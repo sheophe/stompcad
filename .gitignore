@@ -33,3 +33,6 @@ htmlcov/
 *.swp
 .idea/
 .vscode/
+
+# SDD scratch
+.superpowers/
