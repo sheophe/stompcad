@@ -1,0 +1,20 @@
+[project]
+name = "aidrill"
+version = "1.0.0"
+description = "Extract drill data from Adobe Illustrator artwork and emit it in fabrication formats"
+requires-python = ">=3.10"
+dependencies = ["pikepdf>=9"]
+
+[project.scripts]
+aidrill = "aidrill.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
