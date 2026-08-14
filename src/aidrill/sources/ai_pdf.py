@@ -181,13 +181,17 @@ class AiPdfSource:
                 centre_y=pt_to_mm(origin[1]),
             )
 
+        # Traversal order is deterministic for a given file, so numbering the
+        # circles as they are met gives every hole an identity that is the same
+        # on every run — which is what lets a diagnostic name one.
         holes = tuple(
             Hole.from_measurement(
                 x=pt_to_mm(c.cx - origin[0]),
                 y=pt_to_mm(c.cy - origin[1]),
                 diameter=pt_to_mm(c.diameter),
+                index=i,
             )
-            for c in circles
+            for i, c in enumerate(circles)
         )
 
         return DrillData(

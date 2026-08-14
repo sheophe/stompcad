@@ -28,6 +28,7 @@ from aidrill.model import (
     Units,
 )
 from aidrill.protocols import Emitter
+from tests.conftest import at, holes, make_data
 
 
 # --------------------------------------------------------------------------
@@ -37,19 +38,6 @@ from aidrill.protocols import Emitter
 TOOL_DEF = re.compile(r"^T(\d+)C([0-9.]+)$")
 
 
-def at(x: float, y: float, diameter: float = 7.0) -> Hole:
-    return Hole.from_measurement(x, y, diameter)
-
-
-def make_data(*holes: Hole, reference: ReferenceOutline | None = None) -> DrillData:
-    return DrillData(
-        holes=tuple(holes),
-        reference=reference,
-        diagnostics=(),
-        source=SourceInfo(path="panel.ai", drill_layer="Drill"),
-    )
-
-
 def fixture_data() -> DrillData:
     """The ``tests/fixtures/tar.ai`` ground truth from SPEC §9.
 
@@ -57,10 +45,16 @@ def fixture_data() -> DrillData:
     ⌀5.00 at y = −18.75, already snapped, normalised, deduped and sorted by the
     pipeline. Exactly two distinct tools.
     """
-    holes = [at(x, 18.0, 7.0) for x in (-40.0, -20.0, 0.0, 20.0, 40.0)]
-    holes += [at(x, -18.75, 5.0) for x in (-19.0, 19.0)]
     return DrillData(
-        holes=tuple(holes),
+        holes=holes(
+            (-40.0, 18.0),
+            (-20.0, 18.0),
+            (0.0, 18.0),
+            (20.0, 18.0),
+            (40.0, 18.0),
+            (-19.0, -18.75, 5.0),
+            (19.0, -18.75, 5.0),
+        ),
         reference=ReferenceOutline(width=113.0, height=60.0),
         diagnostics=(
             Diagnostic.warning("duplicate-hole", "1 coincident hole collapsed", (-40.0, 18.0)),
@@ -162,12 +156,12 @@ def test_data_without_holes_still_produces_a_valid_file():
 def test_regression_no_two_tool_definitions_share_a_diameter():
     """SPEC §9 invariant. 6.9998 and 7.0000 were normalised to one nominal by the
     pipeline; the file must therefore load one 7 mm bit, once."""
-    holes = (
-        Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-40.0, 18.0, 6.9998)),
-        Hole(x=-20.0, y=18.0, diameter=7.0, raw=RawHole(-20.0, 18.0, 7.0000)),
-        at(0.0, -18.75, 5.0),
+    normalised = (
+        Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-40.0, 18.0, 6.9998), index=0),
+        Hole(x=-20.0, y=18.0, diameter=7.0, raw=RawHole(-20.0, 18.0, 7.0000), index=1),
+        at(0.0, -18.75, 5.0, index=2),
     )
-    data = make_data(*holes, reference=ReferenceOutline(113.0, 60.0))
+    data = make_data(*normalised, reference=ReferenceOutline(113.0, 60.0))
 
     definitions = tool_definitions(emit(data))
 
@@ -196,8 +190,8 @@ def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
     every nominal it was handed — deciding two sizes are 'really' one is a
     pipeline decision, and no longer this module's business."""
     data = make_data(
-        at(-10.0, 0.0, 6.998),
-        at(10.0, 0.0, 7.000),
+        at(-10.0, 0.0, 6.998, index=0),
+        at(10.0, 0.0, 7.000, index=1),
         reference=ReferenceOutline(113.0, 60.0),
     )
 
@@ -209,9 +203,9 @@ def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
 
 def test_emitter_does_not_renumber_after_a_gap_in_diameters():
     data = make_data(
-        at(0.0, 0.0, 3.2),
-        at(10.0, 0.0, 12.5),
-        at(20.0, 0.0, 5.0),
+        at(0.0, 0.0, 3.2, index=0),
+        at(10.0, 0.0, 12.5, index=1),
+        at(20.0, 0.0, 5.0, index=2),
         reference=ReferenceOutline(113.0, 60.0),
     )
 
@@ -222,8 +216,8 @@ def test_emitter_does_not_deduplicate_coincident_holes():
     """Deduplication is ``pipeline.Deduplicate``'s job. If two coincident holes
     survive to the emitter, the operator asked for two hits."""
     data = make_data(
-        at(0.0, 0.0, 7.0),
-        at(0.0, 0.0, 7.0),
+        at(0.0, 0.0, 7.0, index=0),
+        at(0.0, 0.0, 7.0, index=1),
         reference=ReferenceOutline(113.0, 60.0),
     )
 
@@ -254,14 +248,14 @@ def test_lower_left_keeps_every_coordinate_non_negative():
 
 def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
     """Shared with the drawing's schedule via ``formatting.format_mm``."""
-    out = lines(emit(make_data(at(-0.0004, -0.0004, 7.0)), origin=Origin.CENTRE))
+    out = lines(emit(make_data(at(-0.0004, -0.0004, 7.0, index=0)), origin=Origin.CENTRE))
 
     assert "X0.000Y0.000" in out
     assert not any("-0.000" in line for line in out)
 
 
 def test_lower_left_without_a_reference_outline_raises_emitter_error():
-    data = make_data(at(0.0, 0.0, 7.0))
+    data = make_data(at(0.0, 0.0, 7.0, index=0))
 
     with pytest.raises(EmitterError):
         emit(data)
@@ -284,7 +278,7 @@ def test_centre_origin_leaves_the_canonical_frame_alone():
 
 
 def test_centre_origin_needs_no_reference_outline():
-    data = make_data(at(-5.0, -5.0, 7.0))
+    data = make_data(at(-5.0, -5.0, 7.0, index=0))
 
     assert "X-5.000Y-5.000" in lines(emit(data, origin=Origin.CENTRE))
 
@@ -310,10 +304,10 @@ def test_hole_order_is_preserved_not_re_sorted():
     does not is a drill file whose sequence disagrees with the sheet beside it.
     """
     data = make_data(
-        at(10.0, -10.0, 7.0),
-        at(-10.0, 10.0, 7.0),
-        at(10.0, 10.0, 7.0),
-        at(-10.0, -10.0, 7.0),
+        at(10.0, -10.0, 7.0, index=0),
+        at(-10.0, 10.0, 7.0, index=1),
+        at(10.0, 10.0, 7.0, index=2),
+        at(-10.0, -10.0, 7.0, index=3),
         reference=ReferenceOutline(100.0, 100.0),
     )
 
@@ -331,10 +325,10 @@ def test_hole_order_is_preserved_not_re_sorted():
 def test_tool_blocks_stay_ascending_while_order_inside_them_is_untouched():
     """Grouping is the emitter's job; sequence is not."""
     data = make_data(
-        at(0.0, -20.0, 7.0),
-        at(-30.0, 20.0, 5.0),
-        at(30.0, 20.0, 7.0),
-        at(0.0, 20.0, 5.0),
+        at(0.0, -20.0, 7.0, index=0),
+        at(-30.0, 20.0, 5.0, index=1),
+        at(30.0, 20.0, 7.0, index=2),
+        at(0.0, 20.0, 5.0, index=3),
         reference=ReferenceOutline(100.0, 100.0),
     )
 

@@ -32,8 +32,8 @@ def fixture_data() -> DrillData:
     """A DrillData exercising every field: nominal-vs-raw drift, a reference
     outline, one diagnostic of each severity, and full source info."""
     holes = (
-        Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-39.9906, 18.0021, 6.9998)),
-        Hole(x=-19.0, y=-18.75, diameter=5.0, raw=RawHole(-19.0, -18.75, 5.0002)),
+        Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-39.9906, 18.0021, 6.9998), index=0),
+        Hole(x=-19.0, y=-18.75, diameter=5.0, raw=RawHole(-19.0, -18.75, 5.0002), index=1),
     )
     return DrillData(
         holes=holes,
@@ -141,7 +141,7 @@ def test_reference_outline_round_trips():
 
 
 def test_missing_reference_outline_is_null_not_omitted():
-    document = parse(DrillData(holes=(Hole.from_measurement(0.0, 0.0, 7.0),)))
+    document = parse(DrillData(holes=(Hole.from_measurement(0.0, 0.0, 7.0, index=0),)))
 
     assert "reference" in document
     assert document["reference"] is None
@@ -186,10 +186,10 @@ def test_tool_quantities_are_the_models_tool_counts():
     """
     data = DrillData(
         holes=(
-            Hole.from_measurement(0.0, 0.0, 7.0),
-            Hole.from_measurement(10.0, 0.0, 5.0),
-            Hole.from_measurement(20.0, 0.0, 7.0),
-            Hole.from_measurement(30.0, 0.0, 7.0),
+            Hole.from_measurement(0.0, 0.0, 7.0, index=0),
+            Hole.from_measurement(10.0, 0.0, 5.0, index=1),
+            Hole.from_measurement(20.0, 0.0, 7.0, index=2),
+            Hole.from_measurement(30.0, 0.0, 7.0, index=3),
         )
     )
 
@@ -223,13 +223,18 @@ def test_document_rebuilds_an_identical_drilldata():
 
     rebuilt = DrillData(
         holes=tuple(
+            # The document does not carry ``Hole.index`` yet, so identity has to
+            # be inferred from document order. That is faithful only because
+            # this fixture is numbered in order; a consumer given a reordered
+            # panel could not do it, which is why the format needs the field.
             Hole(
                 x=h["x"],
                 y=h["y"],
                 diameter=h["diameter"],
                 raw=RawHole(h["raw"]["x"], h["raw"]["y"], h["raw"]["diameter"]),
+                index=i,
             )
-            for h in document["holes"]
+            for i, h in enumerate(document["holes"])
         ),
         reference=ReferenceOutline(**document["reference"]),
         diagnostics=tuple(
@@ -262,9 +267,9 @@ def test_hole_order_is_preserved_not_re_sorted():
     """Ordering is ``pipeline.SortHoles``' decision, not this emitter's."""
     data = DrillData(
         holes=(
-            Hole.from_measurement(10.0, -10.0, 7.0),
-            Hole.from_measurement(-10.0, 10.0, 5.0),
-            Hole.from_measurement(0.0, 0.0, 7.0),
+            Hole.from_measurement(10.0, -10.0, 7.0, index=0),
+            Hole.from_measurement(-10.0, 10.0, 5.0, index=1),
+            Hole.from_measurement(0.0, 0.0, 7.0, index=2),
         )
     )
 
@@ -278,8 +283,8 @@ def test_hole_order_is_preserved_not_re_sorted():
 def test_emitter_does_not_round_or_cluster_values():
     data = DrillData(
         holes=(
-            Hole.from_measurement(0.1234567, -0.7654321, 6.9998),
-            Hole.from_measurement(1.0, 1.0, 7.0000),
+            Hole.from_measurement(0.1234567, -0.7654321, 6.9998, index=0),
+            Hole.from_measurement(1.0, 1.0, 7.0000, index=1),
         )
     )
     document = parse(data)

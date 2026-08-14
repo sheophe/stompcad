@@ -7,9 +7,10 @@ emitter squatting on a name already taken, would corrupt the mapping the CLI
 resolves through, and an unknown format must fail with the list of formats that
 *would* have worked. Those refusals were the only untested lines in the module.
 
-Every test here runs inside ``clean_registry``, which snapshots ``REGISTRY``
-and puts it back afterwards: registering is a global side effect, and a test
-that leaks one would change what every later test — and ``--help`` — sees.
+Every test here runs inside ``clean_registry`` (``tests/conftest.py``), which
+snapshots ``REGISTRY`` and puts it back afterwards: registering is a global side
+effect, and a test that leaks one would change what every later test — and
+``--help`` — sees.
 """
 
 from __future__ import annotations
@@ -19,17 +20,6 @@ import pytest
 from aidrill.emitters import base
 from aidrill.emitters.base import available, get_emitter, register_emitter
 from aidrill.errors import EmitterError
-
-
-@pytest.fixture
-def clean_registry():
-    """Snapshot and restore the emitter registry around a test."""
-    saved = dict(base.REGISTRY)
-    try:
-        yield base.REGISTRY
-    finally:
-        base.REGISTRY.clear()
-        base.REGISTRY.update(saved)
 
 
 def test_the_fixture_really_restores_the_registry(clean_registry):

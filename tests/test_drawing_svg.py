@@ -35,6 +35,7 @@ from aidrill.model import (
 )
 from aidrill.pipeline import Deduplicate
 from aidrill.protocols import Emitter
+from tests.conftest import holes
 
 SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -49,10 +50,16 @@ CHAR_W = 0.6
 
 
 def _panel() -> DrillData:
-    holes = [Hole.from_measurement(x, 18.0, 7.0) for x in (-40, -20, 0, 20, 40)]
-    holes += [Hole.from_measurement(x, -18.75, 5.0) for x in (-19.0, 19.0)]
     return DrillData(
-        holes=tuple(holes),
+        holes=holes(
+            (-40.0, 18.0),
+            (-20.0, 18.0),
+            (0.0, 18.0),
+            (20.0, 18.0),
+            (40.0, 18.0),
+            (-19.0, -18.75, 5.0),
+            (19.0, -18.75, 5.0),
+        ),
         reference=ReferenceOutline(113.0, 60.0),
         diagnostics=(
             Diagnostic.warning(
@@ -322,8 +329,8 @@ def _reviewers_three_hole_case() -> DrillData:
     """
     return DrillData(
         holes=(
-            Hole.from_measurement(0.0, 0.0, 7.0),
-            Hole.from_measurement(0.03, 0.0, 5.0),
+            Hole.from_measurement(0.0, 0.0, 7.0, index=0),
+            Hole.from_measurement(0.03, 0.0, 5.0, index=1),
         ),
         reference=ReferenceOutline(60.0, 40.0),
         diagnostics=(
@@ -378,9 +385,9 @@ def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
     """
     raw = DrillData(
         holes=(
-            Hole.from_measurement(0.0, 0.0, 7.0),
-            Hole.from_measurement(0.0, 0.0, 7.0),
-            Hole.from_measurement(0.03, 0.0, 5.0),
+            Hole.from_measurement(0.0, 0.0, 7.0, index=0),
+            Hole.from_measurement(0.0, 0.0, 7.0, index=1),
+            Hole.from_measurement(0.03, 0.0, 5.0, index=2),
         ),
         reference=ReferenceOutline(60.0, 40.0),
     )
@@ -407,8 +414,8 @@ def test_a_hole_merely_near_the_flagged_position_is_not_styled_as_a_duplicate():
     """
     data = DrillData(
         holes=(
-            Hole.from_measurement(0.001, 0.0, 7.0),
-            Hole.from_measurement(20.0, 0.0, 7.0),
+            Hole.from_measurement(0.001, 0.0, 7.0, index=0),
+            Hole.from_measurement(20.0, 0.0, 7.0, index=1),
         ),
         reference=ReferenceOutline(60.0, 40.0),
         diagnostics=(
@@ -578,7 +585,7 @@ def test_schedule_never_prints_a_negative_zero():
     contradicted in print. Both now go through ``formatting.format_mm``.
     """
     data = DrillData(
-        holes=(Hole.from_measurement(-0.0004, -0.0004, 5.0),),
+        holes=(Hole.from_measurement(-0.0004, -0.0004, 5.0, index=0),),
         reference=ReferenceOutline(60.0, 40.0),
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
@@ -708,9 +715,11 @@ def test_notes_block_is_labelled(root: ET.Element):
 
 
 def _many_warnings(count: int) -> DrillData:
-    holes = tuple(Hole.from_measurement(-40.0 + 2.0 * i, 0.0, 3.0) for i in range(count))
+    drilled = tuple(
+        Hole.from_measurement(-40.0 + 2.0 * i, 0.0, 3.0, index=i) for i in range(count)
+    )
     return DrillData(
-        holes=holes,
+        holes=drilled,
         reference=ReferenceOutline(113.0, 60.0),
         diagnostics=tuple(
             Diagnostic.warning(
@@ -764,11 +773,11 @@ def test_the_notes_overflow_marker_stays_inside_the_notes_box():
 
 def test_the_schedule_says_how_many_holes_it_could_not_list():
     """The schedule's own truncation path, which was never covered."""
-    holes = tuple(
-        Hole.from_measurement(-55.0 + 0.5 * i, 20.0 - 0.4 * (i // 40), 3.0)
+    drilled = tuple(
+        Hole.from_measurement(-55.0 + 0.5 * i, 20.0 - 0.4 * (i // 40), 3.0, index=i)
         for i in range(240)
     )
-    data = DrillData(holes=holes, reference=ReferenceOutline(120.0, 60.0))
+    data = DrillData(holes=drilled, reference=ReferenceOutline(120.0, 60.0))
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
     listed = by_class(root, "sched-row")
@@ -809,7 +818,7 @@ def test_layout_content_extent_stays_inside_the_drawing_area(panel: DrillData):
 
 def test_scale_none_fits_a_panel_far_bigger_than_the_sheet(panel: DrillData):
     big = panel.with_holes(
-        [Hole.from_measurement(x, y, 12.0) for x in (-400, 0, 400) for y in (-200, 200)]
+        holes(*((x, y, 12.0) for x in (-400.0, 0.0, 400.0) for y in (-200.0, 200.0)))
     )
     big = DrillData(
         holes=big.holes,
@@ -851,11 +860,7 @@ def test_no_text_overflows_for_any_panel_width(width: int):
     there runs off the sheet."""
     half = width / 2 - 6
     data = DrillData(
-        holes=tuple(
-            Hole.from_measurement(x, y, 6.0)
-            for x in (-half, 0.0, half)
-            for y in (12.0, -12.0)
-        ),
+        holes=holes(*((x, y, 6.0) for x in (-half, 0.0, half) for y in (12.0, -12.0))),
         # a six-digit height label is the widest thing on the left-hand side
         reference=ReferenceOutline(float(width), 100.25),
     )
@@ -902,7 +907,7 @@ def test_empty_drilldata_does_not_crash():
 
 
 def test_data_without_a_reference_outline_still_draws_holes():
-    data = DrillData(holes=(Hole.from_measurement(0.0, 0.0, 3.0),))
+    data = DrillData(holes=(Hole.from_measurement(0.0, 0.0, 3.0, index=0),))
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
     assert len(by_class(root, "hole", "circle")) == 1
     assert by_class(root, "outline", "rect") == []
@@ -910,7 +915,7 @@ def test_data_without_a_reference_outline_still_draws_holes():
 
 def test_single_hole_does_not_divide_by_zero():
     data = DrillData(
-        holes=(Hole.from_measurement(3.0, 4.0, 5.0),),
+        holes=(Hole.from_measurement(3.0, 4.0, 5.0, index=0),),
         reference=ReferenceOutline(50.0, 40.0),
     )
     emitter = DrawingSvgEmitter()
@@ -936,10 +941,11 @@ def test_emit_is_deterministic(panel: DrillData):
 
 
 def test_many_holes_still_fit_the_schedule_and_the_sheet():
-    holes = tuple(
-        Hole.from_measurement(-50 + 5 * i, 20.0 - 4 * (i // 20), 3.0) for i in range(60)
+    drilled = tuple(
+        Hole.from_measurement(-50 + 5 * i, 20.0 - 4 * (i // 20), 3.0, index=i)
+        for i in range(60)
     )
-    data = DrillData(holes=holes, reference=ReferenceOutline(120.0, 60.0))
+    data = DrillData(holes=drilled, reference=ReferenceOutline(120.0, 60.0))
     emitter = DrawingSvgEmitter()
     root = ET.fromstring(emitter.emit(data))
     x0, y0, x1, y1 = emitter.layout(data).border

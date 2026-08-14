@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 
 from aidrill import cli
-from aidrill.emitters import base
 from aidrill.emitters.base import available, register_emitter
 from aidrill.errors import EmptyLayerError, LayerNotFoundError
 from aidrill.model import (
@@ -51,9 +50,9 @@ def make_data(
     """DrillData that the default pipeline leaves alone: on-grid, two sizes."""
     if holes is None:
         holes = (
-            Hole.from_measurement(-20.0, 18.0, 7.0),
-            Hole.from_measurement(20.0, 18.0, 7.0),
-            Hole.from_measurement(0.0, -18.75, 5.0),
+            Hole.from_measurement(-20.0, 18.0, 7.0, index=0),
+            Hole.from_measurement(20.0, 18.0, 7.0, index=1),
+            Hole.from_measurement(0.0, -18.75, 5.0, index=2),
         )
     return DrillData(
         holes=tuple(holes),
@@ -88,17 +87,6 @@ def fake_source(monkeypatch):
         return FakeSource
 
     return install
-
-
-@pytest.fixture
-def clean_registry():
-    """Snapshot and restore the emitter registry around a test."""
-    saved = dict(base.REGISTRY)
-    try:
-        yield
-    finally:
-        base.REGISTRY.clear()
-        base.REGISTRY.update(saved)
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +435,7 @@ def test_tool_summary_counts_come_from_the_model(capsys):
 
 
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
-    hole = Hole.from_measurement(-19.9906, 18.0021, 6.9998)
+    hole = Hole.from_measurement(-19.9906, 18.0021, 6.9998, index=0)
     fake_source(make_data(holes=[hole]))
     cli.main([str(FIXTURE)])
     out = capsys.readouterr().out

@@ -81,17 +81,31 @@ class RawHole:
 
 @dataclass(frozen=True, slots=True)
 class Hole:
-    """One drilled hole in the canonical frame."""
+    """One drilled hole in the canonical frame.
+
+    ``index`` is the hole's stable identity. It is required — a shared default
+    would put every hole back under one ambiguous name, which is the whole thing
+    this field exists to remove.
+    """
 
     x: float
     y: float
     diameter: float
     raw: RawHole
+    index: int
 
     @classmethod
-    def from_measurement(cls, x: float, y: float, diameter: float) -> "Hole":
-        """Build a hole whose nominal values are still its measured values."""
-        return cls(x=x, y=y, diameter=diameter, raw=RawHole(x, y, diameter))
+    def from_measurement(cls, x: float, y: float, diameter: float, index: int) -> "Hole":
+        """Build a hole whose nominal values are still its measured values.
+
+        ``index`` is the hole's stable identity, assigned once by the source in
+        traversal order and preserved by every transform. It exists because a
+        diagnostic needs a referent that survives later stages: keying on
+        position went stale the moment a stage moved the hole, and keying on
+        ``raw`` cannot work because two coincident circles — precisely the
+        duplicate case — share identical raw geometry.
+        """
+        return cls(x=x, y=y, diameter=diameter, raw=RawHole(x, y, diameter), index=index)
 
     def moved_to(self, x: float, y: float) -> "Hole":
         return replace(self, x=x, y=y)

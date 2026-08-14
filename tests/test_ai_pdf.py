@@ -239,11 +239,23 @@ def test_hole_positions_and_diameters(data):
 
 
 def test_the_duplicated_hole_is_reported_twice(data):
+    """Same geometry, different identity.
+
+    The two circles are indistinguishable as measurements — which is why
+    ``raw`` cannot serve as a hole's key — so what separates them is
+    ``index``, assigned by the source in traversal order.
+    """
     coincident = [
         h for h in data.holes if abs(h.x - -39.9906) <= TOL and abs(h.y - 18.0) <= TOL
     ]
     assert len(coincident) == 2
-    assert coincident[0] == coincident[1]
+    assert coincident[0].raw == coincident[1].raw
+    assert (coincident[0].x, coincident[0].y, coincident[0].diameter) == (
+        coincident[1].x,
+        coincident[1].y,
+        coincident[1].diameter,
+    )
+    assert coincident[0].index != coincident[1].index
 
 
 def test_raw_provenance_equals_the_nominal_values(data):

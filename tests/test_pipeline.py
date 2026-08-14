@@ -31,24 +31,12 @@ from aidrill.pipeline import (
     SortHoles,
     TableDiameters,
 )
+from tests.conftest import at, make_data
 
 
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
-
-
-def make_data(*holes: Hole, reference: ReferenceOutline | None = None) -> DrillData:
-    return DrillData(
-        holes=tuple(holes),
-        reference=reference,
-        diagnostics=(),
-        source=SourceInfo(path="test"),
-    )
-
-
-def at(x: float, y: float, diameter: float = 7.0) -> Hole:
-    return Hole.from_measurement(x, y, diameter)
 
 
 def codes(data: DrillData) -> list[str]:
@@ -87,9 +75,9 @@ def test_every_stage_satisfies_the_stage_protocol(stage):
 def test_stages_are_pure_functions(stage):
     """A stage may not mutate its input, and must be deterministic."""
     data = make_data(
-        at(-40.003, 18.002, 6.9998),
-        at(-40.0, 18.0, 7.0000),
-        at(19.0, -18.75, 5.0),
+        at(-40.003, 18.002, 6.9998, index=0),
+        at(-40.0, 18.0, 7.0000, index=1),
+        at(19.0, -18.75, 5.0, index=2),
         reference=ReferenceOutline(113.0, 60.0),
     )
     before_holes, before_diags = data.holes, data.diagnostics
@@ -135,7 +123,7 @@ def test_stages_survive_empty_input(stage):
 @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
 def test_stages_preserve_existing_diagnostics(stage):
     prior = Diagnostic.info("prior", "something earlier said this")
-    data = make_data(at(0.0, 0.0, 7.0)).with_diagnostics(prior)
+    data = make_data(at(0.0, 0.0, 7.0, index=0)).with_diagnostics(prior)
     assert prior in stage.apply(data).diagnostics
 
 
@@ -146,50 +134,52 @@ def test_stages_preserve_existing_diagnostics(stage):
 
 class TestSnapPositions:
     def test_snaps_to_the_grid(self):
-        out = SnapPositions(0.25).apply(make_data(at(-39.99, 18.01)))
+        out = SnapPositions(0.25).apply(make_data(at(-39.99, 18.01, index=0)))
         assert positions(out) == [(-40.0, 18.0)]
 
     def test_zero_grid_is_identity_with_no_diagnostics(self):
-        data = make_data(at(-39.99, 18.01), at(0.13, -7.77))
+        data = make_data(at(-39.99, 18.01, index=0), at(0.13, -7.77, index=1))
         out = SnapPositions(0.0).apply(data)
         assert positions(out) == positions(data)
         assert out.diagnostics == ()
 
     def test_keeps_raw_provenance(self):
-        out = SnapPositions(0.25).apply(make_data(at(-39.9906, 18.0)))
+        out = SnapPositions(0.25).apply(make_data(at(-39.9906, 18.0, index=0)))
         hole = out.holes[0]
         assert hole.raw.x == pytest.approx(-39.9906)
         assert hole.x == pytest.approx(-40.0)
         assert hole.residual[0] == pytest.approx(-0.0094, abs=1e-9)
 
     def test_diameter_is_untouched(self):
-        out = SnapPositions(0.25).apply(make_data(at(0.01, 0.01, 6.9998)))
+        out = SnapPositions(0.25).apply(make_data(at(0.01, 0.01, 6.9998, index=0)))
         assert diameters(out) == [6.9998]
 
     def test_small_move_does_not_warn(self):
         # default warn_over is grid / 4 == 0.0625; this hole moves 0.01
-        out = SnapPositions(0.25).apply(make_data(at(-39.99, 18.0)))
+        out = SnapPositions(0.25).apply(make_data(at(-39.99, 18.0, index=0)))
         assert codes(out) == []
 
     def test_large_move_emits_off_grid_warning(self):
-        out = SnapPositions(0.25).apply(make_data(at(-39.9, 18.0)))
+        out = SnapPositions(0.25).apply(make_data(at(-39.9, 18.0, index=0)))
         assert codes(out) == ["off-grid"]
         diag = out.diagnostics[0]
         assert diag.severity is Severity.WARNING
         assert diag.location == (-40.0, 18.0)
 
     def test_explicit_warn_over_overrides_the_default(self):
-        data = make_data(at(-39.9, 18.0))
+        data = make_data(at(-39.9, 18.0, index=0))
         assert codes(SnapPositions(0.25, warn_over=0.2).apply(data)) == []
         assert codes(SnapPositions(0.25, warn_over=0.05).apply(data)) == ["off-grid"]
 
     def test_one_diagnostic_per_offending_hole(self):
-        data = make_data(at(-39.9, 18.0), at(-20.0, 18.0), at(0.1, 18.0))
+        data = make_data(
+            at(-39.9, 18.0, index=0), at(-20.0, 18.0, index=1), at(0.1, 18.0, index=2)
+        )
         assert codes(SnapPositions(0.25).apply(data)) == ["off-grid", "off-grid"]
 
     def test_regression_grid_half_moves_the_five_mm_row_a_quarter_millimetre(self):
         """SPEC §9 regression: at --grid 0.5 the two ⌀5 holes go off-grid."""
-        data = make_data(at(-19.0, -18.75, 5.0), at(19.0, -18.75, 5.0))
+        data = make_data(at(-19.0, -18.75, 5.0, index=0), at(19.0, -18.75, 5.0, index=1))
         out = SnapPositions(0.5).apply(data)
 
         assert codes(out) == ["off-grid", "off-grid"]
@@ -204,7 +194,7 @@ class TestSnapPositions:
             grid = rng.choice([0.05, 0.1, 0.25, 0.5, 1.0, 0.3])
             stage = SnapPositions(grid)
             data = make_data(
-                *(at(rng.uniform(-60, 60), rng.uniform(-30, 30)) for _ in range(5))
+                *(at(rng.uniform(-60, 60), rng.uniform(-30, 30), index=i) for i in range(5))
             )
             once = stage.apply(data)
             twice = stage.apply(once)
@@ -225,7 +215,7 @@ class TestNormalizeDiameters:
         Before this stage existed the Excellon writer clustered them itself and
         the drawing did not, so the two artifacts disagreed about tool count.
         """
-        data = make_data(at(-40.0, 18.0, 6.9998), at(-20.0, 18.0, 7.0000))
+        data = make_data(at(-40.0, 18.0, 6.9998, index=0), at(-20.0, 18.0, 7.0000, index=1))
 
         out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
 
@@ -234,24 +224,28 @@ class TestNormalizeDiameters:
         assert list(out.tools()) == [7.0]
 
     def test_raw_diameters_survive_normalisation(self):
-        data = make_data(at(0.0, 0.0, 6.9998))
+        data = make_data(at(0.0, 0.0, 6.9998, index=0))
         out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
         assert out.holes[0].raw.diameter == pytest.approx(6.9998)
         assert out.holes[0].residual[2] == pytest.approx(0.0002, abs=1e-9)
 
     def test_positions_are_untouched(self):
-        data = make_data(at(-39.99, 18.01, 6.9998))
+        data = make_data(at(-39.99, 18.01, 6.9998, index=0))
         out = NormalizeDiameters(ClusterDiameters()).apply(data)
         assert positions(out) == [(-39.99, 18.01)]
 
     def test_no_diagnostics_from_clustering(self):
-        data = make_data(at(0.0, 0.0, 6.9998), at(1.0, 0.0, 7.0))
+        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(1.0, 0.0, 7.0, index=1))
         assert codes(NormalizeDiameters(ClusterDiameters()).apply(data)) == []
 
 
 class TestClusterDiameters:
     def test_distinct_sizes_are_not_merged(self):
-        data = make_data(at(0.0, 0.0, 5.0), at(1.0, 0.0, 7.0), at(2.0, 0.0, 5.0))
+        data = make_data(
+            at(0.0, 0.0, 5.0, index=0),
+            at(1.0, 0.0, 7.0, index=1),
+            at(2.0, 0.0, 5.0, index=2),
+        )
         out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
         assert len(out.tools()) == 2
         assert diameters(out) == [5.0, 7.0, 5.0]
@@ -262,7 +256,11 @@ class TestClusterDiameters:
         The ends are 0.08 apart, well beyond the 0.05 tolerance. Membership is
         measured from the group's representative, not from the previous member.
         """
-        data = make_data(at(0.0, 0.0, 5.00), at(1.0, 0.0, 5.04), at(2.0, 0.0, 5.08))
+        data = make_data(
+            at(0.0, 0.0, 5.00, index=0),
+            at(1.0, 0.0, 5.04, index=1),
+            at(2.0, 0.0, 5.08, index=2),
+        )
 
         out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
 
@@ -334,13 +332,13 @@ class TestTableDiameters:
     SIZES = [3.2, 5.0, 6.35, 7.0]
 
     def test_snaps_to_the_nearest_declared_size(self):
-        data = make_data(at(0.0, 0.0, 6.98), at(1.0, 0.0, 5.03))
+        data = make_data(at(0.0, 0.0, 6.98, index=0), at(1.0, 0.0, 5.03, index=1))
         out = NormalizeDiameters(TableDiameters(self.SIZES, 0.15)).apply(data)
         assert diameters(out) == [7.0, 5.0]
         assert codes(out) == []
 
     def test_value_outside_tolerance_is_kept_and_reported(self):
-        data = make_data(at(-3.0, 2.0, 4.1))
+        data = make_data(at(-3.0, 2.0, 4.1, index=0))
         out = NormalizeDiameters(TableDiameters(self.SIZES, 0.15)).apply(data)
 
         assert diameters(out) == [4.1]
@@ -349,7 +347,11 @@ class TestTableDiameters:
         assert out.diagnostics[0].location == (-3.0, 2.0)
 
     def test_one_diagnostic_per_offending_hole(self):
-        data = make_data(at(0.0, 0.0, 4.1), at(1.0, 0.0, 4.1), at(2.0, 0.0, 7.0))
+        data = make_data(
+            at(0.0, 0.0, 4.1, index=0),
+            at(1.0, 0.0, 4.1, index=1),
+            at(2.0, 0.0, 7.0, index=2),
+        )
         out = NormalizeDiameters(TableDiameters(self.SIZES, 0.15)).apply(data)
         assert codes(out) == ["unknown-diameter", "unknown-diameter"]
 
@@ -362,7 +364,7 @@ class TestTableDiameters:
         assert dict(TableDiameters([5.0, 7.0], 1.0).nominal([6.0])) == {6.0: 5.0}
 
     def test_empty_table_reports_everything_unknown(self):
-        data = make_data(at(0.0, 0.0, 7.0))
+        data = make_data(at(0.0, 0.0, 7.0, index=0))
         out = NormalizeDiameters(TableDiameters([], 0.15)).apply(data)
         assert diameters(out) == [7.0]
         assert codes(out) == ["unknown-diameter"]
@@ -370,7 +372,7 @@ class TestTableDiameters:
 
 class TestNoNormalization:
     def test_is_the_identity(self):
-        data = make_data(at(0.0, 0.0, 6.9998), at(1.0, 0.0, 7.0000))
+        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(1.0, 0.0, 7.0000, index=1))
         out = NormalizeDiameters(NoNormalization()).apply(data)
         assert diameters(out) == [6.9998, 7.0000]
         assert len(out.tools()) == 2
@@ -394,7 +396,7 @@ class TestStrategyPatternIsOpenForExtension:
         strategy = RoundToWholeMillimetres()
         assert isinstance(strategy, DiameterStrategy)
 
-        data = make_data(at(0.0, 0.0, 6.9998), at(1.0, 0.0, 5.4))
+        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(1.0, 0.0, 5.4, index=1))
         out = NormalizeDiameters(strategy).apply(data)
 
         assert diameters(out) == [7.0, 5.0]
@@ -409,7 +411,7 @@ class TestStrategyPatternIsOpenForExtension:
             def nominal(self, measured):
                 return {}
 
-        data = make_data(at(0.0, 0.0, 6.9998))
+        data = make_data(at(0.0, 0.0, 6.9998, index=0))
         out = NormalizeDiameters(RefusesEverything()).apply(data)
 
         assert diameters(out) == [6.9998]
@@ -423,21 +425,21 @@ class TestStrategyPatternIsOpenForExtension:
 
 class TestDeduplicate:
     def test_collapses_coincident_holes_of_equal_diameter(self):
-        data = make_data(at(-40.0, 18.0, 7.0), at(-40.01, 18.02, 7.0))
+        data = make_data(at(-40.0, 18.0, 7.0, index=0), at(-40.01, 18.02, 7.0, index=1))
         out = Deduplicate(0.05).apply(data)
         assert len(out.holes) == 1
 
     def test_keeps_the_first_hole_in_input_order(self):
-        first, second = at(-40.0, 18.0, 7.0), at(-40.01, 18.02, 7.0)
+        first, second = at(-40.0, 18.0, 7.0, index=0), at(-40.01, 18.02, 7.0, index=1)
         out = Deduplicate(0.05).apply(make_data(first, second))
         assert out.holes == (first,)
 
     def test_emits_one_warning_per_collapsed_group(self):
         data = make_data(
-            at(-40.0, 18.0, 7.0),
-            at(-40.01, 18.0, 7.0),
-            at(-40.02, 18.0, 7.0),
-            at(0.0, 0.0, 7.0),
+            at(-40.0, 18.0, 7.0, index=0),
+            at(-40.01, 18.0, 7.0, index=1),
+            at(-40.02, 18.0, 7.0, index=2),
+            at(0.0, 0.0, 7.0, index=3),
         )
         out = Deduplicate(0.05).apply(data)
 
@@ -448,39 +450,39 @@ class TestDeduplicate:
 
     def test_two_groups_two_warnings(self):
         data = make_data(
-            at(-40.0, 18.0, 7.0),
-            at(-40.0, 18.0, 7.0),
-            at(20.0, 18.0, 7.0),
-            at(20.0, 18.0, 7.0),
+            at(-40.0, 18.0, 7.0, index=0),
+            at(-40.0, 18.0, 7.0, index=1),
+            at(20.0, 18.0, 7.0, index=2),
+            at(20.0, 18.0, 7.0, index=3),
         )
         out = Deduplicate(0.05).apply(data)
         assert len(out.holes) == 2
         assert codes(out) == ["duplicate-hole", "duplicate-hole"]
 
     def test_does_not_collapse_different_diameters_at_the_same_place(self):
-        data = make_data(at(0.0, 0.0, 7.0), at(0.0, 0.0, 5.0))
+        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.0, 0.0, 5.0, index=1))
         out = Deduplicate(0.05).apply(data)
         assert len(out.holes) == 2
         assert codes(out) == []
 
     def test_tolerance_boundary_is_inclusive(self):
-        data = make_data(at(0.0, 0.0, 7.0), at(0.05, 0.0, 7.0))
+        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.05, 0.0, 7.0, index=1))
         assert len(Deduplicate(0.05).apply(data).holes) == 1
 
     def test_does_not_collapse_holes_further_apart_than_the_tolerance(self):
-        data = make_data(at(0.0, 0.0, 7.0), at(0.06, 0.0, 7.0))
+        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.06, 0.0, 7.0, index=1))
         out = Deduplicate(0.05).apply(data)
         assert len(out.holes) == 2
         assert codes(out) == []
 
     def test_tolerance_is_a_radial_distance(self):
         # dx = dy = 0.04 -> distance 0.0566, outside a 0.05 tolerance
-        data = make_data(at(0.0, 0.0, 7.0), at(0.04, 0.04, 7.0))
+        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.04, 0.04, 7.0, index=1))
         assert len(Deduplicate(0.05).apply(data).holes) == 2
 
     def test_unnormalised_diameters_are_not_treated_as_equal(self):
         """Dedupe does not do the diameter stage's job (SRP)."""
-        data = make_data(at(0.0, 0.0, 6.9998), at(0.0, 0.0, 7.0000))
+        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(0.0, 0.0, 7.0000, index=1))
         assert len(Deduplicate(0.05).apply(data).holes) == 2
 
     def test_diagnostic_carries_a_machine_readable_payload(self):
@@ -492,12 +494,12 @@ class TestDeduplicate:
         ``location`` is therefore the survivor's exact post-dedupe coordinate, so
         a consumer matches on ``==`` and needs no tolerance of its own.
         """
-        survivor = at(-40.0031, 18.0007, 7.0)
+        survivor = at(-40.0031, 18.0007, 7.0, index=0)
         data = make_data(
             survivor,
-            at(-40.0129, 18.0203, 7.0),
-            at(-39.9902, 17.9885, 7.0),
-            at(0.0, 0.0, 5.0),  # a lonely hole raises nothing
+            at(-40.0129, 18.0203, 7.0, index=1),
+            at(-39.9902, 17.9885, 7.0, index=2),
+            at(0.0, 0.0, 5.0, index=3),  # a lonely hole raises nothing
         )
 
         out = Deduplicate(0.05).apply(data)
@@ -517,14 +519,36 @@ class TestDeduplicate:
             for _ in range(8):
                 x, y = rng.uniform(-50, 50), rng.uniform(-25, 25)
                 dia = rng.choice([5.0, 7.0])
-                holes.append(at(x, y, dia))
+                holes.append(at(x, y, dia, index=len(holes)))
                 if rng.random() < 0.4:  # sprinkle near-duplicates
-                    holes.append(at(x + rng.uniform(-0.03, 0.03), y, dia))
+                    holes.append(
+                        at(x + rng.uniform(-0.03, 0.03), y, dia, index=len(holes))
+                    )
             stage = Deduplicate(0.05)
             once = stage.apply(make_data(*holes))
             twice = stage.apply(once)
             assert twice.holes == once.holes
             assert codes(twice) == codes(once), "second pass found new duplicates"
+
+
+def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
+    """The referent must survive a later coordinate change.
+
+    protocols.py forbids a stage assuming its predecessor, so Deduplicate may
+    legitimately run before SnapPositions. When it does, the survivor moves
+    after the diagnostic is written and a position-keyed referent goes stale.
+    """
+    data = make_data(
+        Hole.from_measurement(10.03, 5.02, 7.0, index=0),
+        Hole.from_measurement(10.04, 5.02, 7.0, index=1),
+    )
+    after = Pipeline([Deduplicate(tolerance=0.05), SnapPositions(grid=0.25)]).run(data)
+
+    duplicates = [d for d in after.diagnostics if d.code == "duplicate-hole"]
+    assert len(duplicates) == 1
+    survivor_index = duplicates[0].get("hole_index")
+    assert survivor_index is not None
+    assert [h.index for h in after.holes] == [survivor_index]
 
 
 # --------------------------------------------------------------------------
@@ -534,17 +558,17 @@ class TestDeduplicate:
 
 class TestCheckReferenceSize:
     def test_matching_outline_is_silent(self):
-        data = make_data(at(0.0, 0.0), reference=ReferenceOutline(113.0, 60.0))
+        data = make_data(at(0.0, 0.0, index=0), reference=ReferenceOutline(113.0, 60.0))
         assert codes(CheckReferenceSize((113.0, 60.0)).apply(data)) == []
 
     def test_mismatch_warns(self):
-        data = make_data(at(0.0, 0.0), reference=ReferenceOutline(112.4, 60.0))
+        data = make_data(at(0.0, 0.0, index=0), reference=ReferenceOutline(112.4, 60.0))
         out = CheckReferenceSize((113.0, 60.0)).apply(data)
         assert codes(out) == ["reference-size-mismatch"]
         assert out.diagnostics[0].severity is Severity.WARNING
 
     def test_is_a_pure_validator_and_returns_holes_untouched(self):
-        holes = (at(-40.0, 18.0), at(20.0, -18.75, 5.0))
+        holes = (at(-40.0, 18.0, index=0), at(20.0, -18.75, 5.0, index=1))
         data = make_data(*holes, reference=ReferenceOutline(100.0, 60.0))
         out = CheckReferenceSize((113.0, 60.0)).apply(data)
         assert out.holes == holes
@@ -584,7 +608,7 @@ class TestCheckReferenceSize:
         ]
 
     def test_missing_outline_is_an_info_not_a_raise(self):
-        data = make_data(at(0.0, 0.0))
+        data = make_data(at(0.0, 0.0, index=0))
         out = CheckReferenceSize((113.0, 60.0)).apply(data)
         assert codes(out) == ["no-reference-outline"]
         assert out.diagnostics[0].severity is Severity.INFO
@@ -599,10 +623,10 @@ class TestCheckReferenceSize:
 class TestSortHoles:
     def test_default_is_descending_y_then_ascending_x(self):
         data = make_data(
-            at(20.0, -18.75, 5.0),
-            at(-20.0, 18.0),
-            at(-40.0, 18.0),
-            at(-20.0, -18.75, 5.0),
+            at(20.0, -18.75, 5.0, index=0),
+            at(-20.0, 18.0, index=1),
+            at(-40.0, 18.0, index=2),
+            at(-20.0, -18.75, 5.0, index=3),
         )
         out = SortHoles().apply(data)
         assert positions(out) == [
@@ -613,12 +637,21 @@ class TestSortHoles:
         ]
 
     def test_accepts_a_custom_key(self):
-        data = make_data(at(0.0, 0.0, 7.0), at(10.0, 0.0, 3.2), at(-10.0, 0.0, 5.0))
+        data = make_data(
+            at(0.0, 0.0, 7.0, index=0),
+            at(10.0, 0.0, 3.2, index=1),
+            at(-10.0, 0.0, 5.0, index=2),
+        )
         out = SortHoles(key=lambda h: h.diameter).apply(data)
         assert diameters(out) == [3.2, 5.0, 7.0]
 
     def test_is_deterministic_under_input_permutation(self):
-        holes = [at(-40.0, 18.0), at(0.0, 18.0), at(-19.0, -18.75, 5.0), at(20.0, 18.0)]
+        holes = [
+            at(-40.0, 18.0, index=0),
+            at(0.0, 18.0, index=1),
+            at(-19.0, -18.75, 5.0, index=2),
+            at(20.0, 18.0, index=3),
+        ]
         rng = random.Random(7)
         expected = SortHoles().apply(make_data(*holes)).holes
         for _ in range(20):
@@ -627,12 +660,12 @@ class TestSortHoles:
             assert SortHoles().apply(make_data(*shuffled)).holes == expected
 
     def test_emits_no_diagnostics(self):
-        data = make_data(at(0.0, 0.0), at(1.0, 1.0))
+        data = make_data(at(0.0, 0.0, index=0), at(1.0, 1.0, index=1))
         assert codes(SortHoles().apply(data)) == []
 
     def test_tools_are_stable_under_hole_reordering(self):
         """SPEC §9 property: tools() does not depend on hole order."""
-        holes = [at(0.0, 0.0, 7.0), at(1.0, 0.0, 5.0), at(2.0, 0.0, 3.2)]
+        holes = [at(0.0, 0.0, 7.0, index=0), at(1.0, 0.0, 5.0, index=1), at(2.0, 0.0, 3.2, index=2)]
         rng = random.Random(11)
         expected = dict(make_data(*holes).tools())
         for _ in range(20):
@@ -649,7 +682,7 @@ class TestSortHoles:
 
 class TestPipelineComposition:
     def test_empty_pipeline_is_the_identity(self):
-        data = make_data(at(0.0, 0.0))
+        data = make_data(at(0.0, 0.0, index=0))
         assert Pipeline([]).run(data) is data
 
     def test_run_is_a_left_fold(self):
@@ -675,7 +708,7 @@ class TestPipelineComposition:
         The two holes are 0.06 mm apart — outside the 0.05 dedupe tolerance —
         but both snap onto the same 0.25 mm grid point.
         """
-        data = make_data(at(0.0, 0.0, 7.0), at(0.06, 0.0, 7.0))
+        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.06, 0.0, 7.0, index=1))
         snap, dedupe = SnapPositions(0.25), Deduplicate(0.05)
 
         snap_first = Pipeline([snap, dedupe]).run(data)
@@ -690,11 +723,11 @@ class TestPipelineComposition:
     def test_the_canonical_order_yields_one_tool_for_a_noisy_seven_mm_row(self):
         """End-to-end shape of the CLI pipeline (PLAN task F order)."""
         data = make_data(
-            at(-40.003, 18.001, 6.9998),
-            at(-40.0, 18.0, 7.0000),  # duplicate of the above, once snapped
-            at(-20.0, 18.0, 7.0001),
-            at(-19.0, -18.75, 5.0002),
-            at(19.0, -18.75, 4.9998),
+            at(-40.003, 18.001, 6.9998, index=0),
+            at(-40.0, 18.0, 7.0000, index=1),  # duplicate of the above, once snapped
+            at(-20.0, 18.0, 7.0001, index=2),
+            at(-19.0, -18.75, 5.0002, index=3),
+            at(19.0, -18.75, 4.9998, index=4),
             reference=ReferenceOutline(113.0, 60.0),
         )
 

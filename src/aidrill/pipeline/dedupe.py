@@ -56,12 +56,15 @@ class Deduplicate:
     def _report(self, survivor: Hole, count: int) -> Diagnostic:
         """Describe one collapsed group, for humans *and* for machines.
 
-        ``location`` is the survivor's exact post-dedupe coordinate and ``data``
-        carries its diameter and the group's tally, so a consumer can match the
-        surviving hole on equality. Without that payload the drawing emitter had
-        to re-derive which holes were duplicates from positions alone — a second,
-        divergent implementation of this stage's rule, with its own tolerance and
-        no diameter check, which flagged holes this stage had not.
+        ``hole_index`` is the foreign key: the survivor's stable identity, which
+        stays true however far a later stage moves it. ``location`` is the
+        survivor's coordinate *at the time of the report* and stays for human
+        context — the CLI report and the drawing's NOTES both read better with a
+        position in them — but it is no longer what a consumer matches on. It
+        was: with only a position to go by the drawing emitter re-derived which
+        holes were duplicates, a second, divergent implementation of this
+        stage's rule with its own tolerance and no diameter check, and it
+        flagged holes this stage had not.
         """
         return Diagnostic.warning(
             "duplicate-hole",
@@ -70,6 +73,7 @@ class Deduplicate:
             f"kept 1, dropped {count - 1}",
             location=(survivor.x, survivor.y),
             data=(
+                ("hole_index", survivor.index),
                 ("diameter", survivor.diameter),
                 ("dropped", count - 1),
                 ("kept", 1),
