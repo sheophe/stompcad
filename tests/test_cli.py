@@ -263,11 +263,80 @@ def test_table_diameters_without_drill_sizes_is_a_usage_error(fake_source, capsy
     assert "Traceback" not in err
 
 
-@pytest.mark.parametrize("text", ["112.4", "112.4x", "axb", "112.4x60.5x3", "", "-5x60"])
+@pytest.mark.parametrize(
+    "text", ["112.4", "112.4x", "axb", "112.4x60.5x3", "", "0x60", "infx60", "nanxnan"]
+)
 def test_malformed_true_size_is_a_usage_error(fake_source, capsys, text):
+    """Asserted on *our* error line, not merely on the string ``--true-size``.
+
+    ``-5x60`` used to sit in this list and passed for entirely the wrong reason:
+    argparse claims the leading ``-`` as an unrecognised option and prints a
+    usage banner that happens to contain ``--true-size``, so the assertion was
+    satisfied without the value ever reaching :func:`cli.parse_true_size`. Every
+    value below does reach it, and ``main`` prints one line beginning with the
+    program's own prefix — argparse leads with ``usage:`` instead.
+    """
     fake_source(make_data())
     assert cli.main([str(FIXTURE), "--true-size", text]) == 3
-    assert "--true-size" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "--true-size" in err
+
+
+def test_argparse_rejection_is_not_mistaken_for_our_validation(fake_source, capsys):
+    """The two rejections are told apart by shape, because nothing else does it.
+
+    ``--true-size -5x60`` and ``--true-size 0x60`` both exit 3 and both put the
+    string ``--true-size`` on stderr — argparse's own error line even carries the
+    same ``aidrill: error:`` prefix, since it is ``parser.prog``. Substring
+    matching therefore cannot separate them however it is spelled; only the usage
+    banner can, and only at the start of the stream. That is what is asserted.
+    """
+    fake_source(make_data())
+
+    assert cli.main([str(FIXTURE), "--true-size", "-5x60"]) == 3
+    argparse_err = capsys.readouterr().err
+    assert argparse_err.startswith("usage:")  # argparse's, never ours
+    # Why ``startswith`` and not ``in`` — argparse says this too:
+    assert "aidrill: error:" in argparse_err
+    assert "--true-size" in argparse_err
+
+    assert cli.main([str(FIXTURE), "--true-size", "0x60"]) == 3
+    ours = capsys.readouterr().err
+    assert ours.startswith("aidrill: error:")
+    assert "usage:" not in ours
+
+
+@pytest.mark.parametrize("bad", ["infx60", "nanxnan", "0x60"])
+def test_non_finite_or_zero_true_size_is_a_usage_error(bad):
+    """``width <= 0`` never rejects nan (all comparisons false) or inf, so
+    ``--true-size infx60`` exited 1 and wrote an SVG full of ``x="-inf"``."""
+    with pytest.raises(cli.UsageError):
+        cli.parse_true_size(bad)
+
+
+def test_negative_true_size_is_rejected_by_our_validation_not_by_argparse():
+    """The old test asserted '--true-size' appeared in stderr, which argparse's
+    usage banner satisfies -- so it passed without ever reaching the check."""
+    with pytest.raises(cli.UsageError, match="positive"):
+        cli.parse_true_size("-5x60")
+
+
+def test_a_non_finite_true_size_writes_no_artifact_at_all(fake_source, tmp_path, capsys):
+    """The cost of the missing guard, in the currency that matters.
+
+    ``inf`` sailed through ``width <= 0`` and reached the drawing, which exited 1
+    — "warnings, but here are your files" — beside an SVG carrying ``x="-inf"``
+    and ``width="inf"``, and a note declaring the panel ``inf × 60 mm``. A
+    corrupt document that claims to be a good run is worse than no document.
+    """
+    fake_source(make_data())
+    svg = tmp_path / "out.svg"
+
+    assert cli.main([str(FIXTURE), "--true-size", "infx60", "--emit", f"drawing-svg={svg}"]) == 3
+
+    assert not svg.exists()
+    assert "Traceback" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -294,6 +363,23 @@ def test_malformed_drill_sizes_is_a_usage_error(fake_source, capsys):
     code = cli.main([str(FIXTURE), "--diameters", "table", "--drill-sizes", "3.2,fish"])
     assert code == 3
     assert "--drill-sizes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad", ["", "3.2,-5", "3,nan"])
+def test_malformed_drill_sizes_are_rejected(bad):
+    """``nan`` is the same hole as in ``--true-size``: ``size <= 0`` is False for
+    it, so a stocked-size table could contain a size no bit has."""
+    with pytest.raises(cli.UsageError):
+        cli.parse_drill_sizes(bad)
+
+
+def test_a_non_finite_drill_size_never_reaches_the_table_stage(fake_source, capsys):
+    fake_source(make_data())
+    code = cli.main([str(FIXTURE), "--diameters", "table", "--drill-sizes", "3.2,nan"])
+    assert code == 3
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "--drill-sizes" in err
 
 
 @pytest.mark.parametrize("spec", ["excellon", "=out.drl", "excellon="])
@@ -697,3 +783,79 @@ def test_true_size_mismatch_on_the_fixture(tmp_path, capsys):
     assert cli.main([str(FIXTURE), "--true-size", "112.4x60.5", "--emit", f"json={doc}"]) == 1
     codes = [d["code"] for d in json.loads(doc.read_text())["diagnostics"]]
     assert "reference-size-mismatch" in codes
+
+
+@pytest.mark.xfail(strict=True, reason="awaits Task 5: Excellon injectivity guard")
+@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
+def test_a_colliding_tool_table_is_refused_at_the_cli(tmp_path, capsys):
+    """A tool table that is not injective must fail the run, not be written.
+
+    ``--diameter-tolerance 0.0001`` is tight enough that the fixture's measured
+    6.9998 and 7.0000 stay two nominal diameters, and at three decimals both
+    render ``7.000``. Today that emits::
+
+        T1C5.000
+        T2C7.000
+        T3C7.000
+
+    — the same bit loaded twice, exit 1, file on disk: the exact drill file
+    ADR-0001 exists to prevent, arriving through formatting rather than through
+    clustering. Two distinct diameters that print identically are indistinguishable
+    to the machine, so the emitter must refuse rather than serialise them.
+    """
+    drl = tmp_path / "collision.drl"
+
+    code = cli.main(
+        [str(FIXTURE), "--diameter-tolerance", "0.0001", "--emit", f"excellon={drl}"]
+    )
+
+    assert code != 0
+    assert not drl.exists(), "a drill file with a repeated tool diameter reached the disk"
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert err.startswith("aidrill: error:"), err
+
+
+# ---------------------------------------------------------------------------
+# the error hierarchy
+# ---------------------------------------------------------------------------
+
+
+def test_layer_not_found_lists_the_layers_that_were_there():
+    """The operator's next move is reading the list, so the list is the message."""
+    error = LayerNotFoundError("Drill", ["Graphics", "Background"])
+    assert error.wanted == "Drill"
+    assert error.available == ("Graphics", "Background")
+    assert "Background, Graphics" in str(error)
+
+
+def test_layer_not_found_says_so_when_there_were_no_layers_at_all():
+    assert "(none)" in str(LayerNotFoundError("Drill", []))
+
+
+def test_empty_layer_blames_the_missing_paint_when_no_paths_were_seen():
+    """The Illustrator trap: unpainted artwork never reaches the PDF stream."""
+    error = EmptyLayerError("Drill")
+    assert error.layer == "Drill"
+    assert error.path_count == 0
+    assert "stroke" in str(error)
+
+
+def test_empty_layer_blames_the_shapes_when_paths_were_seen():
+    """Two faults, two remedies. Paths that are not circles are a drawing problem,
+    and telling that operator to add a stroke sends them to the wrong place.
+
+    The count is a constructor argument because it was previously a rewrite of
+    ``.args`` at the call site, which left half of this module's message outside
+    this module.
+    """
+    error = EmptyLayerError("Drill", path_count=1)
+    assert error.path_count == 1
+    message = str(error)
+    assert "1 path" in message
+    assert "circle" in message
+    assert "stroke" not in message
+
+
+def test_the_two_empty_layer_causes_do_not_read_alike():
+    assert str(EmptyLayerError("Drill")) != str(EmptyLayerError("Drill", path_count=3))
