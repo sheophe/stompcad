@@ -180,7 +180,7 @@ class AiPdfSource:
         else:
             x0, y0, x1, y1 = outline
             origin = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-            reference = ReferenceOutline(
+            reference = ReferenceOutline.from_measurement(
                 width=pt_to_mm(x1 - x0),
                 height=pt_to_mm(y1 - y0),
                 centre_x=pt_to_mm(origin[0]),

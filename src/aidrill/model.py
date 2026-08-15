@@ -26,6 +26,7 @@ __all__ = [
     "Units",
     "RawHole",
     "Hole",
+    "RawOutline",
     "ReferenceOutline",
     "Diagnostic",
     "SourceInfo",
@@ -131,22 +132,83 @@ class Hole:
 
 
 @dataclass(frozen=True, slots=True)
+class RawOutline:
+    """The outline as measured off the artwork, before any snapping.
+
+    ``RawHole`` to ``ReferenceOutline``'s ``Hole``: same reason, one level up.
+    """
+
+    width: float
+    height: float
+
+
+#: Constructor sentinel for ``ReferenceOutline.raw`` meaning "nobody has snapped
+#: this, so its nominal size *is* the measurement". It is not a value any outline
+#: keeps: ``__post_init__`` replaces it with the instance's own dimensions, and
+#: the identity test means a caller who really does pass ``RawOutline(0.0, 0.0)``
+#: gets it back. A ``None`` default would have been the obvious spelling and the
+#: wrong one — every reader of ``raw`` would then have to decide what an absent
+#: measurement means, which is the ambiguity the field was added to remove.
+_MEASUREMENT_IS_NOMINAL = RawOutline(0.0, 0.0)
+
+
+@dataclass(frozen=True, slots=True)
 class ReferenceOutline:
     """The panel outline that establishes the coordinate frame.
 
     ``centre_x``/``centre_y`` are in *source* space (PDF points, page frame) and
     exist only so a source can report what it used. Everything downstream works
     in the canonical frame where this outline is centred on the origin.
+
+    ``raw`` is the as-measured size, kept for the same reason ``Hole.raw`` is:
+    a stage snaps the outline to a catalogue enclosure, and the fixture panel
+    measures 113.000 x 60.000 mm where the Hammond datasheet says 112 x 61. That
+    snap rewrites a real measurement, and without ``raw`` nothing downstream
+    could tell a 113 that was measured from a 113 that was snapped to — nor
+    could a drawing quote what the artwork actually said. ``processing`` cannot
+    stand in for it: a ``StageRun`` records a stage's configuration, not a
+    result that depends on the data it was handed.
     """
 
     width: float
     height: float
     centre_x: float = 0.0
     centre_y: float = 0.0
+    raw: RawOutline = _MEASUREMENT_IS_NOMINAL
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
             raise ValueError(f"reference outline must be positive, got {self.width}x{self.height}")
+        if self.raw is _MEASUREMENT_IS_NOMINAL:
+            object.__setattr__(self, "raw", RawOutline(self.width, self.height))
+
+    @classmethod
+    def from_measurement(
+        cls, width: float, height: float, centre_x: float = 0.0, centre_y: float = 0.0
+    ) -> "ReferenceOutline":
+        """Build an outline whose nominal size is still its measured size.
+
+        Mirrors ``Hole.from_measurement``, and is what a source calls: the
+        measurement is recorded once, where it is still known, rather than being
+        reconstructed later from a nominal size that a snap may already have
+        moved.
+        """
+        return cls(
+            width=width,
+            height=height,
+            centre_x=centre_x,
+            centre_y=centre_y,
+            raw=RawOutline(width, height),
+        )
+
+    def resized(self, width: float, height: float) -> "ReferenceOutline":
+        """New nominal dimensions, same measurement, same source-space centre.
+
+        ``raw`` is deliberately *not* carried forward from the previous nominal
+        size: that would read identically after one snap and be wrong after two,
+        and nothing forbids a second one.
+        """
+        return replace(self, width=width, height=height)
 
 
 @dataclass(frozen=True, slots=True)
