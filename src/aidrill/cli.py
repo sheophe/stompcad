@@ -29,6 +29,7 @@ Exit codes: 0 clean, 1 warnings, 2 errors, 3 usage or I/O failure.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,7 @@ from typing import Any, Callable, Iterable, Sequence, TextIO, get_args, get_type
 
 from .emitters import DrawingOptions, ExcellonOptions, JsonOptions, available, get_emitter
 from .errors import AidrillError
+from .formatting import format_mm
 from .model import Diagnostic, DrillData, Severity
 from .pipeline import (
     CheckReferenceSize,
@@ -155,7 +157,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_true_size(text: str) -> tuple[float, float]:
-    """``"112.4x60.5"`` → ``(112.4, 60.5)``. Accepts ``x``, ``X`` and ``×``."""
+    """``"112.4x60.5"`` → ``(112.4, 60.5)``. Accepts ``x``, ``X`` and ``×``.
+
+    The finiteness check is not belt and braces. ``float`` happily returns
+    ``inf`` and ``nan`` for ``"inf"`` and ``"nan"``, and ``width <= 0`` rejects
+    neither — every comparison against ``nan`` is False, and ``inf`` is
+    positive. ``--true-size infx60`` therefore passed validation and reached the
+    drawing, which exited 1 and wrote an SVG carrying ``x="-inf"`` and
+    ``width="inf"``: a corrupt document delivered as a successful run. A size
+    that is not a real number is a usage error, and usage errors exit 3.
+    """
     normalised = text
     for separator in _SIZE_SEPARATORS[1:]:
         normalised = normalised.replace(separator, _SIZE_SEPARATORS[0])
@@ -166,13 +177,20 @@ def parse_true_size(text: str) -> tuple[float, float]:
         width, height = (float(part) for part in parts)
     except ValueError:
         raise UsageError(f"--true-size expects WxH in millimetres, got {text!r}") from None
+    if not math.isfinite(width) or not math.isfinite(height):
+        raise UsageError(f"--true-size must be a finite size in millimetres, got {text!r}")
     if width <= 0 or height <= 0:
         raise UsageError(f"--true-size must be positive, got {text!r}")
     return (width, height)
 
 
 def parse_drill_sizes(text: str) -> tuple[float, ...]:
-    """``"3.2,5,7"`` → ``(3.2, 5.0, 7.0)``."""
+    """``"3.2,5,7"`` → ``(3.2, 5.0, 7.0)``.
+
+    Finiteness is checked for the same reason as in :func:`parse_true_size`:
+    ``size <= 0`` is False for ``nan``, so ``--drill-sizes 3,nan`` used to reach
+    ``TableDiameters`` as a stocked size that no bit in any drawer matches.
+    """
     fields = [field.strip() for field in text.split(",") if field.strip()]
     if not fields:
         raise UsageError("--drill-sizes needs at least one size")
@@ -180,6 +198,8 @@ def parse_drill_sizes(text: str) -> tuple[float, ...]:
         sizes = tuple(float(field) for field in fields)
     except ValueError:
         raise UsageError(f"--drill-sizes expects comma-separated millimetres, got {text!r}") from None
+    if not all(math.isfinite(size) for size in sizes):
+        raise UsageError(f"--drill-sizes must all be finite millimetres, got {text!r}")
     if any(size <= 0 for size in sizes):
         raise UsageError(f"--drill-sizes must all be positive, got {text!r}")
     return sizes
@@ -270,9 +290,14 @@ _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
 
 def _options_for(emitter_cls: type, settings: OutputSettings) -> Any | None:
     """Build the options object ``emitter_cls`` declares, or ``None``."""
+    # Narrow, and deliberately so: these three are what an unresolvable
+    # annotation actually raises. A bare ``except Exception`` here would also
+    # swallow a genuine fault inside a third-party emitter and hand it its
+    # defaults, so the emitter would write a file with the wrong options rather
+    # than the run failing.
     try:
         hints = get_type_hints(emitter_cls.__init__)
-    except Exception:  # pragma: no cover - an emitter with unresolvable hints
+    except (NameError, TypeError, AttributeError):  # pragma: no cover - unresolvable hints
         return None
     for name, hint in hints.items():
         if name == "return":
@@ -363,16 +388,54 @@ def format_holes(data: DrillData) -> list[str]:
     return lines
 
 
+#: The report's usual precision. Three decimals reads well and matches the
+#: default the drill file and the drawing print at.
+_REPORT_DECIMALS = 3
+#: Widen no further than this: past nine decimals a float's digits are noise.
+_MAX_REPORT_DECIMALS = 9
+
+
+def _diameter_decimals(diameters: Iterable[float]) -> int:
+    """The fewest decimals that keep every nominal diameter distinct in print.
+
+    Derived from the values actually present, exactly as
+    :attr:`ClusterDiameters.precision` is derived from its tolerance rather than
+    fixed — and for the same reason. A fixed 3 dp is lossy, and what it loses is
+    the one distinction this project exists to preserve: under
+    ``--diameter-tolerance 0.0001`` a panel measuring 6.9998 and 7.0000 keeps two
+    nominal diameters, and the tool summary printed both as ``7.000``. Two lines,
+    the same diameter, different tool numbers — the founding defect of ADR-0001,
+    rendered into the report a human reads and believes.
+
+    Widening only when a collision exists keeps every ordinary panel reading as
+    it always did.
+    """
+    values = list(diameters)
+    decimals = _REPORT_DECIMALS
+    while decimals < _MAX_REPORT_DECIMALS:
+        if len({format_mm(value, decimals) for value in values}) == len(values):
+            break
+        decimals += 1
+    return decimals
+
+
 def format_tools(data: DrillData) -> list[str]:
     """The tool summary. Quantities come from the model, never from a re-count:
     this ``xN``, the machine-readable document's ``count`` field and the
     drawing's QTY column are one computation (:meth:`DrillData.tool_counts`), so
-    no two of them can disagree about how many holes a bit drills."""
+    no two of them can disagree about how many holes a bit drills.
+
+    The precision is the block's own decision (see :func:`_diameter_decimals`)
+    and belongs to no other renderer: what a drill file can print at three
+    decimals is a property of that file's format, not of this report."""
     tools = data.tools()
     counts = data.tool_counts()
+    decimals = _diameter_decimals(tools)
     lines = ["", f"TOOLS ({len(tools)})"]
     for diameter, number in tools.items():
-        lines.append(f"  T{number:<3} dia {diameter:.3f} mm   x{counts[diameter]}")
+        lines.append(
+            f"  T{number:<3} dia {format_mm(diameter, decimals)} mm   x{counts[diameter]}"
+        )
     return lines
 
 
@@ -496,12 +559,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_:  # --help exits 0; argparse usage errors do not
         return EXIT_CLEAN if not exit_.code else EXIT_USAGE
 
+    # One handler, because there was one behaviour: two byte-identical blocks
+    # invited the day somebody edited only one of them. Anything not listed here
+    # is a bug in aidrill rather than a fault in the input, and keeps its
+    # traceback — the operator should never be told a crash was their typo.
     try:
         return _run(args, sys.stdout)
-    except (UsageError, AidrillError) as failure:
-        print(f"{parser.prog}: error: {failure}", file=sys.stderr)
-        return EXIT_USAGE
-    except OSError as failure:
+    except (UsageError, AidrillError, OSError) as failure:
         print(f"{parser.prog}: error: {failure}", file=sys.stderr)
         return EXIT_USAGE
 
