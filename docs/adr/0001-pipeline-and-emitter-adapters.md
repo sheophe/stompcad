@@ -4,6 +4,10 @@
 **Date:** 2026-08-14
 **Deciders:** Pavlo Vakhnivskyi (Artifact Instruments)
 **Supersedes:** the `read_drill.py` / `emit.py` script pair
+**Amended by:** `0003-domain-quantisers.md` (2026-08-15) — the pipeline and the emitter
+adapters stand unchanged; what the stages quantise onto does not. Flags named below as
+forces at the time (`--diameter-tolerance`) no longer exist, and the OCP claim in Decision
+2 is qualified there and here.
 
 ---
 
@@ -73,7 +77,15 @@ Three supporting decisions follow from that core rule:
    it cannot live in either.
 2. **Emitters self-register** via `@register_emitter` into a registry the CLI resolves
    `--emit FORMAT=PATH` against. Adding a format touches the new module plus one
-   `__init__` line; `cli.py` never names a format.
+   `__init__` line; `cli.py` never names a format. **Amended 2026-08-15 — the claim is
+   true only for an emitter that takes no options.** `cli.py` still names the three
+   *options* classes, in `_OPTION_BUILDERS`, keyed by options class rather than by format
+   name, so an emitter this file has never seen is constructed with its own defaults and
+   works. But an emitter that wants a value from the command line needs a flag, and a flag
+   is an `argparse` line plus an entry in that table — a `cli.py` edit. "One module plus
+   one import line" holds for the dispatch, not for the configuration. Letting a registry
+   entry contribute its own option factory would close the gap and has not been done;
+   until it is, the honest form of the promise is the one written here.
 3. **Diagnostics are data, produced once and rendered many times.** A stage that finds
    something appends a `Diagnostic` with a stable machine `code` and a small payload;
    the CLI report, the drawing's NOTES block and the JSON output are three renderings of

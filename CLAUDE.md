@@ -18,7 +18,9 @@ The system Python has neither `pytest` nor `pikepdf`. You must work inside a vir
 uv venv && uv pip install -e ".[dev]"
 ```
 
-`pikepdf>=9` is the only runtime dependency. Python floor is 3.10 (`X | Y` annotations, `slots=True` dataclasses; no `match` statements).
+`pikepdf>=9` is the only runtime dependency. `pdfplumber` is a **development** dependency and must stay one: `tools/extract_1590.py` reads `docs/1590.pdf` with it to generate `src/aidrill/enclosures.py`, and the shipped catalogue is a literal table. Nothing under `src/aidrill` may import it — the runtime never opens the PDF, and `tests/test_enclosures.py` asserts as much.
+
+Python floor is 3.10 (`X | Y` annotations, `slots=True` dataclasses; no `match` statements).
 
 ## Commands
 
@@ -44,7 +46,11 @@ mutmut run && mutmut results
 PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 ```
 
-Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage/IO failure.
+Flags: `--drill-layer`, `--reference-layer`, `--grid`, `--grid-warn`, `--drill-standard` (`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to what is in the drawer), `--dedupe-tolerance`, `--case` (the Hammond base designator the panel is drawn for), `--emit`, `--title`, `-v`. All of them are resolved before the input file is opened, so a bad standard, an unstocked size or a part number in no catalogue is a usage error rather than a diagnostic.
+
+`--diameters`, `--diameter-tolerance` and `--true-size` are gone. `--drill-sizes` kept its name and changed its meaning — it used to be the whole table and was ignored unless `--diameters table` was passed, so an old invocation that carried it as a no-op now takes bits out of the drawer.
+
+Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage/IO failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure` and `wrong-enclosure`.
 
 ## Architecture
 
@@ -52,12 +58,17 @@ Three roles, three protocols, one direction of flow:
 
 ```
 Source ──▶ Pipeline of Stages ──▶ Emitter ──▶ artifact
- .ai/PDF    snap · normalize ·      excellon
-            dedupe · validate ·     drawing-svg
-            sort                    json
+ .ai/PDF    snap · snap-diameters ·  excellon
+            dedupe ·                 drawing-svg
+            identify-enclosure ·     json
+            sort
 ```
 
-**The pipeline is universal, and this is the load-bearing rule.** Snapping, diameter normalisation and deduplication happen once, before any emitter sees the data. An earlier version clustered diameters inside the Excellon writer, so the drill file and the drawing could legitimately disagree about how many hole sizes a panel had — it emitted the same 7 mm bit as two tools. `docs/adr/0001-pipeline-and-emitter-adapters.md` records that incident and is worth reading before changing anything structural.
+**The pipeline is universal, and this is the load-bearing rule.** Snapping, diameter quantisation, deduplication and enclosure identification happen once, before any emitter sees the data. An earlier version clustered diameters inside the Excellon writer, so the drill file and the drawing could legitimately disagree about how many hole sizes a panel had — it emitted the same 7 mm bit as two tools. `docs/adr/0001-pipeline-and-emitter-adapters.md` records that incident and is worth reading before changing anything structural.
+
+**Each quantity snaps onto the domain's own answer set, not onto a number we chose.** Positions go to a declared grid, diameters to a declared drill standard (`DRILL_STANDARDS`, metric by default), and the reference outline to a Hammond 1590 catalogue footprint. We can no more make a custom bit than a custom case, which is why diameters do *not* snap to the grid: at `--grid 0.25` a measured 12.7 mm (1/2″) would become 12.75, a bit that exists in neither drawer. `docs/adr/0003-domain-quantisers.md` has the whole argument.
+
+A hole whose diameter matches no size in the declared standard is an **ERROR** and is **dropped**, and a run with any ERROR writes **no artifacts at all** — the Excellon format renders no diagnostics, so a drill file missing a hole looks perfectly well-formed.
 
 Consequences you must respect:
 
@@ -70,13 +81,20 @@ Consequences you must respect:
 
 Millimetres, Y-up, origin at the centre of the reference outline. Always. Emitters wanting another frame convert on output via `DrillData.with_origin()`; nobody hand-rolls the arithmetic. Inch conversion happens inside an emitter, at the last moment — no stage ever sees inches.
 
-The reference frame comes from the reference layer's largest non-circular path bounding box, **never** from the PDF MediaBox: the artboard is not guaranteed to match the enclosure.
+The reference frame comes from the reference layer's largest non-circular path bounding box, **never** from the PDF MediaBox: the artboard is not guaranteed to match the enclosure. `IdentifyHammondFootprint` then snaps that measured outline to the catalogue footprint it matches — the fixture measures 113.000 × 60.000 and comes out 112 × 61 — keeping the measurement in `ReferenceOutline.raw`.
+
+### The backplate convention
+
+**The Background layer must be drawn to the enclosure's BACKPLATE dimensions.** The catalogue stores backplate sizes, and a Hammond 1590 is die-cast with tapered walls ("low side wall draft angle (2° or less)", per the datasheet), so the face that actually gets drilled is smaller by `2 · d · tan θ` per axis — 1.9 mm on a 1590B, 6.3 mm on a 1590V.
+
+No tolerance can accept a face-drawn outline: matching one needs at least 2.4 mm on the shallowest common part, while two footprints tie at 2.0 mm because the closest pair in the catalogue is 4 mm apart. Required ≥ 2.4, permitted < 2.0. So the operator who carefully measures the face they are about to drill is the one who gets `unknown-enclosure` — which is why that message names the convention, and why this paragraph exists. Do not "fix" it by widening `IdentifyHammondFootprint`'s tolerance; that trades a refusal for a guess between two real enclosures. `docs/adr/0003-domain-quantisers.md` has the arithmetic.
 
 ### Identity and provenance
 
 Two fields exist specifically to stop information going stale, and both are easy to break:
 
 - **`Hole.index`** is a required, deterministic identity assigned in source traversal order and preserved by every transform. Diagnostics refer to holes by it. Do not key on coordinates (a later stage moves them) and do not key on `RawHole` (two coincident circles share identical raw geometry — precisely the duplicate case).
+- **`DrillData.enclosure`** is a *conclusion*, which is why it is neither `SourceInfo` (where the bytes came from) nor a `StageRun` (what a stage was configured to do). It is replaced, never appended: "which enclosure is this panel?" gets one answer or `None`, never a list to pick from. A 2-D outline identifies a **footprint, never a part** — 37 catalogue parts collapse into 22 footprints — so the match names `candidates` and `selected_part` is only ever what the operator declared with `--case`.
 - **`DrillData.processing`** is a tuple of `StageRun` records collected by `Pipeline.run` from each stage's `describe()`. `describe()` reports *effective* values, not raw constructor arguments. The drawing's title block reads the grid from here; it must never be handed a second copy through emitter options, or a library consumer gets a sheet stamping a grid the holes were never snapped to.
 
 ### Diagnostics
@@ -107,7 +125,7 @@ Illustrator's native save embeds a PDF-compatible stream, read with `pikepdf`; I
 **House style is consistent and deliberate — match it rather than imposing an outside one.**
 
 - Module docstrings explain *why*, naming the specific bug that motivated the design. This is the codebase's most distinctive trait and its highest-value documentation. `tolerance.py` and `formatting.py` exist purely because a decision made in six places is six decisions.
-- British spelling in prose (`centre`, `millimetre`, `normalisation`, `colour`), American in identifiers (`NormalizeDiameters`).
+- British spelling in prose (`centre`, `millimetre`, `normalisation`, `colour`), American in identifiers (`SnapDiametersToDrillTable`, `normalize_part_name`).
 - `from __future__ import annotations` and an explicit `__all__` in every module, ordered logically rather than alphabetically.
 - Value objects are `@dataclass(frozen=True, slots=True)`; every transform returns a new instance via `replace()`.
 - Float comparison goes through `tolerance.within()`; millimetre values print through `formatting.format_mm()`, which normalises negative zero away.
@@ -129,10 +147,12 @@ Three mechanics that have each produced a wrong answer in this repo:
 
 Applies to verification tooling too: a linter invoked with a flag that suppresses the rule you are claiming to pass is not evidence. Report the command, not just the result.
 
-Property tests cover snapping idempotence, dedupe idempotence, `tools()` stability under reordering, and cluster group spread.
+Property tests cover snapping idempotence, dedupe idempotence and `tools()` stability under hole reordering. `tests/test_enclosures.py` additionally re-extracts `docs/1590.pdf` on every run, so a datasheet revision is a red test rather than a quiet disagreement.
 
 ## Documentation map
 
-- `docs/SPEC.md` — the specification. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
-- `docs/adr/` — architecture decisions with the incidents that drove them.
-- `docs/PLAN.md` — the original implementation plan and agreed interfaces.
+- `docs/SPEC.md` — the specification, currently v2.0. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
+- `docs/adr/` — architecture decisions with the incidents that drove them. 0001 is the pipeline and the emitter adapters; 0003 is the drill standards, the enclosure catalogue and the backplate convention. There is no 0002 — it was planned and never written, and the gap is left rather than renumbered.
+- `docs/1590.pdf` — the Hammond datasheet `src/aidrill/enclosures.py` is generated from. It is the authority for every catalogue number; `tools/extract_1590.py` is the audit trail, and `tests/test_enclosures.py` re-extracts on every suite run.
+- `docs/PLAN.md` — **historical.** The task breakdown for the original v1.0 build, kept as a record. Its interfaces are superseded; read SPEC and the ADRs for what is true now.
+- `docs/BACKLOG.md` — agreed work that is deliberately not scheduled.
