@@ -64,10 +64,13 @@ class TestRounding:
         assert nm_from_mm(-0.0000025) == -3
 
     def test_printing_ties_the_same_way_as_converting(self) -> None:
-        """``format_nm`` shares ``_round_half_up``, and this is what says so. A
-        formatter that tied to even would print a 2.5 mm hole as ``2`` while the
-        model holds 2 500 000 and every other renderer says 3 -- the two-artifacts
-        disagreement, arriving through the printer rather than the arithmetic."""
+        """``format_nm`` shares ``_round_half_up``, and this is what says so.
+        The model holds 2 500 000, and the printed value has to be the nearest
+        millimetre *by the rule that built it*. A formatter tying to even would
+        print ``2`` -- and, since ``format_nm`` is the shared output boundary,
+        print it everywhere at once, so no artifact contradicts another. That is
+        the harm: the number on the page was reached by arithmetic the stored
+        value never went through, and nothing downstream can notice."""
         assert format_nm(2_500_000, decimals=0) == "3"
         assert format_nm(-2_500_000, decimals=0) == "-3"
 
