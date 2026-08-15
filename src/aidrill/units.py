@@ -83,7 +83,7 @@ def mm_from_pt(points: float) -> float:
     hence no visit to the rounding rule above.
 
     Quantising here instead would be a rounding the artwork never asked for,
-    placed before the stages that know what a length has to land on -- a drill
+    placed before the phase that knows what a length has to land on -- a drill
     size, a grid pitch, a catalogue footprint. Two roundings in series, and the
     order of the two would matter.
     """

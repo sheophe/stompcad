@@ -381,7 +381,7 @@ class ReferenceOutline:
     outline is centred on the origin.
 
     ``raw`` is the as-measured size, kept for the same reason ``Hole.raw`` is:
-    a stage snaps the outline to a catalogue enclosure, and the fixture panel
+    quantising snaps the outline to a catalogue enclosure, and the fixture panel
     measures 113.000 × 60.000 mm where the Hammond datasheet says 112 × 61. That
     snap rewrites a real measurement, and without ``raw`` nothing downstream
     could tell a 113 that was measured from a 113 that was snapped to — nor
@@ -448,14 +448,15 @@ class ReferenceOutline:
 class EnclosureMatch:
     """Which catalogue enclosure the panel outline was drawn for.
 
-    Derived, not read off the file: a stage compares the reference outline
+    Derived, not read off the file: quantising compares the reference outline
     against a catalogue and records what it found. That is why this is neither
     ``SourceInfo`` — which says where the bytes came from, and would be lying if
-    it carried a conclusion reached three stages later — nor a ``StageRun``,
-    which records what a stage was *configured* to do. Leaving the current
-    enclosure in the execution log would send the drawing and every downstream
-    consumer hunting through a generic key/value history for a domain fact,
-    which is the very inference ``processing`` was introduced to stop.
+    it carried a conclusion reached long after the bytes were read — nor a
+    ``StageRun``, which records what a stage was *configured* to do. Leaving
+    the current enclosure in the execution log would send the drawing and every
+    downstream consumer hunting through a generic key/value history for a
+    domain fact, which is the very inference ``processing`` was introduced to
+    stop.
 
     **A 2-D outline identifies a footprint, never a part.** Hammond's 1590
     parts collapse into markedly fewer distinct length × width footprints,
