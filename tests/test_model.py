@@ -369,6 +369,37 @@ def test_the_measurement_carries_the_identity_of_the_hole_it_belongs_to():
     assert [hole.raw.index for hole in holes] == [4, 1, 9]
 
 
+def test_a_hole_cannot_be_number_4_to_a_diagnostic_and_number_9_to_an_artifact():
+    """The split identity, written out at the two ends it gets read from.
+
+    A stage that finds something wrong with a hole is holding the measurement
+    it was checking, so its diagnostic names the hole ``raw.index``. The drill
+    file and the drawing's balloon iterate the finished holes and name that
+    same hole ``index``. Both readings are legitimate, neither consumer can see
+    the other, and the operator reads them on two sheets — so a hole carrying
+    both numbers is one hole described twice under two names, with nothing left
+    holding the pair to notice.
+
+    Numbered 4 and 9, and neither of them 0 or 1, so that no assertion here can
+    pass by a number coinciding with the array position it was built at.
+    """
+    measurement = RawHole(-39.9906, 18.0004, 6.8, 4)
+
+    with pytest.raises(ValueError) as refused:
+        Hole(-40_000_000, 18_000_000, 7_000_000, measurement, 9)
+
+    # Both numbers: a refusal naming one of them leaves the caller to guess
+    # which of the two identities is the one it got wrong.
+    assert "4" in str(refused.value)
+    assert "9" in str(refused.value)
+
+    agreed = Hole(-40_000_000, 18_000_000, 7_000_000, measurement, 4)
+    diagnostic = Diagnostic.error(
+        "unknown-diameter", "no bit that size", data=(("index", agreed.raw.index),)
+    )
+    assert diagnostic.get("index") == agreed.index == 4
+
+
 def test_the_residual_is_the_nominal_position_less_the_measured_one():
     """Positive means the nominal value is the larger, in nanometres. Named
     ``residual_nm`` because it is three lengths, and a caller printing it as

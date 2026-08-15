@@ -14,10 +14,11 @@ catalogue footprint — and a source that rounded first would put two roundings
 in series and make their order matter.
 
 It does **not** snap, dedupe, cluster diameters or validate anything either —
-those are pipeline stages, and doing them here is precisely the layering
-mistake this rewrite exists to undo. Eight circles drawn is eight holes
-reported, even when two of them coincide: only the pipeline may decide that two
-marks are one hole, and only it can report having done so.
+those belong to quantising and to the stages after it, and doing them here is
+precisely the layering mistake the boundary exists to prevent. Eight circles
+drawn is eight holes reported, even when two of them coincide: only
+``Deduplicate`` may decide that two marks are one hole, and only it can report
+having done so.
 
 The awkward parts of the format, all verified against a real Illustrator 30.7
 file:

@@ -241,6 +241,16 @@ class Hole:
     ``index`` is the hole's stable identity. It is required — a shared default
     would put every hole back under one ambiguous name, which is the whole thing
     this field exists to remove.
+
+    It is also the *same* identity as ``raw.index``, and the constructor refuses
+    a hole where the two differ. No artwork can produce the split: a source
+    numbers each circle once and hands the measurement that same number. What
+    can produce it is a caller that enumerates the holes it is building instead
+    of carrying over the number it was given — and the two consumers read
+    different halves. A stage that rejects a hole holds the measurement it was
+    checking, so its diagnostic says hole 4; the drill file and the drawing's
+    balloon iterate the finished holes, so they both say hole 9. One hole,
+    described twice under two names, and no artifact holding the pair to notice.
     """
 
     x_nm: int
@@ -253,6 +263,11 @@ class Hole:
         _check_nanometres(
             "Hole", x_nm=self.x_nm, y_nm=self.y_nm, diameter_nm=self.diameter_nm
         )
+        if self.index != self.raw.index:
+            raise ValueError(
+                f"a hole has one identity: Hole.index is {self.index} but its "
+                f"measurement is numbered {self.raw.index}"
+            )
 
     @classmethod
     def from_measurement(cls, x_nm: int, y_nm: int, diameter_nm: int, index: int) -> Hole:
@@ -366,7 +381,7 @@ class ReferenceOutline:
     outline is centred on the origin.
 
     ``raw`` is the as-measured size, kept for the same reason ``Hole.raw`` is:
-    a stage snaps the outline to a catalogue enclosure, and the fixture panel
+    quantising snaps the outline to a catalogue enclosure, and the fixture panel
     measures 113.000 × 60.000 mm where the Hammond datasheet says 112 × 61. That
     snap rewrites a real measurement, and without ``raw`` nothing downstream
     could tell a 113 that was measured from a 113 that was snapped to — nor
@@ -433,14 +448,15 @@ class ReferenceOutline:
 class EnclosureMatch:
     """Which catalogue enclosure the panel outline was drawn for.
 
-    Derived, not read off the file: a stage compares the reference outline
+    Derived, not read off the file: quantising compares the reference outline
     against a catalogue and records what it found. That is why this is neither
     ``SourceInfo`` — which says where the bytes came from, and would be lying if
-    it carried a conclusion reached three stages later — nor a ``StageRun``,
-    which records what a stage was *configured* to do. Leaving the current
-    enclosure in the execution log would send the drawing and every downstream
-    consumer hunting through a generic key/value history for a domain fact,
-    which is the very inference ``processing`` was introduced to stop.
+    it carried a conclusion reached long after the bytes were read — nor a
+    ``StageRun``, which records what a stage was *configured* to do. Leaving
+    the current enclosure in the execution log would send the drawing and every
+    downstream consumer hunting through a generic key/value history for a
+    domain fact, which is the very inference ``processing`` was introduced to
+    stop.
 
     **A 2-D outline identifies a footprint, never a part.** Hammond's 1590
     parts collapse into markedly fewer distinct length × width footprints,

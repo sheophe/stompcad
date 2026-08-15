@@ -14,7 +14,7 @@ offset is ``KAPPA * r`` and ``KAPPA`` is irrational; a centroid is a mean of
 four coordinates; a radius is a mean of four distances. None of that is
 expressible in whole units of anything without losing the fit it is measuring,
 so the maths is floating point from end to end and the answer is handed on as
-measured. Quantising is for the stage that knows what answer set a length has
+measured. Quantising is for the phase that knows what answer set a length has
 to land on, and this module knows of none.
 """
 

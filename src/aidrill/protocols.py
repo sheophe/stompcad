@@ -17,13 +17,19 @@ __all__ = ["Source", "Stage", "Emitter", "Pipeline"]
 
 @runtime_checkable
 class Source(Protocol):
-    """Parses some artwork format into RawDrillData in the canonical frame.
+    """Parses some artwork format into RawDrillData, in float millimetres.
 
-    Raw is the whole of the contract: a source states the frame — millimetres,
-    Y up, origin at the reference outline's centre — and states what it
+    Raw is the whole of the contract: a source states the frame, states what it
     measured in it, and nothing more. Quantising belongs to the phase that
     knows what each length has to land on, so a source that rounded first would
     be rounding twice with the order of the two left to chance.
+
+    The frame is millimetres and Y up, with the origin at the centre of the
+    reference outline *when the artwork has one*. When it has none there is
+    nothing to centre on, and the source says so — ``reference`` is ``None``,
+    the positions are relative to the page, and a WARNING names the frame they
+    are in. Inventing a centre instead would put every hole a plausible
+    distance from a point the artwork never established.
     """
 
     def read(self) -> RawDrillData: ...
@@ -57,8 +63,11 @@ class Emitter(Protocol):
     """Serialises DrillData into one output format.
 
     Emitters may translate frames and convert units, but must never round
-    positions, cluster diameters, drop duplicates, or otherwise re-derive
-    anything the pipeline is responsible for.
+    positions, cluster diameters, drop duplicates, sort or renumber. Every one
+    of those was settled upstream — quantising fixed the positions, the
+    diameters and the enclosure; the stages after it decided which marks are
+    one hole and what order they come in — and an emitter that re-derives one
+    of them is how two artifacts come to describe the same panel differently.
     """
 
     name: ClassVar[str]
