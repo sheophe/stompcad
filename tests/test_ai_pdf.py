@@ -15,6 +15,7 @@ duplicate from the diagnostics that are supposed to report it.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 
 import pikepdf
@@ -249,12 +250,8 @@ def test_the_duplicated_hole_is_reported_twice(data):
         h for h in data.holes if abs(h.x - -39.9906) <= TOL and abs(h.y - 18.0) <= TOL
     ]
     assert len(coincident) == 2
-    assert coincident[0].raw == coincident[1].raw
-    assert (coincident[0].x, coincident[0].y, coincident[0].diameter) == (
-        coincident[1].x,
-        coincident[1].y,
-        coincident[1].diameter,
-    )
+    # Every field but ``index``, and it stays exhaustive as Hole gains more.
+    assert replace(coincident[0], index=coincident[1].index) == coincident[1]
     assert coincident[0].index != coincident[1].index
 
 

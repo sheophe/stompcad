@@ -1,7 +1,13 @@
 """Shared test helpers.
 
-``clean_registry`` and the hole builders were defined identically in two and
-three files respectively, and the ``at()`` copies had already drifted apart.
+Four helpers lived in more than one test module, and two of them had already
+drifted. ``clean_registry`` existed twice and the copies disagreed about what
+they yield — one handed the test ``base.REGISTRY``, the other nothing — so a
+test moved between files could stop compiling. ``make_data`` existed twice and
+the copies disagreed about ``SourceInfo``, which means the two files were not
+testing quite the same object. (``at`` was the one pair still byte-identical,
+which is how divergence starts, not evidence against it.) One definition each,
+here, so the next change lands in one place.
 """
 
 from __future__ import annotations
@@ -11,7 +17,7 @@ import pytest
 from aidrill.emitters import base
 from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
 
-__all__ = ["at", "holes", "make_data"]
+__all__ = ["at", "clean_registry", "holes", "make_data"]
 
 
 @pytest.fixture

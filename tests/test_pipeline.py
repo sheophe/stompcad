@@ -491,21 +491,26 @@ class TestDeduplicate:
         The drawing emitter has to mark the duplicate it was told about. Given
         only a rounded message it re-implemented this stage's rule — with its own
         tolerance and no diameter check — and flagged holes the pipeline had not.
-        ``location`` is therefore the survivor's exact post-dedupe coordinate, so
-        a consumer matches on ``==`` and needs no tolerance of its own.
+        ``hole_index`` is therefore the key a consumer matches on: it names the
+        survivor and stays true however far a later stage moves it. ``location``
+        is the survivor's coordinate at the time of the report — human context
+        for the CLI and the drawing's NOTES, and no longer a referent.
         """
-        survivor = at(-40.0031, 18.0007, 7.0, index=0)
+        # Identities deliberately do not match positions: an implementation that
+        # reported where the survivor sits rather than who it is would answer 0.
+        survivor = at(-40.0031, 18.0007, 7.0, index=4)
         data = make_data(
             survivor,
-            at(-40.0129, 18.0203, 7.0, index=1),
-            at(-39.9902, 17.9885, 7.0, index=2),
-            at(0.0, 0.0, 5.0, index=3),  # a lonely hole raises nothing
+            at(-40.0129, 18.0203, 7.0, index=5),
+            at(-39.9902, 17.9885, 7.0, index=6),
+            at(0.0, 0.0, 5.0, index=9),  # a lonely hole raises nothing
         )
 
         out = Deduplicate(0.05).apply(data)
 
         assert codes(out) == ["duplicate-hole"]
         diag = out.diagnostics[0]
+        assert diag.get("hole_index") == survivor.index
         assert diag.location == (survivor.x, survivor.y)
         assert diag.location == (out.holes[0].x, out.holes[0].y)
         assert diag.get("diameter") == survivor.diameter
@@ -537,18 +542,29 @@ def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
     protocols.py forbids a stage assuming its predecessor, so Deduplicate may
     legitimately run before SnapPositions. When it does, the survivor moves
     after the diagnostic is written and a position-keyed referent goes stale.
+
+    The two identities are out of order and neither equals a position, so the
+    rejected design — reporting the survivor's index in the surviving tuple —
+    would answer 0 here rather than 7, and SortHoles would invalidate it later.
     """
     data = make_data(
-        Hole.from_measurement(10.03, 5.02, 7.0, index=0),
-        Hole.from_measurement(10.04, 5.02, 7.0, index=1),
+        Hole.from_measurement(10.03, 5.02, 7.0, index=7),
+        Hole.from_measurement(10.04, 5.02, 7.0, index=3),
     )
     after = Pipeline([Deduplicate(tolerance=0.05), SnapPositions(grid=0.25)]).run(data)
 
     duplicates = [d for d in after.diagnostics if d.code == "duplicate-hole"]
     assert len(duplicates) == 1
     survivor_index = duplicates[0].get("hole_index")
-    assert survivor_index is not None
+    assert survivor_index == 7
     assert [h.index for h in after.holes] == [survivor_index]
+
+    # The move the docstring turns on, made observable: by the end of the run
+    # the reported coordinate names nowhere a hole is, and only the id resolves.
+    survivor = after.holes[0]
+    assert (survivor.x, survivor.y) == (10.0, 5.0)
+    assert duplicates[0].location == (10.03, 5.02)
+    assert duplicates[0].location != (survivor.x, survivor.y)
 
 
 # --------------------------------------------------------------------------
@@ -665,7 +681,11 @@ class TestSortHoles:
 
     def test_tools_are_stable_under_hole_reordering(self):
         """SPEC §9 property: tools() does not depend on hole order."""
-        holes = [at(0.0, 0.0, 7.0, index=0), at(1.0, 0.0, 5.0, index=1), at(2.0, 0.0, 3.2, index=2)]
+        holes = [
+            at(0.0, 0.0, 7.0, index=0),
+            at(1.0, 0.0, 5.0, index=1),
+            at(2.0, 0.0, 3.2, index=2),
+        ]
         rng = random.Random(11)
         expected = dict(make_data(*holes).tools())
         for _ in range(20):

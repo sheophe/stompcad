@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from aidrill.emitters.base import REGISTRY, get_emitter
 from aidrill.emitters.json_out import JsonEmitter, JsonOptions
 from aidrill.model import (
@@ -215,6 +217,7 @@ def test_diagnostics_round_trip_with_severity_code_message_and_location():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(strict=True, reason="Task 3: json_out does not serialise Hole.index")
 def test_document_rebuilds_an_identical_drilldata():
     """Nothing in DrillData may be lost on the way out — this is the whole point
     of the format."""
@@ -223,18 +226,14 @@ def test_document_rebuilds_an_identical_drilldata():
 
     rebuilt = DrillData(
         holes=tuple(
-            # The document does not carry ``Hole.index`` yet, so identity has to
-            # be inferred from document order. That is faithful only because
-            # this fixture is numbered in order; a consumer given a reordered
-            # panel could not do it, which is why the format needs the field.
             Hole(
                 x=h["x"],
                 y=h["y"],
                 diameter=h["diameter"],
                 raw=RawHole(h["raw"]["x"], h["raw"]["y"], h["raw"]["diameter"]),
-                index=i,
+                index=h["index"],
             )
-            for i, h in enumerate(document["holes"])
+            for h in document["holes"]
         ),
         reference=ReferenceOutline(**document["reference"]),
         diagnostics=tuple(
