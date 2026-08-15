@@ -6,7 +6,7 @@ valid PDF, so no Illustrator, no scripting bridge and no export step is needed:
 
 What this module does is deliberately narrow (SPEC 2.1). It walks the page's
 content stream, resolves the graphics state, recovers circles, and states them
-in millimetres relative to the reference outline. It does **not** snap, dedupe,
+in whole nanometres relative to the reference outline. It does **not** snap, dedupe,
 cluster diameters or validate anything — those are pipeline stages, and doing
 them here is precisely the layering mistake this rewrite exists to undo. Eight
 circles drawn is eight holes reported, even when two of them coincide: only the
@@ -58,10 +58,10 @@ from ..geometry import (
     SubPath,
     fit_circle,
     multiply,
-    pt_to_mm,
     transform,
 )
 from ..model import Diagnostic, DrillData, Hole, ReferenceOutline, SourceInfo
+from ..units import nm_from_pt
 
 __all__ = ["AiPdfSource"]
 
@@ -163,7 +163,7 @@ class AiPdfSource:
             # numbers true to the file and lets the caller decide; silently
             # falling back to the artboard centre would look plausible and be
             # wrong (SPEC 6.6).
-            origin: Point = (0.0, 0.0)
+            origin_nm = (0, 0)
             reference = None
             diagnostics.append(
                 Diagnostic.warning(
@@ -181,22 +181,32 @@ class AiPdfSource:
             )
         else:
             x0, y0, x1, y1 = outline
-            origin = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            # The bbox is floating-point points, so each of the four lengths the
+            # frame needs crosses into nanometres here, once each: the width and
+            # height as spans, the centre as a point. Every one of them is
+            # finished in points and converted at the end, never assembled from
+            # converted parts — the same rule `fit_circle` follows, for the same
+            # reason.
+            origin_nm = (nm_from_pt((x0 + x1) / 2.0), nm_from_pt((y0 + y1) / 2.0))
             reference = ReferenceOutline.from_measurement(
-                width=pt_to_mm(x1 - x0),
-                height=pt_to_mm(y1 - y0),
-                centre_x=pt_to_mm(origin[0]),
-                centre_y=pt_to_mm(origin[1]),
+                width_nm=nm_from_pt(x1 - x0),
+                height_nm=nm_from_pt(y1 - y0),
+                centre_x_nm=origin_nm[0],
+                centre_y_nm=origin_nm[1],
             )
 
         # Traversal order is deterministic for a given file, so numbering the
         # circles as they are met gives every hole an identity that is the same
         # on every run — which is what lets a diagnostic name one.
+        #
+        # The subtraction is whole-nanometre arithmetic: both operands crossed
+        # the boundary already, so re-centring the panel is exact and cannot
+        # introduce a rounding of its own.
         holes = tuple(
             Hole.from_measurement(
-                x=pt_to_mm(c.cx - origin[0]),
-                y=pt_to_mm(c.cy - origin[1]),
-                diameter=pt_to_mm(c.diameter),
+                x_nm=c.cx_nm - origin_nm[0],
+                y_nm=c.cy_nm - origin_nm[1],
+                diameter_nm=c.diameter_nm,
                 index=i,
             )
             for i, c in enumerate(circles)
