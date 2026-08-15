@@ -12,14 +12,26 @@ so microns would round the answer set itself and reintroduce "is 396.875 the
 same bit as 397?", which is the question a fixed unit exists to abolish. In
 nanometres 25.4 mm is 25 400 000 and the 64 divides out.
 
-**Ties go away from zero, never to even.** Python's builtin ``round`` is
-half-to-even: ``round(0.5)`` is 0 and ``round(2.5)`` is 2. A length is not a
-statistic, and a rule that depends on the parity of the digit above it is one
+**At this boundary, ties go away from zero.** Python's builtin ``round`` is
+half-to-even: ``round(0.5)`` is 0 and ``round(2.5)`` is 2. A measurement is not
+a statistic, and a rule that depends on the parity of the digit above it is one
 nobody can predict at the bench. It is also not the rule the domain uses --
 Hammond publish a 60.50 mm part as 61, where the builtin would say 60, so a
 checker written with it sees one axis of one part disagree and reads bad data
 rather than a rounding mode (``docs/parts/README.md``). Hence
-``decimal.ROUND_HALF_UP``, stated once here for the whole codebase.
+``decimal.ROUND_HALF_UP``, spelled once here so ``nm_from_pt``, ``nm_from_mm``
+and ``format_nm`` cannot drift apart.
+
+**This is the boundary's rule and not the pipeline's.** ``SnapPositions`` ties
+half-to-*even*, deliberately, and the two are not in competition because they
+answer different questions. Here the question is which nanometre a measurement
+*is*, and a measurement carries no meaning in its last digit's parity. There the
+question is which grid point a hole should *move to*, where a consistent bias
+walks a whole panel one way and half-to-even does not. Snapping additionally
+warns when at least half the holes land on a tie, because a panel that ties that
+often was drawn on a different grid than the one declared -- a signal this
+boundary has no equivalent of. Do not "unify" the two rules; unifying them moves
+every tied hole on every panel.
 
 **``Decimal(str(mm))``, not ``Decimal(mm)``.** The second is exact about the
 wrong thing: 0.05 is 0.05000000000000000277... in binary, and converting that

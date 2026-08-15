@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
+from aidrill.geometry import pt_to_mm
 from aidrill.units import NM_PER_MM, format_nm, mm_from_nm, nm_from_mm, nm_from_pt
+
+
+class TestTheReturnIsAnInteger:
+    """``int``, not merely something equal to one.
+
+    Numeric equality cannot see this: ``Decimal("250000") == 250000`` is True, so
+    dropping the ``int()`` from both converters left every other test in this file
+    green while the module's whole contract -- *integer* nanometres -- had gone.
+    Task 2's model guards are ``type(x) is int`` precisely so a ``Decimal`` cannot
+    reach a coordinate; these two assertions are what stop one being handed over.
+    """
+
+    def test_a_converted_millimetre_is_an_int(self) -> None:
+        assert type(nm_from_mm(0.25)) is int
+
+    def test_a_converted_point_is_an_int(self) -> None:
+        assert type(nm_from_pt(72.0)) is int
 
 
 class TestExactness:
@@ -37,6 +55,22 @@ class TestRounding:
         assert nm_from_mm(0.0000025) == 3  # half-to-even would give 2
         assert nm_from_pt(50.00094) == 17_639_221  # the same rule, on the way in from a PDF
 
+    def test_a_negative_tie_goes_away_from_zero_too(self) -> None:
+        """The rule is *away from zero*, which is two claims, and the positive
+        half proves nothing about the negative one. A converter that is half-up
+        above zero and half-to-even below it returns 0 here, and the panel's
+        left-hand holes then round differently from its right-hand ones."""
+        assert nm_from_mm(-0.0000005) == -1
+        assert nm_from_mm(-0.0000025) == -3
+
+    def test_printing_ties_the_same_way_as_converting(self) -> None:
+        """``format_nm`` shares ``_round_half_up``, and this is what says so. A
+        formatter that tied to even would print a 2.5 mm hole as ``2`` while the
+        model holds 2 500 000 and every other renderer says 3 -- the two-artifacts
+        disagreement, arriving through the printer rather than the arithmetic."""
+        assert format_nm(2_500_000, decimals=0) == "3"
+        assert format_nm(-2_500_000, decimals=0) == "-3"
+
 
 class TestBackOut:
     def test_a_whole_nanometre_returns_to_the_millimetre_it_came_from(self) -> None:
@@ -50,6 +84,20 @@ class TestBackOut:
         assert format_nm(5_159_375) == "5.159"
         assert format_nm(5_159_375, decimals=4) == "5.1594"
 
+class TestTheShim:
+    """``geometry.pt_to_mm`` is Task 1's only adoption of the boundary in
+    production code, and Task 3 deletes it. Until then it must actually go
+    through the rule rather than merely look as though it does: plain
+    ``v / PT_PER_MM`` leaves the whole suite green, because the difference sits
+    below every tolerance in the pipeline — which is exactly why nothing else
+    catches it. This test lives here, beside the rule, and goes with the shim."""
+
+    def test_the_shim_quantises_rather_than_dividing(self) -> None:
+        assert pt_to_mm(50.00094) == 17.639221  # not 17.639220499999997
+        assert pt_to_mm(72.0) == 25.4
+
+
+class TestPrinting:
     def test_a_value_that_prints_as_zero_never_prints_as_minus_zero(self) -> None:
         """A hole at -400 nm printed ``X0.000`` in the drill file and ``-0.00``
         in the drawing's schedule: two artifacts describing the same hole and
