@@ -10,7 +10,7 @@ dependencies = ["pikepdf>=9"]
 # and the shipped catalogue is a literal table. Nothing under src/aidrill
 # imports it, so installing aidrill must never pull it in.
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "pdfplumber"]
+dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "mutmut", "pdfplumber"]
 
 [project.scripts]
 aidrill = "aidrill.cli:main"
@@ -89,3 +89,19 @@ warn_unreachable = true
 # internal helpers in ai_pdf.py and model.py's alternate constructors; adopting
 # it in one step would mean a gate that is red on arrival. docs/BACKLOG.md
 # carries it as scoped follow-up work.
+
+# `mutmut run` copies the tree into mutants/ and rewrites the sources there, so
+# anything the suite opens by relative path has to be copied alongside them.
+# tests/ and pyproject.toml come across by default; these two do not, and
+# test_enclosures.py re-extracts docs/1590.pdf through tools/extract_1590.py on
+# every run. A file whose parent directory does not exist under mutants/ fails
+# the copy outright, which is why these name directories.
+[tool.mutmut]
+source_paths = ["src/aidrill"]
+also_copy = ["docs/", "tools/"]
+# enclosures.py is generated, and test_enclosures.py asserts that its *text on
+# disk* is what tools/extract_1590.py renders. Instrumenting it therefore fails
+# that test for every mutant, which aborts the whole run before any result is
+# collected. Excluding it costs nothing: it is a literal catalogue table, so a
+# mutant of it is either caught by the first assertion or meaningless.
+do_not_mutate = ["src/aidrill/enclosures.py"]
