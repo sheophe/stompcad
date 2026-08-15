@@ -79,8 +79,10 @@ Five supporting decisions follow.
 3. **The catalogue stores the datasheet's whole millimetres**, generated from
    `docs/1590.pdf` by `tools/extract_1590.py`, never typed. Adopting Hammond's 0.05 mm
    per-part values is agreed and pending data (below).
-4. **Silence is scoped to a unique match.** A unique match says nothing; no match is a
-   WARNING; a tie and a contradicted `--case` are ERRORs.
+4. **Silence is scoped to a unique match, and a declaration changes what silence means.**
+   A unique match says nothing. On an undeclared run, no match is a WARNING and a tie is
+   an ERROR. On a run that declared `--case`, every path ends in a confirmed match or an
+   ERROR — nothing to check against, nothing that fits, or something else entirely.
 5. **`EnclosureMatch` is a first-class field on `DrillData`**, not a `StageRun` parameter
    and not part of `SourceInfo`.
 
@@ -247,10 +249,10 @@ rediscover:
   one axis of one part disagreeing and read it as a transcription error in the new data.
   Any future re-derivation must use `decimal.ROUND_HALF_UP`.
 
-**Why silence is scoped to a unique match, and why the three failures are not one
-severity.** Saying "matched 1590B" on every run trains the operator to skim past the runs
-that matter, so a unique match within tolerance says nothing at all. The three failures
-are then not variations of one finding:
+**Why silence is scoped to a unique match, and why the failures are not one severity.**
+Saying "matched 1590B" on every run trains the operator to skim past the runs that matter,
+so a unique match within tolerance says nothing at all. The failures are then not
+variations of one finding:
 
 - **A tie** (`ambiguous-enclosure`) and **a declared part the artwork contradicts**
   (`wrong-enclosure`) are ERRORs naming every candidate. Both are statements about *the
@@ -264,6 +266,28 @@ are then not variations of one finding:
   heard of your enclosure" is about **our catalogue**, which holds 22 footprints where the
   world holds rather more. It is the same rule the drill table follows for a 20 mm mic
   tube: we cannot know what another builder is working in.
+
+**A declaration is checked on every outcome, which is what makes `--case` worth typing,
+and it adds two ERRORs of its own.** An operator who says nothing is owed a usable run; one
+who claims the panel is a 1590B is owed the check they asked for, and a check that silently
+does not happen is indistinguishable from one that passed. So:
+
+- **`unverifiable-enclosure`** (ERROR) — a case was declared and there is no reference
+  outline to compare it against. Same missing layer as the undeclared run that says
+  nothing; the declaration is the whole difference, and the reference layer is what has to
+  change.
+- **`unmatched-enclosure`** (ERROR) — a case was declared and the outline does not single
+  that part out, either because nothing fitted or because several footprints did and none
+  was the declared one. Deliberately not `wrong-enclosure`: that code asserts we know what
+  *was* drawn, and here nothing is identified, so the accusation would be unfounded — by
+  the backplate convention below, the likeliest panel here is the declared case measured
+  across its drilled face, and sending that operator to change `--case` sends them away
+  from the fix.
+
+Because a part belongs to exactly one footprint, a declaration always ends a tie — it
+either resolves it or matches nothing — so `ambiguous-enclosure` and `unknown-enclosure`
+are reachable **only from an undeclared run**. Neither is reused at ERROR for the declared
+case: one `code` at two severities meaning two things is a key a consumer cannot route on.
 
 **Why `EnclosureMatch` is a first-class model value.** It is neither provenance nor
 configuration. `SourceInfo` says where the bytes came from and would be lying if it
