@@ -1,0 +1,44 @@
+# Hammond 1590 external dimensions, millimetres, 0.05 mm precision.
+# Backplate ('Top View' in Hammond's drawings) — NOT the drilled face,
+# which is smaller by the wall draft. See CLAUDE.md, backplate convention.
+# Derived from docs/parts/<PART>.pdf by inverting Hammond's double-conversion
+# fault; see docs/BACKLOG.md. 'maintainer' rows were read off the drawings
+# by hand where extraction was ambiguous.
+part	length_mm	width_mm	height_mm	source
+1590LLB	50.50	50.50	25.00	extracted
+1590LB	50.55	50.60	31.00	maintainer
+1590H	52.50	38.00	31.00	extracted
+1590Y	92.00	92.00	42.00	extracted
+1590A	92.60	38.50	31.00	extracted
+1590G	100.00	50.00	25.50	extracted
+1590G2	100.00	50.00	31.00	maintainer
+1590S	110.50	82.40	44.00	extracted(offset (0, 1, 0))
+1590B	112.40	60.50	31.00	extracted(offset (1, 0, 0))
+1590B2	112.40	60.50	37.50	extracted(offset (1, 0, 0))
+1590BS	112.00	60.50	38.00	extracted
+1590B3	116.00	77.00	37.50	extracted
+1590T	120.00	80.00	59.00	extracted
+1590BB	119.50	94.00	34.00	extracted
+1590BB2	119.50	94.00	37.75	extracted
+1590BBS	119.50	94.00	42.10	extracted
+1590C	119.50	94.00	56.50	extracted
+1590CE	120.40	100.40	64.60	maintainer
+1590Q	120.00	120.00	34.00	extracted
+1590U	120.00	120.00	58.60	extracted
+1590V	120.00	120.00	93.80	extracted
+1590N1	121.20	65.50	39.80	extracted
+1590KK	124.80	124.80	57.00	extracted
+1590K	125.00	125.00	79.00	extracted
+1590J	145.00	95.00	49.10	extracted
+1590XX	145.20	121.20	39.30	extracted(offset (0, 0, -1))
+1590X	145.20	121.20	55.00	extracted(offset (0, 0, -1))
+1590P1	153.00	83.10	50.40	maintainer
+1590DD	188.00	120.00	37.00	extracted
+1590D	187.75	119.50	56.00	extracted
+1590E	188.00	120.00	82.00	extracted+glyph
+1590F	188.00	188.00	67.00	extracted
+1590R1	191.80	111.60	61.00	extracted
+1590DE	200.20	120.20	64.30	extracted(offset (0, 0, 1))
+1590EE	200.20	120.20	84.50	extracted
+1590BX2	254.00	70.00	34.50	extracted
+1590BX	254.00	70.00	49.50	maintainer
