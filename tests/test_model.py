@@ -218,6 +218,31 @@ def test_a_translated_hole_keeps_its_identity_and_its_measurement():
     assert moved.raw == RawHole(-40_000_000, 18_000_000, 7_000_000)
 
 
+@pytest.mark.parametrize("value", [_A_FLOAT, True], ids=["float", "bool"])
+@pytest.mark.parametrize(
+    "translate",
+    [
+        pytest.param(lambda hole, v: hole.translated(v, 0), id="dx_nm"),
+        pytest.param(lambda hole, v: hole.translated(0, v), id="dy_nm"),
+    ],
+)
+def test_a_translation_that_is_not_a_length_is_refused(translate, value):
+    """The *parameter* is guarded, not only the field it lands in.
+
+    ``translated`` adds before it constructs, and addition normalises the
+    mistake away: ``True + 0`` is ``1``, so by the time ``replace`` reaches the
+    constructor's guard the boolean has become a whole number of nanometres and
+    the hole sits a plausible nanometre from where it started, with nothing left
+    to say a boolean was ever passed.
+
+    Both deltas, because they are two guards and not one: a call naming only
+    ``dx_nm`` would leave the Y axis exactly as unchecked as it was before.
+    """
+    hole = Hole.from_measurement(-40_000_000, 18_000_000, 7_000_000, index=4)
+    with pytest.raises(TypeError, match="nanometres"):
+        translate(hole, value)
+
+
 def test_the_residual_is_the_nominal_position_less_the_measured_one():
     """Positive means the nominal value is the larger, in nanometres. Named
     ``residual_nm`` because it is three lengths, and a caller printing it as
@@ -888,6 +913,18 @@ def test_two_holes_one_micron_apart_are_two_rows():
     )
 
     assert [y for y, _ in panel.rows()] == [18_001_000, 18_000_000]
+
+
+@pytest.mark.parametrize("value", [_A_FLOAT, True], ids=["float", "bool"])
+def test_a_row_tolerance_that_is_not_a_length_is_refused(value):
+    """The bucket width is a length, and it is the one length no constructor
+    ever sees: it is compared and then discarded, so a float sails through
+    ``within`` and a ``True`` quietly asks for a one-nanometre bucket. Either
+    would change how many rows a drawing dimensions, with no artifact carrying
+    the value that decided it."""
+    panel = row_panel(Hole.from_measurement(0, 18_000_000, 7_000_000, index=3))
+    with pytest.raises(TypeError, match="nanometres"):
+        panel.rows(tolerance_nm=value)
 
 
 def test_two_holes_half_a_millimetre_apart_are_two_rows():

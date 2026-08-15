@@ -194,7 +194,15 @@ class Hole:
         thousand back land on the value they started from, where the same walk
         in millimetres does not. Every emitted artifact translates the whole
         panel at least once.
+
+        The deltas are guarded here and not left to the constructor, because the
+        addition happens first and normalises the mistake away: ``True + 0`` is
+        ``1``, so ``__post_init__`` would be handed a perfectly good nanometre
+        and the hole would sit one nanometre from where it started with nothing
+        left to say a boolean was ever passed. A guard on a field cannot see
+        what the arithmetic has already absorbed.
         """
+        _check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
         return replace(self, x_nm=self.x_nm + dx_nm, y_nm=self.y_nm + dy_nm)
 
     @property
@@ -600,7 +608,14 @@ class DrillData:
         drew on one line can land a nanometre apart. ``ROW_SLACK_NM`` absorbs
         exactly that and nothing an artifact could print — a micron is already
         two rows, because that is two coordinates in the drill file.
+
+        ``tolerance_nm`` is guarded like any other length, and it is the one
+        length no constructor ever sees: it is compared and then discarded, so a
+        float would sail through ``within`` and a ``True`` would quietly ask for
+        a one-nanometre bucket. Either changes how many rows a drawing
+        dimensions, and no artifact carries the value that decided it.
         """
+        _check_nanometres("DrillData.rows", tolerance_nm=tolerance_nm)
         buckets: dict[int, list[Hole]] = {}
         for hole in self.holes:
             for y_nm, bucket in buckets.items():
