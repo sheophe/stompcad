@@ -39,3 +39,6 @@ htmlcov/
 
 # Session docs that might go stale
 docs/superpowers/
+
+# Agent worktrees (native harness-managed)
+.claude/worktrees/
