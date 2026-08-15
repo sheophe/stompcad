@@ -74,3 +74,94 @@ refactor's clothes.
 - Deleting module docstrings or the *why* they record.
 - Splitting `drawing_svg.py` into a package. That is a separate call, and the current
   judgement is to defer it until a concrete boundary reduces real change friction.
+
+---
+
+## Adopt 0.05 mm catalogue values from the per-part drawings
+
+**Status:** method proven, blocked on two residues · **Raised:** 2026-08-15
+
+`src/aidrill/enclosures.py` carries whole-millimetre dimensions from
+`docs/1590.pdf`. The per-part drawings in `docs/parts/` carry the real 0.05 mm
+values. Adopting them makes the catalogue match what Hammond actually specifies.
+
+### Why the obvious extraction does not work
+
+A part drawing states 14–16 dimensions; only three are the external L/W/H, and
+nothing in the extractable text labels which. Two approaches were tried:
+
+- **Match against the coarse table under `ROUND_HALF_UP`.** Resolved 36/37, but
+  the method is **circular**: it assumes the table is a faithful rounding, so it
+  cannot detect a table that is wrong. It surfaced `1590XX` only because the
+  damage there was too large for any drawing value to satisfy the assumption.
+- **Pair metric with imperial by token adjacency.** Spurious — the drawing layout
+  interleaves them, producing pairs like `27.00 [4.425]` that are not conversions.
+
+### The method that works
+
+Hammond's catalogue values are **double-converted**: the true metric goes to
+inches at two decimals, then back to whole millimetres. Reproduce that fault and
+invert it.
+
+1. Extract every number from the part drawing (the model is in the filename, so
+   no model detection is needed).
+2. Apply the fault to each: `mm → inch (2 dp, ROUND_CEILING) → mm (whole,
+   ROUND_HALF_UP)`. Build `{faulted: original_0.05mm}`.
+3. Look up the coarse catalogue's three values in that map.
+
+The transform was **fitted, not guessed** — all nine combinations of
+half-up/ceil/floor at the two steps were tried; `ceil` then `half_up` reproduces
+the most parts.
+
+### Fuzzy search, and why it is cheap
+
+The product pages follow the fault exactly; the series table mostly does but
+sometimes misses by 1 mm, never more. So search offsets of −1/0/+1 per axis,
+**ordered by how many axes are perturbed** — exact first, then one-of-three, then
+two, then three. Measured over all 37 parts:
+
+| | |
+|---|---|
+| Resolved | 36 / 37 |
+| Exact, no perturbation | 29 parts |
+| One axis perturbed | 7 parts |
+| Two or three axes | **0 parts** |
+| Candidates tried, max | 7 of a possible 27 |
+| Candidates tried, mean | 1.7 |
+
+The ordering is what makes it cheap: the worst case is never reached.
+
+### The two residues, both needing a human
+
+1. **Five parts have an ambiguous axis** — more than one drawing value maps to the
+   same catalogue value: `1590LB` 51 ← [50.55, 50.60]; `1590G2` 31 ← [31.00,
+   31.20]; `1590CE` 65 ← [64.57, 64.60]; `1590P1` 83 ← [83.00, 83.10]; `1590BX`
+   50 ← [49.50, 49.88, 50.00]. Resolvable from the drawing geometry, or by
+   preferring the value that is itself an exact match — but not by guessing.
+2. **`1590E` has no width in its drawing's text.** Nothing between 115.40 and 188,
+   where siblings `1590D` and `1590DD` carry 119.50 and 120.00. A gap in the
+   source.
+
+### What else changes
+
+- `Enclosure` and `EnclosureMatch` dimensions are `int` deliberately — the JSON
+  serialises them as ints, the drawing prints them as ints, and tests assert
+  `isinstance(..., int)` to keep them distinct from the float `ReferenceOutline`.
+  Floats ripple through the model, both emitters and their tests.
+- **Use `decimal.ROUND_HALF_UP`, never the builtin.** Hammond rounds 60.50 up to
+  61; Python's `round()` is banker's rounding and gives 60. Every other axis
+  agrees under either mode, so a checker using `round()` sees exactly one axis of
+  one part disagree and reads it as bad data rather than a rounding mode.
+
+### The prize
+
+Once the true values exist, a footprint can be matched against **every published
+form of itself** — the true value, the series table's rounding, and the website's
+double conversion. `tests/fixtures/tar.ai` measures 113.000 × 60.000 because it
+was drawn from the product page; it would then match 1590B **exactly, with no
+tolerance**, and the match could report which published form it recognised. That
+removes the 1.5 mm tolerance rather than widening it, and shrinks the ambiguity
+risk instead of growing it.
+
+Note this does **not** address the draft-angle problem — see the backplate
+convention in `CLAUDE.md`. That offset is depth-dependent and unpublished.
