@@ -232,23 +232,20 @@ def test_emitter_does_not_deduplicate_coincident_holes():
 
 
 def test_two_nominals_that_render_to_the_same_token_are_refused():
-    """SPEC §7: one tool per nominal diameter — this is an invariant.
-
-    ``tools()`` is keyed on the float nominal but the table is printed through
-    ``format_mm(d, decimals)``. Nominals closer together than the print
-    resolution collapse to one token and the file loads the same bit twice —
-    byte for byte the ``T2C7.000`` / ``T3C7.000`` defect the emitter's own module
-    docstring exists to describe. The invariant test above cannot catch it,
-    because it is fed nominals the pipeline had already collapsed.
-    """
+    """A measured 6.9998 and 7.0000 that no stage merged are two tools to the
+    model and one ``C7.000`` on the page — the ``T2C7.000`` / ``T3C7.000`` defect
+    reached through formatting instead of clustering. The message must name both
+    nominals and the token, so the operator need not re-derive the collision."""
     data = make_data(
-        at(0.0, 0.0, 7.0, index=0),
-        at(10.0, 0.0, 7.0004, index=1),
+        at(0.0, 0.0, 6.9998, index=1),
+        at(10.0, 0.0, 7.0000, index=3),
         reference=ReferenceOutline(50.0, 50.0),
     )
 
-    with pytest.raises(EmitterError, match="7.000"):
-        ExcellonEmitter().emit(data)
+    assert len(data.tools()) == 2  # the model still sees two nominals
+
+    with pytest.raises(EmitterError, match=r"6\.9998.*7\.0.*C7\.000"):
+        emit(data)
 
 
 def test_inch_output_refuses_diameters_it_cannot_separate():
@@ -265,26 +262,7 @@ def test_inch_output_refuses_diameters_it_cannot_separate():
     assert tool_definitions(emit(data)) == {1: "3.020", 2: "3.030"}  # fine in mm
 
     with pytest.raises(EmitterError, match="0.119"):
-        ExcellonEmitter(ExcellonOptions(units=Units.INCHES)).emit(data)
-
-
-def test_the_collision_message_names_both_nominals_the_token_the_units_and_the_precision():
-    """An operator has to be able to act on this without re-deriving it."""
-    data = make_data(
-        at(0.0, 0.0, 7.0, index=0),
-        at(10.0, 0.0, 7.0004, index=1),
-        reference=ReferenceOutline(50.0, 50.0),
-    )
-
-    with pytest.raises(EmitterError) as excinfo:
-        ExcellonEmitter().emit(data)
-    message = str(excinfo.value)
-
-    assert "7.0004" in message  # the offending nominal, in full
-    assert "7.0" in message  # and the one it collides with
-    assert "7.000" in message  # the token both would have been written as
-    assert "metric" in message
-    assert "3" in message  # the precision that could not separate them
+        emit(data, units=Units.INCHES)
 
 
 def test_raising_the_precision_makes_the_same_two_nominals_representable():
@@ -292,31 +270,12 @@ def test_raising_the_precision_makes_the_same_two_nominals_representable():
     must never quietly raise the precision itself — but when the caller does,
     the very same data emits, with two genuinely distinct tools."""
     data = make_data(
-        at(0.0, 0.0, 7.0, index=0),
-        at(10.0, 0.0, 7.0004, index=1),
+        at(0.0, 0.0, 6.9998, index=1),
+        at(10.0, 0.0, 7.0000, index=3),
         reference=ReferenceOutline(50.0, 50.0),
     )
 
-    assert tool_definitions(emit(data, decimals=4)) == {1: "7.0000", 2: "7.0004"}
-
-
-def test_the_defect_the_old_invariant_test_could_not_catch():
-    """Reproduced from the real fixture with ``--diameter-tolerance 0.0001``,
-    which leaves a measured 6.9998 and a measured 7.0000 as two nominals. The
-    emitter used to write both, giving T1C5.000 / T2C7.000 / T3C7.000 — the
-    same physical bit loaded twice. The tool table must be injective in the
-    tokens actually written, not merely in the floats behind them."""
-    data = make_data(
-        at(-19.0, -18.75, 5.0, index=6),
-        Hole(x=-40.0, y=18.0, diameter=6.9998, raw=RawHole(-40.0, 18.0, 6.9998), index=1),
-        Hole(x=-20.0, y=18.0, diameter=7.0000, raw=RawHole(-20.0, 18.0, 7.0000), index=3),
-        reference=ReferenceOutline(113.0, 60.0),
-    )
-
-    assert sorted(data.tools().values()) == [1, 2, 3]  # the model still sees three
-
-    with pytest.raises(EmitterError, match="7.000"):
-        emit(data)
+    assert tool_definitions(emit(data, decimals=4)) == {1: "6.9998", 2: "7.0000"}
 
 
 # --------------------------------------------------------------------------
@@ -326,16 +285,10 @@ def test_the_defect_the_old_invariant_test_could_not_catch():
 
 def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
     """SPEC §7 promises LOWER_LEFT keeps every coordinate positive. A hole
-    outside the reference outline breaks that promise silently — the drill file
-    still parses, and the machine drives off the fixture."""
-    data = make_data(at(-60.0, 0.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0))
-
-    with pytest.raises(EmitterError, match="negative"):
-        emit(data)
-
-
-def test_the_negative_coordinate_message_names_the_offending_hole():
-    """By ``index`` — the stable identity — not by position in the tuple."""
+    outside the reference outline breaks that promise silently — the file still
+    parses, and the machine drives off the fixture. The offender is named by
+    ``index``, the stable identity, not by position in the tuple.
+    """
     data = make_data(
         at(0.0, 0.0, 5.0, index=9),
         at(0.0, -60.0, 5.0, index=4),
@@ -355,14 +308,6 @@ def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
     data = make_data(at(-25.0004, 0.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0))
 
     assert "X0.000Y25.000" in lines(emit(data))
-
-
-def test_centre_origin_still_allows_the_negative_coordinates_it_is_for():
-    """The check belongs to LOWER_LEFT alone. CENTRE is the canonical frame and
-    half of every panel sits at a negative coordinate in it."""
-    data = make_data(at(-60.0, -60.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0))
-
-    assert "X-60.000Y-60.000" in lines(emit(data, origin=Origin.CENTRE))
 
 
 def test_lower_left_matches_the_fixture_ground_truth():

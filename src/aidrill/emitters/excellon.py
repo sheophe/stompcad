@@ -27,36 +27,11 @@ The only transforms permitted are frame translation — delegated to
 :meth:`DrillData.with_origin`, never hand-rolled — and unit conversion, via
 :attr:`Units.per_mm`, at the moment of formatting.
 
-Serialising faithfully is not the same as serialising truthfully, and the same
-three lines came back a second way. ``tools()`` is keyed on the *float* nominal;
-this file prints the table through ``format_mm(d, decimals)``. Two nominals
-closer together than the print resolution are two tools to the model and one
-token on the page, so the emitter dutifully wrote both::
-
-    aidrill tests/fixtures/tar.ai --diameter-tolerance 0.0001 --emit excellon=a.drl
-    T1C5.000
-    T2C7.000
-    T3C7.000
-
-— byte for byte the defect above, arrived at without any clustering at all. The
-fix is not to cluster (that would re-import the original sin) and not to widen
-the precision behind the operator's back. It is to notice that the *output
-format* cannot represent the distinction the data carries, and refuse.
-
-That check lives here and nowhere upstream, deliberately. Whether two nominals
-collide depends on ``units`` and ``decimals``, which no stage knows: a pipeline
-warning would be false when only JSON and the drawing are being written — both
-of which represent 6.9998 and 7.0000 perfectly well — and insufficient when
-Excellon is, because the operator can fix it by raising ``decimals``. So the
-emitter checks injectivity of its own rendered tokens, after unit conversion,
-and raises. ``--diameters none`` therefore cannot always emit Excellon; that is
-correct. It is a debug mode preserving measured distinctions a three-decimal
-drill format sometimes cannot express.
-
-The same argument covers coordinates. SPEC §7 says a lower-left origin keeps
-every coordinate positive, but that is a promise about the reframed *output*: a
-hole outside the reference outline reframes to a negative X and the file still
-parses, so the machine drives off the fixture with nothing having complained.
+Two invariants are therefore checked rather than assumed, because ``emit``
+serialises whatever ``DrillData`` a library consumer hands it: the tool table
+must stay injective *as written*, and ``LOWER_LEFT`` must yield no negative
+coordinate. Declining to write a file is permitted; repairing one is not — see
+``docs/adr/0001-pipeline-and-emitter-adapters.md``.
 """
 
 from __future__ import annotations
@@ -152,50 +127,35 @@ class ExcellonEmitter:
             raise EmitterError(f"excellon: {exc}") from exc
 
     def _tool_tokens(self, tools: Mapping[float, int]) -> dict[float, str]:
-        """Render each nominal, and refuse if the rendering is not injective.
+        """Render each nominal once, *after* unit conversion, and refuse a clash.
 
-        Built *after* unit conversion, because that is where the resolution
-        actually is: 3.02 and 3.03 mm are two unmistakable tools in millimetres
-        and one ``0.119`` at three decimals in inches. Comparing the millimetre
-        values — or the floats themselves, which is what ``tools()`` does — would
-        pass this file and still write the same bit twice.
-
-        Nothing is merged, rounded or renumbered here. The emitter has no
-        standing to decide two nominals are really one; that is the pipeline's
-        call, and taking it back is the bug ADR-0001 exists to prevent. The only
-        thing this can do about a distinction it cannot print is decline to print
-        it.
+        Conversion is where the resolution actually is: 3.02 and 3.03 mm are two
+        unmistakable tools in millimetres and one ``0.119`` at three decimals in
+        inches. Merging the two is the pipeline's call, never this file's; all
+        an emitter may do about a distinction it cannot print is decline to.
         """
         seen: dict[str, float] = {}
         tokens: dict[float, str] = {}
         for diameter in tools:
             token = self._value(diameter)
-            collided = seen.get(token)
-            if collided is not None:
+            if token in seen:
                 raise EmitterError(
-                    f"excellon: nominal diameters {collided!r} and {diameter!r} mm both "
-                    f"print as C{token} at {self.options.decimals} decimal places in "
-                    f"{_UNIT_WORD[self.options.units]}, so the drill file would load the "
-                    f"same tool twice — SPEC §7 allows one tool per nominal diameter. "
-                    f"Raise the precision so the two sizes are distinguishable, or "
-                    f"normalise them into a single nominal in the pipeline."
+                    f"excellon: nominal diameters {seen[token]!r} and {diameter!r} mm both "
+                    f"print as C{token} at {self.options.decimals} decimals in "
+                    f"{_UNIT_WORD[self.options.units]}, so the file would load the same "
+                    f"tool twice — raise the precision, or normalise them upstream"
                 )
             seen[token] = diameter
             tokens[diameter] = token
         return tokens
 
     def _reject_negative_coordinates(self, data: DrillData) -> None:
-        """Check the promise LOWER_LEFT makes, against the coordinates as written.
+        """Check the promise ``LOWER_LEFT`` makes, against what will be written.
 
-        Only for LOWER_LEFT: CENTRE is the canonical frame and half of every
-        panel is at a negative coordinate in it. Checked on the rendered token
-        rather than the float so that a hole a ten-thousandth of a millimetre
-        outside the outline — which prints ``0.000`` and drills exactly where it
-        should — is not reported as off the panel.
-
-        Holes are checked in pipeline order, so the index named is the first
-        offender the operator will look for, not the first one that happened to
-        fall under the lowest-numbered tool.
+        Read from the rendered token rather than the float, so a hole a fraction
+        of a print unit outside the outline — which prints ``0.000`` and drills
+        exactly where it should — is not reported as off the panel. Holes are
+        checked in pipeline order, so the index named is the first offender.
         """
         if self.options.origin is not Origin.LOWER_LEFT:
             return
@@ -205,9 +165,8 @@ class ExcellonEmitter:
                 raise EmitterError(
                     f"excellon: hole {hole.index} reframes to X{x}Y{y}, a negative "
                     f"coordinate — a lower-left origin promises every coordinate is "
-                    f"positive, so this hole lies outside the reference outline. Check "
-                    f"the reference layer covers the whole panel, or emit with "
-                    f"origin=Origin.CENTRE."
+                    f"positive, so this hole lies outside the reference outline; check "
+                    f"the reference layer, or emit with origin=Origin.CENTRE"
                 )
 
     def _title(self, data: DrillData) -> str:
