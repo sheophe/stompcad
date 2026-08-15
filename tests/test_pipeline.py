@@ -27,6 +27,7 @@ from aidrill.model import (
     StageRun,
 )
 from aidrill.protocols import Pipeline, Stage
+from aidrill.pipeline.diameters import METRIC_BANDS, _METRIC_DECIMALS, _metric_sizes
 from aidrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -385,6 +386,40 @@ class TestTheMetricSeriesIsGeneratedNotTranscribed:
         assert widest == 0.5
         assert SnapDiametersToDrillTable().tolerance_mm >= widest / 2
 
+    def test_a_band_is_counted_not_accumulated(self):
+        """The size a truncating count drops, on a band that actually misses.
+
+        None of the shipped bands can show this: ``(3.0 - 0.5) / 0.05``, and
+        both of its neighbours, come out exact (50.0, 110.0, 23.0), so
+        truncating the quotient and rounding it agree on all 183 sizes. Editing
+        the bands is the documented way to adopt another preferred series,
+        though, and ``(2.9 - 0.2) / 0.1`` is ``26.999999999999996`` — a band
+        whose top size disappears the moment the count stops being rounded,
+        silently, with the series still ascending and still gap-free.
+        """
+        sizes = _metric_sizes([(0.2, 2.9, 0.1)])
+
+        assert len(sizes) == 27
+        assert sizes[-1] == 2.8, "the top of the band went missing"
+
+    def test_the_bands_are_no_finer_than_the_decimals_they_are_rounded_to(self):
+        """Rounding is dust removal; a finer band would make it corruption.
+
+        Every size goes through ``round(..., _METRIC_DECIMALS)`` to clear
+        binary-accumulation dust, which is only harmless while every band step
+        is a whole number of that last decimal. A band stepping 0.025 against
+        two decimals would not be tidied but *falsified* — 0.525 recorded as
+        0.52, a size in no drawer — so the two are asserted against each other
+        rather than each on its own.
+        """
+        unit = 10**-_METRIC_DECIMALS
+
+        for start, stop, step in METRIC_BANDS:
+            for value in (start, stop, step):
+                assert abs(round(value / unit) * unit - value) < 1e-12, (
+                    f"{value} is finer than {_METRIC_DECIMALS} decimal places"
+                )
+
 
 class TestTheFractionalSeriesIsExactByConstruction:
     FRACTIONAL = DRILL_STANDARDS["fractional"]
@@ -635,6 +670,41 @@ class TestSnapDiametersToDrillTable:
         assert found.get("nearest_mm") == pytest.approx(25.0)
         assert found.get("standard") == "metric"
         assert found.location == (3.0, -2.0)
+
+    def test_a_narrowed_drawer_is_blamed_as_the_drawer_and_not_as_the_standard(self):
+        """5.0 *is* a metric size. What it is not in is the drawer just declared.
+
+        ``--drill-sizes 7.0`` on a panel with 5 mm holes used to report them as
+        matching "no metric drill size", which sends the operator to check the
+        one thing that is right and points away from the flag they typed.
+        """
+        stocked = DRILL_STANDARDS["metric"].select(include=(7.0,))
+        got = SnapDiametersToDrillTable(stocked).apply(
+            make_data(*holes((0.0, 0.0, 5.0001)))
+        )
+        found = got.diagnostics[0]
+
+        assert codes(got) == ["unknown-diameter"]
+        assert "narrowed to 1 size" in found.message
+        assert "no metric drill size" not in found.message
+        assert found.get("stocked_size_count") == 1
+        assert found.get("standard") == "metric"
+
+    def test_an_untouched_standard_is_blamed_as_the_standard(self):
+        """The other branch, and it needs its own fixture rather than a flag.
+
+        A 30 mm cut-out is outside the whole series, so there is no drawer to
+        name: reporting one would send the operator hunting for a narrowing they
+        never asked for. The count goes out either way, so that a consumer
+        rendering the finding never has to branch on a key's absence.
+        """
+        got = SnapDiametersToDrillTable().apply(make_data(*holes((0.0, 0.0, 30.0))))
+        found = got.diagnostics[0]
+
+        assert codes(got) == ["unknown-diameter"]
+        assert "no metric drill size" in found.message
+        assert "narrowed" not in found.message
+        assert found.get("stocked_size_count") == 183
 
     def test_one_diagnostic_per_offending_hole(self):
         got = SnapDiametersToDrillTable().apply(
@@ -2040,3 +2110,52 @@ class TestTheMeasurementSurvivesTheSnap:
         assert twice.reference == once.reference
         assert (twice.reference.raw.width, twice.reference.raw.height) == (113.0, 60.0)
         assert twice.diagnostics == ()
+
+
+# --------------------------------------------------------------------------
+# Reaching the stages
+# --------------------------------------------------------------------------
+
+
+def test_the_stages_and_the_standards_are_re_exported_from_the_package_root():
+    """Nothing enumerates the stages, so the root is where they are named.
+
+    ``build_pipeline`` is the CLI's arrangement and not the only one — SPEC
+    calls ``CheckReferenceSize`` a supported stage for a library caller, and the
+    CLI never runs it. A root exporting ``Pipeline`` and the ``Stage`` protocol
+    but no stage hands a consumer an empty pipeline and no way to fill it, and
+    exporting the stages without ``DRILL_STANDARDS`` leaves the one stage that
+    takes an argument unconfigurable.
+    """
+    import aidrill
+
+    stages = (
+        SnapPositions,
+        SnapDiametersToDrillTable,
+        Deduplicate,
+        IdentifyHammondFootprint,
+        SortHoles,
+        CheckReferenceSize,
+    )
+    for stage in stages:
+        assert getattr(aidrill, stage.__name__, None) is stage
+        assert stage.__name__ in aidrill.__all__
+
+    assert aidrill.DRILL_STANDARDS is DRILL_STANDARDS
+    assert aidrill.DEFAULT_STANDARD == DEFAULT_STANDARD
+    assert aidrill.DrillStandard is DrillStandard
+    for name in ("DRILL_STANDARDS", "DEFAULT_STANDARD", "DrillStandard"):
+        assert name in aidrill.__all__
+
+
+def test_the_generative_bands_stay_in_the_subpackage():
+    """The rule the root's docstring states, made falsifiable.
+
+    ``METRIC_BANDS`` is what a *different* preferred series would be written as,
+    not what running the flow needs, and the split is only worth having while
+    something fails when it blurs.
+    """
+    import aidrill
+
+    assert not hasattr(aidrill, "METRIC_BANDS")
+    assert not hasattr(aidrill, "FRACTIONAL_SIXTY_FOURTHS")

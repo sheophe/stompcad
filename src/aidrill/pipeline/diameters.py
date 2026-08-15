@@ -94,6 +94,12 @@ def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[float, .
     the accumulated version overshoots or stops a size early depending on which
     way the binary error of the step happens to fall, and it does so silently in
     the middle of a band.
+
+    ``round`` and not ``int`` for the same reason one step further in. The
+    quotient is a float, and it lands just below the true count as readily as on
+    it — ``(2.9 - 0.2) / 0.1`` is ``26.999999999999996`` — so truncating drops
+    the top size of the band and leaves a series that is still ascending, still
+    gap-free, and one bit short.
     """
     sizes: list[float] = []
     for start, stop, step in bands:
@@ -243,15 +249,13 @@ class SnapDiametersToDrillTable:
     not this number. Tightening *this* one to catch it would make a legitimate
     14.3 mm panel an ERROR and, by the rule below, cost it the hole.
 
-    Two rules that the earlier, strategy-based version got wrong, and why:
-
-    **An unmatched measurement is not kept.** The old stage retained it and
-    warned. That cannot survive the invariant this stage now carries: if every
-    nominal comes from the table, a retained 30.0 is a nominal that came from
-    nowhere, and the drill file would define a tool for a bit that does not
-    exist. So the finding is an ERROR — the run is not fit to drill — and the
-    hole appears in no artifact. Everything needed to find it is in the
-    diagnostic: the hole's index, what it measured, and the nearest bit there is.
+    **An unmatched measurement is not kept.** Retaining it and warning cannot
+    survive the invariant this stage carries: if every nominal comes from the
+    table, a retained 30.0 is a nominal that came from nowhere, and the drill
+    file would define a tool for a bit that does not exist. So the finding is an
+    ERROR — the run is not fit to drill — and the hole appears in no artifact.
+    Everything needed to find it is in the diagnostic: the hole's index, what it
+    measured, and the nearest bit there is.
     """
 
     name: ClassVar[str] = "snap-diameters"
@@ -291,9 +295,21 @@ class SnapDiametersToDrillTable:
             ("tolerance_mm", self.tolerance_mm),
             ("size_count", len(self.standard.sizes_mm)),
         ]
-        if self.standard != DRILL_STANDARDS.get(self.standard.name):
+        if self._narrowed():
             parameters.append(("sizes_mm", self.standard.sizes_mm))
         return StageRun(self.name, tuple(parameters))
+
+    def _narrowed(self) -> bool:
+        """Is this drawer something other than the registry's table of that name?
+
+        One predicate asked in two places, because two spellings of it would
+        eventually answer differently: ``describe`` decides by it whether the
+        sizes have to be written out, and ``_unknown`` decides by it whom a
+        refusal names. Both are asking "can a reader rebuild this table from the
+        name?", never "was ``select`` called?" — which is why a hand-built
+        standard under a name the registry does not hold answers yes.
+        """
+        return self.standard != DRILL_STANDARDS.get(self.standard.name)
 
     def apply(self, data: DrillData) -> DrillData:
         kept: list[Hole] = []
@@ -318,18 +334,44 @@ class SnapDiametersToDrillTable:
         return min(self.standard.sizes_mm, key=lambda size: (abs(size - measured), size))
 
     def _unknown(self, hole: Hole, nearest: float) -> Diagnostic:
-        """Name the hole, the measurement and the closest bit there is.
+        """Name the hole, the measurement, the closest bit — and what refused it.
 
         ``hole_index`` is the foreign key — the stable identity that survives a
         later stage moving the hole — and ``nearest_mm`` is there so a consumer
         can say "you drew 30.0, the biggest bit is 25.0" without re-deriving the
         search this stage has already done.
+
+        Which table refused the hole is the difference between a finding an
+        operator can act on and one that misdirects them. 5.0 mm *is* a metric
+        size; on a run narrowed to a 7 mm bit, blaming "no metric drill size"
+        sends them to check the series — the one thing that is right — and says
+        nothing about the flag they typed. So the narrowed case names the drawer
+        and how few sizes are in it, and the untouched case keeps naming the
+        standard, because inventing a drawer nobody declared misdirects just as
+        badly in the other direction.
+
+        ``stocked_size_count`` goes out either way, and is a count rather than a
+        flag: it is the quantity the message states, so the console line, the
+        NOTES block and the JSON stay three renderings of one finding instead of
+        three computations. Present on both branches, so nothing has to branch
+        on a key's absence to render it.
         """
+        stocked = len(self.standard.sizes_mm)
+        if self._narrowed():
+            refused = (
+                f"no size in the drawer — the {self.standard.name} standard narrowed "
+                f"to {stocked} size{'' if stocked == 1 else 's'}; the nearest stocked "
+                f"bit is {self.standard.label(nearest)}"
+            )
+        else:
+            refused = (
+                f"no {self.standard.name} drill size — the nearest is "
+                f"{self.standard.label(nearest)}"
+            )
         return Diagnostic.error(
             "unknown-diameter",
             f"⌀{hole.diameter:.4f} mm at ({hole.x:.3f}, {hole.y:.3f}) is within "
-            f"{self.tolerance_mm:g} mm of no {self.standard.name} drill size — the "
-            f"nearest is {self.standard.label(nearest)}; the hole has been dropped "
+            f"{self.tolerance_mm:g} mm of {refused}; the hole has been dropped "
             f"and appears in no artifact",
             location=(hole.x, hole.y),
             data=(
@@ -337,6 +379,7 @@ class SnapDiametersToDrillTable:
                 ("diameter_mm", hole.diameter),
                 ("nearest_mm", nearest),
                 ("standard", self.standard.name),
+                ("stocked_size_count", stocked),
                 ("tolerance_mm", self.tolerance_mm),
             ),
         )
