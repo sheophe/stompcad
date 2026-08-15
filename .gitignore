@@ -36,3 +36,6 @@ htmlcov/
 
 # SDD scratch
 .superpowers/
+
+# Session docs that might go stale
+docs/superpowers/
