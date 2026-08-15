@@ -21,12 +21,17 @@ that ``fit_circle`` returns, whose fields are whole nanometres.
 as they are collected would quantise four coordinates and then average them, so
 the centre and the radius would each carry up to four roundings instead of one —
 and the diameter, being twice a radius, would carry that error doubled. A circle
-of radius 3 pt is the smallest case that shows it: the diameter is 2 116 666.67
-nm and rounds to 2 116 667, while the radius rounds to 1 058 333 and doubles to
-2 116 666. ``test_the_conversion_happens_once_and_on_the_diameter`` sits on that
-nanometre, and it takes a fixture chosen for it — a panel measured off real
-artwork drifts by well under a nanometre and rounds to the same integer either
-way, so a realistic fixture cannot say this and must not be trusted to.
+of radius 3 pt shows the doubling: the diameter is 2 116 666.67 nm and rounds to
+2 116 667, while the radius rounds to 1 058 333 and doubles to 2 116 666. It is
+not the only radius that does, nor even the smallest — 2 pt disagrees the other
+way round, a 4 pt diameter rounding to 1 411 111 against twice 705 556 — but it
+is the one ``test_the_conversion_happens_once_and_on_the_diameter`` is built on,
+with ``test_the_centre_converts_after_the_centroid_and_not_before`` doing the
+same for each coordinate of the centre. Both need a fixture chosen for the
+boundary: the panel in ``tests/fixtures/tar.ai`` drifts by well under a
+nanometre and rounds to the same integer either way, so *that* fixture cannot
+say this and must not be trusted to. Real artwork may land on the boundary; it
+simply cannot be relied on to.
 """
 
 from __future__ import annotations
