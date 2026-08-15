@@ -6,6 +6,10 @@
 **Amends:** ADR-0001 (the pipeline stays; what the stages quantise onto changes)
 **Supersedes:** the `DiameterStrategy` family — `ClusterDiameters`, `TableDiameters`,
 `NoNormalization`
+**Amended in place 2026-08-15** — the decision stands unchanged; one *fact* it rested on
+does not. The per-part product PDFs it records as absent are now in `docs/parts/`, so the
+0.05 mm catalogue work is unblocked. Marked at both places it is stated, below and in
+Action Item 6, rather than edited away: an ADR is a dated record of what was known.
 
 > **On the numbering.** There is no ADR-0002. One was planned, covering `Hole.index` and
 > `DrillData.processing`, and the work shipped without it; those decisions are recorded in
@@ -217,6 +221,15 @@ done from what the repo holds: `docs/1590.pdf` contains exactly **two** decimal 
 the whole document, both of them `0.16` — the lid-height note — so the series table cannot
 supply them, and the per-part PDFs are not in the repo.
 
+> **Amended 2026-08-15 — the blocking condition no longer holds.** The per-part PDFs *are*
+> in the repo: `docs/parts/` carries all 37 drawings, and `docs/parts/dimensions.tsv`
+> carries the 0.05 mm L/W/H they yield, for every part, with a `source` column recording how
+> each was obtained. Adoption is therefore unblocked, and what is left is a decision rather
+> than a data hunt — `docs/BACKLOG.md` records it, including the ruling that the adopted
+> values are stored as **integer microns** rather than floats. The paragraph above stands as
+> the state of things when this ADR was accepted. **The two records below are unaffected and
+> still bind**: they are about what adoption costs, not about whether the data exists.
+
 Two things must be recorded now, because both are cheap to write down and expensive to
 rediscover:
 
@@ -356,7 +369,10 @@ where a silent one costs a case.
 4. [x] Withhold every artifact from a run carrying an ERROR, and print the paths not
        written
 5. [x] Carry the match into the JSON document (v4) and the drawing's title block
-6. [ ] Adopt the 0.05 mm catalogue values once the per-part product PDFs are in the repo —
-       model, both emitters and their tests, with `decimal.ROUND_HALF_UP`
+6. [ ] Adopt the 0.05 mm catalogue values — model, both emitters and their tests, with
+       `decimal.ROUND_HALF_UP`. **Amended 2026-08-15:** the precondition this item was
+       written against ("once the per-part product PDFs are in the repo") is met;
+       `docs/parts/` and its `dimensions.tsv` hold all 37 parts, and the storage decision
+       is integer microns. Still open, no longer blocked.
 7. [ ] Decide whether the face-panel case can be recognised and named rather than merely
        refused

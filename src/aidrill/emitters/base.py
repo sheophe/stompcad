@@ -1,10 +1,22 @@
 """Emitter registry.
 
-The registry exists so that adding an output format touches exactly one file —
-the new emitter's own. ``cli.py`` resolves ``--emit FORMAT=PATH`` through
-``get_emitter``/``available`` and never names a concrete class. That is the
-open/closed principle made checkable: a test asserts the CLI can dispatch to an
-emitter it has never heard of.
+The registry exists so that adding an output format touches the new emitter's own
+module plus one import line in ``emitters/__init__.py``, and nothing else.
+``cli.py`` resolves ``--emit FORMAT=PATH`` through ``get_emitter``/``available``
+and never names a concrete class. That is the open/closed principle made
+checkable: a test asserts the CLI can dispatch to an emitter it has never heard
+of.
+
+**The promise covers dispatch, not configuration, and the difference is not a
+quibble.** ``cli.py`` still names the three *options* classes in its
+``_OPTION_BUILDERS`` table, keyed by options class rather than by format name, so
+an emitter this registry has never seen is constructed with its own defaults and
+works. But an emitter that wants a value off the command line needs a flag, and a
+flag is an ``argparse`` line plus an entry in that table — a ``cli.py`` edit.
+ADR-0001 Decision 2 records that limit (amended 2026-08-15), SPEC 2.1 states it,
+and an unqualified claim here would be the file a contributor opens first telling
+them something the other three deny. Letting a registry entry contribute its own
+option factory would close the gap and has not been done.
 """
 
 from __future__ import annotations

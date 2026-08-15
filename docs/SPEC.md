@@ -17,7 +17,9 @@ chosen output format.
 
 That is the whole responsibility. It does **not** model enclosures in 3D, read KiCad,
 check clearances, or know what a potentiometer is. Those belong to the wider toolchain
-and will consume `aidrill` as a library.
+and will consume `aidrill` as a library. KiCad is therefore not a candidate future
+`Source` either, and §2's diagram no longer lists it: a board file describes parts and
+nets, which is the vocabulary this tool is defined by not having.
 
 Stated as one sentence, which is the SRP test: *"aidrill turns panel artwork into drill
 data."* Anything that doesn't serve that sentence goes elsewhere.
@@ -33,8 +35,8 @@ Three roles, three abstractions, one direction of flow:
   │ Source │ ──────────────▶ │  Pipeline of Stages  │ ────────────▶ │ Emitter │ ──▶ artifact
   └────────┘                 └──────────────────────┘               └─────────┘
    .ai / PDF                  snap · snap-diameters ·                excellon
-   (future: SVG,              dedupe · identify-enclosure ·          drawing-svg
-    DXF, KiCad)               sort                                   json
+   (future: SVG, DXF)         dedupe · identify-enclosure ·          drawing-svg
+                              sort                                   json
                                                                      (future: dxf, ai)
 ```
 
@@ -127,6 +129,10 @@ DrillData:
 - `tool_counts()` → `{diameter: how many holes use it}`
 - `rows(tolerance)` → holes grouped by Y, descending, for per-row chain dimensions
 - `last_run(stage_name)` → the most recent `StageRun` for that stage, or `None`
+- `of_severity(severity)` → the diagnostics at exactly that severity, in order
+- `worst_severity` → property; the highest severity present, or `None` for a clean run.
+  **The exit-code contract of §8 is this property and nothing else**, so a caller wanting to
+  know whether a run may be trusted asks it rather than counting diagnostics itself.
 
 `tools()` living on the model, not in the Excellon emitter, is deliberate: the drawing's
 hole schedule and the Excellon tool table must never disagree.
@@ -199,7 +205,7 @@ is made once, upstream, or it gets made twice and differently.
 | Stage | `name` | Responsibility | Diagnostics emitted |
 |---|---|---|---|
 | `SnapPositions(grid, warn_over=None)` | `snap` | Snap `x`, `y` to `grid`. `warn_over` defaults to `grid / 4`; `grid <= 0` is the identity and says nothing. | `off-grid` (WARNING) per hole exceeding `warn_over` |
-| `SnapDiametersToDrillTable(standard, tolerance_mm=0.25)` | `snap-diameters` | Give every hole the nominal diameter of a bit the declared standard actually holds. A hole matching none is **dropped**. | `unknown-diameter` (**ERROR**) per dropped hole |
+| `SnapDiametersToDrillTable(standard=DRILL_STANDARDS["metric"], tolerance_mm=0.25)` | `snap-diameters` | Give every hole the nominal diameter of a bit the declared standard actually holds. A hole matching none is **dropped**. | `unknown-diameter` (**ERROR**) per dropped hole |
 | `Deduplicate(tolerance=0.05)` | `deduplicate` | Collapse holes coincident within `tolerance` **and** of exactly equal nominal diameter. First in input order survives. | `duplicate-hole` (WARNING) per collapsed group |
 | `IdentifyHammondFootprint(tolerance_mm=1.5, expected_part=None)` | `identify-enclosure` | Match the reference outline against the Hammond 1590 catalogue and snap it to the catalogue's whole millimetres. No reference outline → returns the data untouched, silently. | `unknown-enclosure` (WARNING), `ambiguous-enclosure` (ERROR), `wrong-enclosure` (ERROR) |
 | `SortHoles(key=None)` | `sort` | Deterministic ordering. Default: descending Y, then ascending X. | none |
@@ -260,11 +266,12 @@ carry a transcription typo, and it is auditable by reading five lines instead of
 183 values. Sources genuinely disagree about the metric breakpoints, so the bands are
 *data*: adopting another preferred series is editing a tuple.
 
-**What `tolerance_mm=0.25` really catches.** Within the metric series' range, nothing:
-the widest gap anywhere is the 0.5 mm step between 14.0 and 14.5, so the furthest any
-measurement in 0.5–25.0 mm can sit from a size is exactly 0.25, which `within` treats as
-inclusive. What protects a panel in that range is the *density of the table*. The bound
-exists for measurements **outside** the series — a 30 mm cut-out wanting a step drill, a
+**What `tolerance_mm=0.25` really catches.** Within the metric series' range, nothing: the
+widest gap anywhere is 0.5 mm, and it is not one gap but the whole top band — every step
+from 14.0 to 25.0 is 0.5 mm, so the widest gap occurs 22 times. The furthest any
+measurement in 0.5–25.0 mm can therefore sit from a size is exactly 0.25, which `within`
+treats as inclusive. What protects a panel in that range is the *density of the table*.
+The bound exists for measurements **outside** the series — a 30 mm cut-out wanting a step drill, a
 0.2 mm speck, a rounded rectangle the circle fitter mistook for a circle — where
 unbounded nearest-neighbour matching would turn a malformed shape into a plausible wrong
 drill that nothing downstream could tell from a real one.
@@ -280,9 +287,13 @@ reach a machine.
 only the bits actually in the drawer; a requested size the standard does not have raises
 rather than being quietly dropped, because `--drill-sizes 3.33` is a typo whose silent
 reading makes every hole on the panel an `unknown-diameter` error with nothing pointing
-at the cause. A narrowed standard publishes its whole size list through `describe()`; an
-unnarrowed one publishes only its name and `size_count`, because a consumer that cannot
-expand `"metric"` into 183 sizes cannot interpret them either.
+at the cause. Every run publishes the standard's `name`, the matching `tolerance_mm` and
+its `size_count` through `describe()`; a *narrowed* standard additionally publishes
+`sizes_mm`, the whole list, because a run-specific drawer is small and a consumer computing
+"the nearest available size" gets it wrong without the actual set. An unnarrowed one does
+not, because a consumer that cannot expand `"metric"` into 183 sizes cannot interpret them
+either. The test is equality against the registry, not a flag set by `select`, so a
+hand-built standard wearing a registry name also writes its sizes out.
 
 ---
 
@@ -301,9 +312,25 @@ Contract and known constraints, all verified against a real file (Illustrator 30
 2. Paths with neither fill nor stroke are absent from the PDF stream. If the drill layer
    yields nothing, raise `EmptyLayerError` naming this as the likely cause.
 3. Clip paths (`W`/`W*` followed by `n`) must be discarded, not treated as geometry.
-4. Circles are 4 cubic Béziers, κ ≈ 0.5522847498. Recover centre and diameter from the
-   bounding box of the four on-curve anchors; validate with `|w−h| ≤ tol·max(w,h)` and a
-   κ-consistency check on control points.
+4. Circles are 4 cubic Béziers, κ ≈ 0.5522847498. Recover the centre as the **centroid of
+   the four on-curve anchors** and the radius as their **mean distance from that centroid**.
+   Validate three things, each of which rules out a shape a panel drawing genuinely
+   contains: that the fourth curve's end returns to the first anchor (rejects arcs); that
+   all four anchors are equidistant from the centroid (rejects ellipses, including a circle
+   squashed by a non-uniform CTM); and that every control offset is κ-consistent — `κ·r`
+   long, perpendicular to its own radius, and pointing the way the path travels (rejects the
+   four-cubic rounded square, a control rotated onto the radius, and the inward cusp drawn
+   on the very same anchors). The tolerance is **relative to the radius**, because the
+   absolute error of a PDF's two decimals scales with the size of the shape.
+
+   **The bounding box of the anchors is not an acceptable substitute, and never was the
+   implementation.** The two agree only on axis-aligned input. A `cm` may rotate a circle,
+   and on one turned 45° the anchors' bounding box is `√2·r` across: a bounding-box fit
+   reports a ⌀7 mm hole as ⌀9.9 mm — a size the metric standard actually stocks, so
+   `snap-diameters` accepts it without a diagnostic — or refuses a perfectly good hole on an
+   aspect test that was never a property of circles in the first place. Versions of this
+   section before 2.0 prescribed the bounding box and `|w−h| ≤ tol·max(w,h)`;
+   `geometry.fit_circle` has never implemented it, and a second `Source` must not either.
 5. The CTM from `cm` must be applied, including inside Form XObjects.
 6. PDF user space is 1/72″, Y-up from `/MediaBox` bottom-left. The artboard is **not**
    guaranteed to match the enclosure (the reference file is A4), so the frame origin comes
@@ -312,7 +339,30 @@ Contract and known constraints, all verified against a real file (Illustrator 30
 7. Object names are **not** recoverable — `.ai` files carry no structure tree. Do not
    design around them.
 
-Raises `LayerNotFoundError` (naming the layers that do exist) and `EmptyLayerError`.
+Raises `LayerNotFoundError` (naming the layers that do exist), `EmptyLayerError`, and
+`SourceError` for a file `pikepdf` cannot open or one carrying no pages. All three derive
+from `AidrillError`; `LayerNotFoundError` and `EmptyLayerError` derive from `SourceError`,
+so a caller that wants "the file was unusable" catches the one.
+
+**A source emits diagnostics too, and one of them moves the exit code.** Two findings are
+facts about the artwork rather than reasons to refuse it, so they are reported and the read
+continues. They are part of the diagnostic inventory a consumer must handle even though
+they come from no stage, which brings the codes this tool can emit to **ten**:
+
+| `code` | Severity | Raised when | Consequence |
+|---|---|---|---|
+| `non-circular-path` | INFO | the drill layer holds paths that are not circles — a rounded rectangle, an arc, a stroke cap | they are ignored; the count is in the message |
+| `reference-outline-not-found` | WARNING | the reference layer holds no non-circular path to use as the panel outline | there is no frame to centre on, so hole positions stay page-relative, measured from the MediaBox corner, and `reference` is `None` |
+
+The other eight are in §5's stage table. `non-circular-path` is INFO and leaves a clean run
+at exit 0; `reference-outline-not-found` is a WARNING and takes it to 1, so a CI gate built
+from §5 alone meets an exit code it has never heard of.
+
+`reference-outline-not-found` is deliberately **not** `no-reference-outline`:
+`CheckReferenceSize` already uses that key at INFO for a different finding — that there was
+nothing to check a declared size against. One key meaning two things at two severities
+defeats the point of matching on `code`, the more so because only the WARNING moves the
+exit code.
 
 ### 6.1 The reference outline, and what happens to it
 
@@ -372,8 +422,12 @@ so a new emitter needs no CLI edit.
 ### `excellon`
 
 ```
-ExcellonOptions(origin=Origin.LOWER_LEFT, units=Units.METRIC, decimals=3)
+ExcellonOptions(origin=Origin.LOWER_LEFT, units=Units.MILLIMETRES, decimals=3, title="")
 ```
+
+The member is `Units.MILLIMETRES`, not `Units.METRIC`: `"metric"` is the enum's *value*,
+because it is the word the Excellon header carries. `title` is the only field the CLI sets
+(from `--title`), and it falls back to the source path.
 
 - Header `M48`, `FMAT,2`, `METRIC,TZ` / `INCH,TZ`, `;FORMAT=` comment, tool definitions,
   `%`, then `G90` `G05`, tool-grouped coordinates, `T0`, `M30`.
@@ -447,8 +501,13 @@ never passed in a second time through the options:
 
 ### `json`
 
+```
+JsonOptions(indent=2)
+```
+
 The full `DrillData` including raw provenance and diagnostics. This is the integration
-surface for the wider toolchain and the easiest thing to assert against in tests.
+surface for the wider toolchain and the easiest thing to assert against in tests. `indent`
+goes straight to `json.dumps`, so `None` is the compact form.
 
 Document shape, **version 4**:
 
@@ -535,6 +594,23 @@ not stock is a WARNING and must still produce a drill file.
 Where several artifacts are requested, all of them are rendered before any of them reaches
 the disk. An emitter may legitimately refuse (§7), and writing as we went left the first
 target on disk and not the second.
+
+**Withholding does not delete, and a file already at the target path survives a failed
+run.** This is a deliberate ruling, recorded here rather than fixed. The CLI names every
+path it did not write, but it does not touch them: if a previous run wrote `out.drl` and
+the next one exits 2, `out.drl` is still there, byte for byte, and still loads as a
+perfectly well-formed drill file **for the previous panel**. In a `make` rule or a manual
+rerun that stale file is the obvious one to hand to the machine, and nothing in it says
+so. Two consequences bind a caller:
+
+- **Never treat the presence of an artifact as evidence a run succeeded.** The exit code is
+  the only thing that says so. `0` and `1` wrote every requested path; `2` wrote none of
+  them; `3` is an `OSError` or a usage error and may have got part-way — an emitter refusal
+  writes nothing, but a disk that fills on the second of three targets leaves the first.
+- **A build rule must delete its targets before invoking `aidrill`, or on failure**, so a
+  broken run cannot leave a plausible answer behind. `aidrill` will not do it for you:
+  deleting a file the operator named is a destructive act on the strength of a finding
+  about *this* run's data, and a truncate-then-fail would be worse than either.
 
 `--emit` being repeatable and registry-driven is the OCP proof: `--emit dxf=out.dxf` must
 work the day a DXF emitter is added, with no change to `cli.py` — as long as that emitter

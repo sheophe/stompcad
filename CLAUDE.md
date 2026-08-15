@@ -91,9 +91,10 @@ No tolerance can accept a face-drawn outline: matching one needs at least 2.4 mm
 
 ### Identity and provenance
 
-Two fields exist specifically to stop information going stale, and both are easy to break:
+Four fields exist specifically to stop information going stale, and every one of them is easy to break:
 
 - **`Hole.index`** is a required, deterministic identity assigned in source traversal order and preserved by every transform. Diagnostics refer to holes by it. Do not key on coordinates (a later stage moves them) and do not key on `RawHole` (two coincident circles share identical raw geometry — precisely the duplicate case).
+- **`ReferenceOutline.raw`** is the outline as the artwork actually measured. `IdentifyHammondFootprint` rewrites the nominal size, so without `raw` nothing downstream can tell a 113 that was *measured* from a 113 that was *snapped to* — its absence once sent a nominal size out as though it were what the artwork said. Constructing a fresh `ReferenceOutline(112.0, 61.0)` is legal code whose `raw` defaults to its own dimensions, which is exactly that lie written by hand; go through `resized()`.
 - **`DrillData.enclosure`** is a *conclusion*, which is why it is neither `SourceInfo` (where the bytes came from) nor a `StageRun` (what a stage was configured to do). It is replaced, never appended: "which enclosure is this panel?" gets one answer or `None`, never a list to pick from. A 2-D outline identifies a **footprint, never a part** — 37 catalogue parts collapse into 22 footprints — so the match names `candidates` and `selected_part` is only ever what the operator declared with `--case`.
 - **`DrillData.processing`** is a tuple of `StageRun` records collected by `Pipeline.run` from each stage's `describe()`. `describe()` reports *effective* values, not raw constructor arguments. The drawing's title block reads the grid from here; it must never be handed a second copy through emitter options, or a library consumer gets a sheet stamping a grid the holes were never snapped to.
 
@@ -154,5 +155,6 @@ Property tests cover snapping idempotence, dedupe idempotence and `tools()` stab
 - `docs/SPEC.md` — the specification, currently v2.0. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
 - `docs/adr/` — architecture decisions with the incidents that drove them. 0001 is the pipeline and the emitter adapters; 0003 is the drill standards, the enclosure catalogue and the backplate convention. There is no 0002 — it was planned and never written, and the gap is left rather than renumbered.
 - `docs/1590.pdf` — the Hammond datasheet `src/aidrill/enclosures.py` is generated from. It is the authority for every catalogue number; `tools/extract_1590.py` is the audit trail, and `tests/test_enclosures.py` re-extracts on every suite run.
+- `docs/parts/` — Hammond's 37 per-part drawings, plus `dimensions.tsv`, which carries the same 37 parts at 0.05 mm where `docs/1590.pdf` gives whole millimetres. **Not the shipped catalogue** — `enclosures.py` is still generated from `docs/1590.pdf`, and nothing at runtime reads this directory. `docs/parts/README.md` says what the TSV holds and where the two disagree; the adoption plan is in `docs/BACKLOG.md`.
 - `docs/PLAN.md` — **historical.** The task breakdown for the original v1.0 build, kept as a record. Its interfaces are superseded; read SPEC and the ADRs for what is true now.
 - `docs/BACKLOG.md` — agreed work that is deliberately not scheduled.
