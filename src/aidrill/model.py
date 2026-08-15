@@ -234,6 +234,11 @@ class EnclosureMatch:
     filled in by the operator. Nothing here may infer it from geometry; the
     artwork simply does not contain it.
 
+    An *empty* ``candidates`` has no meaning and must never be constructed: the
+    answer to "no footprint matched" is ``DrillData.enclosure is None``, not a
+    match naming nothing. A stage that cannot identify the outline reports
+    ``unknown-enclosure`` and leaves the field unset.
+
     ``length_mm``/``width_mm`` are the catalogue's own whole millimetres, and
     integers because the datasheet's metric column is. They stay in the
     catalogue's orientation even when ``rotated`` is set: a portrait panel is
@@ -254,13 +259,26 @@ class EnclosureMatch:
     selected_part: str | None = None
 
     def __post_init__(self) -> None:
-        """Coerce ``candidates``, the way ``StageRun`` and ``Diagnostic`` do.
+        """Coerce ``candidates`` to a tuple, and refuse a bare string.
 
-        Same reason as theirs: a match holding a list is unhashable and compares
-        unequal to the identical match built from a tuple, so a document read
-        back from JSON — where every sequence arrives as a list — would differ
-        from the one it was written from while printing identically.
+        The coercion is the same one ``StageRun`` and ``Diagnostic`` do, for the
+        same reason: a match holding a list is unhashable and compares unequal
+        to the identical match built from a tuple, so a document read back from
+        JSON — where every sequence arrives as a list — would differ from the
+        one it was written from while printing identically.
+
+        The guard is *not* shared with them, and the asymmetry is structural
+        rather than incidental. Their payloads are tuples of pairs, so a string
+        fed in where a sequence belongs fails on unpacking and the mistake
+        reports itself. ``candidates`` is a flat ``tuple[str, ...]``, where
+        ``tuple("1590B")`` yields five single-character designators that satisfy
+        the declared type, compare and hash cleanly, and would go on to print a
+        candidate list of "1", "5", "9", "0", "B" on a machinist's sheet without
+        ever failing. This is the one place the type annotation cannot catch a
+        type error, so it is caught here.
         """
+        if isinstance(self.candidates, str):
+            raise TypeError("candidates must be a sequence of designators, not a single string")
         object.__setattr__(self, "candidates", tuple(self.candidates))
 
 

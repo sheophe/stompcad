@@ -188,7 +188,12 @@ _1590BB_FOOTPRINT = EnclosureMatch(
 )
 
 
-def test_a_match_records_the_catalogue_length_and_width_the_right_way_round():
+def test_a_match_records_the_catalogue_length_and_width():
+    """Kept as given — this fixture is keyword-built, so it pins storage only.
+
+    The *order* of the two declarations is a separate claim, and the positional
+    test below is the one that earns it.
+    """
     assert _1590BB_FOOTPRINT.length_mm == 120
     assert _1590BB_FOOTPRINT.width_mm == 94
 
@@ -293,6 +298,48 @@ def test_candidates_given_as_a_list_are_stored_as_a_tuple():
     assert isinstance(from_list.candidates, tuple)
     assert from_list == _1590BB_FOOTPRINT
     assert hash(from_list) == hash(_1590BB_FOOTPRINT)
+
+
+def test_the_coercion_keeps_the_order_it_was_given():
+    """Catalogue order is the caller's to choose; nothing here re-sorts it.
+
+    Deliberately out of sort order, because every other fixture in this file
+    happens to be sorted already — a ``tuple(sorted(...))`` coercion would sail
+    through all of them and only surface once a datasheet listed a footprint's
+    parts in some other order.
+    """
+    unsorted = EnclosureMatch(
+        family="Hammond 1590",
+        length_mm=120,
+        width_mm=94,
+        candidates=("1590C", "1590BB", "1590BBS", "1590BB2"),
+    )
+    assert unsorted.candidates == ("1590C", "1590BB", "1590BBS", "1590BB2")
+
+
+def test_a_bare_string_of_candidates_is_refused():
+    """``tuple("1590B")`` is five candidates, and every one of them type-checks.
+
+    The neighbouring coercions in this module can afford not to guard: their
+    payloads are tuples of pairs, so a string fails on unpacking and says so.
+    ``candidates`` is flat, so the wrong answer is well-formed — it compares,
+    hashes, and prints "1", "5", "9", "0", "B" onto a drawing. Nothing later
+    can catch it, so construction has to.
+    """
+    with pytest.raises(TypeError):
+        EnclosureMatch(
+            family="Hammond 1590",
+            length_mm=120,
+            width_mm=94,
+            candidates="1590BB",  # type: ignore[arg-type]
+        )
+
+
+def test_a_single_candidate_must_still_be_given_as_a_sequence():
+    """The guard's real target: one designator is where the mistake is tempting."""
+    with pytest.raises(TypeError):
+        EnclosureMatch("Hammond 1590", 145, 95, "1590DD")  # type: ignore[arg-type]
+    assert EnclosureMatch("Hammond 1590", 145, 95, ("1590DD",)).candidates == ("1590DD",)
 
 
 def test_enclosure_match_is_frozen_and_slotted():
