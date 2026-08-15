@@ -31,10 +31,9 @@ answer, and the `source` column says how each was arrived at:
 | `maintainer` | 5 | extraction was genuinely ambiguous — more than one drawing value rounds to the coarse one — so the value was read off the drawing by hand |
 
 The five `maintainer` rows are `1590LB`, `1590G2`, `1590CE`, `1590P1` and
-`1590BX` — exactly the five parts `docs/BACKLOG.md` lists as carrying an ambiguous
-axis, now decided. Earlier revisions of this file described those axes, and
-`1590E`'s missing width, as open questions. They are not open. **The TSV is the
-record; read it rather than any prose count, including this one.**
+`1590BX` — exactly the five parts `docs/BACKLOG.md` names as carrying an axis the
+extraction could not disambiguate. **The TSV is the record; read it rather than
+any prose count, including this one.**
 
 ## Status: not adopted into the catalogue
 
@@ -71,9 +70,11 @@ which. **Neither disagreement can move a match**, and that is worth stating
 plainly rather than leaving to be rediscovered: a match is against
 `Enclosure.footprint`, which is L × W, and `Enclosure.height_mm` is stored but
 read nowhere in `src/aidrill` at all. The disagreement is confined to height, and
-**every one of the 37 parts agrees with the catalogue on both L and W** — so no
-footprint changes and no tie is created or broken. What adoption buys is
-precision, not a different answer.
+**every one of the 37 parts agrees with the catalogue on both L and W** — so
+**adopting the 0.05 mm values moves no footprint**: none changes, and no tie is
+created or broken. What adoption buys is precision, not a different answer.
+`docs/BACKLOG.md` records the same two facts where the adoption work is
+scheduled.
 
 The round-trip validation that produced these values is worth keeping: matching
 each drawing's numbers against the coarse table's `ROUND_HALF_UP` disambiguates

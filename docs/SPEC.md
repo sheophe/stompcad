@@ -1,12 +1,6 @@
 # aidrill — specification
 
-**Version:** 2.0 · **Status:** implemented
-
-Version 2.0 records the enclosure-and-drill-quantisation work: diameters are quantised
-onto a declared drill standard instead of being clustered, the reference outline is
-identified against the Hammond 1590 catalogue, an unmatched diameter is now an ERROR that
-drops the hole, and a run with any ERROR writes no artifacts at all. The reasoning is in
-`docs/adr/0003-domain-quantisers.md`.
+**Status:** implemented
 
 ---
 
@@ -18,8 +12,8 @@ chosen output format.
 That is the whole responsibility. It does **not** model enclosures in 3D, read KiCad,
 check clearances, or know what a potentiometer is. Those belong to the wider toolchain
 and will consume `aidrill` as a library. KiCad is therefore not a candidate future
-`Source` either, and §2's diagram no longer lists it: a board file describes parts and
-nets, which is the vocabulary this tool is defined by not having.
+`Source` either, which is why §2's diagram does not list it: a board file describes parts
+and nets, which is the vocabulary this tool is defined by not having.
 
 Stated as one sentence, which is the SRP test: *"aidrill turns panel artwork into drill
 data."* Anything that doesn't serve that sentence goes elsewhere.
@@ -207,22 +201,68 @@ is made once, upstream, or it gets made twice and differently.
 | `SnapPositions(grid, warn_over=None)` | `snap` | Snap `x`, `y` to `grid`. `warn_over` defaults to `grid / 4`; `grid <= 0` is the identity and says nothing. | `off-grid` (WARNING) per hole exceeding `warn_over` |
 | `SnapDiametersToDrillTable(standard=DRILL_STANDARDS["metric"], tolerance_mm=0.25)` | `snap-diameters` | Give every hole the nominal diameter of a bit the declared standard actually holds. A hole matching none is **dropped**. | `unknown-diameter` (**ERROR**) per dropped hole |
 | `Deduplicate(tolerance=0.05)` | `deduplicate` | Collapse holes coincident within `tolerance` **and** of exactly equal nominal diameter. First in input order survives. | `duplicate-hole` (WARNING) per collapsed group |
-| `IdentifyHammondFootprint(tolerance_mm=1.5, expected_part=None)` | `identify-enclosure` | Match the reference outline against the Hammond 1590 catalogue and snap it to the catalogue's whole millimetres. No reference outline → returns the data untouched, silently. | `unknown-enclosure` (WARNING), `ambiguous-enclosure` (ERROR), `wrong-enclosure` (ERROR) |
+| `IdentifyHammondFootprint(tolerance_mm=1.5, expected_part=None)` | `identify-enclosure` | Match the reference outline against the Hammond 1590 catalogue and snap it to the catalogue's whole millimetres. With nothing declared, no reference outline returns the data untouched and silently. | `unknown-enclosure` (WARNING), `ambiguous-enclosure` (ERROR), `unverifiable-enclosure` (ERROR), `unmatched-enclosure` (ERROR), `wrong-enclosure` (ERROR) |
 | `SortHoles(key=None)` | `sort` | Deterministic ordering. Default: descending Y, then ascending X. | none |
 | `CheckReferenceSize(expected, tolerance=0.05)` | `check-reference-size` | **Not in the CLI pipeline.** Compares the outline against a declared `(width, height)`. Pure validator — returns the data unchanged. | `reference-size-mismatch` (WARNING), `no-reference-outline` (INFO) |
 
-`CheckReferenceSize` remains a supported `Stage` for a library caller who has an outside
-authority for the panel size, but `--true-size` is gone and `build_pipeline` no longer
-wires it: an operator retyping a datasheet by hand is exactly the transcription this
-tool now does from the catalogue, and having both would give a run two answers to "how
-big is this panel?".
+`CheckReferenceSize` is **library-only by design**: no CLI flag builds it and
+`build_pipeline` does not wire it. It exists for the caller whose authority for the panel
+size is outside this catalogue — a folded-aluminium box, a printed shell, anything the 22
+Hammond footprints do not hold — for whom `IdentifyHammondFootprint` can say no more than
+`unknown-enclosure`. The CLI's own size assertion is `--case`, which does strictly more:
+it snaps the outline to the catalogue as well as checking it, and only a *catalogue*
+footprint can be snapped to. Wiring both would give one run two answers to "how big is
+this panel?" with nothing to reconcile them.
 
-**Severity is the exit code, so it is a contract.** `unknown-diameter` was a WARNING in
-version 1.0 and the hole kept its measured diameter; it is now an ERROR and the hole is
-gone. A consumer that built its handling from the older spec would treat a **dropped
-hole** as something merely worth logging.
+**Severity is the exit code, so it is a contract.** `unknown-diameter` is an ERROR and the
+hole is **dropped**: if every nominal comes from the drill table, a retained measurement is
+a tool for a bit that does not exist, and §8's withholding rule is what keeps the dropped
+hole off a machine.
 
-### 5.1 Drill standards (a registry of real bits, not a strategy)
+### 5.1 The five enclosure codes, and what gates each
+
+`identify-enclosure` reports on two axes: whether the operator declared a `--case`, and
+what the outline matched. A declaration is knowledge the catalogue does not hold, so it
+changes what a given match *means* — and because a part belongs to exactly one footprint,
+a declaration either resolves a tie or matches nothing at all.
+
+| Declared | Outline | Outcome |
+|---|---|---|
+| no | absent | nothing; the data is returned untouched (a stage may not assume a predecessor ran) |
+| no | unique match | silent; the outline is snapped to the catalogue's whole millimetres |
+| no | no match | `unknown-enclosure` (WARNING) — a statement about *our* catalogue, so the run continues and the outline is left as drawn |
+| no | tie | `ambiguous-enclosure` (ERROR) naming every footprint that fitted |
+| yes | absent | `unverifiable-enclosure` (ERROR) — the one thing this stage was asked to check cannot be checked at all |
+| yes | matches the declared part | silent; snapped. A tie containing the declared part is resolved this way |
+| yes | one match, a different part | `wrong-enclosure` (ERROR) naming both the declared part and what was drawn |
+| yes | no match, or a tie holding no declared part | `unmatched-enclosure` (ERROR) |
+
+Two consequences a consumer may rely on: `ambiguous-enclosure` and `unknown-enclosure` are
+reachable **only from an undeclared run**, and a declared run therefore ends in a confirmed
+match or an ERROR — never in silence it could mistake for confirmation.
+
+`unmatched-enclosure` is deliberately not `wrong-enclosure`: with nothing identified, the
+accusation would be unfounded, and by §6.2's backplate convention the likeliest panel here
+is the declared case measured across its drilled face. It is not `unknown-enclosure`
+either — one `code` at two severities meaning two things is a key nobody can route on.
+
+Payloads, so a consumer need not re-read the catalogue:
+
+| `code` | `data` keys |
+|---|---|
+| `unknown-enclosure` | `width_mm`, `height_mm`, `tolerance_mm`, `catalogue` |
+| `ambiguous-enclosure` | `footprints`, `candidates`, `tolerance_mm` |
+| `unverifiable-enclosure` | `requested_part`, `expected_length_mm`, `expected_width_mm`, `catalogue` |
+| `unmatched-enclosure` | `requested_part`, `expected_length_mm`, `expected_width_mm`, `width_mm`, `height_mm`, `tolerance_mm`, `catalogue`, `footprints`, `candidates` |
+| `wrong-enclosure` | `requested_part`, `identified_parts`, `length_mm`, `width_mm` |
+
+`expected_length_mm` / `expected_width_mm` are **absent**, never zero, when the declared
+part is in no catalogue — reachable only from a library caller, since `cli.parse_case`
+refuses such a part before the file is opened. `footprints` and `candidates` are present
+and empty on an `unmatched-enclosure` where nothing fitted, so the payload has one shape
+however the confirmation failed.
+
+### 5.2 Drill standards (a registry of real bits, not a strategy)
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -328,9 +368,8 @@ Contract and known constraints, all verified against a real file (Illustrator 30
    and on one turned 45° the anchors' bounding box is `√2·r` across: a bounding-box fit
    reports a ⌀7 mm hole as ⌀9.9 mm — a size the metric standard actually stocks, so
    `snap-diameters` accepts it without a diagnostic — or refuses a perfectly good hole on an
-   aspect test that was never a property of circles in the first place. Versions of this
-   section before 2.0 prescribed the bounding box and `|w−h| ≤ tol·max(w,h)`;
-   `geometry.fit_circle` has never implemented it, and a second `Source` must not either.
+   aspect test that was never a property of circles in the first place. `geometry.fit_circle`
+   fits from the centroid for that reason, and a second `Source` must do the same.
 5. The CTM from `cm` must be applied, including inside Form XObjects.
 6. PDF user space is 1/72″, Y-up from `/MediaBox` bottom-left. The artboard is **not**
    guaranteed to match the enclosure (the reference file is A4), so the frame origin comes
@@ -347,14 +386,14 @@ so a caller that wants "the file was unusable" catches the one.
 **A source emits diagnostics too, and one of them moves the exit code.** Two findings are
 facts about the artwork rather than reasons to refuse it, so they are reported and the read
 continues. They are part of the diagnostic inventory a consumer must handle even though
-they come from no stage, which brings the codes this tool can emit to **ten**:
+they come from no stage, which brings the codes this tool can emit to **twelve**:
 
 | `code` | Severity | Raised when | Consequence |
 |---|---|---|---|
 | `non-circular-path` | INFO | the drill layer holds paths that are not circles — a rounded rectangle, an arc, a stroke cap | they are ignored; the count is in the message |
 | `reference-outline-not-found` | WARNING | the reference layer holds no non-circular path to use as the panel outline | there is no frame to centre on, so hole positions stay page-relative, measured from the MediaBox corner, and `reference` is `None` |
 
-The other eight are in §5's stage table. `non-circular-path` is INFO and leaves a clean run
+The other ten are in §5's stage table. `non-circular-path` is INFO and leaves a clean run
 at exit 0; `reference-outline-not-found` is a WARNING and takes it to 1, so a CI gate built
 from §5 alone meets an exit code it has never heard of.
 
@@ -471,11 +510,11 @@ operator orders the box by. `ROTATED` is stated because the match keeps the cata
 orientation while the drawing dimensions the artwork's, so a turned 1590B is dimensioned
 61 × 112 beside an enclosure line reading 112 × 61.
 
-The `true_size` option and its dashed overlay are **gone**. Once the pipeline identifies
-the enclosure itself, the overlay draws a rectangle exactly on top of the normalised
+There is no declared-size overlay, and there must not be one. The pipeline identifies the
+enclosure itself, so an overlay would draw a rectangle exactly on top of the normalised
 reference on every run that matched — two identical outlines, one presented as a check on
-the other — and on a run that did *not* match, what is worth having is which case was
-asked for and which one the artwork is. Those are a title-block line and a diagnostic.
+the other — and on a run that did *not* match, what is worth having is which case was asked
+for and which one the artwork is. Those are a title-block line and a diagnostic.
 
 It must not attempt to render the Graphics layer. Substitute fonts and bbox-only text
 metrics make that misleading, and it isn't drill data.
@@ -530,16 +569,16 @@ Document shape, **version 4**:
 }
 ```
 
-Each version added something a consumer would otherwise have had to reconstruct from
+Every key here exists so that a consumer never has to reconstruct a pipeline fact from
 geometry — the founding bug of this project, displaced one layer out into the toolchain.
-v2 added `Hole.index`, `Diagnostic.data` and `processing`; v3 added `reference.raw`, whose
-absence sent a *snapped* outline out as though it were what the artwork said; v4 added
-`enclosure`, without which the only route back to "which enclosure is this panel?" was to
+`index`, `data` and `processing` carry identity, payload and provenance; `reference.raw`
+keeps a *snapped* outline from going out as though it were what the artwork said; and
+`enclosure` is the only route to "which enclosure is this panel?" that does not
 re-implement the matcher's tolerance rule against the catalogue.
 
-Key order is fixed and part of the contract, and new keys are appended, so a v1 reader
-indexing by position sees the shape it knows before the additions. `enclosure` is `null`
-rather than absent when nothing matched, and never an object naming no candidates.
+Key order is fixed and part of the contract, and new keys are appended rather than
+inserted, so a reader indexing by position is not moved by an addition. `enclosure` is
+`null` rather than absent when nothing matched, and never an object naming no candidates.
 
 ---
 
@@ -555,18 +594,11 @@ aidrill PANEL.ai [options]
   --drill-standard NAME       default: metric   (metric | fractional)
   --drill-sizes CSV           narrow the standard to these of its sizes
   --no-drill-sizes CSV        narrow the standard by removing these of its sizes
-  --dedupe-tolerance MM       default: 0.05
   --case PART                 the Hammond 1590 base designator the panel is drawn for
   --emit FORMAT=PATH          repeatable; FORMAT from the registry
   --title TEXT
   -v/--verbose
 ```
-
-Removed in 2.0: `--diameters`, `--diameter-tolerance`, `--true-size`. `--drill-sizes`
-survives the name but not the meaning — it used to *be* the whole table and was ignored
-unless `--diameters table` was also passed, and it now narrows the declared standard and
-is never ignored. **An old invocation that carried it as a no-op will now take bits out
-of the drawer.**
 
 Every one of `--drill-standard`, `--drill-sizes`, `--no-drill-sizes` and `--case` is
 resolved *before* the input file is opened, and a bad value is a usage error (exit 3). A
@@ -580,8 +612,9 @@ catalogue lookup, and belongs in the report.
 
 Exit codes: `0` clean, `1` warnings present, `2` errors, `3` usage/IO failure.
 
-**Exit 2 is now reachable.** In version 1.0 no stage produced an ERROR. Three do now:
-`unknown-diameter`, `ambiguous-enclosure` and `wrong-enclosure`.
+**Five codes reach exit 2:** `unknown-diameter` from `snap-diameters`, and
+`ambiguous-enclosure`, `unverifiable-enclosure`, `unmatched-enclosure` and
+`wrong-enclosure` from `identify-enclosure` (§5.1).
 
 **A run with any ERROR writes no artifacts.** Not one file, and the emitters are not even
 asked for their bytes. The CLI instead prints every path it did *not* write, so nothing

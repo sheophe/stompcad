@@ -79,7 +79,7 @@ refactor's clothes.
 
 ## Adopt 0.05 mm catalogue values from the per-part drawings
 
-**Status:** method proven, blocked on two residues · **Raised:** 2026-08-15
+**Status:** unblocked, not started · **Raised:** 2026-08-15
 
 `src/aidrill/enclosures.py` carries whole-millimetre dimensions from
 `docs/1590.pdf`. The per-part drawings in `docs/parts/` carry the real 0.05 mm
@@ -131,16 +131,25 @@ two, then three. Measured over all 37 parts:
 
 The ordering is what makes it cheap: the worst case is never reached.
 
-### The two residues, both needing a human
+### Where the fuzzy search stopped, and who finished it
 
-1. **Five parts have an ambiguous axis** — more than one drawing value maps to the
-   same catalogue value: `1590LB` 51 ← [50.55, 50.60]; `1590G2` 31 ← [31.00,
-   31.20]; `1590CE` 65 ← [64.57, 64.60]; `1590P1` 83 ← [83.00, 83.10]; `1590BX`
-   50 ← [49.50, 49.88, 50.00]. Resolvable from the drawing geometry, or by
-   preferring the value that is itself an exact match — but not by guessing.
-2. **`1590E` has no width in its drawing's text.** Nothing between 115.40 and 188,
-   where siblings `1590D` and `1590DD` carry 119.50 and 120.00. A gap in the
-   source.
+The search leaves two kinds of residue, and both were closed by hand rather than
+by more machinery — which is the recommendation if a datasheet revision reopens
+them:
+
+1. **An ambiguous axis**, where more than one drawing value maps to the same
+   catalogue value — `1590LB` 51 ← [50.55, 50.60]; `1590G2` 31 ← [31.00, 31.20];
+   `1590CE` 65 ← [64.57, 64.60]; `1590P1` 83 ← [83.00, 83.10]; `1590BX`
+   50 ← [49.50, 49.88, 50.00]. Five glances at five drawings.
+   **Do not build more extraction machinery for this.**
+2. **A value the text extraction cannot see.** `1590E`'s width renders as
+   individual glyphs (`1 2 0 0 0`) rather than one text run, so word-level
+   extraction misses it; the bracketed imperial beneath reads `[4.724]`, and
+   120.00 ÷ 25.4 = 4.7244, so the two agree and the value is **120.00 mm**.
+
+`docs/parts/dimensions.tsv` holds the result for all 37 parts, and its `source`
+column records which route each value came by. **That file is the record — read
+it rather than any prose count, including this one.**
 
 ### What else changes
 
@@ -166,26 +175,6 @@ risk instead of growing it.
 Note this does **not** address the draft-angle problem — see the backplate
 convention in `CLAUDE.md`. That offset is depth-dependent and unpublished.
 
-### Update: the residue is five numbers, not a pipeline
-
-`1590E` is **resolved without further tooling**. Its width renders as individual
-glyphs (`1 2 0 0 0`) rather than one text run, which is why word-level extraction
-missed it — but the bracketed imperial beneath reads `[4.724]`, and
-120.00 ÷ 25.4 = 4.7244. The two agree, so the value is known: **120.00 mm**.
-
-That leaves **five ambiguous axes**, each a choice between candidates already
-extracted:
-
-| Part | Axis | Candidates |
-|---|---|---|
-| 1590LB | 51 | 50.55, 50.60 |
-| 1590G2 | 31 | 31.00, 31.20 |
-| 1590CE | 65 | 64.57, 64.60 |
-| 1590P1 | 83 | 83.00, 83.10 |
-| 1590BX | 50 | 49.50, 49.88, 50.00 |
-
-Five glances at five drawings. **Do not build more extraction machinery for this.**
-
 ### The principled alternative, deliberately not taken
 
 Hammond publishes `.x_t` (Parasolid), `.dwg`, and `.igs`/`.stp` alongside each
@@ -194,9 +183,8 @@ from it needs no rounding archaeology and no glyph grouping — it is the correc
 answer if this ever had to scale, or to run against a manufacturer who publishes
 no dimension table at all.
 
-It is not worth it here: 37 parts, once, with 97% already resolved. A CAD-parsing
-pipeline adds a dependency and a maintenance surface for a job that never repeats,
-and would cost more than the five numbers left.
+It is not worth it here: 37 parts, once, all resolved. A CAD-parsing pipeline adds
+a dependency and a maintenance surface for a job that never repeats.
 
 **What is worth keeping is the fault model, not the extractor.** That Hammond's
 tables are double-converted, and that Hammond rounds half-up where Python rounds
@@ -204,9 +192,20 @@ half-even, is what makes the *next* discrepancy legible rather than mysterious.
 
 ### Represent catalogue dimensions as integer microns, not floats
 
-**Decided 2026-08-15.** `docs/parts/dimensions.tsv` now carries all 37 parts at
+**Decided 2026-08-15.** `docs/parts/dimensions.tsv` carries all 37 parts at
 0.05 mm precision, so adoption is unblocked. Store them as **integer microns**,
 not floats.
+
+**Adoption moves no footprint, and that is what makes it safe to schedule.** Round
+every TSV row with `decimal.ROUND_HALF_UP` and compare against `HAMMOND_1590`:
+**all 37 parts agree on both length and width**, and the only two disagreements —
+`1590XX` (H 39.30 → 39 against a catalogue 40) and `1590X` (H 55.00 → 55 against
+56) — are in **height alone**. Matching is 2-D, against `Enclosure.footprint`, and
+`Enclosure.height_mm` is stored but **read nowhere in `src/aidrill`**. So no
+footprint changes, no tie is created or broken, and no panel that matches today
+stops matching. What adoption buys is precision, not a different answer. (Both
+claims are cheap to re-check and worth re-checking after any datasheet revision;
+`docs/parts/README.md` records the same comparison.)
 
 `112.40` is not exactly representable in binary floating point — it is
 `112.40000000000000568…` — so equality on catalogue values is fragile and any
@@ -236,6 +235,6 @@ a generated variant is `==` with no tolerance and no epsilon in the comparison a
 all. That is the version of variant matching worth building.
 
 **Scope.** Touches `Enclosure`, `EnclosureMatch`, `IdentifyHammondFootprint`, both
-emitters and their tests. The JSON document gains a version bump: `length_mm: 112`
-becomes `length_um: 112400`, which is a breaking change for any consumer, so it
-wants the same treatment the earlier version bumps got.
+emitters and their tests. In the JSON document `length_mm: 112` becomes
+`length_um: 112400`; bump the document's `version` field with it, so the two keys
+can never be read as the same unit under one number.
