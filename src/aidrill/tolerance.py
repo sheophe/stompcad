@@ -22,9 +22,9 @@ ROW_SLACK: float = 1e-6
 def within(a: float, b: float, tolerance: float) -> bool:
     """True when ``a`` and ``b`` are within ``tolerance``, boundary inclusive.
 
-    Inclusive is the right default: a user who writes ``--dedupe-tolerance
-    0.05`` means two holes exactly 0.05 mm apart to count as one. A number an
-    operator typed is a number they meant, and excluding its own boundary makes
-    the flag mean something a hair tighter than it says.
+    Inclusive is the right default: a user who writes ``--grid-warn 0.05``
+    means a hole that moved exactly 0.05 mm to stay quiet. A number an operator
+    typed is a number they meant, and excluding its own boundary makes the flag
+    mean something a hair tighter than it says.
     """
     return abs(a - b) <= tolerance + SLACK

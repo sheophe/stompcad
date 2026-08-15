@@ -48,11 +48,11 @@ class Deduplicate:
     name: ClassVar[str] = "deduplicate"
 
     def describe(self) -> StageRun:
-        """No parameters, because there is no longer a number to report.
+        """No parameters: the rule is exact coincidence and takes no number.
 
-        The record itself still matters: it is how a consumer knows the stage
-        ran at all, and "deduplicated, on exact coincidence" is the whole of
-        what it was configured to do.
+        The record still matters even so — it is how a consumer knows the stage
+        ran at all, which is not something an empty diagnostics list can tell
+        them apart from a panel that simply had no duplicates.
         """
         return StageRun(self.name, ())
 
