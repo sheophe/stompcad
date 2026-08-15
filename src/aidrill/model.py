@@ -587,9 +587,9 @@ class DrillData:
 
         Grouping is by proximity and not by equality: a Y comes off the artwork
         through a rotation and a frame translation, so two holes the designer
-        drew on one line can land a few nanometres apart. ``ROW_SLACK_NM``
-        absorbs exactly that and nothing a machinist could see — half a
-        millimetre is two rows.
+        drew on one line can land a nanometre apart. ``ROW_SLACK_NM`` absorbs
+        exactly that and nothing an artifact could print — a micron is already
+        two rows, because that is two coordinates in the drill file.
         """
         buckets: dict[int, list[Hole]] = {}
         for hole in self.holes:

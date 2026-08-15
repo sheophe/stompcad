@@ -19,9 +19,15 @@ from __future__ import annotations
 
 __all__ = ["within", "ROW_SLACK_NM"]
 
-#: Bucketing tolerance for "these holes are on the same row": one micron, four
-#: decimal places below the millimetre any artifact prints.
-ROW_SLACK_NM: int = 1_000
+#: Bucketing tolerance for "these holes are on the same row": one nanometre,
+#: the model's own quantum and the narrowest slack there is. It absorbs the
+#: nanometre two holes drawn on one line can differ by after a rotation and a
+#: frame translation, and nothing else — every wider value is a distance an
+#: artifact prints. A micron is the case worth naming rather than assuming: an
+#: Excellon file at three decimal places writes 18.000 and 18.001 for two holes
+#: a micron apart, so a micron-wide bucket would have the drawing dimension one
+#: row where the machine drills two.
+ROW_SLACK_NM: int = 1
 
 
 def within(a: int, b: int, tolerance: int) -> bool:

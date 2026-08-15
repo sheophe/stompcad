@@ -849,13 +849,14 @@ def test_a_row_runs_left_to_right():
     assert [hole.x_nm for hole in holes] == [-40_000_000, 0, 20_000_000]
 
 
-def test_two_holes_a_hair_apart_in_y_are_one_row():
+def test_two_holes_a_nanometre_apart_in_y_are_one_row():
     """Y comes off the artwork through a transform and a frame translation, so
-    two holes the designer drew on one line can land a few nanometres apart.
-    The bucket absorbs that and nothing wider."""
+    two holes the designer drew on one line can land a nanometre apart. The
+    bucket absorbs exactly that — its own boundary, inclusive, which is the rule
+    ``within`` states once for the whole pipeline."""
     panel = row_panel(
         Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=3),
-        Hole.from_measurement(20_000_000, 18_000_500, 7_000_000, index=8),
+        Hole.from_measurement(20_000_000, 18_000_001, 7_000_000, index=8),
     )
 
     rows = panel.rows()
@@ -864,26 +865,31 @@ def test_two_holes_a_hair_apart_in_y_are_one_row():
     assert [hole.index for hole in rows[0][1]] == [3, 8]
 
 
-def test_two_holes_exactly_one_micron_apart_are_still_one_row():
-    """The bucket's own boundary, inclusive — the same rule ``within`` states
-    once for the whole pipeline."""
+def test_two_holes_two_nanometres_apart_are_two_rows():
+    """One nanometre outside, so the width of the bucket is pinned rather than
+    merely its order of magnitude."""
+    panel = row_panel(
+        Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=3),
+        Hole.from_measurement(20_000_000, 18_000_002, 7_000_000, index=8),
+    )
+
+    assert [y for y, _ in panel.rows()] == [18_000_002, 18_000_000]
+
+
+def test_two_holes_one_micron_apart_are_two_rows():
+    """A micron is not a hair — it is a coordinate the drill file writes.
+
+    Excellon at three decimal places prints 18.000 for one of these holes and
+    18.001 for the other, so a bucket a micron wide would have the drawing
+    dimension a single row while the machine drills two Y positions: one panel,
+    two artifacts, silently disagreeing.
+    """
     panel = row_panel(
         Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=3),
         Hole.from_measurement(20_000_000, 18_001_000, 7_000_000, index=8),
     )
 
-    assert len(panel.rows()) == 1
-
-
-def test_two_holes_a_nanometre_past_the_bucket_are_two_rows():
-    """One nanometre outside, so the width of the bucket is pinned rather than
-    merely its order of magnitude."""
-    panel = row_panel(
-        Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=3),
-        Hole.from_measurement(20_000_000, 18_001_001, 7_000_000, index=8),
-    )
-
-    assert [y for y, _ in panel.rows()] == [18_001_001, 18_000_000]
+    assert [y for y, _ in panel.rows()] == [18_001_000, 18_000_000]
 
 
 def test_two_holes_half_a_millimetre_apart_are_two_rows():
