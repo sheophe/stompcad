@@ -140,10 +140,10 @@ class ExcellonEmitter:
             token = self._value(diameter)
             if token in seen:
                 raise EmitterError(
-                    f"excellon: nominal diameters {seen[token]!r} and {diameter!r} mm both "
-                    f"print as C{token} at {self.options.decimals} decimals in "
-                    f"{_UNIT_WORD[self.options.units]}, so the file would load the same "
-                    f"tool twice — raise the precision, or normalise them upstream"
+                    f"excellon: nominal diameters {seen[token]!r} and {diameter!r} mm "
+                    f"both print as C{token} at {self.options.decimals} decimals in "
+                    f"{_UNIT_WORD[self.options.units]}, so the file would load the "
+                    f"same tool twice — raise the precision, or normalise them upstream"
                 )
             seen[token] = diameter
             tokens[diameter] = token

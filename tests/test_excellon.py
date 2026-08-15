@@ -235,7 +235,9 @@ def test_two_nominals_that_render_to_the_same_token_are_refused():
     """A measured 6.9998 and 7.0000 that no stage merged are two tools to the
     model and one ``C7.000`` on the page — the ``T2C7.000`` / ``T3C7.000`` defect
     reached through formatting instead of clustering. The message must name both
-    nominals and the token, so the operator need not re-derive the collision."""
+    nominals and the token, so the operator need not re-derive the collision;
+    lookaheads rather than a sequence, because the order it names them in is
+    presentation, and a test that fails when prose is reordered is a nuisance."""
     data = make_data(
         at(0.0, 0.0, 6.9998, index=1),
         at(10.0, 0.0, 7.0000, index=3),
@@ -244,7 +246,7 @@ def test_two_nominals_that_render_to_the_same_token_are_refused():
 
     assert len(data.tools()) == 2  # the model still sees two nominals
 
-    with pytest.raises(EmitterError, match=r"6\.9998.*7\.0.*C7\.000"):
+    with pytest.raises(EmitterError, match=r"(?=.*6\.9998)(?=.*\b7\.0\b)(?=.*C7\.000)"):
         emit(data)
 
 
@@ -288,15 +290,26 @@ def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
     outside the reference outline breaks that promise silently — the file still
     parses, and the machine drives off the fixture. The offender is named by
     ``index``, the stable identity, not by position in the tuple.
+
+    Both axes are exercised, one alone each time: a check that tested only the
+    pair would still pass while half of it was missing, and a hole to the left
+    of the outline is at least as likely in the field as one below it.
     """
-    data = make_data(
+    y_only = make_data(
         at(0.0, 0.0, 5.0, index=9),
         at(0.0, -60.0, 5.0, index=4),
         reference=ReferenceOutline(50.0, 50.0),
     )
 
     with pytest.raises(EmitterError, match=r"hole 4\b"):
-        emit(data)
+        emit(y_only)
+
+    x_only = make_data(
+        at(-60.0, 0.0, 5.0, index=7), reference=ReferenceOutline(50.0, 50.0)
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 7\b"):
+        emit(x_only)
 
 
 def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
@@ -305,7 +318,9 @@ def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
     millimetre past the edge prints ``0.000`` and drills exactly where it should;
     refusing it would turn representation noise into an operator-facing failure.
     """
-    data = make_data(at(-25.0004, 0.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0))
+    data = make_data(
+        at(-25.0004, 0.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0)
+    )
 
     assert "X0.000Y25.000" in lines(emit(data))
 
