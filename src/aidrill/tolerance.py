@@ -1,25 +1,30 @@
-"""One place for float comparison.
+"""One place for "are these two lengths the same length?".
 
-Five modules were independently declaring their own ``_SLACK = 1e-9`` with
-near-identical comments, and a sixth (``CheckReferenceSize``) had none at all
-and therefore rejected a value the user had typed exactly: with a 0.1 tolerance,
-``60.1 - 60.0 == 0.10000000000000142``. Boundary behaviour is a decision, and a
-decision made in six places is six decisions.
+The body is a single comparison, and it has a module to itself because the
+``<=`` in it is a decision rather than a spelling. Six call sites asking the
+question their own way are six decisions, and the sixth is the one that excludes
+a number the operator typed: ``--grid-warn 0.05`` on a hole that moved exactly
+0.05 mm has one right answer, and it should not depend on which module is
+asking.
+
+Lengths are whole nanometres (``aidrill.units``), so the comparison is exact.
+There is no representation error left for an epsilon to absorb, and a ``within``
+that widened every tolerance by even a nanometre would answer a question nobody
+asked — a small lie of exactly the kind an integer model exists to remove. The
+boundary is therefore the only thing this module decides, which is why there is
+a test sitting on it, one nanometre inside it and one nanometre outside it.
 """
 
 from __future__ import annotations
 
-__all__ = ["SLACK", "within", "ROW_SLACK"]
+__all__ = ["within", "ROW_SLACK_NM"]
 
-#: Absorbs binary-representation error in user-supplied millimetre values.
-#: Chosen well below any physically meaningful dimension.
-SLACK: float = 1e-9
-
-#: Bucketing tolerance for "these holes are on the same row".
-ROW_SLACK: float = 1e-6
+#: Bucketing tolerance for "these holes are on the same row": one micron, four
+#: decimal places below the millimetre any artifact prints.
+ROW_SLACK_NM: int = 1_000
 
 
-def within(a: float, b: float, tolerance: float) -> bool:
+def within(a: int, b: int, tolerance: int) -> bool:
     """True when ``a`` and ``b`` are within ``tolerance``, boundary inclusive.
 
     Inclusive is the right default: a user who writes ``--grid-warn 0.05``
@@ -27,4 +32,4 @@ def within(a: float, b: float, tolerance: float) -> bool:
     typed is a number they meant, and excluding its own boundary makes the flag
     mean something a hair tighter than it says.
     """
-    return abs(a - b) <= tolerance + SLACK
+    return abs(a - b) <= tolerance

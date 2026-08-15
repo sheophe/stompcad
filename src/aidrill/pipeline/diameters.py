@@ -57,7 +57,7 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from ..model import Diagnostic, DrillData, Hole, ParameterValue, StageRun
-from ..tolerance import SLACK, within
+from ..tolerance import within
 
 __all__ = [
     "METRIC_BANDS",
@@ -201,8 +201,11 @@ class DrillStandard:
     def _same(size: float, requested: float) -> bool:
         """Two spellings of one size. Not a matching tolerance — that is the
         stage's job, and a lenient ``select`` would silently hand back a bit the
-        operator did not ask for. This absorbs binary representation only."""
-        return within(size, requested, SLACK)
+        operator did not ask for. This absorbs binary representation only, which
+        the drill table still has because its sizes are millimetre floats built
+        by arithmetic: the 3.2 a band generates is not always the 3.2 an
+        operator types."""
+        return within(size, requested, 1e-9)
 
 
 #: Every standard the operator may declare. A mapping proxy, because a registry
