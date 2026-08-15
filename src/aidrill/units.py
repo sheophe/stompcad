@@ -47,6 +47,7 @@ __all__ = [
     "NM_PER_MM",
     "mm_from_pt",
     "nm_from_mm",
+    "scaled_nm",
     "mm_from_nm",
     "format_nm",
 ]
@@ -97,6 +98,34 @@ def nm_from_mm(mm: float) -> int:
     KiCad grid is quoted in millimetres and that is what the operator thinks in.
     """
     return int(_round_half_up(Decimal(str(mm)) * NM_PER_MM))
+
+
+def scaled_nm(mm: float) -> Decimal:
+    """The measurement in nanometres, exactly, without quantising it.
+
+    A quantiser that rounds the measurement to whole nanometres *before*
+    choosing which grid point or drill size is nearest can choose wrongly by a
+    full grid pitch. ``0.1250004`` mm is 125 000.4 nm exactly; its nearest
+    point on a 250 000 nm grid is 250 000. But `nm_from_mm` first gives
+    125 000, which is an exact tie, and half-even then picks 0 -- the two
+    spellings of the same measurement emit ``X0.250`` and ``X0.000``.
+    Diameters fail the same way: 5.0250004 mm is nearer the 5 050 000 nm table
+    entry, but the rounded copy sits dead centre on 5 025 000 and the
+    tie-break picks 5 000 000.
+
+    The mechanism is not that the pre-rounding is too coarse -- half a
+    nanometre is 250 000x finer than the grid -- it *manufactures a tie the
+    measurement did not have*, and the tie-break then resolves a fabricated
+    ambiguity instead of the real one. `scaled_nm` exists so a quantiser can
+    compare the measurement against an answer set without ever quantising the
+    measurement itself; only the quotient against that answer set gets
+    rounded.
+
+    ``Decimal(str(mm))`` and not ``Decimal(mm)``: ``str`` of a float is its
+    shortest round-tripping decimal, which is the same basis `nm_from_mm`
+    already uses, and it avoids preserving irrelevant binary-expansion digits.
+    """
+    return Decimal(str(mm)) * NM_PER_MM
 
 
 def mm_from_nm(nm: int) -> float:
