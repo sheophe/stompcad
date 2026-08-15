@@ -671,6 +671,41 @@ class TestSnapDiametersToDrillTable:
         assert found.get("standard") == "metric"
         assert found.location == (3.0, -2.0)
 
+    def test_a_narrowed_drawer_is_blamed_as_the_drawer_and_not_as_the_standard(self):
+        """5.0 *is* a metric size. What it is not in is the drawer just declared.
+
+        ``--drill-sizes 7.0`` on a panel with 5 mm holes used to report them as
+        matching "no metric drill size", which sends the operator to check the
+        one thing that is right and points away from the flag they typed.
+        """
+        stocked = DRILL_STANDARDS["metric"].select(include=(7.0,))
+        got = SnapDiametersToDrillTable(stocked).apply(
+            make_data(*holes((0.0, 0.0, 5.0001)))
+        )
+        found = got.diagnostics[0]
+
+        assert codes(got) == ["unknown-diameter"]
+        assert "narrowed to 1 size" in found.message
+        assert "no metric drill size" not in found.message
+        assert found.get("stocked_size_count") == 1
+        assert found.get("standard") == "metric"
+
+    def test_an_untouched_standard_is_blamed_as_the_standard(self):
+        """The other branch, and it needs its own fixture rather than a flag.
+
+        A 30 mm cut-out is outside the whole series, so there is no drawer to
+        name: reporting one would send the operator hunting for a narrowing they
+        never asked for. The count goes out either way, so that a consumer
+        rendering the finding never has to branch on a key's absence.
+        """
+        got = SnapDiametersToDrillTable().apply(make_data(*holes((0.0, 0.0, 30.0))))
+        found = got.diagnostics[0]
+
+        assert codes(got) == ["unknown-diameter"]
+        assert "no metric drill size" in found.message
+        assert "narrowed" not in found.message
+        assert found.get("stocked_size_count") == 183
+
     def test_one_diagnostic_per_offending_hole(self):
         got = SnapDiametersToDrillTable().apply(
             make_data(*holes((0.0, 0.0, 30.0), (1.0, 0.0, 30.0), (2.0, 0.0, 7.0)))
