@@ -704,7 +704,7 @@ Six divergences where `docs/SPEC.md` is the stale side. The spec is explicitly l
 **This runs last, after every other task, as its own review phase.** A test that stays green when the behaviour it names is removed or inverted is not a test; it is documentation that costs CI time. Task 1 produced two such tests *from this plan's own text* — the identity regression test and the payload test both passed unchanged under the positional-survivor design the plan explicitly rejected, and both were caught only by hand-mutating the source. That is a 2-for-2 hit rate on the tests that mattered most, which is the argument for doing this systematically rather than trusting review-by-reading.
 
 **Files:**
-- Create: `.superpowers/sdd/2026-08-15-review-remediation/vacuity-report.md` (outside the repo tree's tracked content)
+- Create: `.superpowers/sdd/2026-08-15-drill-data-integrity/vacuity-report.md` (outside the repo tree's tracked content)
 - Modify: whichever test files the audit proves vacuous
 - Test: the whole suite
 
