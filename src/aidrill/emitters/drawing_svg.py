@@ -12,13 +12,27 @@ What ends up on the sheet:
 * a border, default A4 landscape, sheet configurable
 * the reference outline as a rounded rectangle
 * chain-dash centrelines and an origin symbol at (0, 0)
-* every hole at true diameter with a centre mark and a numbered balloon
+* every hole at true diameter with a centre mark and a balloon carrying its
+  ``Hole.index`` — the same number the report, the JSON and every diagnostic
+  use, so that "hole 2" names one hole across all four
 * one chain dimension per Y row (``DrillData.rows()``) with extension lines,
   plus overall width and height
 * a hole schedule — No. / X / Y / ⌀ / TOOL — with tool numbers taken from
   ``DrillData.tools()`` and never renumbered, and a per-tool quantity summary
 * a title block naming the enclosure the panel was identified as, and a NOTES
   block, warnings and errors in red
+
+Nothing on the sheet runs out of its box, and **nothing leaves it in silence**.
+A panel of 120 distinct diameters used to print 36 summary lines through the
+title block and 3 off the page; a 15-row panel — ordinary work — drew its
+topmost chain dimensions off the sheet, leaving holes with no dimension beside
+them. Both came from the same shape of mistake: :meth:`layout` clamped the
+capacity arithmetic and the loops that spend it were unclamped, so the deficit
+was discarded rather than reported. Every list that can be cut short now goes
+through :func:`_allot`, which reserves the line its own marker needs, and every
+marker names what was dropped and how many — a tool is not a hole, and a sheet
+listing fewer tools than the drill file defines is ADR-0001's failure with the
+drawing as the wrong artifact.
 
 A dashed ``true_size`` overlay used to be drawn beside the reference outline,
 from a ``WxH`` the operator retyped off a datasheet. It is gone with its option.
@@ -204,6 +218,12 @@ _BOTTOM_BASE = 12.0  # below the last chain dimension
 _ROW_PITCH = 8.0  # between stacked chain dimensions
 _GUTTER = 4.0
 
+#: The smallest a title block line is allowed to shrink to earn its width. A
+#: line that still does not fit at this size is truncated, so the enclosure
+#: note composes its candidate list against this size and no other: it is the
+#: widest string the line can ever be asked to carry.
+_TITLE_MIN_FONT = 1.6
+
 
 def _trim(value: float) -> str:
     text = f"{value:.4f}".rstrip("0").rstrip(".")
@@ -219,16 +239,45 @@ def _fmt(value: float | int | str) -> str:
     return text or "0"
 
 
+def _capacity(width: float, size: float) -> int:
+    """How many characters :func:`_fits` will keep at this size.
+
+    One formula, two callers. A line composed to a capacity that ``_fits``
+    disagreed with would be chopped anyway, which is how the title block's
+    candidate list came to end in an ellipsis that named no number.
+    """
+    if width <= 0 or size <= 0:
+        return 0
+    return max(1, int(width / (CHAR_RATIO * size)))
+
+
 def _fits(text: str, size: float, width: float) -> str:
     """Truncate ``text`` so its estimated extent stays inside ``width``."""
     if width <= 0:
         return ""
-    limit = max(1, int(width / (CHAR_RATIO * size))) if size > 0 else 0
+    limit = _capacity(width, size)
     if len(text) <= limit:
         return text
     if limit <= 1:
         return text[:limit]
     return text[: limit - 1] + "…"
+
+
+def _allot(count: int, room: int) -> tuple[int, int]:
+    """How many of ``count`` items to draw in ``room`` lines, and how many are left.
+
+    Not ``min(count, room)``: announcing the leftovers costs a line of its own,
+    and a marker drawn in a line that does not exist is the very failure it is
+    there to report. Both of this module's overflowing loops came from a
+    capacity that was clamped in the arithmetic and unclamped in the drawing —
+    the tool summary ran through the title block and off the page, and the chain
+    dimensions off the bottom of the sheet — so the deficit is returned here
+    rather than discarded, and every caller has to say what it did with it.
+    """
+    if count <= room:
+        return count, 0
+    shown = max(0, room - 1)
+    return shown, count - shown
 
 
 def _fit_font(text: str, width: float, largest: float, smallest: float) -> float:
@@ -496,7 +545,7 @@ class DrawingSvgEmitter:
         group = _sub(root, "g", **{"class": "holes"})
         flagged = _flagged_holes(data.diagnostics)
 
-        for index, hole in enumerate(data.holes, start=1):
+        for hole in data.holes:
             cx, cy = layout.point(hole.x, hole.y)
             radius = max(0.4, layout.length(hole.diameter) / 2.0)
             is_dup = _is_flagged(hole, flagged)
@@ -541,11 +590,19 @@ class DrawingSvgEmitter:
                     stroke_width=0.2,
                 )
 
-            self._balloon(group, cx, cy, radius, index)
+            self._balloon(group, cx, cy, radius, hole.index)
 
     def _balloon(
         self, parent: ET.Element, cx: float, cy: float, radius: float, number: int
     ) -> None:
+        """The balloon carries the hole's ``index``, never its place in the tuple.
+
+        Numbering 1..n down ``data.holes`` gave the sheet a private numbering
+        that agreed with nothing: "hole 2" was the duplicate at (−40, 18) to the
+        JSON and every diagnostic, and the clean hole at (−20, 18) here. The
+        numbers are therefore not contiguous — a gap is a hole the pipeline
+        dropped or deduped, which is a fact worth reading off the sheet.
+        """
         unit = math.sqrt(0.5)
         reach = radius + 7.0
         bx = cx + unit * reach
@@ -583,11 +640,43 @@ class DrawingSvgEmitter:
         self._draw_overall(group, layout, data)
 
     def _draw_row_chains(self, parent: ET.Element, layout: Layout, data: DrillData) -> None:
+        """One chain per Y row, stacked below the panel — as many as fit.
+
+        ``layout`` reserves ``_BOTTOM_BASE + _ROW_PITCH * len(rows)`` for these
+        and then clamps the reservation to half the drawing area; this loop drew
+        one chain per row regardless. A 15-row panel — ordinary work — put its
+        topmost chains off the sheet, and because the stack is built from the
+        bottom row up, the rows that lost their dimension were the ones nearest
+        the top of the panel. Their holes were still drawn, so the sheet showed
+        holes with no dimension and no note saying one was missing.
+        """
         rows = data.rows()
         content_bottom = layout.point(0.0, -layout.half_height)[1]
         edge = data.reference.width / 2.0 if data.reference is not None else None
 
-        for level, (row_y, holes) in enumerate(reversed(rows)):
+        top = content_bottom + 8.0
+        # The extension lines overshoot the dimension line by 1.5, so that is
+        # the lowest ink a chain puts on the sheet.
+        room = int((layout.area[3] - 1.5 - top) / _ROW_PITCH) + 1
+        # Bottom row first, which is the order they stack away from the panel.
+        ordered = list(reversed(rows))
+        drawn, omitted = _allot(len(ordered), room)
+        if omitted:
+            _text(
+                parent,
+                layout.area[0] + 2.0,
+                top + _ROW_PITCH * drawn,
+                _fits(
+                    f"… {omitted} further row dimensions not shown",
+                    2.2,
+                    layout.area[2] - layout.area[0] - 4.0,
+                ),
+                2.2,
+                cls="dim-overflow",
+                fill=RED,
+            )
+
+        for level, (row_y, holes) in enumerate(ordered[:drawn]):
             stations = [hole.x for hole in holes]
             if edge is not None:
                 stations = [-edge, *stations, edge]
@@ -758,18 +847,35 @@ class DrawingSvgEmitter:
         counts = data.tool_counts()
         diameter_label = _diameter_label(data)
 
+        # Two lists share one box, and both used to be sized as though the other
+        # were free. The capacity arithmetic subtracted the summary and then
+        # clamped the remainder to zero, throwing the deficit away, while the
+        # summary loop below still drew one line per tool: 120 distinct
+        # diameters put 36 lines through the title block and 3 off the page, and
+        # the only notice printed said "further holes not listed" — a true
+        # statement about a different quantity.
         summary_lines = len(tools)
         available = (y1 - y0) - 8.0
         needed = len(data.holes) + 2 + summary_lines + 1
         pitch = min(4.6, available / max(1, needed))
         shown = data.holes
+        listed = list(tools.items())
         overflow = 0
+        tool_overflow = 0
         if pitch < 1.6:
             pitch = 1.6
-            capacity = int(available / pitch) - (3 + summary_lines)
-            capacity = max(0, capacity)
-            overflow = len(data.holes) - capacity
-            shown = data.holes[:capacity]
+            # Three lines are spoken for before either list starts: the column
+            # heading, the rule under it and the rule above the summary.
+            body = max(0, int(available / pitch) - 3)
+            # The summary is allotted first, because it is the sheet's copy of
+            # the drill file's tool table and a machinist sets the machine up
+            # from it — but never more than half the box, or a panel of many
+            # sizes would list its bits and none of its holes.
+            room_for_tools = min(summary_lines, max(1, body // 2))
+            kept_tools, tool_overflow = _allot(summary_lines, room_for_tools)
+            listed = listed[:kept_tools]
+            kept_holes, overflow = _allot(len(data.holes), max(0, body - room_for_tools))
+            shown = data.holes[:kept_holes]
         font = max(1.1, min(2.6, pitch * 0.62))
 
         columns = (
@@ -803,12 +909,14 @@ class DrawingSvgEmitter:
         )
 
         flagged = _flagged_holes(data.diagnostics)
-        for index, hole in enumerate(shown, start=1):
+        for hole in shown:
             y += pitch
             row = _sub(group, "g", **{"class": "sched-row"})
             colour = RED if _is_flagged(hole, flagged) else None
             cells = (
-                (str(index), "sched-no"),
+                # The hole's own id, not its place in the tuple — see
+                # ``_balloon``. NO. is the column a diagnostic is joined on.
+                (str(hole.index), "sched-no"),
                 # format_mm, not an f-string: a hole at -0.0004 printed "-0.00"
                 # here while the Excellon writer printed "0.000" for the very
                 # same hole.
@@ -835,9 +943,10 @@ class DrawingSvgEmitter:
                 group,
                 x0 + 2.0,
                 y,
-                f"… {overflow} further holes not listed",
+                _fits(f"… {overflow} further holes not listed", font, width - 4.0),
                 font,
                 cls="sched-overflow",
+                fill=RED,
             )
 
         y += pitch * 0.6
@@ -852,7 +961,7 @@ class DrawingSvgEmitter:
             stroke=INK,
             stroke_width=0.2,
         )
-        for diameter, tool in tools.items():
+        for diameter, tool in listed:
             y += pitch
             _text(
                 group,
@@ -865,6 +974,21 @@ class DrawingSvgEmitter:
                 ),
                 font,
                 cls="sched-summary",
+            )
+        if tool_overflow:
+            y += pitch
+            # Its own wording, and its own class. A tool the sheet does not name
+            # is a bit that does not get fitted, and saying "holes" about it —
+            # which is all the schedule used to say — describes the wrong
+            # quantity while the drill file quietly defines every one of them.
+            _text(
+                group,
+                x0 + 2.0,
+                y,
+                _fits(f"… {tool_overflow} further tools not listed", font, width - 4.0),
+                font,
+                cls="sched-tool-overflow",
+                fill=RED,
             )
 
     # -- title block -----------------------------------------------------
@@ -912,7 +1036,7 @@ class DrawingSvgEmitter:
         lines = [
             f"TITLE  {options.title or 'PANEL DRILL DRAWING'}",
             f"DRG No  {options.drawing_no or '—'}",
-            _enclosure_note(data),
+            _enclosure_note(data, _capacity(inner, _TITLE_MIN_FONT)),
             f"SHEET 1 OF 1   SIZE {layout.sheet.name}",
             f"UNITS mm   SCALE {layout.scale_label}",
             f"{_grid_note(data)}   HOLES {len(data.holes)}",
@@ -922,11 +1046,17 @@ class DrawingSvgEmitter:
             f"ref={data.source.reference_layer or '—'}",
         ]
         step = min(4.2, max(2.4, (y1 - (y0 + 9.0) - 1.5) / len(lines)))
-        font = max(1.6, min(2.8, step * 0.62))
+        font = max(_TITLE_MIN_FONT, min(2.8, step * 0.62))
         y = y0 + 8.0
         for line in lines:
             y += step
-            _text(group, x0 + 2.0, y, _fits(line, font, inner), font, cls="tb")
+            # Shrink the line before chopping it. Every line here is a claim the
+            # sheet makes, and a claim that does not fit is worth a smaller font
+            # rather than an ellipsis: ``_designator`` elides the series so that
+            # a four-candidate footprint fits, and adding ``ROTATED`` to the same
+            # line took two of the four away again.
+            size = _fit_font(line, inner, font, _TITLE_MIN_FONT)
+            _text(group, x0 + 2.0, y, _fits(line, size, inner), size, cls="tb")
 
     # -- notes -----------------------------------------------------------
     def _note_lines(self, data: DrillData) -> list[str]:
@@ -1164,7 +1294,7 @@ def _diameter_label(data: DrillData) -> Callable[[float], str]:
     return standard.label
 
 
-def _enclosure_note(data: DrillData) -> str:
+def _enclosure_note(data: DrillData, capacity: int) -> str:
     """What the title block says the panel is, read from the identified match.
 
     ``HAMMOND 1590  112 × 61 mm  CANDIDATES B / B2 / BS``. Three decisions in
@@ -1197,6 +1327,14 @@ def _enclosure_note(data: DrillData) -> str:
     ``GRID NOT RECORDED``. A missing line reads as a Hammond case nobody wrote
     down, and "this is not a case we stock" is a legitimate outcome — the
     catalogue holds 22 footprints and the world holds rather more.
+
+    ``capacity`` is how many characters the line may run to, and it is required
+    rather than optional because there is no honest default: a note composed
+    against no limit is one ``_fits`` is free to chop. Only the candidate list
+    is composed against it, being the only part of the line that can be
+    shortened *and still be read* — dropping a candidate and saying so leaves a
+    shorter true statement, whereas a chopped line leaves ``CANDIDATES BB /
+    BB2 / …``, from which nobody can tell whether one box was left off or three.
     """
     match = data.enclosure
     if match is None:
@@ -1204,11 +1342,30 @@ def _enclosure_note(data: DrillData) -> str:
     size = f"{match.length_mm} × {match.width_mm} mm"
     if match.rotated:
         size += " ROTATED"
+    head = f"{match.family.upper()}  {size}  "
     if match.selected_part is not None:
-        tail = f"PART {match.selected_part}"
-    else:
-        tail = "CANDIDATES " + " / ".join(_designator(part, match) for part in match.candidates)
-    return f"{match.family.upper()}  {size}  {tail}"
+        return head + f"PART {match.selected_part}"
+    designators = [_designator(part, match) for part in match.candidates]
+    room = capacity - len(head) - len("CANDIDATES ")
+    return head + "CANDIDATES " + _candidate_list(designators, room)
+
+
+def _candidate_list(designators: Sequence[str], room: int) -> str:
+    """``BB / BB2 / +2 MORE`` — the parts, and how many would not fit.
+
+    A count, never a bare ellipsis. The candidates are the boxes this artwork
+    could be for, and "two more, unnamed" is a question the reader can go and
+    answer against the datasheet; "…" is not. The names are dropped from the
+    end, so the list stays in the order the match handed it over.
+    """
+    text = " / ".join(designators)
+    for keep in range(len(designators), 0, -1):
+        text = " / ".join(designators[:keep])
+        if keep < len(designators):
+            text += f" / +{len(designators) - keep} MORE"
+        if len(text) <= room:
+            break
+    return text
 
 
 def _designator(part: str, match: EnclosureMatch) -> str:
