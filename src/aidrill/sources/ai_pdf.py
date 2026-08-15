@@ -541,10 +541,12 @@ def _empty_layer(layer: str, path_count: int) -> EmptyLayerError:
     error = EmptyLayerError(layer)
     if path_count:
         error.args = (
-            f"layer {layer!r} has {path_count} path(s) but none of them is a circle. "
-            f"Only true circles are drillable: four cubic Beziers, equal radii, "
-            f"kappa-consistent controls. Rounded rectangles, ellipses, compound "
-            f"shapes and stray marks all read as non-circular here.",
+            (
+                f"layer {layer!r} has {path_count} path(s) but none of them is a circle. "
+                "Only true circles are drillable: four cubic Beziers, equal radii, "
+                "kappa-consistent controls. Rounded rectangles, ellipses, compound "
+                "shapes and stray marks all read as non-circular here."
+            ),
         )
     return error
 

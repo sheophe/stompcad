@@ -503,9 +503,9 @@ class DrillData:
         """
         buckets: dict[float, list[Hole]] = {}
         for hole in self.holes:
-            for y in buckets:
+            for y, bucket in buckets.items():
                 if within(hole.y, y, tolerance):
-                    buckets[y].append(hole)
+                    bucket.append(hole)
                     break
             else:
                 buckets[hole.y] = [hole]

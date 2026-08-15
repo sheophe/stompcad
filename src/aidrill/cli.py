@@ -754,12 +754,14 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     pipeline = build_pipeline(args)
     data = read_source(args)
 
+    trace: Callable[[Stage, DrillData, DrillData], None] | None = None
     if args.verbose:
         print("PIPELINE", file=out)
         print(f"  {'(source)':<20} {len(data.holes):>3} holes", file=out)
-        trace = lambda stage, before, after: print(format_stage(stage, before, after), file=out)
-    else:
-        trace = None
+
+        def trace(stage: Stage, before: DrillData, after: DrillData) -> None:
+            print(format_stage(stage, before, after), file=out)
+
     data = run_pipeline(pipeline, data, trace)
 
     print(format_report(data), file=out)
