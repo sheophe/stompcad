@@ -43,17 +43,18 @@ finding is raised, the run continues, the outline is left exactly as it was
 measured, and the operator decides.
 
 **A declared case is checked on every outcome, and that is what makes it worth
-declaring.** ``expected_part`` used to be compared only after a unique match, so
-the three ways identification can fail — no reference outline, no footprint, a
-tie — each walked past the assertion. The worst combination was also the likely
-one: a declared case, an outline nothing recognised, ``unknown-enclosure`` at
-WARNING, and a drill file written for a panel the operator had just told us they
-did not believe in. ``--true-size`` was retired on the understanding that
-``--case`` carried an independent assertion; only the retirement had landed. So
-whenever a case is declared, every path ends in a confirmed match or an ERROR,
-and a tie is resolved when the declared part's own footprint is one of the tied
-ones — the operator's declaration is the outside knowledge the catalogue lacks,
-which is exactly what breaks a tie without guessing.
+declaring.** ``expected_part`` is compared on all four, not only on a unique
+match: the three ways identification can fail — no reference outline, no
+footprint, a tie — must each end at the assertion rather than walk past it. The
+likely combination is otherwise also the worst one: a declared case, an outline
+nothing recognised, ``unknown-enclosure`` at WARNING, and a drill file written
+for a panel the operator had just told us they did not believe in. ``--case`` is
+the only assertion the command line can make about the panel's size, and an
+assertion that holds on some paths is not one. So whenever a case is declared,
+every path ends in a confirmed match or an ERROR, and a tie is resolved when the
+declared part's own footprint is one of the tied ones — the operator's
+declaration is the outside knowledge the catalogue lacks, which is exactly what
+breaks a tie without guessing.
 
 **Three ERROR codes, because they ask for three different actions.** A consumer
 routes on ``code``, so a key that needs its payload inspected to tell two

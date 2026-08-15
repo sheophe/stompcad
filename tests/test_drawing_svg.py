@@ -257,21 +257,6 @@ def test_default_options_match_the_spec_signature():
     assert options.drawing_no == ""
 
 
-def test_the_options_carry_no_true_size_of_their_own():
-    """The overlay is gone, and with it the only thing that drew a second outline.
-
-    On a successful match the dashed rectangle sat exactly on the normalised
-    reference — two identical outlines, one of them claiming to be a check on
-    the other. On a mismatch the facts worth having are which enclosure was
-    asked for and which one the artwork is, and those are now the title block's
-    enclosure line and a ``wrong-enclosure`` note, neither of which needs the
-    operator to retype a datasheet.
-    """
-    assert "true_size" not in {f.name for f in fields(DrawingOptions)}
-    with pytest.raises(TypeError):
-        DrawingOptions(true_size=(112.0, 61.0))
-
-
 def test_the_options_carry_no_grid_of_their_own():
     """The grid is a pipeline fact, and a second copy is a second answer.
 
@@ -679,11 +664,12 @@ def test_reference_outline_is_a_rounded_rect_at_scale(panel: DrillData):
 
 
 def test_the_reference_outline_is_the_only_outline_drawn(panel: DrillData):
-    """One panel, one rectangle. The dashed true-size overlay is gone.
+    """One panel, one rectangle.
 
-    Structural rather than ``"true-size" not in svg``: what matters is not that
-    a class name is absent but that nothing draws a *second* outline, whatever
-    it might be called.
+    Structural rather than a search for some particular class name: what matters
+    is not that one spelling is absent but that nothing draws a *second* outline,
+    whatever it might be called. A sheet carrying two rectangles a millimetre
+    apart makes the machinist decide which one is the panel.
     """
     root = ET.fromstring(DrawingSvgEmitter().emit(panel))
     group = by_class(root, "outlines")[0]
@@ -1026,9 +1012,9 @@ def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
 def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
     """A second pitch, so the first test cannot be passing on a constant.
 
-    0.25 was the old hardcoded default and 0.5 the obvious replacement; neither
-    on its own distinguishes "reads the provenance" from "prints something
-    plausible".
+    One pitch on its own cannot distinguish "reads the provenance" from "prints
+    something plausible"; a second one, with no round number in common with the
+    first, can.
     """
     after = Pipeline([SnapPositions(grid=0.1)]).run(make_data(*holes((10.03, 5.02))))
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))

@@ -187,9 +187,11 @@ def test_tool_numbers_are_exactly_drilldata_tools():
 
 
 def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
-    """If the pipeline chose ``NoNormalization`` the emitter must still report
-    every nominal it was handed — deciding two sizes are 'really' one is a
-    pipeline decision, and no longer this module's business."""
+    """Two nominals 0.002 mm apart are two tools, because the pipeline handed
+    over two. Deciding that two sizes are 'really' one is a pipeline decision
+    taken once, before any emitter sees the data; an emitter that took it again
+    could define a different number of bits than the drawing lists — ADR-0001's
+    incident exactly."""
     data = make_data(
         at(-10.0, 0.0, 6.998, index=0),
         at(10.0, 0.0, 7.000, index=1),

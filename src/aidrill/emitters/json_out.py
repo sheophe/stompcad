@@ -46,9 +46,9 @@ parameter values. A consumer that has to be told the grid out of band can be
 told the wrong one; a document that states it cannot disagree with itself.
 
 Version 3 added ``reference.raw``, the outline as measured off the artwork. A
-hole's ``raw`` had been serialised since version 1 while the outline's was not,
-and once a stage snaps the outline to a catalogue enclosure — the fixture panel
-measures 113.000 × 60.000 mm where the datasheet says 112 × 61 — that omission
+hole's ``raw`` was serialised while the outline's was not, and once a stage
+snaps the outline to a catalogue enclosure — the fixture panel measures
+113.000 × 60.000 mm where the datasheet says 112 × 61 — that omission
 sent a *nominal* size out as though it were what the artwork said. Nothing
 downstream could then recover the measurement, which is the same class of
 defect as re-deriving a pipeline fact, only worse: the fact is gone, not merely
