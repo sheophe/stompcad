@@ -6,6 +6,7 @@ Everything here matches diagnostics on ``code`` — never on ``message`` — bec
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import random
 
@@ -795,8 +796,23 @@ class TestStageRunAndProcessing:
     def test_is_an_immutable_value(self):
         run = StageRun("snap", (("grid_mm", 0.5),))
         assert run == StageRun("snap", (("grid_mm", 0.5),))
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             run.name = "sort"  # type: ignore[misc]
+        # slots, not just frozen: no per-instance dict to grow a stray attribute.
+        assert not hasattr(run, "__dict__")
+
+    def test_a_mutable_payload_is_coerced_on_the_way_in(self):
+        """Task 3 deserialises into this: JSON hands back lists, not tuples.
+
+        A ``StageRun`` holding a list is unhashable and compares unequal to the
+        identical record built from tuples, so a round-tripped document would
+        differ from the one it was written from — while looking right in print.
+        """
+        run = StageRun("normalize-diameters", [["sizes_mm", [3.2, 7.0]]])
+
+        assert run == StageRun("normalize-diameters", (("sizes_mm", (3.2, 7.0)),))
+        assert run.get("sizes_mm") == (3.2, 7.0)
+        assert hash(run) == hash(StageRun("normalize-diameters", (("sizes_mm", (3.2, 7.0)),)))
 
     def test_data_starts_with_no_processing_history(self):
         assert make_data(at(0.0, 0.0, index=0)).processing == ()
@@ -809,6 +825,18 @@ class TestStageRunAndProcessing:
         assert data.processing == (), "with_processing mutated its receiver"
         assert [r.name for r in first.processing] == ["snap"]
         assert [r.name for r in second.processing] == ["snap", "sort"]
+
+    def test_the_other_transforms_carry_the_history_forward(self):
+        """Every transform returns a new value; none of them may drop provenance.
+
+        A stage that rebuilt its holes and lost the record of the stages before
+        it would leave the drawing with a history that starts halfway through.
+        """
+        run = StageRun("snap", (("grid_mm", 0.5),))
+        data = make_data(at(0.0, 0.0, index=0)).with_processing(run)
+
+        assert data.with_holes(data.holes).processing == (run,)
+        assert data.with_diagnostics(Diagnostic.info("x", "x")).processing == (run,)
 
     def test_with_processing_of_nothing_is_the_identity(self):
         data = make_data(at(0.0, 0.0, index=0))
@@ -873,16 +901,27 @@ class TestDescribe:
         assert run.get("tolerance_mm") == 0.02
 
     def test_a_table_strategy_also_reports_its_sizes(self):
-        run = NormalizeDiameters(TableDiameters([7.0, 3.2], 0.15)).describe()
+        # 0.1, not the 0.15 the strategy defaults to: a describe() that reported
+        # the class default rather than the configured value must not pass.
+        run = NormalizeDiameters(TableDiameters([7.0, 3.2], 0.1)).describe()
         assert run.get("strategy") == "TableDiameters"
-        assert run.get("tolerance_mm") == 0.15
+        assert run.get("tolerance_mm") == 0.1
         assert run.get("sizes_mm") == (3.2, 7.0)
 
     def test_a_strategy_without_a_tolerance_omits_the_key_rather_than_inventing_one(self):
+        """Absent, not present-and-None. ``get`` cannot tell those apart.
+
+        A record of ``("tolerance_mm", None)`` is the invented default this
+        stage refuses to publish — a consumer that checks for the key would
+        believe a tolerance had been applied, and ``None`` is not even a legal
+        ``ParameterValue``.
+        """
         run = NormalizeDiameters(NoNormalization()).describe()
+        parameters = dict(run.parameters)
+
         assert run.get("strategy") == "NoNormalization"
-        assert run.get("tolerance_mm") is None
-        assert run.get("sizes_mm") is None
+        assert "tolerance_mm" not in parameters
+        assert "sizes_mm" not in parameters
 
     def test_a_strategy_invented_here_is_described_without_editing_the_stage(self):
         """OCP again: describe() may not become a closed union over strategies."""
@@ -908,20 +947,28 @@ class TestPipelineRecordsProvenance:
         assert snap.get("grid_mm") == 0.5
         assert snap.get("warn_over_mm") == 0.125  # the *resolved* default, not None
 
-    @pytest.mark.parametrize("grid", [0.25, 0.5])
-    def test_the_recorded_grid_is_the_grid_the_holes_were_snapped_to(self, grid):
+    @pytest.mark.parametrize(
+        "grid, expected", [(0.25, [(10.25, 5.0)]), (0.5, [(10.5, 5.0)])]
+    )
+    def test_the_recorded_grid_is_the_grid_the_holes_were_snapped_to(self, grid, expected):
         """Finding 08: the sheet stated a grid the data had never been snapped to.
 
-        A consumer reading the record must be able to predict the coordinates —
-        which is only true if the record comes from the stage that moved them.
+        The record must *predict* the coordinates, which is only true if it comes
+        from the stage that moved them. Divisibility alone does not say that —
+        every multiple of 0.5 is also a multiple of 0.25, so a record finer than
+        the reality, which is finding 08 exactly, would satisfy it. Hence the
+        literal positions per grid, plus the residual bound: a snap to a pitch
+        can never move a hole further than half of it, so a doubled pitch under a
+        record that still says 0.25 is caught here too.
         """
         after = Pipeline([SnapPositions(grid=grid)]).run(make_data(*holes((10.3, 5.02))))
 
         recorded = after.last_run("snap").get("grid_mm")
         assert recorded == grid
+        assert positions(after) == expected
         for hole in after.holes:
-            assert round(hole.x / recorded) * recorded == pytest.approx(hole.x)
-            assert round(hole.y / recorded) * recorded == pytest.approx(hole.y)
+            assert abs(hole.x - hole.raw.x) <= recorded / 2 + 1e-9
+            assert abs(hole.y - hole.raw.y) <= recorded / 2 + 1e-9
 
     def test_a_disabled_stage_still_records_that_it_ran_and_did_nothing(self):
         after = Pipeline([SnapPositions(grid=0.0)]).run(make_data(*holes((10.03, 5.02))))

@@ -1,7 +1,7 @@
 """aidrill — extract drill data from Adobe Illustrator artwork and emit it."""
 
 from .model import (
-    Diagnostic, DrillData, Hole, Origin, RawHole, ReferenceOutline,
+    Diagnostic, DrillData, Hole, Origin, ParameterValue, RawHole, ReferenceOutline,
     Severity, SourceInfo, StageRun, Units,
 )
 from .protocols import Emitter, Pipeline, Source, Stage
@@ -11,8 +11,8 @@ from .errors import (
 
 __version__ = "1.0.0"
 __all__ = [
-    "Diagnostic", "DrillData", "Hole", "Origin", "RawHole", "ReferenceOutline",
-    "Severity", "SourceInfo", "StageRun", "Units", "Emitter", "Pipeline", "Source", "Stage",
+    "Diagnostic", "DrillData", "Hole", "Origin", "ParameterValue", "RawHole",
+    "ReferenceOutline", "Severity", "SourceInfo", "StageRun", "Units", "Emitter", "Pipeline", "Source", "Stage",
     "AidrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
     "__version__",
 ]

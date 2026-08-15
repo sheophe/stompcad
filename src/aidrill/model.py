@@ -218,6 +218,24 @@ class StageRun:
     name: str
     parameters: tuple[tuple[str, ParameterValue], ...] = ()
 
+    def __post_init__(self) -> None:
+        """Coerce the payload to tuples, the way ``Diagnostic`` does on the way in.
+
+        Not defensive tidying: a record holding a list is unhashable and compares
+        unequal to the identical record built from tuples, so a document read
+        back from JSON — where every sequence arrives as a list, the pairs and a
+        diameter table alike — would differ from the one it was written from
+        while printing identically.
+        """
+        object.__setattr__(
+            self,
+            "parameters",
+            tuple(
+                (key, tuple(value) if isinstance(value, list) else value)
+                for key, value in self.parameters
+            ),
+        )
+
     def get(self, key: str, default=None):
         """Read one parameter. Mirrors ``Diagnostic.get`` so there is one idiom.
 

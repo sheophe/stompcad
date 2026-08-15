@@ -151,6 +151,12 @@ class NormalizeDiameters:
         nothing. A strategy that has a ``tolerance`` or a table of ``sizes`` gets
         them recorded; one that has neither reports neither, and a consumer sees
         the key absent rather than a default that was never applied.
+
+        The corollary is worth stating: *any* strategy that exposes a sequence
+        named ``sizes`` gets it stamped ``sizes_mm``, whatever that sequence
+        actually means to it — the price of asking the object instead of its
+        type, and the reason the attribute names here are part of the strategy
+        contract rather than an implementation detail of two of them.
         """
         parameters: list[tuple[str, ParameterValue]] = [
             ("strategy", type(self.strategy).__name__)
