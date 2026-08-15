@@ -5,11 +5,11 @@ values behind them, the reference outline, the tool table, every diagnostic, and
 where the data came from. A consumer can rebuild an identical ``DrillData`` from
 this document, which is what ``test_json_emitter.py`` asserts.
 
-Document shape (version 1)::
+Document shape (version 2)::
 
     {
       "format": "aidrill-drill-data",
-      "version": 1,
+      "version": 2,
       "units": "mm",                     # always; canonical frame, never inches
       "origin": "centre",                # centre of the reference outline, Y up
       "source":     {"path", "drill_layer", "reference_layer",
@@ -17,12 +17,35 @@ Document shape (version 1)::
       "reference":  {"width", "height", "centre_x", "centre_y"} | null,
       "tools":     [{"number", "diameter", "count"}, …],   # ascending diameter
       "holes":     [{"x", "y", "diameter", "tool",
-                     "raw": {"x", "y", "diameter"}}, …],   # pipeline order
-      "diagnostics": [{"severity", "code", "message", "location"}, …]
+                     "raw": {"x", "y", "diameter"},
+                     "index"}, …],                         # pipeline order
+      "diagnostics": [{"severity", "code", "message", "location", "data"}, …],
+      "processing":  [{"name", "parameters": {…}}, …]       # in the order run
     }
 
+Version 2 added three things, each of them something a consumer would otherwise
+have to reconstruct from geometry — which is the founding bug of this project,
+displaced one layer out into the toolchain:
+
+``index`` is the hole's stable identity, not its position in the array. It is
+what a diagnostic's ``hole_index`` joins to, and the two stop agreeing the
+moment a stage sorts or drops holes, so a consumer must never substitute one
+for the other.
+
+``data`` is the diagnostic's machine-readable payload, always present, ``{}``
+when the diagnostic had none. Without it, a consumer asked which holes were
+duplicates had only their positions to go on and had to re-implement
+``Deduplicate``'s rule to find out — a second, divergent copy of the rule, which
+is exactly the mistake the drawing emitter made inside this codebase.
+
+``processing`` is what the pipeline actually did, in order, with *effective*
+parameter values. A consumer that has to be told the grid out of band can be
+told the wrong one; a document that states it cannot disagree with itself.
+
 Key order is fixed and part of the contract, so diffing two runs shows real
-changes rather than dictionary reshuffling. ``location`` is ``[x, y]`` in
+changes rather than dictionary reshuffling. New keys are appended — at the top
+level, within a hole, within a diagnostic — so a v1 reader indexing by position
+sees the shape it knows before the additions. ``location`` is ``[x, y]`` in
 canonical millimetres or ``null``.
 
 Like every emitter, this one only serialises: hole order is whatever the pipeline
@@ -38,13 +61,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from ..model import Diagnostic, DrillData, Hole, ReferenceOutline, SourceInfo
+from ..model import Diagnostic, DrillData, Hole, ReferenceOutline, SourceInfo, StageRun
 from .base import register_emitter
 
 __all__ = ["JsonOptions", "JsonEmitter", "FORMAT", "VERSION"]
 
 FORMAT = "aidrill-drill-data"
-VERSION = 1
+VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +110,7 @@ class JsonEmitter:
             ],
             "holes": [_hole(h, tools[h.diameter]) for h in data.holes],
             "diagnostics": [_diagnostic(d) for d in data.diagnostics],
+            "processing": [_stage_run(r) for r in data.processing],
         }
 
 
@@ -112,19 +136,55 @@ def _reference(reference: ReferenceOutline | None) -> dict[str, Any] | None:
 
 
 def _hole(hole: Hole, tool: int) -> dict[str, Any]:
+    """One hole, identity included.
+
+    ``index`` is emitted as the model holds it, never as the loop counter that
+    happens to agree with it in unsorted data: after ``SortHoles`` or
+    ``Deduplicate`` the two differ, and a consumer joining a diagnostic's
+    ``hole_index`` against the array position would then point at the wrong
+    hole while looking entirely plausible.
+    """
     return {
         "x": hole.x,
         "y": hole.y,
         "diameter": hole.diameter,
         "tool": tool,
         "raw": {"x": hole.raw.x, "y": hole.raw.y, "diameter": hole.raw.diameter},
+        "index": hole.index,
     }
 
 
 def _diagnostic(diagnostic: Diagnostic) -> dict[str, Any]:
+    """One finding, payload included.
+
+    ``data`` is an object rather than the model's pair list because that is what
+    a consumer indexes by key, and it is always present — ``{}`` for a finding
+    that carried none — so nobody has to branch on its absence.
+    """
     return {
         "severity": diagnostic.severity.value,
         "code": diagnostic.code,
         "message": diagnostic.message,
         "location": None if diagnostic.location is None else list(diagnostic.location),
+        "data": dict(diagnostic.data),
+    }
+
+
+def _stage_run(run: StageRun) -> dict[str, Any]:
+    """One stage's record. Parameter values pass through untouched.
+
+    A diameter table stays a list of numbers: flattening it to a string would
+    make every consumer parse the provenance back out again, which is the same
+    re-derivation this document exists to stop. It becomes a ``list`` here, as
+    ``layers_found`` and ``location`` do, so that the mapping ``document()``
+    hands a caller is the same shape as the one that comes back from
+    :func:`json.loads` rather than one holding tuples that only compare equal
+    after a round trip through the text.
+    """
+    return {
+        "name": run.name,
+        "parameters": {
+            key: list(value) if isinstance(value, tuple) else value
+            for key, value in run.parameters
+        },
     }
