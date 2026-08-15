@@ -192,8 +192,11 @@ class Hole:
 
         Integers are what make "exactly" true: a thousand shifts one way and a
         thousand back land on the value they started from, where the same walk
-        in millimetres does not. Every emitted artifact translates the whole
-        panel at least once.
+        in millimetres does not. This is what the Excellon emitter's lower-left
+        frame rides on: it is the one caller of ``DrillData.with_origin``, and
+        it moves every hole by half the outline while the drawing dimensions the
+        same panel from the centre frame it was handed. Two frames, one set of
+        positions, and no rounding between them to disagree about.
 
         The deltas are guarded here and not left to the constructor, because the
         addition happens first and normalises the mistake away: ``True + 0`` is
