@@ -699,6 +699,75 @@ Six divergences where `docs/SPEC.md` is the stale side. The spec is explicitly l
 
 ---
 
+### Task 16: Vacuity audit — prove every load-bearing test can actually fail
+
+**This runs last, after every other task, as its own review phase.** A test that stays green when the behaviour it names is removed or inverted is not a test; it is documentation that costs CI time. Task 1 produced two such tests *from this plan's own text* — the identity regression test and the payload test both passed unchanged under the positional-survivor design the plan explicitly rejected, and both were caught only by hand-mutating the source. That is a 2-for-2 hit rate on the tests that mattered most, which is the argument for doing this systematically rather than trusting review-by-reading.
+
+**Files:**
+- Create: `.superpowers/sdd/2026-08-15-review-remediation/vacuity-report.md` (outside the repo tree's tracked content)
+- Modify: whichever test files the audit proves vacuous
+- Test: the whole suite
+
+**Interfaces:**
+- Consumes: every test written or amended by Tasks 1–15.
+- Produces: no source API change. Only test strengthening.
+
+**Method — mutation, not reading.** For each mutation below: apply it to `src/`, run only the tests that claim to cover it, record whether any test fails, then **restore the source and confirm `git diff --stat src/` is empty** before the next mutation. A surviving mutation (suite still green) is a vacuous test and must be strengthened until it fails. Work one mutation at a time; never leave a mutation in the tree.
+
+- [ ] **Step 1: Mutate each finding's fix and confirm its regression test dies**
+
+One mutation per fix, targeting the exact behaviour the task claimed to restore:
+
+| Task | Mutation to apply to `src/` | A test MUST fail |
+|---|---|---|
+| 1 | Make `Deduplicate._report` carry the survivor's *position* in the holes tuple instead of `survivor.index` | identity regression + payload test |
+| 1 | Drop `index=` from `replace()` in one of `moved_to`/`translated`/`with_diameter` — i.e. renumber on transform | some identity test |
+| 2 | Make `SnapPositions.describe()` report the *constructor argument* `warn_over` rather than the resolved default | the resolved-defaults test |
+| 2 | Make `Pipeline.run` record `describe()` *before* applying instead of after | a provenance ordering test |
+| 3 | Delete `"data"` from `_diagnostic`; separately delete `"index"` from `_hole` | round-trip / payload tests |
+| 4 | Revert `_is_flagged` to matching on `(x, y, diameter)` | the both-orderings highlight test |
+| 4 | Hardcode the title block's grid to `0.25` again | the two title-block tests |
+| 5 | Remove the injectivity check | both collision tests |
+| 5 | Compare tokens *before* unit conversion rather than after | the inch-units test |
+| 6 | Restore `paths = [] if self.clipping else self._done` | clip-and-paint tests |
+| 6 | Remove the tangential-direction term from the κ check | the cusped-star test |
+| 8 | Revert the cluster mean to the de-duplicated set | the outlier test |
+| 10 | Remove `total_ordering`; separately make `__lt__` raise instead of returning `NotImplemented` | the comparison-protocol tests |
+
+- [ ] **Step 2: Hunt the two vacuity patterns this codebase has already produced**
+
+Both were real here, so grep for them specifically rather than reading everything:
+
+1. **Coincidence between an identity and a position.** Any test where a hole's `index` equals its position in the tuple proves nothing about identity. Grep every test constructing holes with `index=0, index=1, …` in input order and ask whether the assertion would survive a positional implementation. Renumber out of order where it would not.
+2. **A substring assertion satisfied by the wrong string.** The review already found `assert "2" in summary[0] and "5" in summary[1]`, where each string contained both digits, and a `--true-size` test whose stderr assertion was satisfied by argparse's usage banner rather than the program's own error. Grep for `in stderr`, `in out`, `in text`, `in svg` and check each for a narrower assertion.
+
+- [ ] **Step 3: Verify the strict-xfail markers self-destruct**
+
+Every `xfail(strict=True)` added by this plan must turn XPASS into a failure once its blocking task lands. Confirm none survives at the end of the plan: `grep -rn "xfail" tests/` should return nothing. A leftover strict xfail means a task shipped without removing its marker, and the suite would be failing — if it is not failing, the marker is on a test that never started passing, which is its own finding.
+
+- [ ] **Step 4: Write the report**
+
+`vacuity-report.md` lists every mutation applied, whether it was caught, and by which test. Surviving mutations get a named fix. This table is the evidence that the suite is load-bearing; a green suite alone is not.
+
+- [ ] **Step 5: Strengthen every vacuous test found, then re-run the full suite**
+
+- [ ] **Step 6: Confirm the tree is clean of mutations**
+
+Run `git diff --stat src/` — it must be empty. Then run the full suite one final time.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A
+git commit -m "test: strengthen tests that survived mutation
+
+Mutation-audited every fix from this plan. Tests that stayed green when
+the behaviour they name was removed or inverted are not tests; each is
+listed in the vacuity report with what now makes it fail."
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage.** All 22 review findings map to a task: 01→5, 02→1+4, 03→6, 04→15 (documented, not code-fixed, per decision 4), 05→8, 06→7, 07→3, 08→2+4, 09→8+6, 10→ deliberately out of scope (decision 5) except the merged except blocks in 9, 11→10, 12→13, 13→9, 14→5, 15→6, 16→6, 17→7, 18→10, 19→ out of scope (decision 5), 20→ out of scope (decision 5), 21→ out of scope (decision 5), 22→7. Test findings TQ-1→9, TQ-2/3/4/5→11, TQ-6→11, TQ-8→1 (conftest), TQ-9→11.
