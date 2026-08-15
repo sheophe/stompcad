@@ -837,6 +837,44 @@ class TestCheckReferenceSize:
         assert out.diagnostics[0].severity is Severity.INFO
         assert out.holes == data.holes
 
+    def test_the_mismatch_carries_the_difference_it_already_worked_out(self):
+        """``Diagnostic.data`` exists so a consumer never re-derives a stage's
+        own arithmetic. This one rendered the deltas into prose and dropped
+        them, leaving every reader to subtract the two sizes again.
+
+        The fixture is deliberately asymmetric — one axis under by 0.5, the
+        other over by 0.25 — so neither a swapped pair of axes nor a dropped
+        sign can pass. Both are exact in binary, so the payload can be pinned
+        without a tolerance.
+        """
+        data = make_data(reference=ReferenceOutline(112.5, 60.25))
+
+        diagnostic = CheckReferenceSize((113.0, 60.0)).apply(data).diagnostics[0]
+
+        assert (diagnostic.get("width_mm"), diagnostic.get("height_mm")) == (112.5, 60.25)
+        assert (
+            diagnostic.get("expected_width_mm"),
+            diagnostic.get("expected_height_mm"),
+        ) == (113.0, 60.0)
+        assert (diagnostic.get("delta_width_mm"), diagnostic.get("delta_height_mm")) == (
+            -0.5,
+            0.25,
+        )
+        assert diagnostic.get("tolerance_mm") == 0.05
+
+    def test_the_missing_outline_notice_says_what_it_was_going_to_check(self):
+        """A consumer rendering this finding needs the declared size it could
+        not check, and it is the one fact the stage still holds."""
+        diagnostic = (
+            CheckReferenceSize((113.0, 60.0)).apply(make_data(at(0.0, 0.0, index=0)))
+        ).diagnostics[0]
+
+        assert (
+            diagnostic.get("expected_width_mm"),
+            diagnostic.get("expected_height_mm"),
+        ) == (113.0, 60.0)
+        assert diagnostic.get("tolerance_mm") == 0.05
+
 
 # --------------------------------------------------------------------------
 # SortHoles
@@ -1556,14 +1594,6 @@ class TestDeclaredCase:
         match = IdentifyHammondFootprint().apply(an_outline(113.0, 60.0)).enclosure
         assert match.selected_part is None
 
-    def test_a_declared_case_is_not_checked_against_an_outline_that_matched_nothing(self):
-        """One finding per panel: ``unknown-enclosure`` already says the outline
-        is not any catalogue footprint, and a ``wrong-enclosure`` beside it would
-        name an identified part that does not exist."""
-        out = IdentifyHammondFootprint(expected_part="1590BB").apply(an_outline(500.0, 500.0))
-
-        assert codes(out) == ["unknown-enclosure"]
-
     def test_a_declared_case_is_matched_however_it_was_typed(self):
         out = IdentifyHammondFootprint(expected_part=" 1590b2 ").apply(an_outline(113.0, 60.0))
 
@@ -1576,6 +1606,162 @@ class TestDeclaredCase:
 
         assert out.diagnostics == ()
         assert out.enclosure.selected_part is None
+
+
+class TestADeclarationIsCheckedOnEveryOutcome:
+    """The declaration has to bite where the geometry *failed*, not only where
+    it succeeded.
+
+    Regression for the review's central finding: ``expected_part`` used to be
+    compared only after a unique catalogue match, so the three early returns —
+    no reference outline, no footprint, a tie — each walked past it. The panel
+    that reached the operator was the worst case of all: a declared case, an
+    outline nothing recognised, ``unknown-enclosure`` at WARNING, and a drill
+    file on disk. ``--true-size`` was deleted on the understanding that
+    ``--case`` carried this assertion; these tests are that understanding.
+
+    Every case below is paired with its undeclared twin, because the asymmetry
+    *is* the policy: declare nothing and an unidentifiable panel still runs;
+    declare something and it must be checked.
+    """
+
+    # 1590B3 (116 × 77) and 1590T (120 × 80) are the catalogue's closest pair,
+    # and this outline sits within 2 mm of both — the only shape of fixture that
+    # can reach a tie at all.
+    TIED = (118.0, 78.5)
+    #: Larger than every footprint in the catalogue, on both axes.
+    UNRECOGNISED = (300.0, 300.0)
+
+    def test_a_declaration_with_no_outline_to_check_it_against_is_refused(self):
+        """Silence here would be indistinguishable from a confirmed declaration."""
+        data = make_data(at(3.0, -4.0, index=7))
+
+        out = IdentifyHammondFootprint(expected_part="1590B").apply(data)
+
+        assert codes(out) == ["unverifiable-enclosure"]
+        assert out.diagnostics[0].severity is Severity.ERROR
+        assert out.holes == data.holes
+        assert out.enclosure is None
+
+    def test_no_outline_and_no_declaration_is_still_left_alone(self):
+        """The undeclared twin: nothing was claimed, so nothing is checked."""
+        data = make_data(at(3.0, -4.0, index=7))
+
+        assert IdentifyHammondFootprint().apply(data) == data
+
+    def test_the_unverifiable_diagnostic_names_the_part_and_the_size_it_would_be(self):
+        """A consumer must be able to say what the panel *should* measure
+        without going back to the catalogue the stage has already read."""
+        out = IdentifyHammondFootprint(expected_part=" 1590b ").apply(
+            make_data(at(3.0, -4.0, index=7))
+        )
+        diagnostic = out.diagnostics[0]
+
+        assert diagnostic.get("requested_part") == "1590B"
+        assert (diagnostic.get("expected_length_mm"), diagnostic.get("expected_width_mm")) == (
+            112,
+            61,
+        )
+        assert diagnostic.get("catalogue") == "Hammond 1590"
+
+    def test_a_declaration_the_artwork_matches_nothing_for_is_refused(self):
+        """The reproduction from the review, exactly: a declared 1590B against
+        an outline no footprint fits used to exit 1 and write the drill file."""
+        out = IdentifyHammondFootprint(expected_part="1590BB").apply(
+            an_outline(*self.UNRECOGNISED)
+        )
+
+        assert codes(out) == ["unmatched-enclosure"]
+        assert out.diagnostics[0].severity is Severity.ERROR
+        assert out.enclosure is None
+        assert (out.reference.width, out.reference.height) == self.UNRECOGNISED
+
+    def test_an_unrecognised_outline_nobody_declared_stays_a_warning(self):
+        """The undeclared twin, and the reason the new code is not
+        ``unknown-enclosure`` at a second severity."""
+        out = IdentifyHammondFootprint().apply(an_outline(*self.UNRECOGNISED))
+
+        assert codes(out) == ["unknown-enclosure"]
+        assert out.diagnostics[0].severity is Severity.WARNING
+
+    def test_the_unmatched_diagnostic_carries_the_declaration_and_the_measurement(self):
+        """Both halves of the disagreement, so the consumer re-measures nothing.
+
+        ``footprints``/``candidates`` are empty because nothing fitted; the keys
+        are still there, so one payload shape serves both ways of failing to
+        confirm a declaration.
+        """
+        out = IdentifyHammondFootprint(expected_part="1590BB").apply(
+            an_outline(*self.UNRECOGNISED)
+        )
+        diagnostic = out.diagnostics[0]
+
+        assert diagnostic.get("requested_part") == "1590BB"
+        assert (diagnostic.get("expected_length_mm"), diagnostic.get("expected_width_mm")) == (
+            120,
+            94,
+        )
+        assert (diagnostic.get("width_mm"), diagnostic.get("height_mm")) == self.UNRECOGNISED
+        assert diagnostic.get("tolerance_mm") == 1.5
+        assert diagnostic.get("catalogue") == "Hammond 1590"
+        assert diagnostic.get("footprints") == ""
+        assert diagnostic.get("candidates") == ""
+
+    def test_a_declaration_breaks_a_tie_the_catalogue_cannot(self):
+        """Two footprints fit; the operator already said which one it is.
+
+        1590T's 120 × 80 rather than the nearer 1590B3, so the resolved match
+        cannot be confused with "the first candidate" or "the closest one" —
+        116 × 77 is both.
+        """
+        out = IdentifyHammondFootprint(tolerance_mm=2.0, expected_part="1590T").apply(
+            an_outline(*self.TIED)
+        )
+
+        assert out.diagnostics == ()
+        assert (out.enclosure.length_mm, out.enclosure.width_mm) == (120, 80)
+        assert out.enclosure.selected_part == "1590T"
+        assert (out.reference.width, out.reference.height) == (120.0, 80.0)
+        assert (out.reference.raw.width, out.reference.raw.height) == self.TIED
+
+    def test_a_tie_the_declaration_does_not_resolve_is_refused(self):
+        """Declared 1590B; the outline is within tolerance of two footprints and
+        neither of them is 1590B. Naming either would be the guess."""
+        out = IdentifyHammondFootprint(tolerance_mm=2.0, expected_part="1590B").apply(
+            an_outline(*self.TIED)
+        )
+        diagnostic = out.diagnostics[0]
+
+        assert codes(out) == ["unmatched-enclosure"]
+        assert diagnostic.severity is Severity.ERROR
+        assert diagnostic.get("requested_part") == "1590B"
+        assert diagnostic.get("footprints") == "116 × 77, 120 × 80"
+        assert diagnostic.get("candidates") == "1590B3, 1590T"
+        assert out.enclosure is None
+        assert (out.reference.width, out.reference.height) == self.TIED
+
+    def test_an_undeclared_tie_is_still_ambiguous_and_still_asks_for_a_case(self):
+        """The undeclared twin. ``ambiguous-enclosure`` keeps its one meaning —
+        more than one footprint fits and nothing was said to choose between
+        them — which is why the advice in its message is still sound."""
+        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(an_outline(*self.TIED))
+
+        assert codes(out) == ["ambiguous-enclosure"]
+        assert "declare the case" in out.diagnostics[0].message
+
+    def test_a_declared_part_no_catalogue_holds_invents_no_footprint_for_it(self):
+        """The CLI refuses this as a usage error before the file is opened, but
+        a library caller can hand the stage anything, and a payload key filled
+        in with a plausible number would be worse than an absent one."""
+        out = IdentifyHammondFootprint(expected_part="1590ZZ").apply(
+            an_outline(*self.UNRECOGNISED)
+        )
+        diagnostic = out.diagnostics[0]
+
+        assert diagnostic.code == "unmatched-enclosure"
+        assert diagnostic.get("requested_part") == "1590ZZ"
+        assert diagnostic.get("expected_length_mm") is None
+        assert diagnostic.get("expected_width_mm") is None
 
 
 class TestNormalizePartName:
