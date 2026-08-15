@@ -372,13 +372,13 @@ def test_the_measurement_carries_the_identity_of_the_hole_it_belongs_to():
 def test_a_hole_cannot_be_number_4_to_a_diagnostic_and_number_9_to_an_artifact():
     """The split identity, written out at the two ends it gets read from.
 
-    A stage that finds something wrong with a hole is holding the measurement
-    it was checking, so its diagnostic names the hole ``raw.index``. The drill
-    file and the drawing's balloon iterate the finished holes and name that
-    same hole ``index``. Both readings are legitimate, neither consumer can see
-    the other, and the operator reads them on two sheets — so a hole carrying
-    both numbers is one hole described twice under two names, with nothing left
-    holding the pair to notice.
+    A quantiser that finds something wrong with a hole is holding the
+    measurement it was checking, so its diagnostic names the hole
+    ``raw.index``. The drill file and the drawing's balloon iterate the
+    finished holes and name that same hole ``index``. Both readings are
+    legitimate, neither consumer can see the other, and the operator reads
+    them on two sheets — so a hole carrying both numbers is one hole described
+    twice under two names, with nothing left holding the pair to notice.
 
     Numbered 4 and 9, and neither of them 0 or 1, so that no assertion here can
     pass by a number coinciding with the array position it was built at.
