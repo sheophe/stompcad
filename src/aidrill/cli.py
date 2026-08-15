@@ -30,6 +30,7 @@ Exit codes: 0 clean, 1 warnings, 2 errors, 3 usage or I/O failure.
 from __future__ import annotations
 
 import argparse
+import inspect
 import math
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -375,8 +376,12 @@ def _options_for(emitter_cls: type, settings: OutputSettings) -> Any | None:
     # swallow a genuine fault inside a third-party emitter and hand it its
     # defaults, so the emitter would write a file with the wrong options rather
     # than the run failing.
+    # ``getattr_static`` rather than ``emitter_cls.__init__``: the attribute is
+    # wanted as the function this class declares, not as whatever the descriptor
+    # protocol would bind, and a type checker cannot know the plain access is
+    # safe on an arbitrary ``type``.
     try:
-        hints = get_type_hints(emitter_cls.__init__)
+        hints = get_type_hints(inspect.getattr_static(emitter_cls, "__init__"))
     except (NameError, TypeError, AttributeError):  # pragma: no cover - unresolvable hints
         return None
     for name, hint in hints.items():

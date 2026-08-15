@@ -69,7 +69,7 @@ class Pipeline(Sequence[Stage]):
     def __init__(self, stages: Iterable[Stage] = ()) -> None:
         self._stages: tuple[Stage, ...] = tuple(stages)
 
-    def __getitem__(self, index):  # type: ignore[override]
+    def __getitem__(self, index):
         return self._stages[index]
 
     def __len__(self) -> int:

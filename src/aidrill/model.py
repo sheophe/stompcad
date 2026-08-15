@@ -297,7 +297,10 @@ class EnclosureMatch:
         ever failing. This is the one place the type annotation cannot catch a
         type error, so it is caught here.
         """
-        if isinstance(self.candidates, str):
+        # The ignore is the point restated: mypy is right that a declared
+        # tuple[str, ...] is never a str, and this guard exists for the callers
+        # it cannot see — JSON, a REPL, a downstream tool.
+        if isinstance(self.candidates, str):  # type: ignore[unreachable]
             raise TypeError("candidates must be a sequence of designators, not a single string")
         object.__setattr__(self, "candidates", tuple(self.candidates))
 
@@ -384,7 +387,10 @@ class StageRun:
             self,
             "parameters",
             tuple(
-                (key, tuple(value) if isinstance(value, list) else value)
+                # Same shape of ignore as ``EnclosureMatch``: ParameterValue
+                # never includes list, and a document read back from JSON is
+                # exactly where one arrives anyway.
+                (key, tuple(value) if isinstance(value, list) else value)  # type: ignore[unreachable]
                 for key, value in self.parameters
             ),
         )
