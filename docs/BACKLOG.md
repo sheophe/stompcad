@@ -201,3 +201,41 @@ and would cost more than the five numbers left.
 **What is worth keeping is the fault model, not the extractor.** That Hammond's
 tables are double-converted, and that Hammond rounds half-up where Python rounds
 half-even, is what makes the *next* discrepancy legible rather than mysterious.
+
+### Represent catalogue dimensions as integer microns, not floats
+
+**Decided 2026-08-15.** `docs/parts/dimensions.tsv` now carries all 37 parts at
+0.05 mm precision, so adoption is unblocked. Store them as **integer microns**,
+not floats.
+
+`112.40` is not exactly representable in binary floating point — it is
+`112.40000000000000568…` — so equality on catalogue values is fragile and any
+averaging accumulates error. `112400` is exact and stays exact. This is the
+fixed-point discipline banks and exchanges use for prices, and for the same
+reason: a specified quantity is not a measured one.
+
+**The split is principled, and it is a real cost.** Measurements cannot be
+integers — the PDF yields `113.00001388888887` from Bézier fitting, and that *is*
+a measurement. So the codebase gains a second unit, which is exactly what SPEC
+§2.2's "one canonical frame" rule exists to prevent. Accept it on these terms:
+
+- **Measurements are floats in millimetres.** `ReferenceOutline.width`, `Hole.x`,
+  everything the source produces. Unchanged.
+- **Specifications are integers in microns.** `Enclosure`, `EnclosureMatch`, the
+  drill standards' sizes. Exact, comparable with `==`, never averaged.
+- **Every integer field carries a `_um` suffix**, and conversion happens only at
+  named boundaries — the way `pt_to_mm` already marks the one place PDF points
+  become millimetres. A unit error should be visible at the call site.
+- The existing `isinstance(..., int)` tests keep their job: they now pin
+  microns-vs-millimetres rather than ints-vs-floats, which is a stronger claim.
+
+**It also makes the published-variant idea exact.** With integer microns, every
+published form of a footprint — true value, series-table rounding, website double
+conversion — is an integer, so matching `tests/fixtures/tar.ai`'s 113 × 60 against
+a generated variant is `==` with no tolerance and no epsilon in the comparison at
+all. That is the version of variant matching worth building.
+
+**Scope.** Touches `Enclosure`, `EnclosureMatch`, `IdentifyHammondFootprint`, both
+emitters and their tests. The JSON document gains a version bump: `length_mm: 112`
+becomes `length_um: 112400`, which is a breaking change for any consumer, so it
+wants the same treatment the earlier version bumps got.
