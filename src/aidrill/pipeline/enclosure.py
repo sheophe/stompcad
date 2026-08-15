@@ -9,7 +9,7 @@ and a consumer computing edge clearance from ``reference.width`` is out by half
 a millimetre on the axis where a jack barrel has least to spare.
 
 So this stage turns "roughly 112 × 61" into a named footprint and snaps the
-outline to the catalogue's whole millimetres. Three things about how it does it
+outline to the catalogue's whole millimetres. Seven things about how it does it
 were each decided the hard way:
 
 **It snaps through** :meth:`ReferenceOutline.resized`, **never by constructing a
@@ -19,26 +19,57 @@ the panel was *measured* at 112 × 61 and destroys the 113 × 60 the artwork
 actually said. Both spellings produce an identical-looking outline, which is why
 the test that covers it runs the whole pipeline and reads the emitted document.
 
-**It never guesses.** A tie is ``ambiguous-enclosure`` and a declared part that
-contradicts the artwork is ``wrong-enclosure``, both at ERROR naming every
-candidate, rather than the nearest footprint or the first row. A panel drilled
+**It never guesses.** An unresolved tie is ``ambiguous-enclosure`` and a declared
+part that contradicts the artwork is ``wrong-enclosure``, both at ERROR naming
+every candidate, rather than the nearest footprint or the first row. The one
+thing that may pick between two footprints is the operator's own declaration,
+which is knowledge and not arithmetic. A panel drilled
 for the wrong case is scrap aluminium; a refusal costs a re-run. Silence is
 reserved for the one case it means something: a unique match within tolerance,
 where saying so on every run would train the operator to skim past the runs that
 matter.
 
-**No match at all is only a WARNING, and the asymmetry is the argument.** A
-panel that omits a reference layer reaches the end of the pipeline untouched and
-exits 0 — see :meth:`apply`, which cannot assume a predecessor ran. So an ERROR
-here would mean that *drawing* your outline is punished while *not* drawing it
-is not, which is backwards at any severity. The principle underneath: "two
-Hammond footprints fit yours" and "you declared a part your artwork
-contradicts" are statements about the operator's panel, but "we have never heard
-of your enclosure" is a statement about **our catalogue** — this tool holds 22
-Hammond footprints and the world holds rather more. The same rule the drill
-table follows: we cannot know what another builder is working in. The finding is
-raised, the run continues, the outline is left exactly as it was measured, and
-the operator decides.
+**No match at all is only a WARNING — when nothing was declared — and the
+asymmetry is the argument.** A panel that omits a reference layer reaches the end
+of the pipeline untouched and exits 0 — see :meth:`apply`, which cannot assume a
+predecessor ran. So an ERROR there would mean that *drawing* your outline is
+punished while *not* drawing it is not, which is backwards at any severity. The
+principle underneath: "two Hammond footprints fit yours" and "you declared a part
+your artwork contradicts" are statements about the operator's panel, but "we have
+never heard of your enclosure" is a statement about **our catalogue** — this tool
+holds 22 Hammond footprints and the world holds rather more. The same rule the
+drill table follows: we cannot know what another builder is working in. The
+finding is raised, the run continues, the outline is left exactly as it was
+measured, and the operator decides.
+
+**A declared case is checked on every outcome, and that is what makes it worth
+declaring.** ``expected_part`` used to be compared only after a unique match, so
+the three ways identification can fail — no reference outline, no footprint, a
+tie — each walked past the assertion. The worst combination was also the likely
+one: a declared case, an outline nothing recognised, ``unknown-enclosure`` at
+WARNING, and a drill file written for a panel the operator had just told us they
+did not believe in. ``--true-size`` was retired on the understanding that
+``--case`` carried an independent assertion; only the retirement had landed. So
+whenever a case is declared, every path ends in a confirmed match or an ERROR,
+and a tie is resolved when the declared part's own footprint is one of the tied
+ones — the operator's declaration is the outside knowledge the catalogue lacks,
+which is exactly what breaks a tie without guessing.
+
+**Three ERROR codes, because they ask for three different actions.** A consumer
+routes on ``code``, so a key that needs its payload inspected to tell two
+findings apart is not a key. ``wrong-enclosure`` is the only one that *identifies*
+the panel: a single footprint fits, it is not the declared part, and the message
+can name both. ``unmatched-enclosure`` says the declared part was not matched —
+either nothing fitted or several things did and none of them was yours — and it
+is deliberately not ``wrong-enclosure``, because with nothing identified the
+accusation would be unfounded: by the backplate convention below, the most likely
+panel here is the declared case measured across its drilled face. Sending that
+operator to change ``--case`` would be sending them away from the fix.
+``unverifiable-enclosure`` is the third action again — there is no outline at
+all, so nothing can be compared and the reference layer is what has to change.
+None of the three reuses ``unknown-enclosure``: that code is a WARNING about our
+catalogue on an undeclared run, and one key at two severities meaning two things
+is a key a consumer cannot act on.
 
 **A 2-D outline identifies a footprint, not a part.** 112 × 61 is 1590B, 1590B2
 *and* 1590BS — they differ only in height, which artwork does not carry. The
@@ -89,6 +120,17 @@ __all__ = ["CATALOGUE", "normalize_part_name", "IdentifyHammondFootprint"]
 #: the same fact.
 CATALOGUE: str = "Hammond 1590"
 
+#: The one piece of advice every "nothing fitted" message has to carry, written
+#: once for the same reason ``CATALOGUE`` is: two findings say it — an
+#: unrecognised outline and a declaration nothing could confirm — and an
+#: operator who read one wording on Tuesday and the other on Wednesday would
+#: reasonably think they were two different problems.
+_BACKPLATE_ADVICE: str = (
+    "the catalogue lists backplate dimensions, and a drilled face is smaller "
+    "than its backplate because the walls are drafted — if this outline is a "
+    "face measurement, redraw the reference layer to the backplate size"
+)
+
 
 def normalize_part_name(name: str) -> str:
     """Put an operator-typed part number into catalogue form.
@@ -114,11 +156,13 @@ class IdentifyHammondFootprint:
 
     ``tolerance_mm`` is the per-axis slack allowed between the measured outline
     and a catalogue footprint; ``expected_part`` is what the operator declared
-    the panel to be, checked against the footprint that was actually found.
+    the panel to be, and every outcome is checked against it.
 
-    A missing reference outline is not a finding here — the source may have had
-    no reference layer, and a stage may not assume a predecessor ran — so the
-    data comes back untouched.
+    With nothing declared, a missing reference outline is not a finding here —
+    the source may have had no reference layer, and a stage may not assume a
+    predecessor ran — so the data comes back untouched. With a case declared it
+    is an ERROR, because the declaration is then the one thing this stage was
+    asked to check and it cannot be checked at all.
     """
 
     name: ClassVar[str] = "identify-enclosure"
@@ -152,9 +196,31 @@ class IdentifyHammondFootprint:
     def apply(self, data: DrillData) -> DrillData:
         reference = data.reference
         if reference is None:
-            return data
+            # An undeclared run carries on: the source may have had no reference
+            # layer, and a stage may not assume a predecessor ran. A declared one
+            # cannot, because there is nothing here to check the declaration
+            # against and silence would read exactly like a confirmed one.
+            if self.expected_part is None:
+                return data
+            return data.with_diagnostics(self._unverifiable())
 
         matches = self._matches(reference)
+        if self.expected_part is not None:
+            # A part belongs to exactly one footprint, so this filter yields one
+            # match or none — which is why a declaration always ends a tie, one
+            # way or the other, and why the ambiguous report below is only ever
+            # reached by a run that declared nothing.
+            declared = [
+                match for match in matches if self.expected_part in footprints()[match[0]]
+            ]
+            if declared:
+                matches = declared
+            elif len(matches) != 1:
+                # Nothing fitted, or several did and none was the declared part.
+                # A single fit falls through instead, so that the panel is still
+                # identified and ``wrong-enclosure`` can name what was drawn.
+                return data.with_diagnostics(self._unmatched(reference, matches))
+
         if not matches:
             return data.with_diagnostics(self._unknown(reference))
         if len(matches) > 1:
@@ -236,10 +302,7 @@ class IdentifyHammondFootprint:
             "unknown-enclosure",
             f"reference outline {reference.width:.3f} × {reference.height:.3f} mm "
             f"matches no {CATALOGUE} footprint within {self.tolerance_mm:g} mm; "
-            f"the outline has been left as drawn. The catalogue lists backplate "
-            f"dimensions, and a drilled face is smaller than its backplate because "
-            f"the walls are drafted — if this outline is a face measurement, redraw "
-            f"the reference layer to the backplate size",
+            f"the outline has been left as drawn; {_BACKPLATE_ADVICE}",
             data=(
                 ("width_mm", reference.width),
                 ("height_mm", reference.height),
@@ -266,6 +329,110 @@ class IdentifyHammondFootprint:
                 ("tolerance_mm", self.tolerance_mm),
             ),
         )
+
+    def _unverifiable(self) -> Diagnostic:
+        """A case was declared and there is no outline to check it against.
+
+        ERROR rather than the WARNING an undeclared run gets for the same
+        missing layer, and the difference is the declaration and nothing else:
+        an operator who said nothing is owed a usable run, while one who claimed
+        the panel is a 1590B is owed the check they asked for. Passing silently
+        would be indistinguishable from having made it.
+
+        The declared part's catalogue footprint travels with the finding so a
+        consumer can say what the panel ought to measure without going back to
+        the catalogue this stage has already read.
+        """
+        return Diagnostic.error(
+            "unverifiable-enclosure",
+            f"panel declared as {self.expected_part}{self._expected_size()}, but the "
+            f"artwork has no reference outline to check that against; draw the "
+            f"enclosure outline on the reference layer, to its backplate dimensions",
+            data=(("requested_part", self.expected_part or ""),)
+            + self._expected_footprint_data()
+            + (("catalogue", CATALOGUE),),
+        )
+
+    def _unmatched(
+        self, reference: ReferenceOutline, matches: list[tuple[tuple[int, int], bool]]
+    ) -> Diagnostic:
+        """A case was declared and the outline does not single that part out.
+
+        Two ways to arrive, one finding: nothing fitted, or several footprints
+        fitted and none of them was the declared part. Both leave the panel
+        unidentified, which is why this is not ``wrong-enclosure`` — that code
+        asserts we know what *was* drawn, and here we do not. It is not
+        ``unknown-enclosure`` either: that one is a WARNING about the limits of
+        our catalogue on a run that claimed nothing.
+
+        ``footprints`` and ``candidates`` are always present and empty when
+        nothing fitted, so the payload has one shape however the confirmation
+        failed. The backplate advice rides along on the empty case because the
+        careful operator — the one who measured the face they are about to drill
+        — is the likeliest person to be reading this having declared the *right*
+        part.
+        """
+        fitted = [footprint for footprint, _ in matches]
+        outlines = ", ".join(f"{length} × {width}" for length, width in fitted)
+        parts = ", ".join(part for footprint in fitted for part in footprints()[footprint])
+        measured = f"{reference.width:.3f} × {reference.height:.3f} mm"
+        if fitted:
+            detail = (
+                f"the reference outline {measured} is within {self.tolerance_mm:g} mm of "
+                f"{outlines} mm instead ({parts})"
+            )
+        else:
+            detail = (
+                f"the reference outline {measured} matches no {CATALOGUE} footprint "
+                f"within {self.tolerance_mm:g} mm; {_BACKPLATE_ADVICE}"
+            )
+        return Diagnostic.error(
+            "unmatched-enclosure",
+            f"panel declared as {self.expected_part}{self._expected_size()}, but {detail}",
+            data=(("requested_part", self.expected_part or ""),)
+            + self._expected_footprint_data()
+            + (
+                ("width_mm", reference.width),
+                ("height_mm", reference.height),
+                ("tolerance_mm", self.tolerance_mm),
+                ("catalogue", CATALOGUE),
+                ("footprints", outlines),
+                ("candidates", parts),
+            ),
+        )
+
+    def _expected_footprint(self) -> tuple[int, int] | None:
+        """The declared part's own catalogue footprint, or ``None``.
+
+        ``None`` is reachable only from a library caller: ``cli.parse_case``
+        refuses a part number no catalogue holds before the file is opened. It
+        is still an answer this has to have, because inventing a plausible size
+        for a part nobody stocks is exactly the guess this stage refuses
+        everywhere else.
+        """
+        for footprint, parts in footprints().items():
+            if self.expected_part in parts:
+                return footprint
+        return None
+
+    def _expected_footprint_data(self) -> tuple[tuple[str, float | int | str], ...]:
+        """The declared footprint as payload, omitted entirely when unknown.
+
+        Absent rather than zero or empty: ``Diagnostic.get`` answers ``None`` for
+        a key that was never written, which is the truth, where a 0 × 0 would be
+        a size a consumer could print on a machinist's sheet.
+        """
+        footprint = self._expected_footprint()
+        if footprint is None:
+            return ()
+        return (("expected_length_mm", footprint[0]), ("expected_width_mm", footprint[1]))
+
+    def _expected_size(self) -> str:
+        """`` (112 × 61 mm)`` for a catalogue part, and nothing for anything else."""
+        footprint = self._expected_footprint()
+        if footprint is None:
+            return ""
+        return f" ({footprint[0]} × {footprint[1]} mm)"
 
     def _wrong(self, length_mm: int, width_mm: int, candidates: tuple[str, ...]) -> Diagnostic:
         """Both parts, always: the requested one and the one that was drawn.
