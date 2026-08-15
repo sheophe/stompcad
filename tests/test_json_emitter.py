@@ -628,6 +628,39 @@ def test_the_duplicates_payload_names_the_surviving_hole_by_identity():
     assert [h["index"] for h in doc["holes"]] == [3, 6]
 
 
+def test_error_bearing_data_is_serialised_rather_than_refused():
+    """The deliberate opposite of the Excellon emitter, for the reason that
+    separates the two formats.
+
+    ``SnapDiametersToDrillTable`` reports an unmatched diameter as an ERROR and
+    drops the hole, so the drill file it would produce is one hole short and
+    says nothing about it — which is why that emitter refuses error-bearing data
+    outright. This document has ``diagnostics``, so it is not silent about
+    anything: the finding, its payload and the gap it left are all readable, and
+    hole 2 is visibly absent from a hole list that still names its identities.
+    Refusing here would deny a consumer the one artifact that can tell it *why*
+    the run failed, and would break the round trip this file is built on — the
+    fixture carries an ERROR precisely so that severity is exercised.
+    """
+    data = make_data(
+        at(-19.0, -18.75, 5.0, index=6), reference=ReferenceOutline(113.0, 60.0)
+    ).with_diagnostics(
+        Diagnostic.error(
+            "unknown-diameter",
+            "hole 2: dia 7.000 mm matches no metric drill size",
+            (0.0, 18.0),
+            data=(("hole_index", 2), ("diameter", 7.0)),
+        )
+    )
+
+    doc = parse(data)
+
+    dropped = next(d for d in doc["diagnostics"] if d["severity"] == "error")
+    assert dropped["code"] == "unknown-diameter"
+    assert dropped["data"] == {"hole_index": 2, "diameter": 7.0}
+    assert [h["index"] for h in doc["holes"]] == [6]
+
+
 # --------------------------------------------------------------------------
 # stage provenance
 # --------------------------------------------------------------------------
