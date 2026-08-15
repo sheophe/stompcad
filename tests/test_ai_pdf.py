@@ -75,6 +75,7 @@ def build_pdf(
     *,
     media: tuple[float, float, float, float] = (0, 0, 400, 400),
     form: tuple[list[float], str] | None = None,
+    form_properties: dict[str, str] | None = None,
     image: bool = False,
     extra: str = "",
 ) -> Path:
@@ -83,14 +84,22 @@ def build_pdf(
     ``layers`` maps a layer name to the content stream drawn inside its marked
     content. ``form`` optionally installs ``/Fm0`` as a Form XObject with the
     given ``/Matrix`` and content; ``image`` installs ``/Im0``, a placed image.
+
+    A form gets **no** ``/Resources`` of its own unless ``form_properties`` asks
+    for one, which maps ``/MCn`` tokens onto the OCGs of the named layers. The
+    two cases must stay distinguishable: giving every form the page's own table
+    would make the fallback and the real lookup produce the same answer, and no
+    fixture could then tell whether a form's resources were consulted at all.
     """
     pdf = pikepdf.new()
     ocgs = []
     properties = Dictionary()
+    ocg_of: dict[str, object] = {}
     body = []
     for index, (name, content) in enumerate(layers.items()):
         ocg = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String(name)))
         ocgs.append(ocg)
+        ocg_of[name] = ocg
         properties[f"/MC{index}"] = ocg
         body.append(f"/OC /MC{index} BDC {content} EMC")
     pdf.Root.OCProperties = pdf.make_indirect(
@@ -105,7 +114,11 @@ def build_pdf(
         stream.Subtype = Name.Form
         stream.BBox = Array([0, 0, 10000, 10000])
         stream.Matrix = Array(list(matrix))
-        stream.Resources = Dictionary(Properties=properties)
+        if form_properties is not None:
+            own = Dictionary()
+            for token, layer in form_properties.items():
+                own[token] = ocg_of[layer]
+            stream.Resources = Dictionary(Properties=own)
         resources.XObject = Dictionary(Fm0=pdf.make_indirect(stream))
     if image:
         picture = pdf.make_stream(b"\xff\x00\x00")
@@ -813,6 +826,43 @@ def test_a_form_may_still_close_the_marked_content_it_opened(tmp_path):
     )
     assert len(AiPdfSource(pdf).layer_subpaths("Background")) == 2
     assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 2
+
+
+def test_a_forms_own_properties_outrank_the_pages(tmp_path):
+    """``/MCn`` means whatever the *current* resource dictionary says it means.
+
+    Page and form both define ``/MC1``, and they define it differently: on the
+    page it is Decor, inside the form it is Drill. The ``Do`` sits on Decor, so
+    the two readings are distinguishable — the circle reaches the drill layer
+    only if the form's own ``/Properties`` was consulted. Resolving it against
+    the page's table instead leaves the circle on the layer the ``Do`` happens
+    to be on, and the drill layer comes up short with nothing said.
+    """
+    pdf = build_pdf(
+        tmp_path / "formprops.pdf",
+        {"Background": "10 10 200 100 re f", "Decor": "/Fm0 Do", "Drill": ""},
+        form=([1, 0, 0, 1, 0, 0], "/OC /MC1 BDC " + circle_ops(60, 35, 10) + " EMC"),
+        form_properties={"/MC1": "Drill"},
+    )
+    source = AiPdfSource(pdf)
+    assert len(source.layer_subpaths("Drill")) == 1
+    # not lost, merely also on the layer the ``Do`` was invoked from
+    assert len(source.layer_subpaths("Decor")) == 1
+
+
+def test_a_form_without_its_own_resources_falls_back_to_the_pages(tmp_path):
+    """Most forms carry no ``/Resources``, and their ``/MCn`` is still a layer.
+
+    Illustrator writes plenty of them. With nothing to resolve the name against,
+    every path the form draws is attributed to no layer at all — which is not an
+    error anywhere, just a drill layer that quietly comes up short.
+    """
+    pdf = build_pdf(
+        tmp_path / "formnoprops.pdf",
+        {"Background": "10 10 200 100 re f", "Decor": "/Fm0 Do", "Drill": ""},
+        form=([1, 0, 0, 1, 0, 0], "/OC /MC2 BDC " + circle_ops(60, 35, 10) + " EMC"),
+    )
+    assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 1
 
 
 def test_units_are_millimetres(tmp_path):
