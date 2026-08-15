@@ -50,10 +50,11 @@ inch.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from types import MappingProxyType
-from typing import Callable, ClassVar, Iterable, Mapping, Sequence
+from typing import ClassVar
 
 from ..model import Diagnostic, DrillData, Hole, ParameterValue, StageRun
 from ..tolerance import SLACK, within
@@ -159,7 +160,7 @@ class DrillStandard:
         self,
         include: Sequence[float] | None = None,
         exclude: Sequence[float] | None = None,
-    ) -> "DrillStandard":
+    ) -> DrillStandard:
         """A narrowed copy holding only the bits actually in the drawer.
 
         Narrowing belongs here rather than in the standard because the standard

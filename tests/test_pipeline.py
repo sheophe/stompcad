@@ -13,9 +13,8 @@ import random
 
 import pytest
 
-from aidrill.enclosures import footprints
 from aidrill.emitters.json_out import JsonEmitter
-from aidrill.pipeline import enclosure as enclosure_stage
+from aidrill.enclosures import footprints
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -26,8 +25,6 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.protocols import Pipeline, Stage
-from aidrill.pipeline.diameters import METRIC_BANDS, _METRIC_DECIMALS, _metric_sizes
 from aidrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -40,8 +37,10 @@ from aidrill.pipeline import (
     SortHoles,
     normalize_part_name,
 )
+from aidrill.pipeline import enclosure as enclosure_stage
+from aidrill.pipeline.diameters import _METRIC_DECIMALS, METRIC_BANDS, _metric_sizes
+from aidrill.protocols import Pipeline, Stage
 from tests.conftest import at, holes, make_data
-
 
 # --------------------------------------------------------------------------
 # helpers

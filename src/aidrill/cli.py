@@ -32,9 +32,10 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence, TextIO, get_args, get_type_hints
+from typing import Any, TextIO, get_args, get_type_hints
 
 from .emitters import DrawingOptions, ExcellonOptions, JsonOptions, available, get_emitter
 from .enclosures import HAMMOND_1590
@@ -764,7 +765,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     print(format_report(data), file=out)
 
     if emitters:
-        print("", file=out)
+        print(file=out)
         if data.worst_severity is Severity.ERROR:
             # Not rendered either: an emitter's bytes are of no use to anybody
             # here, and one of them may legitimately refuse data this broken.

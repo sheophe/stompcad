@@ -22,7 +22,7 @@ from a message that contradicted the class it came from.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 __all__ = [
     "AidrillError",

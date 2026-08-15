@@ -73,8 +73,9 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Iterable, Sequence
+from typing import ClassVar
 
 from ..formatting import format_mm
 from ..model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
@@ -223,7 +224,7 @@ def _trim(value: float) -> str:
     return text or "0"
 
 
-def _fmt(value: float | int | str) -> str:
+def _fmt(value: float | str) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, int):

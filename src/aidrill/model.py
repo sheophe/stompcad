@@ -14,10 +14,10 @@ Emitters that need a different frame or different units convert on output, via
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import total_ordering
-from typing import Iterable, Mapping
 
 from .tolerance import ROW_SLACK, within
 
@@ -120,7 +120,7 @@ class Hole:
     index: int
 
     @classmethod
-    def from_measurement(cls, x: float, y: float, diameter: float, index: int) -> "Hole":
+    def from_measurement(cls, x: float, y: float, diameter: float, index: int) -> Hole:
         """Build a hole whose nominal values are still its measured values.
 
         ``index`` is the hole's stable identity, assigned once by the source in
@@ -132,13 +132,13 @@ class Hole:
         """
         return cls(x=x, y=y, diameter=diameter, raw=RawHole(x, y, diameter), index=index)
 
-    def moved_to(self, x: float, y: float) -> "Hole":
+    def moved_to(self, x: float, y: float) -> Hole:
         return replace(self, x=x, y=y)
 
-    def with_diameter(self, diameter: float) -> "Hole":
+    def with_diameter(self, diameter: float) -> Hole:
         return replace(self, diameter=diameter)
 
-    def translated(self, dx: float, dy: float) -> "Hole":
+    def translated(self, dx: float, dy: float) -> Hole:
         return replace(self, x=self.x + dx, y=self.y + dy)
 
     @property
@@ -206,7 +206,7 @@ class ReferenceOutline:
     @classmethod
     def from_measurement(
         cls, width: float, height: float, centre_x: float = 0.0, centre_y: float = 0.0
-    ) -> "ReferenceOutline":
+    ) -> ReferenceOutline:
         """Build an outline whose nominal size is still its measured size.
 
         Mirrors ``Hole.from_measurement``, and is what a source calls: the
@@ -222,7 +222,7 @@ class ReferenceOutline:
             raw=RawOutline(width, height),
         )
 
-    def resized(self, width: float, height: float) -> "ReferenceOutline":
+    def resized(self, width: float, height: float) -> ReferenceOutline:
         """New nominal dimensions, same measurement, same source-space centre.
 
         ``raw`` is deliberately *not* carried forward from the previous nominal
@@ -317,15 +317,15 @@ class Diagnostic:
     data: tuple[tuple[str, float | int | str], ...] = ()
 
     @classmethod
-    def warning(cls, code, message, location=None, data=()) -> "Diagnostic":
+    def warning(cls, code, message, location=None, data=()) -> Diagnostic:
         return cls(Severity.WARNING, code, message, location, tuple(data))
 
     @classmethod
-    def info(cls, code, message, location=None, data=()) -> "Diagnostic":
+    def info(cls, code, message, location=None, data=()) -> Diagnostic:
         return cls(Severity.INFO, code, message, location, tuple(data))
 
     @classmethod
-    def error(cls, code, message, location=None, data=()) -> "Diagnostic":
+    def error(cls, code, message, location=None, data=()) -> Diagnostic:
         return cls(Severity.ERROR, code, message, location, tuple(data))
 
     def get(self, key: str, default=None):
@@ -414,15 +414,15 @@ class DrillData:
     enclosure: EnclosureMatch | None = None
 
     # -- transforms ------------------------------------------------------
-    def with_holes(self, holes: Iterable[Hole]) -> "DrillData":
+    def with_holes(self, holes: Iterable[Hole]) -> DrillData:
         return replace(self, holes=tuple(holes))
 
-    def with_diagnostics(self, *diagnostics: Diagnostic) -> "DrillData":
+    def with_diagnostics(self, *diagnostics: Diagnostic) -> DrillData:
         if not diagnostics:
             return self
         return replace(self, diagnostics=self.diagnostics + tuple(diagnostics))
 
-    def with_processing(self, *runs: "StageRun") -> "DrillData":
+    def with_processing(self, *runs: StageRun) -> DrillData:
         """Append the record of a stage that has just run.
 
         Appended, never replaced: a stage may legitimately run twice — the CLI
@@ -433,7 +433,7 @@ class DrillData:
             return self
         return replace(self, processing=self.processing + tuple(runs))
 
-    def with_enclosure(self, match: EnclosureMatch) -> "DrillData":
+    def with_enclosure(self, match: EnclosureMatch) -> DrillData:
         """Record which enclosure the panel was identified as being drawn for.
 
         Replaced, never appended — the mirror image of ``with_processing``.
@@ -443,7 +443,7 @@ class DrillData:
         """
         return replace(self, enclosure=match)
 
-    def with_origin(self, origin: Origin) -> "DrillData":
+    def with_origin(self, origin: Origin) -> DrillData:
         """Translate every hole into the requested frame.
 
         The canonical frame is CENTRE. LOWER_LEFT needs a reference outline to

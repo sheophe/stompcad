@@ -30,7 +30,6 @@ from aidrill.model import (
 from aidrill.protocols import Emitter
 from tests.conftest import at, holes, make_data
 
-
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------

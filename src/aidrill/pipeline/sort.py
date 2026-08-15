@@ -7,7 +7,8 @@ an operator checking one against another has to work out why they differ.
 
 from __future__ import annotations
 
-from typing import Callable, ClassVar
+from collections.abc import Callable
+from typing import ClassVar
 
 from ..model import DrillData, Hole, StageRun
 

@@ -27,9 +27,9 @@ that shares it, so a match names candidates and never guesses between them.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 __all__ = ["Enclosure", "HAMMOND_1590", "footprints"]
 

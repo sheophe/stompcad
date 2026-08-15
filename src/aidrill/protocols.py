@@ -7,7 +7,8 @@ Only ``cli.py`` is allowed to name concrete implementations.
 
 from __future__ import annotations
 
-from typing import ClassVar, Iterable, Iterator, Protocol, Sequence, runtime_checkable
+from collections.abc import Iterable, Iterator, Sequence
+from typing import ClassVar, Protocol, runtime_checkable
 
 from .model import DrillData, StageRun
 
@@ -80,7 +81,7 @@ class Pipeline(Sequence[Stage]):
     def __repr__(self) -> str:
         return f"Pipeline({[s.name for s in self._stages]!r})"
 
-    def then(self, stage: Stage) -> "Pipeline":
+    def then(self, stage: Stage) -> Pipeline:
         """Return a new pipeline with ``stage`` appended."""
         return Pipeline(self._stages + (stage,))
 
