@@ -17,6 +17,13 @@ same panel and disagreeing is the expensive failure here.
 
 Emitters that need a different frame or different units convert on output, via
 ``DrillData.with_origin`` and ``units.mm_from_nm``. No stage ever sees inches.
+
+``Diagnostic.data`` and ``StageRun.parameters`` are the one open corner of all
+this: a stage records what it has to record, under keys nothing here knows in
+advance. So in a payload the ``_nm`` suffix carries the whole contract, and it
+is enforced at construction — a key ending ``_nm`` holds whole nanometres, in a
+tuple as well as on its own, while every other key is free to hold the float
+that a ratio or an angle genuinely is.
 """
 
 from __future__ import annotations
@@ -48,6 +55,12 @@ __all__ = [
 #: What a stage may record about itself in a ``StageRun``. One member wider than
 #: ``Diagnostic.data``: a diameter table is a list of numbers, and flattening it
 #: into a string would make the drawing parse its own provenance back out again.
+#:
+#: ``float`` stays in the union for the values that genuinely are one — a ratio,
+#: an angle, a fraction — and *not* for lengths. A length is named with an
+#: ``_nm`` suffix and ``_check_payload_lengths`` holds it to that at
+#: construction, so the type here stays as wide as the ``Stage`` protocol needs
+#: while the one class of value two artifacts could round differently does not.
 ParameterValue = float | int | str | bool | tuple[float, ...]
 
 
@@ -124,6 +137,37 @@ def _check_nanometres(owner: str, **lengths: object) -> None:
             )
 
 
+def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> None:
+    """Hold a generic key/value payload to the ``_nm`` suffix in its keys.
+
+    ``Diagnostic.data`` and ``StageRun.parameters`` are open on purpose — a
+    stage records what it has to record, and neither this module nor the
+    ``Stage`` protocol can know in advance what that is. That openness is
+    precisely why the key has to be held to its word: it is the only thing
+    telling a consumer what the number means, and a millimetre float under
+    ``moved_nm`` prints as a plausible number in the CLI report, the drawing's
+    NOTES block and the JSON alike, all three quoting each other.
+
+    The distance ``SnapPositions`` reports is the case this exists for. It comes
+    out of ``math.hypot`` as a float, and dropping that into ``moved_nm``
+    without quantising it is a mistake no artifact would show.
+
+    Everything not named as a length is left alone, because a ratio or an angle
+    is a genuine float and refusing it would push a stage into spelling a real
+    number as a string. Tuples are checked elementwise: the one tuple-valued
+    parameter in the pipeline is a table of diameters, and a scalar-only check
+    would leave every size in it the only unexamined length in the model.
+    """
+    for key, value in items:
+        if not key.endswith("_nm"):
+            continue
+        if isinstance(value, tuple):
+            for position, element in enumerate(value):
+                _check_nanometres(owner, **{f"{key}[{position}]": element})
+        else:
+            _check_nanometres(owner, **{key: value})
+
+
 @dataclass(frozen=True, slots=True)
 class RawHole:
     """As-measured values, before any normalisation.
@@ -192,9 +236,20 @@ class Hole:
 
         Integers are what make "exactly" true: a thousand shifts one way and a
         thousand back land on the value they started from, where the same walk
-        in millimetres does not. Every emitted artifact translates the whole
-        panel at least once.
+        in millimetres does not. This is what the Excellon emitter's lower-left
+        frame rides on: it is the one caller of ``DrillData.with_origin``, and
+        it moves every hole by half the outline while the drawing dimensions the
+        same panel from the centre frame it was handed. Two frames, one set of
+        positions, and no rounding between them to disagree about.
+
+        The deltas are guarded here and not left to the constructor, because the
+        addition happens first and normalises the mistake away: ``True + 0`` is
+        ``1``, so ``__post_init__`` would be handed a perfectly good nanometre
+        and the hole would sit one nanometre from where it started with nothing
+        left to say a boolean was ever passed. A guard on a field cannot see
+        what the arithmetic has already absorbed.
         """
+        _check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
         return replace(self, x_nm=self.x_nm + dx_nm, y_nm=self.y_nm + dy_nm)
 
     @property
@@ -356,7 +411,14 @@ class EnclosureMatch:
     selected_part: str | None = None
 
     def __post_init__(self) -> None:
-        """Coerce ``candidates`` to a tuple, and refuse a bare string.
+        """Guard the two lengths, coerce ``candidates``, and refuse a bare string.
+
+        The dimensions are guarded here for the same reason every other length
+        in this module is: this is a *derived* value, built by a stage out of a
+        catalogue and handed straight to ``DrillData.enclosure``, from which the
+        drawing prints a footprint and the JSON serialises one. A float that
+        reached this far would be two artifacts' worth of rounding under a name
+        that promises nanometres.
 
         The coercion is the same one ``StageRun`` and ``Diagnostic`` do, for the
         same reason: a match holding a list is unhashable and compares unequal
@@ -374,6 +436,9 @@ class EnclosureMatch:
         ever failing. This is the one place the type annotation cannot catch a
         type error, so it is caught here.
         """
+        _check_nanometres(
+            "EnclosureMatch", length_nm=self.length_nm, width_nm=self.width_nm
+        )
         # The ignore is the point restated: mypy is right that a declared
         # tuple[str, ...] is never a str, and this guard exists for the callers
         # it cannot see — JSON, a REPL, a downstream tool.
@@ -393,20 +458,35 @@ class Diagnostic:
     severity: Severity
     code: str
     message: str
-    location: tuple[float, float] | None = None
+    location_nm: tuple[int, int] | None = None
     data: tuple[tuple[str, float | int | str], ...] = ()
 
-    @classmethod
-    def warning(cls, code, message, location=None, data=()) -> Diagnostic:
-        return cls(Severity.WARNING, code, message, location, tuple(data))
+    def __post_init__(self) -> None:
+        """Guard the position and the payload's lengths.
+
+        ``location_nm`` is a point in the canonical frame and is guarded like
+        any other position: a stage reporting where a hole ended up has the
+        millimetres it printed in the message right there to hand, and handing
+        them over here instead would put a finding somewhere the artifacts do
+        not agree it is. ``None`` stays legal — a finding about the panel as a
+        whole has no coordinate to give.
+        """
+        if self.location_nm is not None:
+            x_nm, y_nm = self.location_nm
+            _check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
+        _check_payload_lengths("Diagnostic.data", self.data)
 
     @classmethod
-    def info(cls, code, message, location=None, data=()) -> Diagnostic:
-        return cls(Severity.INFO, code, message, location, tuple(data))
+    def warning(cls, code, message, location_nm=None, data=()) -> Diagnostic:
+        return cls(Severity.WARNING, code, message, location_nm, tuple(data))
 
     @classmethod
-    def error(cls, code, message, location=None, data=()) -> Diagnostic:
-        return cls(Severity.ERROR, code, message, location, tuple(data))
+    def info(cls, code, message, location_nm=None, data=()) -> Diagnostic:
+        return cls(Severity.INFO, code, message, location_nm, tuple(data))
+
+    @classmethod
+    def error(cls, code, message, location_nm=None, data=()) -> Diagnostic:
+        return cls(Severity.ERROR, code, message, location_nm, tuple(data))
 
     def get(self, key: str, default=None):
         """Read one payload value. Emitters use this instead of re-deriving.
@@ -452,13 +532,17 @@ class StageRun:
     parameters: tuple[tuple[str, ParameterValue], ...] = ()
 
     def __post_init__(self) -> None:
-        """Coerce the payload to tuples, the way ``Diagnostic`` does on the way in.
+        """Coerce the payload to tuples, then hold its lengths to their names.
 
-        Not defensive tidying: a record holding a list is unhashable and compares
-        unequal to the identical record built from tuples, so a document read
-        back from JSON — where every sequence arrives as a list, the pairs and a
-        diameter table alike — would differ from the one it was written from
-        while printing identically.
+        The coercion is not defensive tidying: a record holding a list is
+        unhashable and compares unequal to the identical record built from
+        tuples, so a document read back from JSON — where every sequence arrives
+        as a list, the pairs and a diameter table alike — would differ from the
+        one it was written from while printing identically.
+
+        It runs before the guard so that a diameter table arriving from JSON is
+        checked as the tuple it has just become, rather than slipping past a
+        check that only knows what to do with one.
         """
         object.__setattr__(
             self,
@@ -471,6 +555,7 @@ class StageRun:
                 for key, value in self.parameters
             ),
         )
+        _check_payload_lengths("StageRun.parameters", self.parameters)
 
     def get(self, key: str, default=None):
         """Read one parameter. Mirrors ``Diagnostic.get`` so there is one idiom.
@@ -587,10 +672,17 @@ class DrillData:
 
         Grouping is by proximity and not by equality: a Y comes off the artwork
         through a rotation and a frame translation, so two holes the designer
-        drew on one line can land a few nanometres apart. ``ROW_SLACK_NM``
-        absorbs exactly that and nothing a machinist could see — half a
-        millimetre is two rows.
+        drew on one line can land a nanometre apart. ``ROW_SLACK_NM`` absorbs
+        exactly that and nothing an artifact could print — a micron is already
+        two rows, because that is two coordinates in the drill file.
+
+        ``tolerance_nm`` is guarded like any other length, and it is the one
+        length no constructor ever sees: it is compared and then discarded, so a
+        float would sail through ``within`` and a ``True`` would quietly ask for
+        a one-nanometre bucket. Either changes how many rows a drawing
+        dimensions, and no artifact carries the value that decided it.
         """
+        _check_nanometres("DrillData.rows", tolerance_nm=tolerance_nm)
         buckets: dict[int, list[Hole]] = {}
         for hole in self.holes:
             for y_nm, bucket in buckets.items():
