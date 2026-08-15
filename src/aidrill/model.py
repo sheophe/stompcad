@@ -16,9 +16,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from functools import total_ordering
 from typing import Iterable, Mapping
 
-from .tolerance import ROW_SLACK
+from .tolerance import ROW_SLACK, within
 
 __all__ = [
     "Severity",
@@ -43,15 +44,29 @@ __all__ = [
 ParameterValue = float | int | str | bool | tuple[float, ...]
 
 
+@total_ordering
 class Severity(Enum):
-    """How much a diagnostic should worry the operator."""
+    """How much a diagnostic should worry the operator.
+
+    Ordered, because ``worst_severity`` is a ``max`` over the findings and the
+    CLI reads its exit code off that. ``__lt__`` on its own was enough for
+    ``max`` and left the rest of the protocol broken: ``severity >=
+    Severity.WARNING`` — the obvious way to ask "is this worth stopping for?" —
+    raised ``TypeError``, and comparing against anything that is not a severity
+    raised ``ValueError`` out of ``index``, which reports a lookup miss as
+    though the comparison had been attempted. Hence ``total_ordering`` for the
+    other three operators and ``NotImplemented`` for the mixed pair, which is
+    what lets Python raise the ``TypeError`` an unorderable comparison earns.
+    """
 
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
 
-    def __lt__(self, other: "Severity") -> bool:
-        order = [Severity.INFO, Severity.WARNING, Severity.ERROR]
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Severity):
+            return NotImplemented
+        order = (Severity.INFO, Severity.WARNING, Severity.ERROR)
         return order.index(self) < order.index(other)
 
 
@@ -157,9 +172,14 @@ _MEASUREMENT_IS_NOMINAL = RawOutline(0.0, 0.0)
 class ReferenceOutline:
     """The panel outline that establishes the coordinate frame.
 
-    ``centre_x``/``centre_y`` are in *source* space (PDF points, page frame) and
-    exist only so a source can report what it used. Everything downstream works
-    in the canonical frame where this outline is centred on the origin.
+    ``centre_x``/``centre_y`` are **millimetres** in *source* space — the page
+    frame, measured from its lower-left corner — and exist only so a source can
+    report the point it centred everything else on. Millimetres and not the
+    points the PDF is written in, because a source converts as it reads: no
+    value in this model is ever in another unit, and these two are in the
+    published document, where 72/25.4 is the difference between a page centre
+    and nonsense. Everything downstream works in the canonical frame, where
+    this outline is centred on the origin.
 
     ``raw`` is the as-measured size, kept for the same reason ``Hole.raw`` is:
     a stage snaps the outline to a catalogue enclosure, and the fixture panel
@@ -461,11 +481,30 @@ class DrillData:
         return counts
 
     def rows(self, tolerance: float = ROW_SLACK) -> list[tuple[float, list[Hole]]]:
-        """Holes grouped by Y, descending. Used for per-row chain dimensions."""
+        """Holes grouped by Y, rows from the top down, each row left to right.
+
+        Both orderings are contracts rather than incidental output, because both
+        are read as ordering by a caller that cannot see this code:
+
+        * **Rows descend.** The drawing stacks one chain dimension per row and
+          builds the stack outwards from the bottom row, dropping the rows it
+          has no room for. Ascending, the rows that silently lost their
+          dimension would be the ones at the *bottom* of the panel rather than
+          the top — the same sheet, dimensioning a different half of the work.
+        * **A row runs left to right**, which is the direction a chain dimension
+          is read and the order its segment lengths are subtractions in. Handed
+          the holes in artwork order, a chain would double back on itself.
+
+        Grouping is by proximity and not by equality: a Y comes off the artwork
+        through a frame translation and a snap, so two holes the designer drew
+        on one line can differ in the last bits of the float. ``ROW_SLACK``
+        absorbs exactly that and nothing a machinist could see — half a
+        millimetre is two rows.
+        """
         buckets: dict[float, list[Hole]] = {}
         for hole in self.holes:
             for y in buckets:
-                if abs(hole.y - y) <= tolerance:
+                if within(hole.y, y, tolerance):
                     buckets[y].append(hole)
                     break
             else:

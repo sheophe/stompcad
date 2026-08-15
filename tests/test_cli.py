@@ -28,10 +28,12 @@ from aidrill.errors import EmptyLayerError, LayerNotFoundError
 from aidrill.model import (
     Diagnostic,
     DrillData,
+    EnclosureMatch,
     Hole,
     ReferenceOutline,
     Severity,
     SourceInfo,
+    StageRun,
 )
 from aidrill.pipeline import DRILL_STANDARDS
 
@@ -48,6 +50,7 @@ def make_data(
     holes=None,
     reference=ReferenceOutline(113.0, 60.0),
     diagnostics=(),
+    processing=(),
 ) -> DrillData:
     """DrillData that the default pipeline leaves alone: on-grid, two sizes."""
     if holes is None:
@@ -60,6 +63,7 @@ def make_data(
         holes=tuple(holes),
         reference=reference,
         diagnostics=tuple(diagnostics),
+        processing=tuple(processing),
         source=SourceInfo(
             path="fake.ai",
             drill_layer="Drill",
@@ -67,6 +71,16 @@ def make_data(
             layers_found=("Background", "Drill"),
         ),
     )
+
+
+def snapped_against(standard: str, size_count: int = 183) -> StageRun:
+    """The provenance ``SnapDiametersToDrillTable`` leaves behind.
+
+    Hand-built rather than taken from a real run, so that a test can record a
+    standard the registry does not hold — which is what a document from another
+    version of this tool looks like when the report is asked to render it.
+    """
+    return StageRun("snap-diameters", (("standard", standard), ("size_count", size_count)))
 
 
 @pytest.fixture
@@ -745,6 +759,81 @@ def test_report_shows_source_holes_tools_and_diagnostics(fake_source, capsys):
     assert "something" in out and "watch out" in out
 
 
+def report_diagnostic_groups(out: str) -> dict[str, list[str]]:
+    """``{"error": ["unknown-diameter"], …}`` — the DIAGNOSTICS block as printed.
+
+    Read back out of the rendered report and keyed on ``code``, because the
+    claim under test is the *grouping*: an assertion that a finding appears
+    somewhere in the output passes just as happily when it is printed under
+    every heading at once.
+    """
+    groups: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    lines = out.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("DIAGNOSTICS"))
+    for line in lines[start + 1:]:
+        heading = re.fullmatch(r"  (\w+) \(\d+\)", line)
+        entry = re.match(r"    \[([\w-]+)\]", line)
+        if heading is not None:
+            current = groups.setdefault(heading.group(1), [])
+        elif entry is not None and current is not None:
+            current.append(entry.group(1))
+        elif not line.startswith(" "):
+            break
+    return groups
+
+
+def test_each_finding_is_printed_once_under_its_own_severity(fake_source, capsys):
+    """One finding of each severity, one rendering of each.
+
+    ``of_severity`` was invertible: negate its predicate and every finding was
+    printed twice, under two headings that were both wrong, with the summary
+    line claiming three errors — while the exit code, which comes from
+    ``worst_severity`` down another path, went on saying "warnings". The report
+    and the exit code are two renderings of one set of findings, and the whole
+    point of this project is that two renderings cannot be allowed to disagree.
+    """
+    fake_source(
+        make_data(
+            diagnostics=[
+                Diagnostic.warning("off-grid", "hole 4 moved 0.12 mm"),
+                Diagnostic.error("unknown-diameter", "⌀30.0 mm is no bit in the drawer"),
+                Diagnostic.info("duplicate-hole", "two circles in one place"),
+            ]
+        )
+    )
+
+    assert cli.main([str(FIXTURE)]) == 2
+
+    out = capsys.readouterr().out
+    assert "DIAGNOSTICS (3)" in out
+    assert "  error (1)" in out and "  warning (1)" in out and "  info (1)" in out
+    assert report_diagnostic_groups(out) == {
+        "error": ["unknown-diameter"],
+        "warning": ["off-grid"],
+        "info": ["duplicate-hole"],
+    }
+    assert out.splitlines()[-1] == "3 holes, 2 tools, 1 error, 1 warning, 1 info"
+
+
+def test_the_summary_counts_every_finding_of_a_severity(fake_source, capsys):
+    """The counts are plural where they should be, and a severity nobody
+    reported is not listed at all — a report that ends "0 errors" invites the
+    reader to skim past the line that says how many there were."""
+    fake_source(
+        make_data(
+            diagnostics=[
+                Diagnostic.warning("off-grid", "hole 4 moved 0.12 mm"),
+                Diagnostic.warning("unknown-enclosure", "113 × 60 is no catalogue footprint"),
+            ]
+        )
+    )
+
+    assert cli.main([str(FIXTURE)]) == 1
+
+    assert capsys.readouterr().out.splitlines()[-1] == "3 holes, 2 tools, 2 warnings"
+
+
 def test_tool_summary_counts_come_from_the_model(capsys):
     """The ``xN`` column is ``DrillData.tool_counts()``, not a third re-count.
 
@@ -773,9 +862,23 @@ def test_tool_summary_counts_come_from_the_model(capsys):
     assert not [line for line in lines if "x2" in line or "x1" in line], lines
 
 
+def report_tool_labels(lines) -> dict[int, str]:
+    """``{1: '⌀13/64"'}`` — the ``TOOLS`` block as printed, tool number to spelling."""
+    labels = {}
+    for line in lines:
+        match = re.fullmatch(r"  T(\d+)\s+(.+?)\s+x\d+", line)
+        if match is not None:
+            labels[int(match.group(1))] = match.group(2)
+    return labels
+
+
 def report_tool_diameters(lines) -> list[str]:
     """The rendered diameter of each ``TOOLS`` line, as printed."""
-    return [match.group(1) for match in (re.search(r"dia ([\d.]+) mm", line) for line in lines) if match]
+    return [
+        match.group(1)
+        for match in (re.fullmatch(r"⌀([\d.]+) mm", label) for label in report_tool_labels(lines).values())
+        if match
+    ]
 
 
 def test_the_tools_report_never_prints_one_diameter_as_two_tools():
@@ -812,6 +915,60 @@ def test_the_tools_report_keeps_its_usual_three_decimals(fake_source, capsys):
     assert report_tool_diameters(cli.format_tools(make_data())) == ["5.000", "7.000"]
 
 
+def test_the_tools_block_spells_a_bit_the_way_the_standard_that_ran_spells_it():
+    """The spelling comes from provenance, exactly as the drawing's schedule
+    takes it, because a fractional bit has no honest millimetre name.
+
+    ``dia 5.159 mm`` is a size in no drawer on earth: its nearest purchasable
+    neighbour is a 5.2 mm metric bit, which is the wrong hole. 13/64" is the
+    number stamped on the bit the machinist picks up.
+    """
+    data = make_data(
+        holes=[
+            Hole.from_measurement(-20.0, 18.0, 7.14375, index=3),
+            Hole.from_measurement(0.0, -18.75, 5.159375, index=1),
+        ],
+        processing=[snapped_against("fractional", size_count=64)],
+    )
+
+    assert report_tool_labels(cli.format_tools(data)) == {1: '⌀13/64"', 2: '⌀9/32"'}
+
+
+def test_a_recorded_standard_the_registry_does_not_hold_is_not_a_standard():
+    """A hand-built drawer, or a document written by a later version of this
+    tool: the name resolves to nothing and the report states millimetres rather
+    than inventing a spelling for a series it cannot see. The same fallback
+    carries a ``DrillData`` that never went through the stage at all."""
+    assert report_tool_labels(cli.format_tools(make_data())) == {1: "⌀5.000 mm", 2: "⌀7.000 mm"}
+
+    data = make_data(processing=[snapped_against("whitworth")])
+
+    assert report_tool_labels(cli.format_tools(data)) == {1: "⌀5.000 mm", 2: "⌀7.000 mm"}
+
+
+def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools():
+    """The same trap, one layer up: the metric drawer spells to 2 dp, so a
+    document carrying two nominals that agree to two decimals would be stamped
+    ``⌀7.00 mm`` twice under two tool numbers.
+
+    The CLI cannot build such a document — every nominal it produces comes from
+    a table whose sizes are further apart than that — but a library consumer
+    hands the report whatever it likes, and a renderer that is only correct for
+    the inputs one entry point happens to produce is not correct.
+    """
+    data = make_data(
+        holes=[
+            Hole.from_measurement(-20.0, 18.0, 6.9998, index=6),
+            Hole.from_measurement(20.0, 18.0, 7.0, index=2),
+        ],
+        processing=[snapped_against("metric")],
+    )
+
+    printed = report_tool_labels(cli.format_tools(data))
+
+    assert len(set(printed.values())) == 2, f"two tools printed the same diameter: {printed}"
+
+
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
     hole = Hole.from_measurement(-19.9906, 18.0021, 6.9998, index=0)
     fake_source(make_data(holes=[hole]))
@@ -820,6 +977,87 @@ def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
     assert "-20.000" in out  # nominal, after snapping
     assert "-19.9906" in out  # raw provenance
     assert "6.9998" in out
+
+
+def report_field(out: str, label: str) -> str:
+    """The value of one ``  label   value`` line of the report.
+
+    The label is matched against the whole of its padded column, so that
+    ``reference`` cannot be answered by the ``reference layer`` line above it.
+    """
+    prefix = f"  {label:<17}"
+    line = next(line for line in out.splitlines() if line.startswith(prefix))
+    return line[len(prefix):].strip()
+
+
+def test_the_report_shows_the_outline_the_artwork_measured_beside_the_snapped_one(
+    fake_source, capsys
+):
+    """``IdentifyHammondFootprint`` rewrites a real measurement — the fixture
+    comes to 113.000 × 60.000 and leaves as the catalogue's 112 × 61 — and a
+    report stating only the second sends a nominal size out as though it were
+    what the artwork said. The hole table prints ``raw X``/``raw Y`` beside every
+    nominal four lines below for exactly this reason; the outline is the same
+    question one level up.
+    """
+    fake_source(make_data())
+
+    assert cli.main([str(FIXTURE)]) == 0
+
+    reference = report_field(capsys.readouterr().out, "reference")
+    assert "112.000 x 61.000 mm" in reference
+    assert "113.0000 x 60.0000 mm" in reference
+
+
+def test_the_report_states_which_enclosure_the_panel_was_identified_as(fake_source, capsys):
+    """A clean run said nothing at all about the enclosure, while the sheet and
+    the machine-readable document both carried it.
+
+    A *mismatch* surfaces as a diagnostic, so the silence fell exactly on the
+    success case — where confirmation that the artwork is the case the operator
+    thinks it is, is the one thing they are looking for.
+    """
+    fake_source(make_data())
+
+    assert cli.main([str(FIXTURE)]) == 0
+
+    out = capsys.readouterr().out
+    assert "ENCLOSURE" in out
+    assert report_field(out, "footprint") == "Hammond 1590  112 x 61 mm"
+    assert report_field(out, "candidates") == "1590B, 1590B2, 1590BS"
+
+
+def test_an_enclosure_nobody_could_identify_is_said_out_loud():
+    """A missing line reads as a case nobody wrote down. "This is no footprint we
+    stock" is a legitimate outcome — the catalogue holds 22 and the world holds
+    rather more — and it is not the same statement as saying nothing."""
+    lines = cli.format_enclosure(make_data())
+
+    assert "ENCLOSURE" in lines
+    assert any("not identified" in line for line in lines)
+
+
+def test_a_declared_part_replaces_the_candidate_list():
+    """The question the list asks has been answered, so the report answers it —
+    the same rule the drawing's title block follows. A turned panel says so,
+    because the catalogue's own orientation is what is printed beside it."""
+    data = dataclasses.replace(
+        make_data(),
+        enclosure=EnclosureMatch(
+            family="Hammond 1590",
+            length_mm=120,
+            width_mm=94,
+            candidates=("1590BB", "1590BB2", "1590BBS", "1590C"),
+            rotated=True,
+            selected_part="1590BB",
+        ),
+    )
+
+    lines = cli.format_enclosure(data)
+
+    assert report_field("\n".join(lines), "footprint") == "Hammond 1590  120 x 94 mm (rotated)"
+    assert report_field("\n".join(lines), "part") == "1590BB"
+    assert not [line for line in lines if "candidates" in line]
 
 
 def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, capsys):
@@ -991,6 +1229,47 @@ def svg_tool_summary(root: ET.Element) -> dict[int, tuple[float, int]]:
         assert match is not None, f"unreadable summary line {text.text!r}"
         summary[int(match.group(1))] = (float(match.group(2)), int(match.group(3)))
     return summary
+
+
+def svg_tool_labels(root: ET.Element) -> dict[int, str]:
+    """``{tool: "⌀13/64\\""}`` — how the sheet spells each bit, whatever drawer
+    it came out of. ``svg_tool_summary`` above reads the same lines but coerces
+    the diameter to a float, which only a metric run can survive."""
+    labels = {}
+    for text in root.iter(SVG + "text"):
+        if text.get("class") != "sched-summary":
+            continue
+        match = re.fullmatch(r"T(\d+)  (.+)  QTY \d+", text.text or "")
+        assert match is not None, f"unreadable summary line {text.text!r}"
+        labels[int(match.group(1))] = match.group(2)
+    return labels
+
+
+@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
+def test_the_console_and_the_sheet_spell_a_bit_the_same_way(tmp_path, capsys):
+    """Two renderings of one tool table, parsed back out of what was printed.
+
+    The console spelled a fractional bit in decimal millimetres while the sheet
+    spelled it as a fraction: ``dia 5.159 mm`` beside ``⌀13/64"``, for one bit,
+    in one run. 5.159 mm is a size in no drawer, and the operator who goes
+    looking for it comes back with the 5.2 mm metric bit next to it — the wrong
+    hole, drilled from a document that never said anything false about the
+    number, only about how to buy it.
+
+    Asserted across the emitted bytes rather than in memory, because both
+    renderings read the same ``DrillData`` and would agree there under exactly
+    the bug this is written to catch.
+    """
+    svg = tmp_path / "tar.svg"
+
+    code = cli.main(
+        [str(FIXTURE), "--drill-standard", "fractional", "--emit", f"drawing-svg={svg}"]
+    )
+
+    assert code == 1  # a duplicate hole on the fixture, and nothing worse
+    console = report_tool_labels(capsys.readouterr().out.splitlines())
+    assert console == svg_tool_labels(ET.parse(svg).getroot())
+    assert console == {1: '⌀13/64"', 2: '⌀9/32"'}
 
 
 def svg_balloon_numbers(root: ET.Element) -> list[int]:

@@ -130,10 +130,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--drill-sizes",
         metavar="CSV",
         default=None,
-        # The name is older than its meaning: it used to *be* the whole table
-        # and was ignored unless --diameters table was also passed. It now
-        # narrows the standard, and it is never ignored — so an old invocation
-        # that carried it as a no-op will now take bits out of the drawer.
         help="narrow the standard: only these of its sizes are in the drawer "
         "(every value must be a size the standard has)",
     )
@@ -346,12 +342,10 @@ class OutputSettings:
     Not a shared options bag (ISP): it is the *input* to the per-emitter options
     builders below, each of which picks out only what its own emitter declares.
 
-    Down to one field, and deliberately not deleted for it. The drawing's
-    ``true_size`` overlay lost its flag when the enclosure catalogue took over
-    the job of saying what size the panel really is — a declared ``WxH`` was the
-    operator retyping a datasheet — but the *shape* here is what keeps ``--grid``
-    from being copied into an emitter's options, which is a fault this project
-    has already shipped once.
+    One field, and a class rather than the bare string it currently holds,
+    because the shape is what keeps ``--grid`` out of an emitter's options: the
+    sheet was handed the flag alongside the stage that did the snapping, so data
+    snapped at 0.5 could be stamped 0.25 for a machinist to read.
     """
 
     title: str = ""
@@ -432,22 +426,87 @@ def run_pipeline(
 # ---------------------------------------------------------------------------
 
 
+#: Width of the report's label column, so that every ``  label   value`` block
+#: lines its values up with every other one.
+_LABEL = 17
+
+
+def _field(label: str, value: str) -> str:
+    return f"  {label:<{_LABEL}}{value}"
+
+
 def format_source(data: DrillData) -> list[str]:
+    """Where the bytes came from, and the outline that set the frame.
+
+    The outline is printed twice, nominal beside measured, in the idiom the hole
+    table uses four lines below for exactly the same reason.
+    ``IdentifyHammondFootprint`` rewrites the measurement — the fixture panel
+    comes to 113.000 × 60.000 and leaves as the catalogue's 112 × 61 — so a
+    report quoting only the nominal states a datasheet number as though it were
+    what the artwork said, which is the failure ``ReferenceOutline.raw`` was
+    added to make impossible everywhere else.
+    """
     info = data.source
     lines = [
         "SOURCE",
-        f"  file             {info.path}",
-        f"  drill layer      {info.drill_layer}",
-        f"  reference layer  {info.reference_layer}",
+        _field("file", info.path),
+        _field("drill layer", info.drill_layer),
+        _field("reference layer", info.reference_layer),
     ]
     if info.layers_found:
-        lines.append(f"  layers found     {', '.join(info.layers_found)}")
-    if data.reference is not None:
-        lines.append(
-            f"  reference        {data.reference.width:.3f} x {data.reference.height:.3f} mm"
-        )
+        lines.append(_field("layers found", ", ".join(info.layers_found)))
+    if data.reference is None:
+        lines.append(_field("reference", "(none)"))
     else:
-        lines.append("  reference        (none)")
+        reference = data.reference
+        lines.append(
+            _field(
+                "reference",
+                f"{reference.width:.3f} x {reference.height:.3f} mm  |  "
+                f"raw {reference.raw.width:.4f} x {reference.raw.height:.4f} mm",
+            )
+        )
+    return lines
+
+
+def format_enclosure(data: DrillData) -> list[str]:
+    """Which catalogue enclosure the panel was identified as being drawn for.
+
+    The conclusion reached the sheet and the machine-readable document and
+    stopped short of the report a human reads, so a clean run said nothing at
+    all about the case. A *mismatch* arrives as a diagnostic, which put the
+    silence exactly on the success path — where the operator is looking for
+    confirmation that the artwork is the box they think it is.
+
+    Two things are stated the way the drawing's title block states them, so that
+    the two renderings cannot drift: the catalogue's own footprint rather than
+    the measured outline, and ``candidates`` rather than a part, because a 2-D
+    outline identifies a footprint and several parts share each one. A part is
+    named only when the operator declared it, and it replaces the list rather
+    than joining it — the question the list asks has been answered. The
+    candidates are printed in the order the match handed them over and in full,
+    the one place this differs from the sheet: nothing here is competing for
+    room in a title block, and a part number is what the operator orders by.
+
+    No match is said out loud rather than left blank, for the reason "(none)"
+    is: a footprint this catalogue does not stock is a real outcome and reads
+    nothing like a line somebody forgot to print.
+    """
+    lines = ["", "ENCLOSURE"]
+    match = data.enclosure
+    if match is None:
+        lines.append("  (not identified)")
+        return lines
+    size = f"{match.length_mm} x {match.width_mm} mm"
+    if match.rotated:
+        # The match keeps the catalogue's orientation while every dimension
+        # printed elsewhere is the artwork's, so a turned panel needs saying.
+        size += " (rotated)"
+    lines.append(_field("footprint", f"{match.family}  {size}"))
+    if match.selected_part is not None:
+        lines.append(_field("part", match.selected_part))
+    else:
+        lines.append(_field("candidates", ", ".join(match.candidates)))
     return lines
 
 
@@ -514,23 +573,68 @@ def _diameter_decimals(diameters: Iterable[float]) -> int:
     return decimals
 
 
+#: The parameter ``SnapDiametersToDrillTable.describe`` records the drawer under.
+#: The stage's *name* is read off the class, which this module already holds; the
+#: key inside its payload is a string wherever it is read from.
+_STANDARD_PARAMETER = "standard"
+
+
+def _tool_label(data: DrillData) -> Callable[[float], str]:
+    """How this report spells a diameter, read from the standard that ran.
+
+    Read out of ``processing``, never re-derived from the arguments this run was
+    given: the drawing's schedule takes the spelling from the same record, and a
+    renderer that works its own out is the disagreement ADR-0001 exists to
+    prevent — printed, this time, in the block the operator reads before walking
+    to the drawer.
+
+    The spelling is the drill table's own because no single one serves both
+    drawers. ``dia 5.159 mm`` for a 13/64" bit is unique and truthful at no
+    precision at all: the nearest thing to it that can be bought is a 5.2 mm
+    metric bit, which is a different hole.
+
+    Millimetres are the fallback, on two occasions that are not the same
+    occasion. A run that recorded no standard — a library consumer's document,
+    or a pipeline built without the stage — has no spelling to borrow, and
+    guessing one would put a bit designation in the report that no drawer holds.
+    And a *recorded* standard whose own spelling would print two distinct
+    nominals identically is refused the last word: the metric drawer states
+    2 dp, so a document carrying 6.9998 beside 7.0 would read ``⌀7.00 mm`` twice
+    under two tool numbers, which is the founding defect rendered into the
+    report a human believes. No CLI run can build that document — every nominal
+    it produces comes from a table whose sizes are further apart — but the
+    library can, and a renderer correct only for one entry point's output is not
+    correct.
+    """
+    tools = data.tools()
+    run = data.last_run(SnapDiametersToDrillTable.name)
+    name = None if run is None else run.get(_STANDARD_PARAMETER)
+    if isinstance(name, str):
+        standard = DRILL_STANDARDS.get(name)
+        if standard is not None and len({standard.label(d) for d in tools}) == len(tools):
+            return standard.label
+    decimals = _diameter_decimals(tools)
+    return lambda diameter: f"⌀{format_mm(diameter, decimals)} mm"
+
+
 def format_tools(data: DrillData) -> list[str]:
     """The tool summary. Quantities come from the model, never from a re-count:
     this ``xN``, the machine-readable document's ``count`` field and the
     drawing's QTY column are one computation (:meth:`DrillData.tool_counts`), so
     no two of them can disagree about how many holes a bit drills.
 
-    The precision is the block's own decision (see :func:`_diameter_decimals`)
-    and belongs to no other renderer: what a drill file can print at three
-    decimals is a property of that file's format, not of this report."""
+    How a diameter is *spelled* is likewise not this block's decision — see
+    :func:`_tool_label`, which reads it back out of the run's provenance."""
     tools = data.tools()
     counts = data.tool_counts()
-    decimals = _diameter_decimals(tools)
+    label = _tool_label(data)
+    # Padded to the widest spelling present rather than to a constant: a
+    # fraction and a decimal millimetre are not the same length, and neither is
+    # the same length in every drawer.
+    column = max((len(label(diameter)) for diameter in tools), default=0)
     lines = ["", f"TOOLS ({len(tools)})"]
     for diameter, number in tools.items():
-        lines.append(
-            f"  T{number:<3} dia {format_mm(diameter, decimals)} mm   x{counts[diameter]}"
-        )
+        lines.append(f"  T{number:<3} {label(diameter):<{column}}   x{counts[diameter]}")
     return lines
 
 
@@ -572,7 +676,8 @@ def format_summary(data: DrillData) -> list[str]:
 
 
 def format_report(data: DrillData) -> str:
-    lines = format_source(data) + format_holes(data) + format_tools(data)
+    lines = format_source(data) + format_enclosure(data) + format_holes(data)
+    lines += format_tools(data)
     lines += format_diagnostics(data)
     return "\n".join(lines)
 

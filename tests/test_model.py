@@ -23,11 +23,20 @@ part number out of geometry.
 Fixtures deliberately use the 120 × 94 footprint: length and width differ, so an
 implementation that swaps them cannot pass, and its four candidates line up with
 nothing else being asserted.
+
+The third and fourth sections cover the two accessors every renderer reads the
+document through, and they are here because both were fully invertible while the
+suite stayed green. ``of_severity`` was only ever asserted against documents
+holding *no* diagnostics, where the correct predicate and its exact negation both
+return ``()``; ``rows`` was only ever asserted through ``len()``, which says
+nothing about the order it promises. Every test below is therefore written to
+fail under the negation of the rule it names.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import operator
 
 import pytest
 
@@ -38,6 +47,7 @@ from aidrill.model import (
     Hole,
     RawOutline,
     ReferenceOutline,
+    Severity,
     SourceInfo,
     StageRun,
 )
@@ -436,3 +446,148 @@ def test_the_enclosure_is_re_exported_from_the_package_root():
 
     assert aidrill.EnclosureMatch is EnclosureMatch
     assert "EnclosureMatch" in aidrill.__all__
+
+
+# --------------------------------------------------------------------------
+# selecting findings by severity
+# --------------------------------------------------------------------------
+
+
+def four_findings() -> DrillData:
+    """One ERROR, one INFO and two WARNINGs, in an order no grouping produces.
+
+    The two warnings are deliberately not adjacent: a selector that returned
+    every diagnostic *except* the ones asked for would still hand back a
+    non-empty tuple, and one that lost the order they were appended in would
+    still hand back the right two.
+    """
+    return DrillData(
+        diagnostics=(
+            Diagnostic.warning("off-grid", "hole 4 moved 0.12 mm"),
+            Diagnostic.error("unknown-diameter", "⌀30.0 mm is no bit in the drawer"),
+            Diagnostic.info("duplicate-hole", "two circles in one place"),
+            Diagnostic.warning("unknown-enclosure", "113 × 60 is no catalogue footprint"),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "severity, codes",
+    [
+        (Severity.ERROR, ["unknown-diameter"]),
+        (Severity.WARNING, ["off-grid", "unknown-enclosure"]),
+        (Severity.INFO, ["duplicate-hole"]),
+    ],
+)
+def test_of_severity_selects_that_severity_and_nothing_else(severity, codes):
+    """Matched on ``code``, and asserted whole: which findings came back, in
+    which order, and that every one of them really is the severity asked for."""
+    found = four_findings().of_severity(severity)
+
+    assert [diagnostic.code for diagnostic in found] == codes
+    assert {diagnostic.severity for diagnostic in found} == {severity}
+
+
+def test_the_three_severities_partition_the_findings():
+    """Every diagnostic appears under exactly one severity, and none is lost.
+
+    The report groups by severity and then states a total, so a selector that
+    put a finding in two groups — or in none — would make the two halves of one
+    rendering disagree while each looked plausible on its own.
+    """
+    data = four_findings()
+    selected = [
+        diagnostic
+        for severity in (Severity.ERROR, Severity.WARNING, Severity.INFO)
+        for diagnostic in data.of_severity(severity)
+    ]
+
+    assert len(selected) == len(data.diagnostics)
+    assert set(selected) == set(data.diagnostics)
+
+
+def test_severities_order_by_how_much_they_matter():
+    """``worst_severity`` is a ``max`` over this order, and the exit code is read
+    off that — so the order is a contract, not an implementation detail."""
+    assert Severity.INFO < Severity.WARNING < Severity.ERROR
+    assert Severity.ERROR > Severity.WARNING > Severity.INFO
+    assert Severity.WARNING >= Severity.WARNING and Severity.WARNING <= Severity.WARNING
+    assert max((Severity.INFO, Severity.ERROR, Severity.WARNING)) is Severity.ERROR
+
+
+def test_a_severity_does_not_compare_with_anything_else():
+    """An unorderable pair must raise ``TypeError``, which is what a caller
+    catching a comparison failure expects. Ranking the members through
+    ``list.index`` raised ``ValueError`` instead — a lookup miss reported as
+    though the comparison had been attempted."""
+    with pytest.raises(TypeError):
+        operator.lt(Severity.WARNING, "warning")
+    with pytest.raises(TypeError):
+        operator.ge(Severity.WARNING, 2)
+
+
+# --------------------------------------------------------------------------
+# grouping holes into rows
+# --------------------------------------------------------------------------
+
+
+def row_panel(*holes: Hole) -> DrillData:
+    return DrillData(holes=holes)
+
+
+def test_rows_run_from_the_top_of_the_panel_down():
+    """Descending Y, because the drawing stacks one chain dimension per row and
+    builds the stack from the bottom row outwards — so an ascending order does
+    not reorder the sheet, it changes *which* rows lose their dimension when the
+    stack runs out of room."""
+    panel = row_panel(
+        Hole.from_measurement(0.0, -18.75, 5.0, index=7),
+        Hole.from_measurement(0.0, 18.0, 7.0, index=2),
+        Hole.from_measurement(0.0, 0.0, 3.0, index=5),
+    )
+
+    assert [y for y, _ in panel.rows()] == [18.0, 0.0, -18.75]
+
+
+def test_a_row_runs_left_to_right():
+    """Ascending X within the row. The holes are handed over in an order that is
+    neither ascending nor descending, and named by ``index`` rather than by
+    position, so neither a reversal nor "whatever order they arrived in" passes.
+    """
+    panel = row_panel(
+        Hole.from_measurement(20.0, 18.0, 7.0, index=6),
+        Hole.from_measurement(-40.0, 18.0, 7.0, index=2),
+        Hole.from_measurement(0.0, 18.0, 7.0, index=9),
+    )
+
+    (_, holes), = panel.rows()
+
+    assert [hole.index for hole in holes] == [2, 9, 6]
+    assert [hole.x for hole in holes] == [-40.0, 0.0, 20.0]
+
+
+def test_two_holes_a_hair_apart_in_y_are_one_row():
+    """Y comes back off the artwork through a snap and a frame translation, so
+    two holes the designer drew on one line can differ in the last bits. The
+    bucket absorbs that and nothing wider."""
+    panel = row_panel(
+        Hole.from_measurement(-20.0, 18.0, 7.0, index=3),
+        Hole.from_measurement(20.0, 18.0 + 5e-7, 7.0, index=8),
+    )
+
+    rows = panel.rows()
+
+    assert len(rows) == 1
+    assert [hole.index for hole in rows[0][1]] == [3, 8]
+
+
+def test_two_holes_half_a_millimetre_apart_are_two_rows():
+    """The other side of the same boundary. Half a millimetre is a distance a
+    machinist can see on the panel, and a bucket wide enough to swallow it would
+    dimension two rows of holes as one."""
+    panel = row_panel(
+        Hole.from_measurement(-20.0, 18.0, 7.0, index=3),
+        Hole.from_measurement(20.0, 17.5, 7.0, index=8),
+    )
+
+    assert [y for y, _ in panel.rows()] == [18.0, 17.5]
