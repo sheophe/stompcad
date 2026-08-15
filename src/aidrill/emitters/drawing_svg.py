@@ -10,16 +10,24 @@ diagnostics as notes.
 What ends up on the sheet:
 
 * a border, default A4 landscape, sheet configurable
-* the reference outline as a rounded rectangle, plus an optional dashed
-  ``true_size`` overlay so a drawn outline can be checked against the real
-  enclosure
+* the reference outline as a rounded rectangle
 * chain-dash centrelines and an origin symbol at (0, 0)
 * every hole at true diameter with a centre mark and a numbered balloon
 * one chain dimension per Y row (``DrillData.rows()``) with extension lines,
   plus overall width and height
 * a hole schedule — No. / X / Y / ⌀ / TOOL — with tool numbers taken from
   ``DrillData.tools()`` and never renumbered, and a per-tool quantity summary
-* a title block and a NOTES block, warnings and errors in red
+* a title block naming the enclosure the panel was identified as, and a NOTES
+  block, warnings and errors in red
+
+A dashed ``true_size`` overlay used to be drawn beside the reference outline,
+from a ``WxH`` the operator retyped off a datasheet. It is gone with its option.
+Once the pipeline identifies the enclosure itself, the overlay draws a rectangle
+exactly on top of the normalised reference on every run that matched — two
+identical outlines, one of them presented as a check on the other — and on a run
+that did *not* match, the facts worth having are which case was asked for and
+which one the artwork is. Those are a title block line and a diagnostic now, and
+neither of them is a second rectangle a millimetre away from the first.
 
 Two things about SVG that this module is careful about, both learned the hard
 way:
@@ -45,6 +53,13 @@ both went stale in silence:
 * *What grid* the holes are on comes from the recorded ``snap`` run — see
   :func:`_grid_note`. It arrived through ``DrawingOptions`` instead, defaulting
   to 0.25, so data snapped at 0.5 was stamped 0.25.
+* *How a diameter is spelled* comes from the drill standard the recorded
+  ``snap-diameters`` run names — see :func:`_diameter_label`. A millimetre
+  spelling is honest for the metric drawer and not for the fractional one, where
+  1/64" is 0.396875 mm and every decimal-millimetre label is a rounding of a
+  size that is exact.
+* *Which enclosure* the panel is comes from ``DrillData.enclosure`` — see
+  :func:`_enclosure_note`.
 """
 
 from __future__ import annotations
@@ -52,10 +67,11 @@ from __future__ import annotations
 import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import ClassVar, Iterable, Sequence
+from typing import Callable, ClassVar, Iterable, Sequence
 
 from ..formatting import format_mm
-from ..model import Diagnostic, DrillData, Hole, Severity
+from ..model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
+from ..pipeline import DRILL_STANDARDS
 from .base import register_emitter
 
 __all__ = [
@@ -73,7 +89,6 @@ SVG_NS = "http://www.w3.org/2000/svg"
 INK = "#111111"
 RED = "#c00000"
 FEINT = "#8a8a8a"
-TRUE_SIZE_COLOUR = "#1f6fb4"
 
 #: Conservative glyph-advance estimate, as a fraction of the font size. Used to
 #: truncate strings to their box. Deliberately wider than a real sans face so
@@ -94,6 +109,13 @@ DUP_CODE = "duplicate-hole"
 #: has no import of, or opinion about, which stage wrote it.
 SNAP_STAGE = "snap"
 GRID_PARAMETER = "grid_mm"
+
+#: The same idiom for the schedule's diameter spelling: the ``StageRun`` name
+#: the drill standard is read from, and the parameter within it. The standard
+#: itself is looked up by name in ``DRILL_STANDARDS``, so the record stays a
+#: name rather than 183 sizes.
+DIAMETER_STAGE = "snap-diameters"
+STANDARD_PARAMETER = "standard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +144,6 @@ class DrawingOptions:
     scale: float | None = None
     title: str = ""
     drawing_no: str = ""
-    true_size: tuple[float, float] | None = None
     company: str = "ARTIFACT INSTRUMENTS"
 
 
@@ -330,9 +351,6 @@ class DrawingSvgEmitter:
         if data.reference is not None:
             half_w = max(half_w, data.reference.width / 2.0)
             half_h = max(half_h, data.reference.height / 2.0)
-        if self.options.true_size is not None:
-            half_w = max(half_w, self.options.true_size[0] / 2.0)
-            half_h = max(half_h, self.options.true_size[1] / 2.0)
         for hole in data.holes:
             half_w = max(half_w, abs(hole.x) + hole.diameter / 2.0)
             half_h = max(half_h, abs(hole.y) + hole.diameter / 2.0)
@@ -359,6 +377,14 @@ class DrawingSvgEmitter:
 
     # -- outlines --------------------------------------------------------
     def _draw_outlines(self, root: ET.Element, layout: Layout, data: DrillData) -> None:
+        """One panel, one outline. Which enclosure it is, the title block says.
+
+        There was a second, dashed rectangle here — the operator's own ``WxH``,
+        drawn as a check on the first. See the module docstring: once the
+        pipeline identifies the enclosure, the check either coincides with the
+        outline exactly or is better stated in words than as two rectangles a
+        millimetre apart.
+        """
         group = _sub(root, "g", **{"class": "outlines"})
         if data.reference is not None:
             self._rounded(
@@ -369,18 +395,6 @@ class DrawingSvgEmitter:
                 cls="outline",
                 stroke=INK,
                 stroke_width=0.4,
-            )
-        if self.options.true_size is not None:
-            width, height = self.options.true_size
-            self._rounded(
-                group,
-                layout,
-                width,
-                height,
-                cls="true-size",
-                stroke=TRUE_SIZE_COLOUR,
-                stroke_width=0.35,
-                dash="3 1.5",
             )
 
     def _rounded(
@@ -393,7 +407,6 @@ class DrawingSvgEmitter:
         cls: str,
         stroke: str,
         stroke_width: float = 0.4,
-        dash: str | None = None,
     ) -> None:
         x, y = layout.point(-width / 2.0, height / 2.0)
         radius = min(3.0, width / 4.0, height / 4.0) * layout.scale
@@ -410,7 +423,6 @@ class DrawingSvgEmitter:
             fill="none",
             stroke=stroke,
             stroke_width=stroke_width,
-            stroke_dasharray=dash,
         )
 
     # -- centrelines -----------------------------------------------------
@@ -744,6 +756,7 @@ class DrawingSvgEmitter:
 
         tools = data.tools()
         counts = data.tool_counts()
+        diameter_label = _diameter_label(data)
 
         summary_lines = len(tools)
         available = (y1 - y0) - 8.0
@@ -771,7 +784,9 @@ class DrawingSvgEmitter:
         y = y0 + 8.0 + pitch
         for (cx, anchor), label, cls in zip(
             columns,
-            ("NO.", "X", "Y", "⌀ mm", "TOOL"),
+            # No "mm" in the heading: the cells below carry their own units,
+            # and a fractional standard spells this column ``⌀9/32"``.
+            ("NO.", "X", "Y", "⌀", "TOOL"),
             ("sched-head", "sched-head", "sched-head", "sched-head", "sched-head"),
         ):
             _text(group, cx, y, label, font, anchor=anchor, cls=cls, weight="bold")
@@ -799,7 +814,7 @@ class DrawingSvgEmitter:
                 # same hole.
                 (format_mm(hole.x, 2), "sched-x"),
                 (format_mm(hole.y, 2), "sched-y"),
-                (f"⌀{format_mm(hole.diameter, 2)}", "sched-dia"),
+                (diameter_label(hole.diameter), "sched-dia"),
                 (f"T{tools[hole.diameter]}", "sched-tool"),
             )
             for (cx, anchor), (value, cls) in zip(columns, cells):
@@ -844,7 +859,7 @@ class DrawingSvgEmitter:
                 x0 + 2.0,
                 y,
                 _fits(
-                    f"T{tool}  ⌀{format_mm(diameter, 2)} mm  QTY {counts[diameter]}",
+                    f"T{tool}  {diameter_label(diameter)}  QTY {counts[diameter]}",
                     font,
                     width - 4.0,
                 ),
@@ -897,6 +912,7 @@ class DrawingSvgEmitter:
         lines = [
             f"TITLE  {options.title or 'PANEL DRILL DRAWING'}",
             f"DRG No  {options.drawing_no or '—'}",
+            _enclosure_note(data),
             f"SHEET 1 OF 1   SIZE {layout.sheet.name}",
             f"UNITS mm   SCALE {layout.scale_label}",
             f"{_grid_note(data)}   HOLES {len(data.holes)}",
@@ -1100,6 +1116,121 @@ def _grid_note(data: DrillData) -> str:
     if grid > 0:
         return f"GRID {_trim(float(grid))} mm"
     return "GRID OFF"
+
+
+def _millimetre_label(diameter: float) -> str:
+    """``⌀7.00 mm`` — the fallback spelling, when no standard was recorded.
+
+    Through ``format_mm`` rather than an f-string for the reason the schedule's
+    X and Y are: a value that rounds to zero from below printed ``-0.00`` here
+    while the Excellon writer printed ``0.000`` for the same hole.
+    """
+    return f"⌀{format_mm(diameter, 2)} mm"
+
+
+def _diameter_label(data: DrillData) -> Callable[[float], str]:
+    """How the schedule spells a diameter, taken from the standard that ran.
+
+    The drill table owns the display form, and ``DrillStandard.label`` is a
+    *function* rather than a decimal precision because no single precision can
+    serve both drawers: metric sizes are unique and truthful at 2 dp, while the
+    fractional series is truthful at none — 1/64" is 0.396875 mm, and ``⌀0.40
+    mm`` is a bit that exists nowhere. A fractional bit's honest name is its
+    fraction, which is also what is stamped on it.
+
+    Read out of provenance the way :func:`_grid_note` reads the grid, and by
+    name: ``snap-diameters`` records ``standard`` as a word, so the emitter
+    looks it up in ``DRILL_STANDARDS`` and holds no table of its own. A name the
+    registry does not hold — a hand-built standard, or a document written by a
+    later version of this tool — resolves to nothing, and the fallback states
+    millimetres rather than inventing a spelling for a drawer it cannot see.
+    Narrowing does not matter here: ``select`` copies the label through, so the
+    registry's entry spells a narrowed run's sizes exactly as the run would.
+    """
+    run = data.last_run(DIAMETER_STAGE)
+    name = None if run is None else run.get(STANDARD_PARAMETER)
+    # ``StageRun`` payloads are generic, so a value that is not a name cannot
+    # name a standard. This guard is for the type checker rather than for the
+    # output — every ``ParameterValue`` is hashable, so ``get`` would return
+    # ``None`` for a non-name anyway — and it is kept because the alternative is
+    # a lookup whose key type is unchecked. Unlike ``_grid_note``'s
+    # ``isinstance``, which is load-bearing: a recorded ``True`` really would
+    # print there.
+    if not isinstance(name, str):
+        return _millimetre_label
+    standard = DRILL_STANDARDS.get(name)
+    if standard is None:
+        return _millimetre_label
+    return standard.label
+
+
+def _enclosure_note(data: DrillData) -> str:
+    """What the title block says the panel is, read from the identified match.
+
+    ``HAMMOND 1590  112 × 61 mm  CANDIDATES B / B2 / BS``. Three decisions in
+    one line, each of which the drawing would otherwise get wrong:
+
+    * **The catalogue footprint, never the measured outline.** The artwork comes
+      to 113.000 × 60.000 for a 1590B; 112 × 61 is the number on the datasheet
+      the operator orders the box by, and the number every other consumer of
+      this panel has already agreed on.
+    * **Candidates, never a part.** A 2-D outline identifies a footprint — 37
+      catalogue parts collapse into 22 footprints because many differ only in
+      height — so the sheet lists every part sharing the outline and names one
+      only when the operator declared it with ``--case``. The declared part
+      replaces the list rather than joining it: the question the list asks has
+      been answered.
+    * **The order it was given.** ``candidates`` is rendered as handed over,
+      because ordering it here would be the emitter deciding a fact the match
+      already carries. Sorting happens to be invisible today — ``footprints()``
+      sorts, so all 22 production footprints arrive alphabetical — which is
+      exactly why it must not be done here: whoever builds the match owns the
+      order, and a matcher that later ordered by height would find the drawing
+      quietly undoing it.
+
+    ``rotated`` is stated because the two numbers on the sheet would otherwise
+    contradict each other: the match keeps the catalogue's orientation while the
+    drawing dimensions the artwork's, so a turned 1590B is dimensioned 61 × 112
+    beside an enclosure line reading 112 × 61.
+
+    No match at all is said out loud, for the reason :func:`_grid_note` says
+    ``GRID NOT RECORDED``. A missing line reads as a Hammond case nobody wrote
+    down, and "this is not a case we stock" is a legitimate outcome — the
+    catalogue holds 22 footprints and the world holds rather more.
+    """
+    match = data.enclosure
+    if match is None:
+        return "ENCLOSURE NOT IDENTIFIED"
+    size = f"{match.length_mm} × {match.width_mm} mm"
+    if match.rotated:
+        size += " ROTATED"
+    if match.selected_part is not None:
+        tail = f"PART {match.selected_part}"
+    else:
+        tail = "CANDIDATES " + " / ".join(_designator(part, match) for part in match.candidates)
+    return f"{match.family.upper()}  {size}  {tail}"
+
+
+def _designator(part: str, match: EnclosureMatch) -> str:
+    """``1590B`` under a ``Hammond 1590`` heading is the ``B`` of that series.
+
+    The datasheet groups the parts this way and so does the line: the series is
+    already printed, and repeating it four times over is what pushes a
+    four-candidate footprint past the width of the title block, where ``_fits``
+    truncates the last candidate away entirely. A designator that does not begin
+    with the series — or one that *is* the series — is left exactly as it came,
+    since eliding it would leave nothing to read.
+    """
+    words = match.family.split()
+    # A family of no words leaves ``series`` empty, which the test below then
+    # answers correctly on its own: every string starts with "" and every
+    # non-empty one differs from it, so the part comes back whole. No separate
+    # guard for it, because a branch no input can distinguish is a branch no
+    # test can pin.
+    series = words[-1] if words else ""
+    if part.startswith(series) and part != series:
+        return part[len(series):]
+    return part
 
 
 def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[float | int | str]:
