@@ -26,12 +26,18 @@ balloon numbers no longer matched the order the machine drilled in.
 The only transforms permitted are frame translation — delegated to
 :meth:`DrillData.with_origin`, never hand-rolled — and unit conversion, via
 :attr:`Units.per_mm`, at the moment of formatting.
+
+Two invariants are therefore checked rather than assumed, because ``emit``
+serialises whatever ``DrillData`` a library consumer hands it: the tool table
+must stay injective *as written*, and ``LOWER_LEFT`` must yield no negative
+coordinate. Declining to write a file is permitted; repairing one is not — see
+``docs/adr/0001-pipeline-and-emitter-adapters.md``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Iterable
+from typing import ClassVar, Iterable, Mapping
 
 from ..errors import EmitterError
 from ..formatting import format_mm
@@ -83,6 +89,8 @@ class ExcellonEmitter:
     def emit(self, data: DrillData) -> str:
         framed = self._reframe(data)
         tools = framed.tools()
+        tokens = self._tool_tokens(tools)
+        self._reject_negative_coordinates(framed)
 
         lines: list[str] = [
             "M48",
@@ -92,7 +100,7 @@ class ExcellonEmitter:
             _UNIT_HEADER[self.options.units],
         ]
         # One definition per nominal diameter, numbered by the model. Not by us.
-        lines += [f"T{number}C{self._value(diameter)}" for diameter, number in tools.items()]
+        lines += [f"T{number}C{tokens[diameter]}" for diameter, number in tools.items()]
         lines += ["%", "G90", "G05"]
 
         for diameter, number in tools.items():
@@ -117,6 +125,49 @@ class ExcellonEmitter:
             return data.with_origin(self.options.origin)
         except ValueError as exc:  # unknown origin, or a reference lost in flight
             raise EmitterError(f"excellon: {exc}") from exc
+
+    def _tool_tokens(self, tools: Mapping[float, int]) -> dict[float, str]:
+        """Render each nominal once, *after* unit conversion, and refuse a clash.
+
+        Conversion is where the resolution actually is: 3.02 and 3.03 mm are two
+        unmistakable tools in millimetres and one ``0.119`` at three decimals in
+        inches. Merging the two is the pipeline's call, never this file's; all
+        an emitter may do about a distinction it cannot print is decline to.
+        """
+        seen: dict[str, float] = {}
+        tokens: dict[float, str] = {}
+        for diameter in tools:
+            token = self._value(diameter)
+            if token in seen:
+                raise EmitterError(
+                    f"excellon: nominal diameters {seen[token]!r} and {diameter!r} mm "
+                    f"both print as C{token} at {self.options.decimals} decimals in "
+                    f"{_UNIT_WORD[self.options.units]}, so the file would load the "
+                    f"same tool twice — raise the precision, or normalise them upstream"
+                )
+            seen[token] = diameter
+            tokens[diameter] = token
+        return tokens
+
+    def _reject_negative_coordinates(self, data: DrillData) -> None:
+        """Check the promise ``LOWER_LEFT`` makes, against what will be written.
+
+        Read from the rendered token rather than the float, so a hole a fraction
+        of a print unit outside the outline — which prints ``0.000`` and drills
+        exactly where it should — is not reported as off the panel. Holes are
+        checked in pipeline order, so the index named is the first offender.
+        """
+        if self.options.origin is not Origin.LOWER_LEFT:
+            return
+        for hole in data.holes:
+            x, y = self._value(hole.x), self._value(hole.y)
+            if x.startswith("-") or y.startswith("-"):
+                raise EmitterError(
+                    f"excellon: hole {hole.index} reframes to X{x}Y{y}, a negative "
+                    f"coordinate — a lower-left origin promises every coordinate is "
+                    f"positive, so this hole lies outside the reference outline; check "
+                    f"the reference layer, or emit with origin=Origin.CENTRE"
+                )
 
     def _title(self, data: DrillData) -> str:
         return self.options.title or data.source.path or "untitled"

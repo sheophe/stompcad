@@ -227,8 +227,102 @@ def test_emitter_does_not_deduplicate_coincident_holes():
 
 
 # --------------------------------------------------------------------------
+# representability: two nominals the chosen format cannot tell apart
+# --------------------------------------------------------------------------
+
+
+def test_two_nominals_that_render_to_the_same_token_are_refused():
+    """A measured 6.9998 and 7.0000 that no stage merged are two tools to the
+    model and one ``C7.000`` on the page — the ``T2C7.000`` / ``T3C7.000`` defect
+    reached through formatting instead of clustering. The message must name both
+    nominals and the token, so the operator need not re-derive the collision;
+    lookaheads rather than a sequence, because the order it names them in is
+    presentation, and a test that fails when prose is reordered is a nuisance."""
+    data = make_data(
+        at(0.0, 0.0, 6.9998, index=1),
+        at(10.0, 0.0, 7.0000, index=3),
+        reference=ReferenceOutline(50.0, 50.0),
+    )
+
+    assert len(data.tools()) == 2  # the model still sees two nominals
+
+    with pytest.raises(EmitterError, match=r"(?=.*6\.9998)(?=.*\b7\.0\b)(?=.*C7\.000)"):
+        emit(data)
+
+
+def test_inch_output_refuses_diameters_it_cannot_separate():
+    """The collision depends on the units, so the token must be built *after*
+    conversion. ``decimals=3`` in inches is only 0.0254 mm of resolution: 3.02
+    and 3.03 mm are two comfortably distinct tools in millimetres and one
+    ``0.119`` in inches."""
+    data = make_data(
+        at(0.0, 0.0, 3.02, index=0),
+        at(10.0, 0.0, 3.03, index=1),
+        reference=ReferenceOutline(50.0, 50.0),
+    )
+
+    assert tool_definitions(emit(data)) == {1: "3.020", 2: "3.030"}  # fine in mm
+
+    with pytest.raises(EmitterError, match="0.119"):
+        emit(data, units=Units.INCHES)
+
+
+def test_raising_the_precision_makes_the_same_two_nominals_representable():
+    """The refusal is about representability, not about clustering. The emitter
+    must never quietly raise the precision itself — but when the caller does,
+    the very same data emits, with two genuinely distinct tools."""
+    data = make_data(
+        at(0.0, 0.0, 6.9998, index=1),
+        at(10.0, 0.0, 7.0000, index=3),
+        reference=ReferenceOutline(50.0, 50.0),
+    )
+
+    assert tool_definitions(emit(data, decimals=4)) == {1: "6.9998", 2: "7.0000"}
+
+
+# --------------------------------------------------------------------------
 # coordinates: frame, order, grouping
 # --------------------------------------------------------------------------
+
+
+def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
+    """SPEC §7 promises LOWER_LEFT keeps every coordinate positive. A hole
+    outside the reference outline breaks that promise silently — the file still
+    parses, and the machine drives off the fixture. The offender is named by
+    ``index``, the stable identity, not by position in the tuple.
+
+    Both axes are exercised, one alone each time: a check that tested only the
+    pair would still pass while half of it was missing, and a hole to the left
+    of the outline is at least as likely in the field as one below it.
+    """
+    y_only = make_data(
+        at(0.0, 0.0, 5.0, index=9),
+        at(0.0, -60.0, 5.0, index=4),
+        reference=ReferenceOutline(50.0, 50.0),
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 4\b"):
+        emit(y_only)
+
+    x_only = make_data(
+        at(-60.0, 0.0, 5.0, index=7), reference=ReferenceOutline(50.0, 50.0)
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 7\b"):
+        emit(x_only)
+
+
+def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
+    """The promise is about the coordinates as *written*, so the check reads the
+    rendered token, not the float behind it. A hole four ten-thousandths of a
+    millimetre past the edge prints ``0.000`` and drills exactly where it should;
+    refusing it would turn representation noise into an operator-facing failure.
+    """
+    data = make_data(
+        at(-25.0004, 0.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0)
+    )
+
+    assert "X0.000Y25.000" in lines(emit(data))
 
 
 def test_lower_left_matches_the_fixture_ground_truth():
