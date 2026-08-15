@@ -84,6 +84,18 @@ NM_SLACK = 1
 # --------------------------------------------------------------------------
 
 
+def pt_from_nm(nm: float) -> float:
+    """A length in (possibly fractional) nanometres, stated as PDF points.
+
+    The inverse of ``units.nm_from_pt``, and deliberately not in ``units``:
+    nothing in the library wants it, because a nanometre is where a length
+    *arrives* and never where one starts. The one caller is a fixture that has
+    to place an anchor a stated fraction of a nanometre away from a whole one,
+    so it lives here, in the file that needs it.
+    """
+    return nm * 72.0 / 25_400_000.0
+
+
 def circle_path(
     cx: float,
     cy: float,
@@ -443,15 +455,98 @@ class TestFitCircle:
         """The same crossing, for the two fields the diameter fixture cannot see.
 
         ``test_the_conversion_happens_once_and_on_the_diameter`` sits on the
-        origin, and a centroid of four converted anchors is zero there however
-        it is assembled — so it says nothing at all about ``cx_nm`` or
-        ``cy_nm``. This circle is turned 45 degrees and centred off both axes,
-        on a pair of points chosen so that the mean of its converted anchors
-        lands exactly on the half-nanometre *below* the answer. ``% 4 == 2``
-        states that without picking a rounding rule for the mean, which is the
-        point: half-up, half-even and truncation all give the same nanometre,
-        and all three are one short of what converting the finished centroid
-        gives.
+        origin, where a centroid of four converted anchors is zero however it is
+        assembled — so it says nothing at all about ``cx_nm`` or ``cy_nm``.
+
+        A *symmetric* circle cannot say it either, and that is the trap this
+        fixture exists to leave behind. Put the anchors antipodally and the mean
+        of the four converted anchors lands exactly on a half-nanometre, so
+        which integer it becomes is settled by a tie-break rule rather than by
+        the order of the arithmetic — and a tie is decidable four ways. Half-up,
+        half-even, round-half-to-odd and truncation each pick one, so a tied
+        fixture can only ever refute the rules that pick the far side, and
+        whichever rule picks the near side survives it. Rotating the fixture
+        does not help; it only moves the tie.
+
+        So this path is *asymmetric*, and legally so: ``fit_circle`` measures a
+        1% relative tolerance precisely to admit measurement noise, and a circle
+        whose anchors are a nanometre out of true on a one-millimetre radius is
+        noise a thousand times finer than any artwork. The assertion below
+        states the margin — the worst anchor is off the mean radius by less than
+        a thousandth of the budget — so this is ordinary accepted input and not
+        a shape the fitter is being talked into.
+
+        Every one of the eight anchor coordinates sits 0.26 nm above a whole
+        nanometre. Converting an anchor therefore throws 0.26 nm away, and doing
+        it four times before averaging drops the mean by 0.26 nm: from N + 0.51,
+        which rounds to N + 1, to N + 0.25, which rounds to N under half-up,
+        half-even, half-to-odd and truncation alike. On x, N is 0 and the answer
+        is 1 nm; on y, N is 2 and the answer is 3 nm. ``% 4 == 1`` states that
+        the mean is a quarter and not a tie, which is the whole difference.
+
+        The two axes carry different anchor sums and different answers on
+        purpose: where they coincide, one assertion stands in for the other and
+        a mutation to ``cx_nm`` alone is indistinguishable from one to ``cy_nm``
+        alone.
+
+        One thing no fixture can do, and this docstring will not claim it does:
+        take the *ceiling* of the converted-anchor mean and the answer comes
+        back right. It has to. Each conversion loses under half a nanometre, so
+        the mean of four of them is always within half a nanometre of the real
+        centroid, whose own nearest integer is therefore always one of that
+        mean's two neighbours — some directed rounding of the wrong arithmetic
+        always agrees, on every fixture that could ever be built. A ceiling is
+        not a rule anyone writes for a measurement, which is why the four that
+        are stay refuted.
+        """
+        radius_nm = 1_000_000.0
+        anchors = tuple(
+            (pt_from_nm(x), pt_from_nm(y))
+            for x, y in (
+                (radius_nm + 1.26, 3.26),
+                (0.26, radius_nm + 3.26),
+                (-radius_nm + 0.26, 3.26),
+                (0.26, -radius_nm + 0.26),
+            )
+        )
+        path = kappa_correct_path(anchors)
+
+        pairs = _cubics(path)
+        assert pairs is not None and len(pairs) == 4
+        assert tuple(start for start, _ in pairs) == anchors
+
+        # asymmetric, and far inside the tolerance that makes it legal input
+        cx = sum(p[0] for p in anchors) / 4.0
+        cy = sum(p[1] for p in anchors) / 4.0
+        radius = sum(math.dist((cx, cy), p) for p in anchors) / 4.0
+        worst = max(abs(math.dist((cx, cy), p) - radius) for p in anchors)
+        assert worst > 0.0  # not the symmetric case ...
+        assert worst < 0.01 * radius / 1000.0  # ... and nowhere near the 1% budget
+
+        for axis, answer in ((0, 1), (1, 3)):
+            converted = sum(nm_from_pt(a[axis]) for a in anchors)
+            assert converted % 4 == 1  # the mean is exactly N + 0.25, not a tie ...
+            assert converted // 4 == answer - 1  # ... and N is one short, round it how you like
+
+        found = fit_circle(path)
+        assert found is not None
+        assert found.cx_nm == 1
+        assert found.cy_nm == 3
+
+    def test_the_centre_takes_the_upper_nanometre_where_the_anchor_mean_ties(self) -> None:
+        """A tied centre fixture, which can speak about the tie-break and no more.
+
+        This circle is turned 45 degrees and centred off both axes, on a pair of
+        points chosen so that the mean of its converted anchors lands exactly on
+        the half-nanometre *below* the answer: 2 116 666.5 on x, 2 751 666.5 on
+        y. ``% 4 == 2`` states the tie without picking a rule to settle it —
+        which is the limit of what this fixture can do. Half-even and truncation
+        take the tie down and are a nanometre short, so both die here; half-up
+        and half-to-odd take it up and land on the right integer by luck.
+        ``test_recovers_a_circle_under_rotation`` ties the other way and kills
+        half-up in turn, and the ordering itself is pinned by
+        ``test_the_centre_converts_after_the_centroid_and_not_before``, whose
+        anchor mean is not a tie at all.
 
         The two coordinates are pinned to different integers on purpose. A
         fixture centred on the diagonal would let one assertion stand in for the
@@ -499,8 +594,13 @@ class TestFitCircle:
         Exact, and not within ``NM_SLACK``: a nanometre of slack is the whole
         margin between converting the finished centroid and averaging four
         converted anchors, so it is precisely the one nanometre this fixture is
-        able to speak about. Allowing it here accepted 3 878 944 and 714 366 —
-        the anchor-mean answer on both axes — as readily as the right pair.
+        able to speak about. The four converted anchors mean exactly
+        3 878 943.5 and 714 365.5 here — a tie whose *upper* side is wrong on
+        both axes — so allowing a nanometre accepted 3 878 944 and 714 366 as
+        readily as the right pair. Rounding that tie up is half-up and half-even
+        alike, which is what makes this the fixture that kills them;
+        ``test_the_centre_takes_the_upper_nanometre_where_the_anchor_mean_ties``
+        ties the other way and kills truncation.
         """
         ctm = rotation(37.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), ctm))
