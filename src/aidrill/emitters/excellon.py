@@ -41,6 +41,12 @@ with it: the drawing has a NOTES block, the JSON document has ``diagnostics``.
 A drill file has nothing, so an incomplete or nonsensical one does not read as
 damaged — it reads as a drill file for a different panel, and it reads that way
 to a machinist about to put it into a machine.
+
+The header therefore also states which frame the coordinates are in. It declared
+``absolute``, ``metric`` and ``decimal`` while saying nothing about where zero
+was, so the same hole was ``X16.500Y48.000`` here and ``-40.00, 18.00`` on the
+sheet beside it — every number different, by exactly half the outline, with
+neither document explaining the other.
 """
 
 from __future__ import annotations
@@ -98,7 +104,7 @@ class ExcellonEmitter:
     # -- public ----------------------------------------------------------
     def emit(self, data: DrillData) -> str:
         self._reject_errors(data)
-        framed = self._reframe(data)
+        framed, origin_comment = self._reframe(data)
         self._reject_non_finite(framed)
         tools = framed.tools()
         tokens = self._tool_tokens(tools)
@@ -110,6 +116,7 @@ class ExcellonEmitter:
             f";FORMAT={{-:-/ absolute / {_UNIT_WORD[self.options.units]} / decimal}}",
             "FMAT,2",
             _UNIT_HEADER[self.options.units],
+            origin_comment,
         ]
         # One definition per nominal diameter, numbered by the model. Not by us.
         lines += [f"T{number}C{tokens[diameter]}" for diameter, number in tools.items()]
@@ -158,15 +165,35 @@ class ExcellonEmitter:
             f"which can carry them"
         )
 
-    def _reframe(self, data: DrillData) -> DrillData:
-        """Translate into the requested frame using the shared model transform."""
-        if self.options.origin is Origin.LOWER_LEFT and data.reference is None:
-            raise EmitterError(
-                "excellon: a lower-left origin requires a reference outline, and there "
-                "is none — pass origin=Origin.CENTRE or supply a reference layer"
+    def _reframe(self, data: DrillData) -> tuple[DrillData, str]:
+        """Translate into the requested frame, and say in one breath what it is.
+
+        The header's frame comment is built here rather than beside the other
+        header lines because this is the one place that knows both what was
+        asked for and what the shift came to. A file stating a frame it was not
+        written in would be worse than the silence it replaces, and two places
+        deciding the frame is exactly how that happens.
+
+        Frame translation itself is delegated to the shared model transform;
+        ``with_origin`` is also the authority on which origins exist, so an
+        origin neither branch below describes never reaches the header — it
+        raises three lines further down instead.
+        """
+        if self.options.origin is Origin.LOWER_LEFT:
+            if data.reference is None:
+                raise EmitterError(
+                    "excellon: a lower-left origin requires a reference outline, and there "
+                    "is none — pass origin=Origin.CENTRE or supply a reference layer"
+                )
+            frame = (
+                f"lower-left corner of the reference outline, "
+                f"X{self._value(data.reference.width / 2.0)} "
+                f"Y{self._value(data.reference.height / 2.0)} from its centre"
             )
+        else:
+            frame = "centre of the reference outline, the canonical frame"
         try:
-            return data.with_origin(self.options.origin)
+            return data.with_origin(self.options.origin), f";ORIGIN={frame}"
         except ValueError as exc:  # unknown origin, or a reference lost in flight
             raise EmitterError(f"excellon: {exc}") from exc
 

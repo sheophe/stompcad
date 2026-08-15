@@ -121,11 +121,12 @@ def test_header_and_footer_appear_in_the_documented_order():
     assert out[2] == ";FORMAT={-:-/ absolute / metric / decimal}"
     assert out[3] == "FMAT,2"
     assert out[4] == "METRIC,TZ"
-    assert out[5] == "T1C5.000"
-    assert out[6] == "T2C7.000"
-    assert out[7] == "%"
-    assert out[8] == "G90"
-    assert out[9] == "G05"
+    assert out[5].startswith(";ORIGIN=")
+    assert out[6] == "T1C5.000"
+    assert out[7] == "T2C7.000"
+    assert out[8] == "%"
+    assert out[9] == "G90"
+    assert out[10] == "G05"
     assert out[-2] == "T0"
     assert out[-1] == "M30"
 
@@ -483,9 +484,17 @@ def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
 
 
 def test_lower_left_without_a_reference_outline_raises_emitter_error():
+    """The message is asserted, not merely the exception type.
+
+    Without it this test cannot tell its own guard from the one two lines
+    below: strip the check and ``with_origin``'s ``ValueError`` is caught and
+    re-raised as an ``EmitterError`` just the same, so a bare ``pytest.raises``
+    stays green while the only thing the guard produces — the sentence telling
+    the caller which of the two ways out to take — has gone.
+    """
     data = make_data(at(0.0, 0.0, 7.0, index=0))
 
-    with pytest.raises(EmitterError):
+    with pytest.raises(EmitterError, match="origin=Origin.CENTRE or supply a reference layer"):
         emit(data)
 
 
@@ -509,6 +518,48 @@ def test_centre_origin_needs_no_reference_outline():
     data = make_data(at(-5.0, -5.0, 7.0, index=0))
 
     assert "X-5.000Y-5.000" in lines(emit(data, origin=Origin.CENTRE))
+
+
+def test_the_header_says_which_frame_the_coordinates_are_in():
+    """The drill file and the sheet beside it describe one panel in two frames.
+
+    The fixture's first ⌀7 is ``-40.00, 18.00`` on the drawing and in the JSON,
+    and ``X16.500Y48.000`` here: every number differs, by exactly the half-width
+    and half-height of the outline. The file already declares ``absolute``,
+    ``metric`` and ``decimal`` and says nothing at all about where zero is, so
+    a machinist cross-checking the two documents has nothing to reconcile them
+    with. The shift is stated as well as the corner, because naming the frame
+    only tells them *that* the numbers differ.
+    """
+    out = lines(emit(fixture_data()))
+    stated = [ln for ln in out if ln.startswith(";ORIGIN=")]
+
+    assert len(stated) == 1
+    assert "lower-left" in stated[0]
+    assert "56.500" in stated[0] and "30.000" in stated[0]
+    assert "X16.500Y48.000" in out  # the frame it actually wrote
+
+
+def test_the_header_says_centre_when_the_centre_frame_was_written():
+    """Two frames, two statements. A header hard-coding the common one would be
+    wrong precisely for the caller who asked for the other."""
+    out = lines(emit(fixture_data(), origin=Origin.CENTRE))
+    stated = [ln for ln in out if ln.startswith(";ORIGIN=")]
+
+    assert len(stated) == 1
+    assert "centre" in stated[0]
+    assert "lower-left" not in stated[0]
+    assert "X-40.000Y18.000" in out
+
+
+def test_the_stated_shift_is_in_the_units_the_file_is_written_in():
+    """56.500 mm is 2.224 inches. A shift stated in millimetres in an inch file
+    would be a second frame statement disagreeing with the coordinates under
+    it — the disagreement this line exists to end."""
+    stated = [ln for ln in lines(emit(fixture_data(), units=Units.INCHES)) if ln.startswith(";ORIGIN=")]
+
+    assert f"{56.5 * Units.INCHES.per_mm:.3f}" in stated[0]
+    assert "56.500" not in stated[0]
 
 
 def test_coordinates_are_grouped_under_their_tool_ascending_by_diameter():
