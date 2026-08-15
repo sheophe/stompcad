@@ -5,6 +5,13 @@ description = "Extract drill data from Adobe Illustrator artwork and emit it in 
 requires-python = ">=3.10"
 dependencies = ["pikepdf>=9"]
 
+# pdfplumber is a development dependency and must stay one: it reads
+# docs/1590.pdf in tools/extract_1590.py to generate src/aidrill/enclosures.py,
+# and the shipped catalogue is a literal table. Nothing under src/aidrill
+# imports it, so installing aidrill must never pull it in.
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "pdfplumber"]
+
 [project.scripts]
 aidrill = "aidrill.cli:main"
 
