@@ -23,10 +23,10 @@ from pikepdf import Array, Dictionary, Name, String
 
 from aidrill.errors import EmptyLayerError, LayerNotFoundError, SourceError
 from aidrill.geometry import KAPPA, CurveTo, MoveTo, fit_circle
-from aidrill.model import Severity
+from aidrill.model import RawDrillData, RawHole, RawOutline, Severity
 from aidrill.protocols import Source
 from aidrill.sources import AiPdfSource
-from aidrill.units import nm_from_mm, nm_from_pt
+from aidrill.units import mm_from_pt
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 
@@ -34,10 +34,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 #: relative to the centre of the reference outline, Y up. The first entry is
 #: drawn twice — identically — and both occurrences must survive the source.
 #:
-#: Millimetres, not the nanometres the model holds, because this is the
-#: independent measurement of the artwork and it was taken in millimetres.
-#: Restating it in the unit under test would make the fixture agree with the
-#: conversion by construction, which is the one thing it is here to check.
+#: An independent human measurement of the artwork, taken in millimetres, which
+#: is what the source now reports in — so it is compared field for field with no
+#: conversion in between to agree with by construction.
 EXPECTED_HOLES = [
     (-39.9906, 18.0000, 6.9998),
     (-39.9906, 18.0000, 6.9998),
@@ -49,12 +48,11 @@ EXPECTED_HOLES = [
     (19.0047, -18.7500, 5.0001),
 ]
 
-#: What four decimal places of millimetre can pin: a micron either way, which
-#: is 1000 nm. The same strength the millimetre assertions always carried, and
-#: not a licence for the conversion to be loose — exactness is pinned by
-#: ``test_the_fixture_measures_the_same_panel_it_always_did``, which states the
-#: nanometre to the unit.
-TOL_NM = 1_000
+#: One thousandth of a millimetre: the last digit the drill file and the drawing
+#: print, and therefore the smallest disagreement either artifact can show. A
+#: difference this tolerance swallows is one nothing downstream could render, so
+#: tightening it would only pin arithmetic no reader of an output can see.
+TOL_MM = 0.001
 
 #: The fixture's artboard. Present so the tests can assert it is *not* used as
 #: the frame: A4 landscape is the sheet Illustrator happened to be set to, not
@@ -157,7 +155,7 @@ def build_pdf(
     return path
 
 
-def match_multiset(holes, expected, tol_nm=TOL_NM):
+def match_multiset(holes, expected, tol=TOL_MM):
     """Pair each expected (x, y, d) with a distinct hole, or fail loudly.
 
     Order is not asserted — the source reports stream order, which is a
@@ -167,12 +165,11 @@ def match_multiset(holes, expected, tol_nm=TOL_NM):
     remaining = list(holes)
     unmatched = []
     for x, y, d in expected:
-        x_nm, y_nm, d_nm = nm_from_mm(x), nm_from_mm(y), nm_from_mm(d)
         for hole in remaining:
             if (
-                abs(hole.x_nm - x_nm) <= tol_nm
-                and abs(hole.y_nm - y_nm) <= tol_nm
-                and abs(hole.diameter_nm - d_nm) <= tol_nm
+                abs(hole.x - x) <= tol
+                and abs(hole.y - y) <= tol
+                and abs(hole.diameter - d) <= tol
             ):
                 remaining.remove(hole)
                 break
@@ -180,6 +177,17 @@ def match_multiset(holes, expected, tol_nm=TOL_NM):
             unmatched.append((x, y, d))
     assert not unmatched, f"no hole matched {unmatched}; left over: {remaining}"
     assert not remaining, f"unexpected extra holes: {remaining}"
+
+
+def warnings(data):
+    """The WARNING diagnostics of a read.
+
+    Spelt here rather than borrowed from ``DrillData.of_severity``: a
+    ``RawDrillData`` carries findings but answers no questions about them, and
+    reaching for a query method the type does not have is how a source ends up
+    being asked to behave like the thing it is quantised into.
+    """
+    return [d for d in data.diagnostics if d.severity is Severity.WARNING]
 
 
 @pytest.fixture(scope="module")
@@ -194,6 +202,18 @@ def data():
 
 def test_satisfies_the_source_protocol():
     assert isinstance(AiPdfSource(FIXTURE), Source)
+
+
+def test_what_comes_back_is_a_measurement(data):
+    """A source measures. Everything it hands over is still in millimetres.
+
+    ``isinstance`` against ``Source`` cannot say this — a ``Protocol`` checks
+    that ``read`` exists, never what it returns — so the one structural fact
+    the quantisation phase depends on is asserted directly.
+    """
+    assert isinstance(data, RawDrillData)
+    assert isinstance(data.reference, RawOutline)
+    assert all(isinstance(h, RawHole) for h in data.holes)
 
 
 def test_default_layer_names_match_the_spec():
@@ -236,22 +256,16 @@ def test_missing_file_raises_source_error(tmp_path):
 def test_reference_outline_is_the_largest_non_circular_background_path(data):
     reference = data.reference
     assert reference is not None
-    assert reference.width_nm == pytest.approx(nm_from_mm(113.0000), abs=TOL_NM)
-    assert reference.height_nm == pytest.approx(nm_from_mm(60.0001), abs=TOL_NM)
-    assert reference.centre_x_nm == pytest.approx(nm_from_mm(148.4999), abs=TOL_NM)
-    assert reference.centre_y_nm == pytest.approx(nm_from_mm(105.0000), abs=TOL_NM)
+    assert reference.width == pytest.approx(113.0000, abs=TOL_MM)
+    assert reference.height == pytest.approx(60.0001, abs=TOL_MM)
+    assert data.centre == pytest.approx((148.4999, 105.0000), abs=TOL_MM)
 
 
 def test_the_artboard_is_not_the_frame(data):
     """A4 landscape is the sheet, not the enclosure (SPEC 6.6)."""
     assert data.reference is not None
-    half_mm = nm_from_mm(0.5)
-    assert data.reference.width_nm != pytest.approx(
-        nm_from_pt(A4_LANDSCAPE_PT[0]), abs=half_mm
-    )
-    assert data.reference.height_nm != pytest.approx(
-        nm_from_pt(A4_LANDSCAPE_PT[1]), abs=half_mm
-    )
+    assert data.reference.width != pytest.approx(mm_from_pt(A4_LANDSCAPE_PT[0]), abs=0.5)
+    assert data.reference.height != pytest.approx(mm_from_pt(A4_LANDSCAPE_PT[1]), abs=0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -278,43 +292,54 @@ def test_the_duplicated_hole_is_reported_twice(data):
     coincident = [
         h
         for h in data.holes
-        if abs(h.x_nm - nm_from_mm(-39.9906)) <= TOL_NM
-        and abs(h.y_nm - nm_from_mm(18.0)) <= TOL_NM
+        if abs(h.x - (-39.9906)) <= TOL_MM and abs(h.y - 18.0) <= TOL_MM
     ]
     assert len(coincident) == 2
-    # Every field but ``index``, and it stays exhaustive as Hole gains more.
+    # Every field but ``index``, and it stays exhaustive as RawHole gains more.
     assert replace(coincident[0], index=coincident[1].index) == coincident[1]
     assert coincident[0].index != coincident[1].index
 
 
-def test_raw_provenance_equals_the_nominal_values(data):
-    """This source measures; it does not normalise (SPEC 3, SPEC 5)."""
-    for hole in data.holes:
-        assert hole.raw.x_nm == hole.x_nm
-        assert hole.raw.y_nm == hole.y_nm
-        assert hole.raw.diameter_nm == hole.diameter_nm
-        assert hole.residual_nm == (0, 0, 0)
+def test_the_identity_counter_runs_over_circles_not_over_paths(tmp_path):
+    """A path that is not a hole must not spend a hole's identity.
+
+    Counting drill-layer *paths* instead of the circles fitted out of them is
+    the plausible slip, and on this layer it shifts every index by one: the two
+    holes come back as 1 and 2. Nothing about them looks wrong afterwards —
+    both are still distinct, still deterministic, still in traversal order —
+    but every diagnostic that names a hole names the wrong one, and the
+    stray line that caused it is not in any artifact to be blamed.
+    """
+    pdf = build_pdf(
+        tmp_path / "counter.pdf",
+        {
+            "Background": "10 10 200 100 re f",
+            "Drill": "20 20 m 40 40 l S " + circle_ops(60, 35, 10) + " " + circle_ops(150, 35, 8),
+        },
+    )
+    holes = AiPdfSource(pdf).read().holes
+    assert [h.index for h in holes] == [0, 1]
 
 
 def test_diameters_are_not_clustered(data):
     """6.9998 and 7.0000 must both survive; SnapDiametersToDrillTable resolves them."""
-    diameters = {h.diameter_nm for h in data.holes}
+    diameters = {h.diameter for h in data.holes}
     assert len(diameters) > 2
 
 
 def test_no_snapping_has_happened(data):
-    """-39.9906 is off a 0.25 grid; SnapPositions is what fixes that.
+    """The source reports where a circle is, not where a grid would put it.
 
-    An exact remainder, not a distance inside a tolerance: whole nanometres
-    divide by a whole-nanometre grid, so "on the grid" has an exact answer and
-    asking it approximately would only blunt it.
+    The leftmost hole is at -39.9906 mm, which no 0.25 grid contains. Snapping
+    it belongs to the quantisation phase and would move it to -40.0 — 0.0094 mm,
+    nine times the last digit the drill file prints, so this is a difference an
+    artifact shows rather than one only arithmetic can see.
     """
-    grid_nm = nm_from_mm(0.25)
-    assert any(h.x_nm % grid_nm != 0 for h in data.holes)
+    assert min(h.x for h in data.holes) == pytest.approx(-39.9906, abs=TOL_MM)
 
 
 def test_the_source_adds_no_warnings(data):
-    assert data.of_severity(Severity.WARNING) == ()
+    assert warnings(data) == []
 
 
 # ---------------------------------------------------------------------------
@@ -364,13 +389,12 @@ def test_an_invisible_no_paint_rectangle_cannot_become_the_reference_outline(tmp
 
     assert len(AiPdfSource(pdf).layer_subpaths("Background")) == 1
     assert data.reference is not None
-    assert data.reference.width_nm == nm_from_pt(100.0)
-    assert data.reference.height_nm == nm_from_pt(50.0)
+    assert data.reference.width == mm_from_pt(100.0)
+    assert data.reference.height == mm_from_pt(50.0)
     # The filled rectangle's centre is the circle's centre, so the hole is at
-    # exactly 0,0 — the same nanometre subtracted from itself, with no float
-    # left to leave a residue behind.
+    # exactly 0,0.
     hole = data.holes[0]
-    assert (hole.x_nm, hole.y_nm) == (0, 0)
+    assert (hole.x, hole.y) == (0.0, 0.0)
 
 
 def test_a_bare_n_path_on_the_drill_layer_is_not_a_hole(tmp_path):
@@ -385,7 +409,7 @@ def test_a_bare_n_path_on_the_drill_layer_is_not_a_hole(tmp_path):
     assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 1
     holes = AiPdfSource(pdf).read().holes
     assert len(holes) == 1
-    assert holes[0].diameter_nm == pytest.approx(nm_from_pt(20.0), abs=TOL_NM)
+    assert holes[0].diameter == pytest.approx(mm_from_pt(20.0), abs=TOL_MM)
 
 
 def test_a_bare_n_still_ends_the_path_it_discards(tmp_path):
@@ -425,9 +449,9 @@ def test_a_path_that_clips_and_paints_is_kept(tmp_path):
     )
     data = AiPdfSource(pdf).read()
     assert data.reference is not None
-    assert data.reference.width_nm == pytest.approx(nm_from_mm(70.556), abs=TOL_NM)
-    assert data.reference.height_nm == pytest.approx(nm_from_mm(35.278), abs=TOL_NM)
-    assert data.of_severity(Severity.WARNING) == ()
+    assert data.reference.width == pytest.approx(70.556, abs=TOL_MM)
+    assert data.reference.height == pytest.approx(35.278, abs=TOL_MM)
+    assert warnings(data) == []
 
 
 def test_a_stroked_circle_that_also_clips_is_still_a_hole(tmp_path):
@@ -464,7 +488,7 @@ def test_a_clip_that_paints_nothing_is_still_discarded(tmp_path):
     assert len(AiPdfSource(pdf).layer_subpaths("Background")) == 1
     assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 1
     assert data.reference is not None
-    assert data.reference.width_nm == pytest.approx(nm_from_mm(70.556), abs=TOL_NM)
+    assert data.reference.width == pytest.approx(70.556, abs=TOL_MM)
 
 
 def test_clip_rectangles_cannot_become_the_reference_outline():
@@ -478,6 +502,7 @@ def test_clip_rectangles_cannot_become_the_reference_outline():
 def test_without_a_reference_the_frame_falls_back_to_the_page():
     """Coordinates stay honest: page space, measured from the MediaBox corner."""
     data = AiPdfSource(FIXTURE, reference_layer="Drill").read()
+    assert data.centre == (0.0, 0.0)
     shifted = [(x + 148.4999, y + 105.0000, d) for x, y, d in EXPECTED_HOLES]
     match_multiset(data.holes, shifted)
     warning = next(d for d in data.diagnostics if d.code == "reference-outline-not-found")
@@ -631,8 +656,8 @@ def test_the_ctm_is_applied(tmp_path):
     )
     circle = fit_circle(AiPdfSource(pdf).layer_subpaths("Drill")[0])
     assert circle is not None
-    assert (circle.cx_nm, circle.cy_nm) == (nm_from_pt(100.0), nm_from_pt(100.0))
-    assert circle.diameter_nm == nm_from_pt(20.0)
+    assert (circle.cx, circle.cy) == (100.0, 100.0)
+    assert circle.diameter == 20.0
 
 
 def test_nested_cm_operators_compose_in_stream_order(tmp_path):
@@ -651,8 +676,8 @@ def test_nested_cm_operators_compose_in_stream_order(tmp_path):
     circle = fit_circle(AiPdfSource(pdf).layer_subpaths("Drill")[0])
     assert circle is not None
     # inner translate first: (0,0) -> (50,0) -> scaled -> (100,0)
-    assert (circle.cx_nm, circle.cy_nm) == (nm_from_pt(100.0), 0)
-    assert circle.diameter_nm == nm_from_pt(20.0)
+    assert (circle.cx, circle.cy) == (100.0, 0.0)
+    assert circle.diameter == 20.0
 
 
 def test_the_ctm_stack_unwinds(tmp_path):
@@ -666,11 +691,7 @@ def test_the_ctm_stack_unwinds(tmp_path):
     )
     circle = fit_circle(AiPdfSource(pdf).layer_subpaths("Drill")[0])
     assert circle is not None
-    assert (circle.cx_nm, circle.cy_nm, circle.diameter_nm) == (
-        nm_from_pt(50.0),
-        nm_from_pt(50.0),
-        nm_from_pt(10.0),
-    )
+    assert (circle.cx, circle.cy, circle.diameter) == (50.0, 50.0, 10.0)
 
 
 def test_an_unbalanced_restore_does_not_crash(tmp_path):
@@ -699,8 +720,8 @@ def test_form_xobjects_are_walked_with_their_matrix(tmp_path):
     assert len(paths) == 1
     circle = fit_circle(paths[0])
     assert circle is not None
-    assert (circle.cx_nm, circle.cy_nm) == (nm_from_pt(120.0), nm_from_pt(100.0))
-    assert circle.diameter_nm == nm_from_pt(20.0)
+    assert (circle.cx, circle.cy) == (120.0, 100.0)
+    assert circle.diameter == 20.0
 
 
 def test_the_source_is_re_exported_from_the_package_root():
@@ -732,8 +753,8 @@ def test_the_closing_painters_mark_ink(tmp_path, paint):
             "Drill": circle_ops(60, 35, 10, paint=paint),
         },
     )
-    assert AiPdfSource(pdf).read().holes[0].diameter_nm == pytest.approx(
-        nm_from_pt(20.0), abs=TOL_NM
+    assert AiPdfSource(pdf).read().holes[0].diameter == pytest.approx(
+        mm_from_pt(20.0), abs=TOL_MM
     )
 
 
@@ -752,7 +773,7 @@ def test_malformed_operators_are_skipped_not_fatal(tmp_path):
     data = AiPdfSource(pdf).read()
     assert len(data.holes) == 1
     assert data.reference is not None
-    assert data.reference.width_nm == nm_from_pt(100.0)
+    assert data.reference.width == mm_from_pt(100.0)
 
 
 def test_a_do_that_names_nothing_is_ignored(tmp_path):
@@ -911,8 +932,14 @@ def test_a_form_without_its_own_resources_falls_back_to_the_pages(tmp_path):
     assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 1
 
 
-def test_units_are_whole_nanometres(tmp_path):
-    """72 pt to the inch, converted once, at the source boundary."""
+def test_lengths_arrive_in_millimetres(tmp_path):
+    """72 pt to the inch: the source names the unit, and the name is millimetres.
+
+    283.4646 pt is 100 mm to four decimals, and the panel is built out of the
+    point values a drawing tool would write for a round metric size — so a
+    source that forgot the conversion, or applied it twice, misses by a factor
+    of 2.8 rather than by anything a tolerance argument could cover.
+    """
     pdf = build_pdf(
         tmp_path / "units.pdf",
         {
@@ -922,53 +949,10 @@ def test_units_are_whole_nanometres(tmp_path):
     )
     data = AiPdfSource(pdf).read()
     assert data.reference is not None
-    assert data.reference.width_nm == pytest.approx(nm_from_mm(100.0), abs=TOL_NM)
-    assert data.reference.height_nm == pytest.approx(nm_from_mm(50.0), abs=TOL_NM)
+    assert data.reference.width == pytest.approx(100.0, abs=TOL_MM)
+    assert data.reference.height == pytest.approx(50.0, abs=TOL_MM)
     hole = data.holes[0]
-    assert (hole.x_nm, hole.y_nm, hole.diameter_nm) == pytest.approx(
-        (nm_from_mm(10.0), 0, nm_from_mm(10.0)), abs=TOL_NM
-    )
-    # every one of them an ``int``, not an integral float: the model refuses the
-    # second, and it is the source's job never to offer it one
-    assert {type(v) for v in (hole.x_nm, hole.y_nm, hole.diameter_nm)} == {int}
-
-
-def test_the_frame_is_finished_in_points_and_converted_once(tmp_path):
-    """Every length the frame needs crosses into nanometres as one finished value.
-
-    The corner-first spelling — ``nm_from_pt(x1) - nm_from_pt(x0)`` for a span,
-    ``(nm_from_pt(x0) + nm_from_pt(x1)) // 2`` for a centre — rounds two
-    operands and combines them afterwards, so it can be a nanometre out and can
-    be out in either direction. ``tar.ai`` cannot say so: its outline lands on
-    the same ``(148_499_901, 105_000_037)`` under both spellings, which is why
-    this panel is built for the boundary instead.
-
-    It is 0.2 x 0.7 pt — absurd as an enclosure and exact as an instrument.
-    All four lengths move under the corner-first spelling, the width down and
-    the height up, so nothing here can pass by a shared bias; and the hole sits
-    on the outline's centre, where the frame is the whole of its answer, so a
-    moved origin puts it a nanometre off zero instead of on it.
-    """
-    pdf = build_pdf(
-        tmp_path / "quantum.pdf",
-        {
-            "Background": "0.5 0.3 m 0.7 0.3 l 0.7 1.0 l 0.5 1.0 l h f",
-            "Drill": circle_ops(0.6, 0.65, 0.25),
-        },
-    )
-    # the fixture is a chosen boundary, not a coincidence: both axes disagree
-    for low, high in ((0.5, 0.7), (0.3, 1.0)):
-        assert nm_from_pt(high - low) != nm_from_pt(high) - nm_from_pt(low)
-        assert nm_from_pt((low + high) / 2.0) != (nm_from_pt(low) + nm_from_pt(high)) // 2
-
-    data = AiPdfSource(pdf).read()
-    reference = data.reference
-    assert reference is not None
-    assert reference.width_nm == 70_556  # corner-first: 70_555
-    assert reference.height_nm == 246_944  # corner-first: 246_945
-    assert reference.centre_x_nm == 211_667  # corner-first: 211_666
-    assert reference.centre_y_nm == 229_306  # corner-first: 229_305
-    assert (data.holes[0].x_nm, data.holes[0].y_nm) == (0, 0)
+    assert (hole.x, hole.y, hole.diameter) == pytest.approx((10.0, 0.0, 10.0), abs=TOL_MM)
 
 
 def test_y_is_up(tmp_path):
@@ -980,7 +964,7 @@ def test_y_is_up(tmp_path):
             "Drill": circle_ops(100, 80, 5),  # above the outline's centre
         },
     )
-    assert AiPdfSource(pdf).read().holes[0].y_nm > 0
+    assert AiPdfSource(pdf).read().holes[0].y > 0.0
 
 
 def test_a_non_zero_mediabox_origin_is_handled(tmp_path):
@@ -994,8 +978,8 @@ def test_a_non_zero_mediabox_origin_is_handled(tmp_path):
         media=(100, 100, 500, 400),
     )
     data = AiPdfSource(pdf).read()
-    assert data.holes[0].x_nm == pytest.approx(nm_from_pt(10.0), abs=TOL_NM)
-    assert data.holes[0].y_nm == 0
+    assert data.holes[0].x == pytest.approx(mm_from_pt(10.0), abs=TOL_MM)
+    assert data.holes[0].y == 0.0
 
 
 def test_the_largest_non_circular_path_wins(tmp_path):
@@ -1008,7 +992,7 @@ def test_the_largest_non_circular_path_wins(tmp_path):
     )
     reference = AiPdfSource(pdf).read().reference
     assert reference is not None
-    assert reference.width_nm == pytest.approx(nm_from_mm(100.0), abs=TOL_NM)
+    assert reference.width == pytest.approx(100.0, abs=TOL_MM)
 
 
 def test_circles_on_the_reference_layer_are_not_the_outline(tmp_path):
@@ -1022,34 +1006,33 @@ def test_circles_on_the_reference_layer_are_not_the_outline(tmp_path):
     )
     reference = AiPdfSource(pdf).read().reference
     assert reference is not None
-    assert reference.width_nm == pytest.approx(nm_from_mm(100.0), abs=TOL_NM)
+    assert reference.width == pytest.approx(100.0, abs=TOL_MM)
 
 
-def test_the_fixture_measures_the_same_panel_it_always_did(data):
-    """SPEC 9's ground truth, in whole nanometres.
+def test_the_source_rounds_nothing(data):
+    """What comes back is the measurement, and no quantiser's opinion of it.
 
-    113.00001388888887 mm is 113_000_014 nm: the conversion rounds once and
-    never again, and these are the integers it lands on. Exact rather than
-    approximate on purpose — the millimetre assertions elsewhere in this file
-    can only pin a micron, so without this one nothing says which nanometre the
-    boundary chose.
+    ``113.00001388888887`` is the panel as ``tar.ai`` draws it. What the value
+    rules out is every rounding that could have been done early: 113.000014 is
+    the outline put through the nanometre boundary before anything asked it to
+    be, and 112 is the outline snapped to the Hammond footprint it turns out to
+    match. That snap is ``IdentifyHammondFootprint``'s to make, and it needs a
+    measurement to make it from — a source that pre-empted either rounding
+    would leave the stage choosing a case from a number already moved.
 
-    What it does *not* pin is where in ``fit_circle`` the rounding happens. Real
-    artwork does not sit on a half-nanometre: convert each of a circle's four
-    anchors separately instead of the finished centre and radius and this
-    fixture's diameters drift by up to 0.56 nm, and every one of them still
-    rounds to the same integer — the closest comes within 0.0011 nm of noticing
-    and does not. That claim needs a fixture built for it, and it has one in
-    ``test_geometry.py::TestFitCircle::test_the_conversion_happens_once_and_on_the_diameter``.
+    ``float``, because ``RawOutline`` refuses an ``int``: the JSON emitter and
+    the drawing both print the measurement, so a nanometre count reaching a
+    millimetre field puts 113 000 014.000 mm on a sheet a machinist reads.
     """
-    assert data.reference is not None
-    assert data.reference.raw.width_nm == 113_000_014
-    assert {h.raw.diameter_nm for h in data.holes} == {5_000_096, 6_999_817, 6_999_993}
+    reference = data.reference
+    assert reference is not None
+    assert type(reference.width) is float
+    assert reference.width == 113.00001388888887
 
 
 def test_fixture_reference_matches_its_measured_outline(data):
     """Cross-check: the frame centre is where the drill row says it is."""
-    row = [h for h in data.holes if abs(h.y_nm - nm_from_mm(18.0)) <= TOL_NM]
+    row = [h for h in data.holes if abs(h.y - 18.0) <= TOL_MM]
     assert len(row) == 6
-    assert abs(min(h.x_nm for h in row) - nm_from_mm(-39.9906)) <= TOL_NM
-    assert abs(max(h.x_nm for h in row) - nm_from_mm(40.0000)) <= TOL_NM
+    assert abs(min(h.x for h in row) - (-39.9906)) <= TOL_MM
+    assert abs(max(h.x for h in row) - 40.0000) <= TOL_MM

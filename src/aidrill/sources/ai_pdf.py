@@ -6,12 +6,18 @@ valid PDF, so no Illustrator, no scripting bridge and no export step is needed:
 
 What this module does is deliberately narrow (SPEC 2.1). It walks the page's
 content stream, resolves the graphics state, recovers circles, and states them
-in whole nanometres relative to the reference outline. It does **not** snap, dedupe,
-cluster diameters or validate anything — those are pipeline stages, and doing
-them here is precisely the layering mistake this rewrite exists to undo. Eight
-circles drawn is eight holes reported, even when two of them coincide: only the
-pipeline may decide that two marks are one hole, and only it can report having
-done so.
+in millimetres relative to the reference outline. It measures and rounds
+nothing: what comes out is a ``RawDrillData``, and every length in it is the
+float the artwork drew. Quantising is the next phase's business, because only
+it knows the answer set a length has to land on — a drill size, a grid pitch, a
+catalogue footprint — and a source that rounded first would put two roundings
+in series and make their order matter.
+
+It does **not** snap, dedupe, cluster diameters or validate anything either —
+those are pipeline stages, and doing them here is precisely the layering
+mistake this rewrite exists to undo. Eight circles drawn is eight holes
+reported, even when two of them coincide: only the pipeline may decide that two
+marks are one hole, and only it can report having done so.
 
 The awkward parts of the format, all verified against a real Illustrator 30.7
 file:
@@ -60,8 +66,8 @@ from ..geometry import (
     multiply,
     transform,
 )
-from ..model import Diagnostic, DrillData, Hole, ReferenceOutline, SourceInfo
-from ..units import nm_from_pt
+from ..model import Diagnostic, RawDrillData, RawHole, RawOutline, SourceInfo
+from ..units import mm_from_pt
 
 __all__ = ["AiPdfSource"]
 
@@ -133,8 +139,8 @@ class AiPdfSource:
         self._require_layer(layer, names)
         return tuple(p.path for p in paths if layer in p.layers)
 
-    def read(self) -> DrillData:
-        """Parse the file into ``DrillData`` in the canonical frame."""
+    def read(self) -> RawDrillData:
+        """Parse the file into ``RawDrillData`` in the canonical frame."""
         names, paths = self._extract()
         self._require_layer(self.drill_layer, names)
         self._require_layer(self.reference_layer, names)
@@ -163,7 +169,7 @@ class AiPdfSource:
             # numbers true to the file and lets the caller decide; silently
             # falling back to the artboard centre would look plausible and be
             # wrong (SPEC 6.6).
-            origin_nm = (0, 0)
+            centre = (0.0, 0.0)
             reference = None
             diagnostics.append(
                 Diagnostic.warning(
@@ -181,42 +187,29 @@ class AiPdfSource:
             )
         else:
             x0, y0, x1, y1 = outline
-            # The bbox is floating-point points, so each of the four lengths the
-            # frame needs crosses into nanometres here, once each: the width and
-            # height as spans, the centre as a point. Every one of them is
-            # finished in points and converted at the end, never assembled from
-            # converted parts — the same rule `fit_circle` follows, for the same
-            # reason. ``test_the_frame_is_finished_in_points_and_converted_once``
-            # sits on the nanometre the two spellings differ by; ``tar.ai`` sits
-            # nowhere near it and cannot be asked.
-            origin_nm = (nm_from_pt((x0 + x1) / 2.0), nm_from_pt((y0 + y1) / 2.0))
-            reference = ReferenceOutline.from_measurement(
-                width_nm=nm_from_pt(x1 - x0),
-                height_nm=nm_from_pt(y1 - y0),
-                centre_x_nm=origin_nm[0],
-                centre_y_nm=origin_nm[1],
+            centre = (mm_from_pt((x0 + x1) / 2.0), mm_from_pt((y0 + y1) / 2.0))
+            reference = RawOutline(
+                width=mm_from_pt(x1 - x0),
+                height=mm_from_pt(y1 - y0),
             )
 
         # Traversal order is deterministic for a given file, so numbering the
         # circles as they are met gives every hole an identity that is the same
         # on every run — which is what lets a diagnostic name one.
-        #
-        # The subtraction is whole-nanometre arithmetic: both operands crossed
-        # the boundary already, so re-centring the panel is exact and cannot
-        # introduce a rounding of its own.
         holes = tuple(
-            Hole.from_measurement(
-                x_nm=c.cx_nm - origin_nm[0],
-                y_nm=c.cy_nm - origin_nm[1],
-                diameter_nm=c.diameter_nm,
+            RawHole(
+                x=mm_from_pt(c.cx) - centre[0],
+                y=mm_from_pt(c.cy) - centre[1],
+                diameter=mm_from_pt(c.diameter),
                 index=i,
             )
             for i, c in enumerate(circles)
         )
 
-        return DrillData(
+        return RawDrillData(
             holes=holes,
             reference=reference,
+            centre=centre,
             diagnostics=tuple(diagnostics),
             source=SourceInfo(
                 path=str(self.path),
