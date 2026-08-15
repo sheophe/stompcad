@@ -37,6 +37,7 @@ from typing import Any, Callable, Iterable, Sequence, TextIO, get_args, get_type
 
 from .emitters import DrawingOptions, ExcellonOptions, JsonOptions, available, get_emitter
 from .errors import AidrillError
+from .formatting import format_mm
 from .model import Diagnostic, DrillData, Severity
 from .pipeline import (
     CheckReferenceSize,
@@ -387,16 +388,54 @@ def format_holes(data: DrillData) -> list[str]:
     return lines
 
 
+#: The report's usual precision. Three decimals reads well and matches the
+#: default the drill file and the drawing print at.
+_REPORT_DECIMALS = 3
+#: Widen no further than this: past nine decimals a float's digits are noise.
+_MAX_REPORT_DECIMALS = 9
+
+
+def _diameter_decimals(diameters: Iterable[float]) -> int:
+    """The fewest decimals that keep every nominal diameter distinct in print.
+
+    Derived from the values actually present, exactly as
+    :attr:`ClusterDiameters.precision` is derived from its tolerance rather than
+    fixed — and for the same reason. A fixed 3 dp is lossy, and what it loses is
+    the one distinction this project exists to preserve: under
+    ``--diameter-tolerance 0.0001`` a panel measuring 6.9998 and 7.0000 keeps two
+    nominal diameters, and the tool summary printed both as ``7.000``. Two lines,
+    the same diameter, different tool numbers — the founding defect of ADR-0001,
+    rendered into the report a human reads and believes.
+
+    Widening only when a collision exists keeps every ordinary panel reading as
+    it always did.
+    """
+    values = list(diameters)
+    decimals = _REPORT_DECIMALS
+    while decimals < _MAX_REPORT_DECIMALS:
+        if len({format_mm(value, decimals) for value in values}) == len(values):
+            break
+        decimals += 1
+    return decimals
+
+
 def format_tools(data: DrillData) -> list[str]:
     """The tool summary. Quantities come from the model, never from a re-count:
     this ``xN``, the machine-readable document's ``count`` field and the
     drawing's QTY column are one computation (:meth:`DrillData.tool_counts`), so
-    no two of them can disagree about how many holes a bit drills."""
+    no two of them can disagree about how many holes a bit drills.
+
+    The precision is the block's own decision (see :func:`_diameter_decimals`)
+    and belongs to no other renderer: what a drill file can print at three
+    decimals is a property of that file's format, not of this report."""
     tools = data.tools()
     counts = data.tool_counts()
+    decimals = _diameter_decimals(tools)
     lines = ["", f"TOOLS ({len(tools)})"]
     for diameter, number in tools.items():
-        lines.append(f"  T{number:<3} dia {diameter:.3f} mm   x{counts[diameter]}")
+        lines.append(
+            f"  T{number:<3} dia {format_mm(diameter, decimals)} mm   x{counts[diameter]}"
+        )
     return lines
 
 

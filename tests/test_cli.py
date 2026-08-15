@@ -521,6 +521,59 @@ def test_tool_summary_counts_come_from_the_model(capsys):
     assert not [line for line in lines if "x2" in line or "x1" in line], lines
 
 
+def report_tool_diameters(lines) -> list[str]:
+    """The rendered diameter of each ``TOOLS`` line, as printed."""
+    return [match.group(1) for match in (re.search(r"dia ([\d.]+) mm", line) for line in lines) if match]
+
+
+def test_the_tools_report_never_prints_one_diameter_as_two_tools():
+    """The founding defect, in the renderer a human reads.
+
+    ``T2C7.000`` beside ``T3C7.000`` is what ADR-0001 exists to prevent, and the
+    Excellon emitter now refuses to write it. The CLI's ``TOOLS`` block had the
+    same trap for the same reason — its own fixed 3 dp — and printed::
+
+        T2   dia 7.000 mm   x1
+        T3   dia 7.000 mm   x1
+
+    for two genuinely distinct nominals, which is the report stating something
+    false. The precision follows the values present, so distinct nominals stay
+    distinguishable however tight the tolerance was.
+    """
+    data = make_data(
+        holes=[
+            Hole.from_measurement(-20.0, 18.0, 6.9998, index=0),
+            Hole.from_measurement(20.0, 18.0, 7.0, index=1),
+        ]
+    )
+    assert len(data.tools()) == 2  # the fixture must actually pose the problem
+
+    printed = report_tool_diameters(cli.format_tools(data))
+
+    assert len(printed) == 2
+    assert len(set(printed)) == 2, f"two tools printed the same diameter: {printed}"
+
+
+def test_the_tools_report_keeps_its_usual_three_decimals(fake_source, capsys):
+    """Widening is for the collision, not for every panel: an ordinary run must
+    read exactly as it always did."""
+    assert report_tool_diameters(cli.format_tools(make_data())) == ["5.000", "7.000"]
+
+
+@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
+def test_a_tight_tolerance_does_not_make_the_report_lie(capsys):
+    """End to end: the fixture's 6.9998 and 7.0000 survive as two nominals under
+    ``--diameter-tolerance 0.0001``, and the report must show two tools a reader
+    can tell apart."""
+    assert cli.main([str(FIXTURE), "--diameter-tolerance", "0.0001"]) == 1
+
+    tools_block = capsys.readouterr().out.split("TOOLS")[1].splitlines()
+    printed = report_tool_diameters(tools_block)
+
+    assert len(printed) == 3
+    assert len(set(printed)) == 3, f"the TOOLS report claims two identical tools: {printed}"
+
+
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
     hole = Hole.from_measurement(-19.9906, 18.0021, 6.9998, index=0)
     fake_source(make_data(holes=[hole]))
