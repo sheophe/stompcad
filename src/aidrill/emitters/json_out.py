@@ -5,11 +5,11 @@ values behind them, the reference outline, the tool table, every diagnostic, and
 where the data came from. A consumer can rebuild an identical ``DrillData`` from
 this document, which is what ``test_json_emitter.py`` asserts.
 
-Document shape (version 3)::
+Document shape (version 4)::
 
     {
       "format": "aidrill-drill-data",
-      "version": 3,
+      "version": 4,
       "units": "mm",                     # always; canonical frame, never inches
       "origin": "centre",                # centre of the reference outline, Y up
       "source":     {"path", "drill_layer", "reference_layer",
@@ -21,7 +21,9 @@ Document shape (version 3)::
                      "raw": {"x", "y", "diameter"},
                      "index"}, …],                         # pipeline order
       "diagnostics": [{"severity", "code", "message", "location", "data"}, …],
-      "processing":  [{"name", "parameters": {…}}, …]       # in the order run
+      "processing":  [{"name", "parameters": {…}}, …],      # in the order run
+      "enclosure":  {"family", "length_mm", "width_mm", "candidates",
+                     "rotated", "selected_part"} | null
     }
 
 Version 2 added three things, each of them something a consumer would otherwise
@@ -54,6 +56,15 @@ recomputed. The round-trip test did not notice for the classic reason — its
 fixture outline was unsnapped, so ``raw`` and nominal coincided and a dropped
 key rebuilt itself.
 
+Version 4 added ``enclosure``, and it is the same hole one stage further on: the
+entire product of enclosure matching reached no output whatsoever. A consumer
+was handed an outline snapped to 112 × 61 with nothing saying it had been
+identified as anything, so the only route back to "which enclosure is this
+panel?" was to re-implement the matcher's tolerance rule against the catalogue —
+a second, divergent copy of a decision, which is precisely what ADR-0001 was
+written about. ``processing`` could not stand in: it records that
+``identify-enclosure`` ran and with what tolerance, never what it concluded.
+
 Key order is fixed and part of the contract, so diffing two runs shows real
 changes rather than dictionary reshuffling. New keys are appended — at the top
 level, within a hole, within a diagnostic — so a v1 reader indexing by position
@@ -73,13 +84,21 @@ import json
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from ..model import Diagnostic, DrillData, Hole, ReferenceOutline, SourceInfo, StageRun
+from ..model import (
+    Diagnostic,
+    DrillData,
+    EnclosureMatch,
+    Hole,
+    ReferenceOutline,
+    SourceInfo,
+    StageRun,
+)
 from .base import register_emitter
 
 __all__ = ["JsonOptions", "JsonEmitter", "FORMAT", "VERSION"]
 
 FORMAT = "aidrill-drill-data"
-VERSION = 3
+VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +142,7 @@ class JsonEmitter:
             "holes": [_hole(h, tools[h.diameter]) for h in data.holes],
             "diagnostics": [_diagnostic(d) for d in data.diagnostics],
             "processing": [_stage_run(r) for r in data.processing],
+            "enclosure": _enclosure(data.enclosure),
         }
 
 
@@ -208,4 +228,40 @@ def _stage_run(run: StageRun) -> dict[str, Any]:
             key: list(value) if isinstance(value, tuple) else value
             for key, value in run.parameters
         },
+    }
+
+
+def _enclosure(match: EnclosureMatch | None) -> dict[str, Any] | None:
+    """Which catalogue enclosure the panel was identified as, ``null`` if none.
+
+    ``null`` rather than an absent key, and never an object naming nothing: "no
+    footprint matched" is an answer a consumer reads, and a match with an empty
+    ``candidates`` would be a second spelling of it that some reader eventually
+    treats as a match.
+
+    Every field is passed through as the matcher left it. ``candidates`` keeps
+    its order — sorting here would be an emitter re-deciding a pipeline fact,
+    and the drawing and this document would then print two orders of one list.
+    ``length_mm``/``width_mm`` stay ``int``, because they are the datasheet's
+    whole millimetres and not a measurement: emitting ``112.0`` beside a
+    ``reference.width`` of ``112.0`` would make the catalogue's nominal figure
+    indistinguishable from the artwork's, which is the distinction
+    ``ReferenceOutline.raw`` was added to preserve one field earlier. They also
+    stay in the catalogue's orientation when ``rotated`` is set — transposing
+    them would make the footprint unfindable in the datasheet it came from.
+
+    ``selected_part`` is ``None`` unless the operator declared a case. Nothing
+    here may fill it in from ``candidates``: a 2-D outline identifies a
+    footprint and never a part, so a plausible-looking guess would put a part
+    number the artwork cannot support onto a machinist's sheet.
+    """
+    if match is None:
+        return None
+    return {
+        "family": match.family,
+        "length_mm": match.length_mm,
+        "width_mm": match.width_mm,
+        "candidates": list(match.candidates),
+        "rotated": match.rotated,
+        "selected_part": match.selected_part,
     }

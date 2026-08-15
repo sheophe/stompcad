@@ -8,12 +8,16 @@ raw provenance are all part of the contract other tools code against.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+
+import pytest
 
 from aidrill.emitters.base import REGISTRY, get_emitter
 from aidrill.emitters.json_out import JsonEmitter, JsonOptions
 from aidrill.model import (
     Diagnostic,
     DrillData,
+    EnclosureMatch,
     Hole,
     RawHole,
     RawOutline,
@@ -22,7 +26,7 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.pipeline import Deduplicate
+from aidrill.pipeline import Deduplicate, IdentifyHammondFootprint
 from aidrill.protocols import Emitter, Pipeline
 from tests.conftest import at, holes, make_data
 
@@ -37,17 +41,29 @@ def fixture_data() -> DrillData:
     outline, one diagnostic of each severity, full source info, and the stages
     that produced it.
 
-    Three details are deliberate. The hole identities are 4 and 1 — neither
-    sequential nor equal to their position in the document — because a fixture
-    numbered 0, 1 in the order it lists its holes cannot tell a serialised
-    identity from a serialised list index; gaps are what survives a
-    Deduplicate anyway. Two of the three diagnostics carry a payload,
-    because a document that drops ``data`` still round-trips empty ones. And
-    the outline is *snapped* — measured 113 × 60, resized to a catalogue
-    112 × 61 — because an outline whose ``raw`` equals its nominal size cannot
-    tell a serialised measurement from a re-derived one, and the round-trip
-    test stayed green for exactly that reason while ``reference.raw`` was being
-    dropped on the way out.
+    Every detail here exists to break a coincidence, because this fixture is
+    what the round-trip test's ``==`` is worth.
+
+    The hole identities are 4 and 1 — neither sequential nor equal to their
+    position in the document — because a fixture numbered 0, 1 in the order it
+    lists its holes cannot tell a serialised identity from a serialised list
+    index; gaps are what survives a Deduplicate anyway. Two of the three
+    diagnostics carry a payload, because a document that drops ``data`` still
+    round-trips empty ones. The outline is *snapped* — measured 113 × 60,
+    resized to a catalogue 112 × 61 — because an outline whose ``raw`` equals
+    its nominal size cannot tell a serialised measurement from a re-derived
+    one, and the round-trip test stayed green for exactly that reason while
+    ``reference.raw`` was being dropped on the way out.
+
+    The enclosure match is the same lesson applied a third time. Its
+    ``selected_part`` is set, and set to a candidate that is neither the first
+    nor the last of the three, so neither a dropped key nor ``candidates[0]``
+    can impersonate it — ``rotated_fixture_data`` covers the ``None`` half.
+    Its ``candidates`` are listed out of alphabetical order, because a tuple
+    already in the order ``sorted()`` would produce cannot tell a passthrough
+    from a re-sort, and ADR-0001 forbids an emitter the second. And
+    ``length_mm``/``width_mm`` differ from one another, so a document that
+    transposed them would not read back identically.
     """
     given = (
         Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-39.9906, 18.0021, 6.9998), index=4),
@@ -81,6 +97,46 @@ def fixture_data() -> DrillData:
                 "snap-diameters",
                 (("standard", "metric"), ("size_count", 2), ("sizes_mm", (5.0, 7.0))),
             ),
+        ),
+        enclosure=EnclosureMatch(
+            family="Hammond 1590",
+            length_mm=112,
+            width_mm=61,
+            candidates=("1590BS", "1590B", "1590B2"),
+            rotated=False,
+            selected_part="1590B",
+        ),
+    )
+
+
+def rotated_fixture_data() -> DrillData:
+    """The same panel drawn portrait, with no case declared by the operator.
+
+    Only the outline and the match differ, so both fixtures can go through one
+    round-trip test. They differ in the two fields whose defaults make a
+    dropped key invisible: ``rotated`` is ``True`` here where it is ``False``
+    there, and ``selected_part`` is ``None`` here where it names a part there.
+    A serialiser that omitted either would rebuild one fixture correctly and
+    the other silently wrong, which is the whole reason there are two.
+
+    ``length_mm``/``width_mm`` stay in the catalogue's orientation — 112 × 61,
+    the landscape 1590B — while the outline is the 61 × 112 the artwork was
+    drawn as. That is not an inconsistency to tidy up: transposing the match
+    would make the footprint unfindable in the datasheet it came from, and it
+    is the one thing ``rotated`` is for.
+    """
+    return replace(
+        fixture_data(),
+        reference=ReferenceOutline.from_measurement(
+            60.0, 113.0, centre_x=297.6, centre_y=421.0
+        ).resized(61.0, 112.0),
+        enclosure=EnclosureMatch(
+            family="Hammond 1590",
+            length_mm=112,
+            width_mm=61,
+            candidates=("1590B2", "1590BS", "1590B"),
+            rotated=True,
+            selected_part=None,
         ),
     )
 
@@ -136,6 +192,7 @@ def test_top_level_key_order_is_stable_and_documented():
         "holes",
         "diagnostics",
         "processing",
+        "enclosure",
     ]
 
 
@@ -143,9 +200,22 @@ def test_document_declares_its_format_and_canonical_frame():
     document = parse(fixture_data())
 
     assert document["format"] == "aidrill-drill-data"
-    assert document["version"] == 3
+    assert document["version"] == 4
     assert document["units"] == "mm"
     assert document["origin"] == "centre"
+
+
+def test_version_is_bumped_for_the_enclosure_match():
+    """The version number is how a consumer knows the key is there to read.
+
+    A document that grew ``enclosure`` while still calling itself version 3
+    tells a v3 reader nothing has changed, and tells the operator's toolchain
+    that a document *without* the key is the same document as one with it.
+    """
+    document = parse(fixture_data())
+
+    assert document["version"] == 4
+    assert "enclosure" in document
 
 
 def test_source_info_round_trips():
@@ -195,6 +265,164 @@ def test_missing_reference_outline_is_null_not_omitted():
 
     assert "reference" in document
     assert document["reference"] is None
+
+
+# --------------------------------------------------------------------------
+# the enclosure match
+# --------------------------------------------------------------------------
+
+
+def test_enclosure_names_the_footprint_the_panel_was_identified_as():
+    """The whole product of the matching stage, or the consumer cannot see it.
+
+    ``DrillData.enclosure`` reached no output at all: a library consumer was
+    handed a panel snapped to 112 × 61 with nothing in the document saying it
+    had been identified as a Hammond footprint, let alone which one. Re-deriving
+    it means re-implementing the matcher's tolerance rule against the catalogue
+    — a second, divergent copy of the decision, which is the defect ADR-0001
+    exists to stop.
+    """
+    enclosure = parse(fixture_data())["enclosure"]
+
+    assert list(enclosure) == [
+        "family",
+        "length_mm",
+        "width_mm",
+        "candidates",
+        "rotated",
+        "selected_part",
+    ]
+    assert enclosure["family"] == "Hammond 1590"
+    assert enclosure["length_mm"] == 112
+    assert enclosure["width_mm"] == 61
+
+
+def test_enclosure_candidates_keep_the_order_they_were_matched_in():
+    """A 2-D outline identifies a footprint, never a part, so every part sharing
+    it is named — in the order the match holds them.
+
+    Sorting here would be an emitter deciding a pipeline fact, which ADR-0001
+    forbids for the same reason it forbids rounding: the drawing and this
+    document would then present two orders of one list and the operator would
+    have to guess which was the matcher's. The fixture is deliberately not in
+    alphabetical order, because a list that already is cannot tell a
+    passthrough from a ``sorted()``.
+    """
+    candidates = parse(fixture_data())["enclosure"]["candidates"]
+
+    assert candidates == ["1590BS", "1590B", "1590B2"]
+    assert candidates != sorted(candidates)
+
+
+def test_enclosure_dimensions_stay_the_catalogues_whole_millimetres():
+    """``length_mm`` is an ``int``; ``reference.width`` is a ``float``.
+
+    The distinction is the datasheet's: Hammond's metric column is whole
+    millimetres, and the outline is measured artwork. A document that emitted
+    ``112.0`` would read back as a measurement of exactly 112 rather than the
+    catalogue's nominal figure, and — since ``112 == 112.0`` in Python — the
+    round-trip test would compare equal while the type went out wrong.
+    """
+    document = parse(fixture_data())
+    enclosure = document["enclosure"]
+
+    assert isinstance(enclosure["length_mm"], int)
+    assert isinstance(enclosure["width_mm"], int)
+    assert isinstance(document["reference"]["width"], float)
+    assert isinstance(document["reference"]["raw"]["height"], float)
+
+
+def test_enclosure_records_whether_the_panel_was_drawn_rotated():
+    """``rotated`` says the panel is the catalogue footprint turned 90°.
+
+    It defaults to ``False``, so a document that dropped the key would describe
+    every portrait panel as landscape and nothing would contradict it. Both
+    values are asserted for that reason: the ``False`` case alone proves only
+    that something absent looks like the default.
+    """
+    assert parse(fixture_data())["enclosure"]["rotated"] is False
+    assert parse(rotated_fixture_data())["enclosure"]["rotated"] is True
+
+
+def test_enclosure_rotation_is_reported_against_an_untransposed_footprint():
+    """A rotated match keeps the catalogue's own length and width.
+
+    Transposing them to agree with the artwork would make the footprint
+    unfindable in the datasheet it was read from — the panel is 61 × 112 and
+    the enclosure is still the 112 × 61 1590B.
+    """
+    document = parse(rotated_fixture_data())
+
+    assert (document["reference"]["width"], document["reference"]["height"]) == (61.0, 112.0)
+    assert (document["enclosure"]["length_mm"], document["enclosure"]["width_mm"]) == (112, 61)
+
+
+def test_enclosure_carries_the_declared_part_and_its_absence():
+    """``selected_part`` is operator knowledge, never inferred from geometry.
+
+    The artwork cannot say which of three parts sharing a footprint the panel
+    is for, so this is either what the operator declared or ``None``. Both are
+    asserted: an emitter that dropped the key, and one that hard-coded
+    ``None``, each survive a fixture that only ever declares nothing.
+    """
+    declared = parse(fixture_data())["enclosure"]
+
+    assert declared["selected_part"] == "1590B"
+    assert declared["selected_part"] in declared["candidates"]
+    assert parse(rotated_fixture_data())["enclosure"]["selected_part"] is None
+
+
+def test_unmatched_enclosure_is_null_not_omitted():
+    """No match is a value a consumer reads, not a key it has to test for."""
+    document = parse(DrillData(holes=(Hole.from_measurement(0.0, 0.0, 7.0, index=0),)))
+
+    assert "enclosure" in document
+    assert document["enclosure"] is None
+
+
+def test_enclosure_is_what_the_matching_stage_found():
+    """End to end, against the real catalogue rather than a hand-built match.
+
+    The fixtures above are written by hand, so they pin the document's shape but
+    could describe an enclosure the matcher would never produce. Here the stage
+    runs: 113 × 60 of measured artwork comes out as the 112 × 61 footprint, the
+    three parts that share it, and the case the operator declared — normalised
+    to catalogue form on the way through.
+    """
+    data = make_data(
+        at(0.0, 0.0, index=0),
+        reference=ReferenceOutline.from_measurement(113.0, 60.0),
+    )
+
+    after = Pipeline([IdentifyHammondFootprint(expected_part="1590b2")]).run(data)
+
+    assert parse(after)["enclosure"] == {
+        "family": "Hammond 1590",
+        "length_mm": 112,
+        "width_mm": 61,
+        "candidates": ["1590B", "1590B2", "1590BS"],
+        "rotated": False,
+        "selected_part": "1590B2",
+    }
+
+
+def test_an_unrecognised_outline_leaves_the_enclosure_null_and_says_so():
+    """The warning and the null are one finding, not two computations.
+
+    A panel this catalogue has never heard of is left exactly as measured, so
+    the document must carry both halves of that: no match, and the reason.
+    """
+    data = make_data(
+        at(0.0, 0.0, index=0),
+        reference=ReferenceOutline.from_measurement(200.0, 45.0),
+    )
+
+    after = Pipeline([IdentifyHammondFootprint()]).run(data)
+    document = parse(after)
+
+    assert document["enclosure"] is None
+    assert [d["code"] for d in document["diagnostics"]] == ["unknown-enclosure"]
+    assert document["reference"]["width"] == 200.0
 
 
 def test_holes_carry_nominal_and_raw_provenance():
@@ -294,7 +522,7 @@ def test_diagnostic_payloads_survive_serialisation():
     after = Pipeline([Deduplicate(tolerance=0.05)]).run(data)
     doc = json.loads(JsonEmitter().emit(after))
 
-    assert doc["version"] == 3
+    assert doc["version"] == 4
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
     assert duplicate["data"]["dropped"] == 1
     assert duplicate["data"]["hole_index"] == doc["holes"][0]["index"]
@@ -373,7 +601,10 @@ def test_the_exposed_mapping_is_already_json_shaped():
 # --------------------------------------------------------------------------
 
 
-def test_document_rebuilds_an_identical_drilldata():
+@pytest.mark.parametrize(
+    "build", [fixture_data, rotated_fixture_data], ids=["landscape-declared", "rotated-undeclared"]
+)
+def test_document_rebuilds_an_identical_drilldata(build):
     """Nothing in DrillData may be lost on the way out — this is the whole point
     of the format.
 
@@ -384,9 +615,16 @@ def test_document_rebuilds_an_identical_drilldata():
     ``raw`` equals the nominal size — so a document that dropped the outline's
     measurement rebuilt it from the nominal values and compared equal, and the
     claim in the first paragraph was false for a fourth field while this test
-    stayed green. The fixture now carries all four, the outline snapped.
+    stayed green.
+
+    ``enclosure`` is the same trap twice over, which is why this runs over two
+    fixtures rather than one. ``rotated`` defaults to ``False`` and
+    ``selected_part`` to ``None``, so a single fixture leaving either at its
+    default would rebuild a dropped key out of the default and compare equal
+    again. Every field below is read back **out of the document** — nothing is
+    recomputed from ``data``, or this would be testing the fixture.
     """
-    data = fixture_data()
+    data = build()
     document = parse(data)
 
     rebuilt = DrillData(
@@ -430,6 +668,17 @@ def test_document_rebuilds_an_identical_drilldata():
         processing=tuple(
             StageRun(run["name"], list(run["parameters"].items()))
             for run in document["processing"]
+        ),
+        enclosure=EnclosureMatch(
+            family=document["enclosure"]["family"],
+            length_mm=document["enclosure"]["length_mm"],
+            width_mm=document["enclosure"]["width_mm"],
+            # The list ``json.loads`` hands back, not a tuple built here: the
+            # coercion belongs to the model, and a deserialiser that had to
+            # know to make tuples would be one more place to forget.
+            candidates=document["enclosure"]["candidates"],
+            rotated=document["enclosure"]["rotated"],
+            selected_part=document["enclosure"]["selected_part"],
         ),
     )
 
