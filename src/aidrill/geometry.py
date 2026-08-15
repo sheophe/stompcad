@@ -234,13 +234,17 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
     deviates far more in absolute terms than a 3 mm hole, and one absolute
     tolerance cannot serve both.
 
-    Three things must hold, and each rules out a shape that a panel drawing
+    Four things must hold, and each rules out a shape that a panel drawing
     genuinely contains:
 
     * **four cubics, closing back on themselves** — rejects rounded rectangles
       (four cubics *and* four lines), arcs, and anything miscounted;
     * **all four anchors equidistant from their centroid** — rejects ellipses,
       including circles squashed by a non-uniform CTM;
+    * **consecutive anchors a quarter turn apart** — rejects the shape that
+      satisfies both of the above and the one below by taking a circle's
+      controls onto anchors a circle would never have, because ``KAPPA`` is the
+      offset for a quarter arc and only a quarter arc;
     * **kappa-consistent controls** — rejects the four-cubic rounded square,
       which is the case that matters. It has square bounds and four anchors on
       a common circle, so it passes every other test; only the control offsets
@@ -280,10 +284,48 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
     if any(abs(math.dist((cx, cy), p) - radius) > slack for p in anchors):
         return None
 
+    if not _quarter_turns(anchors, (cx, cy), radius, slack):
+        return None
+
     if not _kappa_consistent(pairs, (cx, cy), radius, slack):
         return None
 
     return Circle(cx=cx, cy=cy, diameter=2.0 * radius)
+
+
+def _quarter_turns(
+    anchors: list[Point],
+    centre: Point,
+    radius: float,
+    slack: float,
+) -> bool:
+    """Does each cubic span a quarter turn about the centre?
+
+    This is the precondition the kappa check never stated. ``KAPPA`` is the
+    control offset for a *ninety degree* arc and nothing else — the offset for
+    an arc of theta is ``4/3 * tan(theta/4) * r`` — so measuring controls
+    against ``KAPPA * r`` only means something once the quarters are known to be
+    quarters. Anchors at 0, 45, 180 and 225 degrees are equidistant from their
+    centroid, close on themselves, and take a circle's controls without
+    complaint; the fitter called that lumpy blob a 20.0 mm hole, which is a real
+    bit, so the drill table passed it on without a diagnostic.
+
+    Perpendicularity is the whole condition, and deliberately so. The caller has
+    already established that the four anchors are the same distance from their
+    own centroid, and equal radii about the centroid rule out the shape that
+    turns a quarter one way and a quarter back: its centroid cannot land where
+    such a shape would need it. A separate check on the *sense* of each turn
+    would be a guard that can never fire, and one of those is worse than none.
+
+    The dot product is divided by the radius so that what meets ``slack`` is a
+    length and not an area — the same currency, as in the radial test below.
+    """
+    cx, cy = centre
+    spokes = [(x - cx, y - cy) for x, y in anchors]
+    for (px, py), (qx, qy) in zip(spokes, spokes[1:] + spokes[:1]):
+        if abs(px * qx + py * qy) / radius > slack:
+            return False
+    return True
 
 
 def _kappa_consistent(

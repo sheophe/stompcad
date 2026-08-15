@@ -43,6 +43,7 @@ from aidrill.geometry import (
     # positively that the others passed, and two of them are whole predicates
     _cubics,
     _kappa_consistent,
+    _quarter_turns,
     fit_circle,
     multiply,
     pt_to_mm,
@@ -643,6 +644,7 @@ class TestFitCircle:
 
         # everything except the anchor radii sees a circle of radius 5.5
         assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
+        assert _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.5, 0.055)
         assert _kappa_consistent(pairs, (0.0, 0.0), 5.5, 0.055)
 
         assert fit_circle(oval) is None
@@ -668,6 +670,7 @@ class TestFitCircle:
 
         # the anchors are still a circle's, and the controls are still a circle's
         assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([5.0] * 4)
+        assert _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.0, 0.05)
         assert _kappa_consistent(pairs, (0.0, 0.0), 5.0, 0.05)
         assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(1.2)
 
@@ -693,6 +696,7 @@ class TestFitCircle:
         # anchors untouched, so the guards before the kappa check see a circle
         assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([5.0] * 4)
         assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
+        assert _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.0, 0.05)
 
         for start, curve in pairs:
             for anchor, control, sense in ((start, curve.c1, 1.0), (curve.end, curve.c2, -1.0)):
@@ -706,6 +710,29 @@ class TestFitCircle:
                 assert abs(ox * rx + oy * ry) / 5.0 > 0.05
 
         assert fit_circle(tilted) is None
+
+    def test_rejects_anchors_that_are_not_a_quarter_turn_apart(self) -> None:
+        """Isolates the quarter-turn guard.
+
+        Four anchors at 0, 45, 180 and 225 degrees, all 10 mm from a centroid
+        that still lands on the origin. They are equidistant, they close, and
+        their controls are ``KAPPA * r`` long, perpendicular and running the way
+        the path travels — so the kappa check passes too, because ``KAPPA`` is
+        the offset for a *quarter* arc and nothing was checking that these
+        quarters are quarters. What it draws is a lopsided blob; what it was
+        reported as is a 20.0 mm hole.
+        """
+        d = 10.0 / math.sqrt(2.0)
+        blob = kappa_correct_path(((10.0, 0.0), (d, d), (-10.0, 0.0), (-d, -d)))
+        pairs = _cubics(blob)
+        assert pairs is not None and len(pairs) == 4
+
+        # every guard except the quarter turn sees a circle of radius 10
+        assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([10.0] * 4)
+        assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
+        assert _kappa_consistent(pairs, (0.0, 0.0), 10.0, 0.1)
+
+        assert fit_circle(blob) is None
 
     # -- tolerance ---------------------------------------------------------
 
