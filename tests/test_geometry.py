@@ -1,7 +1,5 @@
 """Tests for :mod:`aidrill.geometry`.
 
-Written before the module exists, per the TDD method in docs/PLAN.md.
-
 The interesting tests here are the *negative* ones. Recovering a circle from
 four cubics is easy; the whole value of ``fit_circle`` is that it refuses
 ellipses and rounded rectangles, which are the two things a panel drawing is

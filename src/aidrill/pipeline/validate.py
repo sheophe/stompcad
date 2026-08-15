@@ -5,19 +5,19 @@ NOTES block, the JSON diagnostics and the CLI's warnings are three renderings of
 one finding, not three computations of it.
 
 **Nothing here is composed by ``cli.build_pipeline``, and that is a decision
-rather than an omission.** ``CheckReferenceSize`` was the ``--true-size`` check;
-the flag went when the enclosure catalogue arrived, and the CLI's size assertion
-is now ``--case``, which does strictly more — it snaps the outline to the
+rather than an omission.** The command line's size assertion is ``--case``,
+which does strictly more than a typed-out ``WxH`` — it snaps the outline to the
 catalogue's whole millimetres as well as checking it, and only a *catalogue*
-footprint can be snapped to. Wiring both in would give the command line two ways
-to state the panel's size with nothing to reconcile them when they disagreed:
-``--case 1590B --true-size 113x60`` has no defensible answer, and a tool that
-lets an operator declare one panel twice will eventually be handed two panels.
+footprint can be snapped to. Giving the CLI this stage as well would hand it two
+ways to state the panel's size with nothing to reconcile them when they
+disagreed: ``--case 1590B`` beside a declared 113 × 60 has no defensible answer,
+and a tool that lets an operator declare one panel twice will eventually be
+handed two panels.
 
-What survives the flag is the caller the flag could never serve: a **library**
-consumer whose authority is outside this catalogue. A builder working in a
-folded-aluminium box, a 3-D printed shell or any of the enclosures the world has
-that Hammond does not can never reach a footprint match — the best
+The caller this stage exists for is the one no command-line flag could serve: a
+**library** consumer whose authority is outside this catalogue. A builder
+working in a folded-aluminium box, a 3-D printed shell or any of the enclosures
+the world has that Hammond does not can never reach a footprint match — the best
 ``IdentifyHammondFootprint`` can say about their panel is ``unknown-enclosure``,
 a WARNING about *our* catalogue — and they are precisely the person who does
 know, to a tenth of a millimetre, what their panel must measure. This stage is

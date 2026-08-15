@@ -34,15 +34,6 @@ marker names what was dropped and how many — a tool is not a hole, and a sheet
 listing fewer tools than the drill file defines is ADR-0001's failure with the
 drawing as the wrong artifact.
 
-A dashed ``true_size`` overlay used to be drawn beside the reference outline,
-from a ``WxH`` the operator retyped off a datasheet. It is gone with its option.
-Once the pipeline identifies the enclosure itself, the overlay draws a rectangle
-exactly on top of the normalised reference on every run that matched — two
-identical outlines, one of them presented as a check on the other — and on a run
-that did *not* match, the facts worth having are which case was asked for and
-which one the artwork is. Those are a title block line and a diagnostic now, and
-neither of them is a second rectangle a millimetre away from the first.
-
 Two things about SVG that this module is careful about, both learned the hard
 way:
 
@@ -57,16 +48,18 @@ way:
 The emitter re-derives nothing and remembers nothing: no snapping, no diameter
 clustering, no deduplication, and no second copy of a pipeline setting. It reads
 ``tools()``, ``tool_counts()``, ``rows()``, ``diagnostics`` and ``processing``,
-and draws what it is given. Two facts on the sheet used to be exceptions, and
-both went stale in silence:
+and draws what it is given. Four facts on the sheet each have exactly one honest
+source, and every one of them can go stale in silence if taken from anywhere
+else:
 
 * *Which* holes are duplicates comes from the ``duplicate-hole`` diagnostics'
   ``hole_index`` — see :func:`_flagged_holes`. Matching on coordinates instead
   worked only until a stage moved the survivor, and
   ``Pipeline([Deduplicate, SnapPositions])`` is a legal order.
 * *What grid* the holes are on comes from the recorded ``snap`` run — see
-  :func:`_grid_note`. It arrived through ``DrawingOptions`` instead, defaulting
-  to 0.25, so data snapped at 0.5 was stamped 0.25.
+  :func:`_grid_note`. Taking it through ``DrawingOptions`` instead means taking
+  a default when the caller gives none, and data snapped at 0.5 gets stamped
+  0.25.
 * *How a diameter is spelled* comes from the drill standard the recorded
   ``snap-diameters`` run names — see :func:`_diameter_label`. A millimetre
   spelling is honest for the metric drawer and not for the fractional one, where
