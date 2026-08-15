@@ -23,11 +23,12 @@ millimetres are rounded from the imperial originals by Hammond, and they are
 what we snap to -- reconstructing "imperial-exact" values would invent precision
 the datasheet does not claim.
 
-Rows whose cells pdfplumber failed to split (the whole line lands in column 0
-and columns 1-10 are ``None``) are skipped by the digit test on columns 7-9.
-Every enclosure in the datasheet is listed at least twice -- once per colour --
-so no size is lost to a merged row; the natural-finish row and the black row
-carry identical dimensions.
+Rows whose cells pdfplumber failed to split put the whole line in column 0 and
+``None`` in columns 1-10, so column 0 is a sentence rather than a part number and
+the row is rejected by the **part-number match**, before the digits are ever
+looked at. Every enclosure in the datasheet is listed at least twice -- once per
+colour -- so no size is lost to a merged row; the natural-finish row and the
+black row carry identical dimensions.
 
 The ``1590F`` collision
 -----------------------
@@ -36,10 +37,16 @@ Collapsing colour, watertight and flange decorations to a base designator is
 ambiguous by construction, because ``1590F`` is a real 188 x 188 x 67 enclosure
 *and* is what "1590 with a flanged bottom plate" would be spelled. Stripping a
 trailing ``F`` turns the real part into a bare ``1590``, which is a family name
-and not a catalogue part at all. ``_base_designator`` therefore backs a
-collapse out when it lands on the bare family name. The datasheet settles the
+and not a catalogue part at all. ``_base_designator`` therefore backs the flange
+strip out when it lands on the bare family name. The datasheet settles the
 question in the row itself: ``1590F``'s own flanged variants are listed
-alongside it as ``1590FFL`` and ``1590FF``.
+alongside it as ``1590FFL`` and ``1590FF``, and its watertight version as
+``1590WF``.
+
+That last name is why the watertight prefix is stripped *first*. Only the flange
+step is ambiguous, so only the flange step may be undone; backing out to the raw
+colour-stripped input would discard the ``1590W`` reduction too and leave
+``1590WF`` uncollapsed.
 """
 
 from __future__ import annotations
@@ -64,7 +71,7 @@ FAMILY = "1590"
 _PART = re.compile(r"1590[A-Z0-9]*")
 
 #: Colour suffixes, per the datasheet's own colour column.
-_COLOUR = re.compile(r"(BK|CB|GR|LG|OR|PR|RD|YL)$")
+_COLOR = re.compile(r"(BK|CB|GR|LG|OR|PR|RD|YL)$")
 
 #: Flanged-lid and flanged-bottom-plate suffixes.
 _FLANGE = re.compile(r"(FL|F)$")
@@ -86,29 +93,46 @@ def _base_designator(part: str) -> str:
     """Reduce a catalogue part number to the designator that names its shape.
 
     Colour, watertight and flange variants of one enclosure share an outline, so
-    they share a footprint and must collapse together. The collapse backs out
-    if it reaches the bare family name -- see the ``1590F`` collision above.
+    they share a footprint and must collapse together.
+
+    Order matters, and so does what the back-out undoes. The watertight prefix
+    is removed *before* the flange suffix so that only the flange step is ever in
+    doubt, and the back-out then returns the prefix-stripped name rather than the
+    raw input -- an earlier version returned the colour-stripped string and threw
+    away the ``1590W`` reduction along with the flange one, so ``1590WF`` stayed
+    ``1590WF`` instead of collapsing to ``1590F``. ``1590WF`` is a real part,
+    printed beside ``1590F`` in the datasheet; no column-0 cell in this revision
+    is both watertight and flanged, so nothing caught it, but this function is a
+    general collapse and a caller resolving an operator-typed part number would
+    have been handed an enclosure that does not exist.
+
+    The back-out itself is the ``1590F`` collision described above.
     """
-    collapsed = _COLOUR.sub("", part)
-    without_decoration = _FLANGE.sub("", collapsed)
-    if without_decoration.startswith(_WATERTIGHT):
-        without_decoration = FAMILY + without_decoration[len(_WATERTIGHT) :]
-    return collapsed if without_decoration == FAMILY else without_decoration
+    coloured = _COLOR.sub("", part)
+    if coloured.startswith(_WATERTIGHT):
+        coloured = FAMILY + coloured[len(_WATERTIGHT) :]
+    without_flange = _FLANGE.sub("", coloured)
+    return coloured if without_flange == FAMILY else without_flange
 
 
 def _dimensioned_row(row: Sequence[str | None]) -> tuple[str, int, int, int] | None:
     """``(part, length, width, height)`` for an enclosure row, else ``None``.
 
     Pure, and separate from the PDF reading, because this is where the extraction
-    decides what counts as data. Three rejections, each for a different reason:
+    decides what counts as data. Three rejections, by three different tests --
+    which is worth stating precisely, because a docstring here previously
+    credited the wrong one and made a test look like it covered something it did
+    not:
 
-    * a row pdfplumber failed to split puts the whole line in column 0 and
-      ``None`` everywhere else, so columns 7-9 are not digits;
+    * a row pdfplumber failed to split puts the whole line in column 0, so
+      column 0 is a sentence and fails the **part-number match**;
     * the screw and gasket tables later in the datasheet are 10 columns wide and
-      put *part numbers* where dimensions belong, so they fail the same test;
-    * a part number outside the 1590 family would pass both of the above and is
-      rejected on its own name -- ``HAMMOND_1590`` is a family catalogue, and a
-      revision that appends another family must not quietly widen it.
+      put *part numbers* where dimensions belong, so they pass the part-number
+      match and fail the **digit test** on columns 7-9;
+    * a part number outside the 1590 family passes both of the above and is
+      rejected by the **family** part of the part-number match --
+      ``HAMMOND_1590`` is a family catalogue, and a revision that appends another
+      family must not quietly widen it.
     """
     if len(row) < _MIN_COLUMNS:
         return None

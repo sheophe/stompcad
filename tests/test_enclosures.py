@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -131,15 +132,23 @@ def test_the_catalogue_is_ordered_by_footprint_then_height():
 
 
 def test_the_runtime_never_opens_the_datasheet():
-    """pdfplumber is a dev dependency. If enclosures.py imported it, installing
-    aidrill would need it, and the catalogue would stop being a shipped constant."""
-    source = (
-        Path(__file__).resolve().parent.parent
-        / "src"
-        / "aidrill"
-        / "enclosures.py"
-    ).read_text(encoding="utf-8")
-    assert "pdfplumber" not in source
+    """pdfplumber is a dev dependency, and the invariant is about the whole
+    package, not one module.
+
+    If anything under ``src/aidrill`` imported it, installing aidrill would need
+    it and the catalogue would stop being a shipped constant. Checking only
+    ``enclosures.py`` would pass while a later stage re-read the PDF at runtime,
+    which is exactly the shape this is meant to forbid.
+    """
+    package = Path(__file__).resolve().parent.parent / "src" / "aidrill"
+    modules = sorted(package.rglob("*.py"))
+    assert modules, "found no modules to check -- the glob is wrong"
+    offenders = [
+        module.relative_to(package).as_posix()
+        for module in modules
+        if "pdfplumber" in module.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
 
 
 class TestTheCollapseToBaseDesignators:
@@ -166,6 +175,8 @@ class TestTheCollapseToBaseDesignators:
             ("1590FBK", "1590F"),
             ("1590FF", "1590F"),
             ("1590FFL", "1590F"),
+            ("1590WF", "1590F"),
+            ("1590WFBK", "1590F"),
         ],
     )
     def test_a_variant_collapses_to_the_part_whose_outline_it_shares(
@@ -192,9 +203,12 @@ class TestWhichRowsCountAsData:
     that is merely right about *this* revision.
     """
 
-    #: A real enclosure row, split cleanly: part, five variants, colour, L, W, H, gasket.
-    GOOD = ["1590BBK", "1590WBBK", "1590BBFLBK", "1590WBBFLBK", "1590BBFBK",
-            "1590WBBFBK", "Black", "120", "94", "34", "1590BBGASKET"]
+    #: A real enclosure row, split cleanly: part, five variants, colour, L, W, H,
+    #: gasket. A tuple, so no test can edit the fixture the others depend on.
+    GOOD: ClassVar[tuple[str, ...]] = (
+        "1590BBK", "1590WBBK", "1590BBFLBK", "1590WBBFLBK", "1590BBFBK",
+        "1590WBBFBK", "Black", "120", "94", "34", "1590BBGASKET",
+    )
 
     def test_a_clean_enclosure_row_yields_its_part_and_dimensions(self):
         from tools.extract_1590 import _dimensioned_row
@@ -225,7 +239,7 @@ class TestWhichRowsCountAsData:
         """
         from tools.extract_1590 import _dimensioned_row
 
-        assert _dimensioned_row(["1550B"] + self.GOOD[1:]) is None
+        assert _dimensioned_row(("1550B",) + self.GOOD[1:]) is None
 
     def test_a_row_too_narrow_to_hold_dimensions_is_skipped(self):
         from tools.extract_1590 import _dimensioned_row
@@ -235,8 +249,8 @@ class TestWhichRowsCountAsData:
     def test_a_blank_part_cell_is_skipped(self):
         from tools.extract_1590 import _dimensioned_row
 
-        assert _dimensioned_row([""] + self.GOOD[1:]) is None
-        assert _dimensioned_row([None] + self.GOOD[1:]) is None
+        assert _dimensioned_row(("",) + self.GOOD[1:]) is None
+        assert _dimensioned_row((None,) + self.GOOD[1:]) is None
 
     def test_the_dimensions_come_from_columns_seven_eight_and_nine(self):
         """Numbers chosen so that reading one column early or late cannot pass."""
@@ -266,22 +280,28 @@ class TestTheGeneratedModule:
         assert render_module(extract(DATASHEET)) == shipped
 
     def test_the_rendered_table_is_ordered_by_footprint_then_height(self):
-        """Three orderings are pulled apart deliberately, because two of them
-        agree on any fixture chosen carelessly.
+        """Four orderings are pulled apart deliberately, because any fixture
+        chosen carelessly lets two or three of them agree.
 
         Part names run Z, M, A down the expected output, so sorting by part
         number cannot pass. Heights run 90, 34, 57, so sorting by height cannot
-        pass either -- an earlier version of this fixture listed its heights
-        ascending and was blind to both.
+        pass either. And the two footprints are ``(100, 90)`` and ``(120, 60)``,
+        which order oppositely by length and by width, so transposing the sort
+        key cannot pass -- by width the order would be M, A, Z.
+
+        Both of the last two were learned the hard way. The first fixture ran its
+        heights ascending and was blind to a height-first sort; the second used a
+        square ``(51, 51)`` alongside two entries sharing one footprint, and a
+        transposed key left the order untouched.
         """
         from tools.extract_1590 import render_module
 
         rendered = render_module(
-            {("1590A", 120, 94, 57), ("1590Z", 51, 51, 90), ("1590M", 120, 94, 34)}
+            {("1590A", 120, 60, 57), ("1590Z", 100, 90, 90), ("1590M", 120, 60, 34)}
         )
         rows = [ln for ln in rendered.splitlines() if ln.startswith("    Enclosure(")]
         assert rows == [
-            '    Enclosure("1590Z", 51, 51, 90),',
-            '    Enclosure("1590M", 120, 94, 34),',
-            '    Enclosure("1590A", 120, 94, 57),',
+            '    Enclosure("1590Z", 100, 90, 90),',
+            '    Enclosure("1590M", 120, 60, 34),',
+            '    Enclosure("1590A", 120, 60, 57),',
         ]
