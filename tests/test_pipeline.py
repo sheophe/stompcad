@@ -20,6 +20,7 @@ from aidrill.model import (
     Diagnostic,
     DrillData,
     Hole,
+    RawOutline,
     ReferenceOutline,
     Severity,
     SourceInfo,
@@ -1029,7 +1030,7 @@ class TestPipelineRecordsProvenance:
             Pipeline([SnapPositions(0.25), Explodes()]).run(data)
         assert data.processing == ()
 
-    def test_the_whole_cli_order_is_recorded_in_order(self):
+    def test_a_pipeline_records_its_stages_in_order(self):
         after = Pipeline(ALL_STAGES).run(
             make_data(
                 *holes((-40.003, 18.001, 6.9998), (19.0, -18.75, 5.0002)),
@@ -1051,7 +1052,7 @@ class TestPipelineRecordsProvenance:
 # --------------------------------------------------------------------------
 
 
-def outline(width: float, height: float) -> DrillData:
+def an_outline(width: float, height: float) -> DrillData:
     """A panel whose reference outline is the measurement, and nothing else."""
     return make_data(reference=ReferenceOutline.from_measurement(width, height))
 
@@ -1059,7 +1060,7 @@ def outline(width: float, height: float) -> DrillData:
 class TestIdentifyHammondFootprint:
     def test_the_fixture_outline_snaps_to_the_1590B_footprint(self):
         """tar.ai measures 113.0 × 60.0; the catalogue says 112 × 61. Snap, silently."""
-        out = IdentifyHammondFootprint().apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint().apply(an_outline(113.0, 60.0))
 
         assert (out.reference.width, out.reference.height) == (112.0, 61.0)
         assert (out.reference.raw.width, out.reference.raw.height) == (113.0, 60.0)
@@ -1075,7 +1076,7 @@ class TestIdentifyHammondFootprint:
         rather than "112.0 × 61.0" and cannot mistake a catalogue constant for a
         measurement that happened to land on a whole number.
         """
-        match = IdentifyHammondFootprint().apply(outline(113.0, 60.0)).enclosure
+        match = IdentifyHammondFootprint().apply(an_outline(113.0, 60.0)).enclosure
 
         assert isinstance(match.length_mm, int) and isinstance(match.width_mm, int)
         assert isinstance(match.rotated, bool)
@@ -1091,12 +1092,28 @@ class TestIdentifyHammondFootprint:
         assert out.diagnostics == ()
 
     def test_an_outline_matching_nothing_is_an_error_not_a_guess(self):
-        out = IdentifyHammondFootprint().apply(outline(500.0, 500.0))
+        out = IdentifyHammondFootprint().apply(an_outline(500.0, 500.0))
 
         assert codes(out) == ["unknown-enclosure"]
         assert out.diagnostics[0].severity is Severity.ERROR
         assert out.enclosure is None
         assert (out.reference.width, out.reference.height) == (500.0, 500.0)
+
+    def test_the_unknown_diagnostic_carries_what_was_measured_and_what_was_searched(self):
+        """``Diagnostic.data`` is a consumer contract, not a debug aid: it is
+        there so a report can say what failed without re-deriving the predicate.
+        Unasserted, it is an unpinned contract."""
+        # 113.6 rather than 500: the size must come from the outline as it
+        # stands, and a payload sourced from ``raw`` instead would be
+        # indistinguishable on an outline nothing has snapped.
+        diagnostic = IdentifyHammondFootprint(tolerance_mm=0.4).apply(
+            make_data(reference=ReferenceOutline(113.6, 60.0, raw=RawOutline(1.0, 2.0)))
+        ).diagnostics[0]
+
+        assert diagnostic.get("width_mm") == 113.6
+        assert diagnostic.get("height_mm") == 60.0
+        assert diagnostic.get("tolerance_mm") == 0.4
+        assert diagnostic.get("catalogue") == "Hammond 1590"
 
     def test_a_near_miss_is_unknown_rather_than_the_footprint_it_nearly_is(self):
         """113.6 × 60.0 is 1.6 mm off 1590B on one axis. Outside is outside.
@@ -1105,7 +1122,7 @@ class TestIdentifyHammondFootprint:
         catalogue lookup that only ever succeeds on an exact hit, and it would
         stay green under a tolerance widened to 2 mm. This one dies to both.
         """
-        out = IdentifyHammondFootprint().apply(outline(113.6, 60.0))
+        out = IdentifyHammondFootprint().apply(an_outline(113.6, 60.0))
 
         assert codes(out) == ["unknown-enclosure"]
         assert out.enclosure is None
@@ -1113,26 +1130,40 @@ class TestIdentifyHammondFootprint:
 
     def test_the_tolerance_boundary_is_inclusive(self):
         """1.5 mm exactly is a match; the machinist typed the number they meant."""
-        assert IdentifyHammondFootprint().apply(outline(113.5, 61.0)).enclosure is not None
-        assert IdentifyHammondFootprint().apply(outline(113.51, 61.0)).enclosure is None
+        assert IdentifyHammondFootprint().apply(an_outline(113.5, 61.0)).enclosure is not None
+        assert IdentifyHammondFootprint().apply(an_outline(113.51, 61.0)).enclosure is None
 
     def test_a_tighter_tolerance_rejects_what_the_default_accepts(self):
         """The fixture's own 1.0 mm error, against a tolerance that will not have it."""
         tight = IdentifyHammondFootprint(tolerance_mm=0.5)
-        assert tight.apply(outline(113.0, 60.0)).enclosure is None
-        assert IdentifyHammondFootprint(tolerance_mm=1.5).apply(outline(113.0, 60.0)).enclosure
+        assert tight.apply(an_outline(113.0, 60.0)).enclosure is None
+        assert IdentifyHammondFootprint(tolerance_mm=1.5).apply(an_outline(113.0, 60.0)).enclosure
 
     def test_both_axes_must_be_within_the_tolerance(self):
-        """One axis on the nose does not carry the other one home."""
+        """One axis on the nose does not carry the other one home.
+
+        The assertion is on the *code*, not on ``enclosure is None``, and that
+        distinction is the whole test. ``enclosure is None`` is reachable by two
+        paths — nothing matched, and too much matched — so it asserts the union
+        rather than the case the name claims. Drop the height clause from
+        ``_fits`` and 112.0 × 65.0 matches three footprints on width alone,
+        (111, 82), (112, 61) and (192, 112) turned 90°, giving
+        ``ambiguous-enclosure`` with ``enclosure`` still ``None``: the half of
+        this test that names the height axis would have stayed green.
+        """
         # Width exact, height 4 mm out.
-        assert IdentifyHammondFootprint().apply(outline(112.0, 65.0)).enclosure is None
+        assert codes(IdentifyHammondFootprint().apply(an_outline(112.0, 65.0))) == [
+            "unknown-enclosure"
+        ]
         # Height exact, width 4 mm out.
-        assert IdentifyHammondFootprint().apply(outline(108.0, 61.0)).enclosure is None
+        assert codes(IdentifyHammondFootprint().apply(an_outline(108.0, 61.0))) == [
+            "unknown-enclosure"
+        ]
 
 
 class TestRotation:
     def test_a_portrait_panel_matches_its_landscape_catalogue_entry(self):
-        out = IdentifyHammondFootprint().apply(outline(60.0, 113.0))
+        out = IdentifyHammondFootprint().apply(an_outline(60.0, 113.0))
 
         assert out.enclosure.rotated is True
         assert (out.reference.width, out.reference.height) == (61.0, 112.0)
@@ -1140,27 +1171,27 @@ class TestRotation:
     def test_a_rotated_match_records_the_catalogue_orientation_not_the_artworks(self):
         """The datasheet says 1590B is 112 × 61. Transposing it here would make
         the identified part unfindable in the document it was identified from."""
-        match = IdentifyHammondFootprint().apply(outline(60.0, 113.0)).enclosure
+        match = IdentifyHammondFootprint().apply(an_outline(60.0, 113.0)).enclosure
 
         assert (match.length_mm, match.width_mm) == (112, 61)
         assert match.candidates == ("1590B", "1590B2", "1590BS")
 
     def test_a_landscape_panel_is_recorded_as_not_rotated(self):
         """Paired with the portrait case so neither hardcoded flag survives."""
-        match = IdentifyHammondFootprint().apply(outline(113.0, 60.0)).enclosure
+        match = IdentifyHammondFootprint().apply(an_outline(113.0, 60.0)).enclosure
         assert match.rotated is False
 
     def test_a_square_footprint_is_not_a_rotation(self):
         """1590Y is 92 × 92, so both readings fit. A turn of no consequence is
         not a turn, and reporting one would put "rotated" on a drawing for a
         panel nobody rotated."""
-        match = IdentifyHammondFootprint().apply(outline(92.4, 91.8)).enclosure
+        match = IdentifyHammondFootprint().apply(an_outline(92.4, 91.8)).enclosure
 
         assert match.candidates == ("1590Y",)
         assert match.rotated is False
 
     def test_a_rotated_match_is_silent_too(self):
-        assert IdentifyHammondFootprint().apply(outline(60.0, 113.0)).diagnostics == ()
+        assert IdentifyHammondFootprint().apply(an_outline(60.0, 113.0)).diagnostics == ()
 
 
 class TestAmbiguity:
@@ -1170,7 +1201,7 @@ class TestAmbiguity:
     TIED = (118.0, 78.5)
 
     def test_an_ambiguous_tie_is_an_error_not_a_choice(self):
-        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(outline(*self.TIED))
+        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(an_outline(*self.TIED))
 
         assert codes(out) == ["ambiguous-enclosure"]
         assert out.diagnostics[0].severity is Severity.ERROR
@@ -1179,15 +1210,18 @@ class TestAmbiguity:
 
     def test_the_tie_diagnostic_names_every_footprint_it_could_not_choose_between(self):
         """Naming one of them would be the guess this rule exists to refuse."""
-        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(outline(*self.TIED))
+        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(an_outline(*self.TIED))
         diagnostic = out.diagnostics[0]
 
         assert diagnostic.get("footprints") == "116 × 77, 120 × 80"
         assert diagnostic.get("candidates") == "1590B3, 1590T"
+        # The tolerance is the actionable half of this finding: it is the one
+        # thing the operator can change to break the tie.
+        assert diagnostic.get("tolerance_mm") == 2.0
 
     def test_the_same_outline_is_unambiguous_at_the_default_tolerance(self):
         """The tie is a property of the tolerance, not of the outline."""
-        assert codes(IdentifyHammondFootprint().apply(outline(*self.TIED))) == [
+        assert codes(IdentifyHammondFootprint().apply(an_outline(*self.TIED))) == [
             "unknown-enclosure"
         ]
 
@@ -1219,10 +1253,10 @@ class TestAmbiguity:
     def test_two_millimetres_is_where_ambiguity_becomes_reachable(self):
         """The bound above is tight, not merely sufficient: at exactly half the
         closest approach the tie is real, which is why the default is not 2."""
-        assert codes(IdentifyHammondFootprint(tolerance_mm=2.0).apply(outline(*self.TIED))) == [
+        assert codes(IdentifyHammondFootprint(tolerance_mm=2.0).apply(an_outline(*self.TIED))) == [
             "ambiguous-enclosure"
         ]
-        just_under = IdentifyHammondFootprint(tolerance_mm=1.99).apply(outline(*self.TIED))
+        just_under = IdentifyHammondFootprint(tolerance_mm=1.99).apply(an_outline(*self.TIED))
         assert just_under.enclosure is None
         assert codes(just_under) == ["unknown-enclosure"]
 
@@ -1241,7 +1275,7 @@ class TestAmbiguity:
             "footprints",
             lambda: {(120, 80): ("FAKE-T",), (116, 77): ("FAKE-B3",)},
         )
-        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(outline(*self.TIED))
+        out = IdentifyHammondFootprint(tolerance_mm=2.0).apply(an_outline(*self.TIED))
 
         assert codes(out) == ["ambiguous-enclosure"]
         assert out.diagnostics[0].get("footprints") == "116 × 77, 120 × 80"
@@ -1250,7 +1284,7 @@ class TestAmbiguity:
 
 class TestDeclaredCase:
     def test_declaring_the_wrong_case_is_an_error(self):
-        out = IdentifyHammondFootprint(expected_part="1590BB").apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint(expected_part="1590BB").apply(an_outline(113.0, 60.0))
 
         assert codes(out) == ["wrong-enclosure"]
         assert out.diagnostics[0].severity is Severity.ERROR
@@ -1258,16 +1292,19 @@ class TestDeclaredCase:
     def test_the_wrong_case_diagnostic_names_both_parts(self):
         """The operator needs to know what they asked for *and* what they drew;
         either alone leaves them re-deriving the other from the artwork."""
-        out = IdentifyHammondFootprint(expected_part="1590BB").apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint(expected_part="1590BB").apply(an_outline(113.0, 60.0))
         diagnostic = out.diagnostics[0]
 
         assert diagnostic.get("requested_part") == "1590BB"
         assert diagnostic.get("identified_parts") == "1590B, 1590B2, 1590BS"
+        # And the footprint that identified them, so a consumer can show the
+        # measurement that produced the disagreement rather than re-taking it.
+        assert (diagnostic.get("length_mm"), diagnostic.get("width_mm")) == (112, 61)
 
     def test_a_wrongly_declared_panel_is_still_identified_and_still_snapped(self):
         """The outline matched; only the declaration disagrees. Dropping the
         match would leave the report with nothing to name."""
-        out = IdentifyHammondFootprint(expected_part="1590BB").apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint(expected_part="1590BB").apply(an_outline(113.0, 60.0))
 
         assert out.enclosure.candidates == ("1590B", "1590B2", "1590BS")
         assert out.enclosure.selected_part == "1590BB"
@@ -1275,33 +1312,33 @@ class TestDeclaredCase:
 
     def test_a_correctly_declared_case_becomes_the_selected_part(self):
         """A footprint names candidates; only the operator can pick among them."""
-        out = IdentifyHammondFootprint(expected_part="1590B2").apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint(expected_part="1590B2").apply(an_outline(113.0, 60.0))
 
         assert out.enclosure.selected_part == "1590B2"
         assert out.diagnostics == ()
 
     def test_nothing_is_selected_when_nothing_was_declared(self):
         """The artwork does not contain the height, so it cannot be inferred."""
-        match = IdentifyHammondFootprint().apply(outline(113.0, 60.0)).enclosure
+        match = IdentifyHammondFootprint().apply(an_outline(113.0, 60.0)).enclosure
         assert match.selected_part is None
 
     def test_a_declared_case_is_not_checked_against_an_outline_that_matched_nothing(self):
         """One finding per panel: ``unknown-enclosure`` already says the outline
         is not any catalogue footprint, and a ``wrong-enclosure`` beside it would
         name an identified part that does not exist."""
-        out = IdentifyHammondFootprint(expected_part="1590BB").apply(outline(500.0, 500.0))
+        out = IdentifyHammondFootprint(expected_part="1590BB").apply(an_outline(500.0, 500.0))
 
         assert codes(out) == ["unknown-enclosure"]
 
     def test_a_declared_case_is_matched_however_it_was_typed(self):
-        out = IdentifyHammondFootprint(expected_part=" 1590b2 ").apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint(expected_part=" 1590b2 ").apply(an_outline(113.0, 60.0))
 
         assert out.diagnostics == ()
         assert out.enclosure.selected_part == "1590B2"
 
     def test_a_blank_declaration_is_no_declaration(self):
         """An empty ``--case`` must not become a part number nothing can match."""
-        out = IdentifyHammondFootprint(expected_part="   ").apply(outline(113.0, 60.0))
+        out = IdentifyHammondFootprint(expected_part="   ").apply(an_outline(113.0, 60.0))
 
         assert out.diagnostics == ()
         assert out.enclosure.selected_part is None
@@ -1398,7 +1435,7 @@ class TestTheMeasurementSurvivesTheSnap:
         """Idempotence, and provenance under it: 112 × 61 is already a footprint,
         so running twice must change nothing and must not promote the snapped
         size to a measurement."""
-        once = IdentifyHammondFootprint().apply(outline(113.0, 60.0))
+        once = IdentifyHammondFootprint().apply(an_outline(113.0, 60.0))
         twice = IdentifyHammondFootprint().apply(once)
 
         assert once.reference.width == 112.0, "the first pass never snapped anything"
