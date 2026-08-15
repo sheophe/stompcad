@@ -29,13 +29,20 @@ from aidrill.emitters.drawing_svg import (
 from aidrill.model import (
     Diagnostic,
     DrillData,
+    EnclosureMatch,
     Hole,
     ReferenceOutline,
     Severity,
     SourceInfo,
     StageRun,
 )
-from aidrill.pipeline import Deduplicate, SnapPositions
+from aidrill.pipeline import (
+    DRILL_STANDARDS,
+    Deduplicate,
+    IdentifyHammondFootprint,
+    SnapDiametersToDrillTable,
+    SnapPositions,
+)
 from aidrill.protocols import Emitter, Pipeline
 from tests.conftest import at, holes, make_data
 
@@ -225,7 +232,21 @@ def test_default_options_match_the_spec_signature():
     assert options.scale is None
     assert options.title == ""
     assert options.drawing_no == ""
-    assert options.true_size is None
+
+
+def test_the_options_carry_no_true_size_of_their_own():
+    """The overlay is gone, and with it the only thing that drew a second outline.
+
+    On a successful match the dashed rectangle sat exactly on the normalised
+    reference — two identical outlines, one of them claiming to be a check on
+    the other. On a mismatch the facts worth having are which enclosure was
+    asked for and which one the artwork is, and those are now the title block's
+    enclosure line and a ``wrong-enclosure`` note, neither of which needs the
+    operator to retype a datasheet.
+    """
+    assert "true_size" not in {f.name for f in fields(DrawingOptions)}
+    with pytest.raises(TypeError):
+        DrawingOptions(true_size=(112.0, 61.0))
 
 
 def test_the_options_carry_no_grid_of_their_own():
@@ -396,7 +417,7 @@ def test_a_neighbour_of_a_different_diameter_is_not_styled_as_a_duplicate():
         for e in by_class(root, "sched-dia", "text")
         if "#c" in (e.get("style") or "").lower()
     ]
-    assert red_rows == ["⌀7.00"], "only the ⌀7 hole is a duplicate in the schedule"
+    assert red_rows == ["⌀7.00 mm"], "only the ⌀7 hole is a duplicate in the schedule"
 
 
 def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
@@ -556,19 +577,17 @@ def test_reference_outline_is_a_rounded_rect_at_scale(panel: DrillData):
     assert num(outline, "rx") > 0
 
 
-def test_true_size_overlay_only_when_requested(panel: DrillData):
-    plain = ET.fromstring(DrawingSvgEmitter().emit(panel))
-    assert by_class(plain, "true-size") == []
+def test_the_reference_outline_is_the_only_outline_drawn(panel: DrillData):
+    """One panel, one rectangle. The dashed true-size overlay is gone.
 
-    emitter = DrawingSvgEmitter(DrawingOptions(true_size=(112.0, 60.5)))
-    root = ET.fromstring(emitter.emit(panel))
-    layout = emitter.layout(panel)
-    overlay = by_class(root, "true-size", "rect")
-    assert len(overlay) == 1
-    assert num(overlay[0], "width") == pytest.approx(112.0 * layout.scale)
-    assert num(overlay[0], "height") == pytest.approx(60.5 * layout.scale)
-    assert overlay[0].get("stroke-dasharray"), "true-size overlay must be dashed"
-    assert overlay[0].get("stroke") != by_class(root, "outline", "rect")[0].get("stroke")
+    Structural rather than ``"true-size" not in svg``: what matters is not that
+    a class name is absent but that nothing draws a *second* outline, whatever
+    it might be called.
+    """
+    root = ET.fromstring(DrawingSvgEmitter().emit(panel))
+    group = by_class(root, "outlines")[0]
+    assert [tag(e) for e in group] == ["rect"]
+    assert classes(group[0]) == {"outline"}
 
 
 def test_centrelines_are_chain_dashed_and_cross_the_origin(panel: DrillData):
@@ -667,7 +686,10 @@ def test_schedule_cells_carry_the_hole_data(panel: DrillData, root: ET.Element):
         assert cells["sched-no"] == str(index)
         assert float(cells["sched-x"]) == pytest.approx(hole.x)
         assert float(cells["sched-y"]) == pytest.approx(hole.y)
-        assert float(cells["sched-dia"].lstrip("⌀")) == pytest.approx(hole.diameter)
+        # The whole cell, not a float parsed out of it: the units are part of
+        # what the column says, and a fractional standard spells the same column
+        # ``⌀9/32"``.
+        assert cells["sched-dia"] == f"⌀{hole.diameter:.2f} mm"
 
 
 def test_schedule_tool_numbers_come_from_drilldata_tools(panel: DrillData, root: ET.Element):
@@ -709,20 +731,111 @@ def test_schedule_has_a_per_tool_summary_with_quantities(root: ET.Element):
     assert "2" in summary[0] and "5" in summary[1]  # quantities, ascending by size
 
 
+def _sched_diameters(root: ET.Element) -> list[str]:
+    return [e.text or "" for e in by_class(root, "sched-dia", "text")]
+
+
+def test_schedule_diameters_are_spelled_the_way_the_drill_standard_spells_them():
+    """A fractional bit's honest name is its fraction, and the standard knows it.
+
+    Deliberately the *fractional* standard: 1/8" is 3.175 mm and 9/32" is
+    7.14375, so a millimetre spelling of either is a rounding of a size that is
+    exact — and, at the schedule's two decimals, ``⌀7.14 mm`` is a bit nobody
+    stocks. The metric standard could not prove this test at all, because its
+    label and the millimetre fallback are the same string.
+    """
+    data = make_data(*holes((-20.0, 0.0, 3.18), (20.0, 0.0, 7.13)))
+    after = Pipeline([SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"])]).run(data)
+    root = ET.fromstring(DrawingSvgEmitter().emit(after))
+
+    assert _sched_diameters(root) == ['⌀1/8"', '⌀9/32"']
+    summary = " | ".join(e.text or "" for e in by_class(root, "sched-summary", "text"))
+    assert '⌀1/8"' in summary and '⌀9/32"' in summary
+
+
+def test_schedule_diameters_use_the_standard_that_actually_ran():
+    """A second standard, so the first test cannot be passing on a constant.
+
+    The same two holes quantised against the metric drawer get metric labels,
+    which is the same fact from the other side: the spelling is read out of the
+    run, not chosen by the emitter.
+    """
+    data = make_data(*holes((-20.0, 0.0, 3.18), (20.0, 0.0, 7.13)))
+    after = Pipeline([SnapDiametersToDrillTable(DRILL_STANDARDS["metric"])]).run(data)
+    root = ET.fromstring(DrawingSvgEmitter().emit(after))
+
+    assert _sched_diameters(root) == ["⌀3.20 mm", "⌀7.10 mm"]
+
+
+def test_schedule_diameters_fall_back_to_millimetres_when_no_standard_was_recorded():
+    """A hand-built ``DrillData`` never met the drill table. Nothing to look up.
+
+    The fallback states millimetres because that is the frame the numbers are
+    in; guessing a standard would put a bit designation on the sheet that no
+    stage ever chose.
+    """
+    data = make_data(*holes((0.0, 0.0, 7.0)))
+    assert data.last_run("snap-diameters") is None
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert _sched_diameters(root) == ["⌀7.00 mm"]
+
+
+@pytest.mark.parametrize("recorded", ["gauge", "", True, 3.0, (3.0, 5.0)])
+def test_a_recorded_standard_that_does_not_resolve_is_not_a_standard(recorded):
+    """``StageRun`` payloads are generic; a name is only a name until it resolves.
+
+    A run recorded against a hand-built standard — or a document from a later
+    version of this tool — names something this build cannot expand into sizes
+    or a spelling. Millimetres, then, rather than a label invented here.
+
+    Every ``ParameterValue`` shape is passed through, because the registry
+    lookup is the one place a payload reaches a dict key: a value it choked on
+    would take out the whole sheet, not just this column.
+    """
+    data = make_data(*holes((0.0, 0.0, 7.0))).with_processing(
+        StageRun("snap-diameters", (("standard", recorded), ("size_count", 80)))
+    )
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert _sched_diameters(root) == ["⌀7.00 mm"]
+
+
+def test_the_diameter_column_does_not_promise_millimetres_it_cannot_keep():
+    """The heading carried ``mm`` while the rows can carry inch fractions."""
+    data = make_data(*holes((0.0, 0.0, 3.18)))
+    after = Pipeline([SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"])]).run(data)
+    root = ET.fromstring(DrawingSvgEmitter().emit(after))
+
+    headers = [e.text for e in by_class(root, "sched-head", "text")]
+    assert headers[3] == "⌀"
+    assert _sched_diameters(root) == ['⌀1/8"']
+
+
 # --------------------------------------------------------------------------
 # title block
 # --------------------------------------------------------------------------
 
 
-def _title_block_text(root: ET.Element) -> str:
-    """Every string inside the title block, and nothing from the rest of the sheet.
+def _title_block_lines(root: ET.Element) -> list[str]:
+    """Every string inside the title block, one per ``<text>``, in sheet order.
 
     Scoped deliberately: ``all_text`` would let a dimension label elsewhere on
     the drawing satisfy an assertion about what the title block states.
+
+    Lines rather than one blob, because the title block is where the sheet makes
+    its claims and a claim is a whole line. ``"112 × 61" in text`` is satisfied
+    by a line that also carries a truncation ellipsis, or by two facts that
+    happen to abut across a join; ``line in lines`` is not.
     """
     groups = by_class(root, "title-block-group")
     assert len(groups) == 1, "expected exactly one title block"
-    return "\n".join((e.text or "") for e in walk(groups[0], "text"))
+    return [(e.text or "") for e in walk(groups[0], "text")]
+
+
+def _title_block_text(root: ET.Element) -> str:
+    """The title block's strings joined, for assertions about a fragment."""
+    return "\n".join(_title_block_lines(root))
 
 
 def test_title_block_carries_the_required_fields(panel: DrillData):
@@ -816,6 +929,157 @@ def test_a_recorded_grid_of_true_is_not_a_pitch_of_one_millimetre():
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
     assert "GRID NOT RECORDED" in text
     assert "GRID 1 mm" not in text
+
+
+# -- the enclosure the panel was identified as ------------------------------
+
+
+def _identified(
+    *,
+    length_mm: int = 112,
+    width_mm: int = 61,
+    candidates: tuple[str, ...] = ("1590B", "1590B2", "1590BS"),
+    rotated: bool = False,
+    selected_part: str | None = None,
+    reference: ReferenceOutline | None = None,
+) -> DrillData:
+    """A panel whose *measured* outline is not its *catalogue* footprint.
+
+    113 × 60 against a 112 × 61 match, which is the fixture panel's own error and
+    the whole reason the identification stage exists. Kept apart on purpose: an
+    emitter that printed ``data.reference`` instead of the match would be
+    indistinguishable from a correct one if the two agreed.
+    """
+    return DrillData(
+        holes=holes((0.0, 0.0)),
+        reference=reference if reference is not None else ReferenceOutline(113.0, 60.0),
+        enclosure=EnclosureMatch(
+            family="Hammond 1590",
+            length_mm=length_mm,
+            width_mm=width_mm,
+            candidates=candidates,
+            rotated=rotated,
+            selected_part=selected_part,
+        ),
+    )
+
+
+def test_the_title_block_states_the_enclosure_the_pipeline_identified():
+    """Straight off a real run: outline in, footprint on the sheet.
+
+    The stage does the identifying; the drawing reads ``DrillData.enclosure``.
+    Asserted as a whole line, because the sheet's claim is the line.
+    """
+    data = make_data(*holes((10.0, 5.0)), reference=ReferenceOutline(113.0, 60.0))
+    after = Pipeline([IdentifyHammondFootprint()]).run(data)
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(after)))
+    assert "HAMMOND 1590  112 × 61 mm  CANDIDATES B / B2 / BS" in lines
+
+
+def test_the_enclosure_line_states_the_catalogue_footprint_not_the_measured_outline():
+    """112 × 61 is what the case is; 113 × 60 is what the artwork came to.
+
+    The datasheet number is the one a machinist can order a box by, and it is
+    the one every other consumer of this panel has already agreed on.
+    """
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(_identified())))
+    assert "HAMMOND 1590  112 × 61 mm  CANDIDATES B / B2 / BS" in lines
+    assert not [line for line in lines if "113" in line or "60" in line]
+
+
+def test_the_enclosure_line_renders_the_candidates_in_the_order_it_was_handed():
+    """A claim about the emitter: it passes the tuple through, it does not order it.
+
+    ``enclosures.footprints()`` sorts, so all 22 production footprints arrive
+    alphabetical and no fixture drawn from the catalogue can tell passthrough
+    from sorting — ``("1590BB", "1590BB2", "1590BBS", "1590C")`` sorts to
+    itself. These candidates are therefore hand-built out of alphabetical order,
+    which is the only fixture that distinguishes the two, and the contract it
+    pins is the emitter's: whoever builds an ``EnclosureMatch`` — a future
+    matcher, a library caller, a changed ``footprints()`` — decides the order,
+    and the drawing renders it.
+    """
+    data = _identified(candidates=("1590BS", "1590B", "1590B2"))
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "HAMMOND 1590  112 × 61 mm  CANDIDATES BS / B / B2" in lines
+
+
+def test_a_candidate_that_does_not_carry_the_series_is_printed_whole():
+    """``1590B`` under a ``HAMMOND 1590`` heading is that series' ``B``.
+
+    The shorthand is the datasheet's, and it buys the width that keeps a
+    four-candidate footprint inside the title block. It is not a substring
+    operation, though, and the difference shows on anything the series does not
+    prefix: blind slicing turns ``PB-61`` into ``61`` — a designator that reads
+    like a dimension — and a designator that *is* the series into nothing at all.
+    """
+    data = _identified(candidates=("1590B", "1590", "PB-61"))
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "HAMMOND 1590  112 × 61 mm  CANDIDATES B / 1590 / PB-61" in lines
+
+
+def test_the_enclosure_line_names_the_one_part_when_the_operator_declared_one():
+    """``--case`` is the only thing that can ever narrow a footprint to a part.
+
+    The declared part replaces the candidate list rather than joining it: the
+    operator has answered the question the list was asking.
+    """
+    data = _identified(selected_part="1590B")
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "HAMMOND 1590  112 × 61 mm  PART 1590B" in lines
+
+
+def test_the_enclosure_line_does_not_name_a_part_when_none_was_declared():
+    """``selected_part`` is ``None`` on every run that did not declare a case.
+
+    A 2-D outline identifies a footprint and never a part, so a sheet naming one
+    it was never told is claiming knowledge that is not in the artwork — and it
+    is the plausible half of the pair a machinist would act on.
+    """
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(_identified())))
+    assert "HAMMOND 1590  112 × 61 mm  CANDIDATES B / B2 / BS" in lines
+    assert not [line for line in lines if "PART" in line]
+
+
+def test_the_enclosure_line_says_the_panel_is_turned_when_it_is():
+    """The match keeps the catalogue's orientation; the artwork keeps its own.
+
+    So a portrait panel is dimensioned 61 × 112 on the drawing while its
+    enclosure line says 112 × 61 — two true numbers that read as a contradiction
+    unless the sheet says which way round the panel sits.
+    """
+    data = _identified(rotated=True, reference=ReferenceOutline(60.0, 113.0))
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "HAMMOND 1590  112 × 61 mm ROTATED  CANDIDATES B / B2 / BS" in lines
+
+
+def test_the_title_block_says_so_when_no_enclosure_was_identified():
+    """No match, or no reference layer at all: the sheet says which, honestly.
+
+    The literal is pinned rather than the absence of a footprint, for the reason
+    ``GRID NOT RECORDED`` is: a line missing from the title block leaves the
+    machinist to assume the panel is a Hammond case, and "unknown enclosure" is
+    a legitimate outcome — the world holds more cases than this catalogue does.
+    """
+    data = make_data(*holes((0.0, 0.0)), reference=ReferenceOutline(200.0, 33.0))
+    assert data.enclosure is None
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "ENCLOSURE NOT IDENTIFIED" in lines
+    assert not [line for line in lines if "HAMMOND" in line.upper()]
+
+
+def test_a_panel_that_matches_nothing_still_says_so_after_a_real_run():
+    """The warning path end to end: ``unknown-enclosure`` leaves the field unset.
+
+    The hand-built case above cannot prove the stage leaves it unset — only that
+    the emitter reads it — so the two tests are not one test twice.
+    """
+    data = make_data(*holes((0.0, 0.0)), reference=ReferenceOutline(200.0, 33.0))
+    after = Pipeline([IdentifyHammondFootprint()]).run(data)
+    assert [d.code for d in after.diagnostics] == ["unknown-enclosure"]
+    assert "ENCLOSURE NOT IDENTIFIED" in _title_block_lines(
+        ET.fromstring(DrawingSvgEmitter().emit(after))
+    )
 
 
 def test_title_block_reports_the_scale(panel: DrillData):
