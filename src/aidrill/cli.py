@@ -130,10 +130,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--drill-sizes",
         metavar="CSV",
         default=None,
-        # The name is older than its meaning: it used to *be* the whole table
-        # and was ignored unless --diameters table was also passed. It now
-        # narrows the standard, and it is never ignored — so an old invocation
-        # that carried it as a no-op will now take bits out of the drawer.
         help="narrow the standard: only these of its sizes are in the drawer "
         "(every value must be a size the standard has)",
     )
@@ -346,12 +342,10 @@ class OutputSettings:
     Not a shared options bag (ISP): it is the *input* to the per-emitter options
     builders below, each of which picks out only what its own emitter declares.
 
-    Down to one field, and deliberately not deleted for it. The drawing's
-    ``true_size`` overlay lost its flag when the enclosure catalogue took over
-    the job of saying what size the panel really is — a declared ``WxH`` was the
-    operator retyping a datasheet — but the *shape* here is what keeps ``--grid``
-    from being copied into an emitter's options, which is a fault this project
-    has already shipped once.
+    One field, and a class rather than the bare string it currently holds,
+    because the shape is what keeps ``--grid`` out of an emitter's options: the
+    sheet was handed the flag alongside the stage that did the snapping, so data
+    snapped at 0.5 could be stamped 0.25 for a machinist to read.
     """
 
     title: str = ""
