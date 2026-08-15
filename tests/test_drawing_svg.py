@@ -33,6 +33,7 @@ from aidrill.model import (
     ReferenceOutline,
     Severity,
     SourceInfo,
+    StageRun,
 )
 from aidrill.pipeline import Deduplicate, SnapPositions
 from aidrill.protocols import Emitter, Pipeline
@@ -743,7 +744,6 @@ def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
     data = make_data(*holes((10.03, 5.02)))
     after = Pipeline([SnapPositions(grid=0.5)]).run(data)
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
-    assert "0.5" in text
     assert "GRID 0.5 mm" in text
 
 
@@ -757,7 +757,9 @@ def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
     after = Pipeline([SnapPositions(grid=0.1)]).run(make_data(*holes((10.03, 5.02))))
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "GRID 0.1 mm" in text
-    assert "0.5" not in text and "0.25" not in text
+    # Scoped to the grid line: the title block also carries SCALE, so a bare
+    # substring check would be pinned to layout fitting rather than to the grid.
+    assert "GRID 0.5 mm" not in text and "GRID 0.25 mm" not in text
 
 
 def test_the_title_block_says_the_grid_was_off_when_snapping_was_disabled():
@@ -769,16 +771,51 @@ def test_the_title_block_says_the_grid_was_off_when_snapping_was_disabled():
     after = Pipeline([SnapPositions(grid=0.0)]).run(make_data(*holes((10.03, 5.02))))
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "GRID OFF" in text
-    assert "0.25" not in text
+    assert "GRID 0.25 mm" not in text and "GRID 0 mm" not in text
 
 
 def test_the_title_block_does_not_invent_a_grid_when_none_was_recorded():
-    """A hand-built ``DrillData`` never went through a pipeline. Saying 0.25 would be a lie."""
+    """A hand-built ``DrillData`` never went through a pipeline. Saying 0.25 would be a lie.
+
+    The literal is pinned, not merely the absence of 0.25: SPEC §7 promises
+    ``GRID NOT RECORDED``, and "says nothing at all" satisfies "does not lie"
+    while breaking that promise. A blank line where the grid should be also
+    leaves the machinist to assume one.
+    """
     data = make_data(*holes((0.0, 0.0)))
     assert data.processing == ()
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "GRID NOT RECORDED" in text
     assert "0.25" not in text
-    assert "NOT RECORDED" in text or "GRID" not in text
+
+
+def test_a_recorded_grid_that_is_not_a_number_is_not_a_grid():
+    """``StageRun`` payloads are generic, so "0.5" is a string, not a pitch.
+
+    Reported the same way as no record at all. Printing it would put a number on
+    the sheet that nothing guarantees is a millimetre value, and coercing it
+    would be the emitter deciding what the pipeline meant.
+    """
+    data = make_data(*holes((0.0, 0.0))).with_processing(
+        StageRun("snap", (("grid_mm", "0.5"), ("enabled", True)))
+    )
+    text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "GRID NOT RECORDED" in text
+    assert "0.5" not in text
+
+
+def test_a_recorded_grid_of_true_is_not_a_pitch_of_one_millimetre():
+    """``bool`` is a legal ``ParameterValue`` and, in Python, also an ``int``.
+
+    A naive numeric guard admits ``True`` and stamps the sheet ``GRID 1 mm`` —
+    a plausible, wrong, drillable number. That is worse than saying nothing.
+    """
+    data = make_data(*holes((0.0, 0.0))).with_processing(
+        StageRun("snap", (("grid_mm", True),))
+    )
+    text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "GRID NOT RECORDED" in text
+    assert "GRID 1 mm" not in text
 
 
 def test_title_block_reports_the_scale(panel: DrillData):

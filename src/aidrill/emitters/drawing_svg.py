@@ -1091,15 +1091,18 @@ def _grid_note(data: DrillData) -> str:
     run = data.last_run(SNAP_STAGE)
     grid = None if run is None else run.get(GRID_PARAMETER)
     # ``StageRun`` payloads are deliberately generic, so a value that is not a
-    # number is not a pitch and gets the same answer as no value at all.
-    if not isinstance(grid, (int, float)):
+    # number is not a pitch and gets the same answer as no value at all. ``bool``
+    # is excluded explicitly because it is a legal ``ParameterValue`` *and* an
+    # ``int`` in Python: a recorded ``True`` would otherwise stamp the sheet
+    # "GRID 1 mm", which is a plausible, wrong and entirely drillable number.
+    if not isinstance(grid, (int, float)) or isinstance(grid, bool):
         return "GRID NOT RECORDED"
     if grid > 0:
         return f"GRID {_trim(float(grid))} mm"
     return "GRID OFF"
 
 
-def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[object]:
+def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[float | int | str]:
     """The ``Hole.index`` of every hole ``Deduplicate`` kept and reported.
 
     ``hole_index`` is the survivor's stable identity, which is why it exists: a
@@ -1107,11 +1110,12 @@ def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[object]:
     is written at the moment of the report. A diagnostic carrying no id names no
     hole this emitter can place, so it rings nothing rather than guessing.
 
-    Typed ``object`` and not ``int`` on purpose. ``Diagnostic.data`` is a generic
-    payload, and the set is only ever tested with ``in``, so a value that is not
-    an id simply matches no hole — whereas an ``isinstance(…, int)`` filter would
-    also throw away a ``3.0`` that equals, and would have correctly rung, hole 3.
-    Dropping a ring in silence is the failure this function was rewritten to fix.
+    Typed as ``Diagnostic.data``'s own value type and not ``int`` on purpose. The
+    payload is generic and the set is only ever tested with ``in``, so a value
+    that is not an id simply matches no hole — whereas an ``isinstance(…, int)``
+    filter would also throw away a ``3.0`` that equals, and would have correctly
+    rung, hole 3. Dropping a ring in silence is the failure this function was
+    rewritten to fix, so no filter is added to narrow the annotation.
     """
     return frozenset(
         index
@@ -1120,7 +1124,7 @@ def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[object]:
     )
 
 
-def _is_flagged(hole: Hole, flagged: frozenset[object]) -> bool:
+def _is_flagged(hole: Hole, flagged: frozenset[float | int | str]) -> bool:
     """Identity, not geometry. Whoever the pipeline named is who gets the ring.
 
     Two earlier versions decided this from positions. The first matched within a
