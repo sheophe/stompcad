@@ -770,7 +770,21 @@ A survivor left untriaged is the same failure this task exists to prevent, one l
 
 - [ ] **Step 1 (Lane B): Hand-mutate each finding's fix and confirm its regression test dies**
 
-For each mutation below: apply it to `src/`, run only the tests that claim to cover it, record whether any test fails, then **restore the source and confirm `git diff --stat src/` is empty** before the next mutation. A surviving mutation is a vacuous test and must be strengthened until it fails. Work one at a time; never leave a mutation in the tree.
+**MANDATORY: every mutation run must disable the bytecode cache.** Use `python -B` or export `PYTHONDONTWRITEBYTECODE=1`. This is not hygiene — without it the results are fiction.
+
+CPython validates a `.pyc` against the source's `(mtime, size)`, and **the `.pyc` header stores mtime as a 4-byte value in whole seconds**. A mutation applied and reverted inside one wall-clock second, at unchanged file size — which is every same-length mutation, run at machine speed — is invisible to the validator, so the interpreter silently executes the *previous* bytecode. Reproduced in this repo: a file mutated from `"ORIGINAL"` to `"MUTATEDX"` still printed `ORIGINAL`. Under `-B` the same sequence correctly prints `ORIGINAL → MUTATEDX → ORIGINAL`.
+
+Both failure directions are possible and both are silent:
+- the mutant never runs, the original passes, and the mutation is recorded as a **false survivor** — you strengthen a test that was already fine;
+- the run executes the *preceding* mutant, and its kill list is attributed to the current one — a **false kill**, which is worse, because a genuine survivor is recorded as caught.
+
+This defect was found in a hand-written harness during Task 4, where one mutation reported an identical kill list to the mutation before it. Any mutation evidence gathered without `-B` is not evidence.
+
+- [ ] **Step 1a: Re-run Tasks 1–3's hand mutations under `-B`**
+
+Tasks 1, 2 and 3 ran hand mutations before this was known (8, 8 and 9 respectively, all reported killed). Their conclusions are probably right — most were applied deliberately and slowly — but they were not gathered under a sound harness, so they are not evidence. Re-run them from the tables in each task's report and record the results in `vacuity-report.md` alongside the new ones. A mutation that now survives is a finding against that task, not against this one.
+
+For each mutation below: apply it to `src/`, run only the tests that claim to cover it **with `-B`**, record whether any test fails, then **restore the source and confirm `git diff --stat src/` is empty** before the next mutation. A surviving mutation is a vacuous test and must be strengthened until it fails. Work one at a time; never leave a mutation in the tree.
 
 One mutation per fix, targeting the exact behaviour the task claimed to restore:
 
