@@ -51,9 +51,10 @@ neither document explaining the other.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import isfinite
-from typing import ClassVar, Iterable, Mapping
+from typing import ClassVar
 
 from ..errors import EmitterError
 from ..formatting import format_mm

@@ -30,7 +30,6 @@ from aidrill.pipeline import Deduplicate, IdentifyHammondFootprint
 from aidrill.protocols import Emitter, Pipeline
 from tests.conftest import at, holes, make_data
 
-
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------

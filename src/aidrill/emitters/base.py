@@ -21,7 +21,7 @@ option factory would close the gap and has not been done.
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, TypeVar
+from typing import TypeVar
 
 from ..errors import EmitterError
 

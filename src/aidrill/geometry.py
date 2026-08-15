@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Union
 
 __all__ = [
     "IDENTITY",
@@ -128,7 +127,7 @@ class ClosePath:
     """PDF ``h``: straight segment back to the subpath's start."""
 
 
-Segment = Union[MoveTo, LineTo, CurveTo, ClosePath]
+Segment = MoveTo | LineTo | CurveTo | ClosePath
 
 
 @dataclass(frozen=True, slots=True)

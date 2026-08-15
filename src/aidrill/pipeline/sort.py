@@ -7,9 +7,18 @@ an operator checking one against another has to work out why they differ.
 
 from __future__ import annotations
 
-from typing import Callable, ClassVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, ClassVar
 
 from ..model import DrillData, Hole, StageRun
+
+if TYPE_CHECKING:
+    # ``sorted`` needs a key whose result can be compared with ``<``. Spelling
+    # that as ``object`` types the parameter by what a key *is* rather than by
+    # what this stage does with it, and ``SortHoles(key=lambda h: h)`` then
+    # type-checks cleanly and raises TypeError on a real panel. _typeshed is
+    # not importable at runtime, which is why the import is guarded.
+    from _typeshed import SupportsRichComparison
 
 __all__ = ["SortHoles"]
 
@@ -24,7 +33,7 @@ class SortHoles:
 
     name: ClassVar[str] = "sort"
 
-    def __init__(self, key: Callable[[Hole], object] | None = None) -> None:
+    def __init__(self, key: Callable[[Hole], SupportsRichComparison] | None = None) -> None:
         self.key = _reading_order if key is None else key
 
     def describe(self) -> StageRun:

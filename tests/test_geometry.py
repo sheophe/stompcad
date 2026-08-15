@@ -22,6 +22,7 @@ arbitrary anchors.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -355,11 +356,11 @@ class TestSubPath:
 
     def test_bbox_of_a_pathless_subpath_is_an_error(self) -> None:
         with pytest.raises(ValueError):
-            SubPath(()).bbox
+            SubPath(()).bbox  # noqa: B018  the bare access is the assertion: bbox is a property
 
     def test_subpath_is_frozen(self) -> None:
         path = circle_path(0.0, 0.0, 1.0)
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             path.segments = ()  # type: ignore[misc]
 
 
@@ -379,7 +380,7 @@ class TestFitCircle:
     def test_returns_a_frozen_circle_value(self) -> None:
         found = fit_circle(circle_path(0.0, 0.0, 1.0))
         assert isinstance(found, Circle)
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             found.cx = 5.0  # type: ignore[misc]
 
     def test_recovers_a_circle_through_a_translate_and_scale_ctm(self) -> None:

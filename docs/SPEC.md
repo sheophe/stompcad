@@ -214,6 +214,13 @@ it snaps the outline to the catalogue as well as checking it, and only a *catalo
 footprint can be snapped to. Wiring both would give one run two answers to "how big is
 this panel?" with nothing to reconcile them.
 
+Every stage in the table above, and `AiPdfSource`, are importable from `aidrill` directly
+and not only from `aidrill.pipeline` / `aidrill.sources`. That matters most for exactly
+this stage and for the source: neither is reachable through a registry — there is no
+source registry at all, and `build_pipeline` never names `CheckReferenceSize` — so the
+package root is the only place a library caller can find them. Emitters are the
+exception, resolved through `aidrill.emitters.get_emitter`.
+
 **Severity is the exit code, so it is a contract.** `unknown-diameter` is an ERROR and the
 hole is **dropped**: if every nominal comes from the drill table, a retained measurement is
 a tool for a bit that does not exist, and §8's withholding rule is what keeps the dropped

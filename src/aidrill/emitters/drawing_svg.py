@@ -73,8 +73,10 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Iterable, Sequence
+from itertools import pairwise
+from typing import ClassVar
 
 from ..formatting import format_mm
 from ..model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
@@ -223,7 +225,7 @@ def _trim(value: float) -> str:
     return text or "0"
 
 
-def _fmt(value: float | int | str) -> str:
+def _fmt(value: float | str) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, int):
@@ -694,7 +696,7 @@ class DrawingSvgEmitter:
                     stroke_width=0.15,
                 )
 
-            for start, end in zip(stations, stations[1:]):
+            for start, end in pairwise(stations):
                 x1 = layout.point(start, 0.0)[0]
                 x2 = layout.point(end, 0.0)[0]
                 _sub(
@@ -1035,8 +1037,10 @@ class DrawingSvgEmitter:
             f"{_grid_note(data)}   HOLES {len(data.holes)}",
             "THIRD ANGLE PROJECTION — DO NOT SCALE FROM DRAWING",
             f"SOURCE  {data.source.path or '—'}",
-            f"LAYERS  drill={data.source.drill_layer or '—'} "
-            f"ref={data.source.reference_layer or '—'}",
+            (
+                f"LAYERS  drill={data.source.drill_layer or '—'} "
+                f"ref={data.source.reference_layer or '—'}"
+            ),
         ]
         step = min(4.2, max(2.4, (y1 - (y0 + 9.0) - 1.5) / len(lines)))
         font = max(_TITLE_MIN_FONT, min(2.8, step * 0.62))

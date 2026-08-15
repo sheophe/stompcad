@@ -28,6 +28,11 @@ htmlcov/
 .ruff_cache/
 .dmypy.json
 
+# Mutation testing. `mutmut run` copies the whole tree into mutants/ and
+# rewrites the sources there; nothing in it is authored.
+mutants/
+mutants.sqlite
+
 # Editor / OS cruft
 .DS_Store
 *.swp
