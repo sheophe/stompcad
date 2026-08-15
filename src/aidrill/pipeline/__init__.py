@@ -18,6 +18,7 @@ from .diameters import (
     NormalizeDiameters,
     TableDiameters,
 )
+from .enclosure import IdentifyHammondFootprint, normalize_part_name
 from .snap import SnapPositions
 from .sort import SortHoles
 from .validate import CheckReferenceSize
@@ -32,4 +33,6 @@ __all__ = [
     "Deduplicate",
     "CheckReferenceSize",
     "SortHoles",
+    "IdentifyHammondFootprint",
+    "normalize_part_name",
 ]
