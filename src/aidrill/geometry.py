@@ -9,64 +9,19 @@ cubic Beziers. Recovering "this is a 7 mm hole at (-40, 18)" from twelve
 coordinate pairs is a single, sharp problem, and per SPEC 2.2 it is solved
 exactly once, here, for every source to reuse.
 
-**This is one of the three modules where a length is a float, and the reason is
-the fitting itself.** A quarter arc's control offset is ``KAPPA * r`` and
-``KAPPA`` is irrational; a centroid is a mean of four coordinates; a radius is a
-mean of four distances. None of that is expressible in whole nanometres without
-losing the fit it is measuring. So the maths stays in floating-point PDF points
-and the result crosses into the model's unit at one named place: the ``Circle``
-that ``fit_circle`` returns, whose fields are whole nanometres.
-
-**The conversion is at construction and nowhere earlier.** Rounding the anchors
-as they are collected would quantise four coordinates and then average them, so
-the centre and the radius would each carry up to four roundings instead of one —
-and the diameter, being twice a radius, would carry that error doubled. A circle
-of radius 3 pt shows the doubling: the diameter is 2 116 666.67 nm and rounds to
-2 116 667, while the radius rounds to 1 058 333 and doubles to 2 116 666. It is
-not the only radius that does, nor even the smallest — 2 pt disagrees the other
-way round, a 4 pt diameter rounding to 1 411 111 against twice 705 556 — but it
-is the one ``test_the_conversion_happens_once_and_on_the_diameter`` is built on.
-
-**The centre needs a different kind of fixture, and the difference has already
-fooled one reading of this module.** On a symmetric circle the four anchors of
-an axis fall into antipodal pairs, and each pair sums — before any rounding — to
-exactly twice the centre. Converting the two anchors separately can only carry
-that sum to an integer beside it, which pins the mean of all four within half a
-nanometre of the answer: the symmetric fixtures in ``tests/test_geometry.py``
-land on it exactly (0.0, for a circle on the origin), a quarter off it
-(-3 527 777.75, mirrored) or on the tie itself (3 878 943.5 at 37 degrees,
-2 116 666.5 at 45). Half a nanometre is where the two orders stop disagreeing
-about arithmetic and start disagreeing about a tie-break, and a tie only ever
-refutes the rules that pick the far side — so those two tied fixtures pull in
-opposite directions and *still* leave round-half-to-odd standing between them.
-A whole suite once stayed green with the centroid replaced by a converted-anchor
-mean.
-
-What breaks the pairing, and with it the bound, is a *slightly asymmetric* path,
-which is legal input here because ``fit_circle``'s tolerance is relative and
-exists to admit measurement noise: a circle a nanometre out of true on a
-millimetre radius is four orders of magnitude inside the 1% budget. Its
-converted mean comes out three quarters of a nanometre low — 0.25 where the
-answer is 1, 2.25 where it is 3 — far enough that half-up, half-even,
-half-to-odd, truncation and a floor each give one wrong answer. A ceiling is the
-one spelling that survives it, by landing on the right integer from the wrong
-side, and the tied fixtures refute the ceiling instead.
-``test_the_centre_converts_after_the_centroid_and_not_before`` is built on the
-asymmetric path and keeps the whole table.
-
-Both fixtures are chosen rather than found. The panel in
-``tests/fixtures/tar.ai`` drifts by well under a nanometre and rounds to the
-same integer either way, so *that* fixture cannot say this and must not be
-trusted to. Real artwork may land on the boundary; it simply cannot be relied on
-to.
+**Lengths here are floats, and they stay floats.** A quarter arc's control
+offset is ``KAPPA * r`` and ``KAPPA`` is irrational; a centroid is a mean of
+four coordinates; a radius is a mean of four distances. None of that is
+expressible in whole units of anything without losing the fit it is measuring,
+so the maths is floating point from end to end and the answer is handed on as
+measured. Quantising is for the stage that knows what answer set a length has
+to land on, and this module knows of none.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-
-from aidrill.units import nm_from_pt
 
 __all__ = [
     "IDENTITY",
@@ -235,23 +190,22 @@ class SubPath:
 
 @dataclass(frozen=True, slots=True)
 class Circle:
-    """A recovered circle, in whole nanometres of the space its subpath was in.
+    """A recovered circle, in the units of the space its subpath was in.
 
-    The subpath arrives in PDF points, so this is where a length stops being a
-    float: the ``_nm`` suffix on every field is the unit stated at the call site
-    rather than three stages downstream, which is the whole point of the
-    convention (`aidrill.units`).
+    Which are PDF points — and the fields deliberately do not say so. Naming a
+    length is the job of the caller that knows where it came from: a fitter that
+    said millimetres would be claiming to know the CTM's business, and one that
+    said nanometres would be quantising a measurement before anything
+    downstream had said what answer set it has to land on.
 
     Diameter, not radius, because that is what a drill chart, a tool table and
     a designer all speak in; halving it once here avoids everyone downstream
-    doubling it back. It is also converted *as a diameter* — ``nm_from_pt`` of
-    twice the radius, never twice ``nm_from_pt`` of the radius, which rounds the
-    half-length and then doubles the error with it.
+    doubling it back.
     """
 
-    cx_nm: int
-    cy_nm: int
-    diameter_nm: int
+    cx: float
+    cy: float
+    diameter: float
 
 
 def _cubics(path: SubPath) -> list[tuple[Point, CurveTo]] | None:
@@ -344,14 +298,7 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
     if not _kappa_consistent(pairs, (cx, cy), radius, slack):
         return None
 
-    # The one conversion. Everything above is floating-point points because the
-    # fitting genuinely is; everything below this line, and every consumer, has
-    # whole nanometres.
-    return Circle(
-        cx_nm=nm_from_pt(cx),
-        cy_nm=nm_from_pt(cy),
-        diameter_nm=nm_from_pt(2.0 * radius),
-    )
+    return Circle(cx=cx, cy=cy, diameter=2.0 * radius)
 
 
 def _quarter_turns(

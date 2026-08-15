@@ -19,14 +19,11 @@ one guard, assert *positively* that the others are satisfied, and only then
 assert the rejection. ``kappa_correct_path`` exists to make that possible for
 arbitrary anchors.
 
-Everything a path is made of here is a floating-point PDF point, and only what
-``fit_circle`` returns is nanometres. That is the module boundary, so the
-assertions come in two currencies: an expectation about a control offset or an
-anchor radius is a float in points and is compared with ``PT_SLACK``, while an
-expectation about a recovered ``Circle`` is a whole number of nanometres and is
-compared with ``units.nm_from_pt``. ``tolerance.within`` belongs to neither: it
-takes whole nanometres, and loosening it to take a float would move the model's
-boundary to suit a test at the one place a float is legitimate.
+Everything here is a floating-point PDF point — the paths the fixtures build and
+the ``Circle`` the fitter returns alike — because ``fit_circle`` quantises
+nothing and names no unit. So every numeric expectation is a float in points,
+compared with ``PT_SLACK``, whether it is about a control offset, an anchor
+radius or a recovered centre.
 """
 
 from __future__ import annotations
@@ -55,45 +52,25 @@ from aidrill.geometry import (
     multiply,
     transform,
 )
-from aidrill.units import nm_from_pt
 
 Point = tuple[float, float]
 
 #: PDF user space is 1/72 inch, so this is the scale between a stated point and
 #: a millimetre. It is here, in the file that wants it, and not exported from
-#: ``geometry``: the only thing that needs it is a CTM fixture magnifying a path
-#: by a realistic amount, and the conversion itself is ``units.nm_from_pt``,
-#: which divides one exact rational rather than multiplying by this ratio.
+#: ``geometry``, which knows no unit at all: the only thing that needs it is a
+#: CTM fixture magnifying a path by a realistic amount.
 PT_PER_MM = 72.0 / 25.4
 
-#: Slack for the float assertions, in points. These sit on the *inside* of the
-#: fitter, where the maths is genuinely fractional, so they are the one thing in
-#: the suite that a nanometre cannot express.
+#: Slack for the assertions, in points. The maths inside the fitter is genuinely
+#: fractional — an irrational control offset, a mean of four distances — so a
+#: scaled or rotated fixture lands a few ULPs off its closed form, and the cases
+#: whose anchors are exact halves assert equality instead.
 PT_SLACK = 1e-9
-
-#: Slack for the nanometre assertions, in nanometres. A centroid is a mean of
-#: four coordinates and a radius a mean of four distances, so a scaled or
-#: rotated fixture can land on the nanometre either side of the closed form; one
-#: nanometre is the narrowest slack there is and every exact case below asserts
-#: equality instead.
-NM_SLACK = 1
 
 
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
-
-
-def pt_from_nm(nm: float) -> float:
-    """A length in (possibly fractional) nanometres, stated as PDF points.
-
-    The inverse of ``units.nm_from_pt``, and deliberately not in ``units``:
-    nothing in the library wants it, because a nanometre is where a length
-    *arrives* and never where one starts. The one caller is a fixture that has
-    to place an anchor a stated fraction of a nanometre away from a whole one,
-    so it lives here, in the file that needs it.
-    """
-    return nm * 72.0 / 25_400_000.0
 
 
 def circle_path(
@@ -409,237 +386,45 @@ class TestSubPath:
 
 class TestFitCircle:
     def test_recovers_a_synthetic_circle_exactly(self) -> None:
-        """Exactly, and in whole nanometres: the fitter's own boundary.
+        """Exactly, and in the points the path was stated in.
 
-        The path is in points, the answer is not. Nothing is approximate here
-        because nothing needs to be — the anchors are exact halves, so the
-        centroid and the radius are exact and the only rounding left is the one
-        ``nm_from_pt`` performs, which is the answer.
+        Nothing is approximate here because nothing needs to be: the anchors are
+        exact halves, so the centroid and the radius are exact and the fitter
+        does not round them onto anything afterwards. The ``float`` assertion is
+        the one that notices if it starts to — an integer answer would still
+        compare equal to 7.0 and say nothing.
         """
         found = fit_circle(circle_path(-40.0, 18.0, 3.5))
         assert found is not None
-        assert found.cx_nm == nm_from_pt(-40.0)
-        assert found.cy_nm == nm_from_pt(18.0)
-        assert found.diameter_nm == nm_from_pt(7.0)
-        assert {type(v) for v in (found.cx_nm, found.cy_nm, found.diameter_nm)} == {int}
-
-    def test_the_conversion_happens_once_and_on_the_diameter(self) -> None:
-        """Pins *where* the crossing into nanometres happens, not merely that it does.
-
-        A 3 pt radius is 1 058 333.33 nm and the 6 pt diameter it implies is
-        2 116 666.67 — which round to 1 058 333 and 2 116 667. So rounding the
-        radius first and doubling gives 2 116 666: a nanometre short, because a
-        half-length was rounded and then had its error doubled along with it.
-
-        The circle is centred on the origin deliberately, which makes this fixture
-        refuse the other spelling of the same mistake too. Its four anchors sit at
-        ``(+-3, 0)`` and ``(0, +-3)``, so converting each anchor as it is collected
-        gives a centroid of exactly zero and a mean anchor radius of exactly
-        ``nm_from_pt(3.0)`` — a per-anchor conversion *is* a rounded radius here,
-        and lands on the same 2 116 666.
-
-        A fixture whose true value sits far from a half-nanometre cannot say any of
-        this: the fixture in ``test_ai_pdf`` drifts by up to 0.56 nm under a
-        per-anchor conversion and still rounds to the same integer, coming within
-        0.0011 nm of noticing on its closest hole. Exactness needs a fixture chosen
-        to sit on the boundary, and this is it.
-        """
-        # the two orders genuinely disagree here — the fixture is not a coincidence
-        assert nm_from_pt(6.0) != 2 * nm_from_pt(3.0)
-
-        found = fit_circle(circle_path(0.0, 0.0, 3.0))
-        assert found is not None
-        assert found.diameter_nm == nm_from_pt(6.0) == 2_116_667
-
-    def test_the_centre_converts_after_the_centroid_and_not_before(self) -> None:
-        """The same crossing, for the two fields the diameter fixture cannot see.
-
-        ``test_the_conversion_happens_once_and_on_the_diameter`` sits on the
-        origin, where a centroid of four converted anchors is zero however it is
-        assembled — so it says nothing at all about ``cx_nm`` or ``cy_nm``.
-
-        A *symmetric* circle cannot say it on its own either, and that is the
-        trap this fixture exists to leave behind. Antipodal anchors do not force
-        a tie, whatever the angle: ``circle_path(0.0, 0.0, 3.0)`` converts to a
-        mean of exactly 0.0, and the mirrored fixture below to -3 527 777.75, a
-        quarter above its answer. What they do force is a *bound*. Each
-        antipodal pair sums, unrounded, to exactly twice the centre, so
-        converting its two anchors separately can only move that sum to an
-        integer beside it — and the mean of two such pairs therefore stays
-        within half a nanometre of the answer. Half a nanometre is a tie, so the
-        worst a symmetric circle can expose is a disagreement about the
-        tie-break: 2 116 666.5 on the 45-degree fixture, 3 878 943.5 on the
-        37-degree one. A tie refutes only the rules that pick the far side, and
-        those two pull in opposite directions yet still leave round-half-to-odd
-        — which picks the near side of both — alive.
-
-        So this path is *asymmetric* — the pairing broken, and with it the bound
-        — and legally so: ``fit_circle`` measures a 1% relative tolerance
-        precisely to admit measurement noise, and a circle whose anchors are a
-        nanometre out of true on a one-millimetre radius is noise a thousand
-        times finer than any artwork. The assertion below
-        states the margin — the worst anchor is off the mean radius by less than
-        a thousandth of the budget — so this is ordinary accepted input and not
-        a shape the fitter is being talked into.
-
-        Every one of the eight anchor coordinates sits 0.26 nm above a whole
-        nanometre. Converting an anchor therefore throws 0.26 nm away, and doing
-        it four times before averaging drops the mean by 0.26 nm: from N + 0.51,
-        which rounds to N + 1, to N + 0.25, which rounds to N under half-up,
-        half-even, half-to-odd, truncation and a floor alike. On x, N is 0 and
-        the answer is 1 nm; on y, N is 2 and the answer is 3 nm. ``% 4 == 1``
-        states that the mean is a quarter and not a tie, which is the whole
-        difference — three quarters of a nanometre from the answer, where a
-        symmetric fixture could never have got past a half.
-
-        The two axes carry different anchor sums and different answers on
-        purpose: where they coincide, one assertion stands in for the other and
-        a mutation to ``cx_nm`` alone is indistinguishable from one to ``cy_nm``
-        alone.
-
-        What this fixture cannot do on its own is refute a *ceiling*: 0.25 ceils
-        to 1 and 2.25 to 3, the right answers, reached from the wrong side. That
-        is a gap in this fixture, not a licence for the arithmetic, and it is
-        closed elsewhere rather than argued away. Six spellings of "round the
-        mean of the converted anchors" have been run against this file and
-        ``tests/test_ai_pdf.py``, one axis at a time, and all twelve mutants
-        died:
-
-        * half-up — here, and ``test_recovers_a_circle_under_rotation``;
-        * half-even — those two, and the 45-degree tie fixture below;
-        * round-half-to-odd — **here and nowhere else**, which is this
-          fixture's whole reason to exist;
-        * truncation — here, the 45-degree tie, the mirrored circle, and the
-          outline tests in ``tests/test_ai_pdf.py`` besides;
-        * floor — here, the 45-degree tie, and those outline tests;
-        * ceiling — *not* here, but ``test_recovers_a_circle_under_rotation``,
-          whose tied 3 878 943.5 ceils a nanometre above the correct
-          3 878 943, and the mirrored circle, whose -3 527 777.75 ceils to
-          -3 527 777 against the correct -3 527 778.
-
-        The tempting argument that a ceiling *must* always agree — each
-        conversion loses under half a nanometre, so the answer is one of the
-        mean's neighbours — proves only that for any given fixture *some*
-        neighbour is right. It does not survive being read as one fixed
-        direction working every time, and the 37-degree rotation is where it
-        stops. An enumeration that can be re-run beats a theorem that cannot.
-        """
-        radius_nm = 1_000_000.0
-        anchors = tuple(
-            (pt_from_nm(x), pt_from_nm(y))
-            for x, y in (
-                (radius_nm + 1.26, 3.26),
-                (0.26, radius_nm + 3.26),
-                (-radius_nm + 0.26, 3.26),
-                (0.26, -radius_nm + 0.26),
-            )
-        )
-        path = kappa_correct_path(anchors)
-
-        pairs = _cubics(path)
-        assert pairs is not None and len(pairs) == 4
-        assert tuple(start for start, _ in pairs) == anchors
-
-        # asymmetric, and far inside the tolerance that makes it legal input
-        cx = sum(p[0] for p in anchors) / 4.0
-        cy = sum(p[1] for p in anchors) / 4.0
-        radius = sum(math.dist((cx, cy), p) for p in anchors) / 4.0
-        worst = max(abs(math.dist((cx, cy), p) - radius) for p in anchors)
-        assert worst > 0.0  # not the symmetric case ...
-        assert worst < 0.01 * radius / 1000.0  # ... and nowhere near the 1% budget
-
-        for axis, answer in ((0, 1), (1, 3)):
-            converted = sum(nm_from_pt(a[axis]) for a in anchors)
-            assert converted % 4 == 1  # the mean is exactly N + 0.25, not a tie ...
-            assert converted // 4 == answer - 1  # ... and N is one short, round it how you like
-
-        found = fit_circle(path)
-        assert found is not None
-        assert found.cx_nm == 1
-        assert found.cy_nm == 3
-
-    def test_the_centre_takes_the_upper_nanometre_where_the_anchor_mean_ties(self) -> None:
-        """A tied centre fixture, which can speak about the tie-break and no more.
-
-        This circle is turned 45 degrees and centred off both axes, on a pair of
-        points chosen so that the mean of its converted anchors lands exactly on
-        the half-nanometre *below* the answer: 2 116 666.5 on x, 2 751 666.5 on
-        y. ``% 4 == 2`` states the tie without picking a rule to settle it —
-        which is the limit of what this fixture can do. Half-even, truncation
-        and a floor take the tie down and are a nanometre short, so all three
-        die here; half-up, half-to-odd and a ceiling take it up and land on the
-        right integer by luck.
-        ``test_recovers_a_circle_under_rotation`` ties the other way and kills
-        half-up and the ceiling in turn, and the ordering itself is pinned by
-        ``test_the_centre_converts_after_the_centroid_and_not_before``, whose
-        anchor mean is not a tie at all.
-
-        The two coordinates are pinned to different integers on purpose. A
-        fixture centred on the diagonal would let one assertion stand in for the
-        other, and a mutation to ``cx_nm`` alone would be indistinguishable from
-        one to ``cy_nm`` alone.
-        """
-        placed: Matrix = (1.0, 0.0, 0.0, 1.0, 6.0, 7.8)
-        turned = mapped(circle_path(0.0, 0.0, 5.0), multiply(rotation(45.0), placed))
-
-        pairs = _cubics(turned)
-        assert pairs is not None and len(pairs) == 4
-        anchors = [start for start, _ in pairs]
-        for axis, answer in ((0, nm_from_pt(6.0)), (1, nm_from_pt(7.8))):
-            converted = sum(nm_from_pt(a[axis]) for a in anchors)
-            assert converted % 4 == 2  # the mean is exactly N + 0.5 ...
-            assert converted // 4 == answer - 1  # ... and N is one short
-
-        found = fit_circle(turned)
-        assert found is not None
-        assert found.cx_nm == nm_from_pt(6.0) == 2_116_667
-        assert found.cy_nm == nm_from_pt(7.8) == 2_751_667
+        assert found.cx == -40.0
+        assert found.cy == 18.0
+        assert found.diameter == 7.0
+        assert {type(v) for v in (found.cx, found.cy, found.diameter)} == {float}
 
     def test_returns_a_frozen_circle_value(self) -> None:
         found = fit_circle(circle_path(0.0, 0.0, 1.0))
         assert isinstance(found, Circle)
         with pytest.raises(dataclasses.FrozenInstanceError):
-            found.cx_nm = 5  # type: ignore[misc]
+            found.cx = 5.0  # type: ignore[misc]
 
     def test_recovers_a_circle_through_a_translate_and_scale_ctm(self) -> None:
         ctm: Matrix = (PT_PER_MM, 0.0, 0.0, PT_PER_MM, 200.0, 400.0)
         found = fit_circle(mapped(circle_path(-40.0, 18.0, 3.5), ctm))
         assert found is not None
-        expected = transform(ctm, -40.0, 18.0)
-        assert (found.cx_nm, found.cy_nm) == pytest.approx(
-            (nm_from_pt(expected[0]), nm_from_pt(expected[1])), abs=NM_SLACK
-        )
-        assert found.diameter_nm == pytest.approx(nm_from_pt(7.0 * PT_PER_MM), abs=NM_SLACK)
+        assert (found.cx, found.cy) == pytest.approx(transform(ctm, -40.0, 18.0), abs=PT_SLACK)
+        assert found.diameter == pytest.approx(7.0 * PT_PER_MM, abs=PT_SLACK)
 
     def test_recovers_a_circle_under_rotation(self) -> None:
         """A rotated circle is still a circle.
 
         Fitting from the *axis-aligned* bounding box would report a diameter of
         2r*cos(45 deg) here. Anchor radii are rotation invariant, so they don't.
-
-        Exact, and not within ``NM_SLACK``: a nanometre of slack is the whole
-        margin between converting the finished centroid and averaging four
-        converted anchors, so it is precisely the one nanometre this fixture is
-        able to speak about. The four converted anchors mean exactly
-        3 878 943.5 and 714 365.5 here — a tie whose *upper* side is wrong on
-        both axes — so allowing a nanometre accepted 3 878 944 and 714 366 as
-        readily as the right pair. Rounding that tie up is half-up, half-even
-        and a ceiling alike, which is what makes this the fixture that kills all
-        three — the ceiling in particular, which
-        ``test_the_centre_converts_after_the_centroid_and_not_before`` cannot
-        touch.
-        ``test_the_centre_takes_the_upper_nanometre_where_the_anchor_mean_ties``
-        ties the other way and kills truncation and a floor.
         """
         ctm = rotation(37.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), ctm))
         assert found is not None
-        expected = transform(ctm, 10.0, -5.0)
-        assert (found.cx_nm, found.cy_nm) == (
-            nm_from_pt(expected[0]),
-            nm_from_pt(expected[1]),
-        )
-        assert found.diameter_nm == nm_from_pt(5.0)
+        assert (found.cx, found.cy) == pytest.approx(transform(ctm, 10.0, -5.0), abs=PT_SLACK)
+        assert found.diameter == pytest.approx(5.0, abs=PT_SLACK)
 
     def test_recovers_a_circle_drawn_the_other_way_round(self) -> None:
         """A mirroring CTM reverses the direction of travel; a circle survives it.
@@ -653,8 +438,8 @@ class TestFitCircle:
         mirror: Matrix = (-1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), mirror))
         assert found is not None
-        assert (found.cx_nm, found.cy_nm) == (nm_from_pt(-10.0), nm_from_pt(-5.0))
-        assert found.diameter_nm == nm_from_pt(5.0)
+        assert (found.cx, found.cy) == (-10.0, -5.0)
+        assert found.diameter == 5.0
 
     def test_open_circle_path_without_closepath_still_fits(self) -> None:
         assert fit_circle(circle_path(0.0, 0.0, 4.0, closed=False)) is not None
@@ -669,7 +454,7 @@ class TestFitCircle:
         """
         found = fit_circle(kappa_correct_path(((3.5, 0.0), (0.0, 3.5), (-3.5, 0.0), (0.0, -3.5))))
         assert found is not None
-        assert found.diameter_nm == pytest.approx(nm_from_pt(7.0), abs=NM_SLACK)
+        assert found.diameter == pytest.approx(7.0, abs=PT_SLACK)
 
     # -- rejections --------------------------------------------------------
 
@@ -990,7 +775,7 @@ class TestFitCircle:
         )
         found = fit_circle(noisy)
         assert found is not None
-        assert found.diameter_nm == pytest.approx(nm_from_pt(7.0), abs=nm_from_pt(0.02))
+        assert found.diameter == pytest.approx(7.0, abs=0.02)
 
     def test_a_tight_tolerance_rejects_what_a_loose_one_accepts(self) -> None:
         slightly_oval = circle_path(0.0, 0.0, 10.0, ry=10.05)

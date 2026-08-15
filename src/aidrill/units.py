@@ -1,9 +1,9 @@
 """The unit boundary: one length, one representation, one rounding rule.
 
-Every length inside `aidrill` is an exact integer number of nanometres. Points
-arrive from the PDF and millimetres arrive from the operator's command line;
-both cross into the model through this module and nowhere else, so a conversion
-that is wrong is wrong in exactly one place.
+Every quantised length inside `aidrill` is an exact integer number of
+nanometres. Points arrive from the PDF and millimetres arrive from the
+operator's command line; every change of unit happens through this module and
+nowhere else, so a conversion that is wrong is wrong in exactly one place.
 
 **Nanometres, not microns.** The fractional drill standard settles it. A 64th of
 an inch is 127/320 mm, which is 396.875 microns -- not a whole one -- and
@@ -19,8 +19,8 @@ nobody can predict at the bench. It is also not the rule the domain uses --
 Hammond publish a 60.50 mm part as 61, where the builtin would say 60, so a
 checker written with it sees one axis of one part disagree and reads bad data
 rather than a rounding mode (``docs/parts/README.md``). Hence
-``decimal.ROUND_HALF_UP``, spelled once here so ``nm_from_pt``, ``nm_from_mm``
-and ``format_nm`` cannot drift apart.
+``decimal.ROUND_HALF_UP``, spelled once here so ``nm_from_mm`` and ``format_nm``
+cannot drift apart.
 
 **This is the boundary's rule and not the pipeline's.** ``SnapPositions`` ties
 half-to-*even*, deliberately, and the two are not in competition because they
@@ -45,7 +45,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 __all__ = [
     "NM_PER_MM",
-    "nm_from_pt",
+    "mm_from_pt",
     "nm_from_mm",
     "mm_from_nm",
     "format_nm",
@@ -55,10 +55,10 @@ __all__ = [
 #: and so is every drill size, grid pitch and catalogue dimension in play.
 NM_PER_MM: int = 1_000_000
 
-#: An inch is 25.4 mm by definition, so it is exact in nanometres too, and PDF
-#: user space is 1/72 inch. Kept as integers rather than the float ratio 72/25.4
-#: so that the point conversion is one exact rational, rounded once at the end.
-_NM_PER_INCH: int = 25_400_000
+#: An inch is 25.4 mm by definition, and PDF user space is 1/72 inch. Kept as
+#: the two factors rather than folded into the ratio 25.4/72, so the conversion
+#: below reads as the definition it is.
+_MM_PER_INCH: float = 25.4
 _PT_PER_INCH: int = 72
 
 _WHOLE = Decimal(1)
@@ -67,22 +67,27 @@ _WHOLE = Decimal(1)
 def _round_half_up(value: Decimal, exponent: Decimal = _WHOLE) -> Decimal:
     """Quantise ``value`` onto ``exponent``, ties away from zero.
 
-    The single site of the module's rounding rule: `nm_from_pt`, `nm_from_mm`
-    and `format_nm` all tie-break the same way because they all come through
-    here, rather than each spelling a mode that could drift apart.
+    The single site of the module's rounding rule: `nm_from_mm` and `format_nm`
+    tie-break the same way because they both come through here, rather than each
+    spelling a mode that could drift apart.
     """
     return value.quantize(exponent, rounding=ROUND_HALF_UP)
 
 
-def nm_from_pt(points: float) -> int:
-    """Convert PDF user-space points to whole nanometres.
+def mm_from_pt(points: float) -> float:
+    """Convert PDF user-space points to millimetres.
 
-    The way in from the artwork. `geometry` fits Beziers in floating-point
-    points because that maths is genuinely fractional; the result crosses into
-    the model here, once, at construction -- converting earlier would round each
-    of a circle's four anchors separately and compound the error.
+    The way in from the artwork, and a change of unit rather than a change of
+    representation: 72 pt is an inch by definition, so this is the same length
+    written differently and there is nothing here to decide. Hence a float, and
+    hence no visit to the rounding rule above.
+
+    Quantising here instead would be a rounding the artwork never asked for,
+    placed before the stages that know what a length has to land on -- a drill
+    size, a grid pitch, a catalogue footprint. Two roundings in series, and the
+    order of the two would matter.
     """
-    return int(_round_half_up(Decimal(str(points)) * _NM_PER_INCH / _PT_PER_INCH))
+    return points * _MM_PER_INCH / _PT_PER_INCH
 
 
 def nm_from_mm(mm: float) -> int:
