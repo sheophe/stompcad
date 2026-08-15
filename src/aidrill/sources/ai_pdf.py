@@ -73,10 +73,12 @@ _PAINT_OPS = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"})
 #: every viewer whether or not a ``W`` preceded it, so it is not artwork and
 #: must never reach the output — an unpainted artboard-sized rectangle would
 #: otherwise out-area the panel and hijack the reference frame (SPEC 6.3, 6.6).
+#:
+#: ``s``, ``b`` and ``b*`` additionally close the subpath before painting, and
+#: that closure is deliberately not recorded: a ``ClosePath`` carries no
+#: coordinate, and every consumer of a ``SubPath`` — ``anchors``, ``bbox``,
+#: ``fit_circle`` — steps over it. Recording it could not change an answer.
 _NO_PAINT_OPS = frozenset({"n"})
-
-#: Painting operators that close the subpath first.
-_CLOSING_PAINT_OPS = frozenset({"s", "b", "b*"})
 
 #: How deep Form XObjects may nest before we assume a malicious or broken file.
 _MAX_FORM_DEPTH = 12
@@ -352,16 +354,17 @@ def _walk(
         elif op in ("m", "l", "c", "v", "y", "h", "re"):
             builder.construct(op, operands)
         elif op in ("W", "W*"):
-            # Recorded, never acted on: clipping is not a painting decision.
-            # The operator that ends the path is what says whether it marked
-            # ink, and ``n`` is the only one that says no.
-            builder.clipping = True
+            # A deliberate no-op, spelt out rather than left to fall through:
+            # clipping is not a painting decision. The operator that ends the
+            # path is what says whether it marked ink, and ``n`` is the only one
+            # that says no. Nothing about a ``W`` is worth carrying forward.
+            pass
 
         # -- path painting
         elif op in _PAINT_OPS:
             # flush unconditionally: the path ends either way, and leaving it
             # pending would splice it onto whatever is constructed next.
-            painted = builder.flush(close=op in _CLOSING_PAINT_OPS)
+            painted = builder.flush()
             if op in _NO_PAINT_OPS:
                 continue
             layers = frozenset().union(*marks) if marks else frozenset()
@@ -387,11 +390,10 @@ class _PathBuilder:
     (legally) restore a different one before painting.
     """
 
-    __slots__ = ("ctm", "clipping", "_done", "_current", "_point", "_start")
+    __slots__ = ("ctm", "_done", "_current", "_point", "_start")
 
     def __init__(self, ctm: Matrix) -> None:
         self.ctm: Matrix = ctm
-        self.clipping = False
         self._done: list[SubPath] = []
         self._current: list[Segment] = []
         self._point: Point = (0.0, 0.0)
@@ -449,7 +451,7 @@ class _PathBuilder:
             self._current.append(ClosePath())
             self._point = self._start
 
-    def flush(self, close: bool = False) -> list[SubPath]:
+    def flush(self) -> list[SubPath]:
         """End the path and return its subpaths, whether or not it also clips.
 
         Deciding *here* was the bug. ``W``/``W*`` only adds the path to the
@@ -460,14 +462,11 @@ class _PathBuilder:
         ``h W S`` drill circle, whose absence was then reported as a layer that
         needed a stroke it already had. The caller applies ``_NO_PAINT_OPS``.
         """
-        if close:
-            self._close()
         if self._current:
             self._done.append(SubPath(tuple(self._current)))
         paths = self._done
         self._done = []
         self._current = []
-        self.clipping = False
         return paths
 
     # -- internals

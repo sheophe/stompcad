@@ -659,13 +659,20 @@ def test_form_xobjects_are_walked_with_their_matrix(tmp_path):
     assert circle.diameter == pytest.approx(20.0, abs=1e-6)
 
 
-def test_closing_paint_operators_still_close_the_path(tmp_path):
-    """``s`` is ``h`` then ``S``; a circle drawn that way is still a circle."""
+@pytest.mark.parametrize("paint", ["s", "b", "b*"])
+def test_the_closing_painters_mark_ink(tmp_path, paint):
+    """``s``, ``b`` and ``b*`` paint, so a circle ended by any of them is a hole.
+
+    The stakes are higher than a misclassified path. An operator this source
+    does not recognise as *ending* the path leaves it pending, so it is never
+    flushed and the hole is absent from every artifact with nothing said — the
+    silent-loss failure the whole module is arranged to avoid.
+    """
     pdf = build_pdf(
-        tmp_path / "closepaint.pdf",
+        tmp_path / f"closepaint-{paint.replace('*', 'star')}.pdf",
         {
             "Background": "10 10 100 50 re f",
-            "Drill": circle_ops(60, 35, 10, paint="s"),
+            "Drill": circle_ops(60, 35, 10, paint=paint),
         },
     )
     assert AiPdfSource(pdf).read().holes[0].diameter == pytest.approx(pt_to_mm(20.0))
