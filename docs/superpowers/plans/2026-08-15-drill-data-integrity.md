@@ -670,6 +670,29 @@ Fixes finding 12.
   - `[tool.ruff]` with an explicit `line-length` and `select = ["E","F","B","BLE","ISC","UP"]`, `ignore = ["RUF022"]` — the `__all__` ordering in this codebase is deliberately logical, not alphabetical.
   - `[tool.mypy]` with `warn_unused_ignores = true`.
 - [ ] **Step 2:** Fix the two real mypy errors: the `sorted(key=...)` type at `pipeline/sort.py:31`, and the unsound `emitter_cls.__init__` access at `cli.py:273`.
+
+- [ ] **Step 2a:** Configure `basedpyright`, which is what the maintainer's editor runs. Out of the box it reports 356 diagnostics against `src/aidrill`, ~190 of which are strict-mode unknown/Any noise from the untyped `pikepdf` boundary. Configure it so the signal survives:
+
+```toml
+[tool.basedpyright]
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+reportUnusedImport = "none"   # see the trap below
+```
+
+`venvPath`/`venv` matter: without them basedpyright cannot resolve `pikepdf` and reports a spurious missing-import error.
+
+**A trap that must not be "fixed":** basedpyright flags the three imports in `emitters/__init__.py:10` as unused. They are side-effect imports that run the `@register_emitter` decorators — deleting them empties `REGISTRY` and every `--emit` invocation fails with "unknown output format". They already carry `# noqa: F401` for ruff, which basedpyright does not honour. Suppress the rule or re-export the modules; never delete the imports.
+
+- [ ] **Step 2b:** Fix the two genuine type errors basedpyright finds that mypy misses:
+
+1. `pipeline/diameters.py:169` — `tuple(float(s) for s in sizes)` where `sizes` was narrowed only to bare `Sequence`, so its elements are `object` and `float(s)` is unsound. This is the duck-typing hazard already noted against `describe()`: a strategy exposing a non-numeric `sizes` raises at runtime. Narrow the elements, not just the container.
+2. `emitters/drawing_svg.py:1110` — `_flagged_holes` is annotated `frozenset[int]` but builds from `d.get("hole_index")`, whose type is `ParameterValue | None` (`float | int | str | None`). The annotation is *wrong*, not merely loose. Narrow the payload value to `int` explicitly before adding it to the set.
+
+**Do not** chase `reportUnknownMemberType`/`reportAny`/`reportUnknownArgumentType` at the `pikepdf` boundary — that library is untyped, the boundary is deliberately duck-typed, and `typeCheckingMode = "standard"` already silences most of it. `reportUnusedCallResult` (53 hits) is pure opinion; leave it off.
+
+- [ ] **Step 2c:** `reportDeprecated` correctly flags `typing.Iterable`/`Sequence`/`Mapping`/`Iterator`/`Union` imports that should now come from `collections.abc` (and `X | Y` for `Union`). This overlaps ruff's `UP035`/`UP007`. Fix them together in Step 3 rather than twice.
 - [ ] **Step 3:** Fix the genuine ruff findings only — the two dead imports at `emitters/base.py:12`, `BLE001`, the two `ISC004` implicit concatenations, `UP037`, `UP007`. Leave the stylistic defaults alone.
 - [ ] **Step 4:** Type `REGISTRY: dict[str, type[Emitter]]` and `get_emitter() -> type[Emitter]`; annotate `Diagnostic.warning/info/error` and `get()`.
 - [ ] **Step 5: Run ruff, mypy and the full suite; Step 6: Commit.**
