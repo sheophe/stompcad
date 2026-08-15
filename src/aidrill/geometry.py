@@ -29,17 +29,30 @@ is the one ``test_the_conversion_happens_once_and_on_the_diameter`` is built on.
 
 **The centre needs a different kind of fixture, and the difference has already
 fooled one reading of this module.** On a symmetric circle the four anchors of
-an axis are antipodal, so their converted mean lands exactly on a half
-nanometre; which integer that becomes is then settled by a tie-break rule and
-not by the order of the arithmetic. A tie is decidable four ways — half-up,
-half-even, half-to-odd, truncation — so pinning one of them pins nothing, and a
-whole suite once stayed green with the centroid replaced by a converted-anchor
-mean. What does pin the order is a *slightly asymmetric* path, which is legal
-input here because ``fit_circle``'s tolerance is relative and exists to admit
-measurement noise: a circle a nanometre out of true on a millimetre radius is
-four orders of magnitude inside the 1% budget. Move the converted-anchor mean
-off the tie and every rounding rule gives one wrong answer, which is what
-``test_the_centre_converts_after_the_centroid_and_not_before`` is built on.
+an axis fall into antipodal pairs, and each pair sums — before any rounding — to
+exactly twice the centre. Converting the two anchors separately can only carry
+that sum to an integer beside it, which pins the mean of all four within half a
+nanometre of the answer: the symmetric fixtures in ``tests/test_geometry.py``
+land on it exactly (0.0, for a circle on the origin), a quarter off it
+(-3 527 777.75, mirrored) or on the tie itself (3 878 943.5 at 37 degrees,
+2 116 666.5 at 45). Half a nanometre is where the two orders stop disagreeing
+about arithmetic and start disagreeing about a tie-break, and a tie only ever
+refutes the rules that pick the far side — so those two tied fixtures pull in
+opposite directions and *still* leave round-half-to-odd standing between them.
+A whole suite once stayed green with the centroid replaced by a converted-anchor
+mean.
+
+What breaks the pairing, and with it the bound, is a *slightly asymmetric* path,
+which is legal input here because ``fit_circle``'s tolerance is relative and
+exists to admit measurement noise: a circle a nanometre out of true on a
+millimetre radius is four orders of magnitude inside the 1% budget. Its
+converted mean comes out three quarters of a nanometre low — 0.25 where the
+answer is 1, 2.25 where it is 3 — far enough that half-up, half-even,
+half-to-odd, truncation and a floor each give one wrong answer. A ceiling is the
+one spelling that survives it, by landing on the right integer from the wrong
+side, and the tied fixtures refute the ceiling instead.
+``test_the_centre_converts_after_the_centroid_and_not_before`` is built on the
+asymmetric path and keeps the whole table.
 
 Both fixtures are chosen rather than found. The panel in
 ``tests/fixtures/tar.ai`` drifts by well under a nanometre and rounds to the
