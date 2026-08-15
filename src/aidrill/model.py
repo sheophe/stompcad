@@ -356,7 +356,14 @@ class EnclosureMatch:
     selected_part: str | None = None
 
     def __post_init__(self) -> None:
-        """Coerce ``candidates`` to a tuple, and refuse a bare string.
+        """Guard the two lengths, coerce ``candidates``, and refuse a bare string.
+
+        The dimensions are guarded here for the same reason every other length
+        in this module is: this is a *derived* value, built by a stage out of a
+        catalogue and handed straight to ``DrillData.enclosure``, from which the
+        drawing prints a footprint and the JSON serialises one. A float that
+        reached this far would be two artifacts' worth of rounding under a name
+        that promises nanometres.
 
         The coercion is the same one ``StageRun`` and ``Diagnostic`` do, for the
         same reason: a match holding a list is unhashable and compares unequal
@@ -374,6 +381,9 @@ class EnclosureMatch:
         ever failing. This is the one place the type annotation cannot catch a
         type error, so it is caught here.
         """
+        _check_nanometres(
+            "EnclosureMatch", length_nm=self.length_nm, width_nm=self.width_nm
+        )
         # The ignore is the point restated: mypy is right that a declared
         # tuple[str, ...] is never a str, and this guard exists for the callers
         # it cannot see — JSON, a REPL, a downstream tool.

@@ -88,92 +88,90 @@ def test_every_length_on_a_hole_is_an_integer():
         assert type(value) is int
 
 
-def test_a_float_coordinate_is_refused_at_construction():
-    """The one place a stray float can still enter is a hand-built ``Hole`` from
-    a library consumer. It is refused here rather than surfacing as
-    7000000.0000001 in a drill file, where nothing names where it came from."""
-    with pytest.raises(TypeError, match="nanometres"):
-        Hole(
-            x_nm=1.5,  # type: ignore[arg-type]
-            y_nm=0,
-            diameter_nm=7_000_000,
-            raw=RawHole(0, 0, 7_000_000),
-            index=0,
-        )
+#: A length that crossed no unit boundary: it is the shape of 7 mm and it is not
+#: an integer, which is the whole of what makes it inadmissible.
+_A_FLOAT = 7_000_000.5
+
+#: Valid provenance to hand a constructor whose guard is not the one under test.
+#: ``ReferenceOutline`` needs it explicitly: left to default, the sentinel path
+#: builds a ``RawOutline`` out of the very values being tested and *that* guard
+#: raises, so the outline's own guard could be deleted and the test would still
+#: pass on someone else's work.
+_VALID_RAW_HOLE = RawHole(0, 0, 7_000_000)
+_VALID_RAW_OUTLINE = RawOutline(113_000_000, 60_000_000)
+
+#: Every ``(owner, field)`` pair the model guards, one builder each, named by
+#: the pair so a failure says which guard went missing.
+#:
+#: Enumerated exhaustively and one field at a time because the guards are a
+#: folded condition: they are separate keyword arguments to one helper, the
+#: helper is strict, and a *call* that quietly stops naming a field is invisible
+#: from anywhere else. Six of these pairs — both of ``RawHole``'s trailing
+#: lengths, ``Hole.y_nm``, ``RawOutline.height_nm`` and both of
+#: ``ReferenceOutline``'s Y-axis lengths — could each be dropped from their
+#: call with the whole suite staying green. Proving the X axis proves nothing
+#: about the Y.
+_GUARDED_LENGTHS = [
+    pytest.param(lambda v: RawHole(v, 0, 7_000_000), id="RawHole.x_nm"),
+    pytest.param(lambda v: RawHole(0, v, 7_000_000), id="RawHole.y_nm"),
+    pytest.param(lambda v: RawHole(0, 0, v), id="RawHole.diameter_nm"),
+    pytest.param(lambda v: Hole(v, 0, 7_000_000, _VALID_RAW_HOLE, 4), id="Hole.x_nm"),
+    pytest.param(lambda v: Hole(0, v, 7_000_000, _VALID_RAW_HOLE, 4), id="Hole.y_nm"),
+    pytest.param(lambda v: Hole(0, 0, v, _VALID_RAW_HOLE, 4), id="Hole.diameter_nm"),
+    pytest.param(lambda v: RawOutline(v, 60_000_000), id="RawOutline.width_nm"),
+    pytest.param(lambda v: RawOutline(113_000_000, v), id="RawOutline.height_nm"),
+    pytest.param(
+        lambda v: ReferenceOutline(v, 60_000_000, raw=_VALID_RAW_OUTLINE),
+        id="ReferenceOutline.width_nm",
+    ),
+    pytest.param(
+        lambda v: ReferenceOutline(113_000_000, v, raw=_VALID_RAW_OUTLINE),
+        id="ReferenceOutline.height_nm",
+    ),
+    pytest.param(
+        lambda v: ReferenceOutline(
+            113_000_000, 60_000_000, centre_x_nm=v, raw=_VALID_RAW_OUTLINE
+        ),
+        id="ReferenceOutline.centre_x_nm",
+    ),
+    pytest.param(
+        lambda v: ReferenceOutline(
+            113_000_000, 60_000_000, centre_y_nm=v, raw=_VALID_RAW_OUTLINE
+        ),
+        id="ReferenceOutline.centre_y_nm",
+    ),
+    pytest.param(
+        lambda v: EnclosureMatch("Hammond 1590", v, 94_000_000, ("1590BB",)),
+        id="EnclosureMatch.length_nm",
+    ),
+    pytest.param(
+        lambda v: EnclosureMatch("Hammond 1590", 120_000_000, v, ("1590BB",)),
+        id="EnclosureMatch.width_nm",
+    ),
+]
 
 
-def test_a_float_diameter_is_refused_at_construction():
-    """The diameter is guarded separately from the position.
+@pytest.mark.parametrize("build", _GUARDED_LENGTHS)
+def test_a_float_is_not_a_length(build):
+    """Refused at construction, where the offending value still has a call site.
 
-    A guard written for the coordinates alone would let 6.999999999 mm through
-    on the one quantity that names a bit in the drawer.
+    A float that gets in is only ever noticed at the far end, as a drill file
+    reading ``X6.999999999`` with nothing left to say where the value came from
+    — and it is a quantity the drill file and the drawing may round differently,
+    which is one panel described by two disagreeing artifacts.
     """
     with pytest.raises(TypeError, match="nanometres"):
-        Hole(
-            x_nm=0,
-            y_nm=0,
-            diameter_nm=7_000_000.0,  # type: ignore[arg-type]
-            raw=RawHole(0, 0, 7_000_000),
-            index=0,
-        )
+        build(_A_FLOAT)
 
 
-def test_a_float_on_a_raw_hole_is_refused():
-    """``RawHole`` is measured provenance, and measured is not an excuse: the
-    measurement crossed the unit boundary in ``units`` and arrived whole."""
-    with pytest.raises(TypeError, match="nanometres"):
-        RawHole(1.5, 0, 7_000_000)  # type: ignore[arg-type]
-
-
-def test_a_float_on_a_raw_outline_is_refused():
-    with pytest.raises(TypeError, match="nanometres"):
-        RawOutline(113_000_000.5, 60_000_000)  # type: ignore[arg-type]
-
-
-def test_a_float_outline_dimension_is_refused():
-    """Built with an explicit ``raw``, so that the guard under test is the
-    outline's own. Left to default, the sentinel path would construct a
-    ``RawOutline`` from these same values and *that* guard would raise —
-    a pass this test has not earned."""
-    with pytest.raises(TypeError, match="nanometres"):
-        ReferenceOutline(
-            width_nm=113_000_000.5,  # type: ignore[arg-type]
-            height_nm=60_000_000,
-            raw=RawOutline(113_000_000, 60_000_000),
-        )
-
-
-def test_a_float_source_space_centre_is_refused():
-    """The centre is a length too — millimetres in page space, and the one pair
-    a source is most tempted to hand over as it read them off the PDF."""
-    with pytest.raises(TypeError, match="nanometres"):
-        ReferenceOutline(
-            width_nm=113_000_000,
-            height_nm=60_000_000,
-            centre_x_nm=297_600_000.0,  # type: ignore[arg-type]
-            raw=RawOutline(113_000_000, 60_000_000),
-        )
-
-
-@pytest.mark.parametrize(
-    "build",
-    [
-        pytest.param(lambda v: RawHole(v, 0, 7_000_000), id="raw-hole"),
-        pytest.param(
-            lambda v: Hole(v, 0, 7_000_000, RawHole(0, 0, 7_000_000), 0), id="hole"
-        ),
-        pytest.param(lambda v: RawOutline(v, 60_000_000), id="raw-outline"),
-        pytest.param(
-            lambda v: ReferenceOutline(v, 60_000_000, raw=RawOutline(1, 1)),
-            id="reference-outline",
-        ),
-    ],
-)
+@pytest.mark.parametrize("build", _GUARDED_LENGTHS)
 def test_a_bool_is_not_a_length(build):
     """``True`` is an ``int`` in Python, and ``isinstance(True, int)`` is
     ``True``. A guard written that way accepts it, and a hole at ``True``
     nanometres is a hole one millionth of a millimetre from the origin — a
-    position no report would ever make look wrong."""
+    position no report would ever make look wrong. Asserted for every guarded
+    field and not only for the float, because ``type(v) is int`` and
+    ``isinstance(v, int)`` differ on exactly this value and nothing else."""
     with pytest.raises(TypeError, match="nanometres"):
         build(True)
 
