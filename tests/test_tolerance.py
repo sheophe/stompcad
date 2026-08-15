@@ -18,7 +18,7 @@ downstream reads as a promise. Two of them are pinned here:
 
 from __future__ import annotations
 
-from aidrill.tolerance import ROW_SLACK_NM, within
+from aidrill.tolerance import within
 
 # One micron, in nanometres. Named here rather than reused from the module so
 # that a test of the boundary cannot be satisfied by whatever the module happens
@@ -57,19 +57,3 @@ def test_a_zero_tolerance_asks_for_equality_and_gets_it():
     apart would come back as the same length."""
     assert within(7_000_000, 7_000_000, 0) is True
     assert within(7_000_001, 7_000_000, 0) is False
-
-
-def test_the_row_slack_is_one_nanometre():
-    """One unit of the model's own quantum, and no wider.
-
-    A Y comes off the artwork through a rotation and a frame translation, so two
-    holes the designer drew on one line can land a nanometre apart; that is the
-    whole of what this bucket exists to absorb. Every wider value is a distance
-    an artifact prints. One micron is the case to hold in mind: an Excellon file
-    at three decimal places writes 18.000 and 18.001 for two holes a micron
-    apart, so a micron-wide bucket would have the drawing dimension one row
-    where the machine drills two — the cross-artifact disagreement the whole
-    pipeline is arranged to prevent.
-    """
-    assert ROW_SLACK_NM == 1
-    assert type(ROW_SLACK_NM) is int

@@ -8,12 +8,25 @@ Canonical frame, used by every stage and by every emitter's *input*:
 
     whole nanometres, Y up, origin at the centre of the reference outline.
 
-Every length is an ``int`` and carries an ``_nm`` suffix, so a unit mistake is
-visible at the call site rather than three stages downstream. Floating point
-belongs at the boundaries — ``aidrill.units`` on the way in, an emitter's own
-layout arithmetic on the way out — and never in a stored length: a float is a
-quantity two artifacts can round differently, and two artifacts describing the
-same panel and disagreeing is the expensive failure here.
+There are two kinds of length here and the suffix is what tells them apart.
+
+A **nominal** length — where a hole will actually be drilled, what a tool table
+lists, what an artifact prints — is an ``int`` and carries an ``_nm`` suffix, so
+a unit mistake is visible at the call site rather than three stages downstream.
+It is never a float: a float is a quantity two artifacts can round differently,
+and two artifacts describing the same panel and disagreeing is the expensive
+failure here.
+
+A **measurement** — what the artwork said, on ``RawHole`` and ``RawOutline`` —
+is a ``float`` millimetre and carries no suffix, because quantisation has not
+happened to it yet and naming it in nanometres would be the very lie
+``_check_payload_lengths`` exists to catch one level down. A measurement is
+consumed by exactly one thing: the quantisation phase, which turns it into the
+nominal values above. Everything after that reads it only to print it.
+
+The two guards therefore run in opposite directions, and both are at
+construction: ``_check_nanometres`` refuses anything but a plain ``int``,
+``_check_millimetres`` anything but a finite ``float``.
 
 Emitters that need a different frame or different units convert on output, via
 ``DrillData.with_origin`` and ``units.mm_from_nm``. No stage ever sees inches.
@@ -28,12 +41,13 @@ that a ratio or an angle genuinely is.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import total_ordering
 
-from .tolerance import ROW_SLACK_NM, within
+from .units import mm_from_nm, nm_from_mm
 
 __all__ = [
     "Severity",
@@ -48,6 +62,7 @@ __all__ = [
     "SourceInfo",
     "ParameterValue",
     "StageRun",
+    "RawDrillData",
     "DrillData",
 ]
 
@@ -137,6 +152,35 @@ def _check_nanometres(owner: str, **lengths: object) -> None:
             )
 
 
+def _check_millimetres(owner: str, **lengths: object) -> None:
+    """Refuse anything but a finite ``float`` for a measurement.
+
+    Not symmetry for its own sake. ``raw`` is *printed*: the JSON emitter
+    serialises it and the drawing quotes what the artwork measured, so a value
+    that reaches a millimetre field without ever crossing ``units`` is not
+    merely mistyped — it is a number a machinist reads. 40 mm arriving as the
+    40 000 000 nanometres it also is puts a 40 000 000.000 mm residual on the
+    sheet, with nothing in the figure to look wrong.
+
+    ``type(value) is float`` and not ``isinstance``, for the mirror image of the
+    reason ``_check_nanometres`` writes ``type(value) is int``: a plain ``int``
+    is a perfectly good ``float`` argument everywhere else in Python, which is
+    exactly what makes it invisible here, and ``bool`` is an ``int`` besides.
+    An ``int`` in a millimetre field is a length that never crossed a unit
+    boundary, and refusing it is the whole point.
+
+    ``math.isfinite``, because a NaN is a ``float`` and would satisfy a type
+    check alone. It then propagates in silence: every comparison against it is
+    ``False``, so a NaN measurement is neither inside a tolerance nor outside
+    one, and the stage that would have reported it simply does not.
+    """
+    for name, value in lengths.items():
+        if type(value) is not float or not math.isfinite(value):
+            raise TypeError(
+                f"{owner}.{name} must be a finite number of millimetres, not {value!r}"
+            )
+
+
 def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> None:
     """Hold a generic key/value payload to the ``_nm`` suffix in its keys.
 
@@ -170,20 +214,24 @@ def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> N
 
 @dataclass(frozen=True, slots=True)
 class RawHole:
-    """As-measured values, before any normalisation.
+    """One circle as the artwork measured it, in millimetres, before quantising.
 
     Kept for provenance so a drawing can show "0.000 (raw -39.991)" and so a
     residual can always be recomputed rather than remembered.
+
+    ``index`` is the source's traversal-order identity, and it lives here rather
+    than only on ``Hole`` because identity belongs with the measurement: the
+    measurement is the one thing about a hole that never moves, so a diagnostic
+    holding a raw circle can still say which hole it is about.
     """
 
-    x_nm: int
-    y_nm: int
-    diameter_nm: int
+    x: float
+    y: float
+    diameter: float
+    index: int
 
     def __post_init__(self) -> None:
-        _check_nanometres(
-            "RawHole", x_nm=self.x_nm, y_nm=self.y_nm, diameter_nm=self.diameter_nm
-        )
+        _check_millimetres("RawHole", x=self.x, y=self.y, diameter=self.diameter)
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,14 +262,20 @@ class Hole:
         traversal order and preserved by every transform. It exists because a
         diagnostic needs a referent that survives later stages: keying on
         position went stale the moment a stage moved the hole, and keying on
-        ``raw`` cannot work because two coincident circles — precisely the
-        duplicate case — share identical raw geometry.
+        geometry cannot work because two coincident circles — precisely the
+        duplicate case — are measured identically.
+
+        The nominal values are nanometres and the measurement is millimetres, so
+        the one ``index`` argument fills both fields and the three lengths are
+        converted on the way into ``raw``.
         """
         return cls(
             x_nm=x_nm,
             y_nm=y_nm,
             diameter_nm=diameter_nm,
-            raw=RawHole(x_nm, y_nm, diameter_nm),
+            raw=RawHole(
+                mm_from_nm(x_nm), mm_from_nm(y_nm), mm_from_nm(diameter_nm), index
+            ),
             index=index,
         )
 
@@ -259,36 +313,43 @@ class Hole:
         Positive means the nominal value is the larger. Suffixed like every
         other length here, because a caller printing this as millimetres would
         be six decimal places out with nothing on the sheet to notice.
+
+        The subtraction crosses a unit, and it is the measurement that is
+        quantised to meet the nominal value rather than the other way about:
+        this is a printed figure, and the un-quantised measurement stays on
+        ``raw`` for anyone who wants it.
         """
         return (
-            self.x_nm - self.raw.x_nm,
-            self.y_nm - self.raw.y_nm,
-            self.diameter_nm - self.raw.diameter_nm,
+            self.x_nm - nm_from_mm(self.raw.x),
+            self.y_nm - nm_from_mm(self.raw.y),
+            self.diameter_nm - nm_from_mm(self.raw.diameter),
         )
 
 
 @dataclass(frozen=True, slots=True)
 class RawOutline:
-    """The outline as measured off the artwork, before any snapping.
+    """The outline as measured off the artwork, in millimetres, before snapping.
 
     ``RawHole`` to ``ReferenceOutline``'s ``Hole``: same reason, one level up.
+    It carries no identity of its own, because there is only ever one of these
+    per document.
     """
 
-    width_nm: int
-    height_nm: int
+    width: float
+    height: float
 
     def __post_init__(self) -> None:
-        _check_nanometres("RawOutline", width_nm=self.width_nm, height_nm=self.height_nm)
+        _check_millimetres("RawOutline", width=self.width, height=self.height)
 
 
 #: Constructor sentinel for ``ReferenceOutline.raw`` meaning "nobody has snapped
 #: this, so its nominal size *is* the measurement". It is not a value any outline
 #: keeps: ``__post_init__`` replaces it with the instance's own dimensions, and
-#: the identity test means a caller who really does pass ``RawOutline(0, 0)``
+#: the identity test means a caller who really does pass ``RawOutline(0.0, 0.0)``
 #: gets it back. A ``None`` default would have been the obvious spelling and the
 #: wrong one — every reader of ``raw`` would then have to decide what an absent
 #: measurement means, which is the ambiguity the field was added to remove.
-_MEASUREMENT_IS_NOMINAL = RawOutline(0, 0)
+_MEASUREMENT_IS_NOMINAL = RawOutline(0.0, 0.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,13 +357,13 @@ class ReferenceOutline:
     """The panel outline that establishes the coordinate frame.
 
     ``centre_x_nm``/``centre_y_nm`` are in *source* space — the page frame,
-    measured from its lower-left corner — and exist only so a source can report
-    the point it centred everything else on. Nanometres and not the points the
-    PDF is written in, because a source converts as it reads: no value in this
-    model is ever in another unit, and these two are in the published document,
-    where 72/25.4 is the difference between a page centre and nonsense.
-    Everything downstream works in the canonical frame, where this outline is
-    centred on the origin.
+    measured from its lower-left corner — and exist only so the document can
+    report the point everything else was centred on. Nanometres and not the
+    points the PDF is written in, and the suffix is doing real work on these
+    two: they are the pair most tempting to carry over as read, they are in the
+    published document, and 72/25.4 is the difference between a page centre and
+    nonsense. Everything downstream works in the canonical frame, where this
+    outline is centred on the origin.
 
     ``raw`` is the as-measured size, kept for the same reason ``Hole.raw`` is:
     a stage snaps the outline to a catalogue enclosure, and the fixture panel
@@ -333,7 +394,11 @@ class ReferenceOutline:
                 f"reference outline must be positive, got {self.width_nm}x{self.height_nm}"
             )
         if self.raw is _MEASUREMENT_IS_NOMINAL:
-            object.__setattr__(self, "raw", RawOutline(self.width_nm, self.height_nm))
+            object.__setattr__(
+                self,
+                "raw",
+                RawOutline(mm_from_nm(self.width_nm), mm_from_nm(self.height_nm)),
+            )
 
     @classmethod
     def from_measurement(
@@ -341,17 +406,17 @@ class ReferenceOutline:
     ) -> ReferenceOutline:
         """Build an outline whose nominal size is still its measured size.
 
-        Mirrors ``Hole.from_measurement``, and is what a source calls: the
-        measurement is recorded once, where it is still known, rather than being
-        reconstructed later from a nominal size that a snap may already have
-        moved.
+        Mirrors ``Hole.from_measurement``, down to converting the two lengths on
+        the way into ``raw``: the measurement is recorded once, where it is still
+        known, rather than being reconstructed later from a nominal size that a
+        snap may already have moved.
         """
         return cls(
             width_nm=width_nm,
             height_nm=height_nm,
             centre_x_nm=centre_x_nm,
             centre_y_nm=centre_y_nm,
-            raw=RawOutline(width_nm, height_nm),
+            raw=RawOutline(mm_from_nm(width_nm), mm_from_nm(height_nm)),
         )
 
     def resized(self, width_nm: int, height_nm: int) -> ReferenceOutline:
@@ -595,6 +660,51 @@ class StageRun:
 
 
 @dataclass(frozen=True, slots=True)
+class RawDrillData:
+    """Everything a source read, in millimetres, with nothing quantised yet.
+
+    This is what a ``Source`` returns and what the quantisation phase consumes.
+    It is a separate type from ``DrillData`` rather than a mode of it because
+    the difference is not a flag: nothing here has a nominal value, so there is
+    no tool table to build, no row to group and no frame to translate — the only
+    thing that can legitimately be done with one of these is quantise it.
+
+    ``reference`` is ``None`` when the reference layer held no non-circular
+    path. The source has nothing to centre on then, so it reports page-relative
+    positions and a WARNING rather than inventing an outline, and ``centre`` is
+    ``(0.0, 0.0)``.
+
+    ``centre`` sits here and not on ``RawOutline`` because it is a fact about
+    where the outline sat on the page, not a dimension of the outline: two
+    panels of identical size drawn at different places on one artboard have the
+    same ``RawOutline`` and are not the same read.
+    """
+
+    source: SourceInfo
+    reference: RawOutline | None
+    centre: tuple[float, float]
+    holes: tuple[RawHole, ...]
+    diagnostics: tuple[Diagnostic, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Guard the centre, elementwise.
+
+        It is the one raw length not held by a value type of its own, and it is
+        also the widest-blast-radius one: it is the point every hole's position
+        is measured from, so an int nanometre here displaces the whole canonical
+        frame by six orders of magnitude rather than spoiling one field on one
+        hole, and a ``True`` puts the origin a nanometre from the page corner —
+        a panel no report would make look wrong.
+
+        Elementwise for the reason ``_check_payload_lengths`` checks a tuple
+        that way: a scalar-only check would leave both coordinates the only
+        unexamined lengths in the model.
+        """
+        x, y = self.centre
+        _check_millimetres("RawDrillData", centre_x=x, centre_y=y)
+
+
+@dataclass(frozen=True, slots=True)
 class DrillData:
     """The single object that travels the whole pipeline."""
 
@@ -679,7 +789,7 @@ class DrillData:
             counts[hole.diameter_nm] += 1
         return counts
 
-    def rows(self, tolerance_nm: int = ROW_SLACK_NM) -> list[tuple[int, list[Hole]]]:
+    def rows(self) -> list[tuple[int, list[Hole]]]:
         """Holes grouped by Y, rows from the top down, each row left to right.
 
         Both orderings are contracts rather than incidental output, because both
@@ -694,27 +804,19 @@ class DrillData:
           is read and the order its segment lengths are subtractions in. Handed
           the holes in artwork order, a chain would double back on itself.
 
-        Grouping is by proximity and not by equality: a Y comes off the artwork
-        through a rotation and a frame translation, so two holes the designer
-        drew on one line can land a nanometre apart. ``ROW_SLACK_NM`` absorbs
-        exactly that and nothing an artifact could print — a micron is already
-        two rows, because that is two coordinates in the drill file.
-
-        ``tolerance_nm`` is guarded like any other length, and it is the one
-        length no constructor ever sees: it is compared and then discarded, so a
-        float would sail through ``within`` and a ``True`` would quietly ask for
-        a one-nanometre bucket. Either changes how many rows a drawing
-        dimensions, and no artifact carries the value that decided it.
+        Grouping is by exact equality, and there is no slack because there is
+        nothing left for one to absorb. A slack absorbs rounding error, and
+        every Y reaching here has been quantised: holes on one row are exact
+        multiples of the same grid and therefore the identical integer. Where
+        two integers differ they differ because the holes do — and no slack
+        narrow enough to be safe would help anyway, since the smallest bucket
+        wider than a nanometre is a micron, and a micron is already
+        cross-artifact: 18.000 against 18.001 is two coordinates in the drill
+        file and one row on the drawing.
         """
-        _check_nanometres("DrillData.rows", tolerance_nm=tolerance_nm)
         buckets: dict[int, list[Hole]] = {}
         for hole in self.holes:
-            for y_nm, bucket in buckets.items():
-                if within(hole.y_nm, y_nm, tolerance_nm):
-                    bucket.append(hole)
-                    break
-            else:
-                buckets[hole.y_nm] = [hole]
+            buckets.setdefault(hole.y_nm, []).append(hole)
         return [
             (y_nm, sorted(hs, key=lambda h: h.x_nm))
             for y_nm, hs in sorted(buckets.items(), reverse=True)

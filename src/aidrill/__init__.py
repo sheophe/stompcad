@@ -20,8 +20,8 @@ the source, the stages, then what interprets the answer.
 """
 
 from .model import (
-    Diagnostic, DrillData, EnclosureMatch, Hole, Origin, ParameterValue, RawHole, RawOutline,
-    ReferenceOutline, Severity, SourceInfo, StageRun, Units,
+    Diagnostic, DrillData, EnclosureMatch, Hole, Origin, ParameterValue, RawDrillData, RawHole,
+    RawOutline, ReferenceOutline, Severity, SourceInfo, StageRun, Units,
 )
 from .protocols import Emitter, Pipeline, Source, Stage
 from .sources import AiPdfSource
@@ -35,8 +35,8 @@ from .errors import (
 )
 
 __all__ = [
-    "Diagnostic", "DrillData", "EnclosureMatch", "Hole", "Origin", "ParameterValue", "RawHole", "RawOutline",
-    "ReferenceOutline", "Severity", "SourceInfo", "StageRun", "Units",
+    "Diagnostic", "DrillData", "EnclosureMatch", "Hole", "Origin", "ParameterValue", "RawDrillData",
+    "RawHole", "RawOutline", "ReferenceOutline", "Severity", "SourceInfo", "StageRun", "Units",
     "Emitter", "Pipeline", "Source", "Stage",
     "AiPdfSource",
     "SnapPositions", "SnapDiametersToDrillTable", "Deduplicate", "IdentifyHammondFootprint",
