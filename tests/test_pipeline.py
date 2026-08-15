@@ -837,6 +837,44 @@ class TestCheckReferenceSize:
         assert out.diagnostics[0].severity is Severity.INFO
         assert out.holes == data.holes
 
+    def test_the_mismatch_carries_the_difference_it_already_worked_out(self):
+        """``Diagnostic.data`` exists so a consumer never re-derives a stage's
+        own arithmetic. This one rendered the deltas into prose and dropped
+        them, leaving every reader to subtract the two sizes again.
+
+        The fixture is deliberately asymmetric — one axis under by 0.5, the
+        other over by 0.25 — so neither a swapped pair of axes nor a dropped
+        sign can pass. Both are exact in binary, so the payload can be pinned
+        without a tolerance.
+        """
+        data = make_data(reference=ReferenceOutline(112.5, 60.25))
+
+        diagnostic = CheckReferenceSize((113.0, 60.0)).apply(data).diagnostics[0]
+
+        assert (diagnostic.get("width_mm"), diagnostic.get("height_mm")) == (112.5, 60.25)
+        assert (
+            diagnostic.get("expected_width_mm"),
+            diagnostic.get("expected_height_mm"),
+        ) == (113.0, 60.0)
+        assert (diagnostic.get("delta_width_mm"), diagnostic.get("delta_height_mm")) == (
+            -0.5,
+            0.25,
+        )
+        assert diagnostic.get("tolerance_mm") == 0.05
+
+    def test_the_missing_outline_notice_says_what_it_was_going_to_check(self):
+        """A consumer rendering this finding needs the declared size it could
+        not check, and it is the one fact the stage still holds."""
+        diagnostic = (
+            CheckReferenceSize((113.0, 60.0)).apply(make_data(at(0.0, 0.0, index=0)))
+        ).diagnostics[0]
+
+        assert (
+            diagnostic.get("expected_width_mm"),
+            diagnostic.get("expected_height_mm"),
+        ) == (113.0, 60.0)
+        assert diagnostic.get("tolerance_mm") == 0.05
+
 
 # --------------------------------------------------------------------------
 # SortHoles
