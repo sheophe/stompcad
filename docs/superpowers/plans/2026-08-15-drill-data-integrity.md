@@ -712,9 +712,42 @@ Six divergences where `docs/SPEC.md` is the stale side. The spec is explicitly l
 - Consumes: every test written or amended by Tasks 1–15.
 - Produces: no source API change. Only test strengthening.
 
-**Method — mutation, not reading.** For each mutation below: apply it to `src/`, run only the tests that claim to cover it, record whether any test fails, then **restore the source and confirm `git diff --stat src/` is empty** before the next mutation. A surviving mutation (suite still green) is a vacuous test and must be strengthened until it fails. Work one mutation at a time; never leave a mutation in the tree.
+**Method — mutation, not reading, in two lanes.** Lane A automates breadth with a mutation-testing tool. Lane B hand-applies the semantic substitutions no tool can express. Both are required, and neither substitutes for the other — see the note below on why.
 
-- [ ] **Step 1: Mutate each finding's fix and confirm its regression test dies**
+**Why both lanes.** `mutmut` mutates *syntax*: it flips operators, perturbs constants, negates conditionals, swaps boundaries. That catches an enormous class of weak assertions cheaply. But the two vacuous tests this plan actually produced were neither — "carry the survivor's **position** instead of its **index**" and "report the **constructor argument** instead of the **resolved default**" are *design* substitutions between two equally well-formed programs. No syntactic mutation operator generates them. Lane A finds the many shallow gaps; Lane B finds the few that matter most, which are exactly the ones guarding this plan's invariants.
+
+**Viability, measured:** the suite runs in 0.5 s over 1439 statements, so a full mutmut run is minutes, not hours. There is no excuse for sampling.
+
+- [ ] **Step 0 (Lane A): Configure and run mutmut**
+
+Add to `pyproject.toml` (mutmut 3.7 reads `[tool.mutmut]`; confirm the key names against the installed version's docs before the full run, since the config API changed between 2.x and 3.x):
+
+```toml
+[tool.mutmut]
+paths_to_mutate = ["src/aidrill/"]
+tests_dir = ["tests/"]
+```
+
+Add `mutmut` to the dev dependency group created in Task 13. Then:
+
+```bash
+mutmut run                       # full run; use --max-children to parallelise
+mutmut results                   # survivors
+mutmut show <mutant>             # the exact surviving diff
+```
+
+Validate the harness on one module first (`mutmut run src/aidrill/pipeline/snap.py`) and confirm it reports *some* killed mutants — a run that kills nothing means the tool is not actually running the suite, not that the tests are perfect.
+
+Triage every survivor into exactly one bucket, and record the bucket in the report:
+- **Vacuous test** — the mutant changes real behaviour and no test noticed. Strengthen the test.
+- **Equivalent mutant** — the mutant cannot change observable behaviour (e.g. perturbing a constant inside an unreachable defensive guard). Record it with one sentence of justification; do not chase it.
+- **Genuinely untested behaviour** — no test claims to cover this at all. Write one, or record it as accepted risk with a reason.
+
+A survivor left untriaged is the same failure this task exists to prevent, one level up.
+
+- [ ] **Step 1 (Lane B): Hand-mutate each finding's fix and confirm its regression test dies**
+
+For each mutation below: apply it to `src/`, run only the tests that claim to cover it, record whether any test fails, then **restore the source and confirm `git diff --stat src/` is empty** before the next mutation. A surviving mutation is a vacuous test and must be strengthened until it fails. Work one at a time; never leave a mutation in the tree.
 
 One mutation per fix, targeting the exact behaviour the task claimed to restore:
 
