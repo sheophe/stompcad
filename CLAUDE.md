@@ -51,11 +51,14 @@ PYTHONPATH=src pytest -o addopts= tests/test_pipeline.py::test_name -v
 # Coverage. SPEC 9 targets 90% of src/aidrill and 100% of the stages and emitters.
 PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
 
-# Lint, format check, types
-ruff check src tests
+# Lint and types. Both are configured in pyproject.toml and both are green;
+# an error from either is a new defect, not a backlog item. tools/ is linted
+# because extract_1590.py renders a module in src/ that ruff also grades.
+ruff check src tests tools
 mypy src/aidrill
 
-# Mutation testing — the suite is sub-second, so run it fully rather than sampling
+# Mutation testing — the suite is sub-second, so run it fully rather than
+# sampling. ~40s for 2531 mutants; mutants/ is a scratch copy of the tree.
 mutmut run && mutmut results
 
 # Run the tool
@@ -124,6 +127,14 @@ Stages append `Diagnostic`s; emitters render them. The CLI report, the drawing's
 - **New stage:** implement `Stage` (including `describe()`), then insert it in `cli.build_pipeline`. Every output format inherits it. `build_pipeline` is the integration point by design, because order is the one thing a stage cannot self-declare.
 - **New source:** implement `Source`. There is no source registry — `AiPdfSource` is currently the only one, and the abstraction is acknowledged as speculative.
 
+### What the package root carries
+
+`src/aidrill/__init__.py` exports what no registry can find: the model, the three protocols, `AiPdfSource`, every stage, and `DRILL_STANDARDS`. Emitters are the deliberate exception — they *have* a registry, so a format is resolved through `aidrill.emitters.get_emitter` and named at the root no more than `cli.py` names one.
+
+**So a new stage or source gets one line in `src/aidrill/__init__.py` as well as its subpackage; a new emitter does not.** Without that line, a consumer reproducing the documented `Source → Pipeline → Emitter` flow finds two of the three roles exported as protocols with nothing at hand that satisfies them.
+
+`METRIC_BANDS` and `FRACTIONAL_SIXTY_FOURTHS` stay in `aidrill.pipeline`: they generate the standards rather than being used to read a result, and only a caller declaring a different series wants them. `HAMMOND_1590` is exported by the same test — `DrillData.enclosure` names a footprint, and the catalogue is what turns that name into dimensions.
+
 ## Parsing `.ai` files
 
 Illustrator's native save embeds a PDF-compatible stream, read with `pikepdf`; Illustrator need not be running. Constraints verified against real files:
@@ -161,6 +172,8 @@ Three mechanics that have each produced a wrong answer in this repo:
 - **A mutation must change only the thing it names.** An impure mutation produces a falsely *strong* result: editing a value where it is both compared and emitted gets "killed" by tests that merely noticed the changed output, proving nothing about the comparison. If a mutation dies, check *which* test died and whether it had any business dying.
 
 Applies to verification tooling too: a linter invoked with a flag that suppresses the rule you are claiming to pass is not evidence. Report the command, not just the result.
+
+`mutmut run` is a survey, not a gate: the current standing is **2531 mutants, 2071 killed, 457 survived**, and the number is expected to move. Read it by module rather than in total — nearly half the survivors are in `cli.build_parser`, where a mutant rewrites an argparse help string and nothing observable changes. A survivor in `geometry.py`, `dedupe.py` or `tolerance.py` is the kind worth chasing; `within`'s `<=` boundary is one such, and survives today.
 
 Property tests cover snapping idempotence, dedupe idempotence and `tools()` stability under hole reordering. `tests/test_enclosures.py` additionally re-extracts `docs/1590.pdf` on every run, so a datasheet revision is a red test rather than a quiet disagreement.
 

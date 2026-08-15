@@ -238,3 +238,77 @@ all. That is the version of variant matching worth building.
 emitters and their tests. In the JSON document `length_mm: 112` becomes
 `length_um: 112400`; bump the document's `version` field with it, so the two keys
 can never be read as the same unit under one number.
+
+---
+
+## Adopt mypy `strict` on `src/aidrill`
+
+**Status:** agreed, not started · **Raised:** 2026-08-15
+
+`[tool.mypy]` was configured with `python_version = "3.10"`, `warn_unused_ignores`,
+`warn_redundant_casts` and `warn_unreachable`, and the tree is clean under it.
+`strict` was deliberately not adopted, because it is not a setting so much as a
+piece of work: measured at the time of writing, it is **18 further errors**, and a
+gate that arrives red is the thing that configuration was fixing.
+
+The delta is narrow and boring, which is why it is worth doing rather than
+arguing about:
+
+- **~14 `no-untyped-def`**, all on definitions that were never annotated rather
+  than annotated wrongly: `model.py`'s alternate constructors (`Diagnostic.warning`
+  / `.info` / `.error`, the `get` helpers) and six internal helpers in
+  `sources/ai_pdf.py`, plus `protocols.py`'s `Pipeline.__getitem__` and one
+  function in `emitters/drawing_svg.py`.
+- The remainder is `no-untyped-call` and `no-any-return` falling out of those, and
+  one `unused-ignore` where a suppression stops matching once its neighbours are
+  typed.
+
+`Pipeline.__getitem__` is the one that needs a decision rather than a signature:
+typing it properly means overloads for `int` and `slice`, since `Sequence`
+declares both and this returns `self._stages[index]` for either.
+
+**Do it in one commit per module, not one for the flag**, so that a test failure
+has one file to look at.
+
+---
+
+## `import aidrill` now costs a pikepdf import
+
+**Status:** noted, no action agreed · **Raised:** 2026-08-15
+
+Exporting `AiPdfSource` from the package root — which is what makes the only
+`Source` findable, since there is no source registry — means `import aidrill`
+imports `.sources`, and therefore `pikepdf`, which it did not before.
+
+This is defensible: `pikepdf` is the sole runtime dependency, so nothing new is
+*installed*, and a consumer that reads a `.ai` file was always going to pay it.
+But it is a real change in import cost for the wider pedal-design toolchain,
+whose interest in this library may be no more than `DrillData` and the `json`
+emitter, and which now pays a C-extension import to get them.
+
+If it ever matters, the fix is a module-level `__getattr__` in
+`src/aidrill/__init__.py` resolving `AiPdfSource` lazily (PEP 562). Do not do it
+speculatively — it trades a measurable cost for an invisible one, and `__all__`
+would then name something `dir()` does not.
+
+---
+
+## Chain-dimension segments are unmeasured by any test
+
+**Status:** found during review, not scheduled · **Raised:** 2026-08-15
+
+`_draw_row_chains`'s loop over consecutive station pairs in `emitters/drawing_svg.py`
+can be made to skip its first pair — the whole first chain segment — with the
+suite still fully green. Verified by mutation: replacing the iteration with one
+that drops the first element leaves **732 passed**.
+
+`test_chain_dimension_values_are_hole_to_hole_distances` does die when the row
+*grouping* underneath it is broken, so rows are covered; what is not covered is
+that every consecutive pair in a row actually gets a dimension drawn. A row whose
+first gap is silently undimensioned is precisely the "holes with no dimension
+beside them" failure the module docstring says the `_allot` work was done to stop,
+so this one has form.
+
+The test to write asserts the *count* of `dim-line` elements per row against
+`len(stations) - 1`, on a fixture with at least three holes in one row — two holes
+make one pair, where dropping the first and dropping the last are the same bug.
