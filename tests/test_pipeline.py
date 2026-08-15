@@ -18,6 +18,7 @@ from aidrill.model import (
     ReferenceOutline,
     Severity,
     SourceInfo,
+    StageRun,
 )
 from aidrill.protocols import Pipeline, Stage
 from aidrill.pipeline import (
@@ -31,7 +32,7 @@ from aidrill.pipeline import (
     SortHoles,
     TableDiameters,
 )
-from tests.conftest import at, make_data
+from tests.conftest import at, holes, make_data
 
 
 # --------------------------------------------------------------------------
@@ -718,6 +719,9 @@ class TestPipelineComposition:
                 calls.append(self.tag)
                 return data.with_diagnostics(Diagnostic.info(self.tag, self.tag))
 
+            def describe(self) -> StageRun:
+                return StageRun(self.name, (("tag", self.tag),))
+
         out = Pipeline([Recorder("a"), Recorder("b"), Recorder("c")]).run(make_data())
         assert calls == ["a", "b", "c"]
         assert codes(out) == ["a", "b", "c"]
@@ -770,4 +774,213 @@ class TestPipelineComposition:
             (-20.0, 18.0),
             (-19.0, -18.75),
             (19.0, -18.75),
+        ]
+
+
+# --------------------------------------------------------------------------
+# Provenance: what the data records about the stages that shaped it
+# --------------------------------------------------------------------------
+
+
+class TestStageRunAndProcessing:
+    """The record itself, before any stage fills one in."""
+
+    def test_get_reads_a_parameter_and_falls_back_to_the_default(self):
+        run = StageRun("snap", (("grid_mm", 0.5), ("enabled", True)))
+        assert run.get("grid_mm") == 0.5
+        assert run.get("enabled") is True
+        assert run.get("warn_over_mm") is None
+        assert run.get("warn_over_mm", 0.0) == 0.0
+
+    def test_is_an_immutable_value(self):
+        run = StageRun("snap", (("grid_mm", 0.5),))
+        assert run == StageRun("snap", (("grid_mm", 0.5),))
+        with pytest.raises(Exception):
+            run.name = "sort"  # type: ignore[misc]
+
+    def test_data_starts_with_no_processing_history(self):
+        assert make_data(at(0.0, 0.0, index=0)).processing == ()
+
+    def test_with_processing_appends_without_mutating(self):
+        data = make_data(at(0.0, 0.0, index=0))
+        first = data.with_processing(StageRun("snap", ()))
+        second = first.with_processing(StageRun("sort", ()))
+
+        assert data.processing == (), "with_processing mutated its receiver"
+        assert [r.name for r in first.processing] == ["snap"]
+        assert [r.name for r in second.processing] == ["snap", "sort"]
+
+    def test_with_processing_of_nothing_is_the_identity(self):
+        data = make_data(at(0.0, 0.0, index=0))
+        assert data.with_processing() is data
+
+    def test_last_run_answers_the_most_recent_of_a_repeated_stage(self):
+        """A stage may legitimately run twice; the title block wants the last one."""
+        data = make_data().with_processing(
+            StageRun("snap", (("grid_mm", 1.0),)),
+            StageRun("sort", ()),
+            StageRun("snap", (("grid_mm", 0.25),)),
+        )
+        assert data.last_run("snap").get("grid_mm") == 0.25
+        assert data.last_run("deduplicate") is None
+
+
+class TestDescribe:
+    """Every stage reports what it was configured to do, in effective values."""
+
+    @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
+    def test_a_stage_describes_itself_under_its_own_name(self, stage):
+        assert stage.describe().name == type(stage).name
+
+    def test_snap_reports_grid_and_the_resolved_warning_threshold(self):
+        run = SnapPositions(grid=0.5).describe()
+        assert run.get("grid_mm") == 0.5
+        assert run.get("warn_over_mm") == 0.125
+        assert run.get("enabled") is True
+
+    def test_describe_reports_resolved_defaults_not_raw_arguments(self):
+        """warn_over defaults to grid/4; provenance must record the effective value."""
+        assert SnapPositions(grid=0.25).describe().get("warn_over_mm") == 0.0625
+
+    def test_snap_reports_an_explicit_warning_threshold_as_given(self):
+        assert SnapPositions(0.25, warn_over=0.2).describe().get("warn_over_mm") == 0.2
+
+    def test_a_non_positive_grid_describes_itself_as_disabled(self):
+        run = SnapPositions(grid=0.0).describe()
+        assert run.get("enabled") is False
+        assert run.get("grid_mm") == 0.0
+
+    def test_deduplicate_reports_its_resolved_tolerance(self):
+        assert Deduplicate().describe().get("tolerance_mm") == 0.05
+        assert Deduplicate(0.02).describe().get("tolerance_mm") == 0.02
+
+    def test_check_reference_size_reports_the_declared_panel_and_slack(self):
+        run = CheckReferenceSize((113.0, 60.0)).describe()
+        assert run.get("expected_width_mm") == 113.0
+        assert run.get("expected_height_mm") == 60.0
+        assert run.get("tolerance_mm") == 0.05
+
+    def test_sort_names_its_key_function(self):
+        def by_diameter(hole):
+            return hole.diameter
+
+        assert SortHoles().describe().get("key") == "default"
+        assert SortHoles(key=by_diameter).describe().get("key") == "by_diameter"
+
+    def test_normalize_reports_the_strategy_and_the_strategys_tolerance(self):
+        run = NormalizeDiameters(ClusterDiameters(0.02)).describe()
+        assert run.get("strategy") == "ClusterDiameters"
+        assert run.get("tolerance_mm") == 0.02
+
+    def test_a_table_strategy_also_reports_its_sizes(self):
+        run = NormalizeDiameters(TableDiameters([7.0, 3.2], 0.15)).describe()
+        assert run.get("strategy") == "TableDiameters"
+        assert run.get("tolerance_mm") == 0.15
+        assert run.get("sizes_mm") == (3.2, 7.0)
+
+    def test_a_strategy_without_a_tolerance_omits_the_key_rather_than_inventing_one(self):
+        run = NormalizeDiameters(NoNormalization()).describe()
+        assert run.get("strategy") == "NoNormalization"
+        assert run.get("tolerance_mm") is None
+        assert run.get("sizes_mm") is None
+
+    def test_a_strategy_invented_here_is_described_without_editing_the_stage(self):
+        """OCP again: describe() may not become a closed union over strategies."""
+
+        class RoundToWholeMillimetres:
+            tolerance = 0.5
+
+            def nominal(self, measured):
+                return {m: float(round(m)) for m in measured}
+
+        run = NormalizeDiameters(RoundToWholeMillimetres()).describe()
+        assert run.get("strategy") == "RoundToWholeMillimetres"
+        assert run.get("tolerance_mm") == 0.5
+
+
+class TestPipelineRecordsProvenance:
+    def test_pipeline_records_what_each_stage_actually_did(self):
+        data = make_data(*holes((10.03, 5.02), (-20.0, 5.0, 5.0)))
+        after = Pipeline([SnapPositions(grid=0.5), Deduplicate(tolerance=0.05)]).run(data)
+
+        assert [r.name for r in after.processing] == ["snap", "deduplicate"]
+        snap = after.last_run("snap")
+        assert snap.get("grid_mm") == 0.5
+        assert snap.get("warn_over_mm") == 0.125  # the *resolved* default, not None
+
+    @pytest.mark.parametrize("grid", [0.25, 0.5])
+    def test_the_recorded_grid_is_the_grid_the_holes_were_snapped_to(self, grid):
+        """Finding 08: the sheet stated a grid the data had never been snapped to.
+
+        A consumer reading the record must be able to predict the coordinates —
+        which is only true if the record comes from the stage that moved them.
+        """
+        after = Pipeline([SnapPositions(grid=grid)]).run(make_data(*holes((10.3, 5.02))))
+
+        recorded = after.last_run("snap").get("grid_mm")
+        assert recorded == grid
+        for hole in after.holes:
+            assert round(hole.x / recorded) * recorded == pytest.approx(hole.x)
+            assert round(hole.y / recorded) * recorded == pytest.approx(hole.y)
+
+    def test_a_disabled_stage_still_records_that_it_ran_and_did_nothing(self):
+        after = Pipeline([SnapPositions(grid=0.0)]).run(make_data(*holes((10.03, 5.02))))
+
+        assert [r.name for r in after.processing] == ["snap"]
+        assert after.last_run("snap").get("enabled") is False
+        assert positions(after) == [(10.03, 5.02)], "a disabled snap moved a hole"
+
+    def test_a_stage_never_sees_its_own_provenance_in_its_input(self):
+        """The record says what a stage *did*, so it cannot exist before it acts.
+
+        Recording before applying would also hand every stage a record of itself
+        it had not yet earned — and if ``apply`` then raised, the history would
+        claim work that never happened.
+        """
+        class Nosy:
+            name = "nosy"
+
+            def apply(self, data: DrillData) -> DrillData:
+                return data.with_diagnostics(
+                    Diagnostic.info(
+                        "seen", "counted the history", data=(("runs", len(data.processing)),)
+                    )
+                )
+
+            def describe(self) -> StageRun:
+                return StageRun(self.name, ())
+
+        out = Pipeline([Nosy(), Nosy(), Nosy()]).run(make_data())
+
+        assert [d.get("runs") for d in out.diagnostics] == [0, 1, 2]
+        assert len(out.processing) == 3
+
+    def test_a_stage_that_raises_records_nothing(self):
+        class Explodes:
+            name = "explodes"
+
+            def apply(self, data: DrillData) -> DrillData:
+                raise RuntimeError("boom")
+
+            def describe(self) -> StageRun:
+                return StageRun(self.name, ())
+
+        data = make_data(at(0.0, 0.0, index=0))
+        with pytest.raises(RuntimeError):
+            Pipeline([SnapPositions(0.25), Explodes()]).run(data)
+        assert data.processing == ()
+
+    def test_the_whole_cli_order_is_recorded_in_order(self):
+        after = Pipeline(ALL_STAGES).run(
+            make_data(
+                *holes((-40.003, 18.001, 6.9998), (19.0, -18.75, 5.0002)),
+                reference=ReferenceOutline(113.0, 60.0),
+            )
+        )
+        assert [r.name for r in after.processing] == [
+            "snap",
+            "normalize-diameters",
+            "deduplicate",
+            "check-reference-size",
+            "sort",
         ]

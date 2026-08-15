@@ -29,8 +29,16 @@ __all__ = [
     "ReferenceOutline",
     "Diagnostic",
     "SourceInfo",
+    "ParameterValue",
+    "StageRun",
     "DrillData",
 ]
+
+
+#: What a stage may record about itself in a ``StageRun``. One member wider than
+#: ``Diagnostic.data``: a diameter table is a list of numbers, and flattening it
+#: into a string would make the drawing parse its own provenance back out again.
+ParameterValue = float | int | str | bool | tuple[float, ...]
 
 
 class Severity(Enum):
@@ -193,6 +201,37 @@ class SourceInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class StageRun:
+    """What one stage was configured to do, recorded once it has done it.
+
+    Deliberately generic — a name and a key/value payload, the same idiom as
+    ``Diagnostic.data`` — rather than one record class per stage. A closed union
+    of record types would have to grow a member for every new stage, which is
+    precisely the extensibility ``Stage`` exists to protect: ``Pipeline`` records
+    what the abstraction hands it and knows nothing about grids or diameters.
+
+    ``parameters`` holds *effective* values, not raw constructor arguments: the
+    drawing needs the grid numerically, so recording ``None`` for a threshold
+    that resolved to 0.0625 would defeat the point of recording it at all.
+    """
+
+    name: str
+    parameters: tuple[tuple[str, ParameterValue], ...] = ()
+
+    def get(self, key: str, default=None):
+        """Read one parameter. Mirrors ``Diagnostic.get`` so there is one idiom.
+
+        A key a stage did not report is simply absent — the drawing asks for the
+        grid and gets ``None`` from a run that never had one, rather than a
+        plausible-looking default it would then print on a machinist's sheet.
+        """
+        for k, v in self.parameters:
+            if k == key:
+                return v
+        return default
+
+
+@dataclass(frozen=True, slots=True)
 class DrillData:
     """The single object that travels the whole pipeline."""
 
@@ -200,6 +239,7 @@ class DrillData:
     reference: ReferenceOutline | None = None
     diagnostics: tuple[Diagnostic, ...] = ()
     source: SourceInfo = field(default_factory=SourceInfo)
+    processing: tuple[StageRun, ...] = ()
 
     # -- transforms ------------------------------------------------------
     def with_holes(self, holes: Iterable[Hole]) -> "DrillData":
@@ -209,6 +249,17 @@ class DrillData:
         if not diagnostics:
             return self
         return replace(self, diagnostics=self.diagnostics + tuple(diagnostics))
+
+    def with_processing(self, *runs: "StageRun") -> "DrillData":
+        """Append the record of a stage that has just run.
+
+        Appended, never replaced: a stage may legitimately run twice — the CLI
+        chooses the order, and nothing forbids two snaps — and the history is
+        what happened, not a set of what was configured.
+        """
+        if not runs:
+            return self
+        return replace(self, processing=self.processing + tuple(runs))
 
     def with_origin(self, origin: Origin) -> "DrillData":
         """Translate every hole into the requested frame.
@@ -258,6 +309,20 @@ class DrillData:
             else:
                 buckets[hole.y] = [hole]
         return [(y, sorted(hs, key=lambda h: h.x)) for y, hs in sorted(buckets.items(), reverse=True)]
+
+    def last_run(self, stage_name: str) -> StageRun | None:
+        """The most recent record for ``stage_name``, or ``None`` if it never ran.
+
+        The drawing's title block must state the grid these holes were actually
+        snapped to. It was told a second copy through its own options instead,
+        so data snapped at 0.5 could be stamped 0.25 on the sheet a machinist
+        reads. ``None`` — no such stage ran — is a real answer here, and the
+        caller must render it as "not snapped", never as a default value.
+        """
+        for run in reversed(self.processing):
+            if run.name == stage_name:
+                return run
+        return None
 
     def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
         return tuple(d for d in self.diagnostics if d.severity is severity)

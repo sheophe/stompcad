@@ -458,6 +458,26 @@ def test_verbose_adds_per_stage_detail(fake_source, capsys):
     assert len(loud) > len(quiet)
 
 
+def test_the_traced_path_folds_through_the_same_pipeline_as_the_plain_one():
+    """``--verbose`` must not be a second, divergent fold.
+
+    It was one: an ``apply`` loop of its own, identical to ``Pipeline.run`` right
+    up until the fold gained a second responsibility. A verbose run then produced
+    data with no processing history at all, and the drawing made from it could
+    not say what grid the holes had been snapped to.
+    """
+    args = cli.build_parser().parse_args(["panel.ai", "--grid", "0.5"])
+    pipeline = cli.build_pipeline(args)
+    data = make_data()
+
+    plain = cli.run_pipeline(pipeline, data)
+    traced = cli.run_pipeline(pipeline, data, trace=lambda *_: None)
+
+    assert traced.processing == plain.processing
+    assert [run.name for run in traced.processing] == [stage.name for stage in pipeline]
+    assert traced.last_run("snap").get("grid_mm") == 0.5
+
+
 def test_title_reaches_the_drawing(fake_source, tmp_path):
     fake_source(make_data())
     svg = tmp_path / "out.svg"

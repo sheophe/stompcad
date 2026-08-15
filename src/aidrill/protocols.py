@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Iterable, Iterator, Protocol, Sequence, runtime_checkable
 
-from .model import DrillData
+from .model import DrillData, StageRun
 
 __all__ = ["Source", "Stage", "Emitter", "Pipeline"]
 
@@ -33,6 +33,15 @@ class Stage(Protocol):
     name: ClassVar[str]
 
     def apply(self, data: DrillData) -> DrillData: ...
+
+    def describe(self) -> StageRun:
+        """Report what this stage was configured to do, with *effective* values.
+
+        The drawing's title block must state the grid the holes were actually
+        snapped to. Threading that through the emitter's options instead meant a
+        library consumer could emit a sheet stamped 0.25 for data snapped at 0.5.
+        """
+        ...
 
 
 @runtime_checkable
@@ -76,6 +85,14 @@ class Pipeline(Sequence[Stage]):
         return Pipeline(self._stages + (stage,))
 
     def run(self, data: DrillData) -> DrillData:
+        """Fold the stages over ``data``, recording each one as it succeeds.
+
+        The record is appended *after* ``apply`` returns, so a stage never sees
+        provenance for itself in its own input and a stage that raises leaves no
+        claim that it ran. What the record contains is the stage's business:
+        this fold asks ``describe()`` and stores the answer, which is how it
+        stays free of any knowledge of grids, diameters or tolerances.
+        """
         for stage in self._stages:
-            data = stage.apply(data)
+            data = stage.apply(data).with_processing(stage.describe())
         return data

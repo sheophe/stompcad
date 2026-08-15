@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, ClassVar
 
-from ..model import DrillData, Hole
+from ..model import DrillData, Hole, StageRun
 
 __all__ = ["SortHoles"]
 
@@ -26,6 +26,19 @@ class SortHoles:
 
     def __init__(self, key: Callable[[Hole], object] | None = None) -> None:
         self.key = _reading_order if key is None else key
+
+    def describe(self) -> StageRun:
+        """Name the ordering that was applied, not the argument that chose it.
+
+        ``SortHoles()`` and ``SortHoles(key=None)`` order holes identically, so
+        both report ``"default"``; anything else reports the callable's own
+        ``__name__``, which is the only handle a reader has on what it did.
+        """
+        if self.key is _reading_order:
+            key = "default"
+        else:
+            key = getattr(self.key, "__name__", type(self.key).__name__)
+        return StageRun(self.name, (("key", key),))
 
     def apply(self, data: DrillData) -> DrillData:
         return data.with_holes(sorted(data.holes, key=self.key))

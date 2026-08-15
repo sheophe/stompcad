@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from typing import ClassVar
 
-from ..model import Diagnostic, DrillData, Hole
+from ..model import Diagnostic, DrillData, Hole, StageRun
 from ..tolerance import within
 
 __all__ = ["SnapPositions"]
@@ -34,6 +34,22 @@ class SnapPositions:
     def __init__(self, grid: float, warn_over: float | None = None) -> None:
         self.grid = float(grid)
         self.warn_over = (self.grid / 4.0) if warn_over is None else float(warn_over)
+
+    def describe(self) -> StageRun:
+        """Report the pitch the holes were really snapped to, and the threshold.
+
+        ``warn_over`` is reported resolved: ``SnapPositions(grid=0.25)`` was
+        constructed with ``None`` there but behaves as 0.0625, and a record of
+        ``None`` would tell a reader nothing about what happened to the data.
+        """
+        return StageRun(
+            self.name,
+            (
+                ("grid_mm", self.grid),
+                ("warn_over_mm", self.warn_over),
+                ("enabled", self.grid > 0),
+            ),
+        )
 
     def apply(self, data: DrillData) -> DrillData:
         if self.grid <= 0:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import ClassVar
 
-from ..model import Diagnostic, DrillData, Hole
+from ..model import Diagnostic, DrillData, Hole, StageRun
 from ..tolerance import within
 
 __all__ = ["Deduplicate"]
@@ -33,6 +33,10 @@ class Deduplicate:
 
     def __init__(self, tolerance: float = 0.05) -> None:
         self.tolerance = float(tolerance)
+
+    def describe(self) -> StageRun:
+        """The radius within which two same-size holes were treated as one."""
+        return StageRun(self.name, (("tolerance_mm", self.tolerance),))
 
     def apply(self, data: DrillData) -> DrillData:
         kept: list[Hole] = []

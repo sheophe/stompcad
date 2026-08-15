@@ -303,11 +303,19 @@ def run_pipeline(
     data: DrillData,
     trace: Callable[[Stage, DrillData, DrillData], None] | None = None,
 ) -> DrillData:
-    """Fold the stages over ``data``, optionally reporting each step."""
+    """Fold the stages over ``data``, optionally reporting each step.
+
+    Both paths fold through ``Pipeline.run`` — the traced one a stage at a time —
+    so that whatever the fold does beyond calling ``apply`` happens under
+    ``--verbose`` too. It did not: this function ran its own bare ``apply`` loop,
+    and the day the fold started recording stage provenance the verbose run would
+    have produced a drawing with an empty processing history, which is exactly
+    the class of divergence provenance exists to stop.
+    """
     if trace is None:
         return pipeline.run(data)
     for stage in pipeline:
-        before, data = data, stage.apply(data)
+        before, data = data, Pipeline([stage]).run(data)
         trace(stage, before, data)
     return data
 

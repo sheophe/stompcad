@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 from typing import ClassVar, Mapping, Protocol, Sequence, runtime_checkable
 
-from ..model import Diagnostic, DrillData, Hole
+from ..model import Diagnostic, DrillData, Hole, ParameterValue, StageRun
 from ..tolerance import within
 
 __all__ = [
@@ -140,6 +140,28 @@ class NormalizeDiameters:
 
     def __init__(self, strategy: DiameterStrategy) -> None:
         self.strategy = strategy
+
+    def describe(self) -> StageRun:
+        """Report the strategy by name, plus whatever settings it exposes.
+
+        Asked *of* the strategy, never decided by type: an ``isinstance`` ladder
+        over ClusterDiameters / TableDiameters would put back the closed set of
+        strategies this stage was written to avoid, and the fourth strategy — the
+        one that lives in a caller's own module — would describe itself as
+        nothing. A strategy that has a ``tolerance`` or a table of ``sizes`` gets
+        them recorded; one that has neither reports neither, and a consumer sees
+        the key absent rather than a default that was never applied.
+        """
+        parameters: list[tuple[str, ParameterValue]] = [
+            ("strategy", type(self.strategy).__name__)
+        ]
+        tolerance = getattr(self.strategy, "tolerance", None)
+        if isinstance(tolerance, (int, float)) and not isinstance(tolerance, bool):
+            parameters.append(("tolerance_mm", float(tolerance)))
+        sizes = getattr(self.strategy, "sizes", None)
+        if isinstance(sizes, Sequence) and not isinstance(sizes, (str, bytes)):
+            parameters.append(("sizes_mm", tuple(float(s) for s in sizes)))
+        return StageRun(self.name, tuple(parameters))
 
     def apply(self, data: DrillData) -> DrillData:
         if not data.holes:
