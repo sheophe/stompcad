@@ -34,7 +34,13 @@ Fixtures deliberately use the 120 × 94 footprint: length and width differ, so a
 implementation that swaps them cannot pass, and its four candidates line up with
 nothing else being asserted.
 
-The last two sections cover the two accessors every renderer reads the document
+``Diagnostic`` and ``StageRun`` get a section of their own because they are the
+model's one open corner: their payloads are generic key/value pairs, so the
+``_nm`` suffix in a key is the only thing that says a number is a length. The
+tests there pin both halves of that — that a key naming a length is held to one,
+and that a key naming something else is not.
+
+Two further sections cover the accessors every renderer reads the document
 through, and they are here because both were fully invertible while the suite
 stayed green. ``of_severity`` was only ever asserted against documents holding
 *no* diagnostics, where the correct predicate and its exact negation both return
@@ -147,6 +153,14 @@ _GUARDED_LENGTHS = [
     pytest.param(
         lambda v: EnclosureMatch("Hammond 1590", 120_000_000, v, ("1590BB",)),
         id="EnclosureMatch.width_nm",
+    ),
+    pytest.param(
+        lambda v: Diagnostic.warning("off-grid", "hole 4 moved", location_nm=(v, 0)),
+        id="Diagnostic.location_x_nm",
+    ),
+    pytest.param(
+        lambda v: Diagnostic.warning("off-grid", "hole 4 moved", location_nm=(0, v)),
+        id="Diagnostic.location_y_nm",
     ),
 ]
 
@@ -830,6 +844,104 @@ def test_a_severity_does_not_compare_with_anything_else():
         operator.lt(Severity.WARNING, "warning")
     with pytest.raises(TypeError):
         operator.ge(Severity.WARNING, 2)
+
+
+# --------------------------------------------------------------------------
+# what a finding and a stage record may hold
+# --------------------------------------------------------------------------
+
+
+def test_a_diagnostic_locates_a_finding_in_whole_nanometres():
+    """``location_nm`` is a position in the canonical frame like any other.
+
+    The suffix is the point: an unsuffixed ``location`` is the one pair in the
+    model with nothing in its name to say what unit it is in, and a stage
+    reporting where a hole ended up has the millimetres it printed in the
+    message right there to hand.
+    """
+    finding = Diagnostic.warning(
+        "off-grid", "hole 4 moved", location_nm=(-40_000_000, 18_000_000)
+    )
+    assert finding.location_nm == (-40_000_000, 18_000_000)
+    assert all(type(value) is int for value in finding.location_nm)
+
+
+def test_a_finding_need_not_be_anywhere():
+    """A finding about the panel as a whole has no coordinate to give."""
+    assert Diagnostic.error("unmatched-enclosure", "113 × 60 is no footprint").location_nm is None
+
+
+@pytest.mark.parametrize("value", [_A_FLOAT, True], ids=["float", "bool"])
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(
+            lambda v: Diagnostic.warning("off-grid", "hole 4 moved", data=(("moved_nm", v),)),
+            id="Diagnostic.data",
+        ),
+        pytest.param(
+            lambda v: StageRun("snap", (("grid_nm", v),)), id="StageRun.parameters"
+        ),
+        pytest.param(
+            lambda v: StageRun("snap-diameters", (("sizes_nm", (7_000_000, v)),)),
+            id="StageRun.parameters-in-a-tuple",
+        ),
+    ],
+)
+def test_a_payload_key_ending_nm_must_hold_whole_nanometres(build, value):
+    """The suffix is the whole contract in a payload, so it is enforced.
+
+    ``Diagnostic.data`` and ``StageRun.parameters`` are open by design — a stage
+    records what it has to record, under keys this module cannot know in
+    advance — and that openness is exactly why the key has to be held to its
+    word. ``moved_nm`` is read by the CLI report, the drawing's NOTES block and
+    the JSON alike, and a millimetre float sitting under that name prints as a
+    plausible number in all three.
+
+    Both call sites, because they are two guards: a check wired into
+    ``Diagnostic`` alone would leave every stage's provenance unchecked. And the
+    tuple case separately, because the one tuple-valued parameter in the
+    pipeline is a table of diameters — a scalar-only check would leave every
+    size in it unexamined.
+    """
+    with pytest.raises(TypeError, match="nanometres"):
+        build(value)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(
+            lambda: Diagnostic.warning("off-grid", "hole 4 moved", data=(("moved_nm", -9_400),)),
+            id="Diagnostic.data",
+        ),
+        pytest.param(lambda: StageRun("snap", (("grid_nm", 500_000),)), id="StageRun.parameters"),
+        pytest.param(
+            lambda: StageRun("snap-diameters", (("sizes_nm", (7_000_000, 12_000_000)),)),
+            id="StageRun.parameters-in-a-tuple",
+        ),
+    ],
+)
+def test_a_payload_key_ending_nm_accepts_whole_nanometres(build):
+    """The other side of the same guard: it refuses a type, not a payload.
+
+    Without this the rule above is satisfied by a check that rejects everything,
+    and every stage in the pipeline would be unable to describe itself.
+    """
+    assert build() is not None
+
+
+def test_a_payload_key_that_is_not_a_length_may_hold_a_float():
+    """The rule is the suffix, not "no floats".
+
+    A ratio, an angle or a fraction is a genuine float and none of them is a
+    length; refusing them would push a stage into spelling a real number as a
+    string, which is how a consumer ends up parsing provenance back out again.
+    """
+    finding = Diagnostic.warning("off-grid", "hole 4 moved", data=(("share", 0.25),))
+    run = StageRun("identify-enclosure", (("draft_angle_deg", 2.0),))
+    assert finding.get("share") == 0.25
+    assert run.get("draft_angle_deg") == 2.0
 
 
 # --------------------------------------------------------------------------
