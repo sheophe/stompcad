@@ -672,6 +672,19 @@ def test_form_xobjects_are_walked_with_their_matrix(tmp_path):
     assert circle.diameter == pytest.approx(20.0, abs=1e-6)
 
 
+def test_the_source_is_re_exported_from_the_package_root():
+    """There is no source registry, so the root is the only place to find one.
+
+    ``aidrill`` exports the ``Source`` protocol, and ``AiPdfSource`` is the only
+    thing that satisfies it. Nothing enumerates the implementations, so a
+    consumer who cannot name it from the root cannot start the flow at all.
+    """
+    import aidrill
+
+    assert aidrill.AiPdfSource is AiPdfSource
+    assert "AiPdfSource" in aidrill.__all__
+
+
 @pytest.mark.parametrize("paint", ["s", "b", "b*"])
 def test_the_closing_painters_mark_ink(tmp_path, paint):
     """``s``, ``b`` and ``b*`` paint, so a circle ended by any of them is a hole.

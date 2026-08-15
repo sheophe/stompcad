@@ -2075,3 +2075,52 @@ class TestTheMeasurementSurvivesTheSnap:
         assert twice.reference == once.reference
         assert (twice.reference.raw.width, twice.reference.raw.height) == (113.0, 60.0)
         assert twice.diagnostics == ()
+
+
+# --------------------------------------------------------------------------
+# Reaching the stages
+# --------------------------------------------------------------------------
+
+
+def test_the_stages_and_the_standards_are_re_exported_from_the_package_root():
+    """Nothing enumerates the stages, so the root is where they are named.
+
+    ``build_pipeline`` is the CLI's arrangement and not the only one — SPEC
+    calls ``CheckReferenceSize`` a supported stage for a library caller, and the
+    CLI never runs it. A root exporting ``Pipeline`` and the ``Stage`` protocol
+    but no stage hands a consumer an empty pipeline and no way to fill it, and
+    exporting the stages without ``DRILL_STANDARDS`` leaves the one stage that
+    takes an argument unconfigurable.
+    """
+    import aidrill
+
+    stages = (
+        SnapPositions,
+        SnapDiametersToDrillTable,
+        Deduplicate,
+        IdentifyHammondFootprint,
+        SortHoles,
+        CheckReferenceSize,
+    )
+    for stage in stages:
+        assert getattr(aidrill, stage.__name__, None) is stage
+        assert stage.__name__ in aidrill.__all__
+
+    assert aidrill.DRILL_STANDARDS is DRILL_STANDARDS
+    assert aidrill.DEFAULT_STANDARD == DEFAULT_STANDARD
+    assert aidrill.DrillStandard is DrillStandard
+    for name in ("DRILL_STANDARDS", "DEFAULT_STANDARD", "DrillStandard"):
+        assert name in aidrill.__all__
+
+
+def test_the_generative_bands_stay_in_the_subpackage():
+    """The rule the root's docstring states, made falsifiable.
+
+    ``METRIC_BANDS`` is what a *different* preferred series would be written as,
+    not what running the flow needs, and the split is only worth having while
+    something fails when it blurs.
+    """
+    import aidrill
+
+    assert not hasattr(aidrill, "METRIC_BANDS")
+    assert not hasattr(aidrill, "FRACTIONAL_SIXTY_FOURTHS")

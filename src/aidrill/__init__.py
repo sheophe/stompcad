@@ -1,11 +1,35 @@
-"""aidrill — extract drill data from Adobe Illustrator artwork and emit it."""
+"""aidrill — extract drill data from Adobe Illustrator artwork and emit it.
+
+The package root carries what no registry can find for a caller. There is no
+source registry and no stage registry — ``AiPdfSource`` and the stages are named
+directly or not at all — so a root that exported the ``Source`` and ``Stage``
+protocols without anything satisfying them would name two of the three roles a
+library consumer then had no way to fill. Emitters are the exception that states
+the rule: they *have* a registry, so a format is resolved through
+``aidrill.emitters.get_emitter`` and named here no more than ``cli.py`` names one.
+
+What stays in the subpackages is the material for changing the domain's answer
+sets rather than for using them. ``METRIC_BANDS`` and ``FRACTIONAL_SIXTY_FOURTHS``
+(``aidrill.pipeline``) generate the standards exported below and interest only
+someone declaring a different series. Reference data a caller needs to *read* a
+result is not in that class and is exported: ``DrillData.enclosure`` names a
+footprint, and ``HAMMOND_1590`` is what turns that name into dimensions.
+
+Both lists run in the order the flow runs: the data the roles pass, the roles,
+the source, the stages, then what interprets the answer.
+"""
 
 from .model import (
     Diagnostic, DrillData, EnclosureMatch, Hole, Origin, ParameterValue, RawHole, RawOutline,
     ReferenceOutline, Severity, SourceInfo, StageRun, Units,
 )
-from .enclosures import Enclosure, HAMMOND_1590, footprints
 from .protocols import Emitter, Pipeline, Source, Stage
+from .sources import AiPdfSource
+from .pipeline import (
+    SnapPositions, SnapDiametersToDrillTable, Deduplicate, IdentifyHammondFootprint,
+    CheckReferenceSize, SortHoles, DrillStandard, DRILL_STANDARDS, DEFAULT_STANDARD,
+)
+from .enclosures import Enclosure, HAMMOND_1590, footprints
 from .errors import (
     AidrillError, EmitterError, EmptyLayerError, LayerNotFoundError, SourceError,
 )
@@ -13,7 +37,10 @@ from .errors import (
 __all__ = [
     "Diagnostic", "DrillData", "EnclosureMatch", "Hole", "Origin", "ParameterValue", "RawHole", "RawOutline",
     "ReferenceOutline", "Severity", "SourceInfo", "StageRun", "Units",
-    "Enclosure", "HAMMOND_1590", "footprints",
     "Emitter", "Pipeline", "Source", "Stage",
+    "AiPdfSource",
+    "SnapPositions", "SnapDiametersToDrillTable", "Deduplicate", "IdentifyHammondFootprint",
+    "CheckReferenceSize", "SortHoles", "DrillStandard", "DRILL_STANDARDS", "DEFAULT_STANDARD",
+    "Enclosure", "HAMMOND_1590", "footprints",
     "AidrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]
