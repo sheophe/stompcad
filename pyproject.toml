@@ -1,6 +1,6 @@
 [project]
 name = "aidrill"
-version = "2.0.0"
+version = "0.1.0"
 description = "Extract drill data from Adobe Illustrator artwork and emit it in fabrication formats"
 requires-python = ">=3.10"
 dependencies = ["pikepdf>=9"]
