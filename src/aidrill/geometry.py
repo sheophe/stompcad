@@ -25,13 +25,27 @@ of radius 3 pt shows the doubling: the diameter is 2 116 666.67 nm and rounds to
 2 116 667, while the radius rounds to 1 058 333 and doubles to 2 116 666. It is
 not the only radius that does, nor even the smallest — 2 pt disagrees the other
 way round, a 4 pt diameter rounding to 1 411 111 against twice 705 556 — but it
-is the one ``test_the_conversion_happens_once_and_on_the_diameter`` is built on,
-with ``test_the_centre_converts_after_the_centroid_and_not_before`` doing the
-same for each coordinate of the centre. Both need a fixture chosen for the
-boundary: the panel in ``tests/fixtures/tar.ai`` drifts by well under a
-nanometre and rounds to the same integer either way, so *that* fixture cannot
-say this and must not be trusted to. Real artwork may land on the boundary; it
-simply cannot be relied on to.
+is the one ``test_the_conversion_happens_once_and_on_the_diameter`` is built on.
+
+**The centre needs a different kind of fixture, and the difference has already
+fooled one reading of this module.** On a symmetric circle the four anchors of
+an axis are antipodal, so their converted mean lands exactly on a half
+nanometre; which integer that becomes is then settled by a tie-break rule and
+not by the order of the arithmetic. A tie is decidable four ways — half-up,
+half-even, half-to-odd, truncation — so pinning one of them pins nothing, and a
+whole suite once stayed green with the centroid replaced by a converted-anchor
+mean. What does pin the order is a *slightly asymmetric* path, which is legal
+input here because ``fit_circle``'s tolerance is relative and exists to admit
+measurement noise: a circle a nanometre out of true on a millimetre radius is
+four orders of magnitude inside the 1% budget. Move the converted-anchor mean
+off the tie and every rounding rule gives one wrong answer, which is what
+``test_the_centre_converts_after_the_centroid_and_not_before`` is built on.
+
+Both fixtures are chosen rather than found. The panel in
+``tests/fixtures/tar.ai`` drifts by well under a nanometre and rounds to the
+same integer either way, so *that* fixture cannot say this and must not be
+trusted to. Real artwork may land on the boundary; it simply cannot be relied on
+to.
 """
 
 from __future__ import annotations
