@@ -32,12 +32,19 @@ way:
 2. **Vertical dimension labels must be rotated.** An unrotated label on the
    left-hand height dimension runs straight off the side of the sheet.
 
-The emitter re-derives nothing: no snapping, no diameter clustering, no
-deduplication. It reads ``tools()``, ``tool_counts()``, ``rows()`` and
-``diagnostics`` and draws what it is given. In particular, *which* holes are
-duplicates is read out of the ``duplicate-hole`` diagnostics themselves — see
-:func:`_flagged_holes` — because the one time this file decided that for itself
-it disagreed with the pipeline and painted an innocent hole red.
+The emitter re-derives nothing and remembers nothing: no snapping, no diameter
+clustering, no deduplication, and no second copy of a pipeline setting. It reads
+``tools()``, ``tool_counts()``, ``rows()``, ``diagnostics`` and ``processing``,
+and draws what it is given. Two facts on the sheet used to be exceptions, and
+both went stale in silence:
+
+* *Which* holes are duplicates comes from the ``duplicate-hole`` diagnostics'
+  ``hole_index`` — see :func:`_flagged_holes`. Matching on coordinates instead
+  worked only until a stage moved the survivor, and
+  ``Pipeline([Deduplicate, SnapPositions])`` is a legal order.
+* *What grid* the holes are on comes from the recorded ``snap`` run — see
+  :func:`_grid_note`. It arrived through ``DrawingOptions`` instead, defaulting
+  to 0.25, so data snapped at 0.5 was stamped 0.25.
 """
 
 from __future__ import annotations
@@ -82,6 +89,12 @@ PREFERRED_SCALES = (
 
 DUP_CODE = "duplicate-hole"
 
+#: The ``StageRun`` name the title block's grid is read from, and the parameter
+#: within it. Names the *record*, not the class: the emitter reads provenance and
+#: has no import of, or opinion about, which stage wrote it.
+SNAP_STAGE = "snap"
+GRID_PARAMETER = "grid_mm"
+
 
 @dataclass(frozen=True, slots=True)
 class Sheet:
@@ -110,7 +123,6 @@ class DrawingOptions:
     title: str = ""
     drawing_no: str = ""
     true_size: tuple[float, float] | None = None
-    grid: float = 0.25
     company: str = "ARTIFACT INSTRUMENTS"
 
 
@@ -887,7 +899,7 @@ class DrawingSvgEmitter:
             f"DRG No  {options.drawing_no or '—'}",
             f"SHEET 1 OF 1   SIZE {layout.sheet.name}",
             f"UNITS mm   SCALE {layout.scale_label}",
-            f"GRID {_trim(options.grid)} mm   HOLES {len(data.holes)}",
+            f"{_grid_note(data)}   HOLES {len(data.holes)}",
             "THIRD ANGLE PROJECTION — DO NOT SCALE FROM DRAWING",
             f"SOURCE  {data.source.path or '—'}",
             f"LAYERS  drill={data.source.drill_layer or '—'} "
@@ -1059,30 +1071,64 @@ def _dedupe_sorted(values: Iterable[float], tolerance: float = 1e-6) -> list[flo
     return out
 
 
-def _flagged_holes(
-    diagnostics: Sequence[Diagnostic],
-) -> frozenset[tuple[float, float, float]]:
-    """The ``(x, y, ⌀)`` of every hole ``Deduplicate`` kept and reported.
+def _grid_note(data: DrillData) -> str:
+    """What the title block says about the grid, read from what actually ran.
 
-    ``Deduplicate`` sets ``location`` to the surviving hole's exact post-dedupe
-    coordinates and puts that hole's diameter in the diagnostic's payload, so
-    identifying the hole is a lookup, not a computation.
+    The grid used to arrive through ``DrawingOptions``, defaulting to 0.25, so a
+    library consumer who snapped at 0.5 and called ``emit`` got a sheet stamped
+    with a pitch the holes had never been near. The number is a fact about the
+    data, so it comes out of the data.
+
+    Three answers, all of them honest:
+
+    * a recorded positive pitch — print it;
+    * a recorded ``0`` — ``SnapPositions`` ran as the identity (that is exactly
+      what its ``enabled: False`` records), so say OFF rather than "GRID 0 mm",
+      which reads as a pitch;
+    * no record at all — say so. Hand-built ``DrillData`` never met a pipeline,
+      and a plausible-looking default is the failure this whole change is about.
+    """
+    run = data.last_run(SNAP_STAGE)
+    grid = None if run is None else run.get(GRID_PARAMETER)
+    # ``StageRun`` payloads are deliberately generic, so a value that is not a
+    # number is not a pitch and gets the same answer as no value at all.
+    if not isinstance(grid, (int, float)):
+        return "GRID NOT RECORDED"
+    if grid > 0:
+        return f"GRID {_trim(float(grid))} mm"
+    return "GRID OFF"
+
+
+def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[object]:
+    """The ``Hole.index`` of every hole ``Deduplicate`` kept and reported.
+
+    ``hole_index`` is the survivor's stable identity, which is why it exists: a
+    coordinate is only true until the next stage moves the hole, and ``location``
+    is written at the moment of the report. A diagnostic carrying no id names no
+    hole this emitter can place, so it rings nothing rather than guessing.
+
+    Typed ``object`` and not ``int`` on purpose. ``Diagnostic.data`` is a generic
+    payload, and the set is only ever tested with ``in``, so a value that is not
+    an id simply matches no hole — whereas an ``isinstance(…, int)`` filter would
+    also throw away a ``3.0`` that equals, and would have correctly rung, hole 3.
+    Dropping a ring in silence is the failure this function was rewritten to fix.
     """
     return frozenset(
-        (d.location[0], d.location[1], d.get("diameter"))
+        index
         for d in diagnostics
-        if d.code == DUP_CODE and d.location is not None and d.get("diameter") is not None
+        if d.code == DUP_CODE and (index := d.get("hole_index")) is not None
     )
 
 
-def _is_flagged(hole: Hole, flagged: frozenset[tuple[float, float, float]]) -> bool:
-    """Exact match on position *and* diameter — no tolerance lives here.
+def _is_flagged(hole: Hole, flagged: frozenset[object]) -> bool:
+    """Identity, not geometry. Whoever the pipeline named is who gets the ring.
 
-    The emitter used to match on position within a hardcoded 0.05 mm, which is
-    neither ``Deduplicate``'s rule (proximity **and** equal diameter) nor
-    necessarily its tolerance (``--dedupe-tolerance`` is a user's to choose).
-    A ⌀5 hole 0.03 mm from a flagged ⌀7 was drawn red and ringed on the sheet
-    the machinist reads, while the pipeline had correctly kept both. Whether a
-    hole is a duplicate is decided once, upstream; this reads the answer.
+    Two earlier versions decided this from positions. The first matched within a
+    hardcoded 0.05 mm and ringed a ⌀5 hole sitting beside a flagged ⌀7 that the
+    pipeline had correctly kept. The second matched exactly, on position and
+    diameter, and so was right only while nothing moved the survivor afterwards
+    — ``Pipeline([Deduplicate, SnapPositions])`` is a legal order, and under it
+    the ring silently vanished from the sheet while the CLI still reported the
+    duplicate.
     """
-    return (hole.x, hole.y, hole.diameter) in flagged
+    return hole.index in flagged

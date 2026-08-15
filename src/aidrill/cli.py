@@ -252,7 +252,6 @@ class OutputSettings:
 
     title: str = ""
     true_size: tuple[float, float] | None = None
-    grid: float = 0.25
 
 
 #: Keyed by options **class**, never by format name. An emitter whose options
@@ -260,9 +259,11 @@ class OutputSettings:
 #: with its own defaults.
 _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
     ExcellonOptions: lambda s: ExcellonOptions(title=s.title),
-    DrawingOptions: lambda s: DrawingOptions(
-        title=s.title, true_size=s.true_size, grid=max(s.grid, 0.0)
-    ),
+    # No grid here: ``--grid`` goes to ``SnapPositions`` and nowhere else, and
+    # the drawing reads the pitch back out of that stage's record. Passing it a
+    # second time made the sheet's stamp agree with the flag rather than with
+    # the holes, which is the same disagreement in miniature.
+    DrawingOptions: lambda s: DrawingOptions(title=s.title, true_size=s.true_size),
     JsonOptions: lambda s: JsonOptions(),
 }
 
@@ -294,7 +295,6 @@ def settings_from(args: argparse.Namespace) -> OutputSettings:
     return OutputSettings(
         title=args.title,
         true_size=None if args.true_size is None else parse_true_size(args.true_size),
-        grid=args.grid,
     )
 
 

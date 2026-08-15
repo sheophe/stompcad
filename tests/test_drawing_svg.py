@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import fields
 
 import pytest
 
@@ -33,9 +34,9 @@ from aidrill.model import (
     Severity,
     SourceInfo,
 )
-from aidrill.pipeline import Deduplicate
-from aidrill.protocols import Emitter
-from tests.conftest import holes
+from aidrill.pipeline import Deduplicate, SnapPositions
+from aidrill.protocols import Emitter, Pipeline
+from tests.conftest import at, holes, make_data
 
 SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -50,15 +51,23 @@ CHAR_W = 0.6
 
 
 def _panel() -> DrillData:
+    """The SPEC §9 panel, post-pipeline.
+
+    The hole ids are deliberately neither sequential nor in position order. A
+    fixture numbered 0, 1, 2… makes ``hole.index`` indistinguishable from the
+    hole's place in the tuple, so an emitter that flagged the wrong one of the
+    two would still look right. Here the flagged hole is id 12, which is not a
+    position at all.
+    """
     return DrillData(
-        holes=holes(
-            (-40.0, 18.0),
-            (-20.0, 18.0),
-            (0.0, 18.0),
-            (20.0, 18.0),
-            (40.0, 18.0),
-            (-19.0, -18.75, 5.0),
-            (19.0, -18.75, 5.0),
+        holes=(
+            at(-40.0, 18.0, index=12),
+            at(-20.0, 18.0, index=5),
+            at(0.0, 18.0, index=9),
+            at(20.0, 18.0, index=3),
+            at(40.0, 18.0, index=11),
+            at(-19.0, -18.75, 5.0, index=7),
+            at(19.0, -18.75, 5.0, index=1),
         ),
         reference=ReferenceOutline(113.0, 60.0),
         diagnostics=(
@@ -67,7 +76,7 @@ def _panel() -> DrillData:
                 "2 coincident ⌀7 mm holes at (-40.000, 18.000) within 0.05 mm; "
                 "kept 1, dropped 1",
                 location=(-40.0, 18.0),
-                data=(("diameter", 7.0), ("dropped", 1)),
+                data=(("hole_index", 12), ("diameter", 7.0), ("dropped", 1)),
             ),
             Diagnostic.info("snap", "snapped 8 holes to a 0.25 mm grid"),
         ),
@@ -216,7 +225,19 @@ def test_default_options_match_the_spec_signature():
     assert options.title == ""
     assert options.drawing_no == ""
     assert options.true_size is None
-    assert options.grid == 0.25
+
+
+def test_the_options_carry_no_grid_of_their_own():
+    """The grid is a pipeline fact, and a second copy is a second answer.
+
+    A library consumer who snaps at 0.5 and calls ``DrawingSvgEmitter().emit``
+    got a sheet stamped 0.25, because the option defaulted rather than asking
+    the data. There is nowhere to pass a grid now; the drawing reads the one the
+    holes were actually snapped to.
+    """
+    assert "grid" not in {f.name for f in fields(DrawingOptions)}
+    with pytest.raises(TypeError):
+        DrawingOptions(grid=0.25)
 
 
 # --------------------------------------------------------------------------
@@ -325,12 +346,12 @@ def _reviewers_three_hole_case() -> DrillData:
 
     ``Deduplicate`` collapses on proximity **and** equal diameter, so it keeps
     the ⌀7 at (0, 0) and the ⌀5 at (0.03, 0), and raises one ``duplicate-hole``
-    naming the survivor: position (0, 0), diameter 7.
+    naming the survivor by its id, 4.
     """
     return DrillData(
         holes=(
-            Hole.from_measurement(0.0, 0.0, 7.0, index=0),
-            Hole.from_measurement(0.03, 0.0, 5.0, index=1),
+            Hole.from_measurement(0.0, 0.0, 7.0, index=4),
+            Hole.from_measurement(0.03, 0.0, 5.0, index=2),
         ),
         reference=ReferenceOutline(60.0, 40.0),
         diagnostics=(
@@ -339,7 +360,7 @@ def _reviewers_three_hole_case() -> DrillData:
                 "2 coincident ⌀7 mm holes at (0.000, 0.000) within 0.05 mm; "
                 "kept 1, dropped 1",
                 location=(0.0, 0.0),
-                data=(("diameter", 7.0), ("dropped", 1)),
+                data=(("hole_index", 4), ("diameter", 7.0), ("dropped", 1)),
             ),
         ),
     )
@@ -405,17 +426,18 @@ def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
     assert len(by_class(root, "dup-ring", "circle")) == 1
 
 
-def test_a_hole_merely_near_the_flagged_position_is_not_styled_as_a_duplicate():
-    """No tolerance lives in the emitter: the match is exact, on both keys.
+def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it():
+    """Identity decides, and ``location`` is human context the emitter ignores.
 
-    A 0.001 mm offset means this is a *different* hole from the one the
-    pipeline kept — and the pipeline's tolerance is ``--dedupe-tolerance``,
-    which the emitter has no access to and must not guess at.
+    The diagnostic names hole 8, which sits 20 mm away; hole 3 sits 0.001 mm
+    from ``location`` and is not the hole the pipeline kept. An emitter matching
+    on coordinates rings hole 3 — or, once a later stage has moved the survivor,
+    rings nothing at all. Both are the sheet disagreeing with the pipeline.
     """
     data = DrillData(
         holes=(
-            Hole.from_measurement(0.001, 0.0, 7.0, index=0),
-            Hole.from_measurement(20.0, 0.0, 7.0, index=1),
+            Hole.from_measurement(0.001, 0.0, 7.0, index=3),
+            Hole.from_measurement(20.0, 0.0, 7.0, index=8),
         ),
         reference=ReferenceOutline(60.0, 40.0),
         diagnostics=(
@@ -423,14 +445,96 @@ def test_a_hole_merely_near_the_flagged_position_is_not_styled_as_a_duplicate():
                 "duplicate-hole",
                 "2 coincident ⌀7 mm holes at (0.000, 0.000)",
                 location=(0.0, 0.0),
-                data=(("diameter", 7.0), ("dropped", 1)),
+                data=(("hole_index", 8), ("diameter", 7.0), ("dropped", 1)),
             ),
         ),
     )
+    emitter = DrawingSvgEmitter()
+    root = ET.fromstring(emitter.emit(data))
+    layout = emitter.layout(data)
+
+    flagged = [c for c in by_class(root, "hole", "circle") if "dup" in classes(c)]
+    assert len(flagged) == 1
+    assert num(flagged[0], "cx") == pytest.approx(layout.point(20.0, 0.0)[0])
+    assert len(by_class(root, "dup-ring", "circle")) == 1
+    assert num(by_class(root, "dup-ring", "circle")[0], "cx") == pytest.approx(
+        layout.point(20.0, 0.0)[0]
+    )
+
+    plain = [c for c in by_class(root, "hole", "circle") if "dup" not in classes(c)]
+    assert len(plain) == 1
+    assert num(plain[0], "cx") == pytest.approx(layout.point(0.001, 0.0)[0])
+    assert "c00000" not in (plain[0].get("stroke") or "")
+
+
+def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
+    """One ⌀7 hole with id 3, and a ``duplicate-hole`` carrying ``payload``."""
+    return DrillData(
+        holes=(Hole.from_measurement(0.0, 0.0, 7.0, index=3),),
+        reference=ReferenceOutline(60.0, 40.0),
+        diagnostics=(
+            Diagnostic.warning(
+                "duplicate-hole",
+                "2 coincident ⌀7 mm holes at (0.000, 0.000)",
+                location=(0.0, 0.0),
+                data=payload,
+            ),
+        ),
+    )
+
+
+def test_a_duplicate_hole_diagnostic_without_an_id_flags_nothing():
+    """No id, no ring — and emphatically no guess from the coordinates.
+
+    A payload naming no hole is a finding this emitter cannot place. The NOTES
+    block still carries the warning, so nothing is lost silently; what must not
+    happen is the sheet ringing a hole the pipeline never named.
+    """
+    data = _one_hole_with_a_duplicate_diagnostic((("diameter", 7.0), ("dropped", 1)))
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
     assert [c for c in by_class(root, "hole", "circle") if "dup" in classes(c)] == []
     assert by_class(root, "dup-ring", "circle") == []
+    assert "coincident" in all_text(root)  # the finding still reaches the sheet
+
+
+def test_an_id_that_arrived_as_a_float_still_rings_its_hole():
+    """3.0 is hole 3. Being strict about the type would drop the ring in silence.
+
+    ``Diagnostic.data`` is a generic payload and a round trip through a document
+    format is entitled to hand back 3.0 where 3 went in. The lookup is by value,
+    so it costs nothing to accept — and the whole point of this task is that a
+    ring must not vanish without anything failing.
+    """
+    data = _one_hole_with_a_duplicate_diagnostic((("hole_index", 3.0), ("diameter", 7.0)))
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert len([c for c in by_class(root, "hole", "circle") if "dup" in classes(c)]) == 1
+    assert len(by_class(root, "dup-ring", "circle")) == 1
+
+
+def test_duplicates_are_highlighted_whatever_order_the_pipeline_ran_in():
+    """``protocols.py`` fixes no stage order, so neither may the drawing.
+
+    ``Deduplicate`` writes the survivor's coordinates into ``location`` at the
+    moment it reports. Snap the panel afterwards and the survivor moves, so an
+    emitter matching on coordinates ringed nothing — while the CLI report and
+    the JSON still said "duplicate". The ring vanished from the one artifact a
+    machinist actually reads.
+    """
+    data = make_data(at(10.03, 5.02, index=6), at(10.04, 5.02, index=2))
+    for pipeline in (
+        Pipeline([SnapPositions(grid=0.25), Deduplicate(tolerance=0.05)]),
+        Pipeline([Deduplicate(tolerance=0.05), SnapPositions(grid=0.25)]),
+    ):
+        after = pipeline.run(data)
+        assert [d.code for d in after.diagnostics] == ["duplicate-hole"], pipeline
+        assert [h.index for h in after.holes] == [6], pipeline
+
+        root = ET.fromstring(DrawingSvgEmitter().emit(after))
+        flagged = [c for c in by_class(root, "hole", "circle") if "dup" in classes(c)]
+        assert len(flagged) == 1, f"no duplicate ring for {pipeline!r}"
+        assert len(by_class(root, "dup-ring", "circle")) == 1, f"no ring for {pipeline!r}"
 
 
 # --------------------------------------------------------------------------
@@ -609,21 +713,72 @@ def test_schedule_has_a_per_tool_summary_with_quantities(root: ET.Element):
 # --------------------------------------------------------------------------
 
 
+def _title_block_text(root: ET.Element) -> str:
+    """Every string inside the title block, and nothing from the rest of the sheet.
+
+    Scoped deliberately: ``all_text`` would let a dimension label elsewhere on
+    the drawing satisfy an assertion about what the title block states.
+    """
+    groups = by_class(root, "title-block-group")
+    assert len(groups) == 1, "expected exactly one title block"
+    return "\n".join((e.text or "") for e in walk(groups[0], "text"))
+
+
 def test_title_block_carries_the_required_fields(panel: DrillData):
-    emitter = DrawingSvgEmitter(
-        DrawingOptions(title="TAR PANEL", drawing_no="AI-0001", grid=0.25)
-    )
+    emitter = DrawingSvgEmitter(DrawingOptions(title="TAR PANEL", drawing_no="AI-0001"))
     root = ET.fromstring(emitter.emit(panel))
-    text = all_text(root)
+    text = _title_block_text(root)
     assert by_class(root, "title-block", "rect")
     assert "ARTIFACT" in text.upper()
     assert "TAR PANEL" in text
     assert "AI-0001" in text
     assert "SHEET" in text.upper()
     assert "mm" in text
-    assert "0.25" in text
     assert "PROJECTION" in text.upper()
     assert "tar.ai" in text
+
+
+def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
+    """The pitch printed on the sheet is read out of the run that did the work."""
+    data = make_data(*holes((10.03, 5.02)))
+    after = Pipeline([SnapPositions(grid=0.5)]).run(data)
+    text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
+    assert "0.5" in text
+    assert "GRID 0.5 mm" in text
+
+
+def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
+    """A second pitch, so the first test cannot be passing on a constant.
+
+    0.25 was the old hardcoded default and 0.5 the obvious replacement; neither
+    on its own distinguishes "reads the provenance" from "prints something
+    plausible".
+    """
+    after = Pipeline([SnapPositions(grid=0.1)]).run(make_data(*holes((10.03, 5.02))))
+    text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
+    assert "GRID 0.1 mm" in text
+    assert "0.5" not in text and "0.25" not in text
+
+
+def test_the_title_block_says_the_grid_was_off_when_snapping_was_disabled():
+    """``grid <= 0`` makes ``SnapPositions`` the identity; the sheet says so.
+
+    Printing "GRID 0 mm" would read as a pitch. The holes are wherever the
+    artwork put them, which is a different claim.
+    """
+    after = Pipeline([SnapPositions(grid=0.0)]).run(make_data(*holes((10.03, 5.02))))
+    text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
+    assert "GRID OFF" in text
+    assert "0.25" not in text
+
+
+def test_the_title_block_does_not_invent_a_grid_when_none_was_recorded():
+    """A hand-built ``DrillData`` never went through a pipeline. Saying 0.25 would be a lie."""
+    data = make_data(*holes((0.0, 0.0)))
+    assert data.processing == ()
+    text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "0.25" not in text
+    assert "NOT RECORDED" in text or "GRID" not in text
 
 
 def test_title_block_reports_the_scale(panel: DrillData):

@@ -13,6 +13,7 @@ Three things are being pinned here.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -476,6 +477,30 @@ def test_the_traced_path_folds_through_the_same_pipeline_as_the_plain_one():
     assert traced.processing == plain.processing
     assert [run.name for run in traced.processing] == [stage.name for stage in pipeline]
     assert traced.last_run("snap").get("grid_mm") == 0.5
+
+
+def test_the_grid_reaches_the_drawing_through_the_pipeline_not_the_options(
+    fake_source, tmp_path
+):
+    """``--grid`` is handed to ``SnapPositions``, and to nothing else.
+
+    It used to be copied into ``DrawingOptions`` as well, which made the sheet's
+    stamp agree with the flag rather than with the holes. Asserted on the
+    emitted SVG, since agreement between two artifacts is not visible in the
+    objects they were built from.
+    """
+    fake_source(make_data())
+    svg = tmp_path / "out.svg"
+    # 1, not 0: a 0.5 mm grid moves a hole far enough to raise ``off-grid``.
+    assert cli.main([str(FIXTURE), "--grid", "0.5", "--emit", f"drawing-svg={svg}"]) == 1
+    text = svg.read_text()
+    assert "GRID 0.5 mm" in text
+    assert "GRID 0.25 mm" not in text
+
+
+def test_the_output_settings_carry_no_grid():
+    """One route from ``--grid`` to the sheet, so there is nothing to diverge."""
+    assert "grid" not in {f.name for f in dataclasses.fields(cli.OutputSettings)}
 
 
 def test_title_reaches_the_drawing(fake_source, tmp_path):

@@ -226,6 +226,18 @@ metrics make that misleading, and it isn't drill data.
 
 `scale=None` fits the drawing to the available area.
 
+Two things on the sheet are pipeline facts and are read as such, never re-derived and never
+passed in a second time through the options:
+
+- **Which holes are duplicates** comes from each `duplicate-hole` diagnostic's `hole_index`.
+  Matching on coordinates is wrong: `Pipeline([Deduplicate, SnapPositions])` is a legal
+  order, and under it the survivor moves after the diagnostic was written.
+- **The grid** comes from the recorded `snap` run (`DrillData.last_run("snap")`). A positive
+  pitch is printed, a recorded `0` prints `GRID OFF`, and data that never met a pipeline
+  prints `GRID NOT RECORDED`. There is no default to fall back to — a sheet stamped with a
+  pitch the holes were never snapped to is exactly the silent disagreement this spec exists
+  to prevent.
+
 ### `json`
 
 The full `DrillData` including raw provenance and diagnostics. This is the integration
