@@ -144,13 +144,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="narrow the standard: these of its sizes are not in the drawer",
     )
     parser.add_argument(
-        "--dedupe-tolerance",
-        metavar="MM",
-        type=float,
-        default=0.05,
-        help="how close two holes of one size must be to count as one (default: 0.05)",
-    )
-    parser.add_argument(
         "--case",
         metavar="PART",
         default=None,
@@ -294,24 +287,41 @@ def build_drill_standard(args: argparse.Namespace) -> DrillStandard:
         raise UsageError(str(failure)) from failure
 
 
+def _snap_positions(args: argparse.Namespace) -> SnapPositions:
+    """The snapping stage, or a usage error if its numbers are not numbers.
+
+    The rule is the stage's and stays there — ``--grid=nan`` is refused whoever
+    builds it, library consumer included. What belongs here is the *exit code*:
+    left to escape, the stage's ``ValueError`` reached no handler and Python
+    exited 1, which this CLI has promised means "warnings present". Naming the
+    flags is also this layer's job, because flags are the CLI's vocabulary and
+    not the stage's: ``--grid-warn`` arrives there as ``warn_over``.
+    """
+    try:
+        return SnapPositions(args.grid, args.grid_warn)
+    except ValueError as failure:
+        raise UsageError(f"--grid/--grid-warn: {failure}") from failure
+
+
 def build_pipeline(args: argparse.Namespace) -> Pipeline:
     """snap → snap-diameters → dedupe → identify-enclosure → sort.
 
     The order is a property of *this* call, not of the stages: no stage knows or
     may ask what ran before it.
 
-    Two positions are worth the sentence. Diameters are quantised before
-    deduplication because ``Deduplicate`` compares diameters exactly and will not
-    decide for itself that 6.9998 and 7.0002 are one size — that decision is made
-    once, upstream, or it gets made twice and differently. And the enclosure is
-    identified on every run, declared case or not: the outline it snaps to whole
-    millimetres is what the drawing dimensions and what a consumer computes edge
-    clearance from, neither of which is opt-in.
+    Two positions are worth the sentence. ``Deduplicate`` compares both position
+    and diameter exactly and decides neither for itself, so it goes after both
+    quantisers or it collapses nothing: that 6.9998 and 7.0002 are one size is
+    ``SnapDiametersToDrillTable``'s answer and that −39.9906 and −40.0 are one
+    place is ``SnapPositions``', made once here or made twice and differently.
+    And the enclosure is identified on every run, declared case or not: the
+    outline it snaps to whole millimetres is what the drawing dimensions and
+    what a consumer computes edge clearance from, neither of which is opt-in.
     """
     stages: list[Stage] = [
-        SnapPositions(args.grid, args.grid_warn),
+        _snap_positions(args),
         SnapDiametersToDrillTable(build_drill_standard(args)),
-        Deduplicate(args.dedupe_tolerance),
+        Deduplicate(),
         IdentifyHammondFootprint(
             expected_part=None if args.case is None else parse_case(args.case)
         ),
@@ -442,16 +452,25 @@ def format_source(data: DrillData) -> list[str]:
 
 
 def format_holes(data: DrillData) -> list[str]:
-    """The hole table: nominal values, and the raw measurement behind each."""
+    """The hole table: nominal values, and the raw measurement behind each.
+
+    Holes are named by ``Hole.index``, the identity every diagnostic and the
+    drawing's balloons use, never by position in the table. The two coincide
+    only until something changes the population: dedupe drops a hole and the
+    positions renumber while the identities do not, so a report keyed on
+    position names a different hole than the ``duplicate-hole`` finding printed
+    six lines above it. The numbers are therefore not contiguous, which is the
+    honest rendering of a list that has had holes removed from it.
+    """
     tools = data.tools()
     lines = [
         "",
         f"HOLES ({len(data.holes)})",
         "  No. Tool         X         Y      Dia  |      raw X      raw Y    raw Dia",
     ]
-    for number, hole in enumerate(data.holes, start=1):
+    for hole in data.holes:
         lines.append(
-            f"  {number:>3} T{tools[hole.diameter]:<3} "
+            f"  {hole.index:>3} T{tools[hole.diameter]:<3} "
             f"{hole.x:>9.3f} {hole.y:>9.3f} {hole.diameter:>8.3f}  | "
             f"{hole.raw.x:>10.4f} {hole.raw.y:>10.4f} {hole.raw.diameter:>10.4f}"
         )

@@ -601,8 +601,8 @@ def test_diagnostic_payloads_survive_serialisation():
     positions alone — the exact defect ADR-0001 exists to eliminate, displaced
     one layer out into the toolchain.
     """
-    data = make_data(*holes((0.0, 0.0), (0.01, 0.0)))
-    after = Pipeline([Deduplicate(tolerance=0.05)]).run(data)
+    data = make_data(*holes((0.0, 0.0), (0.0, 0.0)))
+    after = Pipeline([Deduplicate()]).run(data)
     doc = json.loads(JsonEmitter().emit(after))
 
     assert doc["version"] == 4
@@ -618,13 +618,19 @@ def test_the_duplicates_payload_names_the_surviving_hole_by_identity():
     array position 0 and a serialiser emitting either would pass. Here the
     survivor is hole 6, second in the document.
     """
-    data = make_data(at(50.0, 0.0, index=3), at(0.0, 0.0, index=6), at(0.01, 0.0, index=9))
-    after = Pipeline([Deduplicate(tolerance=0.05)]).run(data)
+    data = make_data(at(50.0, 0.0, index=3), at(0.0, 0.0, index=6), at(0.0, 0.0, index=9))
+    after = Pipeline([Deduplicate()]).run(data)
 
     doc = json.loads(JsonEmitter().emit(after))
 
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
-    assert duplicate["data"] == {"hole_index": 6, "diameter": 7.0, "dropped": 1, "kept": 1}
+    assert duplicate["data"] == {
+        "hole_index": 6,
+        "diameter": 7.0,
+        "dropped": 1,
+        "dropped_indices": "9",
+        "kept": 1,
+    }
     assert [h["index"] for h in doc["holes"]] == [3, 6]
 
 
@@ -689,13 +695,11 @@ def test_processing_records_what_the_pipeline_did():
 
 
 def test_processing_records_the_stages_a_real_pipeline_ran():
-    data = make_data(*holes((0.0, 0.0), (0.01, 0.0)))
+    data = make_data(*holes((0.0, 0.0), (0.0, 0.0)))
 
-    after = Pipeline([Deduplicate(tolerance=0.05)]).run(data)
+    after = Pipeline([Deduplicate()]).run(data)
 
-    assert parse(after)["processing"] == [
-        {"name": "deduplicate", "parameters": {"tolerance_mm": 0.05}}
-    ]
+    assert parse(after)["processing"] == [{"name": "deduplicate", "parameters": {}}]
 
 
 def test_a_pipeline_that_never_ran_leaves_processing_empty_not_absent():

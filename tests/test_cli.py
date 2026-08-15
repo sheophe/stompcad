@@ -211,8 +211,52 @@ def test_grid_warn_defaults_are_left_to_the_stage():
     assert stage_named("snap", "--grid", "1.0", "--grid-warn", "0.4").warn_over == pytest.approx(0.4)
 
 
-def test_dedupe_tolerance_reaches_the_stage():
-    assert stage_named("deduplicate", "--dedupe-tolerance", "0.3").tolerance == pytest.approx(0.3)
+class TestAGridThatIsNotANumberIsAUsageError:
+    """Exit 3, not 1, and not an artifact full of ``XnanYnan``.
+
+    ``--grid=nan`` used to crash out of ``SnapPositions.apply`` with an uncaught
+    ``ValueError``: Python exits **1** for that, which is the code this CLI
+    reserves for "warnings present", so a wrapper testing ``[ $? -le 1 ]`` read
+    it as a run that had produced usable output. ``--grid=inf`` did not crash at
+    all — every coordinate became ``nan`` and the files were written.
+
+    The rule lives in the stage; this is the CLI turning its ``ValueError`` into
+    the exit code the contract promises, the way it already does for
+    ``build_drill_standard``.
+    """
+
+    @pytest.mark.parametrize("argv", [["--grid", "nan"], ["--grid", "inf"]])
+    def test_a_non_finite_grid_exits_three(self, fake_source, capsys, argv):
+        fake_source(make_data())
+        assert cli.main([str(FIXTURE), *argv]) == 3
+        assert capsys.readouterr().err.startswith("aidrill: error:")
+
+    def test_a_non_finite_warning_threshold_exits_three(self, fake_source, capsys):
+        fake_source(make_data())
+        assert cli.main([str(FIXTURE), "--grid-warn", "nan"]) == 3
+        assert capsys.readouterr().err.startswith("aidrill: error:")
+
+    def test_nothing_is_written(self, fake_source, tmp_path, capsys):
+        """The failure this is really about: a file that looks well-formed.
+
+        An Excellon file of ``XnanYnan`` lines parses, loads and is the obvious
+        one to hand to the machine.
+        """
+        fake_source(make_data())
+        target = tmp_path / "panel.drl"
+
+        assert cli.main([str(FIXTURE), "--grid", "inf", "--emit", f"excellon={target}"]) == 3
+        assert not target.exists()
+
+    def test_the_grid_is_checked_before_the_file_is_even_opened(self, capsys):
+        """A typo costs no PDF parse, and is reported as a typo rather than I/O."""
+        assert cli.main(["/no/such/panel.ai", "--grid", "nan"]) == 3
+        assert "nan" in capsys.readouterr().err
+
+    def test_zero_still_switches_snapping_off_rather_than_being_refused(self, fake_source):
+        fake_source(make_data())
+        assert cli.main([str(FIXTURE), "--grid", "0"]) == 0
+        assert stage_named("snap", "--grid", "0").describe().get("enabled") is False
 
 
 # ---------------------------------------------------------------------------
@@ -452,22 +496,6 @@ def test_the_case_is_checked_before_the_file_is_even_opened(capsys):
     """
     assert cli.main(["/no/such/panel.ai", "--case", "1590ZZ"]) == 3
     assert "1590ZZ" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["--diameters", "cluster"],
-        ["--diameter-tolerance", "0.2"],
-        ["--true-size", "113x60"],
-    ],
-)
-def test_the_flags_that_went_with_the_strategies_are_gone(fake_source, capsys, argv):
-    """Rejected by argparse, not quietly ignored. A flag that still parses but
-    no longer does anything is worse than one that fails."""
-    fake_source(make_data())
-    assert cli.main([str(FIXTURE), *argv]) == 3
-    assert capsys.readouterr().err.startswith("usage:")  # argparse's, never ours
 
 
 # ---------------------------------------------------------------------------
@@ -794,6 +822,34 @@ def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
     assert "6.9998" in out
 
 
+def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, capsys):
+    """The ``No.`` column is ``Hole.index``, the identity the diagnostics and the
+    drawing's balloons both use.
+
+    The fixture's indices are 4, 1, 9 — not ``0, 1, 2`` and not in order, because
+    position and identity agree on a list numbered from zero and a test written
+    over one cannot tell which column it is reading. Under positional numbering
+    this table would read 1, 2, 3, so every assertion below fails.
+    """
+    fake_source(
+        make_data(
+            holes=[
+                Hole.from_measurement(-20.0, 18.0, 7.0, index=4),
+                Hole.from_measurement(0.0, 18.0, 7.0, index=1),
+                Hole.from_measurement(20.0, 18.0, 7.0, index=9),
+            ]
+        )
+    )
+    cli.main([str(FIXTURE)])
+    numbers = [
+        int(line.split()[0])
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("  ") and line.split() and line.split()[0].isdigit()
+    ]
+
+    assert numbers == [4, 1, 9]
+
+
 def test_verbose_reports_every_stage_the_cli_built(fake_source, capsys):
     """The list of stages comes from ``build_pipeline``, so a stage added there
     is covered here without anyone remembering to add it twice."""
@@ -981,8 +1037,12 @@ def test_the_drill_file_and_the_drawing_agree_with_each_other(tmp_path, capsys):
     for _, _, _, diameter, tool in rows:
         assert drawing_tools[tool] == diameter  # every row uses its own tool's bit
 
-    # 3. the drilling order is the balloon order, grouped by tool
-    assert balloons == [number for number, *_ in rows] == list(range(1, 8))
+    # 3. the drilling order is the balloon order, grouped by tool, and both name
+    # holes by ``Hole.index``. The literal is the fixture's traversal order, which
+    # is deliberately not 1..7: were either artifact numbering by position in its
+    # own list, this would read 1, 2, 3, … and pass while naming different holes
+    # than every diagnostic does.
+    assert balloons == [number for number, *_ in rows] == [2, 3, 4, 6, 7, 0, 1]
     # The drill file is in a lower-left frame and the schedule in the centre
     # frame; the two differ by a pure translation, so the corner of the bounding
     # box recovers it without the test knowing the panel size.

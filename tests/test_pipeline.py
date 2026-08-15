@@ -202,6 +202,72 @@ class TestSnapPositions:
             assert math.hypot(dx, dy) == pytest.approx(0.25)
         assert [h.x for h in out.holes] == [-19.0, 19.0]
 
+    def test_the_off_grid_diagnostic_names_the_hole_it_moved(self):
+        """The stage that moves coordinates is the worst one to leave anonymous.
+
+        ``off-grid`` was the only hole-level diagnostic carrying no payload at
+        all, so a consumer joining on ``hole_index`` — as ``duplicate-hole`` and
+        ``unknown-diameter`` both invite it to — dropped every off-grid finding,
+        and the drawing could not ring an off-grid hole because it had nothing
+        to ring it by.
+
+        The identity is deliberately neither array position nor anything derived
+        from one: hole 6 is second in the tuple, and it is the only hole that
+        moves.
+        """
+        data = make_data(at(-20.0, 18.0, index=2), at(-39.9, 18.0, index=6))
+
+        out = SnapPositions(0.25).apply(data)
+
+        assert codes(out) == ["off-grid"]
+        diag = out.diagnostics[0]
+        assert diag.get("hole_index") == 6
+        assert diag.get("moved_mm") == pytest.approx(0.1)
+        assert diag.get("grid_mm") == 0.25
+
+    def test_the_off_grid_message_says_which_hole_and_which_moment(self):
+        """Both coordinates appear, and neither is left to be guessed at.
+
+        The message quotes where the hole was drawn; ``location`` is where it
+        now is. That is one finding about two moments, and the only thing that
+        makes it readable is saying so — with the hole's identity in front, so
+        the sentence and the payload name the same hole.
+        """
+        out = SnapPositions(0.25).apply(make_data(at(-39.9, 18.0, index=6)))
+        message = out.diagnostics[0].message
+
+        assert "hole 6" in message
+        assert "-39.9000" in message and "-40.0000" in message
+
+    def test_two_coincident_off_grid_holes_each_get_their_own_warning(self):
+        """Ruled deliberately: one warning per artwork circle, not per survivor.
+
+        Snapping runs before deduplication, so two circles that collapse into
+        one hole have already raised two ``off-grid`` warnings. Both are true
+        statements about the artwork — there really are two circles off the grid
+        and the operator will want to fix both in the source file — and this
+        stage may not know that a later one will drop either of them (LSP), nor
+        retract a diagnostic it has already written.
+
+        What made the pair look like noise was that the two warnings were
+        indistinguishable. They no longer are: each names its own hole, and
+        ``duplicate-hole`` names the ones that went, so the join resolves and a
+        consumer can tell an off-grid warning about a dropped hole from one
+        about a hole in the drill file.
+        """
+        data = make_data(at(0.1, 0.1, 7.0, index=5), at(0.12, 0.09, 7.0, index=2))
+
+        after = Pipeline([SnapPositions(0.25), Deduplicate()]).run(data)
+
+        off_grid = [d for d in after.diagnostics if d.code == "off-grid"]
+        duplicate = [d for d in after.diagnostics if d.code == "duplicate-hole"]
+        assert [d.get("hole_index") for d in off_grid] == [5, 2]
+        assert [hole.index for hole in after.holes] == [5]
+        assert duplicate[0].get("dropped_indices") == "2"
+        # The join the ruling turns on: the second warning is about a hole that
+        # reaches no artifact, and a consumer can find that out.
+        assert str(off_grid[1].get("hole_index")) in duplicate[0].get("dropped_indices")
+
     def test_property_snapping_is_idempotent(self):
         rng = random.Random(20250814)
         for _ in range(300):
@@ -214,6 +280,57 @@ class TestSnapPositions:
             twice = stage.apply(once)
             assert positions(twice) == positions(once)
             assert codes(twice) == codes(once), "a snapped hole cannot still be off grid"
+
+
+class TestSnapPositionsRefusesAGridThatIsNotANumber:
+    """K5: ``--grid=nan`` and ``--grid=inf`` both got past ``grid <= 0``.
+
+    Every comparison against NaN is False, so the "disabled" gate let it through
+    and ``round(x / nan)`` raised ``ValueError`` out of ``apply`` — uncaught, so
+    the process exited **1**, the code reserved for "warnings present". A wrapper
+    testing ``[ $? -le 1 ]`` read a crash as a clean run. ``inf`` did not even
+    crash: ``round(x / inf) * inf`` is ``0 * inf``, so every hole snapped to
+    ``nan`` and the artifact was written with ``XnanYnan`` in it.
+
+    Checked once, in the constructor, on the ``DrillStandard.__post_init__``
+    precedent, so a bad value is refused before any hole is looked at.
+    """
+
+    @pytest.mark.parametrize("grid", [float("nan"), float("inf"), float("-inf")])
+    def test_a_non_finite_grid_is_refused_at_construction(self, grid):
+        with pytest.raises(ValueError, match="grid"):
+            SnapPositions(grid)
+
+    @pytest.mark.parametrize("warn_over", [float("nan"), float("inf"), float("-inf")])
+    def test_a_non_finite_warning_threshold_is_refused_too(self, warn_over):
+        """``--grid-warn=nan`` warns about every hole, including the still ones.
+
+        ``within(moved, 0.0, nan)`` is False whatever the hole did, so every
+        hole on the panel — the ones that did not move at all included — is
+        reported off-grid. That is the same defect as a negative threshold,
+        wearing a different value.
+        """
+        with pytest.raises(ValueError, match="warn"):
+            SnapPositions(0.25, warn_over=warn_over)
+
+    def test_a_negative_warning_threshold_is_refused(self):
+        with pytest.raises(ValueError, match="warn"):
+            SnapPositions(0.25, warn_over=-0.1)
+
+    def test_a_zero_warning_threshold_is_allowed(self):
+        """"Tell me about every hole that moved at all" is a real request."""
+        out = SnapPositions(0.25, warn_over=0.0).apply(
+            make_data(at(0.0, 0.0, index=0), at(0.01, 0.0, index=1))
+        )
+        assert codes(out) == ["off-grid"]
+
+    def test_a_non_positive_grid_is_still_how_the_stage_is_switched_off(self):
+        """The finiteness rule must not take the documented disable with it."""
+        data = make_data(at(-39.99, 18.01, index=0))
+        for grid in (0.0, -0.25):
+            out = SnapPositions(grid).apply(data)
+            assert positions(out) == positions(data)
+            assert codes(out) == []
 
 
 # --------------------------------------------------------------------------
@@ -632,23 +749,23 @@ class TestSnapDiametersToDrillTable:
 
 class TestDeduplicate:
     def test_collapses_coincident_holes_of_equal_diameter(self):
-        data = make_data(at(-40.0, 18.0, 7.0, index=0), at(-40.01, 18.02, 7.0, index=1))
-        out = Deduplicate(0.05).apply(data)
+        data = make_data(at(-40.0, 18.0, 7.0, index=0), at(-40.0, 18.0, 7.0, index=1))
+        out = Deduplicate().apply(data)
         assert len(out.holes) == 1
 
     def test_keeps_the_first_hole_in_input_order(self):
-        first, second = at(-40.0, 18.0, 7.0, index=0), at(-40.01, 18.02, 7.0, index=1)
-        out = Deduplicate(0.05).apply(make_data(first, second))
+        first, second = at(-40.0, 18.0, 7.0, index=0), at(-40.0, 18.0, 7.0, index=1)
+        out = Deduplicate().apply(make_data(first, second))
         assert out.holes == (first,)
 
     def test_emits_one_warning_per_collapsed_group(self):
         data = make_data(
             at(-40.0, 18.0, 7.0, index=0),
-            at(-40.01, 18.0, 7.0, index=1),
-            at(-40.02, 18.0, 7.0, index=2),
+            at(-40.0, 18.0, 7.0, index=1),
+            at(-40.0, 18.0, 7.0, index=2),
             at(0.0, 0.0, 7.0, index=3),
         )
-        out = Deduplicate(0.05).apply(data)
+        out = Deduplicate().apply(data)
 
         assert len(out.holes) == 2
         assert codes(out) == ["duplicate-hole"]
@@ -662,35 +779,61 @@ class TestDeduplicate:
             at(20.0, 18.0, 7.0, index=2),
             at(20.0, 18.0, 7.0, index=3),
         )
-        out = Deduplicate(0.05).apply(data)
+        out = Deduplicate().apply(data)
         assert len(out.holes) == 2
         assert codes(out) == ["duplicate-hole", "duplicate-hole"]
 
     def test_does_not_collapse_different_diameters_at_the_same_place(self):
         data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.0, 0.0, 5.0, index=1))
-        out = Deduplicate(0.05).apply(data)
+        out = Deduplicate().apply(data)
         assert len(out.holes) == 2
         assert codes(out) == []
 
-    def test_tolerance_boundary_is_inclusive(self):
-        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.05, 0.0, 7.0, index=1))
-        assert len(Deduplicate(0.05).apply(data).holes) == 1
+    @pytest.mark.parametrize("dx, dy", [(0.01, 0.0), (0.0, 0.01), (0.04, 0.04)])
+    def test_a_hole_a_hair_away_is_a_different_hole(self, dx, dy):
+        """Coincidence is exact, on each axis separately.
 
-    def test_does_not_collapse_holes_further_apart_than_the_tolerance(self):
-        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.06, 0.0, 7.0, index=1))
-        out = Deduplicate(0.05).apply(data)
+        The two offsets used to fall inside a 0.05 mm tolerance and collapse.
+        They no longer do, and that is the behaviour, not a regression: deciding
+        that two nearby coordinates are one place is ``SnapPositions``' job, and
+        a near miss the grid did not close is a hole the artwork puts somewhere
+        else. Dropping it drills one hole where the panel asks for two.
+
+        Both axes are exercised on their own, because a rule written ``x == y``
+        on one of them would still pass a fixture that moved the other.
+        """
+        data = make_data(at(0.0, 0.0, 7.0, index=0), at(dx, dy, 7.0, index=1))
+        out = Deduplicate().apply(data)
         assert len(out.holes) == 2
         assert codes(out) == []
 
-    def test_tolerance_is_a_radial_distance(self):
-        # dx = dy = 0.04 -> distance 0.0566, outside a 0.05 tolerance
-        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.04, 0.04, 7.0, index=1))
-        assert len(Deduplicate(0.05).apply(data).holes) == 2
+    def test_even_a_hole_one_ulp_away_is_a_different_hole(self):
+        """No slack at all, not merely less than there was."""
+        data = make_data(
+            at(0.0, 0.0, 7.0, index=0), at(math.ulp(0.0), 0.0, 7.0, index=1)
+        )
+        assert len(Deduplicate().apply(data).holes) == 2
+
+    def test_the_fixtures_own_duplicate_is_byte_identical_before_any_snapping(self):
+        """Why exactness is enough: a copy-paste duplicates the coordinates.
+
+        These are the two ⌀7 holes the shipped ``tar.ai`` carries, as
+        ``AiPdfSource`` parses them — equal to the last bit, with nothing having
+        snapped them. That is what a duplicate is in this domain, and it is what
+        the tolerance was really catching.
+        """
+        both = (-39.990641944444405, 17.999956944444445, 6.999816666666661)
+        data = make_data(at(*both, index=2), at(*both, index=5))
+
+        out = Deduplicate().apply(data)
+
+        assert [hole.index for hole in out.holes] == [2]
+        assert codes(out) == ["duplicate-hole"]
 
     def test_unnormalised_diameters_are_not_treated_as_equal(self):
         """Dedupe does not do the diameter stage's job (SRP)."""
         data = make_data(at(0.0, 0.0, 6.9998, index=0), at(0.0, 0.0, 7.0000, index=1))
-        assert len(Deduplicate(0.05).apply(data).holes) == 2
+        assert len(Deduplicate().apply(data).holes) == 2
 
     def test_diagnostic_carries_a_machine_readable_payload(self):
         """A consumer must be able to identify the survivor without re-deriving it.
@@ -708,12 +851,12 @@ class TestDeduplicate:
         survivor = at(-40.0031, 18.0007, 7.0, index=4)
         data = make_data(
             survivor,
-            at(-40.0129, 18.0203, 7.0, index=5),
-            at(-39.9902, 17.9885, 7.0, index=6),
+            at(-40.0031, 18.0007, 7.0, index=7),
+            at(-40.0031, 18.0007, 7.0, index=5),
             at(0.0, 0.0, 5.0, index=9),  # a lonely hole raises nothing
         )
 
-        out = Deduplicate(0.05).apply(data)
+        out = Deduplicate().apply(data)
 
         assert codes(out) == ["duplicate-hole"]
         diag = out.diagnostics[0]
@@ -724,6 +867,33 @@ class TestDeduplicate:
         assert diag.get("dropped") == 2
         assert diag.get("kept") == 1
 
+    def test_the_diagnostic_names_the_holes_that_went_not_only_how_many(self):
+        """A count cannot be turned back into identities.
+
+        The dropped pair is 7 and 5 — out of order, not adjacent to the
+        survivor's 4, and not the two array positions they occupy. Anything
+        derived from position or from arithmetic on the survivor's id answers
+        something else here, which is the point: ``Hole.index`` exists so an
+        artwork circle can be reconciled against an emitted hole, and a hole
+        that reaches no artifact is exactly the one that needs naming.
+        """
+        data = make_data(
+            at(-40.0031, 18.0007, 7.0, index=4),
+            at(-40.0031, 18.0007, 7.0, index=7),
+            at(-40.0031, 18.0007, 7.0, index=5),
+            at(0.0, 0.0, 5.0, index=9),
+        )
+
+        diag = Deduplicate().apply(data).diagnostics[0]
+
+        assert diag.get("dropped_indices") == "7,5"
+        assert diag.get("hole_index") == 4
+
+    def test_a_lone_dropped_hole_is_still_named(self):
+        data = make_data(at(0.0, 0.0, 7.0, index=8), at(0.0, 0.0, 7.0, index=3))
+        diag = Deduplicate().apply(data).diagnostics[0]
+        assert diag.get("dropped_indices") == "3"
+
     def test_property_dedupe_is_idempotent(self):
         rng = random.Random(90210)
         for _ in range(300):
@@ -732,11 +902,9 @@ class TestDeduplicate:
                 x, y = rng.uniform(-50, 50), rng.uniform(-25, 25)
                 dia = rng.choice([5.0, 7.0])
                 holes.append(at(x, y, dia, index=len(holes)))
-                if rng.random() < 0.4:  # sprinkle near-duplicates
-                    holes.append(
-                        at(x + rng.uniform(-0.03, 0.03), y, dia, index=len(holes))
-                    )
-            stage = Deduplicate(0.05)
+                if rng.random() < 0.4:  # sprinkle exact duplicates
+                    holes.append(at(x, y, dia, index=len(holes)))
+            stage = Deduplicate()
             once = stage.apply(make_data(*holes))
             twice = stage.apply(once)
             assert twice.holes == once.holes
@@ -756,9 +924,9 @@ def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
     """
     data = make_data(
         Hole.from_measurement(10.03, 5.02, 7.0, index=7),
-        Hole.from_measurement(10.04, 5.02, 7.0, index=3),
+        Hole.from_measurement(10.03, 5.02, 7.0, index=3),
     )
-    after = Pipeline([Deduplicate(tolerance=0.05), SnapPositions(grid=0.25)]).run(data)
+    after = Pipeline([Deduplicate(), SnapPositions(grid=0.25)]).run(data)
 
     duplicates = [d for d in after.diagnostics if d.code == "duplicate-hole"]
     assert len(duplicates) == 1
@@ -973,11 +1141,13 @@ class TestPipelineComposition:
     def test_stage_order_is_observable(self):
         """snap-then-dedupe collapses a near-duplicate that dedupe-then-snap does not.
 
-        The two holes are 0.06 mm apart — outside the 0.05 dedupe tolerance —
-        but both snap onto the same 0.25 mm grid point.
+        The two holes are 0.06 mm apart, so ``Deduplicate`` — which compares
+        exactly — sees two holes; both snap onto the same 0.25 mm grid point, so
+        after ``SnapPositions`` it sees one. The whole difference is the order,
+        which is why only ``cli.build_pipeline`` gets to choose it.
         """
         data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.06, 0.0, 7.0, index=1))
-        snap, dedupe = SnapPositions(0.25), Deduplicate(0.05)
+        snap, dedupe = SnapPositions(0.25), Deduplicate()
 
         snap_first = Pipeline([snap, dedupe]).run(data)
         dedupe_first = Pipeline([dedupe, snap]).run(data)
@@ -1009,7 +1179,7 @@ class TestPipelineComposition:
             [
                 SnapPositions(0.25),
                 SnapDiametersToDrillTable(),
-                Deduplicate(0.05),
+                Deduplicate(),
                 IdentifyHammondFootprint(),
                 SortHoles(),
             ]
@@ -1127,9 +1297,17 @@ class TestDescribe:
         assert run.get("enabled") is False
         assert run.get("grid_mm") == 0.0
 
-    def test_deduplicate_reports_its_resolved_tolerance(self):
-        assert Deduplicate().describe().get("tolerance_mm") == 0.05
-        assert Deduplicate(0.02).describe().get("tolerance_mm") == 0.02
+    def test_deduplicate_has_nothing_to_report_but_still_reports(self):
+        """The stage has no parameters at all, and its record is not empty for it.
+
+        A reader of ``processing`` learns that deduplication ran; there is no
+        bound to publish because coincidence is exact. Publishing one anyway —
+        the ``tolerance_mm`` that used to be here — would tell a consumer a
+        number that decides nothing.
+        """
+        run = Deduplicate().describe()
+        assert run.name == "deduplicate"
+        assert run.parameters == ()
 
     def test_check_reference_size_reports_the_declared_panel_and_slack(self):
         run = CheckReferenceSize((113.0, 60.0)).describe()
@@ -1198,7 +1376,7 @@ class TestDescribe:
 class TestPipelineRecordsProvenance:
     def test_pipeline_records_what_each_stage_actually_did(self):
         data = make_data(*holes((10.03, 5.02), (-20.0, 5.0, 5.0)))
-        after = Pipeline([SnapPositions(grid=0.5), Deduplicate(tolerance=0.05)]).run(data)
+        after = Pipeline([SnapPositions(grid=0.5), Deduplicate()]).run(data)
 
         assert [r.name for r in after.processing] == ["snap", "deduplicate"]
         snap = after.last_run("snap")

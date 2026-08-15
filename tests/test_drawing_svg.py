@@ -425,7 +425,7 @@ def test_undflagged_holes_are_not_red(root: ET.Element):
 
 
 def _reviewers_three_hole_case() -> DrillData:
-    """Post-``Deduplicate(0.05)`` state of ⌀7 @ (0,0), ⌀7 @ (0,0), ⌀5 @ (0.03,0).
+    """Post-``Deduplicate()`` state of ⌀7 @ (0,0), ⌀7 @ (0,0), ⌀5 @ (0.03,0).
 
     ``Deduplicate`` collapses on proximity **and** equal diameter, so it keeps
     the ⌀7 at (0, 0) and the ⌀5 at (0.03, 0), and raises one ``duplicate-hole``
@@ -495,7 +495,7 @@ def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
         ),
         reference=ReferenceOutline(60.0, 40.0),
     )
-    data = Deduplicate(0.05).apply(raw)
+    data = Deduplicate().apply(raw)
     assert [(h.x, h.diameter) for h in data.holes] == [(0.0, 7.0), (0.03, 5.0)]
     assert [d.code for d in data.diagnostics] == ["duplicate-hole"]
 
@@ -645,10 +645,10 @@ def test_duplicates_are_highlighted_whatever_order_the_pipeline_ran_in():
     the JSON still said "duplicate". The ring vanished from the one artifact a
     machinist actually reads.
     """
-    data = make_data(at(10.03, 5.02, index=6), at(10.04, 5.02, index=2))
+    data = make_data(at(10.03, 5.02, index=6), at(10.03, 5.02, index=2))
     for pipeline in (
-        Pipeline([SnapPositions(grid=0.25), Deduplicate(tolerance=0.05)]),
-        Pipeline([Deduplicate(tolerance=0.05), SnapPositions(grid=0.25)]),
+        Pipeline([SnapPositions(grid=0.25), Deduplicate()]),
+        Pipeline([Deduplicate(), SnapPositions(grid=0.25)]),
     ):
         after = pipeline.run(data)
         assert [d.code for d in after.diagnostics] == ["duplicate-hole"], pipeline
