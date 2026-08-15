@@ -5,9 +5,8 @@
 **Deciders:** Pavlo Vakhnivskyi (Artifact Instruments)
 **Supersedes:** the `read_drill.py` / `emit.py` script pair
 **Amended by:** `0003-domain-quantisers.md` (2026-08-15) — the pipeline and the emitter
-adapters stand unchanged; what the stages quantise onto does not. Flags named below as
-forces at the time (`--diameter-tolerance`) no longer exist, and the OCP claim in Decision
-2 is qualified there and here.
+adapters stand unchanged; what the stages quantise onto does not. The OCP claim in
+Decision 2 is qualified there and here.
 
 ---
 
@@ -46,8 +45,8 @@ disagree about how many hole sizes existed, and nothing would catch it.
 - Input formats may multiply too — SVG and DXF sources are conceivable.
 - Every artifact from one run is consumed by a *different human*: the machinist reads the
   drawing, the CNC reads the drill file, the wider toolchain reads JSON. They must agree.
-- Preprocessing parameters are user-facing (`--grid`, `--diameter-tolerance`,
-  `--dedupe-tolerance`) and must apply uniformly, not per-format.
+- Preprocessing parameters are user-facing (the grid, the drill standard and how it is
+  narrowed) and must apply uniformly, not per-format.
 - Single-operator project. Maintenance burden matters more than throughput; there is no
   team to absorb accidental complexity.
 
@@ -66,9 +65,13 @@ Source ──RawGeometry──▶ Pipeline of Stages ──DrillData──▶ Em
 ```
 
 **All normalisation happens exactly once, in the pipeline, before any emitter sees the
-data.** Snapping, diameter normalisation, deduplication and validation are `Stage`
-implementations composed by the CLI in a fixed order. Emitters serialise and may translate
-frames or units, but may not round, cluster, dedupe or renumber anything.
+data.** Snapping, diameter quantisation, deduplication, enclosure identification and
+sorting are `Stage` implementations composed by the CLI in a fixed order. Validation is a
+`Stage` too, but `CheckReferenceSize` is deliberately **not** composed by the CLI: it
+serves a library caller whose authority for the panel size lies outside this catalogue,
+and `validate.py`'s docstring records why the command line stays out of it. Emitters
+serialise and may translate frames or units, but may not round, cluster, dedupe or
+renumber anything.
 
 Three supporting decisions follow from that core rule:
 
