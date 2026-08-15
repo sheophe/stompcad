@@ -18,6 +18,15 @@ every test under "one guard at a time" follows it: build a shape that defeats
 one guard, assert *positively* that the others are satisfied, and only then
 assert the rejection. ``kappa_correct_path`` exists to make that possible for
 arbitrary anchors.
+
+Everything a path is made of here is a floating-point PDF point, and only what
+``fit_circle`` returns is nanometres. That is the module boundary, so the
+assertions come in two currencies: an expectation about a control offset or an
+anchor radius is a float in points and is compared with ``PT_SLACK``, while an
+expectation about a recovered ``Circle`` is a whole number of nanometres and is
+compared with ``units.nm_from_pt``. ``tolerance.within`` belongs to neither: it
+takes whole nanometres, and loosening it to take a float would move the model's
+boundary to suit a test at the one place a float is legitimate.
 """
 
 from __future__ import annotations
@@ -30,7 +39,6 @@ import pytest
 from aidrill.geometry import (
     IDENTITY,
     KAPPA,
-    PT_PER_MM,
     Circle,
     ClosePath,
     CurveTo,
@@ -45,12 +53,30 @@ from aidrill.geometry import (
     _quarter_turns,
     fit_circle,
     multiply,
-    pt_to_mm,
     transform,
 )
-from aidrill.tolerance import SLACK, within
+from aidrill.units import nm_from_pt
 
 Point = tuple[float, float]
+
+#: PDF user space is 1/72 inch, so this is the scale between a stated point and
+#: a millimetre. It is here, in the file that wants it, and not exported from
+#: ``geometry``: the only thing that needs it is a CTM fixture magnifying a path
+#: by a realistic amount, and the conversion itself is ``units.nm_from_pt``,
+#: which divides one exact rational rather than multiplying by this ratio.
+PT_PER_MM = 72.0 / 25.4
+
+#: Slack for the float assertions, in points. These sit on the *inside* of the
+#: fitter, where the maths is genuinely fractional, so they are the one thing in
+#: the suite that a nanometre cannot express.
+PT_SLACK = 1e-9
+
+#: Slack for the nanometre assertions, in nanometres. A centroid is a mean of
+#: four coordinates and a radius a mean of four distances, so a scaled or
+#: rotated fixture can land on the nanometre either side of the closed form; one
+#: nanometre is the narrowest slack there is and every exact case below asserts
+#: equality instead.
+NM_SLACK = 1
 
 
 # --------------------------------------------------------------------------
@@ -371,24 +397,63 @@ class TestSubPath:
 
 class TestFitCircle:
     def test_recovers_a_synthetic_circle_exactly(self) -> None:
+        """Exactly, and in whole nanometres: the fitter's own boundary.
+
+        The path is in points, the answer is not. Nothing is approximate here
+        because nothing needs to be — the anchors are exact halves, so the
+        centroid and the radius are exact and the only rounding left is the one
+        ``nm_from_pt`` performs, which is the answer.
+        """
         found = fit_circle(circle_path(-40.0, 18.0, 3.5))
         assert found is not None
-        assert found.cx == pytest.approx(-40.0, abs=1e-9)
-        assert found.cy == pytest.approx(18.0, abs=1e-9)
-        assert found.diameter == pytest.approx(7.0, abs=1e-9)
+        assert found.cx_nm == nm_from_pt(-40.0)
+        assert found.cy_nm == nm_from_pt(18.0)
+        assert found.diameter_nm == nm_from_pt(7.0)
+        assert {type(v) for v in (found.cx_nm, found.cy_nm, found.diameter_nm)} == {int}
+
+    def test_the_conversion_happens_once_and_on_the_diameter(self) -> None:
+        """Pins *where* the crossing into nanometres happens, not merely that it does.
+
+        A 3 pt radius is 1 058 333.33 nm and the 6 pt diameter it implies is
+        2 116 666.67 — which round to 1 058 333 and 2 116 667. So rounding the
+        radius first and doubling gives 2 116 666: a nanometre short, because a
+        half-length was rounded and then had its error doubled along with it.
+
+        The circle is centred on the origin deliberately, which makes this fixture
+        refuse the other spelling of the same mistake too. Its four anchors sit at
+        ``(+-3, 0)`` and ``(0, +-3)``, so converting each anchor as it is collected
+        gives a centroid of exactly zero and a mean anchor radius of exactly
+        ``nm_from_pt(3.0)`` — a per-anchor conversion *is* a rounded radius here,
+        and lands on the same 2 116 666.
+
+        A fixture whose true value sits far from a half-nanometre cannot say any of
+        this: the fixture in ``test_ai_pdf`` drifts by up to 0.56 nm under a
+        per-anchor conversion and still rounds to the same integer, coming within
+        0.0011 nm of noticing on its closest hole. Exactness needs a fixture chosen
+        to sit on the boundary, and this is it.
+        """
+        # the two orders genuinely disagree here — the fixture is not a coincidence
+        assert nm_from_pt(6.0) != 2 * nm_from_pt(3.0)
+
+        found = fit_circle(circle_path(0.0, 0.0, 3.0))
+        assert found is not None
+        assert found.diameter_nm == nm_from_pt(6.0) == 2_116_667
 
     def test_returns_a_frozen_circle_value(self) -> None:
         found = fit_circle(circle_path(0.0, 0.0, 1.0))
         assert isinstance(found, Circle)
         with pytest.raises(dataclasses.FrozenInstanceError):
-            found.cx = 5.0  # type: ignore[misc]
+            found.cx_nm = 5  # type: ignore[misc]
 
     def test_recovers_a_circle_through_a_translate_and_scale_ctm(self) -> None:
         ctm: Matrix = (PT_PER_MM, 0.0, 0.0, PT_PER_MM, 200.0, 400.0)
         found = fit_circle(mapped(circle_path(-40.0, 18.0, 3.5), ctm))
         assert found is not None
-        assert (found.cx, found.cy) == pytest.approx(transform(ctm, -40.0, 18.0), abs=1e-9)
-        assert found.diameter == pytest.approx(7.0 * PT_PER_MM, abs=1e-9)
+        expected = transform(ctm, -40.0, 18.0)
+        assert (found.cx_nm, found.cy_nm) == pytest.approx(
+            (nm_from_pt(expected[0]), nm_from_pt(expected[1])), abs=NM_SLACK
+        )
+        assert found.diameter_nm == pytest.approx(nm_from_pt(7.0 * PT_PER_MM), abs=NM_SLACK)
 
     def test_recovers_a_circle_under_rotation(self) -> None:
         """A rotated circle is still a circle.
@@ -399,8 +464,11 @@ class TestFitCircle:
         ctm = rotation(37.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), ctm))
         assert found is not None
-        assert (found.cx, found.cy) == pytest.approx(transform(ctm, 10.0, -5.0), abs=1e-9)
-        assert found.diameter == pytest.approx(5.0, abs=1e-9)
+        expected = transform(ctm, 10.0, -5.0)
+        assert (found.cx_nm, found.cy_nm) == pytest.approx(
+            (nm_from_pt(expected[0]), nm_from_pt(expected[1])), abs=NM_SLACK
+        )
+        assert found.diameter_nm == pytest.approx(nm_from_pt(5.0), abs=NM_SLACK)
 
     def test_recovers_a_circle_drawn_the_other_way_round(self) -> None:
         """A mirroring CTM reverses the direction of travel; a circle survives it.
@@ -414,8 +482,8 @@ class TestFitCircle:
         mirror: Matrix = (-1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), mirror))
         assert found is not None
-        assert (found.cx, found.cy) == pytest.approx((-10.0, -5.0), abs=1e-9)
-        assert found.diameter == pytest.approx(5.0, abs=1e-9)
+        assert (found.cx_nm, found.cy_nm) == (nm_from_pt(-10.0), nm_from_pt(-5.0))
+        assert found.diameter_nm == nm_from_pt(5.0)
 
     def test_open_circle_path_without_closepath_still_fits(self) -> None:
         assert fit_circle(circle_path(0.0, 0.0, 4.0, closed=False)) is not None
@@ -430,7 +498,7 @@ class TestFitCircle:
         """
         found = fit_circle(kappa_correct_path(((3.5, 0.0), (0.0, 3.5), (-3.5, 0.0), (0.0, -3.5))))
         assert found is not None
-        assert found.diameter == pytest.approx(7.0, abs=1e-9)
+        assert found.diameter_nm == pytest.approx(nm_from_pt(7.0), abs=NM_SLACK)
 
     # -- rejections --------------------------------------------------------
 
@@ -465,7 +533,7 @@ class TestFitCircle:
 
         # the length half of the check sees nothing wrong here
         assert len(control_offsets(path)) == 8
-        assert all(within(d, KAPPA * 5.0, SLACK) for d in control_offsets(path))
+        assert control_offsets(path) == pytest.approx([KAPPA * 5.0] * 8, abs=PT_SLACK)
         # nor does anything before it: same anchors as the real circle
         assert path.anchors == circle_path(0.0, 0.0, 5.0).anchors
 
@@ -474,7 +542,7 @@ class TestFitCircle:
     def test_rejects_controls_rotated_into_the_radius_pointing_inward(self) -> None:
         """Same cusp, controls folded towards the centre instead of away."""
         path = cusp_path(0.0, 0.0, 5.0, outward=False)
-        assert all(within(d, KAPPA * 5.0, SLACK) for d in control_offsets(path))
+        assert control_offsets(path) == pytest.approx([KAPPA * 5.0] * 8, abs=PT_SLACK)
         assert fit_circle(path) is None
 
     def test_rejects_a_cusped_star(self) -> None:
@@ -702,7 +770,7 @@ class TestFitCircle:
                 ox, oy = control[0] - anchor[0], control[1] - anchor[1]
                 rx, ry = anchor  # the centre is the origin
                 # right length ...
-                assert within(math.hypot(ox, oy), KAPPA * 5.0, SLACK)
+                assert math.hypot(ox, oy) == pytest.approx(KAPPA * 5.0, abs=PT_SLACK)
                 # ... and running the way the path travels (anticlockwise here)
                 assert (ox * -ry + oy * rx) * sense > 0.0
                 # only the radial component is wrong, and it is far out
@@ -751,7 +819,7 @@ class TestFitCircle:
         )
         found = fit_circle(noisy)
         assert found is not None
-        assert found.diameter == pytest.approx(7.0, abs=0.02)
+        assert found.diameter_nm == pytest.approx(nm_from_pt(7.0), abs=nm_from_pt(0.02))
 
     def test_a_tight_tolerance_rejects_what_a_loose_one_accepts(self) -> None:
         slightly_oval = circle_path(0.0, 0.0, 10.0, ry=10.05)
@@ -786,21 +854,10 @@ class TestFitCircle:
 
 
 # --------------------------------------------------------------------------
-# units
+# constants
 # --------------------------------------------------------------------------
 
 
-class TestUnits:
+class TestConstants:
     def test_kappa_constant(self) -> None:
         assert KAPPA == pytest.approx(0.5522847498)
-
-    def test_pt_per_mm(self) -> None:
-        assert PT_PER_MM == pytest.approx(72.0 / 25.4)
-
-    def test_pt_to_mm_round_numbers(self) -> None:
-        assert pt_to_mm(72.0) == pytest.approx(25.4)
-        assert pt_to_mm(PT_PER_MM) == pytest.approx(1.0)
-        assert pt_to_mm(0.0) == 0.0
-
-    def test_pt_to_mm_is_linear(self) -> None:
-        assert pt_to_mm(-10.0) == pytest.approx(-pt_to_mm(10.0))

@@ -8,6 +8,25 @@ PostScript, PDF and SVG all lack an arc primitive, so a circle arrives as four
 cubic Beziers. Recovering "this is a 7 mm hole at (-40, 18)" from twelve
 coordinate pairs is a single, sharp problem, and per SPEC 2.2 it is solved
 exactly once, here, for every source to reuse.
+
+**This is one of the three modules where a length is a float, and the reason is
+the fitting itself.** A quarter arc's control offset is ``KAPPA * r`` and
+``KAPPA`` is irrational; a centroid is a mean of four coordinates; a radius is a
+mean of four distances. None of that is expressible in whole nanometres without
+losing the fit it is measuring. So the maths stays in floating-point PDF points
+and the result crosses into the model's unit at one named place: the ``Circle``
+that ``fit_circle`` returns, whose fields are whole nanometres.
+
+**The conversion is at construction and nowhere earlier.** Rounding the anchors
+as they are collected would quantise four coordinates and then average them, so
+the centre and the radius would each carry up to four roundings instead of one —
+and the diameter, being twice a radius, would carry that error doubled. A circle
+of radius 3 pt is the smallest case that shows it: the diameter is 2 116 666.67
+nm and rounds to 2 116 667, while the radius rounds to 1 058 333 and doubles to
+2 116 666. ``test_the_conversion_happens_once_and_on_the_diameter`` sits on that
+nanometre, and it takes a fixture chosen for it — a panel measured off real
+artwork drifts by well under a nanometre and rounds to the same integer either
+way, so a realistic fixture cannot say this and must not be trusted to.
 """
 
 from __future__ import annotations
@@ -15,12 +34,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from aidrill.units import mm_from_nm, nm_from_pt
+from aidrill.units import nm_from_pt
 
 __all__ = [
     "IDENTITY",
     "KAPPA",
-    "PT_PER_MM",
     "Circle",
     "ClosePath",
     "CurveTo",
@@ -32,7 +50,6 @@ __all__ = [
     "SubPath",
     "fit_circle",
     "multiply",
-    "pt_to_mm",
     "transform",
 ]
 
@@ -49,12 +66,6 @@ IDENTITY: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 #: approximate a quarter circle: 4/3 * (sqrt(2) - 1). Every drawing tool uses
 #: it, which is what makes circle recovery possible at all.
 KAPPA: float = 0.5522847498
-
-#: PDF user space is 1/72 inch, so this is the scale between a stated point and
-#: a millimetre -- what a caller reasoning about a CTM's magnitude wants. The
-#: conversion itself is not done with it: `units.nm_from_pt` divides one exact
-#: rational instead, so no length is ever multiplied by an inexact ratio.
-PT_PER_MM: float = 72.0 / 25.4
 
 
 # --------------------------------------------------------------------------
@@ -192,16 +203,23 @@ class SubPath:
 
 @dataclass(frozen=True, slots=True)
 class Circle:
-    """A recovered circle in whatever space its subpath was in.
+    """A recovered circle, in whole nanometres of the space its subpath was in.
+
+    The subpath arrives in PDF points, so this is where a length stops being a
+    float: the ``_nm`` suffix on every field is the unit stated at the call site
+    rather than three stages downstream, which is the whole point of the
+    convention (`aidrill.units`).
 
     Diameter, not radius, because that is what a drill chart, a tool table and
     a designer all speak in; halving it once here avoids everyone downstream
-    doubling it back.
+    doubling it back. It is also converted *as a diameter* — ``nm_from_pt`` of
+    twice the radius, never twice ``nm_from_pt`` of the radius, which rounds the
+    half-length and then doubles the error with it.
     """
 
-    cx: float
-    cy: float
-    diameter: float
+    cx_nm: int
+    cy_nm: int
+    diameter_nm: int
 
 
 def _cubics(path: SubPath) -> list[tuple[Point, CurveTo]] | None:
@@ -294,7 +312,14 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
     if not _kappa_consistent(pairs, (cx, cy), radius, slack):
         return None
 
-    return Circle(cx=cx, cy=cy, diameter=2.0 * radius)
+    # The one conversion. Everything above is floating-point points because the
+    # fitting genuinely is; everything below this line, and every consumer, has
+    # whole nanometres.
+    return Circle(
+        cx_nm=nm_from_pt(cx),
+        cy_nm=nm_from_pt(cy),
+        diameter_nm=nm_from_pt(2.0 * radius),
+    )
 
 
 def _quarter_turns(
@@ -384,21 +409,3 @@ def _kappa_consistent(
             if ox * tx + oy * ty <= 0.0:
                 return False
     return True
-
-
-# --------------------------------------------------------------------------
-# units
-# --------------------------------------------------------------------------
-
-
-def pt_to_mm(v: float) -> float:
-    """Convert PDF points to millimetres, through the nanometre rule.
-
-    The conversion itself is `units.nm_from_pt`; this only spells the result in
-    millimetres for the callers that still hold floats. Going by way of whole
-    nanometres is the point rather than a detour: two paths from points to a
-    printed length that round in different places are how the drill file and the
-    drawing came to disagree in the first place, so there is one rule and it
-    lives in `units`.
-    """
-    return mm_from_nm(nm_from_pt(v))

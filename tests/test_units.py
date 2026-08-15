@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from aidrill.geometry import pt_to_mm
 from aidrill.units import NM_PER_MM, format_nm, mm_from_nm, nm_from_mm, nm_from_pt
 
 
@@ -86,18 +85,6 @@ class TestBackOut:
         assert format_nm(-40_000_000) == "-40.000"
         assert format_nm(5_159_375) == "5.159"
         assert format_nm(5_159_375, decimals=4) == "5.1594"
-
-class TestTheShim:
-    """``geometry.pt_to_mm`` is Task 1's only adoption of the boundary in
-    production code, and Task 3 deletes it. Until then it must actually go
-    through the rule rather than merely look as though it does: plain
-    ``v / PT_PER_MM`` leaves the whole suite green, because the difference sits
-    below every tolerance in the pipeline — which is exactly why nothing else
-    catches it. This test lives here, beside the rule, and goes with the shim."""
-
-    def test_the_shim_quantises_rather_than_dividing(self) -> None:
-        assert pt_to_mm(50.00094) == 17.639221  # not 17.639220499999997
-        assert pt_to_mm(72.0) == 25.4
 
 
 class TestPrinting:
