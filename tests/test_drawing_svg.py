@@ -184,6 +184,29 @@ def text_box(element: ET.Element) -> tuple[float, float, float, float]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def extents(root: ET.Element) -> list[tuple[str, float, float, float, float]]:
+    """Every drawn thing's estimated box, as ``(what, x0, y0, x1, y1)``.
+
+    ``drawn_points`` and ``text_box`` each cover half the sheet, and a
+    containment claim that consults only one of them is half a claim: the tool
+    summary that ran off the bottom of the schedule box was text, and the chain
+    dimensions that ran off the drawing area were lines. ``what`` carries the
+    element's own text or tag so a failure names the thing that escaped.
+    """
+    boxes = [
+        ((element.text or tag(element)), *text_box(element))
+        for element in walk(root, "text")
+    ]
+    return boxes + [(name, px, py, px, py) for name, px, py in drawn_points(root)]
+
+
+def assert_within(box: tuple[float, float, float, float], group: ET.Element, what: str) -> None:
+    x0, y0, x1, y1 = box
+    for label, bx0, by0, bx1, by1 in extents(group):
+        assert x0 - 0.6 <= bx0 and bx1 <= x1 + 0.6, f"{label!r} escapes {what} sideways"
+        assert y0 - 0.6 <= by0 and by1 <= y1 + 0.6, f"{label!r} escapes {what} vertically"
+
+
 def drawn_points(root: ET.Element) -> list[tuple[str, float, float]]:
     """Extreme points of every drawn shape, as (tag, x, y)."""
     points: list[tuple[str, float, float]] = []
@@ -335,7 +358,45 @@ def test_every_hole_has_a_centre_mark_and_a_numbered_balloon(panel: DrillData, r
     assert len(by_class(root, "centre-mark", "line")) == 2 * len(panel.holes)
 
     numbers = sorted(int(e.text) for e in by_class(root, "balloon-no", "text"))
-    assert numbers == list(range(1, len(panel.holes) + 1))
+    assert numbers == sorted(hole.index for hole in panel.holes)
+
+
+def test_balloons_number_holes_by_identity_not_by_position(panel: DrillData, root: ET.Element):
+    """One number, one hole, across all four artifacts.
+
+    The balloons counted 1..n down the tuple while the JSON and every
+    diagnostic used ``Hole.index``, so "hole 2" named the duplicate at
+    (−40, 18) to one reader, the clean hole at (−20, 18) to another, and a
+    third hole to anyone indexing the array. Gaps in the numbering are the
+    point: an id missing from the sheet is a hole the pipeline dropped.
+    """
+    balloons = [int(e.text) for e in by_class(root, "balloon-no", "text")]
+    assert balloons == [hole.index for hole in panel.holes]
+    assert balloons != list(range(1, len(panel.holes) + 1)), (
+        "the fixture's ids must not coincide with its positions, or this proves nothing"
+    )
+
+
+def test_the_sheet_numbers_the_flagged_hole_the_way_the_diagnostic_does(
+    panel: DrillData, root: ET.Element
+):
+    """The one place the two numbering schemes can be caught disagreeing.
+
+    ``duplicate-hole`` names hole 12. Under positional numbering the schedule
+    called that same hole 1, and the sheet and the report described the panel in
+    two incompatible languages.
+    """
+    duplicate = next(d for d in panel.diagnostics if d.code == "duplicate-hole")
+    named = str(duplicate.get("hole_index"))
+
+    red = [
+        row
+        for row in by_class(root, "sched-row")
+        if any("fill:#c" in (e.get("style") or "") for e in walk(row, "text"))
+    ]
+    assert len(red) == 1, "exactly one hole is flagged on this panel"
+    assert by_class(red[0], "sched-no", "text")[0].text == named
+    assert named in [e.text for e in by_class(root, "balloon-no", "text")]
 
 
 def test_duplicate_flagged_holes_are_red_with_a_dashed_ring(panel: DrillData):
@@ -490,9 +551,18 @@ def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it(
 
 
 def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
-    """One ⌀7 hole with id 3, and a ``duplicate-hole`` carrying ``payload``."""
+    """Two ⌀7 holes, ids 3 and 0, and a ``duplicate-hole`` carrying ``payload``.
+
+    Id 0 is in the panel deliberately. A payload that names no hole must ring
+    nothing, and the obvious way to break that is a lookup that falls back to a
+    default — ``d.get("hole_index", 0)`` — which a panel numbered from 3 upwards
+    would absorb in silence. The hole that would then light up is here.
+    """
     return DrillData(
-        holes=(Hole.from_measurement(0.0, 0.0, 7.0, index=3),),
+        holes=(
+            Hole.from_measurement(0.0, 0.0, 7.0, index=3),
+            Hole.from_measurement(20.0, 10.0, 7.0, index=0),
+        ),
         reference=ReferenceOutline(60.0, 40.0),
         diagnostics=(
             Diagnostic.warning(
@@ -518,6 +588,37 @@ def test_a_duplicate_hole_diagnostic_without_an_id_flags_nothing():
     assert [c for c in by_class(root, "hole", "circle") if "dup" in classes(c)] == []
     assert by_class(root, "dup-ring", "circle") == []
     assert "coincident" in all_text(root)  # the finding still reaches the sheet
+
+
+def test_a_finding_that_is_not_a_duplicate_rings_no_hole():
+    """The ring means *duplicate*, so the code is what selects it.
+
+    ``hole_index`` is carried by other findings too — ``unknown-diameter``
+    already does — and dropping the code clause turns every one of them into a
+    duplicate ring on a hole that is nothing of the sort. The CLI withholds
+    artifacts on an ERROR, so the guard is masked there; a library consumer
+    calling ``emit`` on the ``DrillData`` it was handed has no such cover, and
+    CLAUDE.md's "match on ``code``, never on ``message``" exists for exactly
+    this clause.
+    """
+    data = DrillData(
+        holes=(at(0.0, 0.0, 7.0, index=3),),
+        reference=ReferenceOutline(60.0, 40.0),
+        diagnostics=(
+            Diagnostic.error(
+                "unknown-diameter",
+                "no metric drill size within 0.15 mm of ⌀7.13 mm; hole dropped",
+                location=(0.0, 0.0),
+                data=(("hole_index", 3), ("diameter", 7.13)),
+            ),
+        ),
+    )
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert [c for c in by_class(root, "hole", "circle") if "dup" in classes(c)] == []
+    assert by_class(root, "dup-ring", "circle") == []
+    assert by_class(root, "hole", "circle")[0].get("stroke") == "#111111"
+    assert "no metric drill size" in all_text(root)  # the finding still reaches the sheet
 
 
 def test_an_id_that_arrived_as_a_float_still_rings_its_hole():
@@ -657,6 +758,68 @@ def test_vertical_dimension_text_is_rotated(root: ET.Element):
     assert all("rotate(-90" in (e.get("transform") or "") for e in vertical)
 
 
+def _rows_of_five(count: int) -> DrillData:
+    """``count`` rows of five holes, spread down a 112 × 61 panel.
+
+    A 15-row panel is ordinary work — five controls in three banks is already
+    three rows, and a row here is any distinct Y. Ids run backwards so nothing
+    in the drawing can pass by treating a position as an identity.
+    """
+    pitch = 56.0 / (count - 1) if count > 1 else 0.0
+    return DrillData(
+        holes=tuple(
+            Hole.from_measurement(
+                -40.0 + 20.0 * column,
+                28.0 - pitch * row,
+                3.0,
+                index=500 - (row * 5 + column),
+            )
+            for row in range(count)
+            for column in range(5)
+        ),
+        reference=ReferenceOutline(112.0, 61.0),
+    )
+
+
+@pytest.mark.parametrize("rows", [5, 14, 15, 30])
+def test_every_dimension_stays_inside_the_drawing_area(rows: int):
+    """Measured thresholds: 14 rows passed the border, 15 left the sheet.
+
+    ``layout`` clamps the room it reserves for chain dimensions to half the
+    drawing area; ``_draw_row_chains`` stacked one chain per row regardless. And
+    because the chains are drawn from the bottom row up, the ones that vanish
+    are the *topmost* rows — whose holes are still drawn, with no dimension and
+    nothing saying one was left off.
+    """
+    data = _rows_of_five(rows)
+    emitter = DrawingSvgEmitter()
+    root = ET.fromstring(emitter.emit(data))
+    assert len(data.rows()) == rows
+    assert_within(emitter.layout(data).area, by_class(root, "dimensions")[0], "the drawing area")
+
+
+def test_the_drawing_says_how_many_row_dimensions_it_could_not_draw():
+    """A hole with no dimension beside it is a hole nobody can locate.
+
+    Same rule as the notes and the schedule: a fact that disappears without
+    trace is worse than one that is visibly missing.
+    """
+    data = _rows_of_five(30)
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    chains = by_class(root, "dim-chain")
+    marker = by_class(root, "dim-overflow", "text")
+
+    assert len(chains) < 30, "this test only means anything if chains are dropped"
+    assert len(marker) == 1, "truncation must be announced exactly once"
+    omitted = int(re.search(r"(\d+)", marker[0].text or "").group(1))
+    assert len(chains) + omitted == 30
+
+
+def test_a_panel_whose_rows_all_fit_carries_no_dimension_marker(root: ET.Element):
+    assert by_class(root, "dim-overflow", "text") == []
+
+
 # --------------------------------------------------------------------------
 # hole schedule
 # --------------------------------------------------------------------------
@@ -676,14 +839,14 @@ def test_schedule_columns_are_no_x_y_diameter_tool(root: ET.Element):
 
 def test_schedule_cells_carry_the_hole_data(panel: DrillData, root: ET.Element):
     rows = by_class(root, "sched-row")
-    for index, (hole, row) in enumerate(zip(panel.holes, rows), start=1):
+    for hole, row in zip(panel.holes, rows):
         cells = {
             cls: e.text
             for e in walk(row, "text")
             for cls in classes(e)
             if cls.startswith("sched-") and cls != "sched-row"
         }
-        assert cells["sched-no"] == str(index)
+        assert cells["sched-no"] == str(hole.index)
         assert float(cells["sched-x"]) == pytest.approx(hole.x)
         assert float(cells["sched-y"]) == pytest.approx(hole.y)
         # The whole cell, not a float parsed out of it: the units are part of
@@ -1053,6 +1216,48 @@ def test_the_enclosure_line_says_the_panel_is_turned_when_it_is():
     assert "HAMMOND 1590  112 × 61 mm ROTATED  CANDIDATES B / B2 / BS" in lines
 
 
+def test_a_rotated_panel_keeps_every_candidate_in_the_title_block():
+    """The one footprint in the catalogue that used to lose candidates.
+
+    120 × 94 is 1590BB, 1590BB2, 1590BBS and 1590C — four of them, which
+    ``_designator``'s elision was sized to fit. Turn the panel portrait and
+    ``ROTATED`` joins the same line, pushing the last two past the title block,
+    where they were replaced by an ellipsis that did not say how many had gone.
+    The JSON, meanwhile, listed all four.
+    """
+    data = Pipeline([IdentifyHammondFootprint()]).run(
+        make_data(*holes((0.0, 0.0)), reference=ReferenceOutline(94.0, 120.0))
+    )
+    assert data.enclosure is not None
+    assert data.enclosure.candidates == ("1590BB", "1590BB2", "1590BBS", "1590C")
+
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+    assert "HAMMOND 1590  120 × 94 mm ROTATED  CANDIDATES BB / BB2 / BBS / C" in lines
+
+
+def test_a_candidate_list_that_cannot_fit_says_how_many_it_dropped():
+    """Beyond shrinking, the line still has to end somewhere — honestly.
+
+    A bare ellipsis leaves the reader unable to tell one missing candidate from
+    three, which is the difference between ordering the right box and the wrong
+    one. Twelve candidates is not a catalogue footprint; it is the width the
+    real four-candidate case is one datasheet revision away from.
+    """
+    candidates = tuple(
+        f"1590{suffix}"
+        for suffix in ("B", "B2", "BS", "BB", "BB2", "BBS", "C", "D", "N1", "P", "Q", "R")
+    )
+    data = _identified(candidates=candidates)
+    lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
+
+    line = next(line for line in lines if "CANDIDATES" in line)
+    assert "…" not in line, "an ellipsis names no number"
+    dropped = int(re.search(r"\+(\d+) MORE", line).group(1))
+    listed = line.split("CANDIDATES ")[1].split(" / +")[0].split(" / ")
+    assert len(listed) + dropped == len(candidates)
+    assert listed[0] == "B"
+
+
 def test_the_title_block_says_so_when_no_enclosure_was_identified():
     """No match, or no reference layer at all: the sheet says which, honestly.
 
@@ -1080,6 +1285,25 @@ def test_a_panel_that_matches_nothing_still_says_so_after_a_real_run():
     assert "ENCLOSURE NOT IDENTIFIED" in _title_block_lines(
         ET.fromstring(DrawingSvgEmitter().emit(after))
     )
+
+
+def test_a_line_too_long_even_at_the_smallest_font_is_still_truncated():
+    """Shrinking buys width; it does not buy an unlimited amount of it.
+
+    A title block line is shrunk to earn its room and only then chopped, and the
+    chop still has to happen — at 1.6 mm the block holds 88 characters and this
+    title is longer than that on any sheet. Without a case that reaches the
+    floor, nothing distinguishes "fits the line" from "prints the line straight
+    through the border", because every other line on the sheet is short enough
+    that shrinking alone saves it.
+    """
+    emitter = DrawingSvgEmitter(DrawingOptions(title="PANEL " * 40))
+    root = ET.fromstring(emitter.emit(_identified()))
+
+    line = next(line for line in _title_block_lines(root) if line.startswith("TITLE"))
+    assert line.endswith("…")
+    assert_within(emitter.layout(_identified()).title_block, by_class(root, "title-block-group")[0],
+                  "the title block")
 
 
 def test_title_block_reports_the_scale(panel: DrillData):
@@ -1245,6 +1469,69 @@ def test_the_schedule_says_how_many_holes_it_could_not_list():
     assert len(listed) + omitted == 240
 
 
+def _every_hole_a_different_size(count: int) -> DrillData:
+    """``count`` holes, no two the same diameter, so the tool table is as long
+    as the schedule itself.
+
+    The truncation test above uses 240 holes of *one* diameter, which is why it
+    never saw this: with one tool the summary is one line, and the capacity
+    arithmetic that subtracts the summary from the box never bites. Ids run
+    backwards so the NO. column cannot pass by coinciding with a position.
+    """
+    return DrillData(
+        holes=tuple(
+            Hole.from_measurement(-50.0 + 0.8 * i, 20.0, 3.0 + 0.1 * i, index=count - i)
+            for i in range(count)
+        ),
+        reference=ReferenceOutline(112.0, 61.0),
+    )
+
+
+@pytest.mark.parametrize("tools", [2, 83, 120])
+def test_every_element_of_the_schedule_stays_inside_its_box(tools: int):
+    """Measured thresholds: 82 tools left the box, 83 reached the title block
+    and 118 left the page altogether — while the drill file defined every one.
+
+    ``layout`` clamped the capacity arithmetic to zero and the summary loop
+    below it drew one line per tool regardless, so the deficit was thrown away
+    rather than reported. Asserted on *where the elements land*, because the
+    escaping branch executes on every run: line coverage said 100%.
+    """
+    data = _every_hole_a_different_size(tools)
+    emitter = DrawingSvgEmitter()
+    root = ET.fromstring(emitter.emit(data))
+    assert_within(emitter.layout(data).schedule, by_class(root, "schedule")[0], "the schedule box")
+
+
+def test_the_schedule_says_how_many_tools_it_could_not_list():
+    """A tool the sheet does not name is a bit the machinist does not fit.
+
+    The wording is its own: the only overflow the schedule used to print said
+    "further holes not listed", which is a true statement about a different
+    quantity and was printed while 39 tools were missing.
+    """
+    data = _every_hole_a_different_size(120)
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    listed = by_class(root, "sched-summary", "text")
+    marker = by_class(root, "sched-tool-overflow", "text")
+
+    assert len(listed) < 120, "this test only means anything if the summary is truncated"
+    assert len(data.tools()) == 120, "the drill file defines all 120"
+    assert len(marker) == 1, "truncation must be announced exactly once"
+
+    text = marker[0].text or ""
+    omitted = int(re.search(r"(\d+)", text).group(1))
+    assert len(listed) + omitted == 120
+    assert "tool" in text.lower(), f"the marker must name what was dropped, got {text!r}"
+    assert "hole" not in text.lower(), "a dropped tool is not a dropped hole"
+
+
+def test_a_schedule_that_fits_carries_neither_overflow_marker(root: ET.Element):
+    assert by_class(root, "sched-overflow", "text") == []
+    assert by_class(root, "sched-tool-overflow", "text") == []
+
+
 # --------------------------------------------------------------------------
 # fitting and overflow
 # --------------------------------------------------------------------------
@@ -1378,6 +1665,24 @@ def test_single_hole_does_not_divide_by_zero():
     root = ET.fromstring(emitter.emit(data))
     assert len(by_class(root, "hole", "circle")) == 1
     assert emitter.layout(data).scale > 0
+
+
+def test_a_sheet_with_no_room_for_a_title_block_says_nothing_rather_than_guessing():
+    """A 10 mm square sheet leaves the title block a negative width.
+
+    Every string in it is composed to a character capacity, and a box of no
+    width has a capacity of nothing — which must come out as an empty line, not
+    as a lie fitted to a width the sheet does not have. Absurd as the sheet is,
+    ``Sheet`` is a public option and the arithmetic is the same arithmetic the
+    enclosure note trusts to decide how many candidates it may name.
+    """
+    data = _identified()
+    emitter = DrawingSvgEmitter(DrawingOptions(sheet=Sheet("mini", 10.0, 10.0)))
+    root = ET.fromstring(emitter.emit(data))
+
+    assert emitter.layout(data).title_block[2] - emitter.layout(data).title_block[0] < 4.0
+    assert _title_block_lines(root) == [""] * len(_title_block_lines(root))
+    assert "HAMMOND" not in all_text(root)
 
 
 def test_text_is_xml_escaped():
