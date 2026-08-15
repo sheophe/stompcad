@@ -186,7 +186,9 @@ class AiPdfSource:
             # height as spans, the centre as a point. Every one of them is
             # finished in points and converted at the end, never assembled from
             # converted parts — the same rule `fit_circle` follows, for the same
-            # reason.
+            # reason. ``test_the_frame_is_finished_in_points_and_converted_once``
+            # sits on the nanometre the two spellings differ by; ``tar.ai`` sits
+            # nowhere near it and cannot be asked.
             origin_nm = (nm_from_pt((x0 + x1) / 2.0), nm_from_pt((y0 + y1) / 2.0))
             reference = ReferenceOutline.from_measurement(
                 width_nm=nm_from_pt(x1 - x0),

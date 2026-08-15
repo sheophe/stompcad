@@ -933,6 +933,44 @@ def test_units_are_whole_nanometres(tmp_path):
     assert {type(v) for v in (hole.x_nm, hole.y_nm, hole.diameter_nm)} == {int}
 
 
+def test_the_frame_is_finished_in_points_and_converted_once(tmp_path):
+    """Every length the frame needs crosses into nanometres as one finished value.
+
+    The corner-first spelling — ``nm_from_pt(x1) - nm_from_pt(x0)`` for a span,
+    ``(nm_from_pt(x0) + nm_from_pt(x1)) // 2`` for a centre — rounds two
+    operands and combines them afterwards, so it can be a nanometre out and can
+    be out in either direction. ``tar.ai`` cannot say so: its outline lands on
+    the same ``(148_499_901, 105_000_037)`` under both spellings, which is why
+    this panel is built for the boundary instead.
+
+    It is 0.2 x 0.7 pt — absurd as an enclosure and exact as an instrument.
+    All four lengths move under the corner-first spelling, the width down and
+    the height up, so nothing here can pass by a shared bias; and the hole sits
+    on the outline's centre, where the frame is the whole of its answer, so a
+    moved origin puts it a nanometre off zero instead of on it.
+    """
+    pdf = build_pdf(
+        tmp_path / "quantum.pdf",
+        {
+            "Background": "0.5 0.3 m 0.7 0.3 l 0.7 1.0 l 0.5 1.0 l h f",
+            "Drill": circle_ops(0.6, 0.65, 0.25),
+        },
+    )
+    # the fixture is a chosen boundary, not a coincidence: both axes disagree
+    for low, high in ((0.5, 0.7), (0.3, 1.0)):
+        assert nm_from_pt(high - low) != nm_from_pt(high) - nm_from_pt(low)
+        assert nm_from_pt((low + high) / 2.0) != (nm_from_pt(low) + nm_from_pt(high)) // 2
+
+    data = AiPdfSource(pdf).read()
+    reference = data.reference
+    assert reference is not None
+    assert reference.width_nm == 70_556  # corner-first: 70_555
+    assert reference.height_nm == 246_944  # corner-first: 246_945
+    assert reference.centre_x_nm == 211_667  # corner-first: 211_666
+    assert reference.centre_y_nm == 229_306  # corner-first: 229_305
+    assert (data.holes[0].x_nm, data.holes[0].y_nm) == (0, 0)
+
+
 def test_y_is_up(tmp_path):
     """PDF user space is Y-up from the MediaBox corner, and stays that way."""
     pdf = build_pdf(
