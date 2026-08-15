@@ -1,6 +1,6 @@
-"""Diameter normalisation, and the strategies that decide what "nominal" means.
+"""Drill standards, and snapping every measured diameter onto one of them.
 
-**Why this stage exists.** Measured diameters come back as 6.9998 and 7.0000 for
+**Why this stage exists.** Measured diameters come back as 6.9998 and 7.0002 for
 what the designer drew as one 7 mm hole. Without normalisation every downstream
 consumer sees two sizes: the Excellon file loads the same bit twice, the hole
 schedule shows two tools, and a part lookup misses. An earlier version of this
@@ -8,187 +8,308 @@ tool clustered diameters *inside the Excellon writer*, which meant the drawing
 and the drill file could legitimately disagree about how many hole sizes
 existed. Normalisation happens here, once, before any emitter sees the data.
 
-**How it stays open for extension.** ``NormalizeDiameters`` knows nothing about
-clustering, tables or anything else — it delegates to a ``DiameterStrategy`` and
-turns the result into holes and diagnostics. A fourth strategy is a new class;
-it requires no edit to this stage.
+**Why a table of real bits, and not clustering.** Clustering answers "which of
+these measurements are the same hole?" — a question about the artwork. The
+question that gets a panel drilled is "which bit do I put in the chuck?", and
+its answer set is fixed by a bit series nobody here gets to invent. Clustering
+5.02 and 5.04 into a nominal 5.03 produces a size that exists in no drawer on
+earth, and it does so silently, in the number the machinist reads. Every nominal
+diameter this stage produces comes from a declared table, or the hole is
+refused.
+
+**Why a registry of standards, and never one merged table.** Metric and
+fractional bits are two different drawers, and overlaying them destroys the
+matching semantics: 3.175 mm (1/8") and 3.2 mm are 0.025 mm apart, a tenth of
+the matching tolerance, and 1/2" *is* 12.7 mm — the same physical bit, zero
+millimetres apart, under two names. Merged, the choice between neighbours would
+be decided by float ordering rather than by anything real, and the unique-label
+invariant that keeps a hole schedule readable would be unsatisfiable by
+construction. A panel is drilled with one set of bits; the operator declares
+which set, and ``cli.py`` is where they say so.
+
+**Why both series are generative rules rather than transcribed lists.** A rule
+cannot carry a transcription typo, and it is auditable by reading five lines
+instead of checking 247 values. It also puts the disagreement where it belongs:
+sources genuinely differ about the metric breakpoints — ISO 235, BS 328 and
+DIN 338 preferred sizes are not the same series — so the bands are *data*, and
+adopting a different standard is editing a tuple rather than rewriting a stage.
+
+**Why the widest practical union rather than a "common sizes" list.** We cannot
+know another builder's needs: a talk-box pedal legitimately wants a 20 mm hole
+for the mic tube. A table that is too narrow refuses real work, whereas one that
+is too wide only ever offers a bit somebody has to buy. Narrowing is the
+operator's job, through :meth:`DrillStandard.select`, and the narrowed set is
+what ``describe`` publishes — so the drawing and the JSON state the sizes the
+panel was actually quantised against, not the series they nominally came from.
+
+Sources: the metric series follows the `BS 328 preferred sizes
+<https://mechanical-engineering.com/drill-size-chart/>`_; the `fractional series
+<https://workshopcalc.com/reference/drill-bit-sizes>`_ is sixty-fourths of an
+inch.
 """
 
 from __future__ import annotations
 
-import math
-from typing import ClassVar, Mapping, Protocol, Sequence, runtime_checkable
+from dataclasses import dataclass, replace
+from fractions import Fraction
+from types import MappingProxyType
+from typing import Callable, ClassVar, Iterable, Mapping, Sequence
 
 from ..model import Diagnostic, DrillData, Hole, ParameterValue, StageRun
-from ..tolerance import within
+from ..tolerance import SLACK, within
 
 __all__ = [
-    "DiameterStrategy",
-    "ClusterDiameters",
-    "TableDiameters",
-    "NoNormalization",
-    "NormalizeDiameters",
+    "METRIC_BANDS",
+    "FRACTIONAL_SIXTY_FOURTHS",
+    "DrillStandard",
+    "DRILL_STANDARDS",
+    "DEFAULT_STANDARD",
+    "SnapDiametersToDrillTable",
 ]
 
+#: Metric: ``(start_mm, stop_mm, step_mm)`` bands, ``stop`` exclusive, so each
+#: band runs up to — and not including — the first size of the next. Sources
+#: disagree about where the pitch changes, which is exactly why this is data:
+#: switching to another preferred series is editing this tuple.
+METRIC_BANDS: tuple[tuple[float, float, float], ...] = (
+    (0.5, 3.0, 0.05),
+    (3.0, 14.0, 0.1),
+    (14.0, 25.5, 0.5),
+)
 
-@runtime_checkable
-class DiameterStrategy(Protocol):
-    """Decides the nominal diameter for each measured diameter.
+#: Fractional inch: 1/64" steps from 1/64" to a full inch.
+FRACTIONAL_SIXTY_FOURTHS = range(1, 65)
 
-    The returned mapping is keyed by measured value. **A measured value that the
-    strategy cannot resolve is simply absent from the mapping**; the stage then
-    keeps the measured value and raises ``unknown-diameter``. That contract is
-    what lets ``NormalizeDiameters`` report unresolved sizes without knowing
-    which strategies can produce them.
+#: Decimal places the metric bands are exact in. Every band step is a multiple
+#: of 0.01, so rounding here removes binary-accumulation dust (0.8500000000000001)
+#: without touching a single real size — and it is what lets the label be
+#: *truthful* at 2 dp rather than merely unique.
+_METRIC_DECIMALS = 2
+
+
+def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[float, ...]:
+    """Every size the bands describe, ascending.
+
+    Counted with ``round`` rather than accumulated with ``while value < stop``:
+    the accumulated version overshoots or stops a size early depending on which
+    way the binary error of the step happens to fall, and it does so silently in
+    the middle of a band.
+    """
+    sizes: list[float] = []
+    for start, stop, step in bands:
+        for index in range(round((stop - start) / step)):
+            sizes.append(round(start + index * step, _METRIC_DECIMALS))
+    return tuple(sizes)
+
+
+def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[float, ...]:
+    """``n * 25.4 / 64``, which is exact: 1/8" is 3.175 and 1/2" is 12.7 with no
+    rounding anywhere, because the division is by a power of two."""
+    return tuple(n * 25.4 / 64 for n in sixty_fourths)
+
+
+def _metric_label(size_mm: float) -> str:
+    """``⌀3.20 mm``. Unique *and* truthful at 2 dp across all 183 sizes."""
+    return f"⌀{size_mm:.2f} mm"
+
+
+def _fractional_label(size_mm: float) -> str:
+    """``⌀1/8"`` — the fraction, because no decimal millimetre is honest.
+
+    1/64" is 0.396875 mm, which no finite decimal-millimetre label states
+    exactly; measured at 2, 3 and 4 decimals the fractional series is unique at
+    every precision and truthful at none. The fraction is exact, and it is also
+    what is stamped on the bit the machinist picks up.
+    """
+    return f'⌀{Fraction(round(size_mm * 64 / 25.4), 64)}"'
+
+
+@dataclass(frozen=True, slots=True)
+class DrillStandard:
+    """One drawer of bits: the sizes it holds and what each one is called.
+
+    ``label`` is a function rather than a decimal precision, and that is a
+    measured decision rather than a stylistic one — see :func:`_fractional_label`.
+    A ``display_decimals: int`` serves metric perfectly and cannot serve
+    fractional at any value.
     """
 
-    def nominal(self, measured: Sequence[float]) -> Mapping[float, float]: ...
+    name: str
+    sizes_mm: tuple[float, ...]
+    label: Callable[[float], str]
 
+    def __post_init__(self) -> None:
+        """A drawer with nothing in it drills nothing, so it is not a standard.
 
-class ClusterDiameters:
-    """Group measured values that are within ``tolerance`` of each other.
-
-    Values are grouped in ascending order. A value joins the open group when it
-    is within ``tolerance`` of that group's *representative* — the first (and so
-    smallest) member — and not merely within ``tolerance`` of the previous
-    member. Naive single-linkage would chain 5.00 → 5.04 → 5.08 into one group
-    although its ends are 0.08 apart; measuring from the representative bounds
-    every group's spread at ``tolerance``.
-
-    The nominal assigned to a group is the mean of its members, rounded to a
-    precision **derived from the tolerance**, so 6.9998 and 7.0000 become one
-    7.0. The precision has to follow the tolerance: a fixed 2 dp quietly undid
-    the grouping whenever the caller asked for something finer than a hundredth
-    of a millimetre — at ``tolerance=0.001`` the three separate groups 7.000,
-    7.002 and 7.004 all rounded to 7.0 and became one tool, the exact opposite of
-    what was asked for, with no diagnostic. It also corrupted sizes that are
-    genuinely three-decimal: 3.175 mm (1/8") became 3.17.
-    """
-
-    #: Never coarser than a hundredth: 6.9998 and 7.0000 must still land on 7.0
-    #: at the default tolerance, which is the whole point of the stage.
-    MIN_PRECISION: ClassVar[int] = 2
-    #: Beyond this, rounding is noise on a float anyway.
-    MAX_PRECISION: ClassVar[int] = 9
-
-    def __init__(self, tolerance: float = 0.05) -> None:
-        self.tolerance = float(tolerance)
-
-    @property
-    def precision(self) -> int:
-        """Decimal places for the nominal, fine enough to keep groups distinct.
-
-        Two groups are at least ``tolerance`` apart, so rounding to the first
-        decimal place that resolves ``tolerance`` cannot merge them.
+        Checked once, here, rather than at every use: without it the emptiness
+        would first be noticed by the matching stage, as an ``unknown-diameter``
+        error against every hole on the panel and nothing at all pointing at the
+        cause.
         """
-        if self.tolerance <= 0.0:
-            return self.MAX_PRECISION
-        decimals = -math.floor(math.log10(self.tolerance))
-        return max(self.MIN_PRECISION, min(self.MAX_PRECISION, decimals))
+        if not self.sizes_mm:
+            raise ValueError(f"the {self.name} drill standard has no sizes in it")
 
-    def nominal(self, measured: Sequence[float]) -> Mapping[float, float]:
-        groups: list[list[float]] = []
-        for value in sorted(set(measured)):
-            if groups and within(value, groups[-1][0], self.tolerance):
-                groups[-1].append(value)
-            else:
-                groups.append([value])
+    def select(
+        self,
+        include: Sequence[float] | None = None,
+        exclude: Sequence[float] | None = None,
+    ) -> "DrillStandard":
+        """A narrowed copy holding only the bits actually in the drawer.
 
-        precision = self.precision
-        return {
-            value: round(sum(group) / len(group), precision)
-            for group in groups
-            for value in group
-        }
+        Narrowing belongs here rather than in the standard because the standard
+        is a physical constant and the drawer is not. A copy, never an edit: the
+        registry is shared by every run in the process.
+
+        A requested size the standard does not have raises, rather than being
+        quietly dropped. ``--drill-sizes 3.33`` is a typo, and the silent
+        reading of it — a drawer with one bit missing, or none at all — makes
+        every hole on the panel an ``unknown-diameter`` error with nothing
+        pointing at the cause. The same goes for asking a fractional standard
+        for 3.2 mm: that is a real drill, but it is not one of *these*.
+        """
+        sizes = self.sizes_mm
+        if include is not None:
+            self._reject_unknown(include, "included")
+            sizes = tuple(s for s in sizes if self._holds(include, s))
+        if exclude is not None:
+            self._reject_unknown(exclude, "excluded")
+            sizes = tuple(s for s in sizes if not self._holds(exclude, s))
+        # An empty result raises from ``__post_init__``, where the same rule is
+        # enforced for a hand-built standard. One rule, one place.
+        return replace(self, sizes_mm=sizes)
+
+    def _reject_unknown(self, requested: Sequence[float], verb: str) -> None:
+        missing = [r for r in requested if not any(self._same(s, r) for s in self.sizes_mm)]
+        if missing:
+            named = ", ".join(f"{m:g}" for m in missing)
+            raise ValueError(
+                f"{named} mm cannot be {verb}: no such size in the {self.name} drill "
+                f"standard, which runs {self.sizes_mm[0]:g}–{self.sizes_mm[-1]:g} mm"
+            )
+
+    def _holds(self, requested: Sequence[float], size: float) -> bool:
+        return any(self._same(size, r) for r in requested)
+
+    @staticmethod
+    def _same(size: float, requested: float) -> bool:
+        """Two spellings of one size. Not a matching tolerance — that is the
+        stage's job, and a lenient ``select`` would silently hand back a bit the
+        operator did not ask for. This absorbs binary representation only."""
+        return within(size, requested, SLACK)
 
 
-class TableDiameters:
-    """Snap each measured value to the nearest declared drill size.
+#: Every standard the operator may declare. A mapping proxy, because a registry
+#: one run can rewrite is a registry the next run cannot trust.
+DRILL_STANDARDS: Mapping[str, DrillStandard] = MappingProxyType(
+    {
+        "metric": DrillStandard(
+            name="metric",
+            sizes_mm=_metric_sizes(METRIC_BANDS),
+            label=_metric_label,
+        ),
+        "fractional": DrillStandard(
+            name="fractional",
+            sizes_mm=_fractional_sizes(FRACTIONAL_SIXTY_FOURTHS),
+            label=_fractional_label,
+        ),
+    }
+)
 
-    A value further than ``tolerance`` from every declared size is left
-    unresolved — the stage keeps the measurement and reports
-    ``unknown-diameter`` rather than silently pretending it was a stocked bit.
-    Ties go to the smaller size, so the result never depends on table order.
+#: What a panel is drilled with unless the operator says otherwise.
+DEFAULT_STANDARD = "metric"
+
+
+class SnapDiametersToDrillTable:
+    """Give every hole the nominal diameter of a bit that actually exists.
+
+    ``tolerance_mm`` is how far a measurement may sit from a table size and
+    still be that size. It is a *bound*, not a preference: a measurement outside
+    it is an ``unknown-diameter`` ERROR and the hole is dropped, rather than
+    being matched to its nearest neighbour anyway.
+
+    Two rules that the earlier, strategy-based version got wrong, and why:
+
+    **Unbounded nearest-neighbour matching is not available.** With no bound,
+    a malformed circle — a rounded rectangle the fitter mistook for one, a
+    30 mm cut-out that wants a step drill — becomes a plausible *wrong* drill,
+    and nothing downstream can tell it from a real one.
+
+    **An unmatched measurement is not kept.** The old stage retained it and
+    warned. That cannot survive the invariant this stage now carries: if every
+    nominal comes from the table, a retained 30.0 is a nominal that came from
+    nowhere, and the drill file would define a tool for a bit that does not
+    exist. So the finding is an ERROR — the run is not fit to drill — and the
+    hole appears in no artifact. Everything needed to find it is in the
+    diagnostic: the hole's index, what it measured, and the nearest bit there is.
     """
 
-    def __init__(self, sizes: Sequence[float], tolerance: float = 0.15) -> None:
-        self.sizes = tuple(sorted(float(s) for s in sizes))
-        self.tolerance = float(tolerance)
+    name: ClassVar[str] = "snap-diameters"
 
-    def nominal(self, measured: Sequence[float]) -> Mapping[float, float]:
-        if not self.sizes:
-            return {}
-        resolved: dict[float, float] = {}
-        for value in set(measured):
-            nearest = min(self.sizes, key=lambda s: (abs(s - value), s))
-            if within(nearest, value, self.tolerance):
-                resolved[value] = nearest
-        return resolved
-
-
-class NoNormalization:
-    """Identity strategy. Every measurement is its own nominal. For debugging."""
-
-    def nominal(self, measured: Sequence[float]) -> Mapping[float, float]:
-        return {value: value for value in measured}
-
-
-class NormalizeDiameters:
-    """Assign a nominal diameter to every hole, using ``strategy``."""
-
-    name: ClassVar[str] = "normalize-diameters"
-
-    def __init__(self, strategy: DiameterStrategy) -> None:
-        self.strategy = strategy
+    def __init__(
+        self,
+        standard: DrillStandard = DRILL_STANDARDS[DEFAULT_STANDARD],
+        tolerance_mm: float = 0.25,
+    ) -> None:
+        self.standard = standard
+        self.tolerance_mm = float(tolerance_mm)
 
     def describe(self) -> StageRun:
-        """Report the strategy by name, plus whatever settings it exposes.
+        """The standard by name *and* the sizes that were available under it.
 
-        Asked *of* the strategy, never decided by type: an ``isinstance`` ladder
-        over ClusterDiameters / TableDiameters would put back the closed set of
-        strategies this stage was written to avoid, and the fourth strategy — the
-        one that lives in a caller's own module — would describe itself as
-        nothing. A strategy that has a ``tolerance`` or a table of ``sizes`` gets
-        them recorded; one that has neither reports neither, and a consumer sees
-        the key absent rather than a default that was never applied.
-
-        The corollary is worth stating: *any* strategy that exposes a sequence
-        named ``sizes`` gets it stamped ``sizes_mm``, whatever that sequence
-        actually means to it — the price of asking the object instead of its
-        type, and the reason the attribute names here are part of the strategy
-        contract rather than an implementation detail of two of them.
+        Both, because neither implies the other: the name says which series the
+        panel was quantised against, and ``sizes_mm`` says which bits of it the
+        operator actually owns. A consumer given only the name would compute a
+        nearest available size the run never considered.
         """
         parameters: list[tuple[str, ParameterValue]] = [
-            ("strategy", type(self.strategy).__name__)
+            ("standard", self.standard.name),
+            ("tolerance_mm", self.tolerance_mm),
+            ("sizes_mm", self.standard.sizes_mm),
         ]
-        tolerance = getattr(self.strategy, "tolerance", None)
-        if isinstance(tolerance, (int, float)) and not isinstance(tolerance, bool):
-            parameters.append(("tolerance_mm", float(tolerance)))
-        sizes = getattr(self.strategy, "sizes", None)
-        if isinstance(sizes, Sequence) and not isinstance(sizes, (str, bytes)):
-            parameters.append(("sizes_mm", tuple(float(s) for s in sizes)))
         return StageRun(self.name, tuple(parameters))
 
     def apply(self, data: DrillData) -> DrillData:
-        if not data.holes:
-            return data
-
-        resolved = self.strategy.nominal([h.diameter for h in data.holes])
-
-        holes: list[Hole] = []
+        kept: list[Hole] = []
         diagnostics: list[Diagnostic] = []
-        for hole in data.holes:
-            nominal = resolved.get(hole.diameter)
-            if nominal is None:
-                diagnostics.append(
-                    Diagnostic.warning(
-                        "unknown-diameter",
-                        f"⌀{hole.diameter:.4f} mm at ({hole.x:.3f}, {hole.y:.3f}) "
-                        f"matched no nominal size; the measured value is kept",
-                        location=(hole.x, hole.y),
-                    )
-                )
-                nominal = hole.diameter
-            holes.append(hole.with_diameter(nominal))
 
-        return data.with_holes(holes).with_diagnostics(*diagnostics)
+        for hole in data.holes:
+            nearest = self._nearest(hole.diameter)
+            if not within(nearest, hole.diameter, self.tolerance_mm):
+                diagnostics.append(self._unknown(hole, nearest))
+                continue
+            kept.append(hole.with_diameter(nearest))
+
+        return data.with_holes(kept).with_diagnostics(*diagnostics)
+
+    def _nearest(self, measured: float) -> float:
+        """The closest size in the table, ties going to the smaller bit.
+
+        The tie-break is what stops the answer depending on the order the table
+        happens to be in: 6.35 sits exactly between the 6.3 and 6.4 metric
+        sizes, and ``min`` would otherwise return whichever came first.
+        """
+        return min(self.standard.sizes_mm, key=lambda size: (abs(size - measured), size))
+
+    def _unknown(self, hole: Hole, nearest: float) -> Diagnostic:
+        """Name the hole, the measurement and the closest bit there is.
+
+        ``hole_index`` is the foreign key — the stable identity that survives a
+        later stage moving the hole — and ``nearest_mm`` is there so a consumer
+        can say "you drew 30.0, the biggest bit is 25.0" without re-deriving the
+        search this stage has already done.
+        """
+        return Diagnostic.error(
+            "unknown-diameter",
+            f"⌀{hole.diameter:.4f} mm at ({hole.x:.3f}, {hole.y:.3f}) is within "
+            f"{self.tolerance_mm:g} mm of no {self.standard.name} drill size — the "
+            f"nearest is {self.standard.label(nearest)}; the hole has been dropped "
+            f"and appears in no artifact",
+            location=(hole.x, hole.y),
+            data=(
+                ("hole_index", hole.index),
+                ("diameter_mm", hole.diameter),
+                ("nearest_mm", nearest),
+                ("standard", self.standard.name),
+                ("tolerance_mm", self.tolerance_mm),
+            ),
+        )

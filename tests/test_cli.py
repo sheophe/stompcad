@@ -25,6 +25,7 @@ import pytest
 from aidrill import cli
 from aidrill.emitters.base import available, register_emitter
 from aidrill.errors import EmptyLayerError, LayerNotFoundError
+from aidrill.pipeline import DRILL_STANDARDS
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -157,51 +158,293 @@ def test_help_lists_the_registry(clean_registry, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_pipeline_order_is_fixed_by_the_cli():
-    args = cli.build_parser().parse_args(["panel.ai", "--true-size", "113x60"])
-    assert [stage.name for stage in cli.build_pipeline(args)] == [
+def pipeline_for(*argv: str):
+    """The pipeline the CLI actually builds for ``argv``.
+
+    Every test below that cares about stage order reads it from here rather than
+    restating it, because a parallel list of stage names has already drifted
+    once in this repo — ``tests/test_pipeline.py`` still carried the CLI's old
+    order long after the CLI had changed.
+    """
+    return cli.build_pipeline(cli.build_parser().parse_args(["panel.ai", *argv]))
+
+
+def test_the_cli_fixes_the_stage_order():
+    """The one deliberately literal statement of the order in the suite.
+
+    It is literal because it *is* the specification: order is the single thing a
+    stage may not declare for itself (LSP), so somebody has to say it, and this
+    is the assertion that says it. Everything else derives from
+    :func:`pipeline_for`.
+    """
+    assert [stage.name for stage in pipeline_for()] == [
         "snap",
-        "normalize-diameters",
+        "snap-diameters",
         "deduplicate",
-        "check-reference-size",
+        "identify-enclosure",
         "sort",
     ]
 
 
-def test_validate_stage_only_present_with_true_size():
-    args = cli.build_parser().parse_args(["panel.ai"])
-    assert "check-reference-size" not in [s.name for s in cli.build_pipeline(args)]
+def test_the_enclosure_stage_is_wired_in_whether_or_not_a_case_was_declared():
+    """Identification is not opt-in. The outline is snapped to the catalogue on
+    every run, and ``--case`` only adds the cross-check against what was drawn —
+    so a panel drawn 1 mm out is still reported without the operator having to
+    know to ask."""
+    for argv in ([], ["--case", "1590B"]):
+        assert "identify-enclosure" in [s.name for s in pipeline_for(*argv)]
+
+
+def stage_named(name: str, *argv: str):
+    """One stage out of the pipeline the CLI built, found by name not position."""
+    found = [stage for stage in pipeline_for(*argv) if stage.name == name]
+    assert len(found) == 1, f"{name} appears {len(found)} times in the pipeline"
+    return found[0]
 
 
 def test_grid_warn_defaults_are_left_to_the_stage():
     """The grid/4 rule lives in SnapPositions; the CLI must not restate it."""
-    args = cli.build_parser().parse_args(["panel.ai", "--grid", "1.0"])
-    snap = cli.build_pipeline(args)[0]
+    snap = stage_named("snap", "--grid", "1.0")
     assert snap.grid == 1.0
     assert snap.warn_over == pytest.approx(0.25)
 
-    args = cli.build_parser().parse_args(["panel.ai", "--grid", "1.0", "--grid-warn", "0.4"])
-    assert cli.build_pipeline(args)[0].warn_over == pytest.approx(0.4)
-
-
-def test_diameter_strategy_selection():
-    build = lambda argv: cli.build_pipeline(cli.build_parser().parse_args(argv))[1].strategy
-
-    assert type(build(["panel.ai"])).__name__ == "ClusterDiameters"
-    assert build(["panel.ai"]).tolerance == pytest.approx(0.05)
-    assert build(["panel.ai", "--diameter-tolerance", "0.2"]).tolerance == pytest.approx(0.2)
-
-    table = build(["panel.ai", "--diameters", "table", "--drill-sizes", "3.2,5,7"])
-    assert type(table).__name__ == "TableDiameters"
-    assert table.sizes == (3.2, 5.0, 7.0)
-    assert table.tolerance == pytest.approx(0.15)  # the table default, not cluster's
-
-    assert type(build(["panel.ai", "--diameters", "none"])).__name__ == "NoNormalization"
+    assert stage_named("snap", "--grid", "1.0", "--grid-warn", "0.4").warn_over == pytest.approx(0.4)
 
 
 def test_dedupe_tolerance_reaches_the_stage():
-    args = cli.build_parser().parse_args(["panel.ai", "--dedupe-tolerance", "0.3"])
-    assert cli.build_pipeline(args)[2].tolerance == pytest.approx(0.3)
+    assert stage_named("deduplicate", "--dedupe-tolerance", "0.3").tolerance == pytest.approx(0.3)
+
+
+# ---------------------------------------------------------------------------
+# which bits are in the drawer
+# ---------------------------------------------------------------------------
+
+
+def test_the_default_standard_is_metric_and_the_tolerance_is_the_stages():
+    """The CLI restates neither. ``--drill-standard`` has a default because
+    argparse needs one; the matching tolerance has none here at all."""
+    stage = stage_named("snap-diameters")
+    assert stage.standard.name == "metric"
+    assert stage.standard.sizes_mm == DRILL_STANDARDS["metric"].sizes_mm
+    assert stage.tolerance_mm == pytest.approx(0.25)
+
+
+def test_the_declared_standard_reaches_the_stage():
+    stage = stage_named("snap-diameters", "--drill-standard", "fractional")
+    assert stage.standard.name == "fractional"
+    assert stage.standard.sizes_mm == DRILL_STANDARDS["fractional"].sizes_mm
+
+
+def test_the_declared_standard_decides_what_a_hole_is_drilled_with(fake_source, tmp_path):
+    """The flag, proved on the emitted bytes rather than on the stage object.
+
+    6.348 mm is 0.048 from the 6.3 mm metric bit and 0.002 from a 1/4" one, so
+    the two standards give different, unmistakable answers — and a CLI that
+    accepted ``--drill-standard`` and then built the metric table anyway would
+    still write 6.3 here.
+    """
+    fake_source(
+        make_data(holes=[Hole.from_measurement(0.0, 0.0, 6.348, index=0)])
+    )
+    doc = tmp_path / "panel.txt"
+
+    assert cli.main([str(FIXTURE), "--drill-standard", "fractional", "--emit", f"json={doc}"]) == 0
+
+    assert [t["diameter"] for t in json.loads(doc.read_text())["tools"]] == [6.35]
+
+
+def test_an_unknown_standard_is_a_usage_error_that_names_the_ones_there_are(
+    fake_source, capsys
+):
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), "--drill-standard", "whitworth"]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "whitworth" in err
+    for name in DRILL_STANDARDS:
+        assert name in err
+
+
+def test_a_whitelist_narrows_the_table_to_the_drawer():
+    stage = stage_named("snap-diameters", "--drill-sizes", "3.2,5,7,12")
+    assert stage.standard.sizes_mm == (3.2, 5.0, 7.0, 12.0)
+
+
+def test_a_blacklist_removes_the_bit_that_is_broken():
+    stage = stage_named("snap-diameters", "--no-drill-sizes", "7.0")
+    assert 7.0 not in stage.standard.sizes_mm
+    assert len(stage.standard.sizes_mm) == len(DRILL_STANDARDS["metric"].sizes_mm) - 1
+    assert 6.9 in stage.standard.sizes_mm
+
+
+def test_the_two_size_flags_combine():
+    stage = stage_named("snap-diameters", "--drill-sizes", "3.2,5,7,12", "--no-drill-sizes", "5")
+    assert stage.standard.sizes_mm == (3.2, 7.0, 12.0)
+
+
+def test_a_narrowed_table_is_what_the_holes_are_actually_quantised_against(
+    fake_source, tmp_path
+):
+    """With no 7 mm bit in the drawer, a 6.9998 mm hole is drilled with what is.
+
+    Read back out of the machine-readable document, because the claim is about
+    what reaches a consumer: both the hole's nominal size *and* the record of
+    which sizes were available must be the narrowed set.
+    """
+    fake_source(make_data(holes=[Hole.from_measurement(0.0, 0.0, 6.9998, index=0)]))
+    doc = tmp_path / "panel.txt"
+
+    assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,6.8,12", "--emit", f"json={doc}"]) == 0
+
+    document = json.loads(doc.read_text())
+    assert [t["diameter"] for t in document["tools"]] == [6.8]
+    recorded = [r for r in document["processing"] if r["name"] == "snap-diameters"]
+    assert recorded[0]["parameters"]["sizes_mm"] == [3.2, 6.8, 12.0]
+    assert recorded[0]["parameters"]["standard"] == "metric"
+
+
+def test_a_size_the_standard_does_not_have_is_a_usage_error(fake_source, capsys):
+    """``3.33`` is a typo. Read leniently it would give the panel a drawer with
+    a bit missing; read as a match it would give it one that does not exist."""
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,3.33"]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "3.33" in err
+
+
+def test_a_metric_size_is_not_a_fractional_bit(fake_source, capsys):
+    """The refusal is against the declared standard, not against drills at large."""
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), "--drill-standard", "fractional", "--drill-sizes", "3.2"]) == 3
+    assert "fractional" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["--drill-sizes", "--no-drill-sizes"])
+@pytest.mark.parametrize("bad", ["", "3.2,fish", "3,nan", "3.2,0"])
+def test_a_malformed_size_list_is_a_usage_error(fake_source, capsys, flag, bad):
+    """Both flags, because a bug has more than one spelling: the whitelist and
+    the blacklist are two call sites of one parser, and only one of them was
+    ever reached by the old ``--drill-sizes`` tests.
+
+    ``nan`` is why finiteness is checked rather than positivity alone: every
+    comparison against it is False, so ``size <= 0`` lets it through.
+    """
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), flag, bad]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert flag in err
+
+
+# ---------------------------------------------------------------------------
+# which case the panel is for
+# ---------------------------------------------------------------------------
+
+
+def test_a_declared_case_reaches_the_enclosure_stage_in_catalogue_form():
+    assert stage_named("identify-enclosure", "--case", " 1590b ").expected_part == "1590B"
+    assert stage_named("identify-enclosure").expected_part is None
+
+
+def test_the_declared_case_agreeing_with_the_artwork_is_silent(fake_source, capsys):
+    fake_source(make_data())  # a 113 x 60 outline, which is a 112 x 61 1590B
+    assert cli.main([str(FIXTURE), "--case", "1590B"]) == 0
+
+
+def test_a_case_that_disagrees_with_the_artwork_is_an_error(fake_source, capsys, tmp_path):
+    """Exit 2, and the finding names both parts.
+
+    This is what finally makes exit 2 reachable from a correct file: the panel
+    parses, every hole is a real bit, and the run is still refused because the
+    aluminium in front of the operator is the wrong case.
+    """
+    fake_source(make_data())
+    doc = tmp_path / "panel.txt"
+
+    assert cli.main([str(FIXTURE), "--case", "1590BB", "--emit", f"json={doc}"]) == 2
+
+    found = [
+        d for d in json.loads(doc.read_text())["diagnostics"] if d["code"] == "wrong-enclosure"
+    ]
+    assert len(found) == 1
+    assert found[0]["data"]["requested_part"] == "1590BB"
+    assert found[0]["severity"] == "error"
+
+
+def test_an_order_code_is_not_told_it_drew_the_wrong_case(fake_source, capsys):
+    """``1590BBBK`` is a real order code — BB body, BK black finish — and the
+    single most likely thing an operator types.
+
+    It is not a base designator, so it cannot be checked against a footprint,
+    and treating it as one would report ``wrong-enclosure`` on a *correct*
+    1590BB panel: a message telling the operator they drew the wrong case when
+    they drew the right one. It is a usage error instead, and it says which
+    designator the order code is built on so the fix is one retype.
+    """
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), "--case", "1590BBBK"]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "1590BBBK" in err
+    # The whole phrase, not the substring: ``"1590BB" in err`` is satisfied by
+    # the echoed order code itself, so it passes just as happily when the
+    # suggestion is the wrong one — and suggesting 1590B for a 1590BB panel
+    # sends the operator to a case 8 mm narrower.
+    assert "did you mean 1590BB?" in err
+
+
+def test_a_part_number_from_nowhere_is_a_usage_error(fake_source, capsys):
+    """No suggestion to make, and none invented: 1590ZZ resembles nothing."""
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), "--case", "1590ZZ"]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "1590ZZ" in err
+
+
+def test_an_empty_case_is_told_it_is_empty(fake_source, capsys):
+    """``--case "$CASE"`` with ``CASE`` unset is a Makefile away, and the answer
+    to it must not be a sentence about ``''`` not being in the catalogue — the
+    operator would go looking for a part number they never typed."""
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), "--case", "  "]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("aidrill: error:"), err
+    assert "needs a part number" in err
+
+
+def test_the_case_is_checked_before_the_file_is_even_opened(capsys):
+    """A typo costs no PDF parse, and — the point — it is reported *as* a typo.
+
+    The file here does not exist, so an unvalidated ``--case`` would surface as
+    an I/O failure instead, and the operator would go looking at the wrong end
+    of the command line.
+    """
+    assert cli.main(["/no/such/panel.ai", "--case", "1590ZZ"]) == 3
+    assert "1590ZZ" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--diameters", "cluster"],
+        ["--diameter-tolerance", "0.2"],
+        ["--true-size", "113x60"],
+    ],
+)
+def test_the_flags_that_went_with_the_strategies_are_gone(fake_source, capsys, argv):
+    """Rejected by argparse, not quietly ignored. A flag that still parses but
+    no longer does anything is worse than one that fails."""
+    fake_source(make_data())
+    assert cli.main([str(FIXTURE), *argv]) == 3
+    assert capsys.readouterr().err.startswith("usage:")  # argparse's, never ours
 
 
 # ---------------------------------------------------------------------------
@@ -255,131 +498,35 @@ def test_no_arguments_is_a_usage_error(capsys):
     assert cli.main([]) == 3
 
 
-def test_table_diameters_without_drill_sizes_is_a_usage_error(fake_source, capsys):
-    fake_source(make_data())
-    assert cli.main([str(FIXTURE), "--diameters", "table"]) == 3
-    err = capsys.readouterr().err
-    assert "--drill-sizes" in err
-    assert "Traceback" not in err
-
-
-@pytest.mark.parametrize(
-    "text", ["112.4", "112.4x", "axb", "112.4x60.5x3", "", "0x60", "infx60", "nanxnan"]
-)
-def test_malformed_true_size_is_a_usage_error(fake_source, capsys, text):
-    """Asserted on *our* error line, not merely on the string ``--true-size``.
-
-    ``-5x60`` used to sit in this list and passed for entirely the wrong reason:
-    argparse claims the leading ``-`` as an unrecognised option and prints a
-    usage banner that happens to contain ``--true-size``, so the assertion was
-    satisfied without the value ever reaching :func:`cli.parse_true_size`. Every
-    value below does reach it, and ``main`` prints one line beginning with the
-    program's own prefix — argparse leads with ``usage:`` instead.
-    """
-    fake_source(make_data())
-    assert cli.main([str(FIXTURE), "--true-size", text]) == 3
-    err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
-    assert "--true-size" in err
-
-
 def test_argparse_rejection_is_not_mistaken_for_our_validation(fake_source, capsys):
     """The two rejections are told apart by shape, because nothing else does it.
 
-    ``--true-size -5x60`` and ``--true-size 0x60`` both exit 3 and both put the
-    string ``--true-size`` on stderr — argparse's own error line even carries the
-    same ``aidrill: error:`` prefix, since it is ``parser.prog``. Substring
-    matching therefore cannot separate them however it is spelled; only the usage
-    banner can, and only at the start of the stream. That is what is asserted.
+    ``--drill-sizes -3.2,7`` and ``--drill-sizes 3.33`` both exit 3 and both put
+    the string ``--drill-sizes`` on stderr — argparse's own error line even
+    carries the same ``aidrill: error:`` prefix, since it is ``parser.prog``.
+    Substring matching therefore cannot separate them however it is spelled;
+    only the usage banner can, and only at the start of the stream. That is what
+    is asserted, and it is what stops a test claiming to exercise our validation
+    while argparse quietly satisfies it first.
+
+    A stray leading minus is the version argparse claims, and only because the
+    rest of the field stops it looking like a negative number: ``-5`` alone
+    *does* reach our own check, which is precisely why "starts with a dash"
+    cannot be assumed to mean "argparse handled it".
     """
     fake_source(make_data())
 
-    assert cli.main([str(FIXTURE), "--true-size", "-5x60"]) == 3
+    assert cli.main([str(FIXTURE), "--drill-sizes", "-3.2,7"]) == 3
     argparse_err = capsys.readouterr().err
     assert argparse_err.startswith("usage:")  # argparse's, never ours
     # Why ``startswith`` and not ``in`` — argparse says this too:
     assert "aidrill: error:" in argparse_err
-    assert "--true-size" in argparse_err
+    assert "--drill-sizes" in argparse_err
 
-    assert cli.main([str(FIXTURE), "--true-size", "0x60"]) == 3
+    assert cli.main([str(FIXTURE), "--drill-sizes", "3.33"]) == 3
     ours = capsys.readouterr().err
     assert ours.startswith("aidrill: error:")
     assert "usage:" not in ours
-
-
-@pytest.mark.parametrize("bad", ["infx60", "nanxnan", "0x60"])
-def test_non_finite_or_zero_true_size_is_a_usage_error(bad):
-    """``width <= 0`` never rejects nan (all comparisons false) or inf, so
-    ``--true-size infx60`` exited 1 and wrote an SVG full of ``x="-inf"``."""
-    with pytest.raises(cli.UsageError):
-        cli.parse_true_size(bad)
-
-
-def test_negative_true_size_is_rejected_by_our_validation_not_by_argparse():
-    """The old test asserted '--true-size' appeared in stderr, which argparse's
-    usage banner satisfies -- so it passed without ever reaching the check."""
-    with pytest.raises(cli.UsageError, match="positive"):
-        cli.parse_true_size("-5x60")
-
-
-def test_a_non_finite_true_size_writes_no_artifact_at_all(fake_source, tmp_path, capsys):
-    """The cost of the missing guard, in the currency that matters.
-
-    ``inf`` sailed through ``width <= 0`` and reached the drawing, which exited 1
-    — "warnings, but here are your files" — beside an SVG carrying ``x="-inf"``
-    and ``width="inf"``, and a note declaring the panel ``inf × 60 mm``. A
-    corrupt document that claims to be a good run is worse than no document.
-    """
-    fake_source(make_data())
-    svg = tmp_path / "out.svg"
-
-    assert cli.main([str(FIXTURE), "--true-size", "infx60", "--emit", f"drawing-svg={svg}"]) == 3
-
-    assert not svg.exists()
-    assert "Traceback" not in capsys.readouterr().err
-
-
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("112.4x60.5", (112.4, 60.5)),
-        ("113X60", (113.0, 60.0)),
-        ("113×60", (113.0, 60.0)),
-        (" 113 x 60 ", (113.0, 60.0)),
-    ],
-)
-def test_true_size_parsing(text, expected):
-    assert cli.parse_true_size(text) == pytest.approx(expected)
-
-
-def test_true_size_feeds_the_reference_check(fake_source, capsys):
-    fake_source(make_data())  # reference is 113 x 60
-    assert cli.main([str(FIXTURE), "--true-size", "112.4x60.5"]) == 1
-    assert "reference-size-mismatch" in capsys.readouterr().out
-
-
-def test_malformed_drill_sizes_is_a_usage_error(fake_source, capsys):
-    fake_source(make_data())
-    code = cli.main([str(FIXTURE), "--diameters", "table", "--drill-sizes", "3.2,fish"])
-    assert code == 3
-    assert "--drill-sizes" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("bad", ["", "3.2,-5", "3,nan"])
-def test_malformed_drill_sizes_are_rejected(bad):
-    """``nan`` is the same hole as in ``--true-size``: ``size <= 0`` is False for
-    it, so a stocked-size table could contain a size no bit has."""
-    with pytest.raises(cli.UsageError):
-        cli.parse_drill_sizes(bad)
-
-
-def test_a_non_finite_drill_size_never_reaches_the_table_stage(fake_source, capsys):
-    fake_source(make_data())
-    code = cli.main([str(FIXTURE), "--diameters", "table", "--drill-sizes", "3.2,nan"])
-    assert code == 3
-    err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
-    assert "--drill-sizes" in err
 
 
 @pytest.mark.parametrize("spec", ["excellon", "=out.drl", "excellon="])
@@ -487,7 +634,10 @@ def test_report_shows_source_holes_tools_and_diagnostics(fake_source, capsys):
 
     assert "fake.ai" in out
     assert "Drill" in out and "Background" in out
-    assert "113.000" in out and "60.000" in out
+    # 112 × 61, not the 113 × 60 the artwork measured: the enclosure stage runs
+    # on every panel now, and the report states the catalogue's whole
+    # millimetres because those are what the holes are positioned against.
+    assert "112.000" in out and "61.000" in out
     assert "7.000" in out and "5.000" in out  # hole diameters
     assert "T1" in out and "T2" in out  # tool summary
     assert "something" in out and "watch out" in out
@@ -560,20 +710,6 @@ def test_the_tools_report_keeps_its_usual_three_decimals(fake_source, capsys):
     assert report_tool_diameters(cli.format_tools(make_data())) == ["5.000", "7.000"]
 
 
-@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
-def test_a_tight_tolerance_does_not_make_the_report_lie(capsys):
-    """End to end: the fixture's 6.9998 and 7.0000 survive as two nominals under
-    ``--diameter-tolerance 0.0001``, and the report must show two tools a reader
-    can tell apart."""
-    assert cli.main([str(FIXTURE), "--diameter-tolerance", "0.0001"]) == 1
-
-    tools_block = capsys.readouterr().out.split("TOOLS")[1].splitlines()
-    printed = report_tool_diameters(tools_block)
-
-    assert len(printed) == 3
-    assert len(set(printed)) == 3, f"the TOOLS report claims two identical tools: {printed}"
-
-
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
     hole = Hole.from_measurement(-19.9906, 18.0021, 6.9998, index=0)
     fake_source(make_data(holes=[hole]))
@@ -584,7 +720,9 @@ def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
     assert "6.9998" in out
 
 
-def test_verbose_adds_per_stage_detail(fake_source, capsys):
+def test_verbose_reports_every_stage_the_cli_built(fake_source, capsys):
+    """The list of stages comes from ``build_pipeline``, so a stage added there
+    is covered here without anyone remembering to add it twice."""
     fake_source(make_data())
     cli.main([str(FIXTURE)])
     quiet = capsys.readouterr().out
@@ -593,8 +731,8 @@ def test_verbose_adds_per_stage_detail(fake_source, capsys):
     fake_source(make_data())
     cli.main([str(FIXTURE), "-v"])
     loud = capsys.readouterr().out
-    for stage in ("snap", "normalize-diameters", "deduplicate", "sort"):
-        assert stage in loud
+    for stage in pipeline_for():
+        assert stage.name in loud, f"--verbose said nothing about {stage.name}"
     assert len(loud) > len(quiet)
 
 
@@ -831,41 +969,32 @@ def test_grid_half_millimetre_raises_two_off_grid_warnings(tmp_path, capsys):
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
-def test_true_size_mismatch_on_the_fixture(tmp_path, capsys):
+def test_the_fixture_panel_is_identified_as_the_case_it_was_drawn_for(tmp_path):
+    """The 1590B footprint, and the artwork's own measurement kept beside it.
+
+    ``--case`` is what makes the check two-way; without it the panel is still
+    identified, which is what lets the drawing dimension whole millimetres.
+    """
     doc = tmp_path / "tar.json"
-    assert cli.main([str(FIXTURE), "--true-size", "112.4x60.5", "--emit", f"json={doc}"]) == 1
-    codes = [d["code"] for d in json.loads(doc.read_text())["diagnostics"]]
-    assert "reference-size-mismatch" in codes
+    assert cli.main([str(FIXTURE), "--case", "1590B", "--emit", f"json={doc}"]) == 1
+
+    document = json.loads(doc.read_text())
+    # Read off the emitted bytes: the artwork measures 113.000 × 60.000 and the
+    # catalogue says 1590B is 112 × 61, so a document carrying whole millimetres
+    # beside a fractional measurement is the enclosure stage having run.
+    assert (document["reference"]["width"], document["reference"]["height"]) == (112.0, 61.0)
+    assert document["reference"]["raw"]["width"] == pytest.approx(113.0, abs=1e-3)
+    assert document["reference"]["raw"]["height"] == pytest.approx(60.0, abs=1e-3)
+    assert [d["code"] for d in document["diagnostics"]] == ["duplicate-hole"]
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
-def test_a_colliding_tool_table_is_refused_at_the_cli(tmp_path, capsys):
-    """A tool table that is not injective must fail the run, not be written.
+def test_the_fixture_panel_declared_as_the_wrong_case_exits_two(tmp_path, capsys):
+    doc = tmp_path / "tar.json"
+    assert cli.main([str(FIXTURE), "--case", "1590BB", "--emit", f"json={doc}"]) == 2
 
-    ``--diameter-tolerance 0.0001`` is tight enough that the fixture's measured
-    6.9998 and 7.0000 stay two nominal diameters, and at three decimals both
-    render ``7.000``. Today that emits::
-
-        T1C5.000
-        T2C7.000
-        T3C7.000
-
-    — the same bit loaded twice, exit 1, file on disk: the exact drill file
-    ADR-0001 exists to prevent, arriving through formatting rather than through
-    clustering. Two distinct diameters that print identically are indistinguishable
-    to the machine, so the emitter must refuse rather than serialise them.
-    """
-    drl = tmp_path / "collision.drl"
-
-    code = cli.main(
-        [str(FIXTURE), "--diameter-tolerance", "0.0001", "--emit", f"excellon={drl}"]
-    )
-
-    assert code != 0
-    assert not drl.exists(), "a drill file with a repeated tool diameter reached the disk"
-    err = capsys.readouterr().err
-    assert "Traceback" not in err
-    assert err.startswith("aidrill: error:"), err
+    codes = [d["code"] for d in json.loads(doc.read_text())["diagnostics"]]
+    assert "wrong-enclosure" in codes
 
 
 # ---------------------------------------------------------------------------

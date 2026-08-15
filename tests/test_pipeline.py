@@ -28,16 +28,15 @@ from aidrill.model import (
 )
 from aidrill.protocols import Pipeline, Stage
 from aidrill.pipeline import (
+    DEFAULT_STANDARD,
+    DRILL_STANDARDS,
     CheckReferenceSize,
-    ClusterDiameters,
     Deduplicate,
-    DiameterStrategy,
+    DrillStandard,
     IdentifyHammondFootprint,
-    NoNormalization,
-    NormalizeDiameters,
+    SnapDiametersToDrillTable,
     SnapPositions,
     SortHoles,
-    TableDiameters,
     normalize_part_name,
 )
 from tests.conftest import at, holes, make_data
@@ -62,7 +61,7 @@ def diameters(data: DrillData) -> list[float]:
 
 ALL_STAGES = [
     SnapPositions(grid=0.25),
-    NormalizeDiameters(ClusterDiameters()),
+    SnapDiametersToDrillTable(),
     Deduplicate(),
     CheckReferenceSize((113.0, 60.0)),
     SortHoles(),
@@ -218,219 +217,386 @@ class TestSnapPositions:
 
 
 # --------------------------------------------------------------------------
-# NormalizeDiameters + strategies
+# The drill standards, and snapping onto one of them
 # --------------------------------------------------------------------------
 
 
-class TestNormalizeDiameters:
-    def test_measurement_noise_yields_exactly_one_tool(self):
-        """THE regression this whole stage exists for (SPEC §5.1).
+class TestTheMetricSeriesIsGeneratedNotTranscribed:
+    """A rule cannot carry a transcription typo, so the bands are the source."""
 
-        6.9998 and 7.0000 are one 7 mm hole that a measurement split in two.
-        Before this stage existed the Excellon writer clustered them itself and
-        the drawing did not, so the two artifacts disagreed about tool count.
+    METRIC = DRILL_STANDARDS["metric"]
+
+    def test_the_bands_cover_half_a_millimetre_to_twenty_five(self):
+        assert len(self.METRIC.sizes_mm) == 183
+        assert self.METRIC.sizes_mm[0] == 0.5
+        assert self.METRIC.sizes_mm[-1] == 25.0
+
+    def test_each_band_steps_at_its_own_pitch_right_up_to_the_next_one(self):
+        """The last size of a band and the first of the next, both spellings.
+
+        A band boundary moved either way shows up here rather than only in a
+        count: 2.95 is the last of the 0.05 band and 3.0 the first of the 0.1
+        band, so a first band that ran to 3.5 would put 3.05 in the table and a
+        second that started at 3.5 would take 3.0 out of it.
         """
-        data = make_data(at(-40.0, 18.0, 6.9998, index=0), at(-20.0, 18.0, 7.0000, index=1))
+        sizes = set(self.METRIC.sizes_mm)
+        assert {2.95, 3.0, 13.9, 14.0, 14.5, 25.0} <= sizes
+        assert 3.05 not in sizes, "the 0.05 band ran past its stop"
+        assert 13.95 not in sizes, "the 0.1 band ran past its stop"
+        assert 25.5 not in sizes, "the stop of the last band is exclusive too"
 
-        out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
-
-        assert len(out.tools()) == 1
-        assert diameters(out) == [7.0, 7.0]
-        assert list(out.tools()) == [7.0]
-
-    def test_raw_diameters_survive_normalisation(self):
-        data = make_data(at(0.0, 0.0, 6.9998, index=0))
-        out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
-        assert out.holes[0].raw.diameter == pytest.approx(6.9998)
-        assert out.holes[0].residual[2] == pytest.approx(0.0002, abs=1e-9)
-
-    def test_positions_are_untouched(self):
-        data = make_data(at(-39.99, 18.01, 6.9998, index=0))
-        out = NormalizeDiameters(ClusterDiameters()).apply(data)
-        assert positions(out) == [(-39.99, 18.01)]
-
-    def test_no_diagnostics_from_clustering(self):
-        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(1.0, 0.0, 7.0, index=1))
-        assert codes(NormalizeDiameters(ClusterDiameters()).apply(data)) == []
+    def test_the_series_is_ascending_and_has_no_size_twice(self):
+        sizes = self.METRIC.sizes_mm
+        assert list(sizes) == sorted(sizes)
+        assert len(set(sizes)) == len(sizes)
 
 
-class TestClusterDiameters:
-    def test_distinct_sizes_are_not_merged(self):
-        data = make_data(
-            at(0.0, 0.0, 5.0, index=0),
-            at(1.0, 0.0, 7.0, index=1),
-            at(2.0, 0.0, 5.0, index=2),
+class TestTheFractionalSeriesIsExactByConstruction:
+    FRACTIONAL = DRILL_STANDARDS["fractional"]
+
+    def test_sixty_four_sixty_fourths_up_to_one_inch(self):
+        """``n * 25.4 / 64`` for 1..64 — the last one being a 1" bit exactly.
+
+        The count and the top of the series are asserted apart, because they
+        fail for different edits: a series stopping at 63 is one bit short *and*
+        no longer reaches an inch, and only the second says which end went.
+        """
+        assert len(self.FRACTIONAL.sizes_mm) == 64
+        assert self.FRACTIONAL.sizes_mm[-1] == 25.4
+
+    def test_the_common_bits_are_exact_millimetres_with_no_rounding_anywhere(self):
+        sizes = self.FRACTIONAL.sizes_mm
+        assert sizes[0] == 25.4 / 64  # 1/64", 0.396875 mm
+        assert sizes[7] == 3.175  # 1/8"
+        assert sizes[15] == 6.35  # 1/4"
+        assert sizes[31] == 12.7  # 1/2"
+
+    def test_the_series_is_ascending_and_has_no_size_twice(self):
+        sizes = self.FRACTIONAL.sizes_mm
+        assert list(sizes) == sorted(sizes)
+        assert len(set(sizes)) == len(sizes)
+
+
+class TestLabels:
+    """What gets stamped on a drawing for each size."""
+
+    @pytest.mark.parametrize("standard", DRILL_STANDARDS.values(), ids=lambda s: s.name)
+    def test_every_size_has_a_label_that_is_unique_within_its_standard(self, standard):
+        """This is what makes the drawing's schedule safe without a per-emitter guard.
+
+        It must run per standard. A decimal-millimetre label cannot serve both:
+        the metric series is unique *and* truthful at 2 dp, but 1/64" is
+        0.396875 mm, which no finite decimal-mm label states exactly — so the
+        fractional standard labels in sixty-fourths instead.
+        """
+        labels = [standard.label(d) for d in standard.sizes_mm]
+        assert len(set(labels)) == len(labels), f"{standard.name}: two sizes share a label"
+
+    def test_a_metric_label_states_its_size_exactly(self):
+        metric = DRILL_STANDARDS["metric"]
+        assert all(f"{d:.2f}" in metric.label(d) for d in metric.sizes_mm)
+        assert metric.label(3.2) == "⌀3.20 mm"
+
+    def test_a_fractional_label_is_the_fraction_not_a_rounded_millimetre(self):
+        """0.40 mm would be a lie about a 1/64" bit, and 3.18 mm about a 1/8" one."""
+        fractional = DRILL_STANDARDS["fractional"]
+        assert fractional.label(25.4 / 64) == '⌀1/64"'
+        assert fractional.label(25.4 / 8) == '⌀1/8"'
+        assert fractional.label(12.7) == '⌀1/2"'
+        assert fractional.label(25.4) == '⌀1"'
+
+    def test_no_fractional_label_would_survive_being_written_in_millimetres(self):
+        """Measured, not assumed: the fractional series is truthful at *no*
+        decimal precision, which is why ``label`` is a function and not a
+        ``display_decimals`` int. Every bit whose label is a proper fraction
+        misstates its own millimetre value at 2, 3 and 4 decimals."""
+        fractional = DRILL_STANDARDS["fractional"]
+        for decimals in (2, 3, 4):
+            lying = [d for d in fractional.sizes_mm if float(f"{d:.{decimals}f}") != d]
+            assert lying, f"a decimal-mm label at {decimals} dp would be truthful"
+
+
+class TestTheTwoStandardsAreNeverMerged:
+    def test_one_size_belongs_to_both_series_under_two_names(self):
+        """1/2" *is* 12.7 mm — the same physical bit, zero millimetres apart.
+
+        Merged into one table it would appear twice, with two labels, and the
+        unique-label invariant above would be unsatisfiable by construction.
+        """
+        metric = set(DRILL_STANDARDS["metric"].sizes_mm)
+        fractional = set(DRILL_STANDARDS["fractional"].sizes_mm)
+        assert metric & fractional == {12.7}
+        assert DRILL_STANDARDS["metric"] is not DRILL_STANDARDS["fractional"]
+
+    def test_neighbouring_sizes_across_the_two_series_are_closer_than_the_tolerance(self):
+        """3.175 (1/8") and 3.2 (metric) are 0.025 mm apart, a tenth of the
+        matching tolerance. In one table the choice between them would be
+        decided by float ordering rather than by anything real."""
+        metric = DRILL_STANDARDS["metric"].sizes_mm
+        fractional = DRILL_STANDARDS["fractional"].sizes_mm
+        crowded = [(a, b) for a in fractional for b in metric if 0.0 < abs(a - b) < 0.05]
+        assert len(crowded) > 20
+
+    def test_a_panel_is_drilled_with_one_set_of_bits(self):
+        """The registry hands out whole standards, never a union of sizes."""
+        assert set(DRILL_STANDARDS) == {"metric", "fractional"}
+        assert all(isinstance(s, DrillStandard) for s in DRILL_STANDARDS.values())
+
+    def test_the_default_standard_is_metric(self):
+        assert DEFAULT_STANDARD == "metric"
+        assert DRILL_STANDARDS[DEFAULT_STANDARD].name == "metric"
+
+    def test_the_registry_cannot_be_rewritten_by_one_run(self):
+        """A shared mutable registry would let one caller change another's bits."""
+        with pytest.raises(TypeError):
+            DRILL_STANDARDS["metric"] = DRILL_STANDARDS["fractional"]  # type: ignore[index]
+
+
+class TestInventoryFiltering:
+    """``select`` narrows a standard to the bits actually in the drawer."""
+
+    METRIC = DRILL_STANDARDS["metric"]
+
+    def test_a_whitelist_keeps_exactly_the_sizes_asked_for(self):
+        # Scattered through the series on purpose: sizes that happen to be the
+        # first few of the standard cannot tell selection from truncation.
+        stocked = self.METRIC.select(include=(3.2, 5.0, 7.0, 12.0))
+        assert stocked.sizes_mm == (3.2, 5.0, 7.0, 12.0)
+
+    def test_a_whitelist_is_sorted_however_it_was_typed(self):
+        assert self.METRIC.select(include=(12.0, 3.2, 7.0)).sizes_mm == (3.2, 7.0, 12.0)
+
+    def test_a_blacklist_removes_exactly_the_sizes_named(self):
+        """The bit that snapped, and nothing else, leaves the drawer."""
+        thinned = self.METRIC.select(exclude=(3.2, 7.0, 12.0))
+        assert len(thinned.sizes_mm) == len(self.METRIC.sizes_mm) - 3
+        assert 3.2 not in thinned.sizes_mm
+        assert 7.0 not in thinned.sizes_mm
+        assert 12.0 not in thinned.sizes_mm
+        assert 3.3 in thinned.sizes_mm and 6.9 in thinned.sizes_mm
+
+    def test_a_blacklist_applies_on_top_of_a_whitelist(self):
+        both = self.METRIC.select(include=(3.2, 5.0, 7.0, 12.0), exclude=(5.0,))
+        assert both.sizes_mm == (3.2, 7.0, 12.0)
+
+    def test_narrowing_leaves_the_standard_it_came_from_alone(self):
+        """A narrowed copy, not an edit: the registry is shared by every run."""
+        narrowed = self.METRIC.select(include=(3.2, 7.0))
+
+        assert len(self.METRIC.sizes_mm) == 183, "select mutated the registry"
+        assert narrowed is not self.METRIC
+        assert narrowed.name == self.METRIC.name
+        assert narrowed.label(3.2) == "⌀3.20 mm"
+
+    def test_selecting_nothing_is_the_standard_itself(self):
+        assert self.METRIC.select().sizes_mm == self.METRIC.sizes_mm
+
+    def test_a_size_the_standard_does_not_have_is_refused_rather_than_ignored(self):
+        """``--drill-sizes 3.33`` is a typo, and a silently empty drawer is the
+        worst possible answer to it: every hole would then be unknown."""
+        with pytest.raises(ValueError, match="3.33"):
+            self.METRIC.select(include=(3.2, 3.33))
+        with pytest.raises(ValueError, match="3.33"):
+            self.METRIC.select(exclude=(3.33,))
+
+    def test_a_metric_size_is_not_a_fractional_one(self):
+        """The refusal is against the standard in hand, not against bits in general.
+
+        3.2 mm is a real drill; it is not a *fractional* drill, and a drawer of
+        imperial bits does not contain one.
+        """
+        with pytest.raises(ValueError, match="3.2"):
+            DRILL_STANDARDS["fractional"].select(include=(3.2,))
+        assert DRILL_STANDARDS["fractional"].select(include=(3.175,)).sizes_mm == (3.175,)
+
+    def test_narrowing_a_standard_down_to_nothing_is_refused(self):
+        with pytest.raises(ValueError, match="no sizes"):
+            self.METRIC.select(include=(3.2,), exclude=(3.2,))
+
+
+class TestSnapDiametersToDrillTable:
+    def test_bezier_noise_collapses_onto_one_bit(self):
+        """THE regression this stage exists for (SPEC §5.1).
+
+        6.9998 and 7.0002 are one 7 mm hole that a measurement split in two.
+        Before the pipeline owned this the Excellon writer clustered them itself
+        and the drawing did not, so the two artifacts disagreed about tool count.
+        """
+        got = SnapDiametersToDrillTable().apply(
+            make_data(*holes((0.0, 0.0, 6.9998), (10.0, 0.0, 7.0002)))
         )
-        out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
-        assert len(out.tools()) == 2
-        assert diameters(out) == [5.0, 7.0, 5.0]
 
-    def test_does_not_chain_beyond_tolerance_from_the_representative(self):
-        """Greedy single-linkage would chain 5.00→5.04→5.08 into one group.
+        assert {h.diameter for h in got.holes} == {7.0}
+        assert len(got.tools()) == 1
+        assert codes(got) == []
 
-        The ends are 0.08 apart, well beyond the 0.05 tolerance. Membership is
-        measured from the group's representative, not from the previous member.
+    def test_the_declared_standard_decides_which_bit_a_measurement_is(self):
+        """6.348 is a worn 1/4" bit *or* a wide 6.3 mm one, and no arithmetic can
+        tell which. The operator declares the drawer; the stage does not guess.
+
+        This is the fixture that a merged table could not have: the two answers
+        are 0.05 mm apart, well inside the 0.25 mm matching tolerance, so a
+        single sorted table would decide between them by float ordering.
         """
-        data = make_data(
-            at(0.0, 0.0, 5.00, index=0),
-            at(1.0, 0.0, 5.04, index=1),
-            at(2.0, 0.0, 5.08, index=2),
+        measured = make_data(*holes((0.0, 0.0, 6.348)))
+
+        metric = SnapDiametersToDrillTable(DRILL_STANDARDS["metric"]).apply(measured)
+        imperial = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]).apply(measured)
+
+        assert diameters(metric) == [6.3]
+        assert diameters(imperial) == [6.35]
+
+    def test_an_imperial_bit_is_not_dragged_onto_a_metric_grid(self):
+        """6.35 is a 1/4" bit. A 0.25 mm rounding grid would put it at 6.25, a
+        size no bit in either series has."""
+        got = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]).apply(
+            make_data(*holes((0.0, 0.0, 6.348)))
+        )
+        assert got.holes[0].diameter == 6.35
+        assert 6.35 in DRILL_STANDARDS["fractional"].sizes_mm
+
+    def test_a_diameter_no_bit_can_make_is_an_error_not_a_guess(self):
+        """A 30 mm cut-out is a step-drill or a punch, not a twist drill.
+
+        The old rule kept the measurement and warned. It cannot survive the
+        invariant this stage now carries — every nominal diameter comes from the
+        table — because a retained 30.0 would be a nominal that came from
+        nowhere, and the drill file would load a bit that does not exist.
+        """
+        got = SnapDiametersToDrillTable().apply(make_data(*holes((0.0, 0.0, 30.0))))
+
+        assert codes(got) == ["unknown-diameter"]
+        assert got.diagnostics[0].severity is Severity.ERROR
+
+    def test_the_unmatched_measurement_never_becomes_a_tool(self):
+        """The other half of the same rule, asserted on the tool table rather
+        than on the diagnostic: a hole kept at its measured 30.0 would be a
+        third tool in the drill file, whatever the report said about it."""
+        got = SnapDiametersToDrillTable().apply(
+            make_data(*holes((0.0, 0.0, 7.0), (10.0, 0.0, 30.0), (20.0, 0.0, 5.0)))
         )
 
-        out = NormalizeDiameters(ClusterDiameters(0.05)).apply(data)
+        assert list(got.tools()) == [5.0, 7.0]
+        assert [h.index for h in got.holes] == [0, 2]
 
-        assert len(out.tools()) == 2
-        assert out.holes[0].diameter == out.holes[1].diameter
-        assert out.holes[2].diameter != out.holes[0].diameter
+    def test_the_diagnostic_names_the_hole_and_the_nearest_bit(self):
+        """``data`` so a consumer need not re-measure: which hole, what it
+        measured, and the closest thing the drawer actually holds."""
+        got = SnapDiametersToDrillTable().apply(
+            make_data(at(3.0, -2.0, 30.0, index=4))
+        )
+        found = got.diagnostics[0]
 
-    def test_a_tolerance_finer_than_a_hundredth_keeps_its_groups_apart(self):
-        """Regression: rounding the nominal to a fixed 2 dp re-merged what the
-        tolerance had deliberately separated.
-
-        With a 0.001 tolerance these are three groups — the operator asked for
-        sub-hundredth sizes to stay apart — but a nominal rounded to 2 dp gave
-        all three the same 7.0, collapsing three tools into one, silently.
-        """
-        mapping = ClusterDiameters(0.001).nominal([7.0000, 7.0020, 7.0040])
-
-        assert len(set(mapping.values())) == 3, "distinct groups share a nominal"
-        assert mapping[7.0000] == pytest.approx(7.000)
-        assert mapping[7.0020] == pytest.approx(7.002)
-        assert mapping[7.0040] == pytest.approx(7.004)
-
-    def test_a_fine_tolerance_does_not_corrupt_an_imperial_size(self):
-        """3.175 mm is 1/8"; at 2 dp it became 3.17, a size no bit has."""
-        mapping = ClusterDiameters(0.005).nominal([3.175, 6.35])
-        assert mapping[3.175] == pytest.approx(3.175)
-        assert mapping[6.35] == pytest.approx(6.35)
-
-    def test_no_group_ever_spans_more_than_the_tolerance(self):
-        rng = random.Random(4242)
-        for _ in range(400):
-            # Tolerances below 0.01 are the interesting ones: at 0.02 and coarser
-            # a 2 dp nominal cannot make two groups collide, which is exactly why
-            # the earlier sampling of {0.02, 0.05, 0.1} missed the bug above.
-            tolerance = rng.choice([0.02, 0.05, 0.1, 0.005, 0.002, 0.001])
-            # A narrow band at 4 dp puts many values inside one hundredth of a
-            # millimetre of each other, so a collision is likely rather than rare.
-            measured = [round(rng.uniform(6.9, 7.1), 4) for _ in range(12)]
-            mapping = ClusterDiameters(tolerance).nominal(measured)
-
-            groups: dict[float, list[float]] = {}
-            for m in measured:
-                groups.setdefault(mapping[m], []).append(m)
-            for members in groups.values():
-                assert max(members) - min(members) <= tolerance + 1e-9
-
-    def test_representative_is_the_mean_rounded_to_the_tolerance_precision(self):
-        mapping = ClusterDiameters(0.05).nominal([6.9998, 7.0000])
-        assert set(mapping.values()) == {7.0}
-
-        mapping = ClusterDiameters(0.05).nominal([5.00, 5.04])
-        assert set(mapping.values()) == {5.02}
-
-        # A finer tolerance buys finer nominals; a coarse one never goes below 2 dp.
-        assert set(ClusterDiameters(0.001).nominal([5.0010, 5.0016]).values()) == {5.001}
-        assert set(ClusterDiameters(1.0).nominal([5.004, 5.008]).values()) == {5.01}
-
-    def test_ordering_of_input_does_not_change_the_result(self):
-        measured = [7.0000, 5.02, 6.9998, 4.98, 5.0]
-        forward = ClusterDiameters(0.05).nominal(measured)
-        backward = ClusterDiameters(0.05).nominal(list(reversed(measured)))
-        assert forward == backward
-
-    def test_empty_input(self):
-        assert dict(ClusterDiameters().nominal([])) == {}
-
-
-class TestTableDiameters:
-    SIZES = [3.2, 5.0, 6.35, 7.0]
-
-    def test_snaps_to_the_nearest_declared_size(self):
-        data = make_data(at(0.0, 0.0, 6.98, index=0), at(1.0, 0.0, 5.03, index=1))
-        out = NormalizeDiameters(TableDiameters(self.SIZES, 0.15)).apply(data)
-        assert diameters(out) == [7.0, 5.0]
-        assert codes(out) == []
-
-    def test_value_outside_tolerance_is_kept_and_reported(self):
-        data = make_data(at(-3.0, 2.0, 4.1, index=0))
-        out = NormalizeDiameters(TableDiameters(self.SIZES, 0.15)).apply(data)
-
-        assert diameters(out) == [4.1]
-        assert codes(out) == ["unknown-diameter"]
-        assert out.diagnostics[0].severity is Severity.WARNING
-        assert out.diagnostics[0].location == (-3.0, 2.0)
+        assert found.get("hole_index") == 4
+        assert found.get("diameter_mm") == pytest.approx(30.0)
+        assert found.get("nearest_mm") == pytest.approx(25.0)
+        assert found.get("standard") == "metric"
+        assert found.location == (3.0, -2.0)
 
     def test_one_diagnostic_per_offending_hole(self):
-        data = make_data(
-            at(0.0, 0.0, 4.1, index=0),
-            at(1.0, 0.0, 4.1, index=1),
-            at(2.0, 0.0, 7.0, index=2),
+        got = SnapDiametersToDrillTable().apply(
+            make_data(*holes((0.0, 0.0, 30.0), (1.0, 0.0, 30.0), (2.0, 0.0, 7.0)))
         )
-        out = NormalizeDiameters(TableDiameters(self.SIZES, 0.15)).apply(data)
-        assert codes(out) == ["unknown-diameter", "unknown-diameter"]
+        assert codes(got) == ["unknown-diameter", "unknown-diameter"]
 
-    def test_tolerance_boundary_is_inclusive(self):
-        assert dict(TableDiameters([7.0], 0.15).nominal([6.85])) == {6.85: 7.0}
-        assert dict(TableDiameters([7.0], 0.15).nominal([6.84])) == {}
+    def test_the_matching_tolerance_is_inclusive_at_its_boundary(self):
+        """25.25 is exactly 0.25 from the 25 mm bit; 25.3 is 0.3 from it."""
+        inside = SnapDiametersToDrillTable().apply(make_data(*holes((0.0, 0.0, 25.25))))
+        outside = SnapDiametersToDrillTable().apply(make_data(*holes((0.0, 0.0, 25.3))))
 
-    def test_ties_are_resolved_deterministically(self):
-        # 6.0 is equidistant from 5.0 and 7.0; the smaller size wins, always.
-        assert dict(TableDiameters([5.0, 7.0], 1.0).nominal([6.0])) == {6.0: 5.0}
+        assert diameters(inside) == [25.0]
+        assert codes(inside) == []
+        assert codes(outside) == ["unknown-diameter"]
 
-    def test_empty_table_reports_everything_unknown(self):
-        data = make_data(at(0.0, 0.0, 7.0, index=0))
-        out = NormalizeDiameters(TableDiameters([], 0.15)).apply(data)
-        assert diameters(out) == [7.0]
-        assert codes(out) == ["unknown-diameter"]
+    def test_a_tighter_tolerance_refuses_what_a_looser_one_accepted(self):
+        measured = make_data(*holes((0.0, 0.0, 25.25)))
 
+        assert diameters(SnapDiametersToDrillTable(tolerance_mm=0.25).apply(measured)) == [25.0]
+        assert codes(SnapDiametersToDrillTable(tolerance_mm=0.2).apply(measured)) == [
+            "unknown-diameter"
+        ]
 
-class TestNoNormalization:
-    def test_is_the_identity(self):
-        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(1.0, 0.0, 7.0000, index=1))
-        out = NormalizeDiameters(NoNormalization()).apply(data)
-        assert diameters(out) == [6.9998, 7.0000]
-        assert len(out.tools()) == 2
-        assert codes(out) == []
+    def test_a_tie_goes_to_the_smaller_bit_whatever_order_the_table_is_in(self):
+        """14.25 sits exactly between the 14.0 and 14.5 mm sizes — exactly in
+        binary too, which 6.35 between 6.3 and 6.4 is not: it is nearer 6.3 by
+        one part in 10^15, so a fixture built on it would prove nothing about
+        ties at all.
 
+        The second half is the half that bites. Every shipped standard is
+        ascending, so ``min`` returns the smaller of a tied pair *by accident*,
+        and a test using one cannot tell the tie-break from that accident. A
+        caller may hand this stage a table in any order, and the answer may not
+        depend on which.
+        """
+        assert abs(14.25 - 14.0) == abs(14.5 - 14.25), "the fixture is not a tie"
+        measured = make_data(*holes((0.0, 0.0, 14.25)))
+        label = DRILL_STANDARDS["metric"].label
 
-class TestStrategyPatternIsOpenForExtension:
-    """OCP: a fourth strategy must work without editing NormalizeDiameters."""
+        assert diameters(SnapDiametersToDrillTable().apply(measured)) == [14.0]
 
-    def test_the_three_shipped_strategies_satisfy_the_protocol(self):
-        for strategy in (ClusterDiameters(), TableDiameters([7.0]), NoNormalization()):
-            assert isinstance(strategy, DiameterStrategy)
+        for order in ((14.0, 14.5), (14.5, 14.0)):
+            drawer = DrillStandard(name="drawer", sizes_mm=order, label=label)
+            got = SnapDiametersToDrillTable(drawer).apply(measured)
+            assert diameters(got) == [14.0], f"the answer changed with the table order {order}"
 
-    def test_a_strategy_defined_here_needs_no_change_to_the_stage(self):
-        class RoundToWholeMillimetres:
-            """A fourth strategy, invented in this test file and nowhere else."""
+    def test_it_quantises_against_the_narrowed_table_not_the_whole_standard(self):
+        """The drawer, not the catalogue: with no 7 mm bit in it, a 6.9998 mm
+        hole is drilled with whatever *is* there."""
+        drawer = DRILL_STANDARDS["metric"].select(include=(3.2, 6.8, 12.0))
+        got = SnapDiametersToDrillTable(drawer).apply(make_data(*holes((0.0, 0.0, 6.9998))))
 
-            def nominal(self, measured):
-                return {m: float(round(m)) for m in measured}
+        assert diameters(got) == [6.8]
 
-        strategy = RoundToWholeMillimetres()
-        assert isinstance(strategy, DiameterStrategy)
+    def test_it_quantises_the_value_it_was_handed_not_the_original_measurement(self):
+        """No stage may reach behind its input (LSP).
 
-        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(1.0, 0.0, 5.4, index=1))
-        out = NormalizeDiameters(strategy).apply(data)
+        ``raw`` is provenance — what the artwork measured — and the value to
+        quantise is whatever the previous stage left, whether or not there was
+        one. Reading ``raw`` here would silently undo any upstream transform,
+        and it reads identically on every fixture where nothing has moved yet,
+        which is most of them.
+        """
+        handed_on = at(0.0, 0.0, 4.0, index=0).with_diameter(6.9998)
 
-        assert diameters(out) == [7.0, 5.0]
-        assert codes(out) == []
+        got = SnapDiametersToDrillTable().apply(make_data(handed_on))
 
-    def test_unresolved_values_are_reported_generically(self):
-        """A strategy signals "no nominal" by omitting the key; the stage
-        reports it. That contract, not an isinstance check, is what keeps
-        NormalizeDiameters closed for modification."""
+        assert diameters(got) == [7.0]
+        assert got.holes[0].raw.diameter == 4.0, "the measurement was rewritten"
 
-        class RefusesEverything:
-            def nominal(self, measured):
-                return {}
+    def test_positions_and_raw_measurements_are_untouched(self):
+        got = SnapDiametersToDrillTable().apply(make_data(*holes((-39.99, 18.01, 6.9998))))
 
-        data = make_data(at(0.0, 0.0, 6.9998, index=0))
-        out = NormalizeDiameters(RefusesEverything()).apply(data)
+        assert positions(got) == [(-39.99, 18.01)]
+        assert got.holes[0].raw.diameter == pytest.approx(6.9998)
+        assert got.holes[0].residual[2] == pytest.approx(0.0002, abs=1e-9)
 
-        assert diameters(out) == [6.9998]
-        assert codes(out) == ["unknown-diameter"]
+    def test_distinct_sizes_stay_distinct(self):
+        got = SnapDiametersToDrillTable().apply(
+            make_data(*holes((0.0, 0.0, 5.02), (1.0, 0.0, 6.98), (2.0, 0.0, 4.99)))
+        )
+        assert diameters(got) == [5.0, 7.0, 5.0]
+        assert len(got.tools()) == 2
+
+    def test_every_nominal_it_produces_comes_from_the_table(self):
+        """The invariant, stated as a property over the whole series.
+
+        Every measurement inside the standard's range lands on a size the drawer
+        holds — never on a rounded value, and never on its own measurement.
+        """
+        rng = random.Random(20250815)
+        standard = DRILL_STANDARDS["metric"]
+        measured = [round(rng.uniform(0.5, 25.0), 4) for _ in range(200)]
+        got = SnapDiametersToDrillTable().apply(
+            make_data(*holes(*[(float(i), 0.0, m) for i, m in enumerate(measured)]))
+        )
+
+        assert len(got.holes) == len(measured)
+        assert set(diameters(got)) <= set(standard.sizes_mm)
+        for hole in got.holes:
+            # Spelled out rather than routed through ``tolerance.within``: a test
+            # that borrows the implementation's own comparison cannot catch the
+            # implementation getting that comparison wrong.
+            assert abs(hole.diameter - hole.raw.diameter) <= 0.25 + 1e-9
 
 
 # --------------------------------------------------------------------------
@@ -758,8 +924,14 @@ class TestPipelineComposition:
         assert len(dedupe_first.holes) == 2
         assert "duplicate-hole" not in codes(dedupe_first)
 
-    def test_the_canonical_order_yields_one_tool_for_a_noisy_seven_mm_row(self):
-        """End-to-end shape of the CLI pipeline (PLAN task F order)."""
+    def test_a_realistic_composition_yields_one_tool_for_a_noisy_seven_mm_row(self):
+        """Several stages folded together, on the shape of panel they meet.
+
+        Deliberately *not* a second statement of the CLI's stage order — that
+        lives in ``cli.build_pipeline`` and is pinned once, in
+        ``tests/test_cli.py``, by reading the pipeline the CLI actually builds.
+        A parallel list here has already drifted once.
+        """
         data = make_data(
             at(-40.003, 18.001, 6.9998, index=0),
             at(-40.0, 18.0, 7.0000, index=1),  # duplicate of the above, once snapped
@@ -772,9 +944,9 @@ class TestPipelineComposition:
         out = Pipeline(
             [
                 SnapPositions(0.25),
-                NormalizeDiameters(ClusterDiameters(0.05)),
+                SnapDiametersToDrillTable(),
                 Deduplicate(0.05),
-                CheckReferenceSize((113.0, 60.0)),
+                IdentifyHammondFootprint(),
                 SortHoles(),
             ]
         ).run(data)
@@ -908,46 +1080,29 @@ class TestDescribe:
         assert SortHoles().describe().get("key") == "default"
         assert SortHoles(key=by_diameter).describe().get("key") == "by_diameter"
 
-    def test_normalize_reports_the_strategy_and_the_strategys_tolerance(self):
-        run = NormalizeDiameters(ClusterDiameters(0.02)).describe()
-        assert run.get("strategy") == "ClusterDiameters"
-        assert run.get("tolerance_mm") == 0.02
-
-    def test_a_table_strategy_also_reports_its_sizes(self):
-        # 0.1, not the 0.15 the strategy defaults to: a describe() that reported
-        # the class default rather than the configured value must not pass.
-        run = NormalizeDiameters(TableDiameters([7.0, 3.2], 0.1)).describe()
-        assert run.get("strategy") == "TableDiameters"
+    def test_snap_diameters_reports_the_standard_it_quantised_against(self):
+        run = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"], 0.1).describe()
+        assert run.get("standard") == "fractional"
         assert run.get("tolerance_mm") == 0.1
-        assert run.get("sizes_mm") == (3.2, 7.0)
 
-    def test_a_strategy_without_a_tolerance_omits_the_key_rather_than_inventing_one(self):
-        """Absent, not present-and-None. ``get`` cannot tell those apart.
+    def test_snap_diameters_records_the_sizes_that_were_actually_available(self):
+        """The narrowed drawer, not the standard it was narrowed from.
 
-        A record of ``("tolerance_mm", None)`` is the invented default this
-        stage refuses to publish — a consumer that checks for the key would
-        believe a tolerance had been applied, and ``None`` is not even a legal
-        ``ParameterValue``.
+        A drawing or a JSON document stating the full 183-size metric series
+        would claim the panel had been quantised against bits the operator had
+        told us they do not own — and the one number a consumer would take from
+        it, "the nearest available size", would be wrong.
         """
-        run = NormalizeDiameters(NoNormalization()).describe()
-        parameters = dict(run.parameters)
+        drawer = DRILL_STANDARDS["metric"].select(include=(3.2, 5.0, 7.0, 12.0))
+        run = SnapDiametersToDrillTable(drawer).describe()
 
-        assert run.get("strategy") == "NoNormalization"
-        assert "tolerance_mm" not in parameters
-        assert "sizes_mm" not in parameters
+        assert run.get("standard") == "metric"
+        assert run.get("sizes_mm") == (3.2, 5.0, 7.0, 12.0)
 
-    def test_a_strategy_invented_here_is_described_without_editing_the_stage(self):
-        """OCP again: describe() may not become a closed union over strategies."""
-
-        class RoundToWholeMillimetres:
-            tolerance = 0.5
-
-            def nominal(self, measured):
-                return {m: float(round(m)) for m in measured}
-
-        run = NormalizeDiameters(RoundToWholeMillimetres()).describe()
-        assert run.get("strategy") == "RoundToWholeMillimetres"
-        assert run.get("tolerance_mm") == 0.5
+    def test_snap_diameters_reports_the_whole_standard_when_nothing_was_narrowed(self):
+        run = SnapDiametersToDrillTable().describe()
+        assert run.get("sizes_mm") == DRILL_STANDARDS["metric"].sizes_mm
+        assert run.get("tolerance_mm") == 0.25
 
 
 class TestPipelineRecordsProvenance:
@@ -1031,20 +1186,22 @@ class TestPipelineRecordsProvenance:
         assert data.processing == ()
 
     def test_a_pipeline_records_its_stages_in_order(self):
-        after = Pipeline(ALL_STAGES).run(
+        """Read off the stages that were handed in, not from a copy of the list.
+
+        The literal spelling drifted once already — it named the CLI's order,
+        which this list has not been since the enclosure stage joined it — and a
+        parallel list is what let that happen quietly. What is being asserted is
+        that ``Pipeline`` records *in order*, which the input already states.
+        """
+        stages = ALL_STAGES
+        after = Pipeline(stages).run(
             make_data(
                 *holes((-40.003, 18.001, 6.9998), (19.0, -18.75, 5.0002)),
                 reference=ReferenceOutline(113.0, 60.0),
             )
         )
-        assert [r.name for r in after.processing] == [
-            "snap",
-            "normalize-diameters",
-            "deduplicate",
-            "check-reference-size",
-            "sort",
-            "identify-enclosure",
-        ]
+        assert [r.name for r in after.processing] == [type(s).name for s in stages]
+        assert len(after.processing) == len(stages), "a stage recorded nothing"
 
 
 # --------------------------------------------------------------------------

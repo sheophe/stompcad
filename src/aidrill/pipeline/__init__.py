@@ -12,27 +12,30 @@ is chosen by the caller (``cli.py``), not by the stages.
 
 from .dedupe import Deduplicate
 from .diameters import (
-    ClusterDiameters,
-    DiameterStrategy,
-    NoNormalization,
-    NormalizeDiameters,
-    TableDiameters,
+    DEFAULT_STANDARD,
+    DRILL_STANDARDS,
+    FRACTIONAL_SIXTY_FOURTHS,
+    METRIC_BANDS,
+    DrillStandard,
+    SnapDiametersToDrillTable,
 )
-from .enclosure import IdentifyHammondFootprint, normalize_part_name
+from .enclosure import CATALOGUE, IdentifyHammondFootprint, normalize_part_name
 from .snap import SnapPositions
 from .sort import SortHoles
 from .validate import CheckReferenceSize
 
 __all__ = [
     "SnapPositions",
-    "NormalizeDiameters",
-    "DiameterStrategy",
-    "ClusterDiameters",
-    "TableDiameters",
-    "NoNormalization",
+    "SnapDiametersToDrillTable",
+    "DrillStandard",
+    "DRILL_STANDARDS",
+    "DEFAULT_STANDARD",
+    "METRIC_BANDS",
+    "FRACTIONAL_SIXTY_FOURTHS",
     "Deduplicate",
     "CheckReferenceSize",
     "SortHoles",
     "IdentifyHammondFootprint",
     "normalize_part_name",
+    "CATALOGUE",
 ]

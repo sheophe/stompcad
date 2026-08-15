@@ -9,9 +9,9 @@ produced by an emitter.
 Three constraints are worth stating, because each one is a rule that could
 plausibly have been broken here:
 
-* **The stage order lives here, not in the stages.** snap → normalize → dedupe →
-  validate → sort. No stage may assert its own position (LSP), so somebody has
-  to choose, and that somebody is the caller.
+* **The stage order lives here, not in the stages.** snap → snap-diameters →
+  dedupe → identify-enclosure → sort. No stage may assert its own position
+  (LSP), so somebody has to choose, and that somebody is the caller.
 * **Formats are never named.** ``--emit FORMAT=PATH`` is resolved purely through
   :func:`get_emitter`, and :func:`available` supplies both the help text and the
   error messages. Adding an output format must not require an edit to this file;
@@ -19,9 +19,10 @@ plausibly have been broken here:
   inside the test. Emitter *options* classes are named — they are this module's
   job to populate from the arguments — but the option builders below are keyed
   by options class, so an unknown emitter simply gets its own defaults.
-* **Defaults are not restated.** ``--grid-warn`` defaults to ``grid / 4``, and
-  the diameter tolerances default per strategy. Those rules live in the stages;
-  passing ``None`` here means "whatever you already say it is".
+* **Defaults are not restated.** ``--grid-warn`` defaults to ``grid / 4`` and
+  the diameter matching tolerance is whatever ``SnapDiametersToDrillTable`` says
+  it is. Those rules live in the stages; passing ``None`` here, or not passing
+  the argument at all, means "whatever you already say it is".
 
 Exit codes: 0 clean, 1 warnings, 2 errors, 3 usage or I/O failure.
 """
@@ -36,24 +37,33 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence, TextIO, get_args, get_type_hints
 
 from .emitters import DrawingOptions, ExcellonOptions, JsonOptions, available, get_emitter
+from .enclosures import HAMMOND_1590
 from .errors import AidrillError
 from .formatting import format_mm
 from .model import Diagnostic, DrillData, Severity
 from .pipeline import (
-    CheckReferenceSize,
-    ClusterDiameters,
+    CATALOGUE,
+    DEFAULT_STANDARD,
+    DRILL_STANDARDS,
     Deduplicate,
-    DiameterStrategy,
-    NoNormalization,
-    NormalizeDiameters,
+    DrillStandard,
+    IdentifyHammondFootprint,
+    SnapDiametersToDrillTable,
     SnapPositions,
     SortHoles,
-    TableDiameters,
+    normalize_part_name,
 )
 from .protocols import Emitter, Pipeline, Stage
 from .sources import AiPdfSource
 
-__all__ = ["main", "build_parser", "build_pipeline", "parse_true_size", "parse_drill_sizes"]
+__all__ = [
+    "main",
+    "build_parser",
+    "build_pipeline",
+    "build_drill_standard",
+    "parse_case",
+    "parse_sizes",
+]
 
 EXIT_CLEAN = 0
 EXIT_WARNINGS = 1
@@ -71,8 +81,6 @@ _EXIT_FOR_SEVERITY: dict[Severity | None, int] = {
 
 #: Severities in the order the report groups them: worst first.
 _SEVERITY_ORDER = (Severity.ERROR, Severity.WARNING, Severity.INFO)
-
-_SIZE_SEPARATORS = ("x", "X", "×")
 
 
 class UsageError(Exception):
@@ -111,23 +119,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="warn when a hole moves further than this (default: grid/4)",
     )
     parser.add_argument(
-        "--diameters",
-        choices=("cluster", "table", "none"),
-        default="cluster",
-        help="how a nominal diameter is chosen (default: cluster)",
-    )
-    parser.add_argument(
-        "--diameter-tolerance",
-        metavar="MM",
-        type=float,
-        default=None,
-        help="tolerance for the chosen strategy (default: 0.05 cluster / 0.15 table)",
+        "--drill-standard",
+        metavar="NAME",
+        default=DEFAULT_STANDARD,
+        help="the bit series the panel is drilled with, one of: "
+        + ", ".join(DRILL_STANDARDS)
+        + f" (default: {DEFAULT_STANDARD})",
     )
     parser.add_argument(
         "--drill-sizes",
         metavar="CSV",
         default=None,
-        help="comma-separated stocked drill sizes; required by --diameters table",
+        help="only these sizes of the standard are in the drawer",
+    )
+    parser.add_argument(
+        "--no-drill-sizes",
+        metavar="CSV",
+        default=None,
+        help="these sizes of the standard are not in the drawer",
     )
     parser.add_argument(
         "--dedupe-tolerance",
@@ -137,10 +146,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="how close two holes of one size must be to count as one (default: 0.05)",
     )
     parser.add_argument(
-        "--true-size",
-        metavar="WxH",
+        "--case",
+        metavar="PART",
         default=None,
-        help="declared panel size in mm; enables the reference-outline check",
+        help=f"the {CATALOGUE} base designator the panel is drawn for, e.g. 1590B",
     )
     parser.add_argument(
         "--emit",
@@ -156,53 +165,85 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_true_size(text: str) -> tuple[float, float]:
-    """``"112.4x60.5"`` → ``(112.4, 60.5)``. Accepts ``x``, ``X`` and ``×``.
+def parse_sizes(text: str, flag: str) -> tuple[float, ...]:
+    """``"3.2,5,7"`` → ``(3.2, 5.0, 7.0)``. One parser, both size flags.
 
-    The finiteness check is not belt and braces. ``float`` happily returns
-    ``inf`` and ``nan`` for ``"inf"`` and ``"nan"``, and ``width <= 0`` rejects
-    neither — every comparison against ``nan`` is False, and ``inf`` is
-    positive. ``--true-size infx60`` therefore passed validation and reached the
-    drawing, which exited 1 and wrote an SVG carrying ``x="-inf"`` and
-    ``width="inf"``: a corrupt document delivered as a successful run. A size
-    that is not a real number is a usage error, and usage errors exit 3.
-    """
-    normalised = text
-    for separator in _SIZE_SEPARATORS[1:]:
-        normalised = normalised.replace(separator, _SIZE_SEPARATORS[0])
-    parts = [part.strip() for part in normalised.split(_SIZE_SEPARATORS[0])]
-    if len(parts) != 2:
-        raise UsageError(f"--true-size expects WxH in millimetres, got {text!r}")
-    try:
-        width, height = (float(part) for part in parts)
-    except ValueError:
-        raise UsageError(f"--true-size expects WxH in millimetres, got {text!r}") from None
-    if not math.isfinite(width) or not math.isfinite(height):
-        raise UsageError(f"--true-size must be a finite size in millimetres, got {text!r}")
-    if width <= 0 or height <= 0:
-        raise UsageError(f"--true-size must be positive, got {text!r}")
-    return (width, height)
+    ``flag`` is passed in rather than hardcoded because the whitelist and the
+    blacklist are one decision about what a list of millimetres is, and two
+    copies of it would be two decisions — the mistake ``tolerance.py`` and
+    ``formatting.py`` exist to record.
 
-
-def parse_drill_sizes(text: str) -> tuple[float, ...]:
-    """``"3.2,5,7"`` → ``(3.2, 5.0, 7.0)``.
-
-    Finiteness is checked for the same reason as in :func:`parse_true_size`:
-    ``size <= 0`` is False for ``nan``, so ``--drill-sizes 3,nan`` used to reach
-    ``TableDiameters`` as a stocked size that no bit in any drawer matches.
+    Finiteness is checked separately from positivity, and not as belt and
+    braces. ``float`` happily returns ``nan`` for ``"nan"``, and ``size <= 0``
+    rejects it no better than it rejects ``inf`` — every comparison against
+    ``nan`` is False. Such a value would then be looked for in the drill table,
+    found nowhere in it, and reported as a bit the standard does not stock —
+    which is a true sentence about a size the operator never meant to type.
     """
     fields = [field.strip() for field in text.split(",") if field.strip()]
     if not fields:
-        raise UsageError("--drill-sizes needs at least one size")
+        raise UsageError(f"{flag} needs at least one size in millimetres")
     try:
         sizes = tuple(float(field) for field in fields)
     except ValueError:
-        raise UsageError(f"--drill-sizes expects comma-separated millimetres, got {text!r}") from None
+        raise UsageError(f"{flag} expects comma-separated millimetres, got {text!r}") from None
     if not all(math.isfinite(size) for size in sizes):
-        raise UsageError(f"--drill-sizes must all be finite millimetres, got {text!r}")
+        raise UsageError(f"{flag} must all be finite millimetres, got {text!r}")
     if any(size <= 0 for size in sizes):
-        raise UsageError(f"--drill-sizes must all be positive, got {text!r}")
+        raise UsageError(f"{flag} must all be positive, got {text!r}")
     return sizes
+
+
+#: Every base designator the catalogue holds. Derived from the catalogue rather
+#: than listed, because a list is a second copy of a generated file.
+CATALOGUE_PARTS = frozenset(enclosure.part for enclosure in HAMMOND_1590)
+
+
+def _base_designator_of(part: str) -> str | None:
+    """The longest catalogue designator ``part`` begins with, if any.
+
+    A *suggestion*, never a decision, and that distinction is the whole design.
+    Collapsing an order code such as ``1590BBBK`` onto ``1590BB`` for real needs
+    the datasheet's suffix grammar — colour, flange, watertight — which has
+    produced one wrong answer in this project already, and a collapse that lands
+    on the wrong base part is silent and drills the wrong panel. Getting *this*
+    wrong costs nothing: the run has already been refused and the operator
+    retypes the part number either way.
+    """
+    beginnings = [part_number for part_number in CATALOGUE_PARTS if part.startswith(part_number)]
+    return max(beginnings, key=len) if beginnings else None
+
+
+def parse_case(text: str) -> str:
+    """The declared part number, in catalogue form, or a usage error.
+
+    **Why an unknown part number is a usage error and not a diagnostic.**
+    ``--case 1590BBBK`` is a real order code — BB body, BK black finish — and
+    the single most likely thing an operator types. Checked against footprints
+    it would report ``wrong-enclosure`` on a *correct* 1590BB panel: an ERROR,
+    exit 2, telling the operator they drew the wrong case when they drew the
+    right one. Those are two different findings and they get two different
+    exits.
+
+    ``wrong-enclosure`` is a fact about the artwork: it took a parse, a
+    measurement and a catalogue lookup to reach, and it belongs in the report,
+    the drawing's notes and the machine-readable document, where both part
+    numbers can be read side by side. A part number that is in no catalogue is a
+    fact about the command line — nothing was measured, no file need even be
+    opened — so it is refused here, before the input is read, with the base
+    designator the order code is built on where the operator can see it.
+    """
+    part = normalize_part_name(text)
+    if not part:
+        raise UsageError("--case needs a part number, e.g. 1590B")
+    if part in CATALOGUE_PARTS:
+        return part
+    base = _base_designator_of(part)
+    hint = "" if base is None else f"; did you mean {base}?"
+    raise UsageError(
+        f"--case {text!r}: {part} is not a base designator in the {CATALOGUE} "
+        f"catalogue{hint}"
+    )
 
 
 def parse_emit(spec: str) -> tuple[str, Path]:
@@ -220,36 +261,57 @@ def parse_emit(spec: str) -> tuple[str, Path]:
 # ---------------------------------------------------------------------------
 
 
-def build_strategy(args: argparse.Namespace) -> DiameterStrategy:
-    """Choose the diameter strategy, leaving its default tolerance alone (DRY)."""
-    tolerance = args.diameter_tolerance
+def build_drill_standard(args: argparse.Namespace) -> DrillStandard:
+    """The declared bit series, narrowed to what is actually in the drawer.
 
-    if args.diameters == "cluster":
-        return ClusterDiameters() if tolerance is None else ClusterDiameters(tolerance)
+    Resolved here rather than in the stage so that a typed standard, a typed
+    size and an unstocked size are all refused before the input file is opened —
+    and all as usage errors, which is what they are.
+    """
+    standard = DRILL_STANDARDS.get(args.drill_standard)
+    if standard is None:
+        raise UsageError(
+            f"--drill-standard {args.drill_standard!r} is not a drill standard; "
+            f"available: {', '.join(DRILL_STANDARDS)}"
+        )
 
-    if args.diameters == "table":
-        if not args.drill_sizes:
-            raise UsageError("--diameters table requires --drill-sizes")
-        sizes = parse_drill_sizes(args.drill_sizes)
-        return TableDiameters(sizes) if tolerance is None else TableDiameters(sizes, tolerance)
-
-    return NoNormalization()
+    include = None if args.drill_sizes is None else parse_sizes(args.drill_sizes, "--drill-sizes")
+    exclude = (
+        None if args.no_drill_sizes is None else parse_sizes(args.no_drill_sizes, "--no-drill-sizes")
+    )
+    if include is None and exclude is None:
+        return standard
+    try:
+        return standard.select(include=include, exclude=exclude)
+    except ValueError as failure:
+        # The standard already knows which sizes it has and what it is called;
+        # restating that here would be a second answer to the same question.
+        raise UsageError(str(failure)) from failure
 
 
 def build_pipeline(args: argparse.Namespace) -> Pipeline:
-    """snap → normalize → dedupe → validate → sort.
+    """snap → snap-diameters → dedupe → identify-enclosure → sort.
 
     The order is a property of *this* call, not of the stages: no stage knows or
     may ask what ran before it.
+
+    Two positions are worth the sentence. Diameters are quantised before
+    deduplication because ``Deduplicate`` compares diameters exactly and will not
+    decide for itself that 6.9998 and 7.0002 are one size — that decision is made
+    once, upstream, or it gets made twice and differently. And the enclosure is
+    identified on every run, declared case or not: the outline it snaps to whole
+    millimetres is what the drawing dimensions and what a consumer computes edge
+    clearance from, neither of which is opt-in.
     """
     stages: list[Stage] = [
         SnapPositions(args.grid, args.grid_warn),
-        NormalizeDiameters(build_strategy(args)),
+        SnapDiametersToDrillTable(build_drill_standard(args)),
         Deduplicate(args.dedupe_tolerance),
+        IdentifyHammondFootprint(
+            expected_part=None if args.case is None else parse_case(args.case)
+        ),
+        SortHoles(),
     ]
-    if args.true_size is not None:
-        stages.append(CheckReferenceSize(parse_true_size(args.true_size)))
-    stages.append(SortHoles())
     return Pipeline(stages)
 
 
@@ -268,10 +330,16 @@ class OutputSettings:
 
     Not a shared options bag (ISP): it is the *input* to the per-emitter options
     builders below, each of which picks out only what its own emitter declares.
+
+    Down to one field, and deliberately not deleted for it. The drawing's
+    ``true_size`` overlay lost its flag when the enclosure catalogue took over
+    the job of saying what size the panel really is — a declared ``WxH`` was the
+    operator retyping a datasheet — but the *shape* here is what keeps ``--grid``
+    from being copied into an emitter's options, which is a fault this project
+    has already shipped once.
     """
 
     title: str = ""
-    true_size: tuple[float, float] | None = None
 
 
 #: Keyed by options **class**, never by format name. An emitter whose options
@@ -283,7 +351,9 @@ _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
     # the drawing reads the pitch back out of that stage's record. Passing it a
     # second time made the sheet's stamp agree with the flag rather than with
     # the holes, which is the same disagreement in miniature.
-    DrawingOptions: lambda s: DrawingOptions(title=s.title, true_size=s.true_size),
+    # No true_size either: the drawing takes the panel's real size from the
+    # enclosure the pipeline identified, not from a second declaration here.
+    DrawingOptions: lambda s: DrawingOptions(title=s.title),
     JsonOptions: lambda s: JsonOptions(),
 }
 
@@ -317,10 +387,7 @@ def make_emitter(name: str, settings: OutputSettings) -> Emitter:
 
 
 def settings_from(args: argparse.Namespace) -> OutputSettings:
-    return OutputSettings(
-        title=args.title,
-        true_size=None if args.true_size is None else parse_true_size(args.true_size),
-    )
+    return OutputSettings(title=args.title)
 
 
 def run_pipeline(
@@ -398,14 +465,18 @@ _MAX_REPORT_DECIMALS = 9
 def _diameter_decimals(diameters: Iterable[float]) -> int:
     """The fewest decimals that keep every nominal diameter distinct in print.
 
-    Derived from the values actually present, exactly as
-    :attr:`ClusterDiameters.precision` is derived from its tolerance rather than
-    fixed — and for the same reason. A fixed 3 dp is lossy, and what it loses is
-    the one distinction this project exists to preserve: under
-    ``--diameter-tolerance 0.0001`` a panel measuring 6.9998 and 7.0000 keeps two
-    nominal diameters, and the tool summary printed both as ``7.000``. Two lines,
-    the same diameter, different tool numbers — the founding defect of ADR-0001,
-    rendered into the report a human reads and believes.
+    Derived from the values actually present rather than fixed. A fixed 3 dp is
+    lossy, and what it loses is the one distinction this project exists to
+    preserve: a panel carrying two nominal diameters that agree to three
+    decimals printed both as ``7.000``. Two lines, the same diameter, different
+    tool numbers — the founding defect of ADR-0001, rendered into the report a
+    human reads and believes.
+
+    No flag reaches this any more: every nominal now comes from a drill table
+    whose sizes are further apart than three decimals, so the CLI cannot produce
+    the collision. It stays because the *library* still can — a caller may hand
+    the report any ``DrillData`` it likes — and because a renderer that is only
+    correct for the inputs one entry point happens to produce is not correct.
 
     Widening only when a collision exists keeps every ordinary panel reading as
     it always did.
