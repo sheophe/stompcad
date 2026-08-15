@@ -165,3 +165,39 @@ risk instead of growing it.
 
 Note this does **not** address the draft-angle problem — see the backplate
 convention in `CLAUDE.md`. That offset is depth-dependent and unpublished.
+
+### Update: the residue is five numbers, not a pipeline
+
+`1590E` is **resolved without further tooling**. Its width renders as individual
+glyphs (`1 2 0 0 0`) rather than one text run, which is why word-level extraction
+missed it — but the bracketed imperial beneath reads `[4.724]`, and
+120.00 ÷ 25.4 = 4.7244. The two agree, so the value is known: **120.00 mm**.
+
+That leaves **five ambiguous axes**, each a choice between candidates already
+extracted:
+
+| Part | Axis | Candidates |
+|---|---|---|
+| 1590LB | 51 | 50.55, 50.60 |
+| 1590G2 | 31 | 31.00, 31.20 |
+| 1590CE | 65 | 64.57, 64.60 |
+| 1590P1 | 83 | 83.00, 83.10 |
+| 1590BX | 50 | 49.50, 49.88, 50.00 |
+
+Five glances at five drawings. **Do not build more extraction machinery for this.**
+
+### The principled alternative, deliberately not taken
+
+Hammond publishes `.x_t` (Parasolid), `.dwg`, and `.igs`/`.stp` alongside each
+drawing. A STEP or Parasolid file carries exact geometry, so a bounding box read
+from it needs no rounding archaeology and no glyph grouping — it is the correct
+answer if this ever had to scale, or to run against a manufacturer who publishes
+no dimension table at all.
+
+It is not worth it here: 37 parts, once, with 97% already resolved. A CAD-parsing
+pipeline adds a dependency and a maintenance surface for a job that never repeats,
+and would cost more than the five numbers left.
+
+**What is worth keeping is the fault model, not the extractor.** That Hammond's
+tables are double-converted, and that Hammond rounds half-up where Python rounds
+half-even, is what makes the *next* discrepancy legible rather than mysterious.
