@@ -16,6 +16,7 @@ from aidrill.model import (
     DrillData,
     Hole,
     RawHole,
+    RawOutline,
     ReferenceOutline,
     Severity,
     SourceInfo,
@@ -36,12 +37,17 @@ def fixture_data() -> DrillData:
     outline, one diagnostic of each severity, full source info, and the stages
     that produced it.
 
-    Two details are deliberate. The hole identities are 4 and 1 — neither
+    Three details are deliberate. The hole identities are 4 and 1 — neither
     sequential nor equal to their position in the document — because a fixture
     numbered 0, 1 in the order it lists its holes cannot tell a serialised
     identity from a serialised list index; gaps are what survives a
-    Deduplicate anyway. And two of the three diagnostics carry a payload,
-    because a document that drops ``data`` still round-trips empty ones.
+    Deduplicate anyway. Two of the three diagnostics carry a payload,
+    because a document that drops ``data`` still round-trips empty ones. And
+    the outline is *snapped* — measured 113 × 60, resized to a catalogue
+    112 × 61 — because an outline whose ``raw`` equals its nominal size cannot
+    tell a serialised measurement from a re-derived one, and the round-trip
+    test stayed green for exactly that reason while ``reference.raw`` was being
+    dropped on the way out.
     """
     given = (
         Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-39.9906, 18.0021, 6.9998), index=4),
@@ -49,7 +55,9 @@ def fixture_data() -> DrillData:
     )
     return DrillData(
         holes=given,
-        reference=ReferenceOutline(width=113.0, height=60.0, centre_x=297.6, centre_y=421.0),
+        reference=ReferenceOutline.from_measurement(
+            113.0, 60.0, centre_x=297.6, centre_y=421.0
+        ).resized(112.0, 61.0),
         diagnostics=(
             Diagnostic.info("no-reference-outline", "nothing to check against"),
             Diagnostic.warning(
@@ -135,7 +143,7 @@ def test_document_declares_its_format_and_canonical_frame():
     document = parse(fixture_data())
 
     assert document["format"] == "aidrill-drill-data"
-    assert document["version"] == 2
+    assert document["version"] == 3
     assert document["units"] == "mm"
     assert document["origin"] == "centre"
 
@@ -158,11 +166,28 @@ def test_source_info_round_trips():
 def test_reference_outline_round_trips():
     reference = parse(fixture_data())["reference"]
 
-    assert list(reference) == ["width", "height", "centre_x", "centre_y"]
-    assert reference["width"] == 113.0
-    assert reference["height"] == 60.0
+    assert list(reference) == ["width", "height", "centre_x", "centre_y", "raw"]
+    assert reference["width"] == 112.0
+    assert reference["height"] == 61.0
     assert reference["centre_x"] == 297.6
     assert reference["centre_y"] == 421.0
+
+
+def test_reference_outline_carries_what_was_measured_not_only_what_was_snapped():
+    """The nominal size is a catalogue decision; ``raw`` is the artwork.
+
+    A hole's ``raw`` has been in this document since version 1. The outline's
+    was not, so a snapped panel went out stating 112 × 61 with nothing left
+    saying it had been measured at 113 × 60 — provenance leaving the system
+    through the one emitter CLAUDE.md calls the integration contract.
+    """
+    reference = parse(fixture_data())["reference"]
+
+    assert reference["raw"] == {"width": 113.0, "height": 60.0}
+    assert (reference["width"], reference["height"]) != (
+        reference["raw"]["width"],
+        reference["raw"]["height"],
+    )
 
 
 def test_missing_reference_outline_is_null_not_omitted():
@@ -269,7 +294,7 @@ def test_diagnostic_payloads_survive_serialisation():
     after = Pipeline([Deduplicate(tolerance=0.05)]).run(data)
     doc = json.loads(JsonEmitter().emit(after))
 
-    assert doc["version"] == 2
+    assert doc["version"] == 3
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
     assert duplicate["data"]["dropped"] == 1
     assert duplicate["data"]["hole_index"] == doc["holes"][0]["index"]
@@ -355,7 +380,11 @@ def test_document_rebuilds_an_identical_drilldata():
     ``==`` on a frozen dataclass is only as strong as the fixture: it passed for
     a while over holes with no identity, diagnostics with empty payloads and no
     stage records at all, which made "nothing is lost" a claim about three
-    absent fields. The fixture now carries all three.
+    absent fields. It then passed over an *unsnapped* reference outline, where
+    ``raw`` equals the nominal size — so a document that dropped the outline's
+    measurement rebuilt it from the nominal values and compared equal, and the
+    claim in the first paragraph was false for a fourth field while this test
+    stayed green. The fixture now carries all four, the outline snapped.
     """
     data = fixture_data()
     document = parse(data)
@@ -371,7 +400,16 @@ def test_document_rebuilds_an_identical_drilldata():
             )
             for h in document["holes"]
         ),
-        reference=ReferenceOutline(**document["reference"]),
+        reference=ReferenceOutline(
+            width=document["reference"]["width"],
+            height=document["reference"]["height"],
+            centre_x=document["reference"]["centre_x"],
+            centre_y=document["reference"]["centre_y"],
+            raw=RawOutline(
+                document["reference"]["raw"]["width"],
+                document["reference"]["raw"]["height"],
+            ),
+        ),
         diagnostics=tuple(
             Diagnostic(
                 severity=Severity(d["severity"]),

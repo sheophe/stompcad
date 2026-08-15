@@ -5,16 +5,17 @@ values behind them, the reference outline, the tool table, every diagnostic, and
 where the data came from. A consumer can rebuild an identical ``DrillData`` from
 this document, which is what ``test_json_emitter.py`` asserts.
 
-Document shape (version 2)::
+Document shape (version 3)::
 
     {
       "format": "aidrill-drill-data",
-      "version": 2,
+      "version": 3,
       "units": "mm",                     # always; canonical frame, never inches
       "origin": "centre",                # centre of the reference outline, Y up
       "source":     {"path", "drill_layer", "reference_layer",
                      "layers_found", "producer"},
-      "reference":  {"width", "height", "centre_x", "centre_y"} | null,
+      "reference":  {"width", "height", "centre_x", "centre_y",
+                     "raw": {"width", "height"}} | null,
       "tools":     [{"number", "diameter", "count"}, …],   # ascending diameter
       "holes":     [{"x", "y", "diameter", "tool",
                      "raw": {"x", "y", "diameter"},
@@ -42,6 +43,17 @@ is exactly the mistake the drawing emitter made inside this codebase.
 parameter values. A consumer that has to be told the grid out of band can be
 told the wrong one; a document that states it cannot disagree with itself.
 
+Version 3 added ``reference.raw``, the outline as measured off the artwork. A
+hole's ``raw`` had been serialised since version 1 while the outline's was not,
+and once a stage snaps the outline to a catalogue enclosure — the fixture panel
+measures 113.000 × 60.000 mm where the datasheet says 112 × 61 — that omission
+sent a *nominal* size out as though it were what the artwork said. Nothing
+downstream could then recover the measurement, which is the same class of
+defect as re-deriving a pipeline fact, only worse: the fact is gone, not merely
+recomputed. The round-trip test did not notice for the classic reason — its
+fixture outline was unsnapped, so ``raw`` and nominal coincided and a dropped
+key rebuilt itself.
+
 Key order is fixed and part of the contract, so diffing two runs shows real
 changes rather than dictionary reshuffling. New keys are appended — at the top
 level, within a hole, within a diagnostic — so a v1 reader indexing by position
@@ -67,7 +79,7 @@ from .base import register_emitter
 __all__ = ["JsonOptions", "JsonEmitter", "FORMAT", "VERSION"]
 
 FORMAT = "aidrill-drill-data"
-VERSION = 2
+VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +137,14 @@ def _source(source: SourceInfo) -> dict[str, Any]:
 
 
 def _reference(reference: ReferenceOutline | None) -> dict[str, Any] | None:
+    """The outline, measurement included.
+
+    ``raw`` is emitted for the same reason a hole's is: once a stage snaps the
+    outline to a catalogue enclosure, the nominal width is no longer what the
+    artwork said, and a consumer cannot recover the difference from a document
+    that only carries the snapped value. Appended after ``centre_y`` so a reader
+    of the older shape sees the keys it knows in the order it knew them.
+    """
     if reference is None:
         return None
     return {
@@ -132,6 +152,7 @@ def _reference(reference: ReferenceOutline | None) -> dict[str, Any] | None:
         "height": reference.height,
         "centre_x": reference.centre_x,
         "centre_y": reference.centre_y,
+        "raw": {"width": reference.raw.width, "height": reference.raw.height},
     }
 
 

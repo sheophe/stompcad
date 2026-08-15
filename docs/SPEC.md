@@ -74,9 +74,13 @@ Hole:
 RawHole:
     x: float; y: float; diameter: float
 
+RawOutline:
+    width: float; height: float
+
 ReferenceOutline:
-    width: float; height: float          # mm
+    width: float; height: float          # mm, nominal (post-snap)
     centre_x: float; centre_y: float     # mm, in source space
+    raw: RawOutline                      # provenance: as-measured, never mutated
 
 Diagnostic:
     severity: Severity                   # INFO | WARNING | ERROR

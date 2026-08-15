@@ -162,7 +162,7 @@ class ReferenceOutline:
 
     ``raw`` is the as-measured size, kept for the same reason ``Hole.raw`` is:
     a stage snaps the outline to a catalogue enclosure, and the fixture panel
-    measures 113.000 x 60.000 mm where the Hammond datasheet says 112 x 61. That
+    measures 113.000 × 60.000 mm where the Hammond datasheet says 112 × 61. That
     snap rewrites a real measurement, and without ``raw`` nothing downstream
     could tell a 113 that was measured from a 113 that was snapped to — nor
     could a drawing quote what the artwork actually said. ``processing`` cannot

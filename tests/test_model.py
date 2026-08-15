@@ -3,7 +3,7 @@
 ``Hole`` has kept its as-measured values apart from its nominal ones since the
 snapping stage existed. ``ReferenceOutline`` did not, and a later stage snaps
 the outline to a Hammond catalogue size: the fixture panel measures
-113.000 x 60.000 mm and the datasheet says 112 x 61, so the snap rewrites a real
+113.000 × 60.000 mm and the datasheet says 112 × 61, so the snap rewrites a real
 measurement. Before ``raw`` existed there was nowhere left holding what the
 artwork actually said, and no way to tell a 113 that was measured from a 113
 that was snapped from something else.
@@ -121,10 +121,12 @@ def test_raw_outline_compares_by_value():
 
 
 def test_outlines_differing_only_in_provenance_are_not_equal():
-    """A snapped 112 x 61 and a measured one describe different panels.
+    """A snapped 112 × 61 and a measured one describe different panels.
 
-    If ``raw`` were excluded from equality, the JSON round-trip test would
-    accept a document that had silently dropped it.
+    This is the only test pinning ``raw`` into equality, and it has to be:
+    the JSON round-trip test can only notice a dropped measurement once its
+    own fixture carries a snapped outline, because an unsnapped one rebuilds
+    its ``raw`` from the nominal values and compares equal either way.
     """
     measured = ReferenceOutline.from_measurement(112.0, 61.0)
     snapped = ReferenceOutline.from_measurement(113.0, 60.0).resized(112.0, 61.0)
