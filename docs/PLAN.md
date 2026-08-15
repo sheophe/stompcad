@@ -1,4 +1,29 @@
-# aidrill — implementation plan
+# aidrill — implementation plan (SUPERSEDED)
+
+> **Status: historical, as of 2026-08-15. Do not implement from this file.**
+>
+> This is the task breakdown for the original v1.0 build, kept because it records the
+> interfaces that were agreed up front and the order the work was done in. It was never a
+> normative document — SPEC has always been — and it has not been rewritten, because
+> editing a plan after the fact destroys the only thing it is now good for: what was
+> agreed, before the code had an opinion.
+>
+> What it says that is no longer true:
+>
+> - **Task B.2** describes `NormalizeDiameters` and the `ClusterDiameters` /
+>   `TableDiameters` / `NoNormalization` strategies. All four are gone. Diameters now snap
+>   to a registry of drill standards — see SPEC §5.1 and `docs/adr/0003-domain-quantisers.md`.
+> - **Task B.4**'s `CheckReferenceSize` still exists but is no longer in the CLI pipeline;
+>   `IdentifyHammondFootprint` took over the question it answered.
+> - **Task E**'s `DrawingOptions.true_size` and its dashed overlay are gone.
+> - **Task F**'s stage order is now snap → snap-diameters → dedupe → identify-enclosure →
+>   sort, and the flags it implies (`--diameters`, `--diameter-tolerance`, `--true-size`)
+>   no longer exist.
+> - The model listed as "frozen" has since gained `RawOutline`, `EnclosureMatch`,
+>   `StageRun`, `Hole.index`, `Diagnostic.data`, `ReferenceOutline.raw`,
+>   `DrillData.processing` and `DrillData.enclosure`.
+>
+> For current work, read `docs/SPEC.md` and `docs/adr/`.
 
 Read `docs/SPEC.md` first. It is normative; this file only slices it into tasks.
 

@@ -45,6 +45,17 @@ the operator decides.
 match therefore names candidates, and ``selected_part`` is filled in only from
 what the operator declared.
 
+**The catalogue holds BACKPLATE dimensions, and so must the artwork.** A 1590 is
+die-cast with drafted walls -- the datasheet says "low side wall draft angle (2°
+or less)" -- so the face that gets drilled is smaller than the backplate by
+``2 * depth * tan(angle)`` per axis: 1.9 mm on a 1590B, 6.3 mm on a 1590V. No
+tolerance can take a face-drawn outline. Matching one needs at least 2.4 mm on
+the shallowest common part, while two footprints tie at 2.0 mm because the
+closest pair in this catalogue is 4 mm apart -- required >= 2.4, permitted
+< 2.0. So the convention is the fix, not a number, and ``_unknown``'s message
+names it: the operator this catches is the one who measured *more* carefully.
+``docs/adr/0003-domain-quantisers.md`` records the arithmetic.
+
 The default tolerance of 1.5 mm is bounded by the catalogue itself, not chosen
 for the fixture: two footprints can both match one outline once they are within
 twice the tolerance of each other, and the closest approach in the 22 Hammond
@@ -211,12 +222,24 @@ class IdentifyHammondFootprint:
         so refusing one that has an outline we do not recognise would punish the
         operator for drawing it. The outline is left as measured, and the run
         goes on.
+
+        The message names the backplate convention because that is the single
+        most likely reason a correct panel lands here, and the operator who
+        lands there is the *careful* one — they measured the face they are about
+        to drill. The catalogue lists backplate dimensions, and a 1590 face is
+        smaller than its backplate by the wall draft (SPEC §6.2 does the
+        arithmetic: no tolerance can accept both a face-drawn outline and the
+        catalogue's own closest pair of footprints). A failure that teaches the
+        fix costs a re-run; one that does not costs a case.
         """
         return Diagnostic.warning(
             "unknown-enclosure",
             f"reference outline {reference.width:.3f} × {reference.height:.3f} mm "
             f"matches no {CATALOGUE} footprint within {self.tolerance_mm:g} mm; "
-            f"the outline has been left as drawn",
+            f"the outline has been left as drawn. The catalogue lists backplate "
+            f"dimensions, and a drilled face is smaller than its backplate because "
+            f"the walls are drafted — if this outline is a face measurement, redraw "
+            f"the reference layer to the backplate size",
             data=(
                 ("width_mm", reference.width),
                 ("height_mm", reference.height),
