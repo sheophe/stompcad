@@ -28,6 +28,7 @@ __all__ = [
     "Hole",
     "RawOutline",
     "ReferenceOutline",
+    "EnclosureMatch",
     "Diagnostic",
     "SourceInfo",
     "ParameterValue",
@@ -212,6 +213,58 @@ class ReferenceOutline:
 
 
 @dataclass(frozen=True, slots=True)
+class EnclosureMatch:
+    """Which catalogue enclosure the panel outline was drawn for.
+
+    Derived, not read off the file: a stage compares the reference outline
+    against a catalogue and records what it found. That is why this is neither
+    ``SourceInfo`` — which says where the bytes came from, and would be lying if
+    it carried a conclusion reached three stages later — nor a ``StageRun``,
+    which records what a stage was *configured* to do. Leaving the current
+    enclosure in the execution log would send the drawing and every downstream
+    consumer hunting through a generic key/value history for a domain fact,
+    which is the very inference ``processing`` was introduced to stop.
+
+    **A 2-D outline identifies a footprint, never a part.** Hammond's 1590
+    parts collapse into markedly fewer distinct length × width footprints,
+    because many differ only in height: 112 × 61 is 1590B, 1590B2 *and* 1590BS;
+    120 × 94 is 1590BB, 1590BB2, 1590BBS and 1590C. So ``candidates`` is a tuple
+    of every base designator sharing the footprint, and ``selected_part`` — the
+    one part the panel is actually for — starts as ``None`` and can only ever be
+    filled in by the operator. Nothing here may infer it from geometry; the
+    artwork simply does not contain it.
+
+    ``length_mm``/``width_mm`` are the catalogue's own whole millimetres, and
+    integers because the datasheet's metric column is. They stay in the
+    catalogue's orientation even when ``rotated`` is set: a portrait panel is
+    the same enclosure turned 90°, not a second footprint, and transposing them
+    here would make it unfindable in the datasheet it came from.
+
+    No check is made that ``selected_part`` is among ``candidates``. A panel
+    declared as one case and drawn to another is an operator error that must
+    reach the report as a diagnostic naming both; raising here would abort the
+    run instead, with nothing to render.
+    """
+
+    family: str
+    length_mm: int
+    width_mm: int
+    candidates: tuple[str, ...]
+    rotated: bool = False
+    selected_part: str | None = None
+
+    def __post_init__(self) -> None:
+        """Coerce ``candidates``, the way ``StageRun`` and ``Diagnostic`` do.
+
+        Same reason as theirs: a match holding a list is unhashable and compares
+        unequal to the identical match built from a tuple, so a document read
+        back from JSON — where every sequence arrives as a list — would differ
+        from the one it was written from while printing identically.
+        """
+        object.__setattr__(self, "candidates", tuple(self.candidates))
+
+
+@dataclass(frozen=True, slots=True)
 class Diagnostic:
     """A finding. Stages append these; emitters render them.
 
@@ -320,6 +373,7 @@ class DrillData:
     diagnostics: tuple[Diagnostic, ...] = ()
     source: SourceInfo = field(default_factory=SourceInfo)
     processing: tuple[StageRun, ...] = ()
+    enclosure: EnclosureMatch | None = None
 
     # -- transforms ------------------------------------------------------
     def with_holes(self, holes: Iterable[Hole]) -> "DrillData":
@@ -340,6 +394,16 @@ class DrillData:
         if not runs:
             return self
         return replace(self, processing=self.processing + tuple(runs))
+
+    def with_enclosure(self, match: EnclosureMatch) -> "DrillData":
+        """Record which enclosure the panel was identified as being drawn for.
+
+        Replaced, never appended — the mirror image of ``with_processing``.
+        ``processing`` is history and a stage may legitimately run twice;
+        ``enclosure`` is current state, and a consumer asking which enclosure
+        this panel is must get one answer rather than a list to pick from.
+        """
+        return replace(self, enclosure=match)
 
     def with_origin(self, origin: Origin) -> "DrillData":
         """Translate every hole into the requested frame.
