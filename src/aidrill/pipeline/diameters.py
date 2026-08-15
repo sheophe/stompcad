@@ -94,6 +94,12 @@ def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[float, .
     the accumulated version overshoots or stops a size early depending on which
     way the binary error of the step happens to fall, and it does so silently in
     the middle of a band.
+
+    ``round`` and not ``int`` for the same reason one step further in. The
+    quotient is a float, and it lands just below the true count as readily as on
+    it — ``(2.9 - 0.2) / 0.1`` is ``26.999999999999996`` — so truncating drops
+    the top size of the band and leaves a series that is still ascending, still
+    gap-free, and one bit short.
     """
     sizes: list[float] = []
     for start, stop, step in bands:
@@ -243,15 +249,13 @@ class SnapDiametersToDrillTable:
     not this number. Tightening *this* one to catch it would make a legitimate
     14.3 mm panel an ERROR and, by the rule below, cost it the hole.
 
-    Two rules that the earlier, strategy-based version got wrong, and why:
-
-    **An unmatched measurement is not kept.** The old stage retained it and
-    warned. That cannot survive the invariant this stage now carries: if every
-    nominal comes from the table, a retained 30.0 is a nominal that came from
-    nowhere, and the drill file would define a tool for a bit that does not
-    exist. So the finding is an ERROR — the run is not fit to drill — and the
-    hole appears in no artifact. Everything needed to find it is in the
-    diagnostic: the hole's index, what it measured, and the nearest bit there is.
+    **An unmatched measurement is not kept.** Retaining it and warning cannot
+    survive the invariant this stage carries: if every nominal comes from the
+    table, a retained 30.0 is a nominal that came from nowhere, and the drill
+    file would define a tool for a bit that does not exist. So the finding is an
+    ERROR — the run is not fit to drill — and the hole appears in no artifact.
+    Everything needed to find it is in the diagnostic: the hole's index, what it
+    measured, and the nearest bit there is.
     """
 
     name: ClassVar[str] = "snap-diameters"

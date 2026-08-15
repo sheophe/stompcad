@@ -27,6 +27,7 @@ from aidrill.model import (
     StageRun,
 )
 from aidrill.protocols import Pipeline, Stage
+from aidrill.pipeline.diameters import METRIC_BANDS, _METRIC_DECIMALS, _metric_sizes
 from aidrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -384,6 +385,40 @@ class TestTheMetricSeriesIsGeneratedNotTranscribed:
 
         assert widest == 0.5
         assert SnapDiametersToDrillTable().tolerance_mm >= widest / 2
+
+    def test_a_band_is_counted_not_accumulated(self):
+        """The size a truncating count drops, on a band that actually misses.
+
+        None of the shipped bands can show this: ``(3.0 - 0.5) / 0.05``, and
+        both of its neighbours, come out exact (50.0, 110.0, 23.0), so
+        truncating the quotient and rounding it agree on all 183 sizes. Editing
+        the bands is the documented way to adopt another preferred series,
+        though, and ``(2.9 - 0.2) / 0.1`` is ``26.999999999999996`` — a band
+        whose top size disappears the moment the count stops being rounded,
+        silently, with the series still ascending and still gap-free.
+        """
+        sizes = _metric_sizes([(0.2, 2.9, 0.1)])
+
+        assert len(sizes) == 27
+        assert sizes[-1] == 2.8, "the top of the band went missing"
+
+    def test_the_bands_are_no_finer_than_the_decimals_they_are_rounded_to(self):
+        """Rounding is dust removal; a finer band would make it corruption.
+
+        Every size goes through ``round(..., _METRIC_DECIMALS)`` to clear
+        binary-accumulation dust, which is only harmless while every band step
+        is a whole number of that last decimal. A band stepping 0.025 against
+        two decimals would not be tidied but *falsified* — 0.525 recorded as
+        0.52, a size in no drawer — so the two are asserted against each other
+        rather than each on its own.
+        """
+        unit = 10**-_METRIC_DECIMALS
+
+        for start, stop, step in METRIC_BANDS:
+            for value in (start, stop, step):
+                assert abs(round(value / unit) * unit - value) < 1e-12, (
+                    f"{value} is finer than {_METRIC_DECIMALS} decimal places"
+                )
 
 
 class TestTheFractionalSeriesIsExactByConstruction:
