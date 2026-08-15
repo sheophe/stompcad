@@ -121,6 +121,14 @@ Two conventions matter more than coverage:
 - **Assert on emitted bytes for cross-artifact claims.** The test that the drill file and the drawing agree re-parses the `.drl` as text and the `.svg` as XML. Asserting against the in-memory objects would pass even under the bug the architecture exists to prevent, because both emitters read the same `DrillData`.
 - **A test that stays green when the behaviour it names is removed is not a test.** Before claiming a test covers something, mutate the implementation and confirm the test dies. The recurring trap here is a fixture where two quantities coincide numerically — holes numbered `0, 1, 2` in order make `index` indistinguishable from array position, so an assertion about identity silently also passes for position. Number fixtures out of order to break the coincidence.
 
+Three mechanics that have each produced a wrong answer in this repo:
+
+- **Run mutations with `python -B`.** A `.pyc` is validated against the source's `(mtime, size)`, and the header stores mtime in **whole seconds** — so a same-size mutation applied and reverted inside one second executes stale bytecode. That silently yields either a false survivor or, worse, the *previous* mutation's kill list attributed to the current one.
+- **Mutate each clause of a condition, not the condition as a unit.** Removing or misgating a check tests it as a whole; `if x or y` needs `if y` and `if x` mutated separately. A guard covering two axes lost half its coverage here, invisibly, because folding two tests kept one fixture and dropped the other — and the surviving test's name and docstring still described the full behaviour, so nothing *looked* missing.
+- **A mutation must change only the thing it names.** An impure mutation produces a falsely *strong* result: editing a value where it is both compared and emitted gets "killed" by tests that merely noticed the changed output, proving nothing about the comparison. If a mutation dies, check *which* test died and whether it had any business dying.
+
+Applies to verification tooling too: a linter invoked with a flag that suppresses the rule you are claiming to pass is not evidence. Report the command, not just the result.
+
 Property tests cover snapping idempotence, dedupe idempotence, `tools()` stability under reordering, and cluster group spread.
 
 ## Documentation map
