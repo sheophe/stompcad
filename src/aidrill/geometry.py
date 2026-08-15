@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from aidrill.units import mm_from_nm, nm_from_pt
+
 __all__ = [
     "IDENTITY",
     "KAPPA",
@@ -48,7 +50,10 @@ IDENTITY: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 #: it, which is what makes circle recovery possible at all.
 KAPPA: float = 0.5522847498
 
-#: PDF user space is 1/72 inch. Everything downstream of a source is millimetres.
+#: PDF user space is 1/72 inch, so this is the scale between a stated point and
+#: a millimetre -- what a caller reasoning about a CTM's magnitude wants. The
+#: conversion itself is not done with it: `units.nm_from_pt` divides one exact
+#: rational instead, so no length is ever multiplied by an inexact ratio.
 PT_PER_MM: float = 72.0 / 25.4
 
 
@@ -387,5 +392,13 @@ def _kappa_consistent(
 
 
 def pt_to_mm(v: float) -> float:
-    """Convert PDF points to millimetres, the canonical unit of everything above a source."""
-    return v / PT_PER_MM
+    """Convert PDF points to millimetres, through the nanometre rule.
+
+    The conversion itself is `units.nm_from_pt`; this only spells the result in
+    millimetres for the callers that still hold floats. Going by way of whole
+    nanometres is the point rather than a detour: two paths from points to a
+    printed length that round in different places are how the drill file and the
+    drawing came to disagree in the first place, so there is one rule and it
+    lives in `units`.
+    """
+    return mm_from_nm(nm_from_pt(v))
