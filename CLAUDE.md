@@ -10,6 +10,22 @@ It deliberately does **not** model enclosures in 3D, read KiCad, check clearance
 
 The output gets drilled into aluminium. The expensive failure is not a crash — it is two artifacts that describe the same panel and silently disagree.
 
+## Status: unreleased
+
+No remote, no release, no user but the author — so **breaking changes do not exist here**. When a
+flag, stage or field stops earning its place, delete it outright: no deprecation path, no migration
+note, no "X is gone" inventory, no test asserting the old spelling is refused, no version number
+implying a history. `--dedupe-tolerance` was removed exactly this way, as if it had never existed.
+
+This inverts the rule for a published library, deliberately. Prose narrating what the code *used to
+do* can only confuse a reader who never saw it.
+
+It does **not** license deleting the *why*. A docstring explaining why today's code is shaped as it
+is — `geometry.py`'s rotation-invariance argument, `dedupe.py`'s reason for comparing diameters
+exactly — stops the next reader re-breaking a subtle decision, and stays. The test: does this
+paragraph help someone reading the code that exists, or only someone who saw a version that no
+longer exists?
+
 ## Development environment
 
 The system Python has neither `pytest` nor `pikepdf`. You must work inside a virtual environment:
@@ -46,11 +62,9 @@ mutmut run && mutmut results
 PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 ```
 
-Flags: `--drill-layer`, `--reference-layer`, `--grid`, `--grid-warn`, `--drill-standard` (`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to what is in the drawer), `--dedupe-tolerance`, `--case` (the Hammond base designator the panel is drawn for), `--emit`, `--title`, `-v`. All of them are resolved before the input file is opened, so a bad standard, an unstocked size or a part number in no catalogue is a usage error rather than a diagnostic.
+Flags: `--drill-layer`, `--reference-layer`, `--grid`, `--grid-warn`, `--drill-standard` (`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to what is in the drawer), `--case` (the Hammond base designator the panel is drawn for), `--emit`, `--title`, `-v`. All of them are resolved before the input file is opened, so a bad standard, an unstocked size or a part number in no catalogue is a usage error rather than a diagnostic.
 
-`--diameters`, `--diameter-tolerance` and `--true-size` are gone. `--drill-sizes` kept its name and changed its meaning — it used to be the whole table and was ignored unless `--diameters table` was passed, so an old invocation that carried it as a no-op now takes bits out of the drawer.
-
-Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage/IO failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure` and `wrong-enclosure`.
+Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage/IO failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`, `unverifiable-enclosure`, `unmatched-enclosure` and `wrong-enclosure`.
 
 ## Architecture
 
@@ -87,7 +101,7 @@ The reference frame comes from the reference layer's largest non-circular path b
 
 **The Background layer must be drawn to the enclosure's BACKPLATE dimensions.** The catalogue stores backplate sizes, and a Hammond 1590 is die-cast with tapered walls ("low side wall draft angle (2° or less)", per the datasheet), so the face that actually gets drilled is smaller by `2 · d · tan θ` per axis — 1.9 mm on a 1590B, 6.3 mm on a 1590V.
 
-No tolerance can accept a face-drawn outline: matching one needs at least 2.4 mm on the shallowest common part, while two footprints tie at 2.0 mm because the closest pair in the catalogue is 4 mm apart. Required ≥ 2.4, permitted < 2.0. So the operator who carefully measures the face they are about to drill is the one who gets `unknown-enclosure` — which is why that message names the convention, and why this paragraph exists. Do not "fix" it by widening `IdentifyHammondFootprint`'s tolerance; that trades a refusal for a guess between two real enclosures. `docs/adr/0003-domain-quantisers.md` has the arithmetic.
+No tolerance can accept a face-drawn outline: matching one needs at least 2.4 mm on the shallowest common part, while two footprints tie at 2.0 mm because the closest pair in the catalogue is 4 mm apart. Required ≥ 2.4, permitted < 2.0. So the operator who carefully measures the face they are about to drill is the one who gets `unknown-enclosure` — or `unmatched-enclosure` if they declared a `--case` — which is why both messages name the convention, and why this paragraph exists. Do not "fix" it by widening `IdentifyHammondFootprint`'s tolerance; that trades a refusal for a guess between two real enclosures. `docs/adr/0003-domain-quantisers.md` has the arithmetic.
 
 ### Identity and provenance
 
@@ -152,9 +166,8 @@ Property tests cover snapping idempotence, dedupe idempotence and `tools()` stab
 
 ## Documentation map
 
-- `docs/SPEC.md` — the specification, currently v2.0. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
+- `docs/SPEC.md` — the specification. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
 - `docs/adr/` — architecture decisions with the incidents that drove them. 0001 is the pipeline and the emitter adapters; 0003 is the drill standards, the enclosure catalogue and the backplate convention. There is no 0002 — it was planned and never written, and the gap is left rather than renumbered.
 - `docs/1590.pdf` — the Hammond datasheet `src/aidrill/enclosures.py` is generated from. It is the authority for every catalogue number; `tools/extract_1590.py` is the audit trail, and `tests/test_enclosures.py` re-extracts on every suite run.
 - `docs/parts/` — Hammond's 37 per-part drawings, plus `dimensions.tsv`, which carries the same 37 parts at 0.05 mm where `docs/1590.pdf` gives whole millimetres. **Not the shipped catalogue** — `enclosures.py` is still generated from `docs/1590.pdf`, and nothing at runtime reads this directory. `docs/parts/README.md` says what the TSV holds and where the two disagree; the adoption plan is in `docs/BACKLOG.md`.
-- `docs/PLAN.md` — **historical.** The task breakdown for the original v1.0 build, kept as a record. Its interfaces are superseded; read SPEC and the ADRs for what is true now.
 - `docs/BACKLOG.md` — agreed work that is deliberately not scheduled.
