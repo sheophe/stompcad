@@ -246,7 +246,9 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
       a common circle, so it passes every other test; only the control offsets
       betray it. A superellipse pushes them out towards the corners, a slack
       rounded shape pulls them in, and either way the offset stops being
-      ``KAPPA * r`` perpendicular to the radius.
+      ``KAPPA * r`` perpendicular to the radius — and pointing the way the path
+      travels, which is what separates an arc from an inward cusp drawn on the
+      very same anchors.
 
     The centroid/radius test is used in preference to the bounding-box test of
     SPEC 6.4 because it is rotation invariant. They agree on axis-aligned input;
@@ -294,20 +296,46 @@ def _kappa_consistent(
 
     For each quarter, the first control sits ``KAPPA * r`` beyond the start
     anchor along the tangent, and the second sits ``KAPPA * r`` before the end
-    anchor along its tangent. Both the length and the perpendicularity are
-    checked: length alone would accept a shape whose controls are rotated into
-    the radius, which draws a cusp rather than an arc.
+    anchor along its tangent. Three things are checked, and dropping any one of
+    them lets a shape through that a drill would then cut:
+
+    * **length** — rejects the four-cubic rounded square, whose controls are
+      pushed out towards the corners or pulled slackly in;
+    * **radial component** — rejects controls rotated onto the radius, which
+      draw a cusp instead of an arc while keeping the length exactly right;
+    * **tangential sense** — rejects controls that are the right length, exactly
+      perpendicular, and pointing the wrong way along the tangent. Negate both
+      offsets of a real circle and every other test still sees a circle; what it
+      draws is a four-petal star with an inward cusp at every anchor.
+
+    The direction of travel is taken from the anchors, never from an offset: an
+    offset that lies about its direction is precisely what this is here to
+    catch. Two consecutive anchors turn a quarter turn about the centre, and the
+    sign of their cross product is the sense of the whole path — which also
+    keeps this right for a circle mirrored by a negative-determinant CTM, where
+    every control legitimately points the other way.
     """
     expected = KAPPA * radius
     cx, cy = centre
+    anchors = [start for start, _ in pairs]
+    ax, ay = anchors[0][0] - cx, anchors[0][1] - cy
+    bx, by = anchors[1][0] - cx, anchors[1][1] - cy
+    travel = 1.0 if (ax * by - ay * bx) >= 0.0 else -1.0
+
+    # The first control runs with the direction of travel; the second runs back
+    # against it, since it is measured from the anchor the quarter arrives at.
     for start, curve in pairs:
-        for anchor, control in ((start, curve.c1), (curve.end, curve.c2)):
+        for anchor, control, sense in ((start, curve.c1, 1.0), (curve.end, curve.c2, -1.0)):
             ox, oy = control[0] - anchor[0], control[1] - anchor[1]
             if abs(math.hypot(ox, oy) - expected) > slack:
                 return False
             # radial component of the offset; zero for a true tangent
             rx, ry = anchor[0] - cx, anchor[1] - cy
             if abs((ox * rx + oy * ry) / radius) > slack:
+                return False
+            # tangent at this anchor, turned the way the path travels
+            tx, ty = -ry * travel * sense, rx * travel * sense
+            if ox * tx + oy * ty <= 0.0:
                 return False
     return True
 

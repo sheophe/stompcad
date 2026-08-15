@@ -107,6 +107,34 @@ def cusp_path(cx: float, cy: float, r: float, *, outward: bool = True) -> SubPat
     )
 
 
+def star_path(r: float, cx: float = 0.0, cy: float = 0.0) -> SubPath:
+    """A circle's four cubics with *both* control offsets reflected through their anchor.
+
+    Every offset keeps its length and its (zero) radial component, so the length
+    half and the perpendicularity half of the kappa check both see a perfect
+    circle. Only the sense along the tangent is reversed, which turns each
+    quarter arc inside out and draws a four-petal star with a cusp at every
+    anchor. It is the shape that gets through when the check never asks which
+    way the tangential component points.
+    """
+    base = circle_path(cx, cy, r)
+    segments: list[object] = [base.segments[0]]
+    current: Point = base.segments[0].point  # type: ignore[union-attr]
+    for segment in base.segments[1:]:
+        if isinstance(segment, CurveTo):
+            segments.append(
+                CurveTo(
+                    (2 * current[0] - segment.c1[0], 2 * current[1] - segment.c1[1]),
+                    (2 * segment.end[0] - segment.c2[0], 2 * segment.end[1] - segment.c2[1]),
+                    segment.end,
+                )
+            )
+            current = segment.end
+        else:
+            segments.append(segment)
+    return SubPath(tuple(segments))  # type: ignore[arg-type]
+
+
 def control_offsets(path: SubPath) -> list[float]:
     """Distance from each control point to the anchor it belongs to."""
     offsets: list[float] = []
@@ -120,6 +148,21 @@ def control_offsets(path: SubPath) -> list[float]:
             offsets.append(math.dist(segment.end, segment.c2))
             current = segment.end
     return offsets
+
+
+def _offset_vectors(path: SubPath) -> list[Point]:
+    """Each control point as a vector from the anchor it belongs to."""
+    vectors: list[Point] = []
+    current: Point | None = None
+    for segment in path.segments:
+        if isinstance(segment, MoveTo):
+            current = segment.point
+        elif isinstance(segment, CurveTo):
+            assert current is not None
+            vectors.append((segment.c1[0] - current[0], segment.c1[1] - current[1]))
+            vectors.append((segment.c2[0] - segment.end[0], segment.c2[1] - segment.end[1]))
+            current = segment.end
+    return vectors
 
 
 def mapped(path: SubPath, m: Matrix) -> SubPath:
@@ -297,6 +340,21 @@ class TestFitCircle:
         assert (found.cx, found.cy) == pytest.approx(transform(ctm, 10.0, -5.0), abs=1e-9)
         assert found.diameter == pytest.approx(5.0, abs=1e-9)
 
+    def test_recovers_a_circle_drawn_the_other_way_round(self) -> None:
+        """A mirroring CTM reverses the direction of travel; a circle survives it.
+
+        Illustrator writes its circles anticlockwise, but a ``cm`` with a
+        negative determinant — a flipped placed group, an ``-1 0 0 1`` mirror —
+        hands the fitter a clockwise one. Every control offset then points the
+        other way, so a direction check that assumes one sense would reject a
+        perfectly good hole.
+        """
+        mirror: Matrix = (-1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), mirror))
+        assert found is not None
+        assert (found.cx, found.cy) == pytest.approx((-10.0, -5.0), abs=1e-9)
+        assert found.diameter == pytest.approx(5.0, abs=1e-9)
+
     def test_open_circle_path_without_closepath_still_fits(self) -> None:
         assert fit_circle(circle_path(0.0, 0.0, 4.0, closed=False)) is not None
 
@@ -344,6 +402,60 @@ class TestFitCircle:
         path = cusp_path(0.0, 0.0, 5.0, outward=False)
         assert all(within(d, KAPPA * 5.0, SLACK) for d in control_offsets(path))
         assert fit_circle(path) is None
+
+    def test_rejects_a_cusped_star(self) -> None:
+        """The third half of the kappa check: direction *along* the tangent.
+
+        ``cusp_path`` turns the offsets onto the radius, which the
+        perpendicularity test catches. This shape does not touch the radius at
+        all — it reverses the offsets, so each one stays exactly ``KAPPA * r``
+        long and exactly perpendicular to its anchor's radius, and only its
+        sense along the direction of travel is wrong. Every test before this
+        one sees a textbook circle; what it draws is a four-petal star with an
+        inward cusp at every anchor, and drilling it would be a 7 mm hole that
+        is not there.
+        """
+        path = star_path(3.5)
+        real = circle_path(0.0, 0.0, 3.5)
+
+        # nothing before the direction test can tell the two apart
+        assert path.anchors == real.anchors
+        assert control_offsets(path) == pytest.approx(control_offsets(real))
+        for offset, reference in zip(_offset_vectors(path), _offset_vectors(real)):
+            # same length, same (zero) radial component: exactly negated
+            assert offset == pytest.approx((-reference[0], -reference[1]))
+
+        assert fit_circle(real) is not None
+        assert fit_circle(path) is None
+
+    def test_rejects_a_cusped_star_wherever_it_is_drawn(self) -> None:
+        """Not an artefact of sitting on the origin, and not of one radius."""
+        assert fit_circle(star_path(12.5, cx=-40.0, cy=18.0)) is None
+        assert fit_circle(mapped(star_path(3.5), rotation(37.0))) is None
+
+    def test_rejects_a_square_encoded_as_four_cubics(self) -> None:
+        """Controls collapsed onto their anchors: four straight diagonals."""
+        real = circle_path(0.0, 0.0, 5.0)
+        starts = [(5.0, 0.0), (0.0, 5.0), (-5.0, 0.0), (0.0, -5.0)]
+        flat = SubPath(
+            (real.segments[0],)
+            + tuple(
+                CurveTo(start, s.end, s.end)  # type: ignore[union-attr]
+                for start, s in zip(starts, real.segments[1:5])
+            )
+            + (ClosePath(),)
+        )
+        assert flat.anchors == real.anchors
+        assert fit_circle(flat) is None
+
+    def test_rejects_a_circle_sheared_by_a_ctm(self) -> None:
+        shear: Matrix = (1.0, 0.0, 0.5, 1.0, 0.0, 0.0)
+        assert fit_circle(mapped(circle_path(0.0, 0.0, 5.0), shear)) is None
+
+    def test_rejects_an_ellipse_anchored_on_the_diagonals(self) -> None:
+        """An axis test would miss this one; the anchor radii do not."""
+        oval = mapped(circle_path(0.0, 0.0, 10.0, ry=8.0), rotation(45.0))
+        assert fit_circle(oval) is None
 
     def test_rejects_a_trailing_second_subpath(self) -> None:
         """Two subpaths in one ``SubPath`` are the caller's bug, not a circle.
