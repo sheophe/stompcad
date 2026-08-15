@@ -1023,6 +1023,14 @@ def test_the_source_rounds_nothing(data):
     ``float``, because ``RawOutline`` refuses an ``int``: the JSON emitter and
     the drawing both print the measurement, so a nanometre count reaching a
     millimetre field puts 113 000 014.000 mm on a sheet a machinist reads.
+
+    The two rulings out are not worth the same. A pre-empted *footprint* snap
+    changes every artifact — the panel becomes a 112 mm one. A pre-empted
+    *nanometre* rounding changes none: both spellings print 113.000, and the
+    half nanometre between them cannot flip which grid multiple, drill size or
+    catalogue footprint is nearest. So the trailing digits here are an
+    architectural tripwire and are kept deliberately as one, not a claim that
+    the precision matters. Do not build anything else on them.
     """
     reference = data.reference
     assert reference is not None
