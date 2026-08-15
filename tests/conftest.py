@@ -17,7 +17,15 @@ import pytest
 from aidrill.emitters import base
 from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
 
-__all__ = ["at", "clean_registry", "holes", "make_data"]
+__all__ = [
+    "at",
+    "clean_registry",
+    "codes",
+    "diameters",
+    "holes",
+    "make_data",
+    "positions",
+]
 
 
 @pytest.fixture
@@ -65,3 +73,21 @@ def make_data(*given: Hole, reference: ReferenceOutline | None = None) -> DrillD
         diagnostics=(),
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
     )
+
+
+def codes(data: DrillData) -> list[str]:
+    """The stable machine key of every diagnostic a stage raised, in order.
+
+    Every diagnostic assertion in the pipeline tests matches on ``code``, never
+    on ``message`` -- ``code`` is the stable API and the wording is not -- and
+    this is what every one of those assertions goes through.
+    """
+    return [d.code for d in data.diagnostics]
+
+
+def positions(data: DrillData) -> list[tuple[float, float]]:
+    return [(h.x, h.y) for h in data.holes]
+
+
+def diameters(data: DrillData) -> list[float]:
+    return [h.diameter for h in data.holes]
