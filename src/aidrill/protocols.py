@@ -10,16 +10,23 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Sequence
 from typing import ClassVar, Protocol, runtime_checkable
 
-from .model import DrillData, StageRun
+from .model import DrillData, RawDrillData, StageRun
 
 __all__ = ["Source", "Stage", "Emitter", "Pipeline"]
 
 
 @runtime_checkable
 class Source(Protocol):
-    """Parses some artwork format into DrillData in the canonical frame."""
+    """Parses some artwork format into RawDrillData in the canonical frame.
 
-    def read(self) -> DrillData: ...
+    Raw is the whole of the contract: a source states the frame — millimetres,
+    Y up, origin at the reference outline's centre — and states what it
+    measured in it, and nothing more. Quantising belongs to the phase that
+    knows what each length has to land on, so a source that rounded first would
+    be rounding twice with the order of the two left to chance.
+    """
+
+    def read(self) -> RawDrillData: ...
 
 
 @runtime_checkable
