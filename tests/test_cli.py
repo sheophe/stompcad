@@ -892,18 +892,33 @@ def drl_holes(text: str) -> list[tuple[int, float, float]]:
 
 
 def svg_schedule_rows(root: ET.Element) -> list[tuple[int, float, float, float, int]]:
-    """``[(no, x, y, diameter, tool)]`` from the drawing's hole schedule."""
+    """``[(no, x, y, diameter, tool)]`` from the drawing's hole schedule.
+
+    **The ⌀ cell is matched whole, and metric-only on purpose.** The schedule
+    spells a diameter the way the drill standard that ran spells it — ``⌀7.00
+    mm`` from the metric drawer, ``⌀9/32"`` from the fractional one, because
+    1/64" is 0.396875 mm and no decimal-millimetre label for it is honest. This
+    test drives the CLI with its default standard, so metric is the only
+    spelling that can reach here, and a fractional label arriving would mean the
+    run under test had changed. That is worth an assertion naming the string it
+    could not read: coercing with ``float`` instead gave a bare ``ValueError``
+    from inside a helper, which is a poor failure mode for the one test that
+    compares two emitted artifacts. ``svg_tool_summary`` below pins the same
+    format for the same reason, and this now matches its idiom.
+    """
     rows = []
     for group in root.iter(SVG + "g"):
         if group.get("class") != "sched-row":
             continue
         number, x, y, diameter, tool = [text.text or "" for text in group.iter(SVG + "text")]
+        match = re.fullmatch(r"⌀([\d.]+) mm", diameter)
+        assert match is not None, f"unreadable metric schedule diameter {diameter!r}"
         rows.append(
             (
                 int(number),
                 float(x),
                 float(y),
-                float(diameter.lstrip("⌀")),
+                float(match.group(1)),
                 int(tool.lstrip("T")),
             )
         )
