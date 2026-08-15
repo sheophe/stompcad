@@ -439,6 +439,41 @@ class TestFitCircle:
         assert found is not None
         assert found.diameter_nm == nm_from_pt(6.0) == 2_116_667
 
+    def test_the_centre_converts_after_the_centroid_and_not_before(self) -> None:
+        """The same crossing, for the two fields the diameter fixture cannot see.
+
+        ``test_the_conversion_happens_once_and_on_the_diameter`` sits on the
+        origin, and a centroid of four converted anchors is zero there however
+        it is assembled — so it says nothing at all about ``cx_nm`` or
+        ``cy_nm``. This circle is turned 45 degrees and centred off both axes,
+        on a pair of points chosen so that the mean of its converted anchors
+        lands exactly on the half-nanometre *below* the answer. ``% 4 == 2``
+        states that without picking a rounding rule for the mean, which is the
+        point: half-up, half-even and truncation all give the same nanometre,
+        and all three are one short of what converting the finished centroid
+        gives.
+
+        The two coordinates are pinned to different integers on purpose. A
+        fixture centred on the diagonal would let one assertion stand in for the
+        other, and a mutation to ``cx_nm`` alone would be indistinguishable from
+        one to ``cy_nm`` alone.
+        """
+        placed: Matrix = (1.0, 0.0, 0.0, 1.0, 6.0, 7.8)
+        turned = mapped(circle_path(0.0, 0.0, 5.0), multiply(rotation(45.0), placed))
+
+        pairs = _cubics(turned)
+        assert pairs is not None and len(pairs) == 4
+        anchors = [start for start, _ in pairs]
+        for axis, answer in ((0, nm_from_pt(6.0)), (1, nm_from_pt(7.8))):
+            converted = sum(nm_from_pt(a[axis]) for a in anchors)
+            assert converted % 4 == 2  # the mean is exactly N + 0.5 ...
+            assert converted // 4 == answer - 1  # ... and N is one short
+
+        found = fit_circle(turned)
+        assert found is not None
+        assert found.cx_nm == nm_from_pt(6.0) == 2_116_667
+        assert found.cy_nm == nm_from_pt(7.8) == 2_751_667
+
     def test_returns_a_frozen_circle_value(self) -> None:
         found = fit_circle(circle_path(0.0, 0.0, 1.0))
         assert isinstance(found, Circle)
@@ -460,15 +495,22 @@ class TestFitCircle:
 
         Fitting from the *axis-aligned* bounding box would report a diameter of
         2r*cos(45 deg) here. Anchor radii are rotation invariant, so they don't.
+
+        Exact, and not within ``NM_SLACK``: a nanometre of slack is the whole
+        margin between converting the finished centroid and averaging four
+        converted anchors, so it is precisely the one nanometre this fixture is
+        able to speak about. Allowing it here accepted 3 878 944 and 714 366 —
+        the anchor-mean answer on both axes — as readily as the right pair.
         """
         ctm = rotation(37.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), ctm))
         assert found is not None
         expected = transform(ctm, 10.0, -5.0)
-        assert (found.cx_nm, found.cy_nm) == pytest.approx(
-            (nm_from_pt(expected[0]), nm_from_pt(expected[1])), abs=NM_SLACK
+        assert (found.cx_nm, found.cy_nm) == (
+            nm_from_pt(expected[0]),
+            nm_from_pt(expected[1]),
         )
-        assert found.diameter_nm == pytest.approx(nm_from_pt(5.0), abs=NM_SLACK)
+        assert found.diameter_nm == nm_from_pt(5.0)
 
     def test_recovers_a_circle_drawn_the_other_way_round(self) -> None:
         """A mirroring CTM reverses the direction of travel; a circle survives it.
