@@ -110,20 +110,31 @@ def fixture_data() -> DrillData:
 
 
 def rotated_fixture_data() -> DrillData:
-    """The same panel drawn portrait, with no case declared by the operator.
+    """A portrait panel, no case declared, and a catalogue this build cannot emit.
 
-    Only the outline and the match differ, so both fixtures can go through one
-    round-trip test. They differ in the two fields whose defaults make a
-    dropped key invisible: ``rotated`` is ``True`` here where it is ``False``
-    there, and ``selected_part`` is ``None`` here where it names a part there.
-    A serialiser that omitted either would rebuild one fixture correctly and
-    the other silently wrong, which is the whole reason there are two.
+    Only the outline and the match differ from ``fixture_data``, so both go
+    through one round-trip test. They differ in the two fields whose defaults
+    make a dropped key invisible: ``rotated`` is ``True`` here where it is
+    ``False`` there, and ``selected_part`` is ``None`` here where it names a
+    part there. A serialiser that omitted either would rebuild one fixture
+    correctly and the other silently wrong, which is the whole reason there
+    are two.
 
-    ``length_mm``/``width_mm`` stay in the catalogue's orientation — 112 × 61,
-    the landscape 1590B — while the outline is the 61 × 112 the artwork was
-    drawn as. That is not an inconsistency to tidy up: transposing the match
-    would make the footprint unfindable in the datasheet it came from, and it
-    is the one thing ``rotated`` is for.
+    ``length_mm``/``width_mm`` stay in the catalogue's orientation — 112 × 61
+    — while the outline is the 61 × 112 the artwork was drawn as. That is not
+    an inconsistency to tidy up: transposing the match would make the footprint
+    unfindable in the datasheet it came from, and it is the one thing
+    ``rotated`` is for.
+
+    The ``family`` is deliberately **not** the shipped catalogue's, and neither
+    are the designators. ``EnclosureMatch.family`` is a free string, but
+    ``IdentifyHammondFootprint`` can only ever set it to one value, so a
+    fixture repeating that value cannot tell a serialised ``family`` from a
+    hard-coded literal — the same coincidence as an outline whose ``raw``
+    equals its nominal size. A name this build could never produce is what
+    makes the passthrough checkable; ``fixture_data`` and the end-to-end test
+    still pin the real one. These figures and designators are the fixture's
+    own — ``enclosures.py`` is the only place that carries datasheet values.
     """
     return replace(
         fixture_data(),
@@ -131,12 +142,56 @@ def rotated_fixture_data() -> DrillData:
             60.0, 113.0, centre_x=297.6, centre_y=421.0
         ).resized(61.0, 112.0),
         enclosure=EnclosureMatch(
-            family="Hammond 1590",
+            family="Hammond 1550",
             length_mm=112,
             width_mm=61,
-            candidates=("1590B2", "1590BS", "1590B"),
+            candidates=("1550S", "1550A", "1550B"),
             rotated=True,
             selected_part=None,
+        ),
+    )
+
+
+def square_fixture_data() -> DrillData:
+    """A square footprint, rotated, with a case declared. It breaks a correlation.
+
+    Two fixtures were not enough, and the way they failed is the lesson. Across
+    both, ``rotated is True`` held exactly when ``selected_part is None`` and
+    exactly when the outline was portrait — so three re-derivations passed the
+    whole suite: ``match.selected_part is None``, ``match.candidates[1]``
+    keyed on rotation, and worst of all
+    ``data.reference.width < data.reference.height``. That last one is an
+    emitter computing a pipeline fact from geometry, which is the founding
+    rule of ADR-0001, and every *safe* spelling of the bug — dropping the key,
+    hard-coding either value — died while the *dangerous* one lived.
+
+    A square footprint decouples all three at once: 120 × 120 is neither
+    portrait nor landscape, so no comparison of the outline's axes can produce
+    ``rotated``; ``rotated`` is ``True`` here *with* a declared part, so
+    neither field can be computed from the other. Note this is the exact
+    inverse of the usual warning about square fixtures — a square is useless
+    for telling length from width, and is precisely what is needed to tell
+    rotation from portrait-ness.
+
+    1590Q, 1590U and 1590V really are all 120 × 120, so the footprint is a real
+    one. The matcher would not itself report a square as rotated — it prefers
+    the unrotated reading when both fit, because calling it a rotation would
+    put "rotated" on a drawing for a panel nobody turned — and that is the
+    point: this emitter serialises what it is handed, and must not infer that
+    combination away.
+    """
+    return replace(
+        fixture_data(),
+        reference=ReferenceOutline.from_measurement(
+            121.0, 119.0, centre_x=297.6, centre_y=421.0
+        ).resized(120.0, 120.0),
+        enclosure=EnclosureMatch(
+            family="Hammond 1590",
+            length_mm=120,
+            width_mm=120,
+            candidates=("1590U", "1590Q", "1590V"),
+            rotated=True,
+            selected_part="1590Q",
         ),
     )
 
@@ -197,25 +252,19 @@ def test_top_level_key_order_is_stable_and_documented():
 
 
 def test_document_declares_its_format_and_canonical_frame():
+    """Version 4 is the release that added ``enclosure``.
+
+    The number is how a consumer knows the key is there to read: a document
+    that grew ``enclosure`` while still calling itself version 3 would tell a
+    v3 reader nothing had changed, and tell the toolchain that a document
+    *without* the key is the same document as one with it.
+    """
     document = parse(fixture_data())
 
     assert document["format"] == "aidrill-drill-data"
     assert document["version"] == 4
     assert document["units"] == "mm"
     assert document["origin"] == "centre"
-
-
-def test_version_is_bumped_for_the_enclosure_match():
-    """The version number is how a consumer knows the key is there to read.
-
-    A document that grew ``enclosure`` while still calling itself version 3
-    tells a v3 reader nothing has changed, and tells the operator's toolchain
-    that a document *without* the key is the same document as one with it.
-    """
-    document = parse(fixture_data())
-
-    assert document["version"] == 4
-    assert "enclosure" in document
 
 
 def test_source_info_round_trips():
@@ -330,6 +379,12 @@ def test_enclosure_dimensions_stay_the_catalogues_whole_millimetres():
     assert isinstance(enclosure["width_mm"], int)
     assert isinstance(document["reference"]["width"], float)
     assert isinstance(document["reference"]["raw"]["height"], float)
+    # And in the artifact itself, per CLAUDE.md: a consumer in a language with
+    # one number type sees 112 either way, so the distinction only survives if
+    # it is in the bytes. The same figure, spelled twice, one line apart.
+    text = emit(fixture_data())
+    assert '"length_mm": 112,' in text
+    assert '"width": 112.0,' in text
 
 
 def test_enclosure_records_whether_the_panel_was_drawn_rotated():
@@ -339,9 +394,15 @@ def test_enclosure_records_whether_the_panel_was_drawn_rotated():
     every portrait panel as landscape and nothing would contradict it. Both
     values are asserted for that reason: the ``False`` case alone proves only
     that something absent looks like the default.
+
+    ``family`` rides along here because the rotated fixture is the one that
+    names a catalogue this build cannot produce, and a passthrough is only
+    distinguishable from a literal where the two differ.
     """
     assert parse(fixture_data())["enclosure"]["rotated"] is False
     assert parse(rotated_fixture_data())["enclosure"]["rotated"] is True
+    assert parse(square_fixture_data())["enclosure"]["rotated"] is True
+    assert parse(rotated_fixture_data())["enclosure"]["family"] == "Hammond 1550"
 
 
 def test_enclosure_rotation_is_reported_against_an_untransposed_footprint():
@@ -355,6 +416,28 @@ def test_enclosure_rotation_is_reported_against_an_untransposed_footprint():
 
     assert (document["reference"]["width"], document["reference"]["height"]) == (61.0, 112.0)
     assert (document["enclosure"]["length_mm"], document["enclosure"]["width_mm"]) == (112, 61)
+
+
+def test_rotation_is_not_re_derivable_from_the_outline_or_the_declared_part():
+    """``rotated`` must be read off the match, never worked out from the data.
+
+    An emitter that computed ``reference.width < reference.height`` would agree
+    with every portrait fixture in this file and be an ADR-0001 violation
+    outright — a pipeline fact re-derived downstream. One that computed
+    ``selected_part is None`` would agree just as well, because a rotated panel
+    happened to be the undeclared one in both earlier fixtures.
+
+    The square footprint refuses both readings at once: 120 × 120 is neither
+    portrait nor landscape, and it is rotated *and* declared. This is the
+    positive claim, made where the coincidences have been removed.
+    """
+    document = parse(square_fixture_data())
+    enclosure = document["enclosure"]
+
+    assert document["reference"]["width"] == document["reference"]["height"]
+    assert enclosure["length_mm"] == enclosure["width_mm"]
+    assert enclosure["rotated"] is True
+    assert enclosure["selected_part"] == "1590Q"
 
 
 def test_enclosure_carries_the_declared_part_and_its_absence():
@@ -602,7 +685,9 @@ def test_the_exposed_mapping_is_already_json_shaped():
 
 
 @pytest.mark.parametrize(
-    "build", [fixture_data, rotated_fixture_data], ids=["landscape-declared", "rotated-undeclared"]
+    "build",
+    [fixture_data, rotated_fixture_data, square_fixture_data],
+    ids=["landscape-declared", "rotated-undeclared", "square-rotated-declared"],
 )
 def test_document_rebuilds_an_identical_drilldata(build):
     """Nothing in DrillData may be lost on the way out — this is the whole point
@@ -617,12 +702,16 @@ def test_document_rebuilds_an_identical_drilldata(build):
     claim in the first paragraph was false for a fourth field while this test
     stayed green.
 
-    ``enclosure`` is the same trap twice over, which is why this runs over two
-    fixtures rather than one. ``rotated`` defaults to ``False`` and
+    ``enclosure`` is the same trap three times over, which is why this runs
+    over three fixtures rather than one. ``rotated`` defaults to ``False`` and
     ``selected_part`` to ``None``, so a single fixture leaving either at its
     default would rebuild a dropped key out of the default and compare equal
-    again. Every field below is read back **out of the document** — nothing is
-    recomputed from ``data``, or this would be testing the fixture.
+    again — that takes two. The third is the square footprint: with only the
+    first two, ``rotated`` was ``True`` in exactly the fixture that was
+    portrait and exactly the fixture that declared no part, so a serialiser
+    *computing* it from either would have rebuilt both correctly. Every field
+    below is read back **out of the document** — nothing is recomputed from
+    ``data``, or this would be testing the fixture.
     """
     data = build()
     document = parse(data)
