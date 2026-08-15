@@ -838,7 +838,6 @@ def test_true_size_mismatch_on_the_fixture(tmp_path, capsys):
     assert "reference-size-mismatch" in codes
 
 
-@pytest.mark.xfail(strict=True, reason="awaits Task 5: Excellon injectivity guard")
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
 def test_a_colliding_tool_table_is_refused_at_the_cli(tmp_path, capsys):
     """A tool table that is not injective must fail the run, not be written.
