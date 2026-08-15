@@ -886,6 +886,12 @@ def test_a_finding_need_not_be_anywhere():
             lambda v: StageRun("snap-diameters", (("sizes_nm", (7_000_000, v)),)),
             id="StageRun.parameters-in-a-tuple",
         ),
+        pytest.param(
+            lambda v: Diagnostic(
+                Severity.WARNING, "off-grid", "hole 4 moved", data=[["moved_nm", v]]
+            ),
+            id="Diagnostic.data-as-json-shaped-lists",
+        ),
     ],
 )
 def test_a_payload_key_ending_nm_must_hold_whole_nanometres(build, value):
@@ -903,6 +909,12 @@ def test_a_payload_key_ending_nm_must_hold_whole_nanometres(build, value):
     tuple case separately, because the one tuple-valued parameter in the
     pipeline is a table of diameters — a scalar-only check would leave every
     size in it unexamined.
+
+    The JSON-shaped case is the payload a consumer reconstructs from the
+    emitted document, and it is here because ``Diagnostic.__post_init__``
+    normalises it before checking it: a coercion that tidied the pairs into
+    tuples and left the check behind would make the one shape a library
+    consumer actually builds the only unguarded way into the model.
     """
     with pytest.raises(TypeError, match="nanometres"):
         build(value)
@@ -942,6 +954,88 @@ def test_a_payload_key_that_is_not_a_length_may_hold_a_float():
     run = StageRun("identify-enclosure", (("draft_angle_deg", 2.0),))
     assert finding.get("share") == 0.25
     assert run.get("draft_angle_deg") == 2.0
+
+
+#: The finding as a stage writes it: tuples all the way down. Every JSON-shaped
+#: spelling below is the same finding and must compare and hash as one.
+#:
+#: The payload value is a float under a key that does not name a length, which is
+#: the one combination that would break if the ``_nm`` rule were ever widened
+#: into "a payload holds integers": a share is genuinely 0.25, and a round trip
+#: that had to spell it as a string would be a round trip that lost it.
+_TUPLE_BUILT_FINDING = Diagnostic(
+    Severity.WARNING,
+    "off-grid",
+    "hole 4 moved",
+    location_nm=(-40_000_000, 18_000_000),
+    data=(("share", 0.25),),
+)
+
+#: One list per case, and never two at once: ``json.load`` returns a list for
+#: every array, so all three of these arrive together in practice — but folding
+#: them into one case would let any two of the three coercions be deleted with
+#: the case still failing on the third, which is no test of either.
+_JSON_SHAPED_FINDINGS = [
+    pytest.param(
+        [-40_000_000, 18_000_000],
+        (("share", 0.25),),
+        id="location",
+    ),
+    pytest.param(
+        (-40_000_000, 18_000_000),
+        [("share", 0.25)],
+        id="payload",
+    ),
+    pytest.param(
+        (-40_000_000, 18_000_000),
+        (["share", 0.25],),
+        id="payload-pair",
+    ),
+]
+
+#: Both ways a finding is built. The convenience constructors are the ones every
+#: stage calls, the direct constructor is what ``dataclasses.replace`` and a
+#: consumer rebuilding a document both go through, and a coercion in either one
+#: alone leaves the other spelling of the same finding unequal to it.
+_FINDING_CONSTRUCTORS = [
+    pytest.param(
+        lambda location_nm, data: Diagnostic(
+            Severity.WARNING, "off-grid", "hole 4 moved", location_nm, data
+        ),
+        id="direct",
+    ),
+    pytest.param(
+        lambda location_nm, data: Diagnostic.warning(
+            "off-grid", "hole 4 moved", location_nm, data
+        ),
+        id="convenience",
+    ),
+]
+
+
+@pytest.mark.parametrize(("location_nm", "data"), _JSON_SHAPED_FINDINGS)
+@pytest.mark.parametrize("build", _FINDING_CONSTRUCTORS)
+def test_a_finding_rebuilt_from_json_is_the_finding_it_was_written_from(
+    build, location_nm, data
+):
+    """A ``Diagnostic`` is a value object, so a list in one is a broken one.
+
+    Reading the emitted JSON back is the obvious way a library consumer
+    reconstructs a document, and ``json.load`` hands back a list for every
+    array — the location, the payload, and each key/value pair inside it. A
+    finding holding any of them prints exactly like the one the pipeline
+    produced, compares unequal to it, and raises ``TypeError`` from ``hash``,
+    so the reconstruction is only usable by a reader who already knows which
+    sequences this module happens to want as tuples.
+
+    Both assertions, because they fail apart: equality is what a test comparing
+    against an expected finding relies on, and hashability is what putting
+    findings in a set relies on. A coercion that reached one field and not
+    another would satisfy neither.
+    """
+    rebuilt = build(location_nm, data)
+    assert rebuilt == _TUPLE_BUILT_FINDING
+    assert hash(rebuilt) == hash(_TUPLE_BUILT_FINDING)
 
 
 # --------------------------------------------------------------------------
