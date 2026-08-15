@@ -247,8 +247,8 @@ class Hole:
     numbers each circle once and hands the measurement that same number. What
     can produce it is a caller that enumerates the holes it is building instead
     of carrying over the number it was given — and the two consumers read
-    different halves. A stage that rejects a hole holds the measurement it was
-    checking, so its diagnostic says hole 4; the drill file and the drawing's
+    different halves. A quantiser that rejects a hole holds the measurement it
+    was checking, so its diagnostic says hole 4; the drill file and the drawing's
     balloon iterate the finished holes, so they both say hole 9. One hole,
     described twice under two names, and no artifact holding the pair to notice.
     """
@@ -469,7 +469,7 @@ class EnclosureMatch:
 
     An *empty* ``candidates`` has no meaning and must never be constructed: the
     answer to "no footprint matched" is ``DrillData.enclosure is None``, not a
-    match naming nothing. A stage that cannot identify the outline reports
+    match naming nothing. Quantising that cannot identify the outline reports
     ``unknown-enclosure`` and leaves the field unset.
 
     ``length_nm``/``width_nm`` are the catalogue's own dimensions, carried in
@@ -495,8 +495,8 @@ class EnclosureMatch:
         """Guard the two lengths, coerce ``candidates``, and refuse a bare string.
 
         The dimensions are guarded here for the same reason every other length
-        in this module is: this is a *derived* value, built by a stage out of a
-        catalogue and handed straight to ``DrillData.enclosure``, from which the
+        in this module is: this is a *derived* value, built by quantising out of
+        a catalogue and handed straight to ``DrillData.enclosure``, from which the
         drawing prints a footprint and the JSON serialises one. A float that
         reached this far would be two artifacts' worth of rounding under a name
         that promises nanometres.
