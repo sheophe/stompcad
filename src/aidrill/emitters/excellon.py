@@ -27,21 +27,31 @@ The only transforms permitted are frame translation — delegated to
 :meth:`DrillData.with_origin`, never hand-rolled — and unit conversion, via
 :attr:`Units.per_mm`, at the moment of formatting.
 
-Two invariants are therefore checked rather than assumed, because ``emit``
-serialises whatever ``DrillData`` a library consumer hands it: the tool table
-must stay injective *as written*, and ``LOWER_LEFT`` must yield no negative
-coordinate. Declining to write a file is permitted; repairing one is not — see
+Four invariants are therefore checked rather than assumed, because ``emit``
+serialises whatever ``DrillData`` a library consumer hands it — the CLI's own
+gate on ``worst_severity`` protects only the CLI. The data must carry no ERROR,
+every value must be finite, the tool table must stay injective *as written*, and
+``LOWER_LEFT`` must yield no negative coordinate. Declining to write a file is
+permitted; repairing one is not — see
 ``docs/adr/0001-pipeline-and-emitter-adapters.md``.
+
+Excellon is the format where each of those matters most, because it renders no
+diagnostics at all. Every other artifact this project writes carries its findings
+with it: the drawing has a NOTES block, the JSON document has ``diagnostics``.
+A drill file has nothing, so an incomplete or nonsensical one does not read as
+damaged — it reads as a drill file for a different panel, and it reads that way
+to a machinist about to put it into a machine.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import ClassVar, Iterable, Mapping
 
 from ..errors import EmitterError
 from ..formatting import format_mm
-from ..model import DrillData, Hole, Origin, Units
+from ..model import DrillData, Hole, Origin, Severity, Units
 from .base import register_emitter
 
 __all__ = ["ExcellonOptions", "ExcellonEmitter"]
@@ -87,7 +97,9 @@ class ExcellonEmitter:
 
     # -- public ----------------------------------------------------------
     def emit(self, data: DrillData) -> str:
+        self._reject_errors(data)
         framed = self._reframe(data)
+        self._reject_non_finite(framed)
         tools = framed.tools()
         tokens = self._tool_tokens(tools)
         self._reject_negative_coordinates(framed)
@@ -114,6 +126,38 @@ class ExcellonEmitter:
         return "\n".join(lines) + "\n"
 
     # -- internals -------------------------------------------------------
+    def _reject_errors(self, data: DrillData) -> None:
+        """Refuse data a stage has already declared broken.
+
+        ``SnapDiametersToDrillTable`` implements an unmatched diameter by
+        recording an ERROR *and dropping the hole*, so error-bearing data is
+        routinely data with a hole missing from it. The CLI knows this and
+        writes no artifact at all when anything reached ERROR; a library
+        consumer driving the pipeline itself has no such gate, and the file it
+        would get here is the one failure this project is organised around —
+        not a broken drill file, but a well-formed drill file for a panel that
+        is one hole short. Nothing in the format can say otherwise.
+
+        The codes are named because the caller would otherwise have to walk the
+        diagnostics to find out which finding stopped the file, and because
+        ``code`` is the stable key: a consumer that wants to act on this — retry
+        with a wider drill table, say — can match on what it reads here. Each is
+        named once, in the order the stages found them; a panel with nine holes
+        off one table would otherwise repeat one code nine times and say nothing.
+        """
+        errors = data.of_severity(Severity.ERROR)
+        if not errors:
+            return
+        codes = ", ".join(dict.fromkeys(d.code for d in errors))
+        raise EmitterError(
+            f"excellon: the drill data carries {len(errors)} error diagnostic"
+            f"{'' if len(errors) == 1 else 's'} ({codes}), and a stage that reports "
+            f"an error may already have dropped a hole — an Excellon file renders no "
+            f"diagnostics, so the result would look like a complete drill file for a "
+            f"panel it does not describe; resolve the errors, or emit the json format, "
+            f"which can carry them"
+        )
+
     def _reframe(self, data: DrillData) -> DrillData:
         """Translate into the requested frame using the shared model transform."""
         if self.options.origin is Origin.LOWER_LEFT and data.reference is None:
@@ -125,6 +169,39 @@ class ExcellonEmitter:
             return data.with_origin(self.options.origin)
         except ValueError as exc:  # unknown origin, or a reference lost in flight
             raise EmitterError(f"excellon: {exc}") from exc
+
+    def _reject_non_finite(self, data: DrillData) -> None:
+        """Refuse a value the format has no way to write.
+
+        ``format_mm`` renders NaN as ``nan`` and infinity as ``inf``, and
+        neither starts with a minus, so the lower-left check below — which reads
+        the sign of the rendered token — passes them both. ``Xnan`` is a
+        syntactically plausible line in a file whose header promises absolute
+        decimal coordinates, and it is not a position at all.
+
+        Read from the reframed data, so an outline that is itself non-finite is
+        caught through the holes it moved rather than passed over because each
+        hole was finite when handed in. Applied whatever the origin: negative
+        coordinates are legitimate in the centre frame and NaN is legitimate in
+        neither, so this cannot be folded into the sign check. ``-inf`` shows
+        why the two are separate — the sign check does reject it, as a hole
+        outside the outline, which is the wrong account of a value that names no
+        point.
+        """
+        for hole in data.holes:
+            for token, quantity, value in (
+                ("X", "x coordinate", hole.x),
+                ("Y", "y coordinate", hole.y),
+                ("C", "diameter", hole.diameter),
+            ):
+                if not isfinite(value):
+                    raise EmitterError(
+                        f"excellon: hole {hole.index} has a non-finite {quantity} "
+                        f"({value!r}) and would be written as {token}"
+                        f"{self._value(value)} — the format has no spelling for a "
+                        f"value that is not a number, so the line would look ordinary "
+                        f"and mean nothing; check the geometry it was fitted from"
+                    )
 
     def _tool_tokens(self, tools: Mapping[float, int]) -> dict[float, str]:
         """Render each nominal once, *after* unit conversion, and refuse a clash.

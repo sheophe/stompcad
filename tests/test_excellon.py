@@ -281,6 +281,140 @@ def test_raising_the_precision_makes_the_same_two_nominals_representable():
 
 
 # --------------------------------------------------------------------------
+# a finding the pipeline already made: ERROR means no drill file
+# --------------------------------------------------------------------------
+
+
+def error_bearing_data() -> DrillData:
+    """What ``SnapDiametersToDrillTable`` leaves behind after a bad diameter.
+
+    Two holes were drawn; the ⌀7 matched no size in the declared standard, so
+    the stage recorded an ERROR and *dropped it*. Only the ⌀5 remains, and the
+    surviving hole keeps its own identity — 6, not 0 — so nothing here can be
+    read as a position in the tuple.
+    """
+    return make_data(
+        at(-19.0, -18.75, 5.0, index=6), reference=ReferenceOutline(113.0, 60.0)
+    ).with_diagnostics(
+        Diagnostic.error(
+            "unknown-diameter",
+            "hole 2: dia 7.000 mm matches no metric drill size",
+            (0.0, 18.0),
+            data=(("hole_index", 2), ("diameter", 7.0)),
+        )
+    )
+
+
+def test_data_carrying_an_error_is_refused_rather_than_written():
+    """The CLI checks ``worst_severity`` before it renders; a library consumer
+    calling the emitter directly does not, and this is the emitter that cannot
+    afford it. Excellon renders no diagnostics whatsoever, so the file left by
+    a dropped hole is not a damaged file a machinist would question — it is a
+    complete-looking drill file for a panel with one hole fewer than the artwork
+    has. The refusal names the code, so the caller need not re-derive why."""
+    with pytest.raises(EmitterError, match="unknown-diameter"):
+        emit(error_bearing_data())
+
+
+def test_the_refusal_names_every_distinct_error_code_once():
+    """Two findings of one code and one of another: the caller is told what is
+    wrong with the data, not handed a repetition of the commonest failure."""
+    data = error_bearing_data().with_diagnostics(
+        Diagnostic.error("unknown-diameter", "another one", (10.0, 18.0)),
+        Diagnostic.error("wrong-enclosure", "declared 1590B, drawn 1590BB"),
+    )
+
+    with pytest.raises(EmitterError) as raised:
+        emit(data)
+
+    text = str(raised.value)
+    assert text.count("unknown-diameter") == 1
+    assert "wrong-enclosure" in text
+
+
+def test_warnings_and_information_still_produce_a_drill_file():
+    """The refusal is about ERROR, not about diagnostics. A duplicate-hole
+    warning is the fixture's ordinary state and exits 1 with artifacts written;
+    a guard keyed on ``data.diagnostics`` rather than on their severity would
+    refuse the panel this project ships as its worked example."""
+    data = make_data(
+        at(0.0, 18.0, 7.0, index=3), reference=ReferenceOutline(113.0, 60.0)
+    ).with_diagnostics(
+        Diagnostic.warning("duplicate-hole", "1 coincident hole collapsed", (0.0, 18.0)),
+        Diagnostic.info("no-reference-outline", "nothing to check against"),
+    )
+
+    assert "X56.500Y48.000" in lines(emit(data))
+
+
+# --------------------------------------------------------------------------
+# representability again: a value no coordinate can carry
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_x_is_refused(value):
+    """``format_mm(nan)`` is ``"nan"`` and ``format_mm(inf)`` is ``"inf"``:
+    neither starts with a minus, so the lower-left promise sees nothing wrong
+    and ``Xnan`` reaches the file. It is syntactically plausible and drills
+    nowhere. ``-inf`` is checked here too, because it *is* caught by the sign
+    test — as a hole outside the outline, which is the wrong diagnosis of a
+    value that is not a position at all."""
+    data = make_data(
+        at(value, 0.0, 7.0, index=8), reference=ReferenceOutline(50.0, 50.0)
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 8\b.*non-finite"):
+        emit(data)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_y_is_refused(value):
+    """The other axis, alone, so a check that lost half of itself is visible."""
+    data = make_data(
+        at(0.0, value, 7.0, index=5), reference=ReferenceOutline(50.0, 50.0)
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 5\b.*non-finite"):
+        emit(data)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_a_non_finite_diameter_is_refused(value):
+    """``T1Cnan`` is the same defect one column over: the tool table is where a
+    machinist reads which bit to load."""
+    data = make_data(
+        at(0.0, 0.0, value, index=2), reference=ReferenceOutline(50.0, 50.0)
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 2\b.*non-finite"):
+        emit(data)
+
+
+def test_a_non_finite_coordinate_is_refused_in_the_centre_frame_too():
+    """Nothing about ``Xnan`` is a lower-left concern. The sign test returns
+    early for CENTRE — correctly, because negative coordinates are the whole
+    point of that frame — so a check folded into it would pass ``nan`` straight
+    through whenever the caller asked for the canonical frame."""
+    data = make_data(at(0.0, float("nan"), 7.0, index=1))
+
+    with pytest.raises(EmitterError, match="non-finite"):
+        emit(data, origin=Origin.CENTRE)
+
+
+def test_a_non_finite_reference_outline_is_refused_through_its_holes():
+    """The holes are finite; the frame they are translated into is not. The
+    check therefore reads the reframed data, which is what will be written,
+    rather than the data as handed in."""
+    data = make_data(
+        at(0.0, 0.0, 7.0, index=4), reference=ReferenceOutline(float("nan"), 60.0)
+    )
+
+    with pytest.raises(EmitterError, match=r"hole 4\b.*non-finite"):
+        emit(data)
+
+
+# --------------------------------------------------------------------------
 # coordinates: frame, order, grouping
 # --------------------------------------------------------------------------
 
