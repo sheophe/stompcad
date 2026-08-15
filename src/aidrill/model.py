@@ -462,7 +462,7 @@ class Diagnostic:
     data: tuple[tuple[str, float | int | str], ...] = ()
 
     def __post_init__(self) -> None:
-        """Guard the position and the payload's lengths.
+        """Coerce the position and the payload to tuples, then guard the lengths.
 
         ``location_nm`` is a point in the canonical frame and is guarded like
         any other position: a stage reporting where a hole ended up has the
@@ -470,23 +470,47 @@ class Diagnostic:
         them over here instead would put a finding somewhere the artifacts do
         not agree it is. ``None`` stays legal — a finding about the panel as a
         whole has no coordinate to give.
+
+        The coercion is the same one ``StageRun`` and ``EnclosureMatch`` do, and
+        it reaches three sequences because a finding read back from JSON arrives
+        with a list in every one of them: the location, the payload, and each
+        key/value pair inside the payload. A finding holding any of those prints
+        exactly like the one the pipeline produced, compares unequal to it, and
+        is unhashable beside it — so the obvious way to reconstruct a document
+        from the emitted JSON would yield findings a consumer could neither
+        compare nor put in a set, for reasons visible nowhere in the output.
+
+        It runs before the guard, as in ``StageRun``, so that the guard reads
+        the payload in the shape the object will keep. The two orders happen to
+        agree on what they refuse here — a finding's payload values are scalars,
+        so no coercion changes what ``_check_payload_lengths`` looks at — but
+        checking first would leave the coercion as the only step that reads the
+        caller's argument, and a payload handed over as a generator would be
+        consumed by the guard and stored empty.
+
+        Normalising here rather than in the three convenience constructors is
+        the same choice one level up: they are not the only way a finding is
+        built, and a coercion living there leaves ``dataclasses.replace`` and a
+        consumer's direct construction as ways in that skip it.
         """
         if self.location_nm is not None:
             x_nm, y_nm = self.location_nm
+            object.__setattr__(self, "location_nm", (x_nm, y_nm))
             _check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
+        object.__setattr__(self, "data", tuple((key, value) for key, value in self.data))
         _check_payload_lengths("Diagnostic.data", self.data)
 
     @classmethod
     def warning(cls, code, message, location_nm=None, data=()) -> Diagnostic:
-        return cls(Severity.WARNING, code, message, location_nm, tuple(data))
+        return cls(Severity.WARNING, code, message, location_nm, data)
 
     @classmethod
     def info(cls, code, message, location_nm=None, data=()) -> Diagnostic:
-        return cls(Severity.INFO, code, message, location_nm, tuple(data))
+        return cls(Severity.INFO, code, message, location_nm, data)
 
     @classmethod
     def error(cls, code, message, location_nm=None, data=()) -> Diagnostic:
-        return cls(Severity.ERROR, code, message, location_nm, tuple(data))
+        return cls(Severity.ERROR, code, message, location_nm, data)
 
     def get(self, key: str, default=None):
         """Read one payload value. Emitters use this instead of re-deriving.
