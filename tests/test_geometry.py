@@ -6,6 +6,20 @@ The interesting tests here are the *negative* ones. Recovering a circle from
 four cubics is easy; the whole value of ``fit_circle`` is that it refuses
 ellipses and rounded rectangles, which are the two things a panel drawing is
 full of and which a naive bounding-box fit happily mistakes for holes.
+
+A negative test alone is not enough, and this file learned that the hard way.
+``fit_circle`` rejects with a bare ``None``, so ``assert fit_circle(x) is None``
+passes for the *union* of every rejection path — and every negative fixture
+written from ``circle_path`` trips two or three guards at once. Three guards
+were each deleted with the whole suite still green, and each then admitted a
+shape reported at 10.0 or 11.0 mm: real metric bits, so the drill table waves
+them through and a tool is loaded for a hole the artwork never contained.
+
+The cure is the shape of ``test_rejects_controls_rotated_into_the_radius``, and
+every test under "one guard at a time" follows it: build a shape that defeats
+one guard, assert *positively* that the others are satisfied, and only then
+assert the rejection. ``kappa_correct_path`` exists to make that possible for
+arbitrary anchors.
 """
 
 from __future__ import annotations
@@ -25,6 +39,11 @@ from aidrill.geometry import (
     Matrix,
     MoveTo,
     SubPath,
+    # private, and imported on purpose: isolating one guard means asserting
+    # positively that the others passed, and two of them are whole predicates
+    _cubics,
+    _kappa_consistent,
+    _quarter_turns,
     fit_circle,
     multiply,
     pt_to_mm,
@@ -132,6 +151,50 @@ def star_path(r: float, cx: float = 0.0, cy: float = 0.0) -> SubPath:
             current = segment.end
         else:
             segments.append(segment)
+    return SubPath(tuple(segments))  # type: ignore[arg-type]
+
+
+def kappa_correct_path(anchors: tuple[Point, ...], *, tilt: float = 0.0) -> SubPath:
+    """Four cubics on *arbitrary* anchors, carrying the controls a circle would carry.
+
+    ``circle_path`` can only vary one thing at a time and always puts its
+    anchors on the axes, which is why every shipped negative fixture trips two
+    or three guards at once and none of them is pinned. This builder separates
+    the anchors from the controls: give it any four anchors and it fits each
+    quarter with an offset of ``KAPPA * r`` — ``r`` being the mean anchor
+    radius, which is exactly what ``fit_circle`` will measure — perpendicular
+    to *that anchor's own* radius and pointing the way the anchors travel. The
+    kappa check therefore passes by construction whatever the anchors do, so a
+    shape built here fails the one guard it was built to fail and no other.
+
+    ``tilt`` rotates every offset by that many degrees out of the tangent and
+    towards the radius. The length is unchanged and the tangential component
+    stays positive, so only the radial clause of the kappa check can object.
+    """
+    n = len(anchors)
+    cx = sum(p[0] for p in anchors) / n
+    cy = sum(p[1] for p in anchors) / n
+    radius = sum(math.dist((cx, cy), p) for p in anchors) / n
+    offset = KAPPA * radius
+    ax, ay = anchors[0][0] - cx, anchors[0][1] - cy
+    bx, by = anchors[1][0] - cx, anchors[1][1] - cy
+    travel = 1.0 if (ax * by - ay * bx) >= 0.0 else -1.0
+    theta = math.radians(tilt)
+
+    def control(anchor: Point, sense: float) -> Point:
+        rx, ry = anchor[0] - cx, anchor[1] - cy
+        norm = math.hypot(rx, ry)
+        ux, uy = rx / norm, ry / norm  # unit radius
+        tx, ty = -uy * travel * sense, ux * travel * sense  # unit tangent, the way we travel
+        dx = tx * math.cos(theta) + ux * math.sin(theta)
+        dy = ty * math.cos(theta) + uy * math.sin(theta)
+        return (anchor[0] + offset * dx, anchor[1] + offset * dy)
+
+    segments: list[object] = [MoveTo(anchors[0])]
+    for i, start in enumerate(anchors):
+        end = anchors[(i + 1) % n]
+        segments.append(CurveTo(control(start, 1.0), control(end, -1.0), end))
+    segments.append(ClosePath())
     return SubPath(tuple(segments))  # type: ignore[arg-type]
 
 
@@ -358,6 +421,18 @@ class TestFitCircle:
     def test_open_circle_path_without_closepath_still_fits(self) -> None:
         assert fit_circle(circle_path(0.0, 0.0, 4.0, closed=False)) is not None
 
+    def test_the_anchor_builder_draws_a_circle_the_fitter_accepts(self) -> None:
+        """``kappa_correct_path`` on a circle's anchors is a circle.
+
+        Every isolation test below feeds this builder anchors that are wrong in
+        exactly one way and asserts the rest of ``fit_circle`` sees nothing
+        amiss. That argument is only worth anything if the builder itself makes
+        holes the fitter takes, so it is asserted here rather than assumed.
+        """
+        found = fit_circle(kappa_correct_path(((3.5, 0.0), (0.0, 3.5), (-3.5, 0.0), (0.0, -3.5))))
+        assert found is not None
+        assert found.diameter == pytest.approx(7.0, abs=1e-9)
+
     # -- rejections --------------------------------------------------------
 
     def test_rejects_an_ellipse(self) -> None:
@@ -526,8 +601,138 @@ class TestFitCircle:
     def test_rejects_a_degenerate_zero_size_path(self) -> None:
         assert fit_circle(circle_path(7.0, 7.0, 0.0)) is None
 
+    def test_rejects_a_path_whose_radius_overflows(self) -> None:
+        """The other clause of the degeneracy guard: unbounded, not vanishing.
+
+        ``radius <= 0.0`` catches the point a zero-size path collapses to. An
+        anchor radius that overflows to infinity is the opposite failure and
+        sails past that clause, and every guard after it then measures against
+        an infinite slack — so nothing objects and the fitter reports a hole of
+        infinite diameter, which snaps to no bit and drops a real hole with it.
+        """
+        huge = kappa_correct_path(((1e308, 0.0), (0.0, 1e308), (-1e308, 0.0), (0.0, -1e308)))
+        pairs = _cubics(huge)
+        assert pairs is not None
+        radius = sum(math.dist((0.0, 0.0), start) for start, _ in pairs) / 4.0
+        # the sign clause sees nothing wrong: this radius is positive
+        assert radius > 0.0
+        assert math.isinf(radius)
+
+        assert fit_circle(huge) is None
+
     def test_rejects_an_empty_path(self) -> None:
         assert fit_circle(SubPath(())) is None
+
+    # -- one guard at a time -----------------------------------------------
+    #
+    # Each shape below defeats exactly one guard and satisfies the others, and
+    # says so with a positive assertion before it asserts the rejection. Delete
+    # the guard a test names and that test — and only that test — fails.
+
+    def test_rejects_an_oval_carrying_a_circles_controls(self) -> None:
+        """Isolates the equidistant-anchor guard.
+
+        A 12 x 10 oval, its controls built for the 11 mm circle ``fit_circle``
+        will measure. The path closes, the anchors are a quarter turn apart and
+        every control is where a circle puts it, so only the anchor radii
+        disagree. Without that guard this is drilled at 11.0 mm, which is a real
+        metric bit and passes the drill table without a murmur.
+        """
+        oval = kappa_correct_path(((6.0, 0.0), (0.0, 5.0), (-6.0, 0.0), (0.0, -5.0)))
+        pairs = _cubics(oval)
+        assert pairs is not None and len(pairs) == 4
+
+        # everything except the anchor radii sees a circle of radius 5.5
+        assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
+        assert _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.5, 0.055)
+        assert _kappa_consistent(pairs, (0.0, 0.0), 5.5, 0.055)
+
+        assert fit_circle(oval) is None
+
+    def test_rejects_four_cubics_that_end_short_of_their_start(self) -> None:
+        """Isolates the path-closure guard.
+
+        The four anchors are a circle's, and the last curve is displaced along
+        its own radius so that it ends 1.2 mm out beyond the start — which
+        leaves its control offset the same length, still perpendicular to the
+        same radius and still running the way the path travels. Only the gap
+        betrays it. Without the guard this is drilled at 10.0 mm.
+        """
+        base = kappa_correct_path(((5.0, 0.0), (0.0, 5.0), (-5.0, 0.0), (0.0, -5.0)))
+        last = base.segments[4]
+        assert isinstance(last, CurveTo)
+        spiral = SubPath(
+            base.segments[:4]
+            + (CurveTo(last.c1, (last.c2[0] + 1.2, last.c2[1]), (last.end[0] + 1.2, last.end[1])),)
+        )
+        pairs = _cubics(spiral)
+        assert pairs is not None and len(pairs) == 4
+
+        # the anchors are still a circle's, and the controls are still a circle's
+        assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([5.0] * 4)
+        assert _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.0, 0.05)
+        assert _kappa_consistent(pairs, (0.0, 0.0), 5.0, 0.05)
+        assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(1.2)
+
+        assert fit_circle(spiral) is None
+
+    def test_rejects_controls_tilted_off_the_tangent(self) -> None:
+        """Isolates the radial clause of the kappa check.
+
+        ``cusp_path`` turns each offset a full 90 degrees onto the radius, which
+        also reverses what the tangential clause looks at on half of them. This
+        one tilts by 20 degrees: every offset keeps its length exactly, keeps a
+        positive component along the direction of travel, and only picks up a
+        radial component. Both other clauses of the check are asserted here, so
+        the rejection can only be the radial one. Without it this is drilled at
+        10.0 mm.
+        """
+        tilted = kappa_correct_path(
+            ((5.0, 0.0), (0.0, 5.0), (-5.0, 0.0), (0.0, -5.0)), tilt=20.0
+        )
+        pairs = _cubics(tilted)
+        assert pairs is not None and len(pairs) == 4
+
+        # anchors untouched, so the guards before the kappa check see a circle
+        assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([5.0] * 4)
+        assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
+        assert _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.0, 0.05)
+
+        for start, curve in pairs:
+            for anchor, control, sense in ((start, curve.c1, 1.0), (curve.end, curve.c2, -1.0)):
+                ox, oy = control[0] - anchor[0], control[1] - anchor[1]
+                rx, ry = anchor  # the centre is the origin
+                # right length ...
+                assert within(math.hypot(ox, oy), KAPPA * 5.0, SLACK)
+                # ... and running the way the path travels (anticlockwise here)
+                assert (ox * -ry + oy * rx) * sense > 0.0
+                # only the radial component is wrong, and it is far out
+                assert abs(ox * rx + oy * ry) / 5.0 > 0.05
+
+        assert fit_circle(tilted) is None
+
+    def test_rejects_anchors_that_are_not_a_quarter_turn_apart(self) -> None:
+        """Isolates the quarter-turn guard.
+
+        Four anchors at 0, 45, 180 and 225 degrees, all 10 mm from a centroid
+        that still lands on the origin. They are equidistant, they close, and
+        their controls are ``KAPPA * r`` long, perpendicular and running the way
+        the path travels — so the kappa check passes too, because ``KAPPA`` is
+        the offset for a *quarter* arc and nothing was checking that these
+        quarters are quarters. What it draws is a lopsided blob; what it was
+        reported as is a 20.0 mm hole.
+        """
+        d = 10.0 / math.sqrt(2.0)
+        blob = kappa_correct_path(((10.0, 0.0), (d, d), (-10.0, 0.0), (-d, -d)))
+        pairs = _cubics(blob)
+        assert pairs is not None and len(pairs) == 4
+
+        # every guard except the quarter turn sees a circle of radius 10
+        assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([10.0] * 4)
+        assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
+        assert _kappa_consistent(pairs, (0.0, 0.0), 10.0, 0.1)
+
+        assert fit_circle(blob) is None
 
     # -- tolerance ---------------------------------------------------------
 
@@ -553,6 +758,27 @@ class TestFitCircle:
         slightly_oval = circle_path(0.0, 0.0, 10.0, ry=10.05)
         assert fit_circle(slightly_oval, tolerance=0.05) is not None
         assert fit_circle(slightly_oval, tolerance=0.001) is None
+
+    @pytest.mark.parametrize("radius", [0.6, 12.5])
+    def test_the_same_proportional_deviation_gets_the_same_answer_at_any_radius(
+        self, radius: float
+    ) -> None:
+        """The slack scales with the radius, and no absolute slack can do this.
+
+        ``test_default_tolerance_is_one_percent`` pins the *value* of the
+        tolerance and says nothing about what it multiplies: drop the ``*
+        radius`` and its fixture is small enough that relative and absolute
+        agree. They stop agreeing on a big hole. A 25 mm hole rounded to the two
+        decimals a PDF carries can arrive measuring 25.00 x 24.92 — 0.3% out,
+        well inside 1% — and an absolute 0.01 mm slack rejects it. **A rejected
+        circle is not a diagnostic**; it is simply not a hole, so it vanishes
+        from the drill file, the drawing and the JSON alike, at exit 0.
+
+        So: the same *proportion* must get the same verdict on a 1.2 mm hole and
+        a 25 mm one. 0.3% is accepted at both, 3% is refused at both.
+        """
+        assert fit_circle(circle_path(0.0, 0.0, radius, ry=radius * (24.92 / 25.00))) is not None
+        assert fit_circle(circle_path(0.0, 0.0, radius, ry=radius * 0.97)) is None
 
     def test_default_tolerance_is_one_percent(self) -> None:
         import inspect
