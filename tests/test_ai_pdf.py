@@ -368,12 +368,71 @@ def test_a_bare_n_still_ends_the_path_it_discards(tmp_path):
     assert len(AiPdfSource(pdf).read().holes) == 1
 
 
+def test_a_path_that_clips_and_paints_is_kept(tmp_path):
+    """SPEC 6.3 discards ``W``/``W*`` *followed by* ``n``.
+
+    ``W`` is not what makes a path invisible — ``n`` is. ``re W f`` is the
+    ordinary way to fill a shape and clip the group to it at once, and it marks
+    real ink. Throwing it away on the ``W`` alone left the panel outline
+    missing and every hole measured from the page corner instead.
+    """
+    pdf = build_pdf(
+        tmp_path / "clipfill.pdf",
+        {
+            "Background": "10 10 200 100 re W f",
+            "Drill": circle_ops(60, 35, 10),
+        },
+    )
+    data = AiPdfSource(pdf).read()
+    assert data.reference is not None
+    assert data.reference.width == pytest.approx(70.556, abs=1e-3)
+    assert data.reference.height == pytest.approx(35.278, abs=1e-3)
+    assert data.of_severity(Severity.WARNING) == ()
+
+
+def test_a_stroked_circle_that_also_clips_is_still_a_hole(tmp_path):
+    """``h W S`` strokes the circle *and* clips to it — the stroke is the hole.
+
+    Discarding it raised ``EmptyLayerError``, whose default message tells the
+    operator to give the drill circles a stroke they had already given them.
+    """
+    pdf = build_pdf(
+        tmp_path / "clipstroke.pdf",
+        {
+            "Background": "10 10 200 100 re f",
+            "Drill": circle_ops(60, 35, 10, paint="W S"),
+        },
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_clip_that_paints_nothing_is_still_discarded(tmp_path):
+    """The other side of the same rule, kept honest: ``W n`` marks nothing.
+
+    An artboard-sized ``re W n`` is what Illustrator brackets nearly every
+    group with. If keeping ``W f`` were done by keeping every ``W``, this
+    rectangle would out-area the panel and hijack the frame (SPEC 6.6).
+    """
+    pdf = build_pdf(
+        tmp_path / "clipmixed.pdf",
+        {
+            "Background": "0 0 400 400 re W n 10 10 200 100 re W f",
+            "Drill": "0 0 400 400 re W n " + circle_ops(60, 35, 10),
+        },
+    )
+    data = AiPdfSource(pdf).read()
+    assert len(AiPdfSource(pdf).layer_subpaths("Background")) == 1
+    assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 1
+    assert data.reference is not None
+    assert data.reference.width == pytest.approx(70.556, abs=1e-3)
+
+
 def test_clip_rectangles_cannot_become_the_reference_outline():
     """Ask for the frame from the drill layer: its only rectangles are clips."""
     data = AiPdfSource(FIXTURE, reference_layer="Drill").read()
     assert data.reference is None
     codes = [d.code for d in data.diagnostics]
-    assert "no-reference-outline" in codes
+    assert "reference-outline-not-found" in codes
 
 
 def test_without_a_reference_the_frame_falls_back_to_the_page():
@@ -381,8 +440,21 @@ def test_without_a_reference_the_frame_falls_back_to_the_page():
     data = AiPdfSource(FIXTURE, reference_layer="Drill").read()
     shifted = [(x + 148.4999, y + 105.0000, d) for x, y, d in EXPECTED_HOLES]
     match_multiset(data.holes, shifted)
-    warning = next(d for d in data.diagnostics if d.code == "no-reference-outline")
+    warning = next(d for d in data.diagnostics if d.code == "reference-outline-not-found")
     assert warning.severity is Severity.WARNING
+
+
+def test_the_source_does_not_reuse_the_validate_stage_diagnostic_code():
+    """One key, one meaning (SPEC 3): ``code`` is what consumers match on.
+
+    ``CheckReferenceSize`` reports ``no-reference-outline`` at INFO for a
+    different finding — there was nothing to check against. This one is the
+    reference layer arriving with no usable outline, and it is a WARNING, which
+    is what pushes the run to exit 1. Sharing the key made severity depend on
+    which half of the pipeline happened to emit it.
+    """
+    data = AiPdfSource(FIXTURE, reference_layer="Drill").read()
+    assert [d.code for d in data.diagnostics] == ["reference-outline-not-found"]
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +765,47 @@ def test_nested_marked_content_keeps_the_layer(tmp_path):
         },
     )
     assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_an_unbalanced_emc_inside_a_form_does_not_unwind_the_caller(tmp_path):
+    """A form inherits the layer stack; it must not be allowed to pop off it.
+
+    ``/Fm0 Do`` is invoked inside ``BDC /OC /MC1``, so the form's own content is
+    on the drill layer. An ``EMC`` the form never opened used to pop that
+    inherited entry, and everything the form drew afterwards lost its layer —
+    the drill circles simply vanished from the layer they were drawn on.
+    """
+    pdf = build_pdf(
+        tmp_path / "emcform.pdf",
+        {
+            "Background": "10 10 200 100 re f",
+            "Drill": "/Fm0 Do",
+        },
+        form=([1, 0, 0, 1, 0, 0], "EMC " + circle_ops(60, 35, 10)),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_form_may_still_close_the_marked_content_it_opened(tmp_path):
+    """The floor stops at the inherited depth; it does not freeze the stack.
+
+    The form opens the Background layer, draws inside it, then closes it and
+    draws again. That second circle belongs to the caller's layer only — a
+    floor implemented as "never pop" would leave it on Background too.
+    """
+    pdf = build_pdf(
+        tmp_path / "formbdc.pdf",
+        {
+            "Background": "10 10 200 100 re f",
+            "Drill": "/Fm0 Do",
+        },
+        form=(
+            [1, 0, 0, 1, 0, 0],
+            "/OC /MC0 BDC " + circle_ops(60, 35, 10) + " EMC " + circle_ops(150, 35, 8),
+        ),
+    )
+    assert len(AiPdfSource(pdf).layer_subpaths("Background")) == 2
+    assert len(AiPdfSource(pdf).layer_subpaths("Drill")) == 2
 
 
 def test_units_are_millimetres(tmp_path):

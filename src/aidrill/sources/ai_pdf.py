@@ -165,7 +165,13 @@ class AiPdfSource:
             reference = None
             diagnostics.append(
                 Diagnostic.warning(
-                    "no-reference-outline",
+                    # Not ``no-reference-outline``: ``CheckReferenceSize`` uses
+                    # that key at INFO for a different finding — that there was
+                    # nothing to check the outline against. ``code`` is the
+                    # stable machine key consumers match on (SPEC 3), and one
+                    # key meaning two things at two severities defeats it, the
+                    # more so because only the WARNING moves the exit code.
+                    "reference-outline-not-found",
                     f"layer {self.reference_layer!r} has no non-circular path to use "
                     f"as the panel outline; hole positions are page-relative, "
                     f"measured from the MediaBox corner",
@@ -305,9 +311,15 @@ def _walk(
     """Interpret one content stream, appending to ``out``.
 
     ``marks`` is the marked-content stack inherited from the caller, so a Form
-    XObject invoked inside ``BDC /OC /MC1`` keeps its layer.
+    XObject invoked inside ``BDC /OC /MC1`` keeps its layer. Inherited is not
+    the same as owned: a stream may only close what it opened. An ``EMC`` with
+    no ``BDC`` of its own — Illustrator emits them, and so does anything that
+    concatenates streams — would otherwise pop the *caller's* entry, and every
+    path the form drew after it would come back attributed to no layer at all.
+    That is silent: the drill layer simply comes up short.
     """
     stack: list[Matrix] = []
+    floor = len(marks)
     builder = _PathBuilder(ctm)
 
     for instruction in pikepdf.parse_content_stream(source):
@@ -333,12 +345,16 @@ def _walk(
         elif op == "BMC":
             marks = marks + (frozenset(),)
         elif op == "EMC":
-            marks = marks[:-1]
+            if len(marks) > floor:
+                marks = marks[:-1]
 
         # -- path construction
         elif op in ("m", "l", "c", "v", "y", "h", "re"):
             builder.construct(op, operands)
         elif op in ("W", "W*"):
+            # Recorded, never acted on: clipping is not a painting decision.
+            # The operator that ends the path is what says whether it marked
+            # ink, and ``n`` is the only one that says no.
             builder.clipping = True
 
         # -- path painting
@@ -434,17 +450,21 @@ class _PathBuilder:
             self._point = self._start
 
     def flush(self, close: bool = False) -> list[SubPath]:
-        """End the path and return its subpaths — none of them, if it clips.
+        """End the path and return its subpaths, whether or not it also clips.
 
-        A ``W``/``W*`` before the painting operator means the path is (also) a
-        clipping boundary; SPEC 6.3 says to discard it rather than mistake an
-        artboard-sized rectangle for a panel outline.
+        Deciding *here* was the bug. ``W``/``W*`` only adds the path to the
+        clipping boundary; what the path marks is settled by the operator that
+        ends it, and only ``n`` marks nothing (SPEC 6.3 says ``W`` *followed by*
+        ``n``). Discarding on the ``W`` alone silently dropped every ``re W f``
+        background outline — leaving the panel with no frame — and every
+        ``h W S`` drill circle, whose absence was then reported as a layer that
+        needed a stroke it already had. The caller applies ``_NO_PAINT_OPS``.
         """
         if close:
             self._close()
         if self._current:
             self._done.append(SubPath(tuple(self._current)))
-        paths = [] if self.clipping else self._done
+        paths = self._done
         self._done = []
         self._current = []
         self.clipping = False
