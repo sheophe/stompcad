@@ -19,12 +19,26 @@ the panel was *measured* at 112 × 61 and destroys the 113 × 60 the artwork
 actually said. Both spellings produce an identical-looking outline, which is why
 the test that covers it runs the whole pipeline and reads the emitted document.
 
-**It never guesses.** No match is ``unknown-enclosure`` at ERROR and a tie is
-``ambiguous-enclosure`` at ERROR naming both, rather than the nearest footprint
-or the first row. A panel drilled for the wrong case is scrap aluminium; a
-refusal costs a re-run. Silence is reserved for the one case it means something:
-a unique match within tolerance, where saying so on every run would train the
-operator to skim past the runs that matter.
+**It never guesses.** A tie is ``ambiguous-enclosure`` and a declared part that
+contradicts the artwork is ``wrong-enclosure``, both at ERROR naming every
+candidate, rather than the nearest footprint or the first row. A panel drilled
+for the wrong case is scrap aluminium; a refusal costs a re-run. Silence is
+reserved for the one case it means something: a unique match within tolerance,
+where saying so on every run would train the operator to skim past the runs that
+matter.
+
+**No match at all is only a WARNING, and the asymmetry is the argument.** A
+panel that omits a reference layer reaches the end of the pipeline untouched and
+exits 0 — see :meth:`apply`, which cannot assume a predecessor ran. So an ERROR
+here would mean that *drawing* your outline is punished while *not* drawing it
+is not, which is backwards at any severity. The principle underneath: "two
+Hammond footprints fit yours" and "you declared a part your artwork
+contradicts" are statements about the operator's panel, but "we have never heard
+of your enclosure" is a statement about **our catalogue** — this tool holds 22
+Hammond footprints and the world holds rather more. The same rule the drill
+table follows: we cannot know what another builder is working in. The finding is
+raised, the run continues, the outline is left exactly as it was measured, and
+the operator decides.
 
 **A 2-D outline identifies a footprint, not a part.** 112 × 61 is 1590B, 1590B2
 *and* 1590BS — they differ only in height, which artwork does not carry. The
@@ -191,7 +205,14 @@ class IdentifyHammondFootprint:
 
     # -- diagnostics -----------------------------------------------------
     def _unknown(self, reference: ReferenceOutline) -> Diagnostic:
-        return Diagnostic.error(
+        """WARNING, not ERROR — the one finding here about *us* and not the panel.
+
+        See the module docstring: a panel with no reference layer at all exits 0,
+        so refusing one that has an outline we do not recognise would punish the
+        operator for drawing it. The outline is left as measured, and the run
+        goes on.
+        """
+        return Diagnostic.warning(
             "unknown-enclosure",
             f"reference outline {reference.width:.3f} × {reference.height:.3f} mm "
             f"matches no {CATALOGUE} footprint within {self.tolerance_mm:g} mm; "

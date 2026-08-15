@@ -130,13 +130,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--drill-sizes",
         metavar="CSV",
         default=None,
-        help="only these sizes of the standard are in the drawer",
+        # The name is older than its meaning: it used to *be* the whole table
+        # and was ignored unless --diameters table was also passed. It now
+        # narrows the standard, and it is never ignored — so an old invocation
+        # that carried it as a no-op will now take bits out of the drawer.
+        help="narrow the standard: only these of its sizes are in the drawer "
+        "(every value must be a size the standard has)",
     )
     parser.add_argument(
         "--no-drill-sizes",
         metavar="CSV",
         default=None,
-        help="these sizes of the standard are not in the drawer",
+        help="narrow the standard: these of its sizes are not in the drawer",
     )
     parser.add_argument(
         "--dedupe-tolerance",
@@ -592,6 +597,28 @@ def _write(emitter: Emitter, path: Path, text: str) -> str:
     return f"wrote {path}  ({emitter.name}, {len(text.encode('utf-8'))} bytes)"
 
 
+def _withheld(targets: Iterable[tuple[Emitter, Path]]) -> list[str]:
+    """Say what was not written, and name every path, so nothing looks stale.
+
+    An ERROR means the data does not describe a panel that can be drilled, and
+    an artifact made from it is a document that states something false. The
+    exit code already says so, but the exit code is the part of a run that gets
+    read least: the failure this prevents is a drill file **missing a hole**,
+    since a hole whose diameter matches no bit is dropped by ``snap-diameters``
+    and the Excellon format renders no diagnostics at all. The drawing's NOTES
+    and the machine-readable document would both carry the finding; the file
+    that actually goes to the machine would carry a shorter panel and look
+    perfectly well-formed.
+
+    Only ERROR withholds. A warning is something to look at, not a reason to
+    leave the operator with nothing — an enclosure this tool does not stock is a
+    warning, and it must still produce a drill file.
+    """
+    return ["wrote nothing: this run has errors, so these were not written:"] + [
+        f"  {path}  ({emitter.name})" for emitter, path in targets
+    ]
+
+
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
     settings = settings_from(args)
@@ -613,10 +640,14 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     print(format_report(data), file=out)
 
     if emitters:
-        rendered = _render(emitters, data)
         print("", file=out)
-        for emitter, path, text in rendered:
-            print(_write(emitter, path, text), file=out)
+        if data.worst_severity is Severity.ERROR:
+            # Not rendered either: an emitter's bytes are of no use to anybody
+            # here, and one of them may legitimately refuse data this broken.
+            print("\n".join(_withheld(emitters)), file=out)
+        else:
+            for emitter, path, text in _render(emitters, data):
+                print(_write(emitter, path, text), file=out)
 
     print("\n".join(format_summary(data)), file=out)
     return _EXIT_FOR_SEVERITY[data.worst_severity]

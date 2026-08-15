@@ -25,7 +25,6 @@ import pytest
 from aidrill import cli
 from aidrill.emitters.base import available, register_emitter
 from aidrill.errors import EmptyLayerError, LayerNotFoundError
-from aidrill.pipeline import DRILL_STANDARDS
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -34,6 +33,7 @@ from aidrill.model import (
     Severity,
     SourceInfo,
 )
+from aidrill.pipeline import DRILL_STANDARDS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 
@@ -356,23 +356,24 @@ def test_the_declared_case_agreeing_with_the_artwork_is_silent(fake_source, caps
 
 
 def test_a_case_that_disagrees_with_the_artwork_is_an_error(fake_source, capsys, tmp_path):
-    """Exit 2, and the finding names both parts.
+    """Exit 2, reported, and no artifact left behind.
 
     This is what finally makes exit 2 reachable from a correct file: the panel
     parses, every hole is a real bit, and the run is still refused because the
     aluminium in front of the operator is the wrong case.
+
+    Read off the report rather than the machine-readable document, because a run
+    with errors deliberately writes no document — matched on the ``[code]`` the
+    report prints, never on the wording around it. What the finding *carries* is
+    pinned where it is produced, in ``TestDeclaredCase``.
     """
     fake_source(make_data())
     doc = tmp_path / "panel.txt"
 
     assert cli.main([str(FIXTURE), "--case", "1590BB", "--emit", f"json={doc}"]) == 2
 
-    found = [
-        d for d in json.loads(doc.read_text())["diagnostics"] if d["code"] == "wrong-enclosure"
-    ]
-    assert len(found) == 1
-    assert found[0]["data"]["requested_part"] == "1590BB"
-    assert found[0]["severity"] == "error"
+    assert "[wrong-enclosure]" in capsys.readouterr().out
+    assert not doc.exists(), "a document describing the wrong case reached the disk"
 
 
 def test_an_order_code_is_not_told_it_drew_the_wrong_case(fake_source, capsys):
@@ -406,6 +407,28 @@ def test_a_part_number_from_nowhere_is_a_usage_error(fake_source, capsys):
     err = capsys.readouterr().err
     assert err.startswith("aidrill: error:"), err
     assert "1590ZZ" in err
+
+
+def test_a_panel_that_is_no_hammond_case_still_gets_its_drill_data(
+    fake_source, tmp_path, capsys
+):
+    """A folded-aluminium one-off, or any of the enclosures we do not stock.
+
+    The exit code is asserted where an operator actually meets it, because that
+    is the number a Makefile branches on: **1**, not 2. "We have never heard of
+    your enclosure" is a statement about this tool's 22-footprint catalogue, and
+    a panel with no reference layer at all exits 0 — so refusing this one would
+    punish the operator for having drawn their outline. The finding is reported,
+    the outline keeps the size it was measured at, and the artifacts are written.
+    """
+    fake_source(make_data(reference=ReferenceOutline.from_measurement(200.0, 100.0)))
+    doc = tmp_path / "panel.txt"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={doc}"]) == 1
+
+    document = json.loads(doc.read_text())
+    assert [d["code"] for d in document["diagnostics"]] == ["unknown-enclosure"]
+    assert (document["reference"]["width"], document["reference"]["height"]) == (200.0, 100.0)
 
 
 def test_an_empty_case_is_told_it_is_empty(fake_source, capsys):
@@ -586,6 +609,57 @@ def test_a_failing_emitter_writes_nothing_at_all(fake_source, tmp_path, capsys):
     err = capsys.readouterr().err
     assert "Traceback" not in err
     assert err.count("error:") == 1  # reported once, not once per target
+
+
+def test_an_erroring_run_writes_no_artifact_at_all(fake_source, tmp_path, capsys):
+    """The expensive failure, in the one artifact nobody reads with their eyes.
+
+    A panel with a 30 mm cut-out loses that hole at ``snap-diameters``: no bit
+    makes it, so it is an ERROR and the hole is dropped. Every emitter then
+    faithfully describes a *two*-hole panel. The machine-readable document and
+    the drawing's NOTES both carry the finding, but the Excellon format renders
+    no diagnostics at all — so the file that goes to the machine is silently
+    short a hole, and it looks exactly like a good one.
+
+    An exit code the operator may not read is not enough of a guard. A run with
+    errors produces no artifacts, so there is nothing to load by mistake.
+    """
+    fake_source(
+        make_data(
+            holes=[
+                Hole.from_measurement(-20.0, 18.0, 7.0, index=0),
+                Hole.from_measurement(0.0, 18.0, 30.0, index=1),  # no bit makes this
+                Hole.from_measurement(20.0, 18.0, 5.0, index=2),
+            ]
+        )
+    )
+    drl = tmp_path / "panel.drl"
+    doc = tmp_path / "panel.txt"
+
+    code = cli.main(
+        [str(FIXTURE), "--emit", f"excellon={drl}", "--emit", f"json={doc}"]
+    )
+
+    assert code == 2
+    assert not drl.exists(), "a drill file missing a hole reached the disk"
+    assert not doc.exists()
+
+    captured = capsys.readouterr()
+    assert "[unknown-diameter]" in captured.out, "the finding was not reported either"
+    assert str(drl) in captured.out, "the operator is not told which artifact was withheld"
+    assert captured.err == "", "a refusal is a result, not a failure to run"
+
+
+def test_a_warning_still_gets_its_artifacts(fake_source, tmp_path, capsys):
+    """Only ERROR withholds output. A warning is a thing to look at, not a
+    reason to leave the operator with nothing — and after ``unknown-enclosure``
+    became a warning, this is the difference between "we do not stock your case"
+    and "you get no drill file"."""
+    fake_source(make_data(diagnostics=[Diagnostic.warning("something", "watch out")]))
+    doc = tmp_path / "panel.txt"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={doc}"]) == 1
+    assert doc.exists() and doc.read_text().strip()
 
 
 def test_every_target_is_written_on_the_happy_path(fake_source, tmp_path, capsys):
@@ -990,11 +1064,12 @@ def test_the_fixture_panel_is_identified_as_the_case_it_was_drawn_for(tmp_path):
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
 def test_the_fixture_panel_declared_as_the_wrong_case_exits_two(tmp_path, capsys):
+    """The real fixture, end to end: exit 2 and nothing on disk to load."""
     doc = tmp_path / "tar.json"
     assert cli.main([str(FIXTURE), "--case", "1590BB", "--emit", f"json={doc}"]) == 2
 
-    codes = [d["code"] for d in json.loads(doc.read_text())["diagnostics"]]
-    assert "wrong-enclosure" in codes
+    assert "[wrong-enclosure]" in capsys.readouterr().out
+    assert not doc.exists()
 
 
 # ---------------------------------------------------------------------------

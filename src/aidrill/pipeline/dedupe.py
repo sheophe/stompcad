@@ -21,9 +21,9 @@ class Deduplicate:
     """Collapse holes that coincide within ``tolerance`` **and** share a diameter.
 
     Equality of diameter is exact: deciding that 6.9998 and 7.0000 are the same
-    size is ``NormalizeDiameters``' job, not this stage's, and doing it in two
-    places is how the two of them come to disagree. Run normalisation first if
-    that is what you want — but this stage never assumes you did.
+    size is ``SnapDiametersToDrillTable``'s job, not this stage's, and doing it
+    in two places is how the two of them come to disagree. Run that stage first
+    if that is what you want — but this stage never assumes you did.
 
     The first hole of a group in input order survives, so ordering upstream (or
     the lack of it) fully determines the result.

@@ -78,8 +78,8 @@ def fixture_data() -> DrillData:
         processing=(
             StageRun("snap", (("grid_mm", 0.25), ("warn_over_mm", 0.0625), ("enabled", True))),
             StageRun(
-                "normalize-diameters",
-                (("strategy", "TableDiameters"), ("sizes_mm", (5.0, 7.0))),
+                "snap-diameters",
+                (("standard", "metric"), ("size_count", 2), ("sizes_mm", (5.0, 7.0))),
             ),
         ),
     )
@@ -338,8 +338,8 @@ def test_processing_records_what_the_pipeline_did():
             "parameters": {"grid_mm": 0.25, "warn_over_mm": 0.0625, "enabled": True},
         },
         {
-            "name": "normalize-diameters",
-            "parameters": {"strategy": "TableDiameters", "sizes_mm": [5.0, 7.0]},
+            "name": "snap-diameters",
+            "parameters": {"standard": "metric", "size_count": 2, "sizes_mm": [5.0, 7.0]},
         },
     ]
 
@@ -435,7 +435,7 @@ def test_document_rebuilds_an_identical_drilldata():
 
     assert rebuilt == data
     assert rebuilt.diagnostics[1].get("hole_index") == 4
-    assert rebuilt.last_run("normalize-diameters").get("sizes_mm") == (5.0, 7.0)
+    assert rebuilt.last_run("snap-diameters").get("sizes_mm") == (5.0, 7.0)
 
 
 # --------------------------------------------------------------------------

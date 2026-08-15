@@ -223,16 +223,27 @@ class SnapDiametersToDrillTable:
     """Give every hole the nominal diameter of a bit that actually exists.
 
     ``tolerance_mm`` is how far a measurement may sit from a table size and
-    still be that size. It is a *bound*, not a preference: a measurement outside
-    it is an ``unknown-diameter`` ERROR and the hole is dropped, rather than
-    being matched to its nearest neighbour anyway.
+    still be that size. Be clear about what it does and does not catch, because
+    the honest answer is narrower than it looks: **within the series' range it
+    never fires at all.** The widest gap anywhere in the metric series is the
+    0.5 mm step between 14.0 and 14.5, so the furthest any measurement in
+    0.5–25.0 mm can sit from a size is exactly 0.25 — the default tolerance,
+    which ``within`` treats as inclusive. What actually protects a panel in that
+    range is the *density of the table*, not this number: the nearest bit is
+    always within half a step, and half a step is small.
+
+    What the bound really catches is a measurement **outside** the series — a
+    30 mm cut-out that wants a step drill or a punch, a 0.2 mm speck, a rounded
+    rectangle the circle fitter mistook for a circle. Those are the cases where
+    unbounded nearest-neighbour matching would turn a malformed shape into a
+    plausible *wrong* drill that nothing downstream could tell from a real one.
+
+    A second, tighter threshold — "this snapped further than a real drawing
+    ought to" as a WARNING — is a genuinely different idea and is deliberately
+    not this number. Tightening *this* one to catch it would make a legitimate
+    14.3 mm panel an ERROR and, by the rule below, cost it the hole.
 
     Two rules that the earlier, strategy-based version got wrong, and why:
-
-    **Unbounded nearest-neighbour matching is not available.** With no bound,
-    a malformed circle — a rounded rectangle the fitter mistook for one, a
-    30 mm cut-out that wants a step drill — becomes a plausible *wrong* drill,
-    and nothing downstream can tell it from a real one.
 
     **An unmatched measurement is not kept.** The old stage retained it and
     warned. That cannot survive the invariant this stage now carries: if every
@@ -254,18 +265,34 @@ class SnapDiametersToDrillTable:
         self.tolerance_mm = float(tolerance_mm)
 
     def describe(self) -> StageRun:
-        """The standard by name *and* the sizes that were available under it.
+        """Always the name and the count; the sizes only when they are news.
 
-        Both, because neither implies the other: the name says which series the
-        panel was quantised against, and ``sizes_mm`` says which bits of it the
-        operator actually owns. A consumer given only the name would compute a
-        nearest available size the run never considered.
+        A standard is a physical constant addressable by name, and a consumer
+        that cannot expand ``"metric"`` into 183 sizes cannot interpret them
+        either — so writing all 183 into every record buys nothing and costs
+        90 % of the machine-readable document. ``size_count`` goes with the name
+        as a cheap integrity check: it catches the one thing the name alone
+        cannot say, which is that this run's idea of "metric" and the reader's
+        are different versions of the same word.
+
+        The narrowed drawer is the opposite case. It is run-specific, a consumer
+        computing "the nearest available size" gets it wrong without the actual
+        set, and it is *small* — so the case where the record genuinely must
+        stand alone is exactly the case where writing it is cheap.
+
+        The test is equality against the registry rather than a flag set by
+        ``select``, because the question is not "was this narrowed?" but "can a
+        reader rebuild this table from the name?". A hand-built standard under a
+        name the registry does not hold answers no, and gets its sizes written
+        out too.
         """
         parameters: list[tuple[str, ParameterValue]] = [
             ("standard", self.standard.name),
             ("tolerance_mm", self.tolerance_mm),
-            ("sizes_mm", self.standard.sizes_mm),
+            ("size_count", len(self.standard.sizes_mm)),
         ]
+        if self.standard != DRILL_STANDARDS.get(self.standard.name):
+            parameters.append(("sizes_mm", self.standard.sizes_mm))
         return StageRun(self.name, tuple(parameters))
 
     def apply(self, data: DrillData) -> DrillData:

@@ -250,6 +250,24 @@ class TestTheMetricSeriesIsGeneratedNotTranscribed:
         assert list(sizes) == sorted(sizes)
         assert len(set(sizes)) == len(sizes)
 
+    def test_the_table_is_dense_enough_that_in_range_matching_cannot_fail(self):
+        """``SnapDiametersToDrillTable`` says so in prose; this is the arithmetic.
+
+        The widest step anywhere is the 0.5 mm one in the top band, so the
+        furthest a measurement inside 0.5–25.0 mm can sit from a size is exactly
+        half of that — which is the default tolerance, and ``within`` is
+        inclusive. It is the table's *density* that protects a panel in range,
+        not the tolerance number.
+
+        Derived from the series rather than restated, so a band edited to step
+        more coarsely fails here instead of leaving that docstring a lie.
+        """
+        sizes = self.METRIC.sizes_mm
+        widest = max(sizes[i + 1] - sizes[i] for i in range(len(sizes) - 1))
+
+        assert widest == 0.5
+        assert SnapDiametersToDrillTable().tolerance_mm >= widest / 2
+
 
 class TestTheFractionalSeriesIsExactByConstruction:
     FRACTIONAL = DRILL_STANDARDS["fractional"]
@@ -335,7 +353,7 @@ class TestTheTwoStandardsAreNeverMerged:
         metric = DRILL_STANDARDS["metric"].sizes_mm
         fractional = DRILL_STANDARDS["fractional"].sizes_mm
         crowded = [(a, b) for a in fractional for b in metric if 0.0 < abs(a - b) < 0.05]
-        assert len(crowded) > 20
+        assert len(crowded) > 40  # 45 today; a halving of the crowding must fail
 
     def test_a_panel_is_drilled_with_one_set_of_bits(self):
         """The registry hands out whole standards, never a union of sizes."""
@@ -446,14 +464,22 @@ class TestSnapDiametersToDrillTable:
         assert diameters(metric) == [6.3]
         assert diameters(imperial) == [6.35]
 
-    def test_an_imperial_bit_is_not_dragged_onto_a_metric_grid(self):
-        """6.35 is a 1/4" bit. A 0.25 mm rounding grid would put it at 6.25, a
-        size no bit in either series has."""
+    def test_a_quarter_inch_bit_keeps_its_own_size_and_is_not_rounded(self):
+        """6.35 is a 1/4" bit, and it stays 6.35 exactly.
+
+        Two things could have taken it away and neither may. A 0.25 mm rounding
+        grid — the tolerance misused as a step — would put it at 6.25, a size no
+        bit in either series has. And 6.35 is *not* a metric size (that band
+        steps 6.3, 6.4), so a table that quietly held both series would have
+        somewhere else to put it.
+        """
         got = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]).apply(
             make_data(*holes((0.0, 0.0, 6.348)))
         )
+
         assert got.holes[0].diameter == 6.35
         assert 6.35 in DRILL_STANDARDS["fractional"].sizes_mm
+        assert 6.35 not in DRILL_STANDARDS["metric"].sizes_mm
 
     def test_a_diameter_no_bit_can_make_is_an_error_not_a_guess(self):
         """A 30 mm cut-out is a step-drill or a punch, not a twist drill.
@@ -1084,25 +1110,51 @@ class TestDescribe:
         run = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"], 0.1).describe()
         assert run.get("standard") == "fractional"
         assert run.get("tolerance_mm") == 0.1
+        assert run.get("size_count") == 64
 
     def test_snap_diameters_records_the_sizes_that_were_actually_available(self):
-        """The narrowed drawer, not the standard it was narrowed from.
+        """The narrowed drawer, written out in full, because nothing else says it.
 
-        A drawing or a JSON document stating the full 183-size metric series
-        would claim the panel had been quantised against bits the operator had
-        told us they do not own — and the one number a consumer would take from
-        it, "the nearest available size", would be wrong.
+        A consumer's one likely question — "what is the nearest size this panel
+        could have used?" — is answered wrongly by the standard's name once the
+        operator has told us which bits they own. The set is run-specific, so it
+        travels with the run; it is also small, which is why it can.
         """
         drawer = DRILL_STANDARDS["metric"].select(include=(3.2, 5.0, 7.0, 12.0))
         run = SnapDiametersToDrillTable(drawer).describe()
 
         assert run.get("standard") == "metric"
         assert run.get("sizes_mm") == (3.2, 5.0, 7.0, 12.0)
+        assert run.get("size_count") == 4
 
-    def test_snap_diameters_reports_the_whole_standard_when_nothing_was_narrowed(self):
+    def test_an_unnarrowed_standard_is_recorded_by_name_and_count_alone(self):
+        """183 sizes a reader can look up are not worth 90 % of the document.
+
+        The name is an address into a registry of physical constants, and a
+        consumer that cannot expand it cannot use the numbers either. The key is
+        *absent* rather than empty: ``StageRun.get`` cannot tell an absent key
+        from a null one, so an empty tuple here would read as "quantised against
+        no bits at all".
+        """
         run = SnapDiametersToDrillTable().describe()
-        assert run.get("sizes_mm") == DRILL_STANDARDS["metric"].sizes_mm
+        parameters = dict(run.parameters)
+
+        assert run.get("standard") == "metric"
+        assert run.get("size_count") == 183
         assert run.get("tolerance_mm") == 0.25
+        assert "sizes_mm" not in parameters
+
+    def test_a_table_no_registry_name_can_rebuild_records_its_sizes(self):
+        """The rule is "can a reader rebuild this from the name?", not "did
+        ``select`` run?" — a hand-built standard answers no just as a narrowed
+        one does, and a reader looking up its name would find nothing at all."""
+        label = DRILL_STANDARDS["metric"].label
+        run = SnapDiametersToDrillTable(
+            DrillStandard(name="the-drawer-in-the-shed", sizes_mm=(3.2, 7.0), label=label)
+        ).describe()
+
+        assert run.get("sizes_mm") == (3.2, 7.0)
+        assert run.get("size_count") == 2
 
 
 class TestPipelineRecordsProvenance:
@@ -1248,13 +1300,38 @@ class TestIdentifyHammondFootprint:
         assert out.enclosure is None
         assert out.diagnostics == ()
 
-    def test_an_outline_matching_nothing_is_an_error_not_a_guess(self):
+    def test_an_outline_matching_nothing_is_reported_without_being_refused(self):
+        """A warning, not an error, and never a guess.
+
+        This is the one finding in this stage that is about *our catalogue*
+        rather than about the operator's panel: we hold 22 Hammond footprints
+        and the world holds rather more. It still may not be silent — an
+        unmatched outline is not snapped, so every downstream number keeps the
+        artwork's fractional millimetres — but refusing the run would be this
+        tool claiming an authority it does not have.
+        """
         out = IdentifyHammondFootprint().apply(an_outline(500.0, 500.0))
 
         assert codes(out) == ["unknown-enclosure"]
-        assert out.diagnostics[0].severity is Severity.ERROR
+        assert out.diagnostics[0].severity is Severity.WARNING
         assert out.enclosure is None
         assert (out.reference.width, out.reference.height) == (500.0, 500.0)
+
+    def test_drawing_an_unrecognised_outline_is_not_punished_harder_than_omitting_one(self):
+        """The asymmetry that decided the severity, asserted as one comparison.
+
+        A panel with no reference layer returns untouched and clean, because no
+        stage may assume a predecessor ran. If an unrecognised outline were an
+        ERROR, then *drawing* your panel outline would fail the run while
+        leaving it out would pass — and the two would be judged by two different
+        standards for the same missing knowledge. Whatever severity these two
+        carry, the drawn one may not be the worse of them.
+        """
+        omitted = IdentifyHammondFootprint().apply(make_data(at(0.0, 0.0, index=0)))
+        drawn = IdentifyHammondFootprint().apply(an_outline(500.0, 500.0))
+
+        assert omitted.worst_severity is None
+        assert drawn.worst_severity is not Severity.ERROR
 
     def test_the_unknown_diagnostic_carries_what_was_measured_and_what_was_searched(self):
         """``Diagnostic.data`` is a consumer contract, not a debug aid: it is

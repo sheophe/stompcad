@@ -265,7 +265,7 @@ def test_raw_provenance_equals_the_nominal_values(data):
 
 
 def test_diameters_are_not_clustered(data):
-    """6.9998 and 7.0000 must both survive; NormalizeDiameters resolves them."""
+    """6.9998 and 7.0000 must both survive; SnapDiametersToDrillTable resolves them."""
     diameters = {round(h.diameter, 4) for h in data.holes}
     assert len(diameters) > 2
 
