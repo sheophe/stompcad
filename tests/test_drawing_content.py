@@ -56,10 +56,49 @@ def test_candidate_lists_end_in_a_counted_marker_when_they_do_not_fit():
         selected_part=None,
         rotated=False,
     )
-    note = content.enclosure_note(DrillData().with_enclosure(match), 59)
+    # Narrow enough that even the bare candidate list, with no family and no
+    # footprint ahead of it, cannot list all four without a counted marker.
+    note = content.enclosure_note(DrillData().with_enclosure(match), 24)
 
     assert "CANDIDATES" in note
     assert "+3 MORE" in note
+
+
+def test_the_note_sheds_the_footprint_before_the_part_designator():
+    """A cell too narrow for the full claim still names the part: the
+    footprint is already dimensioned on the drawing and is the cheaper loss."""
+    match = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=112_400_000,
+        width_nm=60_500_000,
+        candidates=("1590B", "1590B2"),
+        selected_part="1590B",
+        rotated=False,
+    )
+    data = DrillData().with_enclosure(match)
+    full = content.enclosure_note(data, 200)
+    assert full == "HAMMOND 1590  112.40 × 60.50 mm  PART 1590B"
+
+    note = content.enclosure_note(data, 35)
+
+    assert note == "HAMMOND 1590  PART 1590B"
+    assert "1590B" in note
+
+
+def test_the_note_sheds_the_family_before_the_candidate_list():
+    """Naming which parts a panel might be is worth more than naming the
+    family it belongs to, once even the family-only head overflows."""
+    match = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=112_400_000,
+        width_nm=60_500_000,
+        candidates=("1590B", "1590B2", "1590BS"),
+        selected_part=None,
+        rotated=False,
+    )
+    note = content.enclosure_note(DrillData().with_enclosure(match), 35)
+
+    assert note == "CANDIDATES B / B2 / BS"
 
 
 def test_allot_reserves_a_line_for_the_omission_marker():

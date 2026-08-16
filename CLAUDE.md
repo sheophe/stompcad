@@ -98,7 +98,10 @@ of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene. They d
 which unknown they solve for — SVG fixes the sheet and fits the scale, PDF fixes the
 scale at 1:1 and walks the ISO 5457 candidates. `tests/test_drawing_agreement.py` parses
 both artefacts and compares what they say about one panel; the sheets may list different
-numbers of rows, but never differ about a row they both show.
+numbers of rows, but never differ about a row they both show. A `DrawingOptions(scale=…)`
+that overflows the chosen sheet draws the shared `CONTENT EXCEEDS` marker rather than
+clipping silently; there is no `--scale` flag, so only a library caller supplying an
+explicit scale reaches it, never the CLI.
 
 `quantise()` owns enclosure, diameter, then position ordering. The CLI explicitly
 composes the post-quantisation stage order. A stage must not depend on or assert that

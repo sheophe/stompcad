@@ -352,7 +352,12 @@ def diameter_label(data: DrillData) -> Callable[[Nanometre], str]:
 def enclosure_note(data: DrillData, capacity: int) -> str:
     """State catalogue footprint, rotation and selected part or ordered candidates.
 
-    Missing matches are explicit; candidate truncation reports the omitted count.
+    Missing matches are explicit; candidate truncation reports the omitted
+    count. The part or candidate list is never touched to make room: the
+    footprint is dropped first, since it is already dimensioned on the
+    drawing, then the family, since it is implied by the designator. Each
+    composition is a fit-check against ``capacity``, not a fixed drop — a
+    narrow head can still overflow a wide candidate list.
     """
     match = data.enclosure
     if match is None:
@@ -363,12 +368,32 @@ def enclosure_note(data: DrillData, capacity: int) -> str:
     )
     if match.rotated:
         size += " ROTATED"
-    head = f"{match.family.upper()}  {size}  "
+    family = match.family.upper()
+
+    head = f"{family}  {size}  "
+    full = head + _enclosure_tail(match, capacity - len(head))
+    if len(full) <= capacity:
+        return full
+
+    head = f"{family}  "
+    family_only = head + _enclosure_tail(match, capacity - len(head))
+    if len(family_only) <= capacity:
+        return family_only
+
+    return _enclosure_tail(match, capacity)
+
+
+def _enclosure_tail(match: EnclosureMatch, room: int) -> str:
+    """The part or candidate half of the note, fitted to what its head left.
+
+    A part designator never shrinks; only a candidate list does, and only
+    down to as many as ``room`` — the space the caller's chosen head left
+    behind — still holds.
+    """
     if match.selected_part is not None:
-        return head + f"PART {match.selected_part}"
+        return f"PART {match.selected_part}"
     designators = [designator(part, match) for part in match.candidates]
-    room = capacity - len(head) - len("CANDIDATES ")
-    return head + "CANDIDATES " + candidate_list(designators, room)
+    return "CANDIDATES " + candidate_list(designators, room - len("CANDIDATES "))
 
 
 def candidate_list(designators: Sequence[str], room: int) -> str:

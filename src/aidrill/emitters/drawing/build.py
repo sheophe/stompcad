@@ -39,6 +39,7 @@ from .scene import FEINT, INK, RED, Circle, Group, Item, Line, Polygon, Rect, Sc
 from .sheet import (
     CENTRING_MARK_OVERSHOOT,
     CENTRING_MARK_WIDTH,
+    FILING_BORDER,
     GRID_CHARACTER_SIZE,
     GRID_LETTERS,
     GRID_LINE_WIDTH,
@@ -257,7 +258,11 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
         edges.append(edges[-1] + field)
 
     #: The band the characters sit in: between the trimmed edge and the frame.
-    near, far = PLAIN_BORDER, other - PLAIN_BORDER
+    # 4.2 widens only the left edge to the filing margin; the top, bottom and
+    # right edges keep the plain border, so the far band is always plain width
+    # even though the near band is not, on the axis running down the sheet.
+    near = PLAIN_BORDER if horizontal else FILING_BORDER
+    far = other - PLAIN_BORDER
     for boundary in edges[1:-1]:
         if horizontal:
             items.append(Line(boundary, 0.0, boundary, near, pen, cls="grid-line"))
@@ -275,12 +280,12 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
         if horizontal:
             items.append(_grid_label(centre, near / 2.0, label))
             if both_sides:
-                items.append(_grid_label(centre, other - near / 2.0, label))
+                items.append(_grid_label(centre, other - PLAIN_BORDER / 2.0, label))
         else:
             # A4's letters are on the right; a larger sheet has them on both.
             if both_sides:
                 items.append(_grid_label(near / 2.0, centre, label))
-            items.append(_grid_label(other - near / 2.0, centre, label))
+            items.append(_grid_label(other - PLAIN_BORDER / 2.0, centre, label))
     return items
 
 

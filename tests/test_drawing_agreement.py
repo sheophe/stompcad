@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from aidrill.emitters.drawing.build import SheetText, build_scene
 from aidrill.emitters.drawing.content import (
     enclosure_note,
     grid_note,
@@ -21,8 +22,13 @@ from aidrill.emitters.drawing.content import (
     schedule_rows,
     tool_summary,
 )
+from aidrill.emitters.drawing.layout import choose_sheet
+from aidrill.emitters.drawing.scene import Circle, Group, Item, Scene
+from aidrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
 from aidrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions
-from aidrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
+from aidrill.emitters.drawing_pdf import _num as pdf_num
+from aidrill.emitters.drawing_pdf import _serialise as pdf_serialise
+from aidrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter, _render_item
 from aidrill.model import Diagnostic, DrillData, EnclosureMatch
 from aidrill.units import Nanometre
 from tests.conftest import at, make_data
@@ -143,8 +149,10 @@ def test_both_sheets_state_the_same_grid_note():
 
 
 def test_both_sheets_state_the_same_enclosure_note():
-    """One cell is narrower than the other line, so one may be cut short — but
-    what it shows must still be the start of the very same claim."""
+    """One cell is narrower than the other line, so one may drop the footprint
+    or the family to fit — but the part this panel is for is not negotiable:
+    a prefix predicate cannot tell "shortened" from "the answer is gone", so
+    this checks for the designator itself, on both sheets."""
     data = identified()
     full = enclosure_note(data, 200)
 
@@ -152,7 +160,7 @@ def test_both_sheets_state_the_same_enclosure_note():
     shown_svg = [t for t in svg_strings(data) if t.startswith("HAMMOND 1590")]
     assert len(shown_svg) == 1
     assert truncates(shown_svg[0], full)
-    assert truncates(pdf_field(data, "ENCLOSURE"), full)
+    assert "1590B" in pdf_field(data, "ENCLOSURE")
 
 
 def test_both_sheets_carry_the_same_diagnostic_text():
@@ -308,3 +316,72 @@ def test_the_pdf_overflow_marker_names_the_scale_its_own_sheet_states():
 
     assert marker.group(1) == pdf_field(data, "SCALE") == "1:1"
     assert marker.group(2) == pdf_field(data, "PAPER SIZE") == "A0"
+
+
+# --- where the marks are, not just what the sheet says ----------------------
+
+
+def _scene_hole_circles(scene: Scene) -> list[Circle]:
+    """Every ``hole``-class circle in the scene, wherever its group nests it."""
+    found: list[Circle] = []
+
+    def walk(item: Item) -> None:
+        if isinstance(item, Group):
+            for child in item.items:
+                walk(child)
+        elif isinstance(item, Circle) and "hole" in item.cls.split():
+            found.append(item)
+
+    for item in scene.items:
+        walk(item)
+    return found
+
+
+def _svg_circles(scene: Scene, cls_token: str) -> list[tuple[float, float, float]]:
+    """Render ``scene`` exactly as the SVG backend does, and read its circles.
+
+    ``DrawingSvgEmitter.emit`` resolves its own layout before calling
+    ``_render_item``; this drives the same serialiser over a scene the test
+    already built, so the PDF and SVG halves of the comparison read one scene.
+    """
+    root = ET.Element("svg", {"xmlns": SVG_NS})
+    for item in scene.items:
+        _render_item(root, item)
+    # Namespace inheritance from ``xmlns`` only resolves on parsing text, not
+    # on the in-memory tree ``_render_item`` just populated — the same reason
+    # every other SVG helper in this file round-trips through a string.
+    root = ET.fromstring(ET.tostring(root, encoding="unicode"))
+    return [
+        (float(e.attrib["cx"]), float(e.attrib["cy"]), float(e.attrib["r"]))
+        for e in root.iter(f"{{{SVG_NS}}}circle")
+        if cls_token in (e.get("class") or "").split()
+    ]
+
+
+def test_a_holes_mark_lands_at_the_same_sheet_point_on_both_backends():
+    """Both backends walk one ``Scene``, so a divergence can only enter at a
+    serialiser: ``_circle_path``, ``_rect_path``'s corner arcs, or the ``_y``
+    flip. Each is otherwise tested only against itself, so a mislocated mark
+    on one sheet would have nothing to catch it. SVG is Y-down in sheet
+    millimetres; PDF is Y-up, so ``y_pdf = sheet.height - y_svg``."""
+    data = panel()
+    layout = choose_sheet(data, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    scene = build_scene(layout, data, SheetText(title=TITLE))
+
+    scene_holes = _scene_hole_circles(scene)
+    assert len(scene_holes) == len(data.holes) == 4
+
+    svg_holes = _svg_circles(scene, "hole")
+    assert len(svg_holes) == len(scene_holes)
+
+    pdf_stream = stream_of(pdf_serialise(scene, TITLE))
+
+    by_position = sorted(scene_holes, key=lambda c: (c.cx, c.cy))
+    for hole, svg_circle in zip(by_position, sorted(svg_holes)):
+        # The scene is the one source both backends read, so the SVG circle
+        # must simply carry the scene's own sheet-millimetre numbers through.
+        assert svg_circle == pytest.approx((hole.cx, hole.cy, hole.r))
+        # The PDF's own frame is Y-up: the same centre reappears as the first
+        # point of its Bézier path at (cx + r, sheet.height - cy).
+        moveto = f"{pdf_num(hole.cx + hole.r)} {pdf_num(scene.sheet.height - hole.cy)} m"
+        assert moveto in pdf_stream, f"hole at {(hole.cx, hole.cy)}: {moveto!r} not in the PDF"

@@ -356,6 +356,23 @@ def test_grid_lines_are_drawn_narrow():
     assert all(line.stroke.width == GRID_LINE_WIDTH for line in lines)
 
 
+def test_the_left_hand_grid_ticks_reach_the_filing_edge_frame():
+    """4.2 widens only the left border to the 20 mm filing margin, so a tick
+    drawn from the trimmed edge must reach that far to meet the frame — the
+    10 mm plain border every other edge uses would stop short of it."""
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.scene import Line
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    lines = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Line)]
+    left_ticks = [line for line in lines if line.x1 == 0.0]
+    right_ticks = [line for line in lines if line.x2 == A3_LANDSCAPE.width]
+
+    assert left_ticks and right_ticks
+    assert all(line.x2 == FILING_BORDER for line in left_ticks)
+    assert all(line.x1 == A3_LANDSCAPE.width - PLAIN_BORDER for line in right_ticks)
+
+
 @pytest.mark.parametrize(
     ("across", "down"),
     # Each count on its own, and both together: a sheet lettered down one edge
