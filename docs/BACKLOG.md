@@ -35,9 +35,9 @@ exports `AiPdfSource`. Do not introduce lazy loading without evidence that this 
 material. If measurement justifies a change, preserve the root import contract and keep
 `__all__`, `dir()`, and attribute access consistent.
 
-**Acceptance:** A reproducible benchmark demonstrates the need and the improvement;
-`import aidrill` avoids eager `pikepdf` loading while `AiPdfSource` remains available from
-the package root and the full suite passes.
+**Acceptance:** A reproducible benchmark closes the item if the cost is immaterial. If the
+cost is material, the implemented change demonstrates an improvement, avoids eager
+`pikepdf` loading, preserves `AiPdfSource` at the package root, and passes the full suite.
 
 ## Cover every chain-dimension segment
 
