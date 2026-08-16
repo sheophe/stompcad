@@ -296,9 +296,15 @@ class TestInventoryFiltering:
         same unit boundary, so "is this one of mine?" is equality and not a
         near-miss — a lenient answer here would hand back a bit the operator did
         not ask for, under the name of one they did.
+
+        The refusal is matched on its own wording rather than on ``ValueError``
+        alone, because a lenient membership test raises one anyway: it accepts
+        the request, then filters nothing through and gets the empty-drawer
+        refusal instead. Two different findings, and only one of them is this
+        one.
         """
         assert self.METRIC.select(include=(3_200_000,)).sizes_nm == (3_200_000,)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="no such size"):
             self.METRIC.select(include=(3_200_001,))
 
     def test_a_metric_size_is_not_a_fractional_one(self):
@@ -467,13 +473,17 @@ class TestSnapDiametersToDrillTable:
         ``--drill-sizes 7.0`` on a panel with 5 mm holes used to report them as
         matching "no metric drill size", which sends the operator to check the
         one thing that is right and points away from the flag they typed.
+
+        The singular is asserted with the punctuation that follows it, because
+        "narrowed to 1 size" is a substring of "narrowed to 1 sizes" and an
+        assertion without it would pass on a count and a noun that disagree.
         """
         stocked = DRILL_STANDARDS["metric"].select(include=(7_000_000,))
         _, found = SnapDiametersToDrillTable(stocked).quantise(measured(5.0001))
         diagnostic = found[0]
 
         assert codes(found) == ["unknown-diameter"]
-        assert "narrowed to 1 size" in diagnostic.message
+        assert "narrowed to 1 size;" in diagnostic.message
         assert "no metric drill size" not in diagnostic.message
         assert diagnostic.get("stocked_size_count") == 1
         assert diagnostic.get("standard") == "metric"
