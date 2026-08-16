@@ -174,10 +174,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   identity rather than sequence position.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
   relevant mutation. Mutation testing is a survey, not a numeric gate. Current standing:
-  **2883 mutants, 2380 killed, 500 survived**. Read it by module, not in total — `cli`
-  (223) and `emitters.drawing_svg` (81) account for most survivors, where a mutant
-  rewrites a help string or a layout constant and nothing observable changes. A survivor
-  in `geometry`, `pipeline.dedupe`, `quantise` or `units` is the kind worth chasing.
+  **2916 mutants, 2398 killed, 506 survived**. Read it by module, not in total — `cli`
+  (216), `emitters.drawing_svg` (81) and `sources.ai_pdf` (78) account for most
+  survivors, where a mutant rewrites a help string or a layout constant and nothing
+  observable changes. A survivor in `geometry`, `pipeline.dedupe`, `quantise` or `units`
+  is the kind worth chasing.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.
