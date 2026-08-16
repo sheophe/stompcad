@@ -223,6 +223,26 @@ def test_every_enclosure_error_stops_the_run(expected_part, reference, code):
     assert out.holes == ()
 
 
+def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
+    """The pre-rounding counterexample, carried to the consequence that matters.
+
+    113.5000004 mm is 113 500 000.4 nm, four tenths of a nanometre outside a
+    1 500 000 nm tolerance around 1590B's 112 mm. ``test_enclosure.py`` pins the
+    quantiser's answer; what a returned tuple cannot carry is what that answer
+    costs — the run's worst severity is ERROR, which is the single thing the CLI
+    reads to withhold every artifact, and no hole was quantised for it.
+    """
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(113.5000004, 61.0)),
+        enclosure=IdentifyHammondFootprint("1590B"),
+    )
+
+    assert codes(out) == ["unmatched-enclosure"]
+    assert out.worst_severity is Severity.ERROR
+    assert out.holes == ()
+    assert [run.name for run in out.processing] == ["identify-enclosure"]
+
+
 def test_an_enclosure_warning_does_not_stop_the_run():
     """``unknown-enclosure`` is a WARNING about *our* catalogue, not about the
     panel: the outline keeps the size it was drawn at and the artifacts are
@@ -249,6 +269,25 @@ def test_a_dropped_hole_does_not_stop_the_run():
 
     assert codes(out) == ["unknown-diameter", "unknown-diameter"]
     assert [hole.index for hole in out.holes] == [9]
+
+
+def test_a_diameter_a_hair_outside_the_tolerance_costs_the_run_its_artifacts():
+    """The drill table's half of the same counterexample, at the phase.
+
+    25.2500004 mm is 250 000.4 nm from the largest metric bit, four tenths of a
+    nanometre outside the matching bound; ``test_diameters.py`` pins the refusal
+    itself. Here is what it means for the panel: hole 4 is gone from a document
+    that still carries hole 1, and the run's worst severity is ERROR — so the
+    drill file the machinist would otherwise receive, one hole short and
+    perfectly well-formed, is never written.
+    """
+    out = phase(
+        read(RawHole(-20.0, 18.0, 25.2500004, 4), RawHole(20.0, 18.0, 7.0, 1))
+    )
+
+    assert codes(out) == ["unknown-diameter"]
+    assert out.worst_severity is Severity.ERROR
+    assert [hole.index for hole in out.holes] == [1]
 
 
 # ---------------------------------------------------------------------------

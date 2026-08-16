@@ -369,6 +369,31 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
         assert size == 3_000_000
         assert found == ()
 
+    def test_the_tolerance_is_decided_on_the_measurement_and_not_on_a_rounding(self):
+        """The second decision the measurement is put to, and its own branch.
+
+        "Which size is nearest?" and "is it near enough?" are asked separately,
+        so asking the first one exactly does not make the second one exact:
+        rounding the measurement for the tolerance alone leaves both tests above
+        green. 25.2500004 mm is 25 250 000.4 nm, which is 250 000.4 from the
+        biggest metric bit there is — outside the 250 000 nm bound — while the
+        rounded copy sits exactly *on* it, and the bound is inclusive.
+
+        The two answers are not a bit apart. Refused, the hole is an ERROR that
+        withholds every artifact on the run; accepted, a 25.25 mm cut-out is
+        drilled 25.00 and nothing downstream has anything to say about it.
+        """
+        exact = Decimal("25.2500004") * 1_000_000
+        assert abs(exact - 25_000_000) > 250_000, "the fixture is inside the bound"
+        assert nm_from_mm(25.2500004) - 25_000_000 == 250_000, (
+            "the rounded copy is not on the bound"
+        )
+
+        size, found = SnapDiametersToDrillTable().quantise(measured(25.2500004))
+
+        assert size is None
+        assert codes(found) == ["unknown-diameter"]
+
 
 class TestSnapDiametersToDrillTable:
     def test_bezier_noise_collapses_onto_one_bit(self):

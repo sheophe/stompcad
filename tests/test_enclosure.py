@@ -173,6 +173,31 @@ class TestIdentifyHammondFootprint:
 
         assert match is None
 
+    def test_a_declared_case_is_checked_against_the_unrounded_measurement_too(self):
+        """The same four tenths of a nanometre, on the branch a ``--case`` takes.
+
+        A declaration filters what the common matcher found, so exactness here
+        is inherited rather than owned — and a comparison rounded on this branch
+        alone leaves the test above green. The outcomes are as far apart as the
+        two can be: ``unmatched-enclosure`` is an ERROR that withholds every
+        artifact, while a confirmed declaration snaps the frame to 112 × 61 and
+        drills the panel.
+
+        The 113.5 boundary case is asserted alongside so that the fixture is
+        pinned as a *hair* outside the bound rather than comfortably outside it,
+        which is the only version of it a rounding can move.
+        """
+        on_it = IdentifyHammondFootprint("1590B").quantise(RawOutline(113.5, 61.0), ORIGIN)
+        assert on_it[1] is not None, "the fixture is not a hair outside the bound"
+
+        outline, match, diagnostics = IdentifyHammondFootprint("1590B").quantise(
+            RawOutline(113.5000004, 61.0), ORIGIN
+        )
+
+        assert match is None
+        assert codes(diagnostics) == ["unmatched-enclosure"]
+        assert outline.width_nm == 113_500_000, "the outline was snapped to a footprint anyway"
+
     def test_a_tighter_tolerance_rejects_what_the_default_accepts(self):
         """The fixture's own 1.0 mm error, against a tolerance that will not have it."""
         tight = IdentifyHammondFootprint(tolerance_nm=500_000)
