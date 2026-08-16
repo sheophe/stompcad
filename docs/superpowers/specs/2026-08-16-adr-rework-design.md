@@ -77,7 +77,7 @@ The figure follows this structure:
 ```mermaid
 flowchart LR
     source["AiPdfSource"]
-  
+
     subgraph quantise["quantise()"]
         direction TB
         footprint["IdentifyHammondFootprint"]
