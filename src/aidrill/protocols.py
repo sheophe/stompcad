@@ -7,7 +7,7 @@ from typing import ClassVar, Protocol, runtime_checkable
 
 from .model import DrillData, RawDrillData, StageRun
 
-__all__ = ["Source", "Stage", "Emitter", "Pipeline"]
+__all__ = ["Source", "Stage", "Emitter", "Payload", "Pipeline"]
 
 
 @runtime_checkable
@@ -34,6 +34,12 @@ class Stage(Protocol):
         ...
 
 
+#: What an emitter hands back. Text formats return ``str``; a byte format such
+#: as PDF returns ``bytes``. The writing site chooses how to put it on disk —
+#: see ADR-0005.
+Payload = str | bytes
+
+
 @runtime_checkable
 class Emitter(Protocol):
     """Serialises DrillData into one output format.
@@ -46,7 +52,7 @@ class Emitter(Protocol):
     media_type: ClassVar[str]
     extension: ClassVar[str]
 
-    def emit(self, data: DrillData) -> str: ...
+    def emit(self, data: DrillData) -> Payload: ...
 
 
 class Pipeline(Sequence[Stage]):

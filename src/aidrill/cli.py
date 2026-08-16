@@ -34,7 +34,7 @@ from .pipeline import (
     SortHoles,
     normalize_part_name,
 )
-from .protocols import Emitter, Pipeline, Stage
+from .protocols import Emitter, Payload, Pipeline, Stage
 from .quantise import quantise
 from .sources import AiPdfSource
 from .units import Nanometre, format_nm, nm_from_mm
@@ -576,14 +576,22 @@ def _format_step(
 # ---------------------------------------------------------------------------
 
 
-def _render(emitters: Iterable[tuple[Emitter, Path]], data: DrillData) -> list[tuple[Emitter, Path, str]]:
+def _render(
+    emitters: Iterable[tuple[Emitter, Path]], data: DrillData
+) -> list[tuple[Emitter, Path, Payload]]:
     """Render every artefact before any output path is written."""
     return [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
 
 
-def _write(emitter: Emitter, path: Path, text: str) -> str:
-    path.write_text(text, encoding="utf-8")
-    return f"wrote {path}  ({emitter.name}, {len(text.encode('utf-8'))} bytes)"
+def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
+    """Write one artefact, letting the payload's own type choose the mode."""
+    if isinstance(payload, bytes):
+        path.write_bytes(payload)
+        size = len(payload)
+    else:
+        path.write_text(payload, encoding="utf-8")
+        size = len(payload.encode("utf-8"))
+    return f"wrote {path}  ({emitter.name}, {size} bytes)"
 
 
 def _withheld(targets: Iterable[tuple[Emitter, Path]]) -> list[str]:
@@ -636,8 +644,8 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
             # here, and one of them may legitimately refuse data this broken.
             print("\n".join(_withheld(emitters)), file=out)
         else:
-            for emitter, path, text in _render(emitters, data):
-                print(_write(emitter, path, text), file=out)
+            for emitter, path, payload in _render(emitters, data):
+                print(_write(emitter, path, payload), file=out)
 
     print("\n".join(format_summary(data)), file=out)
     return _EXIT_FOR_SEVERITY[data.worst_severity]

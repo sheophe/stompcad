@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from aidrill import cli
 from aidrill.emitters import base
 from aidrill.emitters.base import available, get_emitter, register_emitter
 from aidrill.errors import EmitterError
@@ -148,3 +149,46 @@ def test_available_is_sorted_and_complete(clean_registry):
     names = available()
     assert names == tuple(sorted(names))
     assert names == tuple(sorted(base.REGISTRY))
+
+
+# ---------------------------------------------------------------------------
+# payload dispatch at the writing site
+# ---------------------------------------------------------------------------
+
+
+def test_a_bytes_payload_is_written_verbatim(tmp_path):
+    """A binary emitter's bytes reach the file without an encoding step."""
+    payload = b"%PDF-1.7\n\x80\x81\xfe\xff\n%%EOF\n"
+
+    class BinaryEmitter:
+        name = "binary-probe"
+        media_type = "application/octet-stream"
+        extension = ".bin"
+
+        def emit(self, data):
+            return payload
+
+    path = tmp_path / "out.bin"
+    line = cli._write(BinaryEmitter(), path, payload)
+
+    assert path.read_bytes() == payload
+    assert "20 bytes" in line
+
+
+def test_a_text_payload_is_still_written_as_utf8(tmp_path):
+    """A text emitter's string is encoded, and its count is of encoded bytes."""
+    path = tmp_path / "out.txt"
+
+    class TextEmitter:
+        name = "text-probe"
+        media_type = "text/plain"
+        extension = ".txt"
+
+        def emit(self, data):
+            return "⌀7.000"
+
+    line = cli._write(TextEmitter(), path, "⌀7.000")
+
+    assert path.read_text(encoding="utf-8") == "⌀7.000"
+    # ⌀ is three bytes in UTF-8, so the count is not the character count.
+    assert "8 bytes" in line
