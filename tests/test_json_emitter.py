@@ -769,6 +769,58 @@ def test_tool_quantities_are_the_models_tool_counts():
     assert [t["count"] for t in tools] == [1, 3]
 
 
+def test_the_tool_numbering_is_read_from_the_model_and_not_re_derived(monkeypatch):
+    """The numbering is looked up, not recomputed to agree.
+
+    ``{d: i for i, d in enumerate(sorted(...), start=1)}`` written inside the
+    emitter produces byte-identical output today, so no assertion against a
+    fixture can tell the two apart — and that is the whole danger, because the
+    private copy is then free to drift the day ``tools()`` changes its rule,
+    which is ADR-0001's incident in its next form. Stubbing the model with a
+    numbering the emitter could not have invented — 4 and 9, largest bit first —
+    is what makes the dependency visible, and it is asserted at *both* places
+    the mapping is read: the tool table and every hole's ``tool`` reference. One
+    of the two would leave the other free to recount.
+    """
+    data = make_data(
+        at(0, 0, 7_000_000, index=5),
+        at(10_000_000, 0, 5_000_000, index=2),
+        at(20_000_000, 0, 7_000_000, index=8),
+    )
+    monkeypatch.setattr(DrillData, "tools", lambda self: {7_000_000: 4, 5_000_000: 9})
+
+    document = parse(data)
+
+    assert [(t["number"], t["diameter_nm"]) for t in document["tools"]] == [
+        (4, 7_000_000),
+        (9, 5_000_000),
+    ]
+    assert [h["tool"] for h in document["holes"]] == [4, 9, 4]
+
+
+def test_the_tool_quantities_are_read_from_the_model_and_not_recounted(monkeypatch):
+    """``count`` is ``tool_counts()``'s answer, not this emitter's tally.
+
+    ``sum(1 for h in data.holes if ...)`` in the comprehension agrees with the
+    model on every fixture that exists, so only a stub the holes contradict can
+    separate reading from recounting. These quantities — 90 and 40 — are ones no
+    tally of three holes could reach.
+    """
+    data = make_data(
+        at(0, 0, 7_000_000, index=5),
+        at(10_000_000, 0, 5_000_000, index=2),
+        at(20_000_000, 0, 7_000_000, index=8),
+    )
+    monkeypatch.setattr(DrillData, "tool_counts", lambda self: {5_000_000: 90, 7_000_000: 40})
+
+    tools = parse(data)["tools"]
+
+    assert [(t["diameter_nm"], t["count"]) for t in tools] == [
+        (5_000_000, 90),
+        (7_000_000, 40),
+    ]
+
+
 # --------------------------------------------------------------------------
 # diagnostics
 # --------------------------------------------------------------------------

@@ -1218,6 +1218,64 @@ def test_the_summary_quantities_are_the_models_tool_counts(panel: DrillData, roo
     ]
 
 
+def _two_size_panel() -> DrillData:
+    """Three holes, two sizes, ids that are not positions — the sheet in
+    miniature, small enough that a stubbed answer is legible in every cell."""
+    return DrillData(
+        holes=(
+            at(-20_000_000, 18_000_000, 7_000_000, index=12),
+            at(20_000_000, 18_000_000, 7_000_000, index=5),
+            at(0, -18_000_000, 5_000_000, index=9),
+        ),
+        reference=outline(113_000_000, 60_000_000),
+    )
+
+
+def test_the_schedule_tool_numbers_are_read_from_the_model_and_not_re_derived(monkeypatch):
+    """The numbering is looked up, not recomputed to agree.
+
+    ``{d: i for i, d in enumerate(sorted(...), start=1)}`` written inside this
+    emitter draws a byte-identical sheet today, so no assertion against a
+    fixture can tell the two apart — and that is the whole danger, because the
+    private copy is then free to drift the day ``tools()`` changes its rule,
+    leaving the sheet and the drill file naming different bits, which is
+    ADR-0001's incident in its next form. Stubbing the model with a numbering
+    the emitter could not have invented — 4 and 9, largest bit first — is what
+    makes the dependency visible, and it is asserted at *both* places the
+    mapping is read: the TOOL column of every row and the per-tool summary.
+    Assert one and the other is free to recount.
+    """
+    data = _two_size_panel()
+    monkeypatch.setattr(DrillData, "tools", lambda self: {7_000_000: 4, 5_000_000: 9})
+
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert [e.text for e in by_class(root, "sched-tool", "text")] == ["T4", "T4", "T9"]
+    assert [e.text for e in by_class(root, "sched-summary", "text")] == [
+        "T4  ⌀7.00 mm  QTY 2",
+        "T9  ⌀5.00 mm  QTY 1",
+    ]
+
+
+def test_the_summary_quantities_are_read_from_the_model_and_not_recounted(monkeypatch):
+    """``QTY`` is ``tool_counts()``'s answer, not this emitter's tally.
+
+    ``sum(1 for h in data.holes if ...)`` beside the summary loop agrees with
+    the model on every fixture that exists, so only a stub the holes contradict
+    can separate reading from recounting: 90 and 40 are quantities no tally of
+    three holes could reach.
+    """
+    data = _two_size_panel()
+    monkeypatch.setattr(DrillData, "tool_counts", lambda self: {5_000_000: 90, 7_000_000: 40})
+
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert [e.text for e in by_class(root, "sched-summary", "text")] == [
+        "T1  ⌀5.00 mm  QTY 90",
+        "T2  ⌀7.00 mm  QTY 40",
+    ]
+
+
 def _sched_diameters(root: ET.Element) -> list[str]:
     return [e.text or "" for e in by_class(root, "sched-dia", "text")]
 

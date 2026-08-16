@@ -260,13 +260,18 @@ class ReviewGridTies:
     diameter_nm)`` — so two *different* measurements can snap onto one nominal
     hole, be duplicates of each other, and disagree about whether they tied. At
     a 250 000 nm pitch a hole measured at 0.000 and one measured at 0.125 both
-    finish at 0: reviewed before dedupe the panel is ambiguous, reviewed after
-    it is not, and *which* of the pair survives is decided by whichever the
-    source happened to reach first. A verdict that turns on traversal order is
-    not a verdict, and ``tied_indices`` would be free to name an identity that
-    reaches no artifact. So the review is asked of the holes the emitters
-    receive, which is what makes it a stage the caller can place rather than a
-    second method on the quantiser.
+    finish at 0, and ``Deduplicate`` keeps the first of them the source reached,
+    so the verdict follows that survivor: drawn ``(tied, on-grid)`` the panel is
+    reported ambiguous and drawn ``(on-grid, tied)`` it is quiet. **That
+    dependence on order is deliberate and is the answer, not a residual to be
+    engineered away.** The surviving hole is the one that will be drilled, and
+    its measurement is the only provenance any artifact carries. Reviewed
+    *before* dedupe the finding would be order-free and useless instead:
+    ``tied_indices`` would name identities the emitters never receive, and a
+    review of the artifacts that names a hole appearing in none of them is not a
+    useful review of the artifacts. So the review is asked of the holes the
+    emitters receive, which is what makes it a stage the caller can place rather
+    than a second method on the quantiser.
 
     **The pitch is read back, never handed in.** ``SnapPositions`` already
     reports the effective grid, and a second copy given to this stage could be a
