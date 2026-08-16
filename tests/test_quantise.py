@@ -622,8 +622,6 @@ def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_p
     assert codes(out) == ["off-grid", "off-grid", "off-grid", "grid-ambiguous"]
     ambiguous = out.diagnostics[-1]
     assert ambiguous.get("tied_indices") == (0, 1, 2)
-    assert ambiguous.get("tied_count") == 3
-    assert ambiguous.get("hole_count") == 3
 
     # The claim the fixture exists for: the artwork did not survive as the
     # midpoint it was drawn at, and the residual is one anyway.

@@ -481,32 +481,52 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
 
         assert stage.review_panel(holes) == ()
 
-    def test_exactly_half_the_panel_warns_and_one_hole_short_of_it_stays_quiet(self):
-        """Four holes, because half of four is two and needs no rounding.
+    def test_one_tie_among_many_is_enough_and_none_stays_quiet(self):
+        """A single tie is a hole placed by a rule rather than by the artwork.
 
-        An odd count leaves "half" to a comparison nobody typed: at three holes
-        the threshold is 1.5, so 2 of 3 sits above ``>`` and ``>=`` alike and
-        neither boundary is pinned. At four, 2 tied *is* the boundary and 1 tied
-        is the case immediately below it — the pair that tells the two spellings
-        apart.
+        The proportion this once required is gone. It bought nothing and cost
+        two things: it made the answer depend on *which* holes were counted, so
+        a duplicated circle could push a panel over the line or hold it under
+        and leave the finding disagreeing with the drill file about how many
+        holes the panel has; and it stayed silent on the panel with one
+        deliberate half-offset hole, which is the case most worth naming.
+
+        One tied hole in four, therefore — the case the old rule ignored.
         """
         stage = SnapPositions(250_000)
-        tied = (raw(0.125, 0.0, index=4), raw(0.375, 0.0, index=1))
-        quiet = (raw(-1.0, 0.0, index=9), raw(2.0, 0.0, index=7))
+        one_tie = (
+            raw(0.125, 0.0, index=4),
+            raw(-1.0, 0.0, index=1),
+            raw(2.0, 0.0, index=9),
+            raw(3.0, 0.0, index=7),
+        )
 
-        assert codes(stage.review_panel(snapped(stage, *tied, *quiet))) == [
-            "grid-ambiguous"
-        ]
-        assert stage.review_panel(snapped(stage, tied[0], *quiet, raw(3.0, 0.0, index=2))) == ()
+        assert codes(stage.review_panel(snapped(stage, *one_tie))) == ["grid-ambiguous"]
+        assert stage.review_panel(snapped(stage, *one_tie[1:])) == ()
+
+    def test_a_duplicated_tie_cannot_change_the_verdict(self):
+        """Two marks at one place are one hole, and must not count as evidence twice.
+
+        This is what asking "did any hole tie" buys over asking "did half of
+        them". A duplicate is identical by definition, so it carries the
+        identical residual, and ``Deduplicate`` keeps one of each group — so the
+        answer is the same whether the review sees the drawn circles or the
+        holes that survive into the artifacts, and nothing here has to know
+        which side of dedupe it was handed.
+        """
+        stage = SnapPositions(250_000)
+        tied, twin = raw(0.125, 0.0, index=4), raw(0.125, 0.0, index=9)
+        ordinary = (raw(-1.0, 0.0, index=1), raw(2.0, 0.0, index=7))
+
+        with_twin = stage.review_panel(snapped(stage, tied, twin, *ordinary))
+        without = stage.review_panel(snapped(stage, tied, *ordinary))
+
+        assert codes(with_twin) == codes(without) == ["grid-ambiguous"]
 
     def test_a_panel_with_no_holes_on_it_says_nothing(self):
-        """``2 * 0 >= 0`` is true, so the empty panel needs a guard of its own.
-
-        Spelt as a ratio it is a division by zero; spelt in integers it is a
-        comparison that quietly passes, and either way a warning about a run
-        with no circles in it is noise in front of an operator with nothing to
-        fix.
-        """
+        """No ties, nothing to say — and an empty tuple is falsey, so this needs
+        no guard of its own. A warning about a run with no circles in it is
+        noise in front of an operator who has nothing to fix."""
         assert SnapPositions(250_000).review_panel(()) == ()
 
     def test_the_finding_names_the_tied_holes_by_identity_and_not_by_position(self):
@@ -529,8 +549,11 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
 
         assert diag.severity is Severity.WARNING
         assert diag.get("tied_indices") == (4, 9)
-        assert diag.get("tied_count") == 2
-        assert diag.get("hole_count") == 3
+        # No denominator, deliberately: nothing decides by proportion now, so a
+        # hole count would be context measured before dedupe — free to say
+        # three where the drill file says two.
+        assert "hole_count" not in dict(diag.data)
+        assert "tied_count" not in dict(diag.data)
 
     def test_the_finding_is_about_the_panel_and_names_no_representative_hole(self):
         """A singular ``hole_index`` is the payload of a hole-level finding.
@@ -551,7 +574,7 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         assert "hole_index" not in dict(diag.data)
         assert diag.location_nm is None
 
-    def test_the_message_says_how_many_of_how_many_and_which_pitch(self):
+    def test_the_message_says_how_many_tied_and_which_pitch(self):
         """What the operator can act on is the grid they declared, so the
         sentence has to point there — the positions are not wrong, and a message
         about the holes would send them looking for a defect in the artwork."""
@@ -565,7 +588,7 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
 
         message = stage.review_panel(holes)[0].message
 
-        assert "2 of 3" in message
+        assert "2 hole(s)" in message
         assert "0.250 mm" in message
 
     def test_reviewing_the_same_panel_twice_gives_the_same_answer(self):

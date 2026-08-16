@@ -204,14 +204,28 @@ class SnapPositions:
         boundary supplies a ±0.5 nm window implicitly — inherited from a
         boundary the codebase already has rather than a constant anybody chose.
 
-        An empty panel is silent, and needs saying because ``2 * 0 >= 0`` is
-        true: a warning about a run with no circles in it is noise in front of
-        an operator who has nothing to fix.
+        **One tie is enough, and there is no proportion to reach.** An earlier
+        rule wanted half the panel before it would speak, which bought nothing
+        and cost two things. It made the answer depend on *which* holes were
+        counted, so a duplicated circle — two marks at one place, one hole in
+        the panel — could push a panel over the line or hold it under: the
+        finding and the drill file could then disagree about how many holes the
+        panel has, which is the disagreement this whole tool exists to prevent.
+        And it stayed silent on the panel with one deliberate half-offset hole,
+        which is the case an operator would most like named, because a single
+        tie is a hole placed by a rule rather than by the artwork.
+
+        Asking only whether *any* hole tied removes both. A duplicate is
+        identical by definition, so it has the identical residual, and dedupe
+        keeps one of each group — the verdict is therefore the same before and
+        after deduplication, and nothing here needs to know which side of it
+        the holes arrived from.
+
+        An empty panel is silent because an empty tuple is falsey, which needs
+        no guard of its own.
         """
         tied = tuple(hole.index for hole in holes if self._is_tied(hole))
-        if holes and 2 * len(tied) >= len(holes):
-            return (self._ambiguous(tied, len(holes)),)
-        return ()
+        return (self._ambiguous(tied),) if tied else ()
 
     def _is_tied(self, hole: Hole) -> bool:
         """Did this hole land exactly between two grid points on either axis?"""
@@ -227,8 +241,8 @@ class SnapPositions:
         """
         return 2 * abs(moved_nm) == self.grid_nm
 
-    def _ambiguous(self, tied: tuple[int, ...], total: int) -> Diagnostic:
-        """Say how many holes of how many, and name the pitch to reconsider.
+    def _ambiguous(self, tied: tuple[int, ...]) -> Diagnostic:
+        """Name the holes a rule placed, and the pitch to reconsider.
 
         One finding about the panel, so there is no ``hole_index`` and no
         ``location_nm``. A singular index is the payload of a hole-level
@@ -236,9 +250,14 @@ class SnapPositions:
         a tied set would be put where the cause belongs and the operator would
         go and inspect a hole no more at fault than the rest. ``tied_indices``
         carries the whole set instead, for a consumer that wants per-hole
-        behaviour, beside the two counts a reader wanting only the headline
-        needs. It does not end ``_nm`` and must not — it is a list of
+        behaviour. It does not end ``_nm`` and must not — it is a list of
         identities, not of lengths.
+
+        **There is no denominator, deliberately.** Nothing here decides by
+        proportion any more, so a hole count would be context rather than
+        evidence — and it would be context measured before deduplication, free
+        to say four where the drill file says three. A number in a finding that
+        contradicts the artifact beside it is worse than no number at all.
 
         The sentence points at the declared grid, because that is the thing the
         operator can change. The positions are not wrong: each is a legitimate
@@ -247,15 +266,11 @@ class SnapPositions:
         """
         return Diagnostic.warning(
             "grid-ambiguous",
-            f"{len(tied)} of {total} holes sat exactly halfway between two "
+            f"{len(tied)} hole(s) sat exactly halfway between two "
             f"{format_nm(self.grid_nm)} mm grid points and were placed by the "
             f"tie-break rather than by the artwork: the declared grid is "
             f"probably not the one the panel was drawn on",
-            data=(
-                ("tied_indices", tied),
-                ("tied_count", len(tied)),
-                ("hole_count", total),
-            ),
+            data=(("tied_indices", tied),),
         )
 
     def _clamped(self) -> Diagnostic:
