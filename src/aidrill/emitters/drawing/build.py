@@ -698,7 +698,11 @@ def _build_title_block(
 # ---------------------------------------------------------------------------
 
 def _overflow_marker(layout: Layout) -> list[Item]:
-    """Say so when the content outran the largest sheet, rather than shrinking it."""
+    """Say so when the content outran the largest sheet, rather than shrinking it.
+
+    Drawn one line below the "NOTES" title, on the title's own baseline offset
+    doubled, so it takes its own line rather than sitting under the heading.
+    """
     if layout.fits:
         return []
     x0, y0, x1, _ = layout.notes
@@ -709,7 +713,7 @@ def _overflow_marker(layout: Layout) -> list[Item]:
     return [
         Text(
             x0 + 2.5,
-            y0 + layout.note_font * 1.6,
+            y0 + layout.note_font * 1.6 * 2.0,
             fits(required, layout.note_font, x1 - x0 - 5.0),
             layout.note_font,
             colour=RED,
@@ -725,12 +729,15 @@ def _build_notes(layout: Layout, data: DrillData) -> list[Item]:
     drawn.append(
         Text(x0 + 2.0, y0 + font * 1.6, "NOTES", font * 1.15, weight="bold", cls="notes-title")
     )
-    drawn += _overflow_marker(layout)
+    overflow = _overflow_marker(layout)
+    drawn += overflow
 
     notes = note_lines(data)
     width = x1 - x0 - 5.0
     limit = y1 - 1.0
-    y = y0 + font * 1.6
+    # The overflow marker, when present, has already claimed the line right
+    # below the title, so the numbered notes start one line further down.
+    y = y0 + font * 1.6 * (2.0 if overflow else 1.0)
     for index, note in enumerate(notes):
         y += font * 1.6
         if y > limit:
