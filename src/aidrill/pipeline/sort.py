@@ -23,9 +23,9 @@ if TYPE_CHECKING:
 __all__ = ["SortHoles"]
 
 
-def _reading_order(hole: Hole) -> tuple[float, float]:
+def _reading_order(hole: Hole) -> tuple[int, int]:
     """Descending Y, then ascending X — the order you would read the panel in."""
-    return (-hole.y, hole.x)
+    return (-hole.y_nm, hole.x_nm)
 
 
 class SortHoles:

@@ -1,21 +1,25 @@
 """Tests for ``Deduplicate``, ``CheckReferenceSize``, ``SortHoles``, ``Pipeline``
-composition and provenance, and the package-root re-exports (SPEC §5, PLAN
-task B).
+composition and provenance, and the package-root re-exports (SPEC §5).
 
 ``SnapPositions``, ``SnapDiametersToDrillTable`` and ``IdentifyHammondFootprint``
 moved out to ``test_snap.py``, ``test_diameters.py`` and ``test_enclosure.py``
-respectively, splitting a 2160-line file so three agents can work on it in
-parallel without owning the same lines. This file kept the stage-protocol
-conformance tests -- which name all six stages by ``ALL_STAGES`` and so belong
-to none of them alone -- plus everything else that did not belong to a single
-stage. Diagnostics are still matched on ``code``, never on ``message`` --
-``code`` is the stable machine API and the wording is not.
+when they stopped being stages, and what composes them is pinned in
+``test_quantise.py``. What is left here is the other half of the subpackage: the
+three classes that really are ``DrillData → DrillData``, and everything about
+folding them that belongs to no single one of them.
+
+``ALL_STAGES`` is therefore the whole of the ``Stage`` protocol's population.
+That is the point of naming it: a quantiser added to it would fail the
+conformance test below, and a stage left out of it would go unfolded and
+untested rather than quietly passing.
+
+Diagnostics are matched on ``code``, never on ``message`` — ``code`` is the
+stable machine API and the wording is not.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import math
 import random
 
 import pytest
@@ -23,7 +27,9 @@ import pytest
 from aidrill.model import (
     Diagnostic,
     DrillData,
-    Hole,
+    RawDrillData,
+    RawHole,
+    RawOutline,
     ReferenceOutline,
     Severity,
     SourceInfo,
@@ -41,6 +47,7 @@ from aidrill.pipeline import (
     SortHoles,
 )
 from aidrill.protocols import Pipeline, Stage
+from aidrill.quantise import quantise
 from tests.conftest import at, codes, diameters, holes, make_data, positions
 
 # --------------------------------------------------------------------------
@@ -48,13 +55,13 @@ from tests.conftest import at, codes, diameters, holes, make_data, positions
 # --------------------------------------------------------------------------
 
 
+#: Every class that satisfies ``Stage``. Three, and no longer six: the three
+#: quantisers answer about one measurement at a time and run in an order they do
+#: not choose, so none of them is a ``DrillData → DrillData`` transform.
 ALL_STAGES = [
-    SnapPositions(grid=0.25),
-    SnapDiametersToDrillTable(),
     Deduplicate(),
-    CheckReferenceSize((113.0, 60.0)),
     SortHoles(),
-    IdentifyHammondFootprint(),
+    CheckReferenceSize((113_000_000, 60_000_000)),
 ]
 
 
@@ -69,14 +76,31 @@ def test_every_stage_satisfies_the_stage_protocol(stage):
     assert isinstance(type(stage).name, str) and type(stage).name
 
 
+@pytest.mark.parametrize(
+    "quantiser",
+    [SnapPositions(250_000), SnapDiametersToDrillTable(), IdentifyHammondFootprint()],
+    ids=lambda q: type(q).__name__,
+)
+def test_a_quantiser_is_not_a_stage(quantiser):
+    """The distinction the restructure turns on, made falsifiable.
+
+    A quantiser that grew an ``apply`` would satisfy ``Stage`` and could then be
+    dropped into ``build_pipeline``, where it would run in an order the caller
+    chose — which is precisely what ``aidrill.quantise`` exists to take out of a
+    caller's hands, because these three depend on each other's answers.
+    """
+    assert not isinstance(quantiser, Stage)
+    assert not hasattr(quantiser, "apply")
+
+
 @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
 def test_stages_are_pure_functions(stage):
     """A stage may not mutate its input, and must be deterministic."""
     data = make_data(
-        at(-40.003, 18.002, 6.9998, index=0),
-        at(-40.0, 18.0, 7.0000, index=1),
-        at(19.0, -18.75, 5.0, index=2),
-        reference=ReferenceOutline(113.0, 60.0),
+        at(-40_000_000, 18_000_000, 7_000_000, index=4),
+        at(-40_000_000, 18_000_000, 7_000_000, index=1),
+        at(19_000_000, -18_750_000, 5_000_000, index=9),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
     )
     before_holes, before_diags = data.holes, data.diagnostics
 
@@ -96,18 +120,13 @@ def test_stages_survive_empty_input(stage):
 
     Surviving means more than "returned something with no holes": a stage that
     bailed out with a bare ``DrillData()`` would drop the reference outline, the
-    source provenance and every diagnostic raised before it, and the pipeline
-    would carry on as though the panel had never had an outline at all.
+    source provenance and every diagnostic raised before it, and the run would
+    carry on as though the panel had never had an outline at all.
     """
     prior = Diagnostic.info("prior", "something earlier said this")
-    # 112 × 61 rather than the fixture's measured 113 × 60: it is a catalogue
-    # footprint exactly, so IdentifyHammondFootprint's snap is the identity and
-    # ``out.reference == data.reference`` still means "the outline was not
-    # dropped" for every stage. Asserting only that it is not None would have
-    # weakened the check for the five stages that must not touch it at all.
     data = DrillData(
         holes=(),
-        reference=ReferenceOutline(112.0, 61.0),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
         diagnostics=(prior,),
         source=SourceInfo(path="test"),
     )
@@ -126,7 +145,7 @@ def test_stages_survive_empty_input(stage):
 @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
 def test_stages_preserve_existing_diagnostics(stage):
     prior = Diagnostic.info("prior", "something earlier said this")
-    data = make_data(at(0.0, 0.0, 7.0, index=0)).with_diagnostics(prior)
+    data = make_data(at(0, 0, 7_000_000, index=4)).with_diagnostics(prior)
     assert prior in stage.apply(data).diagnostics
 
 
@@ -137,90 +156,109 @@ def test_stages_preserve_existing_diagnostics(stage):
 
 class TestDeduplicate:
     def test_collapses_coincident_holes_of_equal_diameter(self):
-        data = make_data(at(-40.0, 18.0, 7.0, index=0), at(-40.0, 18.0, 7.0, index=1))
+        data = make_data(
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            at(-40_000_000, 18_000_000, 7_000_000, index=1),
+        )
         out = Deduplicate().apply(data)
         assert len(out.holes) == 1
 
     def test_keeps_the_first_hole_in_input_order(self):
-        first, second = at(-40.0, 18.0, 7.0, index=0), at(-40.0, 18.0, 7.0, index=1)
+        first = at(-40_000_000, 18_000_000, 7_000_000, index=4)
+        second = at(-40_000_000, 18_000_000, 7_000_000, index=1)
         out = Deduplicate().apply(make_data(first, second))
         assert out.holes == (first,)
 
     def test_emits_one_warning_per_collapsed_group(self):
         data = make_data(
-            at(-40.0, 18.0, 7.0, index=0),
-            at(-40.0, 18.0, 7.0, index=1),
-            at(-40.0, 18.0, 7.0, index=2),
-            at(0.0, 0.0, 7.0, index=3),
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            at(-40_000_000, 18_000_000, 7_000_000, index=1),
+            at(-40_000_000, 18_000_000, 7_000_000, index=9),
+            at(0, 0, 7_000_000, index=6),
         )
         out = Deduplicate().apply(data)
 
         assert len(out.holes) == 2
         assert codes(out) == ["duplicate-hole"]
         assert out.diagnostics[0].severity is Severity.WARNING
-        assert out.diagnostics[0].location == (-40.0, 18.0)
+        assert out.diagnostics[0].location_nm == (-40_000_000, 18_000_000)
 
     def test_two_groups_two_warnings(self):
         data = make_data(
-            at(-40.0, 18.0, 7.0, index=0),
-            at(-40.0, 18.0, 7.0, index=1),
-            at(20.0, 18.0, 7.0, index=2),
-            at(20.0, 18.0, 7.0, index=3),
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            at(-40_000_000, 18_000_000, 7_000_000, index=1),
+            at(20_000_000, 18_000_000, 7_000_000, index=9),
+            at(20_000_000, 18_000_000, 7_000_000, index=6),
         )
         out = Deduplicate().apply(data)
         assert len(out.holes) == 2
         assert codes(out) == ["duplicate-hole", "duplicate-hole"]
 
     def test_does_not_collapse_different_diameters_at_the_same_place(self):
-        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.0, 0.0, 5.0, index=1))
+        data = make_data(
+            at(0, 0, 7_000_000, index=4), at(0, 0, 5_000_000, index=1)
+        )
         out = Deduplicate().apply(data)
         assert len(out.holes) == 2
         assert codes(out) == []
 
-    @pytest.mark.parametrize("dx, dy", [(0.01, 0.0), (0.0, 0.01), (0.04, 0.04)])
-    def test_a_hole_a_hair_away_is_a_different_hole(self, dx, dy):
+    @pytest.mark.parametrize("dx_nm, dy_nm", [(1_000, 0), (0, 1_000), (40_000, 40_000)])
+    def test_a_hole_a_hair_away_is_a_different_hole(self, dx_nm, dy_nm):
         """Coincidence is exact, on each axis separately.
 
-        The two offsets used to fall inside a 0.05 mm tolerance and collapse.
-        They no longer do, and that is the behaviour, not a regression: deciding
-        that two nearby coordinates are one place is ``SnapPositions``' job, and
-        a near miss the grid did not close is a hole the artwork puts somewhere
-        else. Dropping it drills one hole where the panel asks for two.
+        Deciding that two nearby coordinates are one place is ``SnapPositions``'
+        job, and a near miss the grid did not close is a hole the artwork puts
+        somewhere else. Dropping it drills one hole where the panel asks for two.
 
         Both axes are exercised on their own, because a rule written ``x == y``
         on one of them would still pass a fixture that moved the other.
         """
-        data = make_data(at(0.0, 0.0, 7.0, index=0), at(dx, dy, 7.0, index=1))
+        data = make_data(
+            at(0, 0, 7_000_000, index=4), at(dx_nm, dy_nm, 7_000_000, index=1)
+        )
         out = Deduplicate().apply(data)
         assert len(out.holes) == 2
         assert codes(out) == []
 
-    def test_even_a_hole_one_ulp_away_is_a_different_hole(self):
-        """No slack at all, not merely less than there was."""
-        data = make_data(
-            at(0.0, 0.0, 7.0, index=0), at(math.ulp(0.0), 0.0, 7.0, index=1)
-        )
+    def test_even_a_hole_one_nanometre_away_is_a_different_hole(self):
+        """No slack at all, not merely less than there was. A nanometre is the
+        smallest difference the model can hold, so this is the whole of it."""
+        data = make_data(at(0, 0, 7_000_000, index=4), at(1, 0, 7_000_000, index=1))
         assert len(Deduplicate().apply(data).holes) == 2
 
-    def test_the_fixtures_own_duplicate_is_byte_identical_before_any_snapping(self):
+    def test_the_fixtures_own_duplicate_is_byte_identical_before_any_quantising(self):
         """Why exactness is enough: a copy-paste duplicates the coordinates.
 
         These are the two ⌀7 holes the shipped ``tar.ai`` carries, as
-        ``AiPdfSource`` parses them — equal to the last bit, with nothing having
-        snapped them. That is what a duplicate is in this domain, and it is what
-        the tolerance was really catching.
+        ``AiPdfSource`` measures them — equal to the last bit, with nothing
+        having quantised them. That is what a duplicate is in this domain, and it
+        is what a tolerance would really have been catching. Quantised through
+        the phase they stay equal, because quantising is deterministic.
         """
         both = (-39.990641944444405, 17.999956944444445, 6.999816666666661)
-        data = make_data(at(*both, index=2), at(*both, index=5))
+        raw = RawDrillData(
+            source=SourceInfo(path="tar.ai"),
+            reference=RawOutline(113.0, 60.0),
+            centre=(56.5, 30.0),
+            holes=(RawHole(*both, 2), RawHole(*both, 5)),
+        )
+        data = quantise(
+            raw,
+            enclosure=IdentifyHammondFootprint(),
+            diameters=SnapDiametersToDrillTable(),
+            positions=SnapPositions(250_000),
+        )
 
         out = Deduplicate().apply(data)
 
         assert [hole.index for hole in out.holes] == [2]
         assert codes(out) == ["duplicate-hole"]
 
-    def test_unnormalised_diameters_are_not_treated_as_equal(self):
-        """Dedupe does not do the diameter stage's job (SRP)."""
-        data = make_data(at(0.0, 0.0, 6.9998, index=0), at(0.0, 0.0, 7.0000, index=1))
+    def test_unquantised_diameters_are_not_treated_as_equal(self):
+        """Dedupe does not do the drill table's job (SRP)."""
+        data = make_data(
+            at(0, 0, 6_999_800, index=4), at(0, 0, 7_000_000, index=1)
+        )
         assert len(Deduplicate().apply(data).holes) == 2
 
     def test_diagnostic_carries_a_machine_readable_payload(self):
@@ -230,18 +268,19 @@ class TestDeduplicate:
         only a rounded message it re-implemented this stage's rule — with its own
         tolerance and no diameter check — and flagged holes the pipeline had not.
         ``hole_index`` is therefore the key a consumer matches on: it names the
-        survivor and stays true however far a later stage moves it. ``location``
-        is the survivor's coordinate at the time of the report — human context
-        for the CLI and the drawing's NOTES, and no longer a referent.
+        survivor and stays true however far a later stage moves it.
+        ``location_nm`` is the survivor's coordinate at the time of the report —
+        human context for the CLI and the drawing's NOTES, and no longer a
+        referent.
         """
         # Identities deliberately do not match positions: an implementation that
         # reported where the survivor sits rather than who it is would answer 0.
-        survivor = at(-40.0031, 18.0007, 7.0, index=4)
+        survivor = at(-40_000_000, 18_000_000, 7_000_000, index=4)
         data = make_data(
             survivor,
-            at(-40.0031, 18.0007, 7.0, index=7),
-            at(-40.0031, 18.0007, 7.0, index=5),
-            at(0.0, 0.0, 5.0, index=9),  # a lonely hole raises nothing
+            at(-40_000_000, 18_000_000, 7_000_000, index=7),
+            at(-40_000_000, 18_000_000, 7_000_000, index=5),
+            at(0, 0, 5_000_000, index=9),  # a lonely hole raises nothing
         )
 
         out = Deduplicate().apply(data)
@@ -249,11 +288,26 @@ class TestDeduplicate:
         assert codes(out) == ["duplicate-hole"]
         diag = out.diagnostics[0]
         assert diag.get("hole_index") == survivor.index
-        assert diag.location == (survivor.x, survivor.y)
-        assert diag.location == (out.holes[0].x, out.holes[0].y)
-        assert diag.get("diameter") == survivor.diameter
+        assert diag.location_nm == (survivor.x_nm, survivor.y_nm)
+        assert diag.location_nm == (out.holes[0].x_nm, out.holes[0].y_nm)
+        assert diag.get("diameter_nm") == survivor.diameter_nm
         assert diag.get("dropped") == 2
         assert diag.get("kept") == 1
+
+    def test_the_payloads_diameter_is_whole_nanometres_under_a_key_that_says_so(self):
+        """A payload key ending ``_nm`` is held to a whole ``int`` by the model,
+        which is the only thing telling a consumer what the number means: a
+        millimetre float under this key would print as a plausible 7.0 in the CLI
+        report, the drawing's NOTES and the JSON alike, all three quoting each
+        other."""
+        data = make_data(
+            at(0, 0, 3_200_000, index=4), at(0, 0, 3_200_000, index=1)
+        )
+
+        diag = Deduplicate().apply(data).diagnostics[0]
+
+        assert diag.get("diameter_nm") == 3_200_000
+        assert type(diag.get("diameter_nm")) is int
 
     def test_the_diagnostic_names_the_holes_that_went_not_only_how_many(self):
         """A count cannot be turned back into identities.
@@ -266,10 +320,10 @@ class TestDeduplicate:
         that reaches no artifact is exactly the one that needs naming.
         """
         data = make_data(
-            at(-40.0031, 18.0007, 7.0, index=4),
-            at(-40.0031, 18.0007, 7.0, index=7),
-            at(-40.0031, 18.0007, 7.0, index=5),
-            at(0.0, 0.0, 5.0, index=9),
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            at(-40_000_000, 18_000_000, 7_000_000, index=7),
+            at(-40_000_000, 18_000_000, 7_000_000, index=5),
+            at(0, 0, 5_000_000, index=9),
         )
 
         diag = Deduplicate().apply(data).diagnostics[0]
@@ -278,56 +332,52 @@ class TestDeduplicate:
         assert diag.get("hole_index") == 4
 
     def test_a_lone_dropped_hole_is_still_named(self):
-        data = make_data(at(0.0, 0.0, 7.0, index=8), at(0.0, 0.0, 7.0, index=3))
+        data = make_data(at(0, 0, 7_000_000, index=8), at(0, 0, 7_000_000, index=3))
         diag = Deduplicate().apply(data).diagnostics[0]
         assert diag.get("dropped_indices") == "3"
 
     def test_property_dedupe_is_idempotent(self):
         rng = random.Random(90210)
         for _ in range(300):
-            holes = []
+            built = []
             for _ in range(8):
-                x, y = rng.uniform(-50, 50), rng.uniform(-25, 25)
-                dia = rng.choice([5.0, 7.0])
-                holes.append(at(x, y, dia, index=len(holes)))
+                x_nm = rng.randrange(-50_000_000, 50_000_000, 250_000)
+                y_nm = rng.randrange(-25_000_000, 25_000_000, 250_000)
+                dia_nm = rng.choice([5_000_000, 7_000_000])
+                built.append(at(x_nm, y_nm, dia_nm, index=len(built)))
                 if rng.random() < 0.4:  # sprinkle exact duplicates
-                    holes.append(at(x, y, dia, index=len(holes)))
+                    built.append(at(x_nm, y_nm, dia_nm, index=len(built)))
             stage = Deduplicate()
-            once = stage.apply(make_data(*holes))
+            once = stage.apply(make_data(*built))
             twice = stage.apply(once)
             assert twice.holes == once.holes
             assert codes(twice) == codes(once), "second pass found new duplicates"
 
 
 def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
-    """The referent must survive a later coordinate change.
+    """The referent must survive the population changing under it.
 
-    protocols.py forbids a stage assuming its predecessor, so Deduplicate may
-    legitimately run before SnapPositions. When it does, the survivor moves
-    after the diagnostic is written and a position-keyed referent goes stale.
-
-    The two identities are out of order and neither equals a position, so the
-    rejected design — reporting the survivor's index in the surviving tuple —
-    would answer 0 here rather than 7, and SortHoles would invalidate it later.
+    Dropping a hole renumbers every array position after it while no identity
+    moves, and ``SortHoles`` then reorders what is left. The survivor here is
+    hole 7, it is the *second* hole in the input and the *last* in the sorted
+    output, so a referent derived from either list answers something else.
     """
     data = make_data(
-        Hole.from_measurement(10.03, 5.02, 7.0, index=7),
-        Hole.from_measurement(10.03, 5.02, 7.0, index=3),
+        at(0, 25_000_000, 7_000_000, index=3),
+        at(10_000_000, 5_000_000, 7_000_000, index=7),
+        at(10_000_000, 5_000_000, 7_000_000, index=1),
     )
-    after = Pipeline([Deduplicate(), SnapPositions(grid=0.25)]).run(data)
+
+    after = Pipeline([Deduplicate(), SortHoles()]).run(data)
 
     duplicates = [d for d in after.diagnostics if d.code == "duplicate-hole"]
     assert len(duplicates) == 1
     survivor_index = duplicates[0].get("hole_index")
     assert survivor_index == 7
-    assert [h.index for h in after.holes] == [survivor_index]
-
-    # The move the docstring turns on, made observable: by the end of the run
-    # the reported coordinate names nowhere a hole is, and only the id resolves.
-    survivor = after.holes[0]
-    assert (survivor.x, survivor.y) == (10.0, 5.0)
-    assert duplicates[0].location == (10.03, 5.02)
-    assert duplicates[0].location != (survivor.x, survivor.y)
+    assert [h.index for h in after.holes] == [3, 7]
+    # The rejected design — "the survivor is at index 1 of the surviving tuple" —
+    # would name hole 7 as 1, which is a real and different hole in this fixture.
+    assert [h.index for h in after.holes].index(survivor_index) == 1
 
 
 # --------------------------------------------------------------------------
@@ -354,13 +404,13 @@ class TestCheckReferenceSize:
         assert out.diagnostics[0].severity is Severity.WARNING
 
     def test_is_a_pure_validator_and_returns_holes_untouched(self):
-        holes = (
+        given = (
             at(-40_000_000, 18_000_000, 7_000_000, index=4),
             at(20_000_000, -18_750_000, 5_000_000, index=1),
         )
-        data = make_data(*holes, reference=ReferenceOutline(100_000_000, 60_000_000))
+        data = make_data(*given, reference=ReferenceOutline(100_000_000, 60_000_000))
         out = CheckReferenceSize(self.DECLARED).apply(data)
-        assert out.holes == holes
+        assert out.holes == given
         assert out.reference == data.reference
 
     def test_the_tolerance_boundary_is_inclusive_to_the_nanometre(self):
@@ -441,16 +491,6 @@ class TestCheckReferenceSize:
         ) == self.DECLARED
         assert diagnostic.get("tolerance_nm") == 50_000
 
-    def test_describe_reports_the_declared_panel_and_the_slack(self):
-        """Provenance in the same unit the comparison was made in. A consumer
-        reading a slack of 0.05 off a stage that compared 50 000 would be
-        reading a number the data was never checked against."""
-        run = CheckReferenceSize(self.DECLARED, 50_000).describe()
-
-        assert run.name == "check-reference-size"
-        assert (run.get("expected_width_nm"), run.get("expected_height_nm")) == self.DECLARED
-        assert run.get("tolerance_nm") == 50_000
-
     def test_a_declared_size_that_is_not_whole_nanometres_is_refused(self):
         """Checked at construction, where the offending value still has a call
         site attached to it. A caller who hands over the millimetres they were
@@ -476,57 +516,57 @@ class TestCheckReferenceSize:
 class TestSortHoles:
     def test_default_is_descending_y_then_ascending_x(self):
         data = make_data(
-            at(20.0, -18.75, 5.0, index=0),
-            at(-20.0, 18.0, index=1),
-            at(-40.0, 18.0, index=2),
-            at(-20.0, -18.75, 5.0, index=3),
+            at(20_000_000, -18_750_000, 5_000_000, index=4),
+            at(-20_000_000, 18_000_000, index=1),
+            at(-40_000_000, 18_000_000, index=9),
+            at(-20_000_000, -18_750_000, 5_000_000, index=6),
         )
         out = SortHoles().apply(data)
         assert positions(out) == [
-            (-40.0, 18.0),
-            (-20.0, 18.0),
-            (-20.0, -18.75),
-            (20.0, -18.75),
+            (-40_000_000, 18_000_000),
+            (-20_000_000, 18_000_000),
+            (-20_000_000, -18_750_000),
+            (20_000_000, -18_750_000),
         ]
 
     def test_accepts_a_custom_key(self):
         data = make_data(
-            at(0.0, 0.0, 7.0, index=0),
-            at(10.0, 0.0, 3.2, index=1),
-            at(-10.0, 0.0, 5.0, index=2),
+            at(0, 0, 7_000_000, index=4),
+            at(10_000_000, 0, 3_200_000, index=1),
+            at(-10_000_000, 0, 5_000_000, index=9),
         )
-        out = SortHoles(key=lambda h: h.diameter).apply(data)
-        assert diameters(out) == [3.2, 5.0, 7.0]
+        out = SortHoles(key=lambda h: h.diameter_nm).apply(data)
+        assert diameters(out) == [3_200_000, 5_000_000, 7_000_000]
 
     def test_is_deterministic_under_input_permutation(self):
-        holes = [
-            at(-40.0, 18.0, index=0),
-            at(0.0, 18.0, index=1),
-            at(-19.0, -18.75, 5.0, index=2),
-            at(20.0, 18.0, index=3),
+        given = [
+            at(-40_000_000, 18_000_000, index=4),
+            at(0, 18_000_000, index=1),
+            at(-19_000_000, -18_750_000, 5_000_000, index=9),
+            at(20_000_000, 18_000_000, index=6),
         ]
         rng = random.Random(7)
-        expected = SortHoles().apply(make_data(*holes)).holes
+        expected = SortHoles().apply(make_data(*given)).holes
         for _ in range(20):
-            shuffled = holes[:]
+            shuffled = given[:]
             rng.shuffle(shuffled)
             assert SortHoles().apply(make_data(*shuffled)).holes == expected
 
     def test_emits_no_diagnostics(self):
-        data = make_data(at(0.0, 0.0, index=0), at(1.0, 1.0, index=1))
+        data = make_data(at(0, 0, index=4), at(1_000_000, 1_000_000, index=1))
         assert codes(SortHoles().apply(data)) == []
 
     def test_tools_are_stable_under_hole_reordering(self):
         """SPEC §9 property: tools() does not depend on hole order."""
-        holes = [
-            at(0.0, 0.0, 7.0, index=0),
-            at(1.0, 0.0, 5.0, index=1),
-            at(2.0, 0.0, 3.2, index=2),
+        given = [
+            at(0, 0, 7_000_000, index=4),
+            at(1_000_000, 0, 5_000_000, index=1),
+            at(2_000_000, 0, 3_200_000, index=9),
         ]
         rng = random.Random(11)
-        expected = dict(make_data(*holes).tools())
+        expected = dict(make_data(*given).tools())
         for _ in range(20):
-            shuffled = holes[:]
+            shuffled = given[:]
             rng.shuffle(shuffled)
             assert dict(make_data(*shuffled).tools()) == expected
             assert dict(SortHoles().apply(make_data(*shuffled)).tools()) == expected
@@ -539,7 +579,7 @@ class TestSortHoles:
 
 class TestPipelineComposition:
     def test_empty_pipeline_is_the_identity(self):
-        data = make_data(at(0.0, 0.0, index=0))
+        data = make_data(at(0, 0, index=4))
         assert Pipeline([]).run(data) is data
 
     def test_run_is_a_left_fold(self):
@@ -563,62 +603,73 @@ class TestPipelineComposition:
         assert codes(out) == ["a", "b", "c"]
 
     def test_stage_order_is_observable(self):
-        """snap-then-dedupe collapses a near-duplicate that dedupe-then-snap does not.
+        """Sorting before deduplicating keeps a different hole.
 
-        The two holes are 0.06 mm apart, so ``Deduplicate`` — which compares
-        exactly — sees two holes; both snap onto the same 0.25 mm grid point, so
-        after ``SnapPositions`` it sees one. The whole difference is the order,
-        which is why only ``cli.build_pipeline`` gets to choose it.
+        ``Deduplicate`` keeps the first member of a group *in input order*, so
+        whatever decides the input order decides which hole survives — and
+        survives into the artifacts under its own ``index``. The two holes are
+        coincident and numbered 7 and 1, so the answer is unambiguous either way
+        round: this is not a preference, it is two different panels' worth of
+        provenance. Which order the CLI picks is ``cli.build_pipeline``'s to say
+        and nobody else's.
         """
-        data = make_data(at(0.0, 0.0, 7.0, index=0), at(0.06, 0.0, 7.0, index=1))
-        snap, dedupe = SnapPositions(0.25), Deduplicate()
+        data = make_data(
+            at(10_000_000, 5_000_000, 7_000_000, index=7),
+            at(10_000_000, 5_000_000, 7_000_000, index=1),
+        )
+        dedupe, sort = Deduplicate(), SortHoles(key=lambda h: h.index)
 
-        snap_first = Pipeline([snap, dedupe]).run(data)
-        dedupe_first = Pipeline([dedupe, snap]).run(data)
+        dedupe_first = Pipeline([dedupe, sort]).run(data)
+        sort_first = Pipeline([sort, dedupe]).run(data)
 
-        assert len(snap_first.holes) == 1
-        assert "duplicate-hole" in codes(snap_first)
+        assert [h.index for h in dedupe_first.holes] == [7]
+        assert [h.index for h in sort_first.holes] == [1]
 
-        assert len(dedupe_first.holes) == 2
-        assert "duplicate-hole" not in codes(dedupe_first)
-
-    def test_a_realistic_composition_yields_one_tool_for_a_noisy_seven_mm_row(self):
-        """Several stages folded together, on the shape of panel they meet.
+    def test_the_phase_and_the_pipeline_compose_into_one_tool_for_a_noisy_row(self):
+        """The library flow, end to end, on the shape of panel it meets.
 
         Deliberately *not* a second statement of the CLI's stage order — that
         lives in ``cli.build_pipeline`` and is pinned once, in
         ``tests/test_cli.py``, by reading the pipeline the CLI actually builds.
         A parallel list here has already drifted once.
+
+        What it does state is the one arrangement that is not a preference:
+        dedupe cannot run before the phase, because collapsing 6.9998 against
+        7.0000 is the drill table's answer and collapsing −40.003 against −40.0
+        is the grid's.
         """
-        data = make_data(
-            at(-40.003, 18.001, 6.9998, index=0),
-            at(-40.0, 18.0, 7.0000, index=1),  # duplicate of the above, once snapped
-            at(-20.0, 18.0, 7.0001, index=2),
-            at(-19.0, -18.75, 5.0002, index=3),
-            at(19.0, -18.75, 4.9998, index=4),
-            reference=ReferenceOutline(113.0, 60.0),
+        raw = RawDrillData(
+            source=SourceInfo(path="panel.ai"),
+            reference=RawOutline(113.0, 60.0),
+            centre=(56.5, 30.0),
+            holes=(
+                RawHole(-40.003, 18.001, 6.9998, 4),
+                RawHole(-40.0, 18.0, 7.0000, 1),  # a duplicate of the above, once quantised
+                RawHole(-20.0, 18.0, 7.0001, 9),
+                RawHole(-19.0, -18.75, 5.0002, 6),
+                RawHole(19.0, -18.75, 4.9998, 2),
+            ),
         )
 
-        out = Pipeline(
-            [
-                SnapPositions(0.25),
-                SnapDiametersToDrillTable(),
-                Deduplicate(),
-                IdentifyHammondFootprint(),
-                SortHoles(),
-            ]
-        ).run(data)
+        out = Pipeline([Deduplicate(), SortHoles()]).run(
+            quantise(
+                raw,
+                enclosure=IdentifyHammondFootprint(),
+                diameters=SnapDiametersToDrillTable(),
+                positions=SnapPositions(250_000),
+            )
+        )
 
         assert len(out.holes) == 4
-        assert len(out.tools()) == 2
-        assert list(out.tools()) == [5.0, 7.0]
+        assert list(out.tools()) == [5_000_000, 7_000_000]
         assert codes(out) == ["duplicate-hole"]
         assert positions(out) == [
-            (-40.0, 18.0),
-            (-20.0, 18.0),
-            (-19.0, -18.75),
-            (19.0, -18.75),
+            (-40_000_000, 18_000_000),
+            (-20_000_000, 18_000_000),
+            (-19_000_000, -18_750_000),
+            (19_000_000, -18_750_000),
         ]
+        assert [hole.index for hole in out.holes] == [4, 9, 6, 2]
 
 
 # --------------------------------------------------------------------------
@@ -630,38 +681,40 @@ class TestStageRunAndProcessing:
     """The record itself, before any stage fills one in."""
 
     def test_get_reads_a_parameter_and_falls_back_to_the_default(self):
-        run = StageRun("snap", (("grid_mm", 0.5), ("enabled", True)))
-        assert run.get("grid_mm") == 0.5
-        assert run.get("enabled") is True
-        assert run.get("warn_over_mm") is None
-        assert run.get("warn_over_mm", 0.0) == 0.0
+        run = StageRun("snap", (("grid_nm", 500_000), ("key", "default")))
+        assert run.get("grid_nm") == 500_000
+        assert run.get("key") == "default"
+        assert run.get("warn_over_nm") is None
+        assert run.get("warn_over_nm", 0) == 0
 
     def test_is_an_immutable_value(self):
-        run = StageRun("snap", (("grid_mm", 0.5),))
-        assert run == StageRun("snap", (("grid_mm", 0.5),))
+        run = StageRun("snap", (("grid_nm", 500_000),))
+        assert run == StageRun("snap", (("grid_nm", 500_000),))
         with pytest.raises(dataclasses.FrozenInstanceError):
             run.name = "sort"  # type: ignore[misc]
         # slots, not just frozen: no per-instance dict to grow a stray attribute.
         assert not hasattr(run, "__dict__")
 
     def test_a_mutable_payload_is_coerced_on_the_way_in(self):
-        """Task 3 deserialises into this: JSON hands back lists, not tuples.
+        """The JSON emitter deserialises into this, and JSON hands back lists.
 
         A ``StageRun`` holding a list is unhashable and compares unequal to the
         identical record built from tuples, so a round-tripped document would
         differ from the one it was written from — while looking right in print.
         """
-        run = StageRun("normalize-diameters", [["sizes_mm", [3.2, 7.0]]])
+        run = StageRun("snap-diameters", [["sizes_nm", [3_200_000, 7_000_000]]])
 
-        assert run == StageRun("normalize-diameters", (("sizes_mm", (3.2, 7.0)),))
-        assert run.get("sizes_mm") == (3.2, 7.0)
-        assert hash(run) == hash(StageRun("normalize-diameters", (("sizes_mm", (3.2, 7.0)),)))
+        assert run == StageRun("snap-diameters", (("sizes_nm", (3_200_000, 7_000_000)),))
+        assert run.get("sizes_nm") == (3_200_000, 7_000_000)
+        assert hash(run) == hash(
+            StageRun("snap-diameters", (("sizes_nm", (3_200_000, 7_000_000)),))
+        )
 
     def test_data_starts_with_no_processing_history(self):
-        assert make_data(at(0.0, 0.0, index=0)).processing == ()
+        assert make_data(at(0, 0, index=4)).processing == ()
 
     def test_with_processing_appends_without_mutating(self):
-        data = make_data(at(0.0, 0.0, index=0))
+        data = make_data(at(0, 0, index=4))
         first = data.with_processing(StageRun("snap", ()))
         second = first.with_processing(StageRun("sort", ()))
 
@@ -672,170 +725,76 @@ class TestStageRunAndProcessing:
     def test_the_other_transforms_carry_the_history_forward(self):
         """Every transform returns a new value; none of them may drop provenance.
 
-        A stage that rebuilt its holes and lost the record of the stages before
-        it would leave the drawing with a history that starts halfway through.
+        A stage that rebuilt its holes and lost the record of what came before it
+        would leave the drawing with a history that starts halfway through.
         """
-        run = StageRun("snap", (("grid_mm", 0.5),))
-        data = make_data(at(0.0, 0.0, index=0)).with_processing(run)
+        run = StageRun("snap", (("grid_nm", 500_000),))
+        data = make_data(at(0, 0, index=4)).with_processing(run)
 
         assert data.with_holes(data.holes).processing == (run,)
         assert data.with_diagnostics(Diagnostic.info("x", "x")).processing == (run,)
 
     def test_with_processing_of_nothing_is_the_identity(self):
-        data = make_data(at(0.0, 0.0, index=0))
+        data = make_data(at(0, 0, index=4))
         assert data.with_processing() is data
 
     def test_last_run_answers_the_most_recent_of_a_repeated_stage(self):
         """A stage may legitimately run twice; the title block wants the last one."""
         data = make_data().with_processing(
-            StageRun("snap", (("grid_mm", 1.0),)),
+            StageRun("snap", (("grid_nm", 1_000_000),)),
             StageRun("sort", ()),
-            StageRun("snap", (("grid_mm", 0.25),)),
+            StageRun("snap", (("grid_nm", 250_000),)),
         )
-        assert data.last_run("snap").get("grid_mm") == 0.25
+        assert data.last_run("snap").get("grid_nm") == 250_000
         assert data.last_run("deduplicate") is None
 
 
 class TestDescribe:
-    """Every stage reports what it was configured to do, in effective values."""
+    """Every stage reports what it was configured to do, in effective values.
+
+    Only the three stages are here. What each *quantiser* records is pinned
+    beside the quantiser, in ``test_snap.py``, ``test_diameters.py`` and
+    ``test_enclosure.py``, where the thing being recorded is also defined.
+    """
 
     @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
     def test_a_stage_describes_itself_under_its_own_name(self, stage):
         assert stage.describe().name == type(stage).name
 
-    def test_snap_reports_grid_and_the_resolved_warning_threshold(self):
-        run = SnapPositions(grid=0.5).describe()
-        assert run.get("grid_mm") == 0.5
-        assert run.get("warn_over_mm") == 0.125
-        assert run.get("enabled") is True
-
-    def test_describe_reports_resolved_defaults_not_raw_arguments(self):
-        """warn_over defaults to grid/4; provenance must record the effective value."""
-        assert SnapPositions(grid=0.25).describe().get("warn_over_mm") == 0.0625
-
-    def test_snap_reports_an_explicit_warning_threshold_as_given(self):
-        assert SnapPositions(0.25, warn_over=0.2).describe().get("warn_over_mm") == 0.2
-
-    def test_a_non_positive_grid_describes_itself_as_disabled(self):
-        run = SnapPositions(grid=0.0).describe()
-        assert run.get("enabled") is False
-        assert run.get("grid_mm") == 0.0
-
     def test_deduplicate_has_nothing_to_report_but_still_reports(self):
         """The stage has no parameters at all, and its record is not empty for it.
 
         A reader of ``processing`` learns that deduplication ran; there is no
-        bound to publish because coincidence is exact. Publishing one anyway —
-        the ``tolerance_mm`` that used to be here — would tell a consumer a
-        number that decides nothing.
+        bound to publish because coincidence is exact. Publishing one anyway
+        would tell a consumer a number that decides nothing.
         """
         run = Deduplicate().describe()
         assert run.name == "deduplicate"
         assert run.parameters == ()
 
-    def test_check_reference_size_reports_the_declared_panel_and_slack(self):
-        run = CheckReferenceSize((113.0, 60.0)).describe()
-        assert run.get("expected_width_mm") == 113.0
-        assert run.get("expected_height_mm") == 60.0
-        assert run.get("tolerance_mm") == 0.05
-
     def test_sort_names_its_key_function(self):
         def by_diameter(hole):
-            return hole.diameter
+            return hole.diameter_nm
 
         assert SortHoles().describe().get("key") == "default"
         assert SortHoles(key=by_diameter).describe().get("key") == "by_diameter"
 
-    def test_snap_diameters_reports_the_standard_it_quantised_against(self):
-        run = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"], 0.1).describe()
-        assert run.get("standard") == "fractional"
-        assert run.get("tolerance_mm") == 0.1
-        assert run.get("size_count") == 64
-
-    def test_snap_diameters_records_the_sizes_that_were_actually_available(self):
-        """The narrowed drawer, written out in full, because nothing else says it.
-
-        A consumer's one likely question — "what is the nearest size this panel
-        could have used?" — is answered wrongly by the standard's name once the
-        operator has told us which bits they own. The set is run-specific, so it
-        travels with the run; it is also small, which is why it can.
-        """
-        drawer = DRILL_STANDARDS["metric"].select(include=(3.2, 5.0, 7.0, 12.0))
-        run = SnapDiametersToDrillTable(drawer).describe()
-
-        assert run.get("standard") == "metric"
-        assert run.get("sizes_mm") == (3.2, 5.0, 7.0, 12.0)
-        assert run.get("size_count") == 4
-
-    def test_an_unnarrowed_standard_is_recorded_by_name_and_count_alone(self):
-        """183 sizes a reader can look up are not worth 90 % of the document.
-
-        The name is an address into a registry of physical constants, and a
-        consumer that cannot expand it cannot use the numbers either. The key is
-        *absent* rather than empty: ``StageRun.get`` cannot tell an absent key
-        from a null one, so an empty tuple here would read as "quantised against
-        no bits at all".
-        """
-        run = SnapDiametersToDrillTable().describe()
-        parameters = dict(run.parameters)
-
-        assert run.get("standard") == "metric"
-        assert run.get("size_count") == 183
-        assert run.get("tolerance_mm") == 0.25
-        assert "sizes_mm" not in parameters
-
-    def test_a_table_no_registry_name_can_rebuild_records_its_sizes(self):
-        """The rule is "can a reader rebuild this from the name?", not "did
-        ``select`` run?" — a hand-built standard answers no just as a narrowed
-        one does, and a reader looking up its name would find nothing at all."""
-        label = DRILL_STANDARDS["metric"].label
-        run = SnapDiametersToDrillTable(
-            DrillStandard(name="the-drawer-in-the-shed", sizes_mm=(3.2, 7.0), label=label)
-        ).describe()
-
-        assert run.get("sizes_mm") == (3.2, 7.0)
-        assert run.get("size_count") == 2
-
 
 class TestPipelineRecordsProvenance:
     def test_pipeline_records_what_each_stage_actually_did(self):
-        data = make_data(*holes((10.03, 5.02), (-20.0, 5.0, 5.0)))
-        after = Pipeline([SnapPositions(grid=0.5), Deduplicate()]).run(data)
+        data = make_data(*holes((10_000_000, 5_000_000), (-20_000_000, 5_000_000, 5_000_000)))
+        after = Pipeline([Deduplicate(), SortHoles()]).run(data)
 
-        assert [r.name for r in after.processing] == ["snap", "deduplicate"]
-        snap = after.last_run("snap")
-        assert snap.get("grid_mm") == 0.5
-        assert snap.get("warn_over_mm") == 0.125  # the *resolved* default, not None
+        assert [r.name for r in after.processing] == ["deduplicate", "sort"]
+        assert after.last_run("sort").get("key") == "default"
 
-    @pytest.mark.parametrize(
-        "grid, expected", [(0.25, [(10.25, 5.0)]), (0.5, [(10.5, 5.0)])]
-    )
-    def test_the_recorded_grid_is_the_grid_the_holes_were_snapped_to(self, grid, expected):
-        """Finding 08: the sheet stated a grid the data had never been snapped to.
+    def test_a_stage_that_changed_nothing_still_records_that_it_ran(self):
+        """An empty diagnostics list cannot tell a consumer whether a panel had
+        no duplicates or whether nobody looked."""
+        after = Pipeline([Deduplicate()]).run(make_data(at(0, 0, index=4)))
 
-        The record must *predict* the coordinates, which is only true if it comes
-        from the stage that moved them. Divisibility alone does not say that —
-        every multiple of 0.5 is also a multiple of 0.25, so a record finer than
-        the reality, which is finding 08 exactly, would satisfy it. Hence the
-        literal positions per grid, plus the residual bound: a snap to a pitch
-        can never move a hole further than half of it, so a doubled pitch under a
-        record that still says 0.25 is caught here too.
-        """
-        after = Pipeline([SnapPositions(grid=grid)]).run(make_data(*holes((10.3, 5.02))))
-
-        recorded = after.last_run("snap").get("grid_mm")
-        assert recorded == grid
-        assert positions(after) == expected
-        for hole in after.holes:
-            assert abs(hole.x - hole.raw.x) <= recorded / 2 + 1e-9
-            assert abs(hole.y - hole.raw.y) <= recorded / 2 + 1e-9
-
-    def test_a_disabled_stage_still_records_that_it_ran_and_did_nothing(self):
-        after = Pipeline([SnapPositions(grid=0.0)]).run(make_data(*holes((10.03, 5.02))))
-
-        assert [r.name for r in after.processing] == ["snap"]
-        assert after.last_run("snap").get("enabled") is False
-        assert positions(after) == [(10.03, 5.02)], "a disabled snap moved a hole"
+        assert [r.name for r in after.processing] == ["deduplicate"]
+        assert codes(after) == []
 
     def test_a_stage_never_sees_its_own_provenance_in_its_input(self):
         """The record says what a stage *did*, so it cannot exist before it acts.
@@ -872,24 +831,24 @@ class TestPipelineRecordsProvenance:
             def describe(self) -> StageRun:
                 return StageRun(self.name, ())
 
-        data = make_data(at(0.0, 0.0, index=0))
+        data = make_data(at(0, 0, index=4))
         with pytest.raises(RuntimeError):
-            Pipeline([SnapPositions(0.25), Explodes()]).run(data)
+            Pipeline([Deduplicate(), Explodes()]).run(data)
         assert data.processing == ()
 
     def test_a_pipeline_records_its_stages_in_order(self):
         """Read off the stages that were handed in, not from a copy of the list.
 
         The literal spelling drifted once already — it named the CLI's order,
-        which this list has not been since the enclosure stage joined it — and a
+        which this list has not been since the enclosure joined it — and a
         parallel list is what let that happen quietly. What is being asserted is
         that ``Pipeline`` records *in order*, which the input already states.
         """
         stages = ALL_STAGES
         after = Pipeline(stages).run(
             make_data(
-                *holes((-40.003, 18.001, 6.9998), (19.0, -18.75, 5.0002)),
-                reference=ReferenceOutline(113.0, 60.0),
+                *holes((-40_000_000, 18_000_000, 7_000_000), (19_000_000, -18_750_000, 5_000_000)),
+                reference=ReferenceOutline(113_000_000, 60_000_000),
             )
         )
         assert [r.name for r in after.processing] == [type(s).name for s in stages]
@@ -901,29 +860,35 @@ class TestPipelineRecordsProvenance:
 # --------------------------------------------------------------------------
 
 
-def test_the_stages_and_the_standards_are_re_exported_from_the_package_root():
-    """Nothing enumerates the stages, so the root is where they are named.
+def test_the_flow_is_reachable_from_the_package_root():
+    """Nothing enumerates the stages or the quantisers, so the root names them.
 
     ``build_pipeline`` is the CLI's arrangement and not the only one — SPEC
     calls ``CheckReferenceSize`` a supported stage for a library caller, and the
     CLI never runs it. A root exporting ``Pipeline`` and the ``Stage`` protocol
     but no stage hands a consumer an empty pipeline and no way to fill it, and
-    exporting the stages without ``DRILL_STANDARDS`` leaves the one stage that
-    takes an argument unconfigurable.
+    exporting the quantisers without ``DRILL_STANDARDS`` leaves the one that
+    takes a table unconfigurable.
+
+    ``quantise`` is the piece with no protocol standing in for it: without it a
+    consumer holds a ``RawDrillData`` from ``AiPdfSource`` and has no supported
+    way to turn it into the ``DrillData`` every stage and every emitter takes.
     """
     import aidrill
 
-    stages = (
+    for name in (
         SnapPositions,
         SnapDiametersToDrillTable,
-        Deduplicate,
         IdentifyHammondFootprint,
+        Deduplicate,
         SortHoles,
         CheckReferenceSize,
-    )
-    for stage in stages:
-        assert getattr(aidrill, stage.__name__, None) is stage
-        assert stage.__name__ in aidrill.__all__
+    ):
+        assert getattr(aidrill, name.__name__, None) is name
+        assert name.__name__ in aidrill.__all__
+
+    assert aidrill.quantise is quantise
+    assert "quantise" in aidrill.__all__
 
     assert aidrill.DRILL_STANDARDS is DRILL_STANDARDS
     assert aidrill.DEFAULT_STANDARD == DEFAULT_STANDARD
