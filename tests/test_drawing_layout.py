@@ -60,6 +60,12 @@ def test_the_chosen_sheet_is_the_smallest_that_fits():
         assert not rejected.fits
 
 
+def test_choosing_from_no_candidates_is_a_programming_error():
+    """A caller that passes no sheets has a bug; hand back an exception, not None."""
+    with pytest.raises(ValueError, match="candidate"):
+        choose_sheet(panel(100_000_000, 50_000_000), (), frame=FrameStyle.ISO_5457)
+
+
 def test_content_past_a0_clamps_to_the_last_candidate():
     """The ladder ends; elongated sizes are a non-goal, so A0 is the answer."""
     layout = choose_sheet(panel(2_000_000_000, 1_500_000_000), ISO_5457_CANDIDATES,
@@ -86,7 +92,9 @@ def test_a_sheet_without_a_scale_fits_the_content_to_it():
     """The SVG emitter's behaviour, unchanged: solve for scale on a fixed sheet."""
     layout = Layout.for_sheet(A4_LANDSCAPE, panel(112_400_000, 60_500_000), scale=None)
 
-    assert layout.scale in (1.0, 2.0)
+    # A4 landscape's working area comfortably holds this panel at 1:1, so the
+    # raw fitted ratio rounds down no further than the ladder's own 1.0 rung.
+    assert layout.scale == 1.0
     assert layout.fits
 
 
@@ -125,6 +133,17 @@ def test_extents_include_each_hole_radius_not_just_its_centre():
     half_width, _ = content_half_extents(data)
 
     assert half_width == pytest.approx(55.0)
+
+
+def test_for_sheet_keeps_the_frame_style_it_was_given():
+    """The frame decides which furniture a sheet carries, so it must stick."""
+    data = panel(100_000_000, 50_000_000)
+
+    plain = Layout.for_sheet(A4_PORTRAIT, data, scale=1.0)
+    assert plain.frame is FrameStyle.PLAIN
+
+    iso = Layout.for_sheet(A4_PORTRAIT, data, scale=1.0, frame=FrameStyle.ISO_5457)
+    assert iso.frame is FrameStyle.ISO_5457
 
 
 def test_the_scale_label_reads_as_an_engineer_writes_it():

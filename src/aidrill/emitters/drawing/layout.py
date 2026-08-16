@@ -39,7 +39,7 @@ PREFERRED_SCALES = (
 )
 
 # space reserved inside the drawing area for drawing furniture, in sheet mm
-LEFT_ALLOWANCE = 14.0  # left-hand height dimension (rotated label; see _draw_overall)
+LEFT_ALLOWANCE = 14.0  # left-hand height dimension (rotated label; see drawing_svg._draw_overall)
 RIGHT_ALLOWANCE = 14.0  # balloons
 TOP_ALLOWANCE = 16.0  # overall width dimension
 BOTTOM_BASE = 12.0  # below the last chain dimension
