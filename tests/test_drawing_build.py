@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from aidrill.emitters.drawing.build import SheetText, build_scene, pens_for
+from aidrill.emitters.drawing.build import CENTRELINE_DASHES, SheetText, build_scene, pens_for
 from aidrill.emitters.drawing.layout import Layout
 from aidrill.emitters.drawing.scene import FEINT, INK, Group, Item, Line, Stroke
-from aidrill.emitters.drawing.sheet import (
-    A3_LANDSCAPE,
-    GRID_LINE_WIDTH,
-    GROUP_0_7,
-    FrameStyle,
-    LineGroup,
-)
+from aidrill.emitters.drawing.sheet import A3_LANDSCAPE, GROUP_0_7, FrameStyle, LineGroup
 from aidrill.model import DrillData, ReferenceOutline
 from aidrill.units import Nanometre
 from tests.conftest import at
@@ -42,14 +36,45 @@ def test_the_plain_sheet_keeps_the_widths_it_was_always_drawn_with():
 
 
 def test_the_iso_sheet_takes_both_widths_from_the_group_it_was_handed():
-    """A second group, so the first assertion cannot be passing on a constant."""
-    seven = pens_for(GROUP_0_7, FrameStyle.ISO_5457)
-    assert (seven.outline.width, seven.dimension.width) == (0.7, GRID_LINE_WIDTH)
-    assert seven.frame.width == 0.7
+    """Every width comes from the group, not from a constant that happens to match.
 
+    ``GROUP_0_7.narrow`` and ISO 5457's grid reference line are both 0,35 by
+    coincidence of two standards. The group is what ``pens_for`` reads.
+    """
+    seven = pens_for(GROUP_0_7, FrameStyle.ISO_5457)
+    assert seven.outline.width == GROUP_0_7.wide
+    assert seven.dimension.width == GROUP_0_7.narrow
+    assert seven.centreline.width == GROUP_0_7.narrow
+    assert seven.frame.width == GROUP_0_7.wide
+    assert seven.feint.width == GROUP_0_7.narrow
+
+    # A second group, so none of the above can be passing on a constant.
     half = pens_for(LineGroup(0.5, 0.25), FrameStyle.ISO_5457)
-    assert (half.outline.width, half.dimension.width) == (0.5, 0.25)
-    assert half.centreline.dashes and half.feint.colour == FEINT
+    assert half.outline.width == 0.5
+    assert half.dimension.width == 0.25
+    assert half.centreline.width == 0.25
+    assert half.frame.width == 0.5
+    assert half.feint.width == 0.25
+    assert half.feint.colour == FEINT
+
+
+def test_the_iso_centreline_is_long_dashed_dotted_and_drawn_in_ink():
+    """04.1.1 is a line of the drawing, so it is inked, not a receding grey.
+
+    No emitter renders an ISO sheet yet, so neither the colour nor the pattern
+    has any output to be caught in. They are pinned here or nowhere.
+    """
+    centreline = pens_for(GROUP_0_7, FrameStyle.ISO_5457).centreline
+
+    assert centreline.colour == INK
+    assert centreline.dashes == CENTRELINE_DASHES
+    # The constant itself, or the assertion above holds for any pattern at all.
+    # Long dash, gap, dot, gap — the proportions ISO 128-24 gives for 04.1.
+    assert CENTRELINE_DASHES == (12.0, 3.0, 1.0, 3.0)
+
+    assert pens_for(LineGroup(0.5, 0.25), FrameStyle.ISO_5457).centreline.dashes == (
+        CENTRELINE_DASHES
+    ), "the pattern is the standard's, so a narrower group does not change it"
 
 
 def test_a_hole_s_centre_mark_is_not_the_pen_the_panel_s_axes_are_drawn_with():
@@ -60,7 +85,7 @@ def test_a_hole_s_centre_mark_is_not_the_pen_the_panel_s_axes_are_drawn_with():
     sheet has always used, which is why that sheet is unaffected.
     """
     data = _panel()
-    for style, mark_width in ((FrameStyle.ISO_5457, GRID_LINE_WIDTH), (FrameStyle.PLAIN, 0.2)):
+    for style, mark_width in ((FrameStyle.ISO_5457, GROUP_0_7.narrow), (FrameStyle.PLAIN, 0.2)):
         layout = Layout.for_sheet(A3_LANDSCAPE, data, scale=1.0, frame=style)
         items = build_scene(layout, data, SheetText()).items
 

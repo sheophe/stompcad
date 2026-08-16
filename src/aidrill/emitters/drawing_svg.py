@@ -127,7 +127,7 @@ _STYLESHEET = (
 def _render_item(parent: ET.Element, item: Item) -> None:
     """Write one primitive as the SVG element that carries it."""
     if isinstance(item, Group):
-        group = _sub(parent, "g", **{"class": item.cls})
+        group = _sub(parent, "g", **({"class": item.cls} if item.cls else {}))
         for child in item.items:
             _render_item(group, child)
     elif isinstance(item, Line):
