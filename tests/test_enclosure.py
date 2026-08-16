@@ -1,4 +1,4 @@
-"""Tests for ``IdentifyHammondFootprint`` (SPEC §5, PLAN task B).
+"""Tests for ``IdentifyHammondFootprint``.
 
 Split out of ``test_pipeline.py``, which had grown to 2160 lines covering six
 stages with three agents about to work on it in parallel: one file per stage
@@ -31,6 +31,25 @@ MM = 1_000_000
 #: A page centre for the outlines whose source-space position is not the point.
 ORIGIN = (0.0, 0.0)
 
+#: The project's own fixture panel, as ``AiPdfSource`` measures ``tar.ai``. It is
+#: a 1590B — and it fits **two** catalogue footprints, 1590BS's 112.00 × 60.50 and
+#: 1590B/1590B2's 112.40 × 60.50, so an undeclared run cannot identify it. Every
+#: test below that uses it therefore declares a case, and
+#: `TestTheFixturePanelNeedsADeclaredCase` pins that requirement on its own.
+FIXTURE = RawOutline(113.0, 60.0)
+
+#: 1590B's footprint, which `FIXTURE` snaps to once a case is declared.
+B_FOOTPRINT = (112_400_000, 60_500_000)
+
+#: A panel drawn for a 1590A, whose 92.60 × 38.50 has no catalogue neighbour
+#: within tolerance in either orientation. Every test that needs a *silent,
+#: undeclared* match uses this one, because the fixture above can no longer
+#: supply it — and the axes differ, so a transposed answer cannot pass.
+UNAMBIGUOUS = RawOutline(93.0, 38.0)
+
+#: 1590A's footprint, which `UNAMBIGUOUS` snaps to.
+A_FOOTPRINT = (92_600_000, 38_500_000)
+
 
 def codes(diagnostics: tuple[Diagnostic, ...]) -> list[str]:
     """The stable machine key of every finding, in order.
@@ -47,34 +66,40 @@ def catalogue_footprints_nm() -> set[tuple[int, int]]:
     Built from ``footprints()`` rather than from a list typed out here: the point
     of the assertions that use it is that a quantised outline *is* a member of
     the shipped catalogue, and a hand-copied answer key would only prove it
-    equals whatever this file happened to say.
+    equals whatever this file happened to say. The catalogue is keyed in
+    nanometres already, so this converts nothing — which is the point of the
+    unit, and why a helper that multiplied by anything would be a bug.
     """
-    return {(length * MM, width * MM) for length, width in footprints()}
+    return set(footprints())
 
 
 class TestIdentifyHammondFootprint:
     def test_the_fixture_outline_snaps_to_the_1590B_footprint(self):
-        """tar.ai measures 113.0 × 60.0; the catalogue says 112 × 61. Snap, silently."""
-        outline, match, diagnostics = IdentifyHammondFootprint().quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+        """tar.ai measures 113.0 × 60.0; the drawing says 1590B is 112.40 × 60.50.
+
+        Snap, silently — with the case declared, because the same outline is
+        also within tolerance of 1590BS.
+        """
+        outline, match, diagnostics = IdentifyHammondFootprint("1590B").quantise(
+            FIXTURE, ORIGIN
         )
 
-        assert (outline.width_nm, outline.height_nm) == (112 * MM, 61 * MM)
-        assert outline.raw == RawOutline(113.0, 60.0)
-        assert match.candidates == ("1590B", "1590B2", "1590BS")
+        assert (outline.width_nm, outline.height_nm) == B_FOOTPRINT
+        assert outline.raw == FIXTURE
+        assert match.candidates == ("1590B", "1590B2")
         assert match.family == "Hammond 1590"
-        assert (match.length_nm, match.width_nm) == (112 * MM, 61 * MM)
+        assert (match.length_nm, match.width_nm) == B_FOOTPRINT
         assert diagnostics == ()  # silence is the decision
 
     @pytest.mark.parametrize(
         "width, height",
         [
-            (113.0, 60.0),  # 1590B, the fixture
-            (60.0, 113.0),  # the same panel turned 90°
+            (93.0, 38.0),  # 1590A, 92.60 × 38.50
+            (38.0, 93.0),  # the same panel turned 90°
             (92.4, 91.8),  # 1590Y, square
             (99.6, 50.4),  # 1590G
             (120.7, 94.3),  # 1590BB
-            (51.2, 50.6),  # 1590LLB / 1590LB
+            (110.0, 83.0),  # 1590S, 110.50 × 82.40
         ],
     )
     def test_every_snapped_outline_is_provably_a_catalogue_footprint(self, width, height):
@@ -83,9 +108,11 @@ class TestIdentifyHammondFootprint:
         This is the whole claim of the quantiser: the answer it returns is a
         value the domain already holds, not the measurement with its error
         rounded off. So the assertion is membership of the shipped catalogue —
-        a quantiser that merely rounded to whole millimetres would pass the
-        1590B case and fail here on 99.6 × 50.4, which rounds to 100 × 50 by
-        luck and on 120.7 × 94.3, which does not round to 120 × 94 at all.
+        and a quantiser that merely rounded to whole millimetres would now fail
+        every case here, because 93 × 38, 92 × 92, 100 × 50, 121 × 94, 110 × 83
+        is a list of five outlines the catalogue does not contain. 1590A's
+        92.60 × 38.50 and 1590S's 110.50 × 82.40 are the point: the fine
+        catalogue holds figures no rounding of the measurement can reach.
         """
         outline, match, _ = IdentifyHammondFootprint().quantise(
             RawOutline(width, height), ORIGIN
@@ -106,10 +133,15 @@ class TestIdentifyHammondFootprint:
         Recorded as ``int`` nanometres so that two artifacts cannot round one
         catalogue constant two ways, and so a consumer cannot mistake a
         catalogue figure for a measurement that happened to land on it.
+
+        ``112.40`` is the value that makes this bite: as a float, a millimetre
+        catalogue would have carried 112.40000000000001, and the seam that
+        multiplied it by a million would have shipped that.
         """
-        _, match, _ = IdentifyHammondFootprint().quantise(RawOutline(113.0, 60.0), ORIGIN)
+        _, match, _ = IdentifyHammondFootprint("1590B").quantise(FIXTURE, ORIGIN)
 
         assert type(match.length_nm) is int and type(match.width_nm) is int
+        assert (match.length_nm, match.width_nm) == (112_400_000, 60_500_000)
         assert type(match.rotated) is bool
 
     def test_no_outline_is_left_alone(self):
@@ -124,36 +156,37 @@ class TestIdentifyHammondFootprint:
         """``centre`` is where the outline sat on the page, and only the
         quantiser is in a position to put it on the outline: the measurement
         does not carry it and nothing downstream can re-derive it."""
-        outline, _, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(113.0, 60.0), (306.0, 170.0)
-        )
+        outline, _, _ = IdentifyHammondFootprint().quantise(UNAMBIGUOUS, (306.0, 170.0))
 
         assert (outline.centre_x_nm, outline.centre_y_nm) == (306 * MM, 170 * MM)
 
     def test_a_near_miss_is_unknown_rather_than_the_footprint_it_nearly_is(self):
-        """113.6 × 60.0 is 1.6 mm off 1590B on one axis. Outside is outside.
+        """94.2 × 38.5 is 1.6 mm off 1590A on one axis. Outside is outside.
 
         A far-away 500 × 500 fixture cannot tell a tolerance check from a
         catalogue lookup that only ever succeeds on an exact hit, and it would
         stay green under a tolerance widened to 2 mm. This one dies to both.
         """
         outline, match, diagnostics = IdentifyHammondFootprint().quantise(
-            RawOutline(113.6, 60.0), ORIGIN
+            RawOutline(94.2, 38.5), ORIGIN
         )
 
         assert codes(diagnostics) == ["unknown-enclosure"]
         assert match is None
-        assert outline.width_nm == 113_600_000, "an unmatched outline was snapped anyway"
+        assert outline.width_nm == 94_200_000, "an unmatched outline was snapped anyway"
 
     def test_the_tolerance_boundary_is_inclusive_to_the_nanometre(self):
         """1.5 mm exactly is a match; the machinist typed the number they meant.
 
         Exactly on the boundary and exactly one nanometre outside it, which is
-        the pair that dies to ``<`` where a comfortable fixture does not.
+        the pair that dies to ``<`` where a comfortable fixture does not. Taken
+        against 1590A's 92.60, so the boundary is exercised on a catalogue figure
+        that is not a whole millimetre — the arithmetic has to be right in the
+        unit the catalogue is held in, not in the one it used to be printed in.
         """
-        on_it = IdentifyHammondFootprint().quantise(RawOutline(113.5, 61.0), ORIGIN)
+        on_it = IdentifyHammondFootprint().quantise(RawOutline(94.1, 38.5), ORIGIN)
         one_nm_over = IdentifyHammondFootprint().quantise(
-            RawOutline(113.500001, 61.0), ORIGIN
+            RawOutline(94.100001, 38.5), ORIGIN
         )
 
         assert on_it[1] is not None
@@ -162,13 +195,14 @@ class TestIdentifyHammondFootprint:
     def test_the_measurement_is_compared_without_being_rounded_first(self):
         """The defect ``scaled_nm`` exists for, at the one boundary that can show it.
 
-        113.5000004 mm is 113 500 000.4 nm, which is *outside* a 1 500 000 nm
-        tolerance around 112 mm — by four tenths of a nanometre. Quantise the
-        measurement first and it becomes 113 500 000 exactly, which is inside,
-        and the panel silently acquires an enclosure the artwork does not fit.
+        94.1000004 mm is 94 100 000.4 nm, which is *outside* a 1 500 000 nm
+        tolerance around 1590A's 92.6 mm — by four tenths of a nanometre.
+        Quantise the measurement first and it becomes 94 100 000 exactly, which
+        is inside, and the panel silently acquires an enclosure the artwork does
+        not fit.
         """
         _, match, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(113.5000004, 61.0), ORIGIN
+            RawOutline(94.1000004, 38.5), ORIGIN
         )
 
         assert match is None
@@ -180,32 +214,32 @@ class TestIdentifyHammondFootprint:
         is inherited rather than owned — and a comparison rounded on this branch
         alone leaves the test above green. The outcomes are as far apart as the
         two can be: ``unmatched-enclosure`` is an ERROR that withholds every
-        artifact, while a confirmed declaration snaps the frame to 112 × 61 and
-        drills the panel.
+        artifact, while a confirmed declaration snaps the frame to
+        112.400 × 60.500 and drills the panel.
 
-        The 113.5 boundary case is asserted alongside so that the fixture is
+        The 113.9 boundary case is asserted alongside so that the fixture is
         pinned as a *hair* outside the bound rather than comfortably outside it,
-        which is the only version of it a rounding can move.
+        which is the only version of it a rounding can move. 60.5 on the other
+        axis so that only the width is in question: 1590B's own height, exactly.
         """
-        on_it = IdentifyHammondFootprint("1590B").quantise(RawOutline(113.5, 61.0), ORIGIN)
+        on_it = IdentifyHammondFootprint("1590B").quantise(RawOutline(113.9, 60.5), ORIGIN)
         assert on_it[1] is not None, "the fixture is not a hair outside the bound"
 
         outline, match, diagnostics = IdentifyHammondFootprint("1590B").quantise(
-            RawOutline(113.5000004, 61.0), ORIGIN
+            RawOutline(113.9000004, 60.5), ORIGIN
         )
 
         assert match is None
         assert codes(diagnostics) == ["unmatched-enclosure"]
-        assert outline.width_nm == 113_500_000, "the outline was snapped to a footprint anyway"
+        assert outline.width_nm == 113_900_000, "the outline was snapped to a footprint anyway"
 
     def test_a_tighter_tolerance_rejects_what_the_default_accepts(self):
-        """The fixture's own 1.0 mm error, against a tolerance that will not have it."""
+        """A 1.4 mm drawing error against a tolerance that will not have it."""
+        drawn = RawOutline(94.0, 38.0)  # 1.4 and 0.5 mm off 1590A
         tight = IdentifyHammondFootprint(tolerance_nm=500_000)
-        assert tight.quantise(RawOutline(113.0, 60.0), ORIGIN)[1] is None
+        assert tight.quantise(drawn, ORIGIN)[1] is None
         assert (
-            IdentifyHammondFootprint(tolerance_nm=1_500_000).quantise(
-                RawOutline(113.0, 60.0), ORIGIN
-            )[1]
+            IdentifyHammondFootprint(tolerance_nm=1_500_000).quantise(drawn, ORIGIN)[1]
             is not None
         )
 
@@ -216,10 +250,10 @@ class TestIdentifyHammondFootprint:
         distinction is the whole test. ``match is None`` is reachable by two
         paths — nothing matched, and too much matched — so it asserts the union
         rather than the case the name claims. Drop the height clause from
-        ``_fits`` and 112.0 × 65.0 matches three footprints on width alone,
-        (111, 82), (112, 61) and (192, 112) turned 90°, giving
-        ``ambiguous-enclosure`` with ``match`` still ``None``: the half of this
-        test that names the height axis would have stayed green.
+        ``_fits`` and 112.0 × 65.0 matches four footprints on width alone —
+        110.50 × 82.40, 112.00 × 60.50, 112.40 × 60.50 and 191.80 × 111.60 turned
+        90° — giving ``ambiguous-enclosure`` with ``match`` still ``None``: the
+        half of this test that names the height axis would have stayed green.
         """
         # Width exact, height 4 mm out.
         assert codes(
@@ -260,8 +294,8 @@ class TestIdentifyHammondFootprint:
         which is a question an operator is entitled to ask."""
         exact = IdentifyHammondFootprint(tolerance_nm=0)
 
-        assert exact.quantise(RawOutline(112.0, 61.0), ORIGIN)[1] is not None
-        assert exact.quantise(RawOutline(112.000001, 61.0), ORIGIN)[1] is None
+        assert exact.quantise(RawOutline(92.6, 38.5), ORIGIN)[1] is not None
+        assert exact.quantise(RawOutline(92.600001, 38.5), ORIGIN)[1] is None
 
 
 class TestAnUnmatchedOutlineIsQuantisedOntoItself:
@@ -271,7 +305,7 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
     still written, and every one of them needs a frame. There is no third
     option: a ``None`` outline here would leave the drawing with no panel to
     dimension and the Excellon emitter with no lower-left corner to translate
-    to, on a panel whose only fault is not being one of the 22 footprints this
+    to, on a panel whose only fault is not being one of the 26 footprints this
     catalogue holds.
     """
 
@@ -363,22 +397,24 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
 
 
 class TestTheBackplateConvention:
-    """Required ≥ 2.4 mm, permitted < 2.0 mm — so the fix is the convention.
+    """No tolerance identifies a face-drawn panel — so the fix is the convention.
 
     The catalogue lists backplate dimensions and a 1590 is die-cast with drafted
     walls, so the face that gets drilled is smaller than the backplate. The
     operator who measures the face they are about to drill is the one who lands
     on ``unknown-enclosure``, and widening the tolerance until their panel
-    matched would make the tool guess between two real enclosures on every other
-    panel. ``docs/adr/0002-domain-quantisers.md`` has the arithmetic; these two
-    tests are its two halves, and they are what a future widening has to get
-    past.
+    matched does not rescue them: on a 1590B the wall draft and the gap to 1590BS
+    are the same 1.9 mm, so both footprints become admissible at the same instant
+    and the answer turns from a refusal into a tie between two real enclosures.
+    ``docs/adr/0002-domain-quantisers.md`` has the arithmetic; these tests are
+    what a future widening has to get past.
     """
 
-    #: A 1590B measured across its drilled face: 2.4 mm under the catalogue's
-    #: 61 mm on the tighter axis (ADR-0002).
+    #: A 1590B measured across its drilled face: 1.9 mm under its 112.40 × 60.50
+    #: backplate on both axes, which is ``2 · d · tan 2°`` at its 31 mm depth.
     FACE_DRAWN_1590B = (110.5, 58.6)
-    #: 1590B3 (116 × 77) and 1590T (120 × 80) are the catalogue's closest pair,
+    #: 1590B3 (116.00 × 77.00) and 1590T (120.00 × 80.00) are the closest pair in
+    #: the catalogue that is *not* one of the four inherently ambiguous ones,
     #: 4 mm apart. An outline halfway between them ties at 2 mm.
     TIED = (118.0, 78.5)
 
@@ -392,25 +428,37 @@ class TestTheBackplateConvention:
         assert match is None
         assert "backplate" in diagnostics[0].message
 
-    def test_the_tolerance_that_would_accept_it_makes_two_real_enclosures_tie(self):
-        """The two halves of the arithmetic against each other, in one test.
+    def test_no_tolerance_at_all_identifies_a_face_drawn_panel(self):
+        """The whole arithmetic, as the one assertion that settles it.
 
-        2.4 mm is what the face-drawn 1590B above needs — and at 2.4 mm the
-        catalogue's closest pair both match one outline, so the tool would be
-        choosing between two enclosures somebody could actually order. That is
-        why the convention is the fix and not a wider number.
+        The face-drawn 1590B is 1.9 mm from its own backplate on the tighter axis
+        and 1.9 mm from 1590BS's on the same one, so the two footprints do not
+        merely become admissible at *similar* tolerances — they become admissible
+        at the identical one. Below it nothing fits; at it and above, two things
+        do. There is no value in between, so there is no widening that produces
+        an identified panel, which is why the convention is the fix.
         """
-        required_nm = 2_400_000
-        _, face_match, _ = IdentifyHammondFootprint(tolerance_nm=required_nm).quantise(
-            RawOutline(*self.FACE_DRAWN_1590B), ORIGIN
-        )
-        _, tied_match, tied_diagnostics = IdentifyHammondFootprint(
-            tolerance_nm=required_nm
-        ).quantise(RawOutline(*self.TIED), ORIGIN)
+        under = IdentifyHammondFootprint(tolerance_nm=1_899_999)
+        at_it = IdentifyHammondFootprint(tolerance_nm=1_900_000)
+        face = RawOutline(*self.FACE_DRAWN_1590B)
 
-        assert face_match is not None, "2.4 mm is no longer what the face case needs"
-        assert tied_match is None
-        assert codes(tied_diagnostics) == ["ambiguous-enclosure"]
+        _, no_match, refused = under.quantise(face, ORIGIN)
+        assert no_match is None
+        assert codes(refused) == ["unknown-enclosure"]
+
+        _, still_none, tied = at_it.quantise(face, ORIGIN)
+        assert still_none is None
+        assert codes(tied) == ["ambiguous-enclosure"]
+        assert tied[0].get("candidates") == "1590BS, 1590B, 1590B2"
+
+    def test_the_default_tolerance_stays_under_the_wall_draft(self):
+        """The bound the default is chosen against, stated as a number.
+
+        1.5 mm is below the 1.9 mm a 1590B's face is out by, which is what keeps
+        a face-drawn panel a refusal rather than the tie above. Asserted against
+        the shipped default rather than a literal, so raising it fails here.
+        """
+        assert IdentifyHammondFootprint().tolerance_nm < 1_900_000
 
     def test_the_declared_case_message_names_the_convention_too(self):
         """The operator most likely to be reading ``unmatched-enclosure`` is the
@@ -424,9 +472,10 @@ class TestTheBackplateConvention:
 
 
 class TestAmbiguity:
-    # 1590B3 (116 × 77) and 1590T (120 × 80) are the closest pair in the whole
-    # catalogue, 4 mm apart on the wider axis. An outline halfway between them
-    # is within 2 mm of both — the only shape of fixture that can reach a tie.
+    # 1590B3 (116.00 × 77.00) and 1590T (120.00 × 80.00) are 4 mm apart on the
+    # wider axis. An outline halfway between them is within 2 mm of both, which
+    # is the shape of fixture that reaches a tie the tolerance created rather
+    # than one the catalogue already had.
     TIED = (118.0, 78.5)
 
     def test_an_ambiguous_tie_is_an_error_not_a_choice(self):
@@ -445,7 +494,7 @@ class TestAmbiguity:
             RawOutline(*self.TIED), ORIGIN
         )
 
-        assert diagnostics[0].get("footprints") == "116 × 77, 120 × 80"
+        assert diagnostics[0].get("footprints") == "116.000 × 77.000, 120.000 × 80.000"
         assert diagnostics[0].get("candidates") == "1590B3, 1590T"
         # The tolerance is the actionable half of this finding: it is the one
         # thing the operator can change to break the tie.
@@ -457,34 +506,56 @@ class TestAmbiguity:
             IdentifyHammondFootprint().quantise(RawOutline(*self.TIED), ORIGIN)[2]
         ) == ["unknown-enclosure"]
 
-    def test_the_default_tolerance_admits_no_tie_anywhere_in_the_catalogue(self):
-        """Nothing had checked this, so check it against the real catalogue.
+    def test_the_footprints_no_artwork_can_tell_apart_are_exactly_these_four(self):
+        """The catalogue's own ambiguity, named — because it decides which panels
+        need a ``--case``, and a revision that changed the set would otherwise
+        change that answer in silence.
 
-        Two footprints can both match one outline exactly when their per-axis
-        separation — minimised over the rotated reading as well, since a
-        quantiser that compares both is comparing against both orientations of
-        every entry — is at most twice the tolerance. So the largest safe
-        tolerance is half the closest approach in the catalogue, exclusive. That
-        approach is 4 mm (1590B3 116 × 77 against 1590T 120 × 80), which puts
-        the ceiling just under 2 mm and leaves the default 1.5 mm clear.
+        Hammond's 0.05 mm figures separate parts that shared an outline while
+        both were rounded to whole millimetres, and four of the resulting pairs
+        sit 0.10 to 0.50 mm apart. No tolerance separates those while still
+        admitting artwork measured a millimetre off — which is what a panel
+        drawing is — so these eight footprints are inherently ambiguous and the
+        tool says so rather than guessing.
+
+        Computed from the shipped catalogue, not typed: a hand-copied list would
+        only prove it equals whatever this file happened to say. The separation
+        is minimised over the rotated reading as well, because a quantiser that
+        compares both orientations is comparing against both.
         """
         outlines = sorted(footprints())
-        separations = [
-            min(
+        tolerance_nm = IdentifyHammondFootprint().tolerance_nm
+        tied = {
+            (footprints()[a], footprints()[b])
+            for i, a in enumerate(outlines)
+            for b in outlines[i + 1 :]
+            if min(
                 max(abs(a[0] - b[0]), abs(a[1] - b[1])),
                 max(abs(a[0] - b[1]), abs(a[1] - b[0])),
             )
-            for i, a in enumerate(outlines)
-            for b in outlines[i + 1 :]
-        ]
+            <= 2 * tolerance_nm
+        }
 
-        assert len(outlines) == 22
-        assert min(separations) == 4
-        assert 2 * IdentifyHammondFootprint().tolerance_nm < min(separations) * MM
+        assert len(outlines) == 26
+        assert tied == {
+            (("1590LLB",), ("1590LB",)),
+            (("1590BS",), ("1590B", "1590B2")),
+            (("1590KK",), ("1590K",)),
+            (("1590D",), ("1590DD", "1590E")),
+        }
 
-    def test_two_millimetres_is_where_ambiguity_becomes_reachable(self):
-        """The bound above is tight, not merely sufficient: at exactly half the
-        closest approach the tie is real, which is why the default is not 2."""
+    def test_no_other_pair_ties_at_the_default_tolerance(self):
+        """The bound on the *other* side of the four above, and the one that
+        survived the fine catalogue.
+
+        Every pair that is not one of the four is at least 4 mm apart — 1590B3
+        against 1590T — so a fifth tie becomes reachable at exactly 2.0 mm and
+        not before. That is the ceiling the default 1.5 mm is chosen under, and
+        it is what stops a widening from making the tool guess between two
+        enclosures that the catalogue really can tell apart.
+        """
+        assert 2 * IdentifyHammondFootprint().tolerance_nm < 4 * MM
+
         assert codes(
             IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
                 RawOutline(*self.TIED), ORIGIN
@@ -510,37 +581,41 @@ class TestAmbiguity:
         monkeypatch.setattr(
             enclosure_stage,
             "footprints",
-            lambda: {(120, 80): ("FAKE-T",), (116, 77): ("FAKE-B3",)},
+            lambda: {
+                (120_000_000, 80_000_000): ("FAKE-T",),
+                (116_000_000, 77_000_000): ("FAKE-B3",),
+            },
         )
         _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
             RawOutline(*self.TIED), ORIGIN
         )
 
         assert codes(diagnostics) == ["ambiguous-enclosure"]
-        assert diagnostics[0].get("footprints") == "116 × 77, 120 × 80"
+        assert diagnostics[0].get("footprints") == "116.000 × 77.000, 120.000 × 80.000"
         assert diagnostics[0].get("candidates") == "FAKE-B3, FAKE-T"
 
 
 class TestRotation:
+    #: `UNAMBIGUOUS` turned 90°: a portrait 1590A.
+    PORTRAIT = RawOutline(38.0, 93.0)
+
     def test_a_portrait_panel_matches_its_landscape_catalogue_entry(self):
-        outline, match, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(60.0, 113.0), ORIGIN
-        )
+        outline, match, _ = IdentifyHammondFootprint().quantise(self.PORTRAIT, ORIGIN)
 
         assert match.rotated is True
-        assert (outline.width_nm, outline.height_nm) == (61 * MM, 112 * MM)
+        assert (outline.width_nm, outline.height_nm) == (38_500_000, 92_600_000)
 
     def test_a_rotated_match_records_the_catalogue_orientation_not_the_artworks(self):
-        """The datasheet says 1590B is 112 × 61. Transposing it here would make
+        """The drawing says 1590A is 92.60 × 38.50. Transposing it here would make
         the identified part unfindable in the document it was identified from."""
-        _, match, _ = IdentifyHammondFootprint().quantise(RawOutline(60.0, 113.0), ORIGIN)
+        _, match, _ = IdentifyHammondFootprint().quantise(self.PORTRAIT, ORIGIN)
 
-        assert (match.length_nm, match.width_nm) == (112 * MM, 61 * MM)
-        assert match.candidates == ("1590B", "1590B2", "1590BS")
+        assert (match.length_nm, match.width_nm) == A_FOOTPRINT
+        assert match.candidates == ("1590A",)
 
     def test_a_landscape_panel_is_recorded_as_not_rotated(self):
         """Paired with the portrait case so neither hardcoded flag survives."""
-        _, match, _ = IdentifyHammondFootprint().quantise(RawOutline(113.0, 60.0), ORIGIN)
+        _, match, _ = IdentifyHammondFootprint().quantise(UNAMBIGUOUS, ORIGIN)
         assert match.rotated is False
 
     def test_a_square_footprint_is_not_a_rotation(self):
@@ -553,13 +628,21 @@ class TestRotation:
         assert match.rotated is False
 
     def test_a_rotated_match_is_silent_too(self):
-        assert IdentifyHammondFootprint().quantise(RawOutline(60.0, 113.0), ORIGIN)[2] == ()
+        assert IdentifyHammondFootprint().quantise(self.PORTRAIT, ORIGIN)[2] == ()
 
 
 class TestDeclaredCase:
+    """The 1590A panel, not the fixture, wherever a *single* match is needed.
+
+    ``wrong-enclosure`` asserts that we know what was drawn, so it is reachable
+    only from a footprint nothing else is near — declare the wrong case against
+    the fixture and the answer is ``unmatched-enclosure`` instead, because two
+    footprints fitted and neither was the declared one.
+    """
+
     def test_declaring_the_wrong_case_is_an_error(self):
         _, _, diagnostics = IdentifyHammondFootprint(expected_part="1590BB").quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+            UNAMBIGUOUS, ORIGIN
         )
 
         assert codes(diagnostics) == ["wrong-enclosure"]
@@ -569,33 +652,48 @@ class TestDeclaredCase:
         """The operator needs to know what they asked for *and* what they drew;
         either alone leaves them re-deriving the other from the artwork."""
         _, _, diagnostics = IdentifyHammondFootprint(expected_part="1590BB").quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+            UNAMBIGUOUS, ORIGIN
         )
 
         assert diagnostics[0].get("requested_part") == "1590BB"
-        assert diagnostics[0].get("identified_parts") == "1590B, 1590B2, 1590BS"
+        assert diagnostics[0].get("identified_parts") == "1590A"
         # And the footprint that identified them, so a consumer can show the
         # measurement that produced the disagreement rather than re-taking it.
-        assert (diagnostics[0].get("length_nm"), diagnostics[0].get("width_nm")) == (
-            112 * MM,
-            61 * MM,
+        assert (
+            diagnostics[0].get("length_nm"),
+            diagnostics[0].get("width_nm"),
+        ) == A_FOOTPRINT
+
+    def test_the_wrong_case_message_prints_the_catalogues_own_precision(self):
+        """``92.600 × 38.500``, not ``93 × 39``.
+
+        The message is what the operator reads to decide whether their artwork or
+        their ``--case`` is wrong, and rounding the catalogue's figure on the way
+        out would throw away the very digits that make 1590B and 1590BS two
+        enclosures. Read on the message deliberately, like the two backplate
+        assertions: printing the identified size *is* what this finding is for.
+        """
+        _, _, diagnostics = IdentifyHammondFootprint(expected_part="1590BB").quantise(
+            UNAMBIGUOUS, ORIGIN
         )
+
+        assert "92.600 × 38.500 mm" in diagnostics[0].message
 
     def test_a_wrongly_declared_panel_is_still_identified_and_still_snapped(self):
         """The outline matched; only the declaration disagrees. Dropping the
         match would leave the report with nothing to name."""
         outline, match, _ = IdentifyHammondFootprint(expected_part="1590BB").quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+            UNAMBIGUOUS, ORIGIN
         )
 
-        assert match.candidates == ("1590B", "1590B2", "1590BS")
+        assert match.candidates == ("1590A",)
         assert match.selected_part == "1590BB"
-        assert (outline.width_nm, outline.height_nm) == (112 * MM, 61 * MM)
+        assert (outline.width_nm, outline.height_nm) == A_FOOTPRINT
 
     def test_a_correctly_declared_case_becomes_the_selected_part(self):
         """A footprint names candidates; only the operator can pick among them."""
         _, match, diagnostics = IdentifyHammondFootprint(expected_part="1590B2").quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+            FIXTURE, ORIGIN
         )
 
         assert match.selected_part == "1590B2"
@@ -603,12 +701,12 @@ class TestDeclaredCase:
 
     def test_nothing_is_selected_when_nothing_was_declared(self):
         """The artwork does not contain the height, so it cannot be inferred."""
-        _, match, _ = IdentifyHammondFootprint().quantise(RawOutline(113.0, 60.0), ORIGIN)
+        _, match, _ = IdentifyHammondFootprint().quantise(UNAMBIGUOUS, ORIGIN)
         assert match.selected_part is None
 
     def test_a_declared_case_is_matched_however_it_was_typed(self):
         _, match, diagnostics = IdentifyHammondFootprint(expected_part=" 1590b2 ").quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+            FIXTURE, ORIGIN
         )
 
         assert diagnostics == ()
@@ -617,7 +715,7 @@ class TestDeclaredCase:
     def test_a_blank_declaration_is_no_declaration(self):
         """An empty ``--case`` must not become a part number nothing can match."""
         _, match, diagnostics = IdentifyHammondFootprint(expected_part="   ").quantise(
-            RawOutline(113.0, 60.0), ORIGIN
+            UNAMBIGUOUS, ORIGIN
         )
 
         assert diagnostics == ()
@@ -671,7 +769,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
         assert (
             diagnostics[0].get("expected_length_nm"),
             diagnostics[0].get("expected_width_nm"),
-        ) == (112 * MM, 61 * MM)
+        ) == B_FOOTPRINT
         assert diagnostics[0].get("catalogue") == "Hammond 1590"
 
     def test_a_declaration_the_artwork_matches_nothing_for_is_refused(self):
@@ -712,7 +810,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
         assert (
             diagnostic.get("expected_length_nm"),
             diagnostic.get("expected_width_nm"),
-        ) == (120 * MM, 94 * MM)
+        ) == (119_500_000, 94_000_000)
         assert (diagnostic.get("width_nm"), diagnostic.get("height_nm")) == (
             300 * MM,
             300 * MM,
@@ -749,7 +847,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
         assert codes(diagnostics) == ["unmatched-enclosure"]
         assert diagnostics[0].severity is Severity.ERROR
         assert diagnostics[0].get("requested_part") == "1590B"
-        assert diagnostics[0].get("footprints") == "116 × 77, 120 × 80"
+        assert diagnostics[0].get("footprints") == "116.000 × 77.000, 120.000 × 80.000"
         assert diagnostics[0].get("candidates") == "1590B3, 1590T"
         assert match is None
         assert (outline.width_nm, outline.height_nm) == (118 * MM, 78_500_000)
@@ -833,18 +931,18 @@ class TestIdentifyHammondFootprintDescribe:
 
 class TestTheMeasurementSurvivesTheSnap:
     def test_the_outline_still_quotes_what_the_artwork_said(self):
-        """``ReferenceOutline(112_000_000, 61_000_000)`` is legitimate code whose
+        """``ReferenceOutline(112_400_000, 60_500_000)`` is legitimate code whose
         ``raw`` defaults to its own dimensions, so a quantiser that built a fresh
         outline instead of calling ``resized`` would silently rewrite the
         measurement to the size it snapped to. The two spellings are
         indistinguishable in the nominal fields and differ only here.
         """
-        outline, _, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(113.0, 60.0), (306.0, 170.0)
+        outline, _, _ = IdentifyHammondFootprint("1590B").quantise(
+            FIXTURE, (306.0, 170.0)
         )
 
-        assert (outline.width_nm, outline.height_nm) == (112 * MM, 61 * MM)
-        assert outline.raw == RawOutline(113.0, 60.0)
+        assert (outline.width_nm, outline.height_nm) == B_FOOTPRINT
+        assert outline.raw == FIXTURE
 
     def test_the_measurement_is_the_artworks_float_not_a_round_trip_of_the_answer(self):
         """``raw`` is what the source measured, and the distinction has a floor
@@ -866,22 +964,77 @@ class TestTheMeasurementSurvivesTheSnap:
     def test_the_snap_keeps_the_outlines_source_space_centre(self):
         """``centre_x_nm``/``centre_y_nm`` say where the outline sat on the page.
         A fresh construction would drop them back to the origin."""
-        outline, _, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(113.0, 60.0), (306.0, 170.0)
+        outline, _, _ = IdentifyHammondFootprint("1590B").quantise(
+            FIXTURE, (306.0, 170.0)
         )
 
-        assert outline.width_nm == 112 * MM, "the outline was never snapped at all"
+        assert outline.width_nm == 112_400_000, "the outline was never snapped at all"
         assert (outline.centre_x_nm, outline.centre_y_nm) == (306 * MM, 170 * MM)
 
     def test_an_outline_that_already_measures_a_footprint_is_not_promoted(self):
-        """112 × 61 is already a footprint, so nothing moves — and the
+        """92.60 × 38.50 is already a footprint, so nothing moves — and the
         measurement must still be recorded as a measurement rather than
         acquiring the catalogue's authority by coincidence."""
         outline, match, diagnostics = IdentifyHammondFootprint().quantise(
-            RawOutline(112.0, 61.0), ORIGIN
+            RawOutline(92.6, 38.5), ORIGIN
         )
 
-        assert (outline.width_nm, outline.height_nm) == (112 * MM, 61 * MM)
-        assert outline.raw == RawOutline(112.0, 61.0)
-        assert match.candidates == ("1590B", "1590B2", "1590BS")
+        assert (outline.width_nm, outline.height_nm) == A_FOOTPRINT
+        assert outline.raw == RawOutline(92.6, 38.5)
+        assert match.candidates == ("1590A",)
         assert diagnostics == ()
+
+
+class TestTheFixturePanelNeedsADeclaredCase:
+    """The behaviour change the fine catalogue brought, pinned on its own.
+
+    ``tests/fixtures/tar.ai`` is a real 1590B, and at whole millimetres it was
+    the one panel this project could run with no arguments at all. At 0.05 mm it
+    is not: 113.000 × 60.000 is 1.000 mm from 1590BS's 112.00 × 60.50 and
+    0.600 mm from 1590B's 112.40 × 60.50, and nothing in the artwork chooses.
+
+    That is the tool's new, correct answer, not a regression to be tuned away.
+    Widening the tolerance cannot separate a 0.40 mm pair while still admitting a
+    panel measured 1.00 mm off, and narrowing it below 0.60 mm rejects the
+    fixture outright. So it is stated here as a pair — what the undeclared run
+    does and what the declared one does — rather than left to be inferred from
+    every other test in this file having acquired a ``--case``.
+    """
+
+    def test_undeclared_it_is_an_error_naming_both_enclosures(self):
+        outline, match, diagnostics = IdentifyHammondFootprint().quantise(FIXTURE, ORIGIN)
+
+        assert codes(diagnostics) == ["ambiguous-enclosure"]
+        assert diagnostics[0].severity is Severity.ERROR
+        assert match is None
+        assert diagnostics[0].get("footprints") == "112.000 × 60.500, 112.400 × 60.500"
+        assert diagnostics[0].get("candidates") == "1590BS, 1590B, 1590B2"
+        # The frame survives the refusal, as the measurement, because the CLI
+        # reports on a document rather than on an exception.
+        assert (outline.width_nm, outline.height_nm) == (113_000_000, 60_000_000)
+
+    def test_declaring_the_case_resolves_it_and_says_nothing(self):
+        outline, match, diagnostics = IdentifyHammondFootprint("1590B").quantise(
+            FIXTURE, ORIGIN
+        )
+
+        assert diagnostics == ()
+        assert match.selected_part == "1590B"
+        assert (match.length_nm, match.width_nm) == B_FOOTPRINT
+        assert (outline.width_nm, outline.height_nm) == B_FOOTPRINT
+
+    def test_declaring_the_other_side_of_the_tie_resolves_it_differently(self):
+        """The declaration is knowledge, not a rubber stamp: 1590BS is the other
+        real enclosure this outline fits, and it snaps to a different frame.
+
+        Paired with the test above so that neither answer can be a constant. A
+        quantiser that took the first or the nearest candidate would pass one of
+        these two and fail the other.
+        """
+        outline, match, diagnostics = IdentifyHammondFootprint("1590BS").quantise(
+            FIXTURE, ORIGIN
+        )
+
+        assert diagnostics == ()
+        assert match.candidates == ("1590BS",)
+        assert (outline.width_nm, outline.height_nm) == (112_000_000, 60_500_000)
