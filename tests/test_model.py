@@ -1273,37 +1273,46 @@ def test_a_payload_key_that_is_not_a_length_may_hold_a_float():
 #: The finding as a stage writes it: tuples all the way down. Every JSON-shaped
 #: spelling below is the same finding and must compare and hash as one.
 #:
-#: The payload value is a float under a key that does not name a length, which is
-#: the one combination that would break if the ``_nm`` rule were ever widened
-#: into "a payload holds integers": a share is genuinely 0.25, and a round trip
-#: that had to spell it as a string would be a round trip that lost it.
+#: Two payload values, because the two are guarded differently. ``share`` is a
+#: float under a key that does not name a length, which is the one combination
+#: that would break if the ``_nm`` rule were ever widened into "a payload holds
+#: integers": a share is genuinely 0.25, and a round trip that had to spell it
+#: as a string would be a round trip that lost it. ``tied_indices`` is the one
+#: payload value that is itself a sequence — ``grid-ambiguous`` names every hole
+#: that tied, because a panel-level finding has no single hole to point at — and
+#: so the only one a fourth ``json.load`` list can arrive in.
 _TUPLE_BUILT_FINDING = Diagnostic(
     Severity.WARNING,
     "off-grid",
     "hole 4 moved",
     location_nm=(-40_000_000, 18_000_000),
-    data=(("share", 0.25),),
+    data=(("share", 0.25), ("tied_indices", (4, 9))),
 )
 
 #: One list per case, and never two at once: ``json.load`` returns a list for
-#: every array, so all three of these arrive together in practice — but folding
-#: them into one case would let any two of the three coercions be deleted with
-#: the case still failing on the third, which is no test of either.
+#: every array, so all four of these arrive together in practice — but folding
+#: them into one case would let any three of the four coercions be deleted with
+#: the case still failing on the fourth, which is no test of any of them.
 _JSON_SHAPED_FINDINGS = [
     pytest.param(
         [-40_000_000, 18_000_000],
-        (("share", 0.25),),
+        (("share", 0.25), ("tied_indices", (4, 9))),
         id="location",
     ),
     pytest.param(
         (-40_000_000, 18_000_000),
-        [("share", 0.25)],
+        [("share", 0.25), ("tied_indices", (4, 9))],
         id="payload",
     ),
     pytest.param(
         (-40_000_000, 18_000_000),
-        (["share", 0.25],),
+        (["share", 0.25], ("tied_indices", (4, 9))),
         id="payload-pair",
+    ),
+    pytest.param(
+        (-40_000_000, 18_000_000),
+        (("share", 0.25), ("tied_indices", [4, 9])),
+        id="payload-value",
     ),
 ]
 
@@ -1336,11 +1345,12 @@ def test_a_finding_rebuilt_from_json_is_the_finding_it_was_written_from(
 
     Reading the emitted JSON back is the obvious way a library consumer
     reconstructs a document, and ``json.load`` hands back a list for every
-    array — the location, the payload, and each key/value pair inside it. A
-    finding holding any of them prints exactly like the one the pipeline
-    produced, compares unequal to it, and raises ``TypeError`` from ``hash``,
-    so the reconstruction is only usable by a reader who already knows which
-    sequences this module happens to want as tuples.
+    array — the location, the payload, each key/value pair inside it, and the
+    one payload value that is a sequence of its own. A finding holding any of
+    them prints exactly like the one the pipeline produced, compares unequal to
+    it, and raises ``TypeError`` from ``hash``, so the reconstruction is only
+    usable by a reader who already knows which sequences this module happens to
+    want as tuples.
 
     Both assertions, because they fail apart: equality is what a test comparing
     against an expected finding relies on, and hashability is what putting
