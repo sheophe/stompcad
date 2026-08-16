@@ -19,14 +19,14 @@ from pathlib import Path
 
 import pikepdf
 import pytest
-from pikepdf import Array, Dictionary, Name, String
 
 from aidrill.errors import EmptyLayerError, LayerNotFoundError, SourceError
-from aidrill.geometry import KAPPA, CurveTo, MoveTo, fit_circle
+from aidrill.geometry import CurveTo, MoveTo, fit_circle
 from aidrill.model import RawDrillData, RawHole, RawOutline, Severity
 from aidrill.protocols import Source
 from aidrill.sources import AiPdfSource
 from aidrill.units import mm_from_pt
+from tests.conftest import build_pdf, circle_ops
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 
@@ -63,96 +63,6 @@ A4_LANDSCAPE_PT = (841.89, 595.276)
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-
-
-def circle_ops(cx: float, cy: float, r: float, paint: str = "S") -> str:
-    """Content-stream ops drawing a circle the way every vector tool does."""
-    k = KAPPA * r
-    return (
-        f"{cx + r} {cy} m "
-        f"{cx + r} {cy + k} {cx + k} {cy + r} {cx} {cy + r} c "
-        f"{cx - k} {cy + r} {cx - r} {cy + k} {cx - r} {cy} c "
-        f"{cx - r} {cy - k} {cx - k} {cy - r} {cx} {cy - r} c "
-        f"{cx + k} {cy - r} {cx + r} {cy - k} {cx + r} {cy} c h {paint}"
-    )
-
-
-def build_pdf(
-    path: Path,
-    layers: dict[str, str],
-    *,
-    media: tuple[float, float, float, float] = (0, 0, 400, 400),
-    form: tuple[list[float], str] | None = None,
-    form_properties: dict[str, str] | None = None,
-    image: bool = False,
-    extra: str = "",
-) -> Path:
-    """Write a one-page PDF whose layers are OCGs, like a native ``.ai`` save.
-
-    ``layers`` maps a layer name to the content stream drawn inside its marked
-    content. ``form`` optionally installs ``/Fm0`` as a Form XObject with the
-    given ``/Matrix`` and content; ``image`` installs ``/Im0``, a placed image.
-
-    A form gets **no** ``/Resources`` of its own unless ``form_properties`` asks
-    for one, which maps ``/MCn`` tokens onto the OCGs of the named layers. The
-    two cases must stay distinguishable: giving every form the page's own table
-    would make the fallback and the real lookup produce the same answer, and no
-    fixture could then tell whether a form's resources were consulted at all.
-    """
-    pdf = pikepdf.new()
-    ocgs = []
-    properties = Dictionary()
-    ocg_of: dict[str, object] = {}
-    body = []
-    for index, (name, content) in enumerate(layers.items()):
-        ocg = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String(name)))
-        ocgs.append(ocg)
-        ocg_of[name] = ocg
-        properties[f"/MC{index}"] = ocg
-        body.append(f"/OC /MC{index} BDC {content} EMC")
-    pdf.Root.OCProperties = pdf.make_indirect(
-        Dictionary(OCGs=Array(ocgs), D=Dictionary(Order=Array(ocgs), ON=Array(ocgs)))
-    )
-
-    resources = Dictionary(Properties=properties)
-    if form is not None:
-        matrix, form_content = form
-        stream = pdf.make_stream(form_content.encode())
-        stream.Type = Name.XObject
-        stream.Subtype = Name.Form
-        stream.BBox = Array([0, 0, 10000, 10000])
-        stream.Matrix = Array(list(matrix))
-        if form_properties is not None:
-            own = Dictionary()
-            for token, layer in form_properties.items():
-                own[token] = ocg_of[layer]
-            stream.Resources = Dictionary(Properties=own)
-        resources.XObject = Dictionary(Fm0=pdf.make_indirect(stream))
-    if image:
-        picture = pdf.make_stream(b"\xff\x00\x00")
-        picture.Type = Name.XObject
-        picture.Subtype = Name.Image
-        picture.Width = 1
-        picture.Height = 1
-        picture.ColorSpace = Name.DeviceRGB
-        picture.BitsPerComponent = 8
-        table = resources.get("/XObject") or Dictionary()
-        table.Im0 = pdf.make_indirect(picture)
-        resources.XObject = table
-
-    page = pikepdf.Page(
-        pdf.make_indirect(
-            Dictionary(
-                Type=Name.Page,
-                MediaBox=Array(list(media)),
-                Resources=resources,
-                Contents=pdf.make_indirect(pdf.make_stream(("\n".join(body) + extra).encode())),
-            )
-        )
-    )
-    pdf.pages.append(page)
-    pdf.save(path)
-    return path
 
 
 def match_multiset(holes, expected, tol=TOL_MM):

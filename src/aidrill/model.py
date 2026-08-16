@@ -67,9 +67,10 @@ __all__ = [
 ]
 
 
-#: What a stage may record about itself in a ``StageRun``. One member wider than
-#: ``Diagnostic.data``: a diameter table is a list of numbers, and flattening it
-#: into a string would make the drawing parse its own provenance back out again.
+#: What a stage may record about itself in a ``StageRun``. Wider than
+#: ``Diagnostic.data`` by ``bool`` and by a tuple of *lengths*: a diameter table
+#: is a list of numbers, and flattening it into a string would make the drawing
+#: parse its own provenance back out again.
 #:
 #: ``float`` stays in the union for the values that genuinely are one — a ratio,
 #: an angle, a fraction — and *not* for lengths. A length is named with an
@@ -540,7 +541,13 @@ class Diagnostic:
     code: str
     message: str
     location_nm: tuple[int, int] | None = None
-    data: tuple[tuple[str, float | int | str], ...] = ()
+    #: Scalars, plus a tuple of hole identities. ``grid-ambiguous`` is a finding
+    #: about the panel and every hole that tied is equally its subject, so the
+    #: payload names all of them: a singular ``hole_index`` there would put an
+    #: arbitrary representative where the cause belongs. It is *identities* and
+    #: not lengths, which is why no ``_nm`` key of a finding is ever a tuple —
+    #: the one payload that is holds numbers nothing converts.
+    data: tuple[tuple[str, float | int | str | tuple[int, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         """Coerce the position and the payload to tuples, then guard the lengths.
@@ -553,21 +560,23 @@ class Diagnostic:
         whole has no coordinate to give.
 
         The coercion is the same one ``StageRun`` and ``EnclosureMatch`` do, and
-        it reaches three sequences because a finding read back from JSON arrives
-        with a list in every one of them: the location, the payload, and each
-        key/value pair inside the payload. A finding holding any of those prints
-        exactly like the one the pipeline produced, compares unequal to it, and
-        is unhashable beside it — so the obvious way to reconstruct a document
-        from the emitted JSON would yield findings a consumer could neither
-        compare nor put in a set, for reasons visible nowhere in the output.
+        it reaches four sequences because a finding read back from JSON arrives
+        with a list in every one of them: the location, the payload, each
+        key/value pair inside the payload, and the one payload *value* that is
+        itself a sequence — ``grid-ambiguous``'s tied hole ids. A finding
+        holding any of those prints exactly like the one the pipeline produced,
+        compares unequal to it, and is unhashable beside it — so the obvious way
+        to reconstruct a document from the emitted JSON would yield findings a
+        consumer could neither compare nor put in a set, for reasons visible
+        nowhere in the output.
 
         It runs before the guard, as in ``StageRun``, so that the guard reads
-        the payload in the shape the object will keep. The two orders happen to
-        agree on what they refuse here — a finding's payload values are scalars,
-        so no coercion changes what ``_check_payload_lengths`` looks at — but
-        checking first would leave the coercion as the only step that reads the
-        caller's argument, and a payload handed over as a generator would be
-        consumed by the guard and stored empty.
+        the payload in the shape the object will keep: a length arriving from
+        JSON under an ``_nm`` key is checked as the tuple it has just become,
+        rather than slipping past a check that only knows what to do with one.
+        Checking first would additionally leave the coercion as the only step
+        that reads the caller's argument, and a payload handed over as a
+        generator would be consumed by the guard and stored empty.
 
         Normalising here rather than in the three convenience constructors is
         the same choice one level up: they are not the only way a finding is
@@ -578,7 +587,17 @@ class Diagnostic:
             x_nm, y_nm = self.location_nm
             object.__setattr__(self, "location_nm", (x_nm, y_nm))
             _check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
-        object.__setattr__(self, "data", tuple((key, value) for key, value in self.data))
+        object.__setattr__(
+            self,
+            "data",
+            tuple(
+                # Same shape of ignore as ``StageRun``: the declared value type
+                # never includes list, and a document read back from JSON is
+                # exactly where one arrives anyway.
+                (key, tuple(value) if isinstance(value, list) else value)  # type: ignore[unreachable]
+                for key, value in self.data
+            ),
+        )
         _check_payload_lengths("Diagnostic.data", self.data)
 
     @classmethod
