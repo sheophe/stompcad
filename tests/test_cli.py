@@ -30,6 +30,9 @@ from aidrill.model import (
     DrillData,
     EnclosureMatch,
     Hole,
+    RawDrillData,
+    RawHole,
+    RawOutline,
     ReferenceOutline,
     Severity,
     SourceInfo,
@@ -45,19 +48,58 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 # ---------------------------------------------------------------------------
 
 
-def make_data(
+def read(
     *,
     holes=None,
-    reference=ReferenceOutline(113.0, 60.0),
+    reference=RawOutline(113.0, 60.0),
+    diagnostics=(),
+) -> RawDrillData:
+    """What a source hands the CLI: float millimetres, nothing quantised.
+
+    The default panel is deliberately one the whole run leaves alone — every
+    centre is already on the 0.25 mm grid, both diameters are real metric bits,
+    and 113 × 60 is the 1590B footprint — so a test asserting on an exit code or
+    a report line is not also asserting on a diagnostic it never mentioned.
+    """
+    if holes is None:
+        holes = (
+            RawHole(-20.0, 18.0, 7.0, 0),
+            RawHole(20.0, 18.0, 7.0, 1),
+            RawHole(0.0, -18.75, 5.0, 2),
+        )
+    return RawDrillData(
+        source=SourceInfo(
+            path="fake.ai",
+            drill_layer="Drill",
+            reference_layer="Background",
+            layers_found=("Background", "Drill"),
+        ),
+        reference=reference,
+        centre=(56.5, 30.0),
+        holes=tuple(holes),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def document(
+    *,
+    holes=None,
+    reference=ReferenceOutline(112_000_000, 61_000_000),
     diagnostics=(),
     processing=(),
 ) -> DrillData:
-    """DrillData that the default pipeline leaves alone: on-grid, two sizes."""
+    """A finished ``DrillData``, for the report renderers called directly.
+
+    Separate from :func:`read` because it is the *other* side of the
+    quantisation phase: whole nanometres, a nominal outline, and a processing
+    history a run would have filled in. A test that drives ``cli.main`` wants
+    the first; one that calls ``cli.format_tools`` wants this.
+    """
     if holes is None:
         holes = (
-            Hole.from_measurement(-20.0, 18.0, 7.0, index=0),
-            Hole.from_measurement(20.0, 18.0, 7.0, index=1),
-            Hole.from_measurement(0.0, -18.75, 5.0, index=2),
+            Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=0),
+            Hole.from_measurement(20_000_000, 18_000_000, 7_000_000, index=1),
+            Hole.from_measurement(0, -18_750_000, 5_000_000, index=2),
         )
     return DrillData(
         holes=tuple(holes),
@@ -73,7 +115,7 @@ def make_data(
     )
 
 
-def snapped_against(standard: str, size_count: int = 183) -> StageRun:
+def quantised_against(standard: str, size_count: int = 183) -> StageRun:
     """The provenance ``SnapDiametersToDrillTable`` leaves behind.
 
     Hand-built rather than taken from a real run, so that a test can record a
@@ -127,7 +169,7 @@ def test_emit_dispatches_to_an_emitter_the_cli_has_never_heard_of(
         def emit(self, data):
             return f"DUMMY {len(data.holes)} holes\n"
 
-    fake_source(make_data())
+    fake_source(read())
     out = tmp_path / "out.txt"
 
     code = cli.main([str(FIXTURE), "--emit", f"dummy-test-format={out}"])
@@ -190,63 +232,84 @@ def test_the_cli_fixes_the_stage_order():
     stage may not declare for itself (LSP), so somebody has to say it, and this
     is the assertion that says it. Everything else derives from
     :func:`pipeline_for`.
+
+    Two stages, because the quantisers are not stages: their order is
+    ``aidrill.quantise``'s and is pinned in ``tests/test_quantise.py``, where the
+    reasons for it live.
     """
-    assert [stage.name for stage in pipeline_for()] == [
-        "snap",
-        "snap-diameters",
-        "deduplicate",
-        "identify-enclosure",
-        "sort",
-    ]
+    assert [stage.name for stage in pipeline_for()] == ["deduplicate", "sort"]
 
 
-def test_the_enclosure_stage_is_wired_in_whether_or_not_a_case_was_declared():
+def quantisers_for(*argv: str) -> cli.Quantisers:
+    """The three quantisers the CLI actually builds for ``argv``."""
+    return cli.build_quantisers(cli.build_parser().parse_args(["panel.ai", *argv]))
+
+
+def test_the_cli_quantises_between_the_source_and_the_pipeline(fake_source, capsys):
+    """The seam, asserted where it is observable rather than by reading source.
+
+    ``read()`` measures 113 × 60 and hands over float millimetres; the report
+    prints the catalogue's 112 × 61 in whole nanometres and a tool table. Neither
+    could exist if the CLI had folded the pipeline over the raw read.
+    """
+    fake_source(read())
+
+    assert cli.main([str(FIXTURE)]) == 0
+
+    out = capsys.readouterr().out
+    assert "112.000 x 61.000 mm" in out
+    assert "raw 113.0000 x 60.0000 mm" in out
+
+
+def test_the_enclosure_is_identified_whether_or_not_a_case_was_declared():
     """Identification is not opt-in. The outline is snapped to the catalogue on
     every run, and ``--case`` only adds the cross-check against what was drawn —
     so a panel drawn 1 mm out is still reported without the operator having to
     know to ask."""
-    for argv in ([], ["--case", "1590B"]):
-        assert "identify-enclosure" in [s.name for s in pipeline_for(*argv)]
+    assert quantisers_for().enclosure.expected_part is None
+    assert quantisers_for("--case", "1590B").enclosure.expected_part == "1590B"
 
 
-def stage_named(name: str, *argv: str):
-    """One stage out of the pipeline the CLI built, found by name not position."""
-    found = [stage for stage in pipeline_for(*argv) if stage.name == name]
-    assert len(found) == 1, f"{name} appears {len(found)} times in the pipeline"
-    return found[0]
-
-
-def test_grid_warn_defaults_are_left_to_the_stage():
+def test_grid_warn_defaults_are_left_to_the_quantiser():
     """The grid/4 rule lives in SnapPositions; the CLI must not restate it."""
-    snap = stage_named("snap", "--grid", "1.0")
-    assert snap.grid == 1.0
-    assert snap.warn_over == pytest.approx(0.25)
+    snap = quantisers_for("--grid", "1.0").positions
+    assert snap.grid_nm == 1_000_000
+    assert snap.warn_over_nm == 250_000
 
-    assert stage_named("snap", "--grid", "1.0", "--grid-warn", "0.4").warn_over == pytest.approx(0.4)
+    explicit = quantisers_for("--grid", "1.0", "--grid-warn", "0.4").positions
+    assert explicit.warn_over_nm == 400_000
+
+
+def test_the_grid_crosses_the_unit_boundary_exactly_once():
+    """``--grid 0.25`` is a quarter of a millimetre, not 0.25 nanometres.
+
+    ``SnapPositions`` takes whole nanometres and refuses anything that is not a
+    plain ``int``, so the conversion has to happen at this boundary — and a
+    fixture whose millimetres and nanometres could be confused would not show
+    it. 0.25 and 250 000 differ by six orders of magnitude.
+    """
+    assert quantisers_for().positions.grid_nm == 250_000
+    assert quantisers_for("--grid", "0.5").positions.grid_nm == 500_000
 
 
 class TestAGridThatIsNotANumberIsAUsageError:
     """Exit 3, not 1, and not an artifact full of ``XnanYnan``.
 
-    ``--grid=nan`` used to crash out of ``SnapPositions.apply`` with an uncaught
+    ``--grid=nan`` used to crash out of the snapping code with an uncaught
     ``ValueError``: Python exits **1** for that, which is the code this CLI
     reserves for "warnings present", so a wrapper testing ``[ $? -le 1 ]`` read
     it as a run that had produced usable output. ``--grid=inf`` did not crash at
     all — every coordinate became ``nan`` and the files were written.
-
-    The rule lives in the stage; this is the CLI turning its ``ValueError`` into
-    the exit code the contract promises, the way it already does for
-    ``build_drill_standard``.
     """
 
     @pytest.mark.parametrize("argv", [["--grid", "nan"], ["--grid", "inf"]])
     def test_a_non_finite_grid_exits_three(self, fake_source, capsys, argv):
-        fake_source(make_data())
+        fake_source(read())
         assert cli.main([str(FIXTURE), *argv]) == 3
         assert capsys.readouterr().err.startswith("aidrill: error:")
 
     def test_a_non_finite_warning_threshold_exits_three(self, fake_source, capsys):
-        fake_source(make_data())
+        fake_source(read())
         assert cli.main([str(FIXTURE), "--grid-warn", "nan"]) == 3
         assert capsys.readouterr().err.startswith("aidrill: error:")
 
@@ -256,7 +319,7 @@ class TestAGridThatIsNotANumberIsAUsageError:
         An Excellon file of ``XnanYnan`` lines parses, loads and is the obvious
         one to hand to the machine.
         """
-        fake_source(make_data())
+        fake_source(read())
         target = tmp_path / "panel.drl"
 
         assert cli.main([str(FIXTURE), "--grid", "inf", "--emit", f"excellon={target}"]) == 3
@@ -267,10 +330,56 @@ class TestAGridThatIsNotANumberIsAUsageError:
         assert cli.main(["/no/such/panel.ai", "--grid", "nan"]) == 3
         assert "nan" in capsys.readouterr().err
 
-    def test_zero_still_switches_snapping_off_rather_than_being_refused(self, fake_source):
-        fake_source(make_data())
-        assert cli.main([str(FIXTURE), "--grid", "0"]) == 0
-        assert stage_named("snap", "--grid", "0").describe().get("enabled") is False
+
+class TestAGridFinerThanAnArtifactCanPrint:
+    """Two different faults with the same shape, and two different answers.
+
+    A pitch *below* a micron is a request for finer positioning than the drill
+    file and the drawing can render, and the quantiser clamps it to the floor
+    with a WARNING — the operator gets the finest grid that renders rather than
+    no panel at all. A pitch that is not a whole *number* of microns is not a
+    pitch this program can offer at any value, so it is a usage error like every
+    other typo, refused before the input is opened.
+    """
+
+    def test_a_pitch_below_a_micron_is_clamped_and_said_so(self, fake_source, capsys):
+        fake_source(read())
+
+        assert cli.main([str(FIXTURE), "--grid", "0.0001"]) == 1
+
+        assert "[grid-too-fine]" in capsys.readouterr().out
+
+    def test_zero_is_clamped_too_rather_than_switching_snapping_off(self, fake_source, capsys):
+        """There is no way to disable snapping: a hole has to be drilled
+        somewhere, and "wherever the artwork said" is a position no bit lands on
+        twice."""
+        fake_source(read())
+
+        assert cli.main([str(FIXTURE), "--grid", "0"]) == 1
+
+        assert "[grid-too-fine]" in capsys.readouterr().out
+        assert quantisers_for("--grid", "0").positions.grid_nm == 1_000
+
+    def test_the_clamp_is_reported_once_and_not_once_per_hole(self, fake_source, capsys):
+        """The finding is about the configuration, so it is raised once however
+        many circles the panel carries."""
+        fake_source(read())
+
+        cli.main([str(FIXTURE), "--grid", "0"])
+
+        assert capsys.readouterr().out.count("[grid-too-fine]") == 1
+
+    @pytest.mark.parametrize("grid", ["0.2504", "0.0015"])
+    def test_a_pitch_that_is_not_a_whole_micron_is_a_usage_error(
+        self, fake_source, capsys, grid
+    ):
+        fake_source(read())
+
+        assert cli.main([str(FIXTURE), "--grid", grid]) == 3
+
+        err = capsys.readouterr().err
+        assert err.startswith("aidrill: error:"), err
+        assert "--grid" in err
 
 
 # ---------------------------------------------------------------------------
@@ -278,43 +387,41 @@ class TestAGridThatIsNotANumberIsAUsageError:
 # ---------------------------------------------------------------------------
 
 
-def test_the_default_standard_is_metric_and_the_tolerance_is_the_stages():
+def test_the_default_standard_is_metric_and_the_tolerance_is_the_quantisers():
     """The CLI restates neither. ``--drill-standard`` has a default because
     argparse needs one; the matching tolerance has none here at all."""
-    stage = stage_named("snap-diameters")
-    assert stage.standard.name == "metric"
-    assert stage.standard.sizes_mm == DRILL_STANDARDS["metric"].sizes_mm
-    assert stage.tolerance_mm == pytest.approx(0.25)
+    snap = quantisers_for().diameters
+    assert snap.standard.name == "metric"
+    assert snap.standard.sizes_nm == DRILL_STANDARDS["metric"].sizes_nm
+    assert snap.tolerance_nm == 250_000
 
 
-def test_the_declared_standard_reaches_the_stage():
-    stage = stage_named("snap-diameters", "--drill-standard", "fractional")
-    assert stage.standard.name == "fractional"
-    assert stage.standard.sizes_mm == DRILL_STANDARDS["fractional"].sizes_mm
+def test_the_declared_standard_reaches_the_quantiser():
+    snap = quantisers_for("--drill-standard", "fractional").diameters
+    assert snap.standard.name == "fractional"
+    assert snap.standard.sizes_nm == DRILL_STANDARDS["fractional"].sizes_nm
 
 
-def test_the_declared_standard_decides_what_a_hole_is_drilled_with(fake_source, tmp_path):
-    """The flag, proved on the emitted bytes rather than on the stage object.
+def test_the_declared_standard_decides_what_a_hole_is_drilled_with(fake_source, capsys):
+    """The flag, proved on the run's output rather than on the object it built.
 
     6.348 mm is 0.048 from the 6.3 mm metric bit and 0.002 from a 1/4" one, so
     the two standards give different, unmistakable answers — and a CLI that
     accepted ``--drill-standard`` and then built the metric table anyway would
-    still write 6.3 here.
+    still print 6.3 here. The fractional drawer also spells the bit as a
+    fraction, which is a second thing only the declared standard can produce.
     """
-    fake_source(
-        make_data(holes=[Hole.from_measurement(0.0, 0.0, 6.348, index=0)])
-    )
-    doc = tmp_path / "panel.txt"
+    fake_source(read(holes=[RawHole(0.0, 0.0, 6.348, 4)]))
 
-    assert cli.main([str(FIXTURE), "--drill-standard", "fractional", "--emit", f"json={doc}"]) == 0
+    assert cli.main([str(FIXTURE), "--drill-standard", "fractional"]) == 0
 
-    assert [t["diameter"] for t in json.loads(doc.read_text())["tools"]] == [6.35]
+    assert '⌀1/4"' in capsys.readouterr().out
 
 
 def test_an_unknown_standard_is_a_usage_error_that_names_the_ones_there_are(
     fake_source, capsys
 ):
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--drill-standard", "whitworth"]) == 3
 
     err = capsys.readouterr().err
@@ -325,47 +432,51 @@ def test_an_unknown_standard_is_a_usage_error_that_names_the_ones_there_are(
 
 
 def test_a_whitelist_narrows_the_table_to_the_drawer():
-    stage = stage_named("snap-diameters", "--drill-sizes", "3.2,5,7,12")
-    assert stage.standard.sizes_mm == (3.2, 5.0, 7.0, 12.0)
+    """The sizes are millimetres on the command line and nanometres in the
+    table, and the flag is useless unless the CLI converts between them:
+    ``--drill-sizes 3.2`` taken literally is a request for a three-nanometre
+    bit, which the standard correctly reports as a size it does not stock."""
+    snap = quantisers_for("--drill-sizes", "3.2,5,7,12").diameters
+    assert snap.standard.sizes_nm == (3_200_000, 5_000_000, 7_000_000, 12_000_000)
 
 
 def test_a_blacklist_removes_the_bit_that_is_broken():
-    stage = stage_named("snap-diameters", "--no-drill-sizes", "7.0")
-    assert 7.0 not in stage.standard.sizes_mm
-    assert len(stage.standard.sizes_mm) == len(DRILL_STANDARDS["metric"].sizes_mm) - 1
-    assert 6.9 in stage.standard.sizes_mm
+    snap = quantisers_for("--no-drill-sizes", "7.0").diameters
+    assert 7_000_000 not in snap.standard.sizes_nm
+    assert len(snap.standard.sizes_nm) == len(DRILL_STANDARDS["metric"].sizes_nm) - 1
+    assert 6_900_000 in snap.standard.sizes_nm
 
 
 def test_the_two_size_flags_combine():
-    stage = stage_named("snap-diameters", "--drill-sizes", "3.2,5,7,12", "--no-drill-sizes", "5")
-    assert stage.standard.sizes_mm == (3.2, 7.0, 12.0)
+    snap = quantisers_for(
+        "--drill-sizes", "3.2,5,7,12", "--no-drill-sizes", "5"
+    ).diameters
+    assert snap.standard.sizes_nm == (3_200_000, 7_000_000, 12_000_000)
 
 
 def test_a_narrowed_table_is_what_the_holes_are_actually_quantised_against(
-    fake_source, tmp_path
+    fake_source, capsys
 ):
     """With no 7 mm bit in the drawer, a 6.9998 mm hole is drilled with what is.
 
-    Read back out of the machine-readable document, because the claim is about
-    what reaches a consumer: both the hole's nominal size *and* the record of
-    which sizes were available must be the narrowed set.
+    Asserted on the run rather than on the drawer it built, because the claim is
+    that the narrowed table is what the *measurement* was compared against: a
+    CLI that narrowed a copy and quantised against the full series would build
+    an identical-looking drawer and still print 7.000.
     """
-    fake_source(make_data(holes=[Hole.from_measurement(0.0, 0.0, 6.9998, index=0)]))
-    doc = tmp_path / "panel.txt"
+    fake_source(read(holes=[RawHole(0.0, 0.0, 6.9998, 4)]))
 
-    assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,6.8,12", "--emit", f"json={doc}"]) == 0
+    assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,6.8,12"]) == 0
 
-    document = json.loads(doc.read_text())
-    assert [t["diameter"] for t in document["tools"]] == [6.8]
-    recorded = [r for r in document["processing"] if r["name"] == "snap-diameters"]
-    assert recorded[0]["parameters"]["sizes_mm"] == [3.2, 6.8, 12.0]
-    assert recorded[0]["parameters"]["standard"] == "metric"
+    out = capsys.readouterr().out
+    assert "⌀6.80 mm" in out
+    assert "7.000" not in out
 
 
 def test_a_size_the_standard_does_not_have_is_a_usage_error(fake_source, capsys):
     """``3.33`` is a typo. Read leniently it would give the panel a drawer with
     a bit missing; read as a match it would give it one that does not exist."""
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,3.33"]) == 3
 
     err = capsys.readouterr().err
@@ -375,7 +486,7 @@ def test_a_size_the_standard_does_not_have_is_a_usage_error(fake_source, capsys)
 
 def test_a_metric_size_is_not_a_fractional_bit(fake_source, capsys):
     """The refusal is against the declared standard, not against drills at large."""
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--drill-standard", "fractional", "--drill-sizes", "3.2"]) == 3
     assert "fractional" in capsys.readouterr().err
 
@@ -390,7 +501,7 @@ def test_a_malformed_size_list_is_a_usage_error(fake_source, capsys, flag, bad):
     ``nan`` is why finiteness is checked rather than positivity alone: every
     comparison against it is False, so ``size <= 0`` lets it through.
     """
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), flag, bad]) == 3
 
     err = capsys.readouterr().err
@@ -403,13 +514,13 @@ def test_a_malformed_size_list_is_a_usage_error(fake_source, capsys, flag, bad):
 # ---------------------------------------------------------------------------
 
 
-def test_a_declared_case_reaches_the_enclosure_stage_in_catalogue_form():
-    assert stage_named("identify-enclosure", "--case", " 1590b ").expected_part == "1590B"
-    assert stage_named("identify-enclosure").expected_part is None
+def test_a_declared_case_reaches_the_enclosure_quantiser_in_catalogue_form():
+    assert quantisers_for("--case", " 1590b ").enclosure.expected_part == "1590B"
+    assert quantisers_for().enclosure.expected_part is None
 
 
 def test_the_declared_case_agreeing_with_the_artwork_is_silent(fake_source, capsys):
-    fake_source(make_data())  # a 113 x 60 outline, which is a 112 x 61 1590B
+    fake_source(read())  # a 113 x 60 outline, which is a 112 x 61 1590B
     assert cli.main([str(FIXTURE), "--case", "1590B"]) == 0
 
 
@@ -425,7 +536,7 @@ def test_a_case_that_disagrees_with_the_artwork_is_an_error(fake_source, capsys,
     report prints, never on the wording around it. What the finding *carries* is
     pinned where it is produced, in ``TestDeclaredCase``.
     """
-    fake_source(make_data())
+    fake_source(read())
     doc = tmp_path / "panel.txt"
 
     assert cli.main([str(FIXTURE), "--case", "1590BB", "--emit", f"json={doc}"]) == 2
@@ -444,7 +555,7 @@ def test_an_order_code_is_not_told_it_drew_the_wrong_case(fake_source, capsys):
     they drew the right one. It is a usage error instead, and it says which
     designator the order code is built on so the fix is one retype.
     """
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--case", "1590BBBK"]) == 3
 
     err = capsys.readouterr().err
@@ -459,7 +570,7 @@ def test_an_order_code_is_not_told_it_drew_the_wrong_case(fake_source, capsys):
 
 def test_a_part_number_from_nowhere_is_a_usage_error(fake_source, capsys):
     """No suggestion to make, and none invented: 1590ZZ resembles nothing."""
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--case", "1590ZZ"]) == 3
 
     err = capsys.readouterr().err
@@ -467,9 +578,7 @@ def test_a_part_number_from_nowhere_is_a_usage_error(fake_source, capsys):
     assert "1590ZZ" in err
 
 
-def test_a_panel_that_is_no_hammond_case_still_gets_its_drill_data(
-    fake_source, tmp_path, capsys
-):
+def test_a_panel_that_is_no_hammond_case_still_gets_its_drill_data(fake_source, capsys):
     """A folded-aluminium one-off, or any of the enclosures we do not stock.
 
     The exit code is asserted where an operator actually meets it, because that
@@ -477,23 +586,25 @@ def test_a_panel_that_is_no_hammond_case_still_gets_its_drill_data(
     your enclosure" is a statement about this tool's 22-footprint catalogue, and
     a panel with no reference layer at all exits 0 — so refusing this one would
     punish the operator for having drawn their outline. The finding is reported,
-    the outline keeps the size it was measured at, and the artifacts are written.
+    the outline keeps the size it was measured at, and the run goes on.
     """
-    fake_source(make_data(reference=ReferenceOutline.from_measurement(200.0, 100.0)))
-    doc = tmp_path / "panel.txt"
+    fake_source(read(reference=RawOutline(200.0, 100.0)))
 
-    assert cli.main([str(FIXTURE), "--emit", f"json={doc}"]) == 1
+    assert cli.main([str(FIXTURE)]) == 1
 
-    document = json.loads(doc.read_text())
-    assert [d["code"] for d in document["diagnostics"]] == ["unknown-enclosure"]
-    assert (document["reference"]["width"], document["reference"]["height"]) == (200.0, 100.0)
+    out = capsys.readouterr().out
+    assert "[unknown-enclosure]" in out
+    # The outline is left as drawn, not snapped to the nearest thing we stock.
+    assert report_field(out, "reference").startswith("200.000 x 100.000 mm")
+    assert "(not identified)" in out
+    assert "HOLES (3)" in out, "the drill data went missing with the enclosure"
 
 
 def test_an_empty_case_is_told_it_is_empty(fake_source, capsys):
     """``--case "$CASE"`` with ``CASE`` unset is a Makefile away, and the answer
     to it must not be a sentence about ``''`` not being in the catalogue — the
     operator would go looking for a part number they never typed."""
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--case", "  "]) == 3
 
     err = capsys.readouterr().err
@@ -518,23 +629,23 @@ def test_the_case_is_checked_before_the_file_is_even_opened(capsys):
 
 
 def test_exit_zero_when_clean(fake_source, capsys):
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE)]) == 0
 
 
 def test_info_diagnostics_do_not_change_the_exit_code(fake_source, capsys):
-    fake_source(make_data(diagnostics=[Diagnostic.info("note", "just so you know")]))
+    fake_source(read(diagnostics=[Diagnostic.info("note", "just so you know")]))
     assert cli.main([str(FIXTURE)]) == 0
 
 
 def test_exit_one_on_warnings(fake_source, capsys):
-    fake_source(make_data(diagnostics=[Diagnostic.warning("something", "watch out")]))
+    fake_source(read(diagnostics=[Diagnostic.warning("something", "watch out")]))
     assert cli.main([str(FIXTURE)]) == 1
 
 
 def test_exit_two_on_errors(fake_source, capsys):
     fake_source(
-        make_data(
+        read(
             diagnostics=[
                 Diagnostic.warning("something", "watch out"),
                 Diagnostic.error("bad", "that will not drill"),
@@ -550,7 +661,7 @@ def test_exit_code_comes_from_worst_severity(fake_source, capsys):
         (Severity.WARNING, 1),
         (Severity.ERROR, 2),
     ]:
-        fake_source(make_data(diagnostics=[Diagnostic(severity, "c", "m")]))
+        fake_source(read(diagnostics=[Diagnostic(severity, "c", "m")]))
         assert cli.main([str(FIXTURE)]) == expected
 
 
@@ -579,7 +690,7 @@ def test_argparse_rejection_is_not_mistaken_for_our_validation(fake_source, caps
     *does* reach our own check, which is precisely why "starts with a dash"
     cannot be assumed to mean "argparse handled it".
     """
-    fake_source(make_data())
+    fake_source(read())
 
     assert cli.main([str(FIXTURE), "--drill-sizes", "-3.2,7"]) == 3
     argparse_err = capsys.readouterr().err
@@ -596,13 +707,13 @@ def test_argparse_rejection_is_not_mistaken_for_our_validation(fake_source, caps
 
 @pytest.mark.parametrize("spec", ["excellon", "=out.drl", "excellon="])
 def test_malformed_emit_is_a_usage_error(fake_source, capsys, spec):
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--emit", spec]) == 3
     assert "FORMAT=PATH" in capsys.readouterr().err
 
 
 def test_unknown_emit_format_is_a_usage_error(fake_source, tmp_path, capsys):
-    fake_source(make_data())
+    fake_source(read())
     assert cli.main([str(FIXTURE), "--emit", f"dxf={tmp_path / 'x.dxf'}"]) == 3
     err = capsys.readouterr().err
     assert "dxf" in err
@@ -625,7 +736,7 @@ def test_empty_layer_error_is_reported_cleanly(fake_source, capsys):
 
 def test_emitter_error_is_reported_cleanly(fake_source, tmp_path, capsys):
     """LOWER_LEFT excellon without a reference outline raises EmitterError."""
-    fake_source(make_data(reference=None))
+    fake_source(read(reference=None))
     assert cli.main([str(FIXTURE), "--emit", f"excellon={tmp_path / 'x.drl'}"]) == 3
     err = capsys.readouterr().err
     assert "Traceback" not in err
@@ -639,7 +750,7 @@ def test_a_failing_emitter_writes_nothing_at_all(fake_source, tmp_path, capsys):
     that writes as it goes leaves ``a.json`` on disk beside a missing ``b.drl``
     and an exit code of 3 — a stale artifact that looks like a good run.
     """
-    fake_source(make_data(reference=None))
+    fake_source(read(reference=None))
     doc = tmp_path / "a.json"
     drl = tmp_path / "b.drl"
 
@@ -656,8 +767,8 @@ def test_a_failing_emitter_writes_nothing_at_all(fake_source, tmp_path, capsys):
 def test_an_erroring_run_writes_no_artifact_at_all(fake_source, tmp_path, capsys):
     """The expensive failure, in the one artifact nobody reads with their eyes.
 
-    A panel with a 30 mm cut-out loses that hole at ``snap-diameters``: no bit
-    makes it, so it is an ERROR and the hole is dropped. Every emitter then
+    A panel with a 30 mm cut-out loses that hole in the quantisation phase: no
+    bit makes it, so it is an ERROR and the hole is dropped. Every emitter then
     faithfully describes a *two*-hole panel. The machine-readable document and
     the drawing's NOTES both carry the finding, but the Excellon format renders
     no diagnostics at all — so the file that goes to the machine is silently
@@ -667,11 +778,11 @@ def test_an_erroring_run_writes_no_artifact_at_all(fake_source, tmp_path, capsys
     errors produces no artifacts, so there is nothing to load by mistake.
     """
     fake_source(
-        make_data(
+        read(
             holes=[
-                Hole.from_measurement(-20.0, 18.0, 7.0, index=0),
-                Hole.from_measurement(0.0, 18.0, 30.0, index=1),  # no bit makes this
-                Hole.from_measurement(20.0, 18.0, 5.0, index=2),
+                RawHole(-20.0, 18.0, 7.0, 4),
+                RawHole(0.0, 18.0, 30.0, 1),  # no bit makes this
+                RawHole(20.0, 18.0, 5.0, 9),
             ]
         )
     )
@@ -697,7 +808,7 @@ def test_a_warning_still_gets_its_artifacts(fake_source, tmp_path, capsys):
     reason to leave the operator with nothing — and after ``unknown-enclosure``
     became a warning, this is the difference between "we do not stock your case"
     and "you get no drill file"."""
-    fake_source(make_data(diagnostics=[Diagnostic.warning("something", "watch out")]))
+    fake_source(read(diagnostics=[Diagnostic.warning("something", "watch out")]))
     doc = tmp_path / "panel.txt"
 
     assert cli.main([str(FIXTURE), "--emit", f"json={doc}"]) == 1
@@ -706,7 +817,7 @@ def test_a_warning_still_gets_its_artifacts(fake_source, tmp_path, capsys):
 
 def test_every_target_is_written_on_the_happy_path(fake_source, tmp_path, capsys):
     """Rendering to memory first must not cost anyone their artifacts."""
-    fake_source(make_data())
+    fake_source(read())
     targets = {
         "json": tmp_path / "out.json",
         "excellon": tmp_path / "out.drl",
@@ -726,7 +837,7 @@ def test_every_target_is_written_on_the_happy_path(fake_source, tmp_path, capsys
 
 
 def test_io_failure_is_exit_three(fake_source, tmp_path, capsys):
-    fake_source(make_data())
+    fake_source(read())
     target = tmp_path / "no-such-dir" / "out.drl"
     assert cli.main([str(FIXTURE), "--emit", f"excellon={target}"]) == 3
     assert "Traceback" not in capsys.readouterr().err
@@ -744,14 +855,14 @@ def test_missing_input_file_is_exit_three(tmp_path, capsys):
 
 
 def test_report_shows_source_holes_tools_and_diagnostics(fake_source, capsys):
-    fake_source(make_data(diagnostics=[Diagnostic.warning("something", "watch out")]))
+    fake_source(read(diagnostics=[Diagnostic.warning("something", "watch out")]))
     cli.main([str(FIXTURE)])
     out = capsys.readouterr().out
 
     assert "fake.ai" in out
     assert "Drill" in out and "Background" in out
-    # 112 × 61, not the 113 × 60 the artwork measured: the enclosure stage runs
-    # on every panel now, and the report states the catalogue's whole
+    # 112 × 61, not the 113 × 60 the artwork measured: the enclosure is
+    # identified on every panel, and the report states the catalogue's whole
     # millimetres because those are what the holes are positioned against.
     assert "112.000" in out and "61.000" in out
     assert "7.000" in out and "5.000" in out  # hole diameters
@@ -794,7 +905,7 @@ def test_each_finding_is_printed_once_under_its_own_severity(fake_source, capsys
     point of this project is that two renderings cannot be allowed to disagree.
     """
     fake_source(
-        make_data(
+        read(
             diagnostics=[
                 Diagnostic.warning("off-grid", "hole 4 moved 0.12 mm"),
                 Diagnostic.error("unknown-diameter", "⌀30.0 mm is no bit in the drawer"),
@@ -821,7 +932,7 @@ def test_the_summary_counts_every_finding_of_a_severity(fake_source, capsys):
     reported is not listed at all — a report that ends "0 errors" invites the
     reader to skim past the line that says how many there were."""
     fake_source(
-        make_data(
+        read(
             diagnostics=[
                 Diagnostic.warning("off-grid", "hole 4 moved 0.12 mm"),
                 Diagnostic.warning("unknown-enclosure", "113 × 60 is no catalogue footprint"),
@@ -850,8 +961,8 @@ def test_tool_summary_counts_come_from_the_model(capsys):
             return {diameter: 99 for diameter in self.tools()}
 
     data = SpyData(
-        holes=make_data().holes,
-        reference=ReferenceOutline(113.0, 60.0),
+        holes=document().holes,
+        reference=ReferenceOutline(112_000_000, 61_000_000),
         source=SourceInfo(path="fake.ai"),
     )
 
@@ -895,10 +1006,10 @@ def test_the_tools_report_never_prints_one_diameter_as_two_tools():
     false. The precision follows the values present, so distinct nominals stay
     distinguishable however tight the tolerance was.
     """
-    data = make_data(
+    data = document(
         holes=[
-            Hole.from_measurement(-20.0, 18.0, 6.9998, index=0),
-            Hole.from_measurement(20.0, 18.0, 7.0, index=1),
+            Hole.from_measurement(-20_000_000, 18_000_000, 6_999_800, index=6),
+            Hole.from_measurement(20_000_000, 18_000_000, 7_000_000, index=2),
         ]
     )
     assert len(data.tools()) == 2  # the fixture must actually pose the problem
@@ -909,26 +1020,26 @@ def test_the_tools_report_never_prints_one_diameter_as_two_tools():
     assert len(set(printed)) == 2, f"two tools printed the same diameter: {printed}"
 
 
-def test_the_tools_report_keeps_its_usual_three_decimals(fake_source, capsys):
+def test_the_tools_report_keeps_its_usual_three_decimals():
     """Widening is for the collision, not for every panel: an ordinary run must
     read exactly as it always did."""
-    assert report_tool_diameters(cli.format_tools(make_data())) == ["5.000", "7.000"]
+    assert report_tool_diameters(cli.format_tools(document())) == ["5.000", "7.000"]
 
 
 def test_the_tools_block_spells_a_bit_the_way_the_standard_that_ran_spells_it():
     """The spelling comes from provenance, exactly as the drawing's schedule
     takes it, because a fractional bit has no honest millimetre name.
 
-    ``dia 5.159 mm`` is a size in no drawer on earth: its nearest purchasable
+    ``⌀5.159 mm`` is a size in no drawer on earth: its nearest purchasable
     neighbour is a 5.2 mm metric bit, which is the wrong hole. 13/64" is the
     number stamped on the bit the machinist picks up.
     """
-    data = make_data(
+    data = document(
         holes=[
-            Hole.from_measurement(-20.0, 18.0, 7.14375, index=3),
-            Hole.from_measurement(0.0, -18.75, 5.159375, index=1),
+            Hole.from_measurement(-20_000_000, 18_000_000, 7_143_750, index=3),
+            Hole.from_measurement(0, -18_750_000, 5_159_375, index=1),
         ],
-        processing=[snapped_against("fractional", size_count=64)],
+        processing=[quantised_against("fractional", size_count=64)],
     )
 
     assert report_tool_labels(cli.format_tools(data)) == {1: '⌀13/64"', 2: '⌀9/32"'}
@@ -938,10 +1049,13 @@ def test_a_recorded_standard_the_registry_does_not_hold_is_not_a_standard():
     """A hand-built drawer, or a document written by a later version of this
     tool: the name resolves to nothing and the report states millimetres rather
     than inventing a spelling for a series it cannot see. The same fallback
-    carries a ``DrillData`` that never went through the stage at all."""
-    assert report_tool_labels(cli.format_tools(make_data())) == {1: "⌀5.000 mm", 2: "⌀7.000 mm"}
+    carries a ``DrillData`` that never went through the quantiser at all."""
+    assert report_tool_labels(cli.format_tools(document())) == {
+        1: "⌀5.000 mm",
+        2: "⌀7.000 mm",
+    }
 
-    data = make_data(processing=[snapped_against("whitworth")])
+    data = document(processing=[quantised_against("whitworth")])
 
     assert report_tool_labels(cli.format_tools(data)) == {1: "⌀5.000 mm", 2: "⌀7.000 mm"}
 
@@ -956,12 +1070,12 @@ def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools(
     hands the report whatever it likes, and a renderer that is only correct for
     the inputs one entry point happens to produce is not correct.
     """
-    data = make_data(
+    data = document(
         holes=[
-            Hole.from_measurement(-20.0, 18.0, 6.9998, index=6),
-            Hole.from_measurement(20.0, 18.0, 7.0, index=2),
+            Hole.from_measurement(-20_000_000, 18_000_000, 6_999_800, index=6),
+            Hole.from_measurement(20_000_000, 18_000_000, 7_000_000, index=2),
         ],
-        processing=[snapped_against("metric")],
+        processing=[quantised_against("metric")],
     )
 
     printed = report_tool_labels(cli.format_tools(data))
@@ -970,11 +1084,10 @@ def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools(
 
 
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
-    hole = Hole.from_measurement(-19.9906, 18.0021, 6.9998, index=0)
-    fake_source(make_data(holes=[hole]))
+    fake_source(read(holes=[RawHole(-19.9906, 18.0021, 6.9998, 4)]))
     cli.main([str(FIXTURE)])
     out = capsys.readouterr().out
-    assert "-20.000" in out  # nominal, after snapping
+    assert "-20.000" in out  # nominal, after snapping to the grid
     assert "-19.9906" in out  # raw provenance
     assert "6.9998" in out
 
@@ -999,8 +1112,12 @@ def test_the_report_shows_the_outline_the_artwork_measured_beside_the_snapped_on
     what the artwork said. The hole table prints ``raw X``/``raw Y`` beside every
     nominal four lines below for exactly this reason; the outline is the same
     question one level up.
+
+    Four decimals on the raw pair and three on the nominal, deliberately: the
+    two agree to three, so a report printing both at the same precision would
+    show one number twice and prove nothing.
     """
-    fake_source(make_data())
+    fake_source(read())
 
     assert cli.main([str(FIXTURE)]) == 0
 
@@ -1017,7 +1134,7 @@ def test_the_report_states_which_enclosure_the_panel_was_identified_as(fake_sour
     success case — where confirmation that the artwork is the case the operator
     thinks it is, is the one thing they are looking for.
     """
-    fake_source(make_data())
+    fake_source(read())
 
     assert cli.main([str(FIXTURE)]) == 0
 
@@ -1031,7 +1148,7 @@ def test_an_enclosure_nobody_could_identify_is_said_out_loud():
     """A missing line reads as a case nobody wrote down. "This is no footprint we
     stock" is a legitimate outcome — the catalogue holds 22 and the world holds
     rather more — and it is not the same statement as saying nothing."""
-    lines = cli.format_enclosure(make_data())
+    lines = cli.format_enclosure(document())
 
     assert "ENCLOSURE" in lines
     assert any("not identified" in line for line in lines)
@@ -1040,13 +1157,19 @@ def test_an_enclosure_nobody_could_identify_is_said_out_loud():
 def test_a_declared_part_replaces_the_candidate_list():
     """The question the list asks has been answered, so the report answers it —
     the same rule the drawing's title block follows. A turned panel says so,
-    because the catalogue's own orientation is what is printed beside it."""
+    because the catalogue's own orientation is what is printed beside it.
+
+    The footprint is printed as the datasheet prints it — ``120 x 94``, whole
+    millimetres — rather than as ``120.000 x 94.000``: these are catalogue
+    constants and the report keeps them visibly apart from the measurement two
+    blocks above.
+    """
     data = dataclasses.replace(
-        make_data(),
+        document(),
         enclosure=EnclosureMatch(
             family="Hammond 1590",
-            length_mm=120,
-            width_mm=94,
+            length_nm=120_000_000,
+            width_nm=94_000_000,
             candidates=("1590BB", "1590BB2", "1590BBS", "1590C"),
             rotated=True,
             selected_part="1590BB",
@@ -1070,11 +1193,11 @@ def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, cap
     this table would read 1, 2, 3, so every assertion below fails.
     """
     fake_source(
-        make_data(
+        read(
             holes=[
-                Hole.from_measurement(-20.0, 18.0, 7.0, index=4),
-                Hole.from_measurement(0.0, 18.0, 7.0, index=1),
-                Hole.from_measurement(20.0, 18.0, 7.0, index=9),
+                RawHole(-20.0, 18.0, 7.0, 4),
+                RawHole(0.0, 18.0, 7.0, 1),
+                RawHole(20.0, 18.0, 7.0, 9),
             ]
         )
     )
@@ -1091,17 +1214,43 @@ def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, cap
 def test_verbose_reports_every_stage_the_cli_built(fake_source, capsys):
     """The list of stages comes from ``build_pipeline``, so a stage added there
     is covered here without anyone remembering to add it twice."""
-    fake_source(make_data())
+    fake_source(read())
     cli.main([str(FIXTURE)])
     quiet = capsys.readouterr().out
     assert "deduplicate" not in quiet
 
-    fake_source(make_data())
+    fake_source(read())
     cli.main([str(FIXTURE), "-v"])
     loud = capsys.readouterr().out
     for stage in pipeline_for():
         assert stage.name in loud, f"--verbose said nothing about {stage.name}"
     assert len(loud) > len(quiet)
+
+
+def test_verbose_reports_the_quantisation_phase_as_well_as_the_stages(fake_source, capsys):
+    """The phase is where holes are dropped and most findings are made.
+
+    A listing that jumped from the source's hole count straight to dedupe's
+    would leave the operator with nothing to look at for the step that refused
+    their 30 mm cut-out — which is the step they most need to see.
+    """
+    fake_source(
+        read(
+            holes=[
+                RawHole(-20.0, 18.0, 7.0, 4),
+                RawHole(0.0, 18.0, 30.0, 1),  # no bit makes this
+            ]
+        )
+    )
+
+    cli.main([str(FIXTURE), "-v"])
+
+    line = next(
+        line for line in capsys.readouterr().out.splitlines() if "quantise" in line
+    )
+    assert "1 holes" in line
+    assert "-1 holes" in line
+    assert "unknown-diameter" in line
 
 
 def test_the_traced_path_folds_through_the_same_pipeline_as_the_plain_one():
@@ -1114,17 +1263,17 @@ def test_the_traced_path_folds_through_the_same_pipeline_as_the_plain_one():
     """
     args = cli.build_parser().parse_args(["panel.ai", "--grid", "0.5"])
     pipeline = cli.build_pipeline(args)
-    data = make_data()
+    data = document()
 
     plain = cli.run_pipeline(pipeline, data)
     traced = cli.run_pipeline(pipeline, data, trace=lambda *_: None)
 
     assert traced.processing == plain.processing
     assert [run.name for run in traced.processing] == [stage.name for stage in pipeline]
-    assert traced.last_run("snap").get("grid_mm") == 0.5
+    assert traced.last_run("sort").get("key") == "default"
 
 
-def test_the_grid_reaches_the_drawing_through_the_pipeline_not_the_options(
+def test_the_grid_reaches_the_drawing_through_the_quantiser_not_the_options(
     fake_source, tmp_path
 ):
     """``--grid`` is handed to ``SnapPositions``, and to nothing else.
@@ -1134,7 +1283,7 @@ def test_the_grid_reaches_the_drawing_through_the_pipeline_not_the_options(
     emitted SVG, since agreement between two artifacts is not visible in the
     objects they were built from.
     """
-    fake_source(make_data())
+    fake_source(read())
     svg = tmp_path / "out.svg"
     # 1, not 0: a 0.5 mm grid moves a hole far enough to raise ``off-grid``.
     assert cli.main([str(FIXTURE), "--grid", "0.5", "--emit", f"drawing-svg={svg}"]) == 1
@@ -1149,7 +1298,7 @@ def test_the_output_settings_carry_no_grid():
 
 
 def test_title_reaches_the_drawing(fake_source, tmp_path):
-    fake_source(make_data())
+    fake_source(read())
     svg = tmp_path / "out.svg"
     assert cli.main([str(FIXTURE), "--title", "TAR - FRONT PANEL", "--emit", f"drawing-svg={svg}"]) == 0
     assert "TAR - FRONT PANEL" in svg.read_text()
@@ -1397,23 +1546,28 @@ def test_grid_half_millimetre_raises_two_off_grid_warnings(tmp_path, capsys):
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
-def test_the_fixture_panel_is_identified_as_the_case_it_was_drawn_for(tmp_path):
+def test_the_fixture_panel_is_identified_as_the_case_it_was_drawn_for(capsys):
     """The 1590B footprint, and the artwork's own measurement kept beside it.
+
+    The real file, parsed by the real source and quantised by the real phase:
+    the artwork measures 113.000 × 60.000 and the catalogue says 1590B is
+    112 × 61, so whole millimetres printed beside a fractional measurement is
+    the whole claim. Without ``raw`` the report would state a datasheet number
+    as though it were what the artwork said, and nothing on the page would
+    disagree.
 
     ``--case`` is what makes the check two-way; without it the panel is still
     identified, which is what lets the drawing dimension whole millimetres.
     """
-    doc = tmp_path / "tar.json"
-    assert cli.main([str(FIXTURE), "--case", "1590B", "--emit", f"json={doc}"]) == 1
+    assert cli.main([str(FIXTURE), "--case", "1590B"]) == 1
 
-    document = json.loads(doc.read_text())
-    # Read off the emitted bytes: the artwork measures 113.000 × 60.000 and the
-    # catalogue says 1590B is 112 × 61, so a document carrying whole millimetres
-    # beside a fractional measurement is the enclosure stage having run.
-    assert (document["reference"]["width"], document["reference"]["height"]) == (112.0, 61.0)
-    assert document["reference"]["raw"]["width"] == pytest.approx(113.0, abs=1e-3)
-    assert document["reference"]["raw"]["height"] == pytest.approx(60.0, abs=1e-3)
-    assert [d["code"] for d in document["diagnostics"]] == ["duplicate-hole"]
+    out = capsys.readouterr().out
+    reference = report_field(out, "reference")
+    assert reference.startswith("112.000 x 61.000 mm")
+    assert re.search(r"raw 113\.0000 x 60\.000\d mm", reference), reference
+    assert report_field(out, "footprint") == "Hammond 1590  112 x 61 mm"
+    assert report_field(out, "part") == "1590B"
+    assert report_diagnostic_groups(out) == {"warning": ["duplicate-hole"]}
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
