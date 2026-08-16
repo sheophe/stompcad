@@ -10,7 +10,7 @@ import pytest
 
 from aidrill.emitters.drawing.build import iso_frame_items, pens_for
 from aidrill.emitters.drawing.layout import Layout
-from aidrill.emitters.drawing.scene import Line, Polygon, Rect
+from aidrill.emitters.drawing.scene import Line, Polygon, Rect, Text
 from aidrill.emitters.drawing.sheet import (
     A4_PORTRAIT,
     CENTRING_MARK_OVERSHOOT,
@@ -29,6 +29,7 @@ from aidrill.emitters.drawing.sheet import (
     TRIM_MARK_LONG,
     TRIM_MARK_SHORT,
     FrameStyle,
+    Sheet,
     grid_divisions,
 )
 from aidrill.model import DrillData
@@ -141,7 +142,7 @@ def test_the_chosen_group_matches_the_widths_iso_5457_independently_mandates():
 # --- ISO 5457 sheet furniture ---------------------------------------------
 
 
-def iso_layout(sheet=A4_PORTRAIT):
+def iso_layout(sheet: Sheet = A4_PORTRAIT) -> Layout:
     return Layout.for_sheet(sheet, DrillData(), scale=1.0, frame=FrameStyle.ISO_5457)
 
 
@@ -256,9 +257,8 @@ def test_the_size_designation_sits_in_the_bottom_border_at_the_right_corner():
 # --- ISO 5457 grid reference system ----------------------------------------
 
 
-def grid_text(sheet):
+def grid_text(sheet: Sheet) -> list[Text]:
     from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.scene import Text
 
     return [item for item in grid_reference_items(sheet) if isinstance(item, Text)]
 
@@ -289,6 +289,17 @@ def test_the_first_letter_is_at_the_top_and_the_last_at_the_bottom():
     f_positions = [t.y for t in letters if t.content == "F"]
 
     assert max(a_positions) < min(f_positions)
+
+
+def test_the_first_numeral_is_at_the_left_and_the_last_at_the_right():
+    """4.4: 'from left to right', so 1 has the smallest X and 8 the largest."""
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    numerals = [t for t in grid_text(A3_LANDSCAPE) if t.content.isdigit()]
+    first_positions = [t.x for t in numerals if t.content == "1"]
+    last_positions = [t.x for t in numerals if t.content == "8"]
+
+    assert max(first_positions) < min(last_positions)
 
 
 def test_a4_carries_its_references_only_at_the_top_and_the_right():
