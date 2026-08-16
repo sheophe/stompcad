@@ -34,7 +34,8 @@ from .sources import AiPdfSource
 from .quantise import quantise
 from .pipeline import (
     SnapPositions, SnapDiametersToDrillTable, Deduplicate, IdentifyHammondFootprint,
-    CheckReferenceSize, SortHoles, DrillStandard, DRILL_STANDARDS, DEFAULT_STANDARD,
+    CheckReferenceSize, ReviewGridTies, SortHoles, DrillStandard, DRILL_STANDARDS,
+    DEFAULT_STANDARD,
 )
 from .enclosures import Enclosure, HAMMOND_1590, footprints
 from .errors import (
@@ -48,7 +49,8 @@ __all__ = [
     "AiPdfSource",
     "quantise",
     "SnapPositions", "SnapDiametersToDrillTable", "Deduplicate", "IdentifyHammondFootprint",
-    "CheckReferenceSize", "SortHoles", "DrillStandard", "DRILL_STANDARDS", "DEFAULT_STANDARD",
+    "CheckReferenceSize", "ReviewGridTies", "SortHoles", "DrillStandard", "DRILL_STANDARDS",
+    "DEFAULT_STANDARD",
     "Enclosure", "HAMMOND_1590", "footprints",
     "AidrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]

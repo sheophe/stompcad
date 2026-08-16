@@ -14,10 +14,11 @@ difference rather than the topic:
   time, they run in an order that is not the caller's to choose, and one of them
   can stop the run. ``aidrill.quantise`` composes them and is the only thing
   that does.
-* **The stages** — ``Deduplicate``, ``SortHoles`` and ``CheckReferenceSize`` —
-  are ``DrillData → DrillData``, satisfy ``aidrill.protocols.Stage``, and are
-  pure functions of their input. None of them asserts anything about which stage
-  ran before it; order is chosen by the caller (``cli.py``), not by the stages.
+* **The stages** — ``Deduplicate``, ``ReviewGridTies``, ``SortHoles`` and
+  ``CheckReferenceSize`` — are ``DrillData → DrillData``, satisfy
+  ``aidrill.protocols.Stage``, and are pure functions of their input. None of
+  them asserts anything about which stage ran before it; order is chosen by the
+  caller (``cli.py``), not by the stages.
 
 The two are composed in that order, and dedupe is why: it collapses holes that
 share a position and a diameter *exactly*, which it can only do once something
@@ -35,7 +36,7 @@ from .diameters import (
     SnapDiametersToDrillTable,
 )
 from .enclosure import CATALOGUE, IdentifyHammondFootprint, normalize_part_name
-from .snap import SnapPositions
+from .snap import ReviewGridTies, SnapPositions
 from .sort import SortHoles
 from .validate import CheckReferenceSize
 
@@ -48,6 +49,7 @@ __all__ = [
     "METRIC_BANDS",
     "FRACTIONAL_SIXTY_FOURTHS",
     "Deduplicate",
+    "ReviewGridTies",
     "CheckReferenceSize",
     "SortHoles",
     "IdentifyHammondFootprint",

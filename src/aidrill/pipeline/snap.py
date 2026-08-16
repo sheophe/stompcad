@@ -20,30 +20,37 @@ The raw measurement is never lost: ``Hole.raw`` keeps it, so a drawing can show
 "−40.000 (raw −39.9906)" and any residual can be recomputed rather than
 remembered.
 
-**Snapping answers; it does not judge — except once, about the panel.** A hole
-exactly halfway between two grid points gets one of them from ``round``'s parity
-rule, which is deterministic and carries no information about what the designer
-meant. One such hole is nothing: the question genuinely had two equally good
-answers and either is drillable. Half a panel is a different fact — artwork
-drawn on 0.5 mm and run at ``--grid 1.0`` puts *every* hole on a midpoint, and
-the tool used to drill it without a word. `SnapPositions.review_panel` is that
-count, asked once over the finished holes; the holes are snapped either way,
-because the positions are not wrong and there is nothing here to withhold.
+**Snapping answers; it does not judge — the judging is a separate stage.** A
+hole exactly halfway between two grid points gets one of them from ``round``'s
+parity rule, which is deterministic and carries no information about what the
+designer meant. The hole is snapped either way, because the position is not
+wrong and there is nothing here to withhold. But artwork drawn on 0.5 mm and run
+at ``--grid 1.0`` puts *every* hole on a midpoint, and the tool used to drill it
+without a word. `ReviewGridTies` is the finding that says so, and it lives in
+this module because "tied" is a fact about the pitch and there must be exactly
+one definition of it — while being a ``Stage`` rather than a second method on
+the quantiser, for a reason its own docstring gives: the verdict has to be about
+the holes the emitters receive, and that is not the set the quantiser sees.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from decimal import ROUND_HALF_EVEN
 from typing import ClassVar
 
 from ..formatting import format_mm
-from ..model import Diagnostic, Hole, RawHole, StageRun
+from ..model import Diagnostic, DrillData, Hole, RawHole, StageRun
 from ..tolerance import within
 from ..units import format_nm, nm_from_mm, scaled_nm
 
-__all__ = ["SnapPositions"]
+__all__ = ["SnapPositions", "ReviewGridTies"]
+
+#: The key ``SnapPositions`` records its effective pitch under, and the key
+#: `ReviewGridTies` reads it back from. Spelled once, because the two are one
+#: conversation: a reader looking under a name the writer stopped using would
+#: find no pitch and silently review nothing.
+_GRID_PARAMETER: str = "grid_nm"
 
 #: The finest grid a drilled panel can be described on. The drill file and the
 #: drawing both print three decimals of a millimetre, so below a micron the
@@ -122,10 +129,14 @@ class SnapPositions:
         ``SnapPositions(250_000)`` was constructed with ``None`` there but
         behaves as 62 500, and a record of ``None`` would tell a reader nothing
         about what happened to the data.
+
+        The pitch is not only provenance: `ReviewGridTies` reads it back out of
+        this record rather than being handed a second copy, so the two names
+        come from `_GRID_PARAMETER` instead of being spelled twice.
         """
         return StageRun(
             self.name,
-            (("grid_nm", self.grid_nm), ("warn_over_nm", self.warn_over_nm)),
+            ((_GRID_PARAMETER, self.grid_nm), ("warn_over_nm", self.warn_over_nm)),
         )
 
     def quantise(self, hole: RawHole) -> tuple[tuple[int, int], tuple[Diagnostic, ...]]:
@@ -158,120 +169,6 @@ class SnapPositions:
         if within(distance_sq, 0, self.warn_over_nm * self.warn_over_nm):
             return (x_nm, y_nm), ()
         return (x_nm, y_nm), (self._off_grid(hole, x_nm, y_nm, math.isqrt(distance_sq)),)
-
-    def review_panel(self, holes: Sequence[Hole]) -> tuple[Diagnostic, ...]:
-        """Did the panel tie often enough to doubt the declared pitch?
-
-        One question about all the holes at once, which is why it is not asked
-        from `quantise`'s per-hole seat and is not answered by accumulating
-        there either: a counter surviving between calls would make this
-        quantiser order-dependent, and a second run over the same holes would
-        disagree with the first. Nothing here is state — the finished holes
-        arrive, the count is taken, and the instance is as it was.
-
-        **Per axis, and never the scalar distance.** ``moved_nm`` is the
-        Euclidean distance the off-grid finding reports, and it equals half a
-        pitch only when one axis moved half a pitch and the other did not move
-        at all. A hole tied on *both* axes — the most obvious shape of "drawn on
-        the wrong grid" — is 1.41 half-pitches from where it was drawn, so a
-        scalar rule scores it as ordinary and fails hardest on the case this
-        finding exists for.
-
-        **``or``, not ``and``.** A tie on either axis already proves the
-        declared pitch is not the one the artwork was drawn on. ``and`` would
-        require every tied hole to be offset diagonally, and would read a row of
-        pots at constant Y — offset in X alone, the common case — as evidence
-        that nothing is wrong. A hole on-grid in both axes is consistent with
-        the declared grid *and* with the finer one it may have been drawn on, so
-        it is **not** evidence either way and ``or`` correctly declines to count
-        it: the predicate flags positive evidence and abstains on ambiguity.
-
-        **Exact equality, and no ``Decimal``.** The pitch is a whole number of
-        microns and therefore always even, so half of it is a whole nanometre a
-        residual can land on. That is guaranteed rather than lucky — a 1 001 nm
-        grid never reaches here, because the constructor refuses it — so there
-        is no parity to handle and no band to choose. An odd pitch would have
-        had a half-nanometre midpoint no residual could equal, and the finding
-        would have been silent on every panel run at one.
-
-        What makes exactness true of *artwork* as well as of a fixture
-        is reading the residual: a circle drawn at a 0.375 mm offset comes off
-        the page as 0.3749999999999999, because the PDF operands, the CTM, the
-        Bézier centroid and the frame subtraction are all binary float before
-        anything decimal happens, so an exact test on the measurement would
-        never fire and this would be dead code on every real panel. The residual
-        is measured against ``nm_from_mm`` of that measurement, so the nanometre
-        boundary supplies a ±0.5 nm window implicitly — inherited from a
-        boundary the codebase already has rather than a constant anybody chose.
-
-        **One tie is enough, and there is no proportion to reach.** An earlier
-        rule wanted half the panel before it would speak, which bought nothing
-        and cost two things. It made the answer depend on *which* holes were
-        counted, so a duplicated circle — two marks at one place, one hole in
-        the panel — could push a panel over the line or hold it under: the
-        finding and the drill file could then disagree about how many holes the
-        panel has, which is the disagreement this whole tool exists to prevent.
-        And it stayed silent on the panel with one deliberate half-offset hole,
-        which is the case an operator would most like named, because a single
-        tie is a hole placed by a rule rather than by the artwork.
-
-        Asking only whether *any* hole tied removes both. A duplicate is
-        identical by definition, so it has the identical residual, and dedupe
-        keeps one of each group — the verdict is therefore the same before and
-        after deduplication, and nothing here needs to know which side of it
-        the holes arrived from.
-
-        An empty panel is silent because an empty tuple is falsey, which needs
-        no guard of its own.
-        """
-        tied = tuple(hole.index for hole in holes if self._is_tied(hole))
-        return (self._ambiguous(tied),) if tied else ()
-
-    def _is_tied(self, hole: Hole) -> bool:
-        """Did this hole land exactly between two grid points on either axis?"""
-        dx_nm, dy_nm, _ = hole.residual_nm
-        return self._axis_tied(dx_nm) or self._axis_tied(dy_nm)
-
-    def _axis_tied(self, moved_nm: int) -> bool:
-        """Half a pitch, in whole nanometres, whichever way the hole went.
-
-        ``abs`` and not a signed comparison: on a centre-origin panel half the
-        residuals are negative, and a spelling that only recognised the positive
-        ones would drop half the evidence with nothing to show for it.
-        """
-        return 2 * abs(moved_nm) == self.grid_nm
-
-    def _ambiguous(self, tied: tuple[int, ...]) -> Diagnostic:
-        """Name the holes a rule placed, and the pitch to reconsider.
-
-        One finding about the panel, so there is no ``hole_index`` and no
-        ``location_nm``. A singular index is the payload of a hole-level
-        finding: the drawing rings whatever it names, so an arbitrary member of
-        a tied set would be put where the cause belongs and the operator would
-        go and inspect a hole no more at fault than the rest. ``tied_indices``
-        carries the whole set instead, for a consumer that wants per-hole
-        behaviour. It does not end ``_nm`` and must not — it is a list of
-        identities, not of lengths.
-
-        **There is no denominator, deliberately.** Nothing here decides by
-        proportion any more, so a hole count would be context rather than
-        evidence — and it would be context measured before deduplication, free
-        to say four where the drill file says three. A number in a finding that
-        contradicts the artifact beside it is worse than no number at all.
-
-        The sentence points at the declared grid, because that is the thing the
-        operator can change. The positions are not wrong: each is a legitimate
-        answer to a question with two equally good answers, so there is nothing
-        to fix in the artwork and nothing to fix in the artifacts.
-        """
-        return Diagnostic.warning(
-            "grid-ambiguous",
-            f"{len(tied)} hole(s) sat exactly halfway between two "
-            f"{format_nm(self.grid_nm)} mm grid points and were placed by the "
-            f"tie-break rather than by the artwork: the declared grid is "
-            f"probably not the one the panel was drawn on",
-            data=(("tied_indices", tied),),
-        )
 
     def _clamped(self) -> Diagnostic:
         """Say which pitch was asked for and which one was used.
@@ -346,6 +243,161 @@ class SnapPositions:
         """
         quotient = scaled_nm(mm) / self.grid_nm
         return int(quotient.to_integral_value(rounding=ROUND_HALF_EVEN)) * self.grid_nm
+
+
+class ReviewGridTies:
+    """Say so when a hole was placed by the tie-break rather than by the artwork.
+
+    A hole exactly halfway between two grid points is snapped by ``round``'s
+    parity rule, which is deterministic and carries no information about what
+    the designer meant. **One is enough.** A single deliberate half-offset hole
+    is the case an operator would most like named, and the whole panel tied is
+    the mistake this exists for — artwork on 0.5 mm run at ``--grid 1.0``. There
+    is no proportion in between to argue about, and therefore no denominator.
+
+    **A ``Stage``, and it must run after ``Deduplicate``.** Tie status is read
+    off ``Hole.raw``, while ``Deduplicate`` groups on the nominal ``(x_nm, y_nm,
+    diameter_nm)`` — so two *different* measurements can snap onto one nominal
+    hole, be duplicates of each other, and disagree about whether they tied. At
+    a 250 000 nm pitch a hole measured at 0.000 and one measured at 0.125 both
+    finish at 0: reviewed before dedupe the panel is ambiguous, reviewed after
+    it is not, and *which* of the pair survives is decided by whichever the
+    source happened to reach first. A verdict that turns on traversal order is
+    not a verdict, and ``tied_indices`` would be free to name an identity that
+    reaches no artifact. So the review is asked of the holes the emitters
+    receive, which is what makes it a stage the caller can place rather than a
+    second method on the quantiser.
+
+    **The pitch is read back, never handed in.** ``SnapPositions`` already
+    reports the effective grid, and a second copy given to this stage could be a
+    pitch nothing was snapped to — the disagreement ``processing`` exists to
+    prevent, and the one the drawing's title block was already caught making.
+
+    That read is not a stage asserting what ran before it (LSP). ``last_run``
+    answers ``None`` for "no such stage ran", its docstring requires a caller to
+    render that rather than substitute a default, and the rendering here is the
+    honest one: nothing snapped these holes, so no pitch defines a midpoint, so
+    there is no tie to find and the data comes back untouched. The stage is
+    correct in a pipeline with no ``snap`` in it, which is the whole of what LSP
+    asks.
+    """
+
+    name: ClassVar[str] = "review-grid-ties"
+
+    def describe(self) -> StageRun:
+        """No parameters: everything this stage uses, it reads off the data.
+
+        Recording the pitch here would be the obvious thing and the wrong one —
+        ``snap`` already reports it, and one number in two records is two
+        numbers the moment either moves. The record still earns its place, for
+        ``Deduplicate``'s reason: it is how a consumer knows the review happened
+        at all, which an empty diagnostics list cannot tell them apart from a
+        panel that simply had no ties.
+        """
+        return StageRun(self.name, ())
+
+    def apply(self, data: DrillData) -> DrillData:
+        grid_nm = self._pitch(data)
+        if grid_nm is None:
+            return data
+        tied = tuple(hole.index for hole in data.holes if _is_tied(hole, grid_nm))
+        return data.with_diagnostics(*((_ambiguous(tied, grid_nm),) if tied else ()))
+
+    def _pitch(self, data: DrillData) -> int | None:
+        """The pitch these holes were really snapped to, or ``None`` for none.
+
+        A ``_nm`` key in a ``StageRun`` payload is already held to a whole
+        ``int`` where it is constructed, so the only question left is whether a
+        pitch is there to read: no ``snap`` in the pipeline, or a record that
+        did not report one.
+        """
+        run = data.last_run(SnapPositions.name)
+        pitch = None if run is None else run.get(_GRID_PARAMETER)
+        return pitch if isinstance(pitch, int) else None
+
+
+def _is_tied(hole: Hole, grid_nm: int) -> bool:
+    """Did this hole land exactly between two grid points on either axis?
+
+    **Per axis, and never the scalar distance.** ``moved_nm`` is the Euclidean
+    distance the off-grid finding reports, and it equals half a pitch only when
+    one axis moved half a pitch and the other did not move at all. A hole tied
+    on *both* axes — the most obvious shape of "drawn on the wrong grid" — is
+    1.41 half-pitches from where it was drawn, so a scalar rule scores it as
+    ordinary and fails hardest on the case this finding exists for.
+
+    **``or``, not ``and``.** A tie on either axis already proves the declared
+    pitch is not the one the artwork was drawn on. ``and`` would require every
+    tied hole to be offset diagonally, and would read a row of pots at constant
+    Y — offset in X alone, the common case — as evidence that nothing is wrong.
+    A hole on-grid in both axes is consistent with the declared grid *and* with
+    the finer one it may have been drawn on, so it is **not** evidence either
+    way and ``or`` correctly declines to count it: the predicate flags positive
+    evidence and abstains on ambiguity.
+
+    **The residual, not the measurement**, and that is what makes the exactness
+    below true of artwork rather than only of a fixture. A circle drawn at a
+    0.375 mm offset comes off the page as 0.3749999999999999, because the PDF
+    operands, the CTM, the Bézier centroid and the frame subtraction are all
+    binary float before anything decimal happens, so an exact test on the
+    measurement would never fire and this would be dead code on every real
+    panel. ``Hole.residual_nm`` is measured against ``nm_from_mm`` of that
+    measurement, so the nanometre boundary supplies a ±0.5 nm window implicitly
+    — inherited from a boundary the codebase already has rather than a constant
+    anybody chose.
+    """
+    dx_nm, dy_nm, _ = hole.residual_nm
+    return _axis_tied(dx_nm, grid_nm) or _axis_tied(dy_nm, grid_nm)
+
+
+def _axis_tied(moved_nm: int, grid_nm: int) -> bool:
+    """Half a pitch, in whole nanometres, whichever way the hole went.
+
+    ``abs`` and not a signed comparison: on a centre-origin panel half the
+    residuals are negative, and a spelling that only recognised the positive
+    ones would drop half the evidence with nothing to show for it.
+
+    **Exact equality, and no ``Decimal``.** A pitch that reaches here is a whole
+    number of microns and therefore even, so half of it is a whole nanometre a
+    residual can land on. That is guaranteed rather than lucky —
+    ``SnapPositions`` refuses a 1 001 nm grid, so no such pitch is ever
+    recorded — and it means there is no parity to handle and no band for anybody
+    to choose. An odd pitch would have had a half-nanometre midpoint no residual
+    could equal, and the finding would have been silent on every panel run at
+    one.
+    """
+    return 2 * abs(moved_nm) == grid_nm
+
+
+def _ambiguous(tied: tuple[int, ...], grid_nm: int) -> Diagnostic:
+    """Name the holes a rule placed, and the pitch to reconsider.
+
+    One finding about the panel, so there is no ``hole_index`` and no
+    ``location_nm``. A singular index is the payload of a hole-level finding:
+    the drawing rings whatever it names, so an arbitrary member of a tied set
+    would be put where the cause belongs and the operator would go and inspect a
+    hole no more at fault than the rest. ``tied_indices`` carries the whole set
+    instead, for a consumer that wants per-hole behaviour. It does not end
+    ``_nm`` and must not — it is a list of identities, not of lengths.
+
+    **There is no denominator, deliberately.** Nothing here decides by
+    proportion, so a hole count would be context rather than evidence, and a
+    number in a finding that contradicts the artifact beside it is worse than no
+    number at all.
+
+    The sentence points at the declared grid, because that is the thing the
+    operator can change. The positions are not wrong: each is a legitimate
+    answer to a question with two equally good answers, so there is nothing to
+    fix in the artwork and nothing to fix in the artifacts.
+    """
+    return Diagnostic.warning(
+        "grid-ambiguous",
+        f"{len(tied)} hole(s) sat exactly halfway between two "
+        f"{format_nm(grid_nm)} mm grid points and were placed by the "
+        f"tie-break rather than by the artwork: the declared grid is "
+        f"probably not the one the panel was drawn on",
+        data=(("tied_indices", tied),),
+    )
 
 
 def _whole(name: str, value: int) -> int:

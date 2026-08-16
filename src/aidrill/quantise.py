@@ -93,13 +93,13 @@ def quantise(
             enclosure=match,
         )
 
-    # The first of two once-per-run findings, and the one that is known before
-    # any hole is. ``SnapPositions`` raises it in its constructor when the
-    # requested pitch was too fine to render and had to be clamped, because no
-    # per-hole signature can carry it: returned from ``quantise(hole)`` it would
-    # repeat for every circle on the panel and vanish entirely on a panel with
-    # no circles — the run where the operator most needs telling that their grid
-    # is not the one they typed.
+    # The one finding here that belongs to no hole, and the one that is known
+    # before any hole is. ``SnapPositions`` raises it in its constructor when
+    # the requested pitch was too fine to render and had to be clamped, because
+    # no per-hole signature can carry it: returned from ``quantise(hole)`` it
+    # would repeat for every circle on the panel and vanish entirely on a panel
+    # with no circles — the run where the operator most needs telling that their
+    # grid is not the one they typed.
     findings.extend(positions.diagnostics)
 
     holes: list[Hole] = []
@@ -124,14 +124,6 @@ def quantise(
                 index=measurement.index,
             )
         )
-
-    # The second, and the reason it is collected here rather than beside the
-    # first: "half the holes tied" is not a fact about any hole, so it can only
-    # be asked once every hole has one. The rule still belongs to the quantiser
-    # that owns the pitch, which is why it is a second method on
-    # ``SnapPositions`` rather than four lines here: this phase composes, and
-    # holds no domain knowledge of its own.
-    findings.extend(positions.review_panel(holes))
 
     runs.append(diameters.describe())
     runs.append(positions.describe())

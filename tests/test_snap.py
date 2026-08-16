@@ -1,4 +1,10 @@
-"""Tests for ``SnapPositions`` (SPEC §5, PLAN task B).
+"""Tests for the two halves of ``aidrill.pipeline.snap``.
+
+``SnapPositions`` answers which grid point a measured centre belongs on;
+``ReviewGridTies`` asks, of the holes that survive into the artifacts, whether
+any of them was placed by the tie-break rather than by the artwork. They share a
+module because "tied" is a fact about the pitch and there must be one definition
+of it, and they share this file for the same reason.
 
 Split out of ``test_pipeline.py``, which had grown to 2160 lines covering six
 stages with three agents about to work on it in parallel: one file per stage
@@ -18,8 +24,8 @@ import random
 
 import pytest
 
-from aidrill.model import Hole, RawHole, Severity
-from aidrill.pipeline import SnapPositions
+from aidrill.model import Diagnostic, DrillData, Hole, RawHole, Severity, StageRun
+from aidrill.pipeline import ReviewGridTies, SnapPositions
 
 
 def raw(x: float, y: float, *, index: int, diameter: float = 7.0) -> RawHole:
@@ -31,7 +37,7 @@ def raw(x: float, y: float, *, index: int, diameter: float = 7.0) -> RawHole:
 def snapped(stage: SnapPositions, *measurements: RawHole) -> tuple[Hole, ...]:
     """The finished holes, assembled the way the quantisation phase assembles them.
 
-    ``review_panel`` reads ``Hole.residual_nm``, which is the same subtraction
+    ``ReviewGridTies`` reads ``Hole.residual_nm``, which is the same subtraction
     ``quantise`` made, so the fixtures go through the real snap rather than
     stating a residual by hand: a ``Hole`` whose ``raw`` was written to sit half
     a pitch away would prove the predicate reads what the test wrote and nothing
@@ -50,6 +56,19 @@ def snapped(stage: SnapPositions, *measurements: RawHole) -> tuple[Hole, ...]:
             )
         )
     return tuple(holes)
+
+
+def reviewed(stage: SnapPositions, *measurements: RawHole) -> tuple[Diagnostic, ...]:
+    """What ``ReviewGridTies`` finds on a panel that ``stage`` snapped.
+
+    The provenance is the quantiser's own ``describe()`` rather than a
+    hand-written ``StageRun``: the stage reads its pitch back out of that
+    record, so a fixture stating the pair by hand would stay green through a
+    quantiser that had stopped recording the pitch at all -- which is precisely
+    the drift a single spelling of the key exists to make impossible.
+    """
+    data = DrillData(holes=snapped(stage, *measurements)).with_processing(stage.describe())
+    return ReviewGridTies().apply(data).diagnostics
 
 
 def codes(diagnostics) -> list[str]:
@@ -394,16 +413,15 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
         assert codes(stage.quantise(raw(0.01, 0.0, index=1))[1]) == ["off-grid"]
 
 
-class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
+class TestReviewGridTies:
     """Half-to-even is deterministic and says nothing about what was meant.
 
     A hole exactly halfway between two grid points gets one of them by a rule
-    rather than by evidence. One such hole is nothing — the question genuinely
-    had two equally good answers and either is drillable. Half a panel is a
-    different fact: artwork drawn on 0.5 mm and run at ``--grid 1.0`` puts
-    *every* hole on a midpoint, and the tool drilled it without comment. The
-    holes are snapped either way; the operator is owed being told before the
-    drill finds out.
+    rather than by evidence, and the operator is owed being told before the
+    drill finds out. One tie is enough: a single deliberate half-offset hole is
+    the case most worth naming, and artwork drawn on 0.5 mm and run at
+    ``--grid 1.0`` puts *every* hole on a midpoint. The holes are snapped either
+    way — the positions are not wrong.
 
     Every fixture here runs at a 250 000 nm pitch, so a tie is a residual of
     exactly 125 000 nm on either axis.
@@ -428,9 +446,7 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         +125 000, Y of +125 000 and −125 000, and each axis therefore carries a
         tie of each sign rather than the two axes agreeing on one.
         """
-        stage = SnapPositions(250_000)
-
-        assert codes(stage.review_panel(snapped(stage, raw(x, y, index=4)))) == [
+        assert codes(reviewed(SnapPositions(250_000), raw(x, y, index=4))) == [
             "grid-ambiguous"
         ]
 
@@ -449,9 +465,7 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         measurement = raw(0.125, 0.125, index=4)
 
         assert stage.quantise(measurement)[1][0].get("moved_nm") == 176_776
-        assert codes(stage.review_panel(snapped(stage, measurement))) == [
-            "grid-ambiguous"
-        ]
+        assert codes(reviewed(stage, measurement)) == ["grid-ambiguous"]
 
     def test_a_tie_on_one_axis_survives_an_ordinary_residual_on_the_other(self):
         """``or``, and never ``and``.
@@ -462,11 +476,9 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         alone, the common case — as evidence that nothing is wrong. Here Y moves
         31 000 nm, which is neither a tie nor nothing.
         """
-        stage = SnapPositions(250_000)
-
-        assert codes(
-            stage.review_panel(snapped(stage, raw(0.125, 0.031, index=4)))
-        ) == ["grid-ambiguous"]
+        assert codes(reviewed(SnapPositions(250_000), raw(0.125, 0.031, index=4))) == [
+            "grid-ambiguous"
+        ]
 
     def test_a_hole_already_on_a_grid_point_is_not_tied(self):
         """Residual zero, and ``2 * 0 == grid_nm`` is false for any real pitch.
@@ -477,21 +489,16 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         every well-drawn panel there is.
         """
         stage = SnapPositions(250_000)
-        holes = snapped(stage, raw(-0.25, 0.5, index=4), raw(0.75, -1.0, index=1))
 
-        assert stage.review_panel(holes) == ()
+        assert reviewed(stage, raw(-0.25, 0.5, index=4), raw(0.75, -1.0, index=1)) == ()
 
     def test_one_tie_among_many_is_enough_and_none_stays_quiet(self):
         """A single tie is a hole placed by a rule rather than by the artwork.
 
-        The proportion this once required is gone. It bought nothing and cost
-        two things: it made the answer depend on *which* holes were counted, so
-        a duplicated circle could push a panel over the line or hold it under
-        and leave the finding disagreeing with the drill file about how many
-        holes the panel has; and it stayed silent on the panel with one
-        deliberate half-offset hole, which is the case most worth naming.
-
-        One tied hole in four, therefore — the case the old rule ignored.
+        Nothing decides by proportion, so one tied hole in four is the fixture:
+        a panel with a single deliberate half-offset hole is the case an
+        operator would most like named, and the second half of the assertion is
+        what keeps the finding news rather than noise.
         """
         stage = SnapPositions(250_000)
         one_tie = (
@@ -501,33 +508,13 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
             raw(3.0, 0.0, index=7),
         )
 
-        assert codes(stage.review_panel(snapped(stage, *one_tie))) == ["grid-ambiguous"]
-        assert stage.review_panel(snapped(stage, *one_tie[1:])) == ()
-
-    def test_a_duplicated_tie_cannot_change_the_verdict(self):
-        """Two marks at one place are one hole, and must not count as evidence twice.
-
-        This is what asking "did any hole tie" buys over asking "did half of
-        them". A duplicate is identical by definition, so it carries the
-        identical residual, and ``Deduplicate`` keeps one of each group — so the
-        answer is the same whether the review sees the drawn circles or the
-        holes that survive into the artifacts, and nothing here has to know
-        which side of dedupe it was handed.
-        """
-        stage = SnapPositions(250_000)
-        tied, twin = raw(0.125, 0.0, index=4), raw(0.125, 0.0, index=9)
-        ordinary = (raw(-1.0, 0.0, index=1), raw(2.0, 0.0, index=7))
-
-        with_twin = stage.review_panel(snapped(stage, tied, twin, *ordinary))
-        without = stage.review_panel(snapped(stage, tied, *ordinary))
-
-        assert codes(with_twin) == codes(without) == ["grid-ambiguous"]
+        assert codes(reviewed(stage, *one_tie)) == ["grid-ambiguous"]
+        assert reviewed(stage, *one_tie[1:]) == ()
 
     def test_a_panel_with_no_holes_on_it_says_nothing(self):
-        """No ties, nothing to say — and an empty tuple is falsey, so this needs
-        no guard of its own. A warning about a run with no circles in it is
-        noise in front of an operator who has nothing to fix."""
-        assert SnapPositions(250_000).review_panel(()) == ()
+        """No ties, nothing to say. A warning about a run with no circles in it
+        is noise in front of an operator who has nothing to fix."""
+        assert reviewed(SnapPositions(250_000)) == ()
 
     def test_the_finding_names_the_tied_holes_by_identity_and_not_by_position(self):
         """4, 1, 9 — and the tied ones are the first and the last.
@@ -538,20 +525,18 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         identity. Hole 1 sits between them, on the grid, and must not appear.
         """
         stage = SnapPositions(250_000)
-        holes = snapped(
+
+        (diag,) = reviewed(
             stage,
             raw(0.125, 0.0, index=4),
             raw(-0.5, 0.0, index=1),
             raw(0.0, -0.375, index=9),
         )
 
-        diag = stage.review_panel(holes)[0]
-
         assert diag.severity is Severity.WARNING
         assert diag.get("tied_indices") == (4, 9)
-        # No denominator, deliberately: nothing decides by proportion now, so a
-        # hole count would be context measured before dedupe — free to say
-        # three where the drill file says two.
+        # No denominator, deliberately: nothing decides by proportion, so a hole
+        # count in the payload would be context rather than evidence.
         assert "hole_count" not in dict(diag.data)
         assert "tied_count" not in dict(diag.data)
 
@@ -564,8 +549,7 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         beside it. There is no coordinate either — the finding is about the
         pitch, which is nowhere on the panel.
         """
-        stage = SnapPositions(250_000)
-        diag = stage.review_panel(snapped(stage, raw(0.125, 0.0, index=4)))[0]
+        (diag,) = reviewed(SnapPositions(250_000), raw(0.125, 0.0, index=4))
 
         # The key must be *absent*, not present and null. ``get`` cannot tell
         # those apart — its default is ``None`` too — and they are different
@@ -579,32 +563,97 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         sentence has to point there — the positions are not wrong, and a message
         about the holes would send them looking for a defect in the artwork."""
         stage = SnapPositions(250_000)
-        holes = snapped(
+
+        (diag,) = reviewed(
             stage,
             raw(0.125, 0.0, index=4),
             raw(-0.5, 0.0, index=1),
             raw(0.0, -0.375, index=9),
         )
 
-        message = stage.review_panel(holes)[0].message
-
-        assert "2 hole(s)" in message
-        assert "0.250 mm" in message
+        assert "2 hole(s)" in diag.message
+        assert "0.250 mm" in diag.message
 
     def test_reviewing_the_same_panel_twice_gives_the_same_answer(self):
         """No state accumulates across calls, in either direction.
 
-        A quantiser that counted ties into itself would be order-dependent, and
-        a second run over the same holes would disagree with the first. The
-        empty review at the end is the half that a tie *counter* would fail: it
-        must still be silent after two panels' worth of ties have gone past.
+        A stage that counted ties into itself would be order-dependent, and a
+        second run over the same holes would disagree with the first. The empty
+        review at the end is the half that a tie *counter* would fail: it must
+        still be silent after two panels' worth of ties have gone past.
         """
         stage = SnapPositions(250_000)
-        holes = snapped(stage, raw(0.125, 0.0, index=4))
+        tied = raw(0.125, 0.0, index=4)
 
-        assert codes(stage.review_panel(holes)) == ["grid-ambiguous"]
-        assert codes(stage.review_panel(holes)) == ["grid-ambiguous"]
-        assert stage.review_panel(()) == ()
+        assert codes(reviewed(stage, tied)) == ["grid-ambiguous"]
+        assert codes(reviewed(stage, tied)) == ["grid-ambiguous"]
+        assert reviewed(stage) == ()
+
+    def test_the_pitch_is_the_one_the_holes_were_snapped_to_and_not_a_default(self):
+        """One panel, two runs, two answers — and the record is what parts them.
+
+        The same three measurements are snapped at 500 000 nm and at 250 000 nm.
+        At the coarse pitch hole 4 lands 250 000 nm from its centre, exactly
+        half, and the panel is ambiguous; at the fine pitch that same 0.25 mm is
+        a whole grid step and nothing is tied at all. So a stage that had been
+        handed a pitch of its own, or that fell back on one when ``snap`` said
+        something else, gives the wrong answer to one of these two.
+        """
+        panel = (raw(0.25, 0.0, index=4), raw(-1.0, 0.0, index=1), raw(2.0, 0.0, index=9))
+
+        assert codes(reviewed(SnapPositions(500_000), *panel)) == ["grid-ambiguous"]
+        assert reviewed(SnapPositions(250_000), *panel) == ()
+
+    def test_a_run_that_never_snapped_is_reviewed_against_no_pitch_at_all(self):
+        """``last_run`` answers ``None``, and ``None`` is rendered, not defaulted.
+
+        A stage may not assert what ran before it (LSP), so this one has to be
+        correct in a pipeline with no ``snap`` in it. Without a pitch there is no
+        midpoint to be halfway to, and the honest answer is silence: the holes,
+        the reference and every earlier finding come back exactly as they went
+        in. Substituting a plausible default instead would invent a grid these
+        holes were never snapped to and warn about it.
+
+        The holes are the ones the test above finds tied at 500 000 nm, so the
+        silence here is the missing record and not an easy fixture.
+        """
+        stage = SnapPositions(500_000)
+        prior = Diagnostic.info("prior", "something earlier said this")
+        data = DrillData(
+            holes=snapped(stage, raw(0.25, 0.0, index=4), raw(-1.0, 0.0, index=1)),
+            diagnostics=(prior,),
+        )
+
+        assert ReviewGridTies().apply(data) is data
+
+    def test_a_record_from_some_other_stage_is_not_a_pitch(self):
+        """The pitch is looked up by name, and only ``snap`` has one to give.
+
+        A run whose history holds stages but no ``snap`` is the same case as no
+        history at all: nothing here scans the parameters for something
+        grid-shaped, because a ``grid_nm`` another stage happened to record is
+        not the pitch these holes were moved onto.
+        """
+        stage = SnapPositions(500_000)
+        data = DrillData(
+            holes=snapped(stage, raw(0.25, 0.0, index=4))
+        ).with_processing(StageRun("sort", (("key", "default"),)))
+
+        assert ReviewGridTies().apply(data).diagnostics == ()
+
+    def test_the_stage_records_that_it_ran_without_restating_the_pitch(self):
+        """A second copy of one number is two numbers as soon as either moves.
+
+        ``snap`` already reports the effective grid and this stage reads it back
+        from there, so publishing it again here would offer a consumer two
+        answers to one question. The record is not empty for it: it is how a
+        consumer knows the review happened, which no empty diagnostics list can
+        tell them apart from a panel that simply had no ties.
+        """
+        run = ReviewGridTies().describe()
+
+        assert run.name == "review-grid-ties"
+        assert run.parameters == ()
 
 
 def test_the_stage_reports_a_distance_it_could_not_have_got_from_hypot():
