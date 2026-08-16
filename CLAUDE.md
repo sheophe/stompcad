@@ -79,6 +79,7 @@ The accepted architecture is defined by:
 - [ADR-0003](docs/adr/0003-quantisation-boundary-and-ordering.md): the quantisation
   boundary, ordering, and termination rules.
 - [ADR-0004](docs/adr/0004-unit-newtypes.md): the branded length units.
+- [ADR-0005](docs/adr/0005-binary-emitter-payloads.md): the binary emitter payload.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those

@@ -1,0 +1,54 @@
+# ADR-0005: Binary emitter payloads
+
+**Status:** Accepted
+
+## Context
+
+`Emitter.emit` returned `str`, and the command line ended every artifact in
+`path.write_text(text, encoding="utf-8")`. Excellon, JSON and the SVG drawing are all
+text, so the contract and its single writing site agreed.
+
+A PDF drawing does not. PDF is a byte format whose cross-reference table holds byte
+offsets, so it cannot travel a contract that promises text without the encoding step
+becoming part of the format's correctness.
+
+## Decision
+
+The emitter payload is `Payload = str | bytes`. An emitter returns whichever its format
+is; a text emitter continues to return `str` and is unchanged.
+
+The command line owns the encoding decision at the one site that writes a file. It
+dispatches on the value:
+
+```python
+def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
+    if isinstance(payload, bytes):
+        path.write_bytes(payload)
+        size = len(payload)
+    else:
+        path.write_text(payload, encoding="utf-8")
+        size = len(payload.encode("utf-8"))
+    return f"wrote {path}  ({emitter.name}, {size} bytes)"
+```
+
+Every artifact is still rendered before any path is written, so a failure in one emitter
+withholds all of them.
+
+## Rationale
+
+A `binary: ClassVar[bool]` alongside `media_type` and `extension` would match the
+protocol's existing shape, but it is a second claim about the payload that can contradict
+the payload itself. `isinstance` cannot disagree with the value it is given.
+
+Requiring `bytes` from every emitter was rejected for the opposite reason: three existing
+emitters and their suites produce and assert text, and an artifact a person reads is
+legitimately a string.
+
+## Consequences
+
+A binary format is now expressible without a parallel writing path. The cost is one
+branch at one site, and a union that every consumer of `Emitter` must accept: a caller
+that assumes `str` is now wrong, and `mypy` says so.
+
+The reporting line still counts encoded bytes, so its number means the same thing for
+both kinds of payload.

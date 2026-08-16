@@ -26,9 +26,10 @@ the resulting document and may perform presentation-only transformations such as
 coordinate-frame, or textual formatting. They do not quantise, deduplicate, classify,
 sort, or otherwise re-derive shared facts.
 
-An invocation selects one to three emitters through repeatable
-`--emit FORMAT=PATH` arguments. The processing blocks, aggregate boundaries, and typed
-transfers are shown in ADR-0001, Figure 1.
+An invocation selects one to four emitters through repeatable
+`--emit FORMAT=PATH` arguments. Emitter payloads may be text or bytes; see ADR-0005.
+The processing blocks, aggregate boundaries, and typed transfers are shown in ADR-0001,
+Figure 1.
 
 Emitter registration is extensible: a format maps to an emitter without changing the
 processing contract. The CLI explicitly composes the ordered post-quantisation stages;
@@ -58,14 +59,16 @@ flowchart LR
 
     excellon["ExcellonEmitter"]
     drawing["DrawingSvgEmitter"]
+    drawing_pdf["DrawingPdfEmitter"]
     json["JsonEmitter"]
-    selected{"--emit FORMAT=PATH<br/>argument (one to three)"}
+    selected{"--emit FORMAT=PATH<br/>argument (one to four)"}
 
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
     sort -->|DrillData| selected
     selected -->|DrillData| excellon
     selected -->|DrillData| drawing
+    selected -->|DrillData| drawing_pdf
     selected -->|DrillData| json
 ```
 
