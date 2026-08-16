@@ -127,6 +127,24 @@ def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[int, ...]:
     return tuple(n * _SIXTY_FOURTH_NM for n in sixty_fourths)
 
 
+def _whole_nanometres(name: str, value: object) -> int:
+    """A length that is a plain ``int`` of nanometres, and not a float wearing one.
+
+    ``type(value) is int`` and not ``isinstance``, because ``bool`` is a
+    subclass of ``int`` in Python: ``True`` passes an ``isinstance`` guard and
+    goes on to be a one-nanometre matching bound, or a one-nanometre bit, and
+    neither is a number any report would make look wrong.
+
+    Asked at the constructor, on the precedent ``model._check_nanometres`` sets
+    and for its reason: the offending value still has a call site attached to it
+    here. Everywhere else it is a length that never crossed ``units``, and the
+    place it finally surfaces is nowhere near the place it came from.
+    """
+    if type(value) is not int:
+        raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
+    return value
+
+
 def _metric_label(size_nm: int) -> str:
     """``⌀3.20 mm``. Unique *and* truthful at 2 dp across all 183 sizes."""
     return f"⌀{format_nm(size_nm, 2)} mm"
@@ -160,15 +178,31 @@ class DrillStandard:
     label: Callable[[int], str]
 
     def __post_init__(self) -> None:
-        """A drawer with nothing in it drills nothing, so it is not a standard.
+        """The drawer is checked once, here, rather than at every use.
 
-        Checked once, here, rather than at every use: without it the emptiness
-        would first be noticed by the matching stage, as an ``unknown-diameter``
-        error against every hole on the panel and nothing at all pointing at the
-        cause.
+        A drawer with nothing in it drills nothing, so it is not a standard.
+        Without this the emptiness would first be noticed by the matching stage,
+        as an ``unknown-diameter`` error against every hole on the panel and
+        nothing at all pointing at the cause.
+
+        A size that is not a plain positive ``int`` of nanometres is not a bit,
+        and it fails just as far from where it was written: ``7_000_000.0``
+        constructs happily and then raises out of ``Decimal - float`` on the
+        first hole quantised against it, while ``True`` gets as far as being
+        offered to an operator as the nearest available size. The check is
+        elementwise because a table is only as exact as its worst row — the
+        invariant this standard carries is that *every* nominal it hands out is
+        one of these integers.
         """
         if not self.sizes_nm:
             raise ValueError(f"the {self.name} drill standard has no sizes in it")
+        for position, size in enumerate(self.sizes_nm):
+            _whole_nanometres(f"the {self.name} drill standard's size[{position}]", size)
+            if size <= 0:
+                raise ValueError(
+                    f"the {self.name} drill standard holds {size} nm at position "
+                    f"{position}, and no bit is nothing across"
+                )
 
     def select(
         self,
@@ -269,7 +303,11 @@ class SnapDiametersToDrillTable:
     key that promises whole nanometres. It is therefore neither coerced nor
     defaulted on the way in: rounding it here would truncate a real number, and
     accepting a millimetre float would launder it into a field a consumer reads
-    as nanometres — which is exactly what the model's payload guard refuses.
+    as nanometres — which is exactly what the model's payload guard refuses. It
+    is refused *here* rather than there because the payload guard fires from
+    ``describe``, which the phase reaches only after quantising every hole on
+    the panel: a ``TypeError`` out of the provenance record, with the argument
+    that caused it three paths behind and all the work already done.
 
     **An unmatched measurement is not kept.** Retaining it and warning cannot
     survive the invariant this quantiser carries: if every nominal comes from
@@ -288,7 +326,17 @@ class SnapDiametersToDrillTable:
         tolerance_nm: int = 250_000,
     ) -> None:
         self.standard = standard
-        self.tolerance_nm = tolerance_nm
+        self.tolerance_nm = _whole_nanometres("tolerance_nm", tolerance_nm)
+        # Negative is refused rather than clamped, and it is the failure that
+        # says nothing at all: a bound no measurement can be inside of makes
+        # every hole on the panel an ``unknown-diameter`` ERROR, so the report
+        # names forty findings and none of them names the number that caused
+        # them. Zero is a real bound — "this measurement is exactly a size in
+        # the table" — and is left alone.
+        if self.tolerance_nm < 0:
+            raise ValueError(
+                f"tolerance_nm cannot be a negative distance, got {tolerance_nm!r}"
+            )
 
     def describe(self) -> StageRun:
         """Always the name and the count; the sizes only when they are news.

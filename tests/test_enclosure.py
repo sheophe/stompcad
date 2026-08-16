@@ -173,6 +173,31 @@ class TestIdentifyHammondFootprint:
 
         assert match is None
 
+    def test_a_declared_case_is_checked_against_the_unrounded_measurement_too(self):
+        """The same four tenths of a nanometre, on the branch a ``--case`` takes.
+
+        A declaration filters what the common matcher found, so exactness here
+        is inherited rather than owned — and a comparison rounded on this branch
+        alone leaves the test above green. The outcomes are as far apart as the
+        two can be: ``unmatched-enclosure`` is an ERROR that withholds every
+        artifact, while a confirmed declaration snaps the frame to 112 × 61 and
+        drills the panel.
+
+        The 113.5 boundary case is asserted alongside so that the fixture is
+        pinned as a *hair* outside the bound rather than comfortably outside it,
+        which is the only version of it a rounding can move.
+        """
+        on_it = IdentifyHammondFootprint("1590B").quantise(RawOutline(113.5, 61.0), ORIGIN)
+        assert on_it[1] is not None, "the fixture is not a hair outside the bound"
+
+        outline, match, diagnostics = IdentifyHammondFootprint("1590B").quantise(
+            RawOutline(113.5000004, 61.0), ORIGIN
+        )
+
+        assert match is None
+        assert codes(diagnostics) == ["unmatched-enclosure"]
+        assert outline.width_nm == 113_500_000, "the outline was snapped to a footprint anyway"
+
     def test_a_tighter_tolerance_rejects_what_the_default_accepts(self):
         """The fixture's own 1.0 mm error, against a tolerance that will not have it."""
         tight = IdentifyHammondFootprint(tolerance_nm=500_000)
@@ -219,6 +244,25 @@ class TestIdentifyHammondFootprint:
         with pytest.raises(TypeError):
             IdentifyHammondFootprint(tolerance_nm=True)
 
+    def test_a_negative_tolerance_is_refused_rather_than_matching_nothing(self):
+        """One step on from the float, and the failure that says nothing at all.
+
+        No outline is within a negative slack of anything, so every panel comes
+        back ``unknown-enclosure`` — a WARNING, so the run continues and writes
+        a drawing dimensioned to the artwork, with nothing anywhere saying that
+        the catalogue was never really searched.
+        """
+        with pytest.raises(ValueError, match="negative"):
+            IdentifyHammondFootprint(tolerance_nm=-1)
+
+    def test_a_tolerance_of_nothing_is_a_tolerance_and_is_kept(self):
+        """Zero says the outline *is* a catalogue footprint, to the nanometre,
+        which is a question an operator is entitled to ask."""
+        exact = IdentifyHammondFootprint(tolerance_nm=0)
+
+        assert exact.quantise(RawOutline(112.0, 61.0), ORIGIN)[1] is not None
+        assert exact.quantise(RawOutline(112.000001, 61.0), ORIGIN)[1] is None
+
 
 class TestAnUnmatchedOutlineIsQuantisedOntoItself:
     """The outline's answer set is *the catalogue, or the measurement itself*.
@@ -234,7 +278,15 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
     #: Larger than every footprint in the catalogue, on both axes, and not a
     #: whole number of millimetres: the fractional tenth is what proves the
     #: answer is the measurement rather than a rounding of it.
-    UNRECOGNISED = (500.0004, 300.0)
+    #:
+    #: The last digit is doing separate work, and it is the digit below a whole
+    #: nanometre. 500.0004 mm is *exactly* 500 000 400 nm, so a `raw` synthesised
+    #: from the nominal integer would rebuild that very float and the provenance
+    #: assertion below could not tell a kept measurement from a round trip
+    #: through the answer. 500.0004004 mm is 500 000 400.4, quantises to the same
+    #: nominal, and rebuilds as 500.0004 — which is the disagreement the
+    #: assertion needs to be able to see.
+    UNRECOGNISED = (500.0004004, 300.0)
 
     def test_the_answer_is_provably_the_measurement_and_not_a_footprint(self):
         outline, match, _ = IdentifyHammondFootprint().quantise(
@@ -247,11 +299,21 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
 
     def test_the_measurement_is_kept_as_the_float_the_artwork_gave(self):
         """``raw`` is what lets a consumer tell a *measured* 500 from a snapped
-        one, and it is the only place the un-quantised measurement survives."""
+        one, and it is the only place the un-quantised measurement survives.
+
+        The fixture's own arithmetic is asserted first, because this assertion
+        is only worth anything on a measurement the nominal integer cannot
+        reproduce: on a whole number of nanometres, an outline rebuilt with no
+        ``raw`` at all synthesises one that compares equal and the test passes
+        on a quantiser that has thrown the measurement away.
+        """
         outline, _, _ = IdentifyHammondFootprint().quantise(
             RawOutline(*self.UNRECOGNISED), ORIGIN
         )
 
+        assert outline.raw.width * MM != outline.width_nm, (
+            "the fixture is a whole number of nanometres"
+        )
         assert outline.raw == RawOutline(*self.UNRECOGNISED)
 
     def test_it_is_a_warning_and_the_frame_is_still_usable(self):

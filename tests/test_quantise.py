@@ -28,6 +28,7 @@ from aidrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
+from aidrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from aidrill.quantise import quantise
 
 #: The fixture panel's own measurement: 113.000 × 60.000, which the catalogue
@@ -82,7 +83,11 @@ class Watched:
     def __init__(self) -> None:
         self.log: list[str] = []
 
-    def enclosure(self, expected_part: str | None = None) -> IdentifyHammondFootprint:
+    def enclosure(
+        self,
+        expected_part: str | None = None,
+        tolerance_nm: int = DEFAULT_TOLERANCE_NM,
+    ) -> IdentifyHammondFootprint:
         log = self.log
 
         class WatchedEnclosure(IdentifyHammondFootprint):
@@ -90,7 +95,7 @@ class Watched:
                 log.append("enclosure")
                 return super().quantise(outline, centre)
 
-        return WatchedEnclosure(expected_part)
+        return WatchedEnclosure(expected_part, tolerance_nm)
 
     def diameters(self) -> SnapDiametersToDrillTable:
         log = self.log
@@ -168,29 +173,6 @@ def test_a_hole_the_drill_table_refuses_never_reaches_the_grid():
 # ---------------------------------------------------------------------------
 
 
-def test_an_enclosure_error_stops_before_any_hole_is_quantised():
-    """A declared case the artwork contradicts withholds every artifact, so
-    quantising the holes is work for a file nobody receives.
-
-    Asserted on the *work*, not merely on the result: a phase that quantised
-    every hole and then threw them away would produce identical data and would
-    still be wrong about a panel with two thousand circles on it.
-    """
-    watched = Watched()
-
-    out = phase(
-        read(RawHole(-20.0, 18.0, 7.0, 4), RawHole(20.0, 18.0, 5.0, 1)),
-        enclosure=watched.enclosure("1590BB"),  # the artwork is a 1590B
-        diameters=watched.diameters(),
-        positions=watched.positions(),
-    )
-
-    assert watched.log == ["enclosure"]
-    assert out.holes == ()
-    assert codes(out) == ["wrong-enclosure"]
-    assert out.worst_severity is Severity.ERROR
-
-
 def test_a_run_that_stopped_records_only_what_ran():
     """A ``StageRun`` says what a quantiser *did*. A phase that recorded all
     three regardless would tell a consumer the drill table and the grid had been
@@ -204,23 +186,68 @@ def test_a_run_that_stopped_records_only_what_ran():
 
 
 @pytest.mark.parametrize(
-    "expected_part, reference, code",
+    "declared, tolerance_nm, reference, code",
     [
-        ("1590BB", MEASURED, "wrong-enclosure"),
-        ("1590B", None, "unverifiable-enclosure"),
-        ("1590B", RawOutline(200.0, 100.0), "unmatched-enclosure"),
+        ("1590BB", DEFAULT_TOLERANCE_NM, MEASURED, "wrong-enclosure"),
+        ("1590B", DEFAULT_TOLERANCE_NM, None, "unverifiable-enclosure"),
+        ("1590B", DEFAULT_TOLERANCE_NM, RawOutline(200.0, 100.0), "unmatched-enclosure"),
+        (None, 2_000_000, RawOutline(118.0, 78.5), "ambiguous-enclosure"),
     ],
 )
-def test_every_enclosure_error_stops_the_run(expected_part, reference, code):
-    """All three of them, because they arrive by three different paths through
-    the quantiser and only one of them was ever exercised by a single fixture."""
+def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, code):
+    """All four of them, because they arrive by four different paths.
+
+    The first three are the ways a *declaration* can fail, and the fourth is not
+    a fourth spelling of them: ``ambiguous-enclosure`` is the undeclared path —
+    118 × 78.5 mm sits within 2 mm of both 1590B3 and 1590T, and with no
+    ``--case`` there is nothing to break the tie — so it is the one that reaches
+    the abort with ``expected_part`` unset. A phase that returned early on a set
+    of *codes* rather than on the severity would let exactly this one through,
+    and a matrix of the three declaration errors would not notice.
+
+    Asserted on the *work*, not merely on the result: a phase that quantised
+    every hole and then threw them away would produce identical data and would
+    still be wrong about a panel with two thousand circles on it. Hence two
+    holes, both of which the drill table and the grid would have had something
+    to say about.
+    """
+    watched = Watched()
+
     out = phase(
-        read(RawHole(-20.0, 18.0, 7.0, 4), reference=reference),
-        enclosure=IdentifyHammondFootprint(expected_part),
+        read(
+            RawHole(-20.0, 18.0, 7.0, 4),
+            RawHole(20.0, 18.0, 5.0, 1),
+            reference=reference,
+        ),
+        enclosure=watched.enclosure(declared, tolerance_nm),
+        diameters=watched.diameters(),
+        positions=watched.positions(),
     )
 
+    assert watched.log == ["enclosure"]
     assert codes(out) == [code]
     assert out.holes == ()
+    assert out.worst_severity is Severity.ERROR
+
+
+def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
+    """The pre-rounding counterexample, carried to the consequence that matters.
+
+    113.5000004 mm is 113 500 000.4 nm, four tenths of a nanometre outside a
+    1 500 000 nm tolerance around 1590B's 112 mm. ``test_enclosure.py`` pins the
+    quantiser's answer; what a returned tuple cannot carry is what that answer
+    costs — the run's worst severity is ERROR, which is the single thing the CLI
+    reads to withhold every artifact, and no hole was quantised for it.
+    """
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(113.5000004, 61.0)),
+        enclosure=IdentifyHammondFootprint("1590B"),
+    )
+
+    assert codes(out) == ["unmatched-enclosure"]
+    assert out.worst_severity is Severity.ERROR
+    assert out.holes == ()
+    assert [run.name for run in out.processing] == ["identify-enclosure"]
 
 
 def test_an_enclosure_warning_does_not_stop_the_run():
@@ -249,6 +276,25 @@ def test_a_dropped_hole_does_not_stop_the_run():
 
     assert codes(out) == ["unknown-diameter", "unknown-diameter"]
     assert [hole.index for hole in out.holes] == [9]
+
+
+def test_a_diameter_a_hair_outside_the_tolerance_costs_the_run_its_artifacts():
+    """The drill table's half of the same counterexample, at the phase.
+
+    25.2500004 mm is 250 000.4 nm from the largest metric bit, four tenths of a
+    nanometre outside the matching bound; ``test_diameters.py`` pins the refusal
+    itself. Here is what it means for the panel: hole 4 is gone from a document
+    that still carries hole 1, and the run's worst severity is ERROR — so the
+    drill file the machinist would otherwise receive, one hole short and
+    perfectly well-formed, is never written.
+    """
+    out = phase(
+        read(RawHole(-20.0, 18.0, 25.2500004, 4), RawHole(20.0, 18.0, 7.0, 1))
+    )
+
+    assert codes(out) == ["unknown-diameter"]
+    assert out.worst_severity is Severity.ERROR
+    assert [hole.index for hole in out.holes] == [1]
 
 
 # ---------------------------------------------------------------------------

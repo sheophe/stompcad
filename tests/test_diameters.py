@@ -322,6 +322,74 @@ class TestInventoryFiltering:
             self.METRIC.select(include=(3_200_000,), exclude=(3_200_000,))
 
 
+class TestTheAnswerSetAndItsBoundAreCheckedWhereTheyAreDeclared:
+    """Both are refused at the constructor, where the caller still holds them.
+
+    Every assertion here is on a bare constructor call and nothing else, which
+    is what makes it an assertion about *this* guard: the payload guard in the
+    model refuses the same values, but only from ``describe`` — after the run
+    has quantised every hole on the panel — and a test that let the phase get
+    that far would pass on a quantiser with no guard at all.
+
+    The bad size is never the first one in the table. A check that looked at
+    ``sizes_nm[0]`` and called it a table would be indistinguishable otherwise,
+    and the invariant is about every row.
+    """
+
+    LABEL = DRILL_STANDARDS["metric"].label
+
+    def drawer(self, sizes_nm) -> DrillStandard:
+        return DrillStandard(name="drawer", sizes_nm=sizes_nm, label=self.LABEL)
+
+    def test_a_size_that_is_not_whole_nanometres_is_no_size(self):
+        """``7_000_000.0`` is a length that never crossed ``units``. Left alone
+        it constructs, and then crashes in ``Decimal - float`` on the first hole
+        that is quantised against it — one panel's worth of work away from the
+        argument that caused it."""
+        with pytest.raises(TypeError, match=r"size\[1\]"):
+            self.drawer((3_200_000, 7_000_000.0))
+
+    def test_a_boolean_size_is_no_size_either(self):
+        """Checked apart from the float because ``bool`` is an ``int`` in
+        Python: ``True`` passes an ``isinstance`` guard and is then offered to
+        an operator as the nearest bit to their hole, one nanometre across."""
+        with pytest.raises(TypeError, match=r"size\[1\]"):
+            self.drawer((3_200_000, True))
+
+    @pytest.mark.parametrize("size_nm", [0, -3_200_000])
+    def test_a_size_no_bit_could_have_is_refused(self, size_nm):
+        with pytest.raises(ValueError, match="no bit is nothing across"):
+            self.drawer((3_200_000, size_nm))
+
+    def test_a_tolerance_that_is_not_whole_nanometres_is_refused(self):
+        """0.25 mm typed as millimetres is the plausible mistake, and it is the
+        one the bound cannot survive: it is published under ``tolerance_nm`` in
+        the record and in every refusal's payload, where a consumer reads it as
+        nanometres."""
+        with pytest.raises(TypeError, match="tolerance_nm"):
+            SnapDiametersToDrillTable(tolerance_nm=250_000.0)
+
+    def test_a_boolean_tolerance_is_refused(self):
+        with pytest.raises(TypeError, match="tolerance_nm"):
+            SnapDiametersToDrillTable(tolerance_nm=True)
+
+    def test_a_negative_tolerance_is_refused_rather_than_clamped(self):
+        """No measurement is inside a negative bound, so every hole on the panel
+        becomes an ``unknown-diameter`` ERROR — a report naming every hole and
+        not the one number that refused them all."""
+        with pytest.raises(ValueError, match="negative"):
+            SnapDiametersToDrillTable(tolerance_nm=-1)
+
+    def test_a_bound_of_nothing_is_a_bound_and_is_kept(self):
+        """Zero is a real answer — the measurement *is* a size in the table, to
+        the nanometre — and refusing it would refuse a question the operator is
+        entitled to ask."""
+        quantiser = SnapDiametersToDrillTable(tolerance_nm=0)
+
+        assert quantiser.quantise(measured(7.0)) == (7_000_000, ())
+        assert quantiser.quantise(measured(7.000001))[0] is None
+
+
 class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
     """The defect ``units.scaled_nm`` exists to prevent, on the drill table.
 
@@ -368,6 +436,31 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
 
         assert size == 3_000_000
         assert found == ()
+
+    def test_the_tolerance_is_decided_on_the_measurement_and_not_on_a_rounding(self):
+        """The second decision the measurement is put to, and its own branch.
+
+        "Which size is nearest?" and "is it near enough?" are asked separately,
+        so asking the first one exactly does not make the second one exact:
+        rounding the measurement for the tolerance alone leaves both tests above
+        green. 25.2500004 mm is 25 250 000.4 nm, which is 250 000.4 from the
+        biggest metric bit there is — outside the 250 000 nm bound — while the
+        rounded copy sits exactly *on* it, and the bound is inclusive.
+
+        The two answers are not a bit apart. Refused, the hole is an ERROR that
+        withholds every artifact on the run; accepted, a 25.25 mm cut-out is
+        drilled 25.00 and nothing downstream has anything to say about it.
+        """
+        exact = Decimal("25.2500004") * 1_000_000
+        assert abs(exact - 25_000_000) > 250_000, "the fixture is inside the bound"
+        assert nm_from_mm(25.2500004) - 25_000_000 == 250_000, (
+            "the rounded copy is not on the bound"
+        )
+
+        size, found = SnapDiametersToDrillTable().quantise(measured(25.2500004))
+
+        assert size is None
+        assert codes(found) == ["unknown-diameter"]
 
 
 class TestSnapDiametersToDrillTable:

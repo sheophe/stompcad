@@ -217,6 +217,16 @@ class IdentifyHammondFootprint:
             raise TypeError(
                 f"tolerance_nm must be a whole number of nanometres, not {tolerance_nm!r}"
             )
+        # A negative slack is refused for the reason a float is, one step on: no
+        # measurement is inside it, so every panel on earth becomes
+        # ``unknown-enclosure`` — a WARNING, so the run goes on and dimensions
+        # the drawing to the outline as measured, with nothing anywhere saying
+        # that the catalogue was never really searched. Zero is a real bound: an
+        # outline that *is* a catalogue footprint, to the nanometre.
+        if tolerance_nm < 0:
+            raise ValueError(
+                f"tolerance_nm cannot be a negative distance, got {tolerance_nm!r}"
+            )
         self.tolerance_nm = tolerance_nm
         # Normalised once, at construction, so the value compared against the
         # candidates, the value recorded in ``selected_part`` and the value
