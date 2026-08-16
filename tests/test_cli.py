@@ -243,11 +243,21 @@ def test_the_cli_fixes_the_stage_order():
     is the assertion that says it. Everything else derives from
     :func:`pipeline_for`.
 
-    Two stages, because the quantisers are not stages: their order is
-    ``aidrill.quantise``'s and is pinned in ``tests/test_quantise.py``, where the
-    reasons for it live.
+    Three stages, and no quantiser: their order is ``aidrill.quantise``'s and is
+    pinned in ``tests/test_quantise.py``, where the reasons for it live.
+
+    The middle position is the one with a defect behind it. ``ReviewGridTies``
+    must follow ``Deduplicate``, because it judges the pitch from the holes that
+    reach the artifacts and dedupe is what settles which those are; run earlier
+    it can name a hole that is about to be collapsed away. That argument lives
+    in ``cli.build_pipeline`` and the stage's own docstring, and the shape of it
+    is pinned in ``tests/test_pipeline.py``.
     """
-    assert [stage.name for stage in pipeline_for()] == ["deduplicate", "sort"]
+    assert [stage.name for stage in pipeline_for()] == [
+        "deduplicate",
+        "review-grid-ties",
+        "sort",
+    ]
 
 
 def quantisers_for(*argv: str) -> cli.Quantisers:

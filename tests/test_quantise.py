@@ -9,9 +9,10 @@ the provenance records what actually happened rather than what was configured.
 
 One test at the end opens a file. Every other test in the tree builds its
 measurements by hand, which is right for a phase of pure functions and wrong for
-exactly one claim: that ``grid-ambiguous`` fires on *artwork*. A hand-built
-``RawHole(0.125, ...)`` states a midpoint, where a drawn circle only
-approximates one.
+exactly one claim: that a residual this phase produces from *artwork* lands
+exactly on a midpoint, so that ``grid-ambiguous`` is not dead code on every real
+panel. A hand-built ``RawHole(0.125, ...)`` states a midpoint, where a drawn
+circle only approximates one.
 
 Diagnostics are matched on ``code``, never on ``message``.
 """
@@ -31,6 +32,7 @@ from aidrill.model import (
 from aidrill.pipeline import (
     DRILL_STANDARDS,
     IdentifyHammondFootprint,
+    ReviewGridTies,
     SnapDiametersToDrillTable,
     SnapPositions,
 )
@@ -396,61 +398,37 @@ def test_an_unclamped_grid_says_nothing():
     assert codes(out) == []
 
 
-def test_a_panel_that_ties_too_often_is_reported_once_and_after_the_holes():
-    """The phase's other once-per-run finding, and the one that needs the loop.
+def test_the_phase_reports_a_tied_hole_as_moved_and_says_nothing_more():
+    """Whether the *panel* ties is not this phase's question to answer.
 
-    The clamp is known before any hole is looked at. This one cannot be: "half
-    the holes" is not a fact about any hole, so it is collected after the loop
-    rather than before it. Its place in the report is the reading order — the
-    per-hole findings, then the conclusion drawn over all of them.
-
-    Both holes are half a pitch out, so both are off-grid as well; a tie is
-    always a move worth reporting on its own, and the two findings are about
-    different things.
+    Both holes here are half a pitch out, so both are off-grid — a tie is always
+    a move worth reporting on its own. What must not appear beside them is
+    ``grid-ambiguous``: the phase runs before ``Deduplicate``, and a verdict
+    reached here can name a hole that is about to be collapsed away, or miss one
+    that survives. ``ReviewGridTies`` asks it afterwards, of the holes the
+    emitters receive, and this assertion is what stops the question quietly
+    moving back.
     """
     out = phase(read(RawHole(-20.125, 18.0, 7.0, 4), RawHole(0.125, 18.0, 7.0, 1)))
 
-    assert codes(out) == ["off-grid", "off-grid", "grid-ambiguous"]
+    assert codes(out) == ["off-grid", "off-grid"]
 
 
-def test_a_panel_drawn_on_the_declared_grid_is_not_reported_as_ambiguous():
-    """The finding is news, and a run that raises it on every panel has trained
-    the operator to skim past it."""
+def test_a_panel_drawn_on_the_declared_grid_says_nothing_at_all():
+    """The findings this phase makes are news, and a run that raises one on
+    every panel has trained the operator to skim past it."""
     out = phase(read(RawHole(-20.0, 18.0, 7.0, 4), RawHole(0.25, 18.0, 7.0, 1)))
 
     assert codes(out) == []
 
 
-def test_a_panel_with_no_holes_is_never_ambiguous():
-    """``2 * 0 >= 0`` is true, so silence here is a guard and not an accident.
-
-    The zero case is the one that falsifies a threshold written as a ratio, and
-    a warning about a panel with no circles on it is noise in front of an
-    operator with nothing to fix.
-    """
+def test_a_panel_with_no_holes_is_quantised_without_complaint():
+    """A phase handed nothing to quantise has nothing to say about it, and a
+    warning about a panel with no circles on it is noise in front of an operator
+    with nothing to fix."""
     out = phase(read())
 
     assert codes(out) == []
-
-
-def test_a_hole_the_drill_table_dropped_counts_towards_neither_side():
-    """``review_panel`` is handed the finished holes, and a dropped one is not
-    among them.
-
-    Hole 9 is a 30 mm cut-out no bit makes, so the grid never saw it and it has
-    no residual to be tied or untied by. Counting it in the total would dilute
-    the evidence with a hole nothing measured: one tie in the two holes that
-    were quantised is half the panel and warns, while one in three would not.
-    """
-    out = phase(
-        read(
-            RawHole(-20.125, 18.0, 7.0, 4),
-            RawHole(0.0, 18.0, 30.0, 9),
-            RawHole(0.25, 18.0, 7.0, 1),
-        )
-    )
-
-    assert "grid-ambiguous" in codes(out)
 
 
 def test_the_sources_own_findings_survive_the_phase():
@@ -605,6 +583,11 @@ def pt_from_mm(mm: float) -> float:
 def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_path):
     """The one test here that opens a file, and the only kind that can prove it.
 
+    ``ReviewGridTies`` is a stage rather than part of the phase, and it appears
+    in this file all the same because what is on trial is the *residual* the
+    phase produces from artwork. Nothing hand-built can stand in for it, which
+    is the whole reason for the PDF below.
+
     A circle drawn 10.25 mm off centre leaves ``AiPdfSource`` as
     10.249999999999993, because the PDF operands, the CTM, the Bézier centroid
     and the frame subtraction are all binary float before anything decimal
@@ -649,10 +632,11 @@ def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_p
         diameters=SnapDiametersToDrillTable(),
         positions=SnapPositions(500_000),
     )
+    reviewed = ReviewGridTies().apply(out)
 
-    assert codes(out) == ["off-grid", "off-grid", "off-grid", "grid-ambiguous"]
-    ambiguous = out.diagnostics[-1]
-    assert ambiguous.get("tied_indices") == (0, 1, 2)
+    assert codes(out) == ["off-grid", "off-grid", "off-grid"]
+    assert codes(reviewed) == ["off-grid", "off-grid", "off-grid", "grid-ambiguous"]
+    assert reviewed.diagnostics[-1].get("tied_indices") == (0, 1, 2)
 
     # The claim the fixture exists for: the artwork did not survive as the
     # midpoint it was drawn at, and the residual is one anyway.

@@ -9,9 +9,10 @@ produced by an emitter.
 Three constraints are worth stating, because each one is a rule that could
 plausibly have been broken here:
 
-* **The stage order lives here, not in the stages.** dedupe → sort. No stage may
-  assert its own position (LSP), so somebody has to choose, and that somebody is
-  the caller. The *quantisers* are the deliberate exception and are not chosen
+* **The stage order lives here, not in the stages.** dedupe → review-grid-ties →
+  sort. No stage may assert its own position (LSP), so somebody has to choose,
+  and that somebody is the caller. The *quantisers* are the exception and are not
+  chosen
   here at all: they run inside ``aidrill.quantise``, whose docstring says why
   their order is not a caller's to get wrong.
 * **Formats are never named.** ``--emit FORMAT=PATH`` is resolved purely through
@@ -52,6 +53,7 @@ from .pipeline import (
     Deduplicate,
     DrillStandard,
     IdentifyHammondFootprint,
+    ReviewGridTies,
     SnapDiametersToDrillTable,
     SnapPositions,
     SortHoles,
@@ -398,25 +400,33 @@ def _snap_positions(args: argparse.Namespace) -> SnapPositions:
 
 
 def build_pipeline(args: argparse.Namespace) -> Pipeline:
-    """dedupe → sort, after the quantisation phase and never before it.
+    """dedupe → review-grid-ties → sort, after the phase and never before it.
 
     The order is a property of *this* call, not of the stages: no stage knows or
     may ask what ran before it.
 
-    Both positions are worth the sentence, and the first is the reason this
+    Every position is worth a sentence, and the first is the reason this
     pipeline is as short as it is. ``Deduplicate`` compares position and
     diameter exactly and decides neither for itself, so it can only run once
     something else has: that 6.9998 and 7.0002 are one size is
     ``SnapDiametersToDrillTable``'s answer and that −39.9906 and −40.0 are one
     place is ``SnapPositions``', made once in the phase above or made twice and
-    differently. And sorting comes last of all because it orders what survived,
+    differently.
+
+    ``ReviewGridTies`` comes **after** dedupe because its subject is the holes
+    that reach the artifacts. Dedupe groups on the nominal position while a tie
+    is read off the measurement, so two different measurements can collapse into
+    one hole and disagree about whether they tied: run first, the review can
+    warn about a hole that is then dropped, and which of the pair survives is
+    decided by the order the source read them in. Its own docstring has the
+    counterexample. Sorting comes last of all because it orders what survived,
     which is not known until the duplicates have gone.
 
     ``args`` is unused and stays in the signature: this is the documented
     integration point for a new stage, and every stage worth adding here is
     configured from the command line.
     """
-    stages: list[Stage] = [Deduplicate(), SortHoles()]
+    stages: list[Stage] = [Deduplicate(), ReviewGridTies(), SortHoles()]
     return Pipeline(stages)
 
 

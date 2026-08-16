@@ -42,6 +42,7 @@ from aidrill.pipeline import (
     Deduplicate,
     DrillStandard,
     IdentifyHammondFootprint,
+    ReviewGridTies,
     SnapDiametersToDrillTable,
     SnapPositions,
     SortHoles,
@@ -55,11 +56,12 @@ from tests.conftest import at, codes, diameters, holes, make_data, positions
 # --------------------------------------------------------------------------
 
 
-#: Every class that satisfies ``Stage``. Three, and no longer six: the three
-#: quantisers answer about one measurement at a time and run in an order they do
+#: Every class that satisfies ``Stage``. The three quantisers are not among
+#: them: they answer about one measurement at a time and run in an order they do
 #: not choose, so none of them is a ``DrillData → DrillData`` transform.
 ALL_STAGES = [
     Deduplicate(),
+    ReviewGridTies(),
     SortHoles(),
     CheckReferenceSize((113_000_000, 60_000_000)),
 ]
@@ -381,6 +383,97 @@ def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
     # The rejected design — "the survivor is at index 1 of the surviving tuple" —
     # would name hole 7 as 1, which is a real and different hole in this fixture.
     assert [h.index for h in after.holes].index(survivor_index) == 1
+
+
+# --------------------------------------------------------------------------
+# ReviewGridTies, which is only interesting beside the stages around it
+# --------------------------------------------------------------------------
+
+
+#: The two quantisers the phase needs that have nothing to do with grids, and the
+#: case the fixture outline needs declaring: 113 × 60 is within tolerance of two
+#: real footprints, so an undeclared run aborts on ``ambiguous-enclosure`` before
+#: a hole is snapped. What each of those answers is pinned in its own file.
+def _phase(*measurements: RawHole, grid_nm: int = 250_000) -> DrillData:
+    return quantise(
+        RawDrillData(
+            source=SourceInfo(path="panel.ai"),
+            reference=RawOutline(113.0, 60.0),
+            centre=(56.5, 30.0),
+            holes=measurements,
+        ),
+        enclosure=IdentifyHammondFootprint("1590B"),
+        diameters=SnapDiametersToDrillTable(),
+        positions=SnapPositions(grid_nm),
+    )
+
+
+class TestReviewGridTiesSeesWhatTheEmittersSee:
+    """The reason the review is a stage placed after dedupe, and not a step of
+    the quantisation phase.
+
+    ``Deduplicate`` groups on the nominal ``(x_nm, y_nm, diameter_nm)`` while a
+    tie is read off ``Hole.raw``, so the two do not agree about what "the same
+    hole" is. Two *different* measurements can collapse into one hole and
+    disagree about whether they tied — which means the verdict and the artifacts
+    can be about different populations unless the verdict waits.
+    """
+
+    #: 0.000 mm and 0.125 mm both snap onto 0 at a 250 000 nm pitch: one exactly
+    #: on the grid point, the other exactly halfway between two of them. Same
+    #: diameter, same Y, so they are one hole by the time dedupe sees them —
+    #: which is precisely what a fixture of two byte-identical measurements can
+    #: never show, because identical copies share their residual as well.
+    ON_GRID = RawHole(0.0, 18.0, 7.0, 4)
+    TIED = RawHole(0.125, 18.0, 7.0, 9)
+
+    @pytest.mark.parametrize(
+        "drawn, kept, findings",
+        [
+            ((ON_GRID, TIED), 4, ["off-grid", "duplicate-hole"]),
+            ((TIED, ON_GRID), 9, ["off-grid", "duplicate-hole", "grid-ambiguous"]),
+        ],
+        ids=["on-grid drawn first", "tied drawn first"],
+    )
+    def test_the_verdict_describes_the_hole_that_survived(self, drawn, kept, findings):
+        """One panel, two traversal orders, and the answer follows the survivor.
+
+        ``Deduplicate`` keeps the first member of a group in input order, so
+        whichever circle the source reached first is the one that gets drilled.
+        Asked *before* dedupe the review sees both and warns either way — and in
+        the first case ``tied_indices`` would name hole 9, an identity that
+        appears in no drill file, no drawing and no JSON. Asked after, the
+        finding is true of the panel as it will be made.
+
+        Both cases matter. The first is the false positive the move removes; the
+        second is the warning that must survive it, because a tied hole that
+        really is drilled is exactly what the finding is for.
+
+        The ``off-grid`` in both is the phase's, about the tied measurement:
+        125 000 nm is further than the default quarter-pitch warning distance,
+        and it is raised while the hole is still a measurement, before anything
+        knows it has a twin.
+        """
+        out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
+
+        assert [hole.index for hole in out.holes] == [kept]
+        assert codes(out) == findings
+
+    def test_every_named_tie_is_a_hole_the_artifacts_will_list(self):
+        """The claim underneath both cases above, stated once without a fixture
+        to lean on: a finding may not name an identity that reaches no artifact.
+
+        The drawing rings the holes a finding names and the drill file lists the
+        holes that survived, so a ``tied_indices`` naming a collapsed duplicate
+        sends an operator looking for a circle that is not on the sheet.
+        """
+        for drawn in ((self.ON_GRID, self.TIED), (self.TIED, self.ON_GRID)):
+            out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
+            emitted = {hole.index for hole in out.holes}
+
+            for diagnostic in out.diagnostics:
+                named = diagnostic.get("tied_indices", ())
+                assert set(named) <= emitted, f"{diagnostic.code} named a dropped hole"
 
 
 # --------------------------------------------------------------------------
@@ -885,6 +978,7 @@ def test_the_flow_is_reachable_from_the_package_root():
         SnapDiametersToDrillTable,
         IdentifyHammondFootprint,
         Deduplicate,
+        ReviewGridTies,
         SortHoles,
         CheckReferenceSize,
     ):
