@@ -48,7 +48,7 @@ PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --tb=short
 # One test / one file
 PYTHONPATH=src pytest -o addopts= tests/test_pipeline.py::test_name -v
 
-# Coverage. SPEC 9 targets 90% of src/aidrill and 100% of the stages and emitters.
+# Coverage. Target 90% of src/aidrill, and 100% of the quantisers, stages and emitters.
 PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
 
 # Lint and types. Both are configured in pyproject.toml and both are green;
@@ -179,7 +179,7 @@ Property tests cover snapping idempotence, dedupe idempotence and `tools()` stab
 
 ## Documentation map
 
-- `docs/SPEC.md` — the specification. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
+- `docs/adr/` is the only design record. There is no specification document: the three protocols are stated in `src/aidrill/protocols.py`, and every decision that needed an argument has an ADR. A citation of the form `(SPEC §N)` anywhere in the tree is a leftover — delete it and keep the prose around it, or write the ADR if the decision has no other home.
 - `docs/adr/` — architecture decisions with the incidents that drove them. 0001 is the pipeline and the emitter adapters; 0002 is the drill standards, the enclosure catalogue and the backplate convention.
 - `docs/1590.pdf` — the Hammond datasheet `src/aidrill/enclosures.py` is generated from. It is the authority for every catalogue number; `tools/extract_1590.py` is the audit trail, and `tests/test_enclosures.py` re-extracts on every suite run.
 - `docs/parts/` — Hammond's 37 per-part drawings, plus `dimensions.tsv`, which carries the same 37 parts at 0.05 mm where `docs/1590.pdf` gives whole millimetres. **Not the shipped catalogue** — `enclosures.py` is still generated from `docs/1590.pdf`, and nothing at runtime reads this directory. `docs/parts/README.md` says what the TSV holds and where the two disagree; the adoption plan is in `docs/BACKLOG.md`.
