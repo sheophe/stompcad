@@ -10,15 +10,26 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import ClassVar
 
-from ..model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
-from ..pipeline import DRILL_STANDARDS
+from ..model import DrillData, Severity
 from ..units import Nanometre, format_nm, mm_from_nm
 from .base import register_emitter
+from .drawing.content import (
+    POSITION_DECIMALS,
+    allot,
+    capacity,
+    diameter_label,
+    enclosure_note,
+    fit_font,
+    fits,
+    flagged_holes,
+    grid_note,
+    is_flagged,
+    note_lines,
+)
 
 __all__ = [
     "Sheet",
@@ -36,57 +47,12 @@ INK = "#111111"
 RED = "#c00000"
 FEINT = "#8a8a8a"
 
-#: Conservative glyph-advance estimate, as a fraction of the font size. Used to
-#: truncate strings to their box. Deliberately wider than a real sans face so
-#: nothing is clipped by the border.
-CHAR_RATIO = 0.62
-
 #: Scales an engineer expects to read in a title block. The fitted scale is
 #: rounded *down* to one of these, so fitting can never overflow.
 PREFERRED_SCALES = (
     20.0, 10.0, 5.0, 4.0, 2.0, 1.0,
     0.5, 0.4, 0.25, 0.2, 0.1, 0.05, 0.04, 0.025, 0.02, 0.01,
 )
-
-DUP_CODE = "duplicate-hole"
-
-#: One value out of a ``Diagnostic.data`` payload, spelled here so the two
-#: functions that pass one around agree with the model rather than with each
-#: other. Kept as wide as the model declares it: narrowing is what would drop a
-#: ring in silence — see :func:`_flagged_holes`.
-_PayloadValue = float | int | str | tuple[int, ...]
-
-#: The ``StageRun`` name the title block's grid is read from, and the parameter
-#: within it. Names the *record*, not the class: the emitter reads provenance and
-#: has no import of, or opinion about, which stage wrote it.
-SNAP_STAGE = "snap"
-GRID_PARAMETER = "grid_nm"
-
-#: How many decimals of a millimetre a *position* — a schedule cell, a dimension
-#: label, an overall size — is printed to. Three, and not a matter of taste:
-#: ``SnapPositions.MICRON_NM`` floors the grid at a micron precisely because the
-#: drill file and this sheet both print three decimals, so two grid points the
-#: model holds apart cannot come out as one number on the sheet a machinist
-#: reads. Printing two here would give that floor away and let 18.000 and 18.001
-#: — two coordinates in the drill file — read as one on the drawing.
-#:
-#: A diameter is not on this list: how a bit is spelled belongs to the drill
-#: standard that chose it (see :func:`_diameter_label`), and a fractional bit has
-#: no honest decimal spelling at any precision.
-_POSITION_DECIMALS = 3
-
-#: The catalogue footprint's precision, which is Hammond's own: the per-part
-#: drawings publish 0.05 mm and the 1590B sheet prints ``112.40 [4.425]``. This
-#: is the number the operator orders the box by, so it is printed the way the
-#: datasheet they will check it against prints it.
-_FOOTPRINT_DECIMALS = 2
-
-#: The same idiom for the schedule's diameter spelling: the ``StageRun`` name
-#: the drill standard is read from, and the parameter within it. The standard
-#: itself is looked up by name in ``DRILL_STANDARDS``, so the record stays a
-#: name rather than 183 sizes.
-DIAMETER_STAGE = "snap-diameters"
-STANDARD_PARAMETER = "standard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,39 +158,6 @@ def _fmt(value: float | str) -> str:
     return text or "0"
 
 
-def _capacity(width: float, size: float) -> int:
-    """Return the character capacity used by :func:`_fits` at this size."""
-    if width <= 0 or size <= 0:
-        return 0
-    return max(1, int(width / (CHAR_RATIO * size)))
-
-
-def _fits(text: str, size: float, width: float) -> str:
-    """Truncate ``text`` so its estimated extent stays inside ``width``."""
-    if width <= 0:
-        return ""
-    limit = _capacity(width, size)
-    if len(text) <= limit:
-        return text
-    if limit <= 1:
-        return text[:limit]
-    return text[: limit - 1] + "…"
-
-
-def _allot(count: int, room: int) -> tuple[int, int]:
-    """Allot visible items and leftovers, reserving an omission-marker line."""
-    if count <= room:
-        return count, 0
-    shown = max(0, room - 1)
-    return shown, count - shown
-
-
-def _fit_font(text: str, width: float, largest: float, smallest: float) -> float:
-    if not text or width <= 0:
-        return largest
-    return max(smallest, min(largest, width / (CHAR_RATIO * len(text))))
-
-
 # ---------------------------------------------------------------------------
 # emitter
 # ---------------------------------------------------------------------------
@@ -288,12 +221,12 @@ class DrawingSvgEmitter:
         schedule = (right_x, border[1], border[2], title_block[1] - 2.0)
 
         left_w = max(20.0, inner_w - right_w - _GUTTER)
-        note_lines = self._note_lines(data)
+        entries = note_lines(data)
         note_font = min(
-            (_fit_font(line, left_w - 5.0, 2.6, 1.5) for line in note_lines),
+            (fit_font(entry.text, left_w - 5.0, 2.6, 1.5) for entry in entries),
             default=2.6,
         )
-        notes_h = min(inner_h * 0.4, 6.0 + note_font * 1.6 * (len(note_lines) + 1))
+        notes_h = min(inner_h * 0.4, 6.0 + note_font * 1.6 * (len(entries) + 1))
         notes = (border[0], border[3] - notes_h, border[0] + left_w, border[3])
 
         area = (border[0], border[1], border[0] + left_w, notes[1] - _GUTTER)
@@ -473,12 +406,12 @@ class DrawingSvgEmitter:
     # -- holes -----------------------------------------------------------
     def _draw_holes(self, root: ET.Element, layout: Layout, data: DrillData) -> None:
         group = _sub(root, "g", **{"class": "holes"})
-        flagged = _flagged_holes(data.diagnostics)
+        flagged = flagged_holes(data.diagnostics)
 
         for hole in data.holes:
             cx, cy = layout.point(mm_from_nm(hole.x_nm), mm_from_nm(hole.y_nm))
             radius = max(0.4, layout.length(mm_from_nm(hole.diameter_nm)) / 2.0)
-            is_dup = _is_flagged(hole, flagged)
+            is_dup = is_flagged(hole, flagged)
             colour = RED if is_dup else INK
 
             _sub(
@@ -583,13 +516,13 @@ class DrawingSvgEmitter:
         room = int((layout.area[3] - 1.5 - top) / _ROW_PITCH) + 1
         # Bottom row first, which is the order they stack away from the panel.
         ordered = list(reversed(rows))
-        drawn, omitted = _allot(len(ordered), room)
+        drawn, omitted = allot(len(ordered), room)
         if omitted:
             _text(
                 parent,
                 layout.area[0] + 2.0,
                 top + _ROW_PITCH * drawn,
-                _fits(
+                fits(
                     f"… {omitted} further row dimensions not shown",
                     2.2,
                     layout.area[2] - layout.area[0] - 4.0,
@@ -644,12 +577,12 @@ class DrawingSvgEmitter:
                 _arrow(chain, x2, dim_y, -1.0, 0.0)
                 # The subtraction is the two stations', not the two sheet
                 # coordinates': ``x1`` and ``x2`` have been through the scale.
-                label = format_nm(Nanometre(end_nm - start_nm), _POSITION_DECIMALS)
+                label = format_nm(Nanometre(end_nm - start_nm), POSITION_DECIMALS)
                 _text(
                     chain,
                     (x1 + x2) / 2.0,
                     dim_y - 1.2,
-                    _fits(label, 2.2, abs(x2 - x1) + 6.0),
+                    fits(label, 2.2, abs(x2 - x1) + 6.0),
                     2.2,
                     anchor="middle",
                     cls="dim-text",
@@ -705,7 +638,7 @@ class DrawingSvgEmitter:
                 group,
                 (left + right) / 2.0,
                 dim_y - 1.4,
-                format_nm(width_nm, _POSITION_DECIMALS),
+                format_nm(width_nm, POSITION_DECIMALS),
                 2.4,
                 anchor="middle",
                 cls="dim-overall",
@@ -747,7 +680,7 @@ class DrawingSvgEmitter:
                 group,
                 dim_x - 1.4,
                 (top + bottom) / 2.0,
-                format_nm(height_nm, _POSITION_DECIMALS),
+                format_nm(height_nm, POSITION_DECIMALS),
                 2.4,
                 anchor="middle",
                 cls="dim-overall",
@@ -775,7 +708,7 @@ class DrawingSvgEmitter:
 
         tools = data.tools()
         counts = data.tool_counts()
-        diameter_label = _diameter_label(data)
+        label = diameter_label(data)
 
         # The hole list and tool summary share the box. Capacity includes both
         # lists and their structural lines within the available height.
@@ -797,9 +730,9 @@ class DrawingSvgEmitter:
             # from it — but never more than half the box, or a panel of many
             # sizes would list its bits and none of its holes.
             room_for_tools = min(summary_lines, max(1, body // 2))
-            kept_tools, tool_overflow = _allot(summary_lines, room_for_tools)
+            kept_tools, tool_overflow = allot(summary_lines, room_for_tools)
             listed = listed[:kept_tools]
-            kept_holes, overflow = _allot(len(data.holes), max(0, body - room_for_tools))
+            kept_holes, overflow = allot(len(data.holes), max(0, body - room_for_tools))
             shown = data.holes[:kept_holes]
         font = max(1.1, min(2.6, pitch * 0.62))
 
@@ -813,14 +746,14 @@ class DrawingSvgEmitter:
         cell_w = width * 0.2
 
         y = y0 + 8.0 + pitch
-        for (cx, anchor), label, cls in zip(
+        for (cx, anchor), heading, cls in zip(
             columns,
             # No "mm" in the heading: the cells below carry their own units,
             # and a fractional standard spells this column ``⌀9/32"``.
             ("NO.", "X", "Y", "⌀", "TOOL"),
             ("sched-head", "sched-head", "sched-head", "sched-head", "sched-head"),
         ):
-            _text(group, cx, y, label, font, anchor=anchor, cls=cls, weight="bold")
+            _text(group, cx, y, heading, font, anchor=anchor, cls=cls, weight="bold")
         _sub(
             group,
             "line",
@@ -833,11 +766,11 @@ class DrawingSvgEmitter:
             stroke_width=0.2,
         )
 
-        flagged = _flagged_holes(data.diagnostics)
+        flagged = flagged_holes(data.diagnostics)
         for hole in shown:
             y += pitch
             row = _sub(group, "g", **{"class": "sched-row"})
-            colour = RED if _is_flagged(hole, flagged) else None
+            colour = RED if is_flagged(hole, flagged) else None
             cells = (
                 # The hole's own id, not its place in the tuple — see
                 # ``_balloon``. NO. is the column a diagnostic is joined on.
@@ -848,9 +781,9 @@ class DrawingSvgEmitter:
                 # also where the negative zero was — a hole at -400 nm printed
                 # "-0.000" here while the Excellon writer printed "0.000" for the
                 # very same hole.
-                (format_nm(hole.x_nm, _POSITION_DECIMALS), "sched-x"),
-                (format_nm(hole.y_nm, _POSITION_DECIMALS), "sched-y"),
-                (diameter_label(hole.diameter_nm), "sched-dia"),
+                (format_nm(hole.x_nm, POSITION_DECIMALS), "sched-x"),
+                (format_nm(hole.y_nm, POSITION_DECIMALS), "sched-y"),
+                (label(hole.diameter_nm), "sched-dia"),
                 (f"T{tools[hole.diameter_nm]}", "sched-tool"),
             )
             for (cx, anchor), (value, cls) in zip(columns, cells):
@@ -858,7 +791,7 @@ class DrawingSvgEmitter:
                     row,
                     cx,
                     y,
-                    _fits(value, font, cell_w),
+                    fits(value, font, cell_w),
                     font,
                     anchor=anchor,
                     cls=cls,
@@ -871,7 +804,7 @@ class DrawingSvgEmitter:
                 group,
                 x0 + 2.0,
                 y,
-                _fits(f"… {overflow} further holes not listed", font, width - 4.0),
+                fits(f"… {overflow} further holes not listed", font, width - 4.0),
                 font,
                 cls="sched-overflow",
                 fill=RED,
@@ -895,8 +828,8 @@ class DrawingSvgEmitter:
                 group,
                 x0 + 2.0,
                 y,
-                _fits(
-                    f"T{tool}  {diameter_label(diameter_nm)}  QTY {counts[diameter_nm]}",
+                fits(
+                    f"T{tool}  {label(diameter_nm)}  QTY {counts[diameter_nm]}",
                     font,
                     width - 4.0,
                 ),
@@ -910,7 +843,7 @@ class DrawingSvgEmitter:
                 group,
                 x0 + 2.0,
                 y,
-                _fits(f"… {tool_overflow} further tools not listed", font, width - 4.0),
+                fits(f"… {tool_overflow} further tools not listed", font, width - 4.0),
                 font,
                 cls="sched-tool-overflow",
                 fill=RED,
@@ -936,12 +869,12 @@ class DrawingSvgEmitter:
 
         inner = width - 4.0
         options = self.options
-        company_font = _fit_font(options.company, inner, 4.4, 2.2)
+        company_font = fit_font(options.company, inner, 4.4, 2.2)
         _text(
             group,
             x0 + 2.0,
             y0 + 5.4,
-            _fits(options.company, company_font, inner),
+            fits(options.company, company_font, inner),
             company_font,
             cls="tb-company",
             weight="bold",
@@ -961,10 +894,10 @@ class DrawingSvgEmitter:
         lines = [
             f"TITLE  {options.title or 'PANEL DRILL DRAWING'}",
             f"DRG No  {options.drawing_no or '—'}",
-            _enclosure_note(data, _capacity(inner, _TITLE_MIN_FONT)),
+            enclosure_note(data, capacity(inner, _TITLE_MIN_FONT)),
             f"SHEET 1 OF 1   SIZE {layout.sheet.name}",
             f"UNITS mm   SCALE {layout.scale_label}",
-            f"{_grid_note(data)}   HOLES {len(data.holes)}",
+            f"{grid_note(data)}   HOLES {len(data.holes)}",
             "THIRD ANGLE PROJECTION — DO NOT SCALE FROM DRAWING",
             f"SOURCE  {data.source.path or '—'}",
             (
@@ -979,25 +912,13 @@ class DrawingSvgEmitter:
             y += step
             # Shrink the line before chopping it. Every line here is a claim the
             # sheet makes, and a claim that does not fit is worth a smaller font
-            # rather than an ellipsis: ``_designator`` elides the series so that
+            # rather than an ellipsis: ``designator`` elides the series so that
             # a four-candidate footprint fits, and adding ``ROTATED`` to the same
             # line took two of the four away again.
-            size = _fit_font(line, inner, font, _TITLE_MIN_FONT)
-            _text(group, x0 + 2.0, y, _fits(line, size, inner), size, cls="tb")
+            size = fit_font(line, inner, font, _TITLE_MIN_FONT)
+            _text(group, x0 + 2.0, y, fits(line, size, inner), size, cls="tb")
 
     # -- notes -----------------------------------------------------------
-    def _note_lines(self, data: DrillData) -> list[str]:
-        lines: list[str] = []
-        for index, diagnostic in enumerate(data.diagnostics, start=1):
-            prefix = {
-                Severity.WARNING: "WARNING  ",
-                Severity.ERROR: "ERROR  ",
-            }.get(diagnostic.severity, "")
-            lines.append(f"{index}. {prefix}{diagnostic.message}")
-        if not lines:
-            lines.append("1. No diagnostics were raised for this panel.")
-        return lines
-
     def _draw_notes(self, root: ET.Element, layout: Layout, data: DrillData) -> None:
         x0, y0, x1, y1 = layout.notes
         group = _sub(root, "g", **{"class": "notes"})
@@ -1016,16 +937,15 @@ class DrawingSvgEmitter:
         font = layout.note_font
         _text(group, x0 + 2.0, y0 + font * 1.6, "NOTES", font * 1.15, cls="notes-title", weight="bold")
 
-        severities = [d.severity for d in data.diagnostics] or [Severity.INFO]
-        lines = self._note_lines(data)
+        notes = note_lines(data)
         width = x1 - x0 - 5.0
         limit = y1 - 1.0
         y = y0 + font * 1.6
-        for index, (severity, line) in enumerate(zip(severities, lines)):
+        for index, note in enumerate(notes):
             y += font * 1.6
             if y > limit:
                 break
-            remaining = len(lines) - index
+            remaining = len(notes) - index
             if remaining > 1 and y + font * 1.6 > limit:
                 # Last line that fits, and more to come. Spend it saying so: a
                 # note that disappears without trace is worse than one that is
@@ -1036,7 +956,7 @@ class DrawingSvgEmitter:
                     group,
                     x0 + 2.5,
                     y,
-                    _fits(f"… {remaining} further notes not listed", font, width),
+                    fits(f"… {remaining} further notes not listed", font, width),
                     font,
                     cls="note note-overflow",
                     fill=RED,
@@ -1045,15 +965,15 @@ class DrawingSvgEmitter:
             classification = {
                 Severity.WARNING: "note note-warning",
                 Severity.ERROR: "note note-error",
-            }.get(severity, "note note-info")
+            }.get(note.severity, "note note-info")
             # Inline style, not fill= : the stylesheet's text{fill:…} rule would
             # win over a presentation attribute and the note would render black.
-            colour = RED if severity in (Severity.WARNING, Severity.ERROR) else None
+            colour = RED if note.severity in (Severity.WARNING, Severity.ERROR) else None
             _text(
                 group,
                 x0 + 2.5,
                 y,
-                _fits(line, font, width),
+                fits(note.text, font, width),
                 font,
                 cls=classification,
                 fill=colour,
@@ -1133,104 +1053,3 @@ def _preferred_scale(raw: float) -> float:
         if candidate <= raw:
             return candidate
     return raw
-
-
-def _grid_note(data: DrillData) -> str:
-    """State the recorded effective grid, or explicitly that none was recorded."""
-    run = data.last_run(SNAP_STAGE)
-    grid_nm = None if run is None else run.get(GRID_PARAMETER)
-    # ``StageRun`` payloads are deliberately generic. The model holds an ``_nm``
-    # key to whole nanometres at construction — which is what rules out the
-    # ``True`` that would otherwise have stamped the sheet "GRID 0.000 mm" — but
-    # it admits a *tuple* of them, since one parameter in the pipeline is a table
-    # of sizes. A table is not a pitch, and neither is a pitch of nothing, so
-    # both get the same answer as no record at all. ``type(...) is int`` rather
-    # than ``isinstance`` on the precedent the model sets.
-    if type(grid_nm) is not int or grid_nm <= 0:
-        return "GRID NOT RECORDED"
-    return f"GRID {format_nm(Nanometre(grid_nm))} mm"
-
-
-def _millimetre_label(diameter_nm: Nanometre) -> str:
-    """Format the ``⌀7.00 mm`` fallback used without a recorded standard."""
-    return f"⌀{format_nm(diameter_nm, 2)} mm"
-
-
-def _diameter_label(data: DrillData) -> Callable[[Nanometre], str]:
-    """Use the recorded drill standard's labels, falling back to millimetres."""
-    run = data.last_run(DIAMETER_STAGE)
-    name = None if run is None else run.get(STANDARD_PARAMETER)
-    # ``StageRun`` payloads are generic, so a value that is not a name cannot
-    # name a standard. This guard is for the type checker rather than for the
-    # output — every ``ParameterValue`` is hashable, so ``get`` would return
-    # ``None`` for a non-name anyway — and it is kept because the alternative is
-    # a lookup whose key type is unchecked. Unlike ``_grid_note``'s guard, which
-    # is load-bearing: a tuple of pitches really would print there.
-    if not isinstance(name, str):
-        return _millimetre_label
-    standard = DRILL_STANDARDS.get(name)
-    if standard is None:
-        return _millimetre_label
-    return standard.label
-
-
-def _enclosure_note(data: DrillData, capacity: int) -> str:
-    """State catalogue footprint, rotation and selected part or ordered candidates.
-
-    Missing matches are explicit; candidate truncation reports the omitted count.
-    """
-    match = data.enclosure
-    if match is None:
-        return "ENCLOSURE NOT IDENTIFIED"
-    size = (
-        f"{format_nm(match.length_nm, _FOOTPRINT_DECIMALS)} × "
-        f"{format_nm(match.width_nm, _FOOTPRINT_DECIMALS)} mm"
-    )
-    if match.rotated:
-        size += " ROTATED"
-    head = f"{match.family.upper()}  {size}  "
-    if match.selected_part is not None:
-        return head + f"PART {match.selected_part}"
-    designators = [_designator(part, match) for part in match.candidates]
-    room = capacity - len(head) - len("CANDIDATES ")
-    return head + "CANDIDATES " + _candidate_list(designators, room)
-
-
-def _candidate_list(designators: Sequence[str], room: int) -> str:
-    """Fit ordered candidates, ending with a counted ``+N MORE`` marker."""
-    text = " / ".join(designators)
-    for keep in range(len(designators), 0, -1):
-        text = " / ".join(designators[:keep])
-        if keep < len(designators):
-            text += f" / +{len(designators) - keep} MORE"
-        if len(text) <= room:
-            break
-    return text
-
-
-def _designator(part: str, match: EnclosureMatch) -> str:
-    """Elide the family prefix only when a non-empty designator remains."""
-    words = match.family.split()
-    # A family of no words leaves ``series`` empty, which the test below then
-    # answers correctly on its own: every string starts with "" and every
-    # non-empty one differs from it, so the part comes back whole. No separate
-    # guard for it, because a branch no input can distinguish is a branch no
-    # test can pin.
-    series = words[-1] if words else ""
-    if part.startswith(series) and part != series:
-        return part[len(series):]
-    return part
-
-
-def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[_PayloadValue]:
-    """Return stable survivor identities named by ``duplicate-hole`` findings."""
-    return frozenset(
-        index
-        for d in diagnostics
-        if d.code == DUP_CODE and (index := d.get("hole_index")) is not None
-    )
-
-
-def _is_flagged(hole: Hole, flagged: frozenset[_PayloadValue]) -> bool:
-    """Use stable identity, never geometry, to decide whether to draw a ring."""
-    return hole.index in flagged
