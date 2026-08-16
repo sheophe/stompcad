@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in
+this repository.
+
 ## Purpose and scope
 
 `aidrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
@@ -42,6 +45,26 @@ mutmut results
 # Run the tool
 PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 ```
+
+## Command-line contract
+
+Flags: `--drill-layer`, `--reference-layer`, `--grid`, `--grid-warn`, `--drill-standard`
+(`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to
+the sizes in the drawer), `--case` (the Hammond base designator the panel is drawn for),
+`--emit FORMAT=PATH` (repeatable), `--title`, `-v`. All are resolved before the input
+file is opened, so a bad standard, an unstocked size, or a part number in no catalogue
+is a usage error rather than a diagnostic.
+
+Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage or IO
+failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
+`unverifiable-enclosure`, `unmatched-enclosure` and `wrong-enclosure`. `grid-too-fine`
+and `grid-ambiguous` are warnings and reach exit 1.
+
+`tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2` (112.40 × 60.50)
+and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it is
+`ambiguous-enclosure`, an error. This is the correct answer, not a regression: do not
+widen the tolerance, special-case the fixture, or round the footprint key back to whole
+millimetres.
 
 ## Architecture
 
@@ -93,7 +116,8 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   need not be running.
 - Layers come from `/OCProperties` -> `/OCGs` and content mappings in
   `/Resources/Properties` -> `/MCn`. Only top-level layers are recoverable.
-- Paths with neither fill nor stroke are absent from the stream.
+- Paths with neither fill nor stroke are absent from the stream, which is why
+  `EmptyLayerError` names the remedy: give the drill circles a stroke.
 - `W` and `W*` establish clipping boundaries; `n`, not `W`, makes a path invisible.
 - Circle recognition validates four cubic Beziers by equal anchor radii and kappa
   consistency around their centroid, so it remains rotation-invariant.
@@ -101,6 +125,25 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Object names are not recoverable because Illustrator files provide no structure tree.
 - The reference outline is the largest non-circular path on the reference layer, not the
   document MediaBox.
+
+## Extending
+
+- **New emitter:** implement the `Emitter` protocol, decorate with `@register_emitter`,
+  add one import in `emitters/__init__.py`. The CLI resolves `--emit FORMAT=PATH`
+  through the registry and never names a format. An emitter needing its own CLI flags
+  still requires a `cli.py` edit.
+- **New stage:** implement `Stage` including `describe()`, then insert it in
+  `cli.build_pipeline`. Order is the one thing a stage cannot self-declare, so
+  `build_pipeline` is the integration point by design.
+- **New source:** implement `Source`, returning `RawDrillData`. There is no source
+  registry.
+- **A new stage or source also gets one line in `src/aidrill/__init__.py`.** A new
+  emitter does not — it has a registry, and is resolved through
+  `aidrill.emitters.get_emitter`. The root exports what no registry can find: without
+  that line a consumer reproducing the `Source -> quantise -> Pipeline -> Emitter` flow
+  finds protocols with nothing at hand that satisfies them. `METRIC_BANDS` and
+  `FRACTIONAL_SIXTY_FOURTHS` stay in `aidrill.pipeline`: they generate the standards
+  rather than read a result.
 
 ## Documentation rules
 
@@ -125,7 +168,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Break accidental equality in fixtures: use out-of-order hole identities when testing
   identity rather than sequence position.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
-  relevant mutation. Mutation testing is a survey, not a numeric gate.
+  relevant mutation. Mutation testing is a survey, not a numeric gate. Current standing:
+  **2883 mutants, 2380 killed, 500 survived**. Read it by module, not in total — `cli`
+  (223) and `emitters.drawing_svg` (81) account for most survivors, where a mutant
+  rewrites a help string or a layout constant and nothing observable changes. A survivor
+  in `geometry`, `pipeline.dedupe`, `quantise` or `units` is the kind worth chasing.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.

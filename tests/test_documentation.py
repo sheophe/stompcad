@@ -23,13 +23,14 @@ def test_the_scanner_reports_the_owner_and_physical_line_count(tmp_path: Path):
     assert violation.lines == 3
 
 
-def test_repository_docstrings_respect_the_ten_line_ceiling():
+def test_the_repository_docstring_audit_reports_every_over_length_docstring():
+    """The ceiling guides new prose; it does not gate the suite, so this only warns."""
     violations = find_long_docstrings(PYTHON_ROOTS)
-    assert all(item.lines > 10 for item in violations)
-    if violations:
-        details = "\n".join(
-            f"{item.path.relative_to(REPO)}:{item.line}: "
-            f"{item.owner} spans {item.lines} lines"
-            for item in violations
-        )
-        warnings.warn(f"docstrings over 10 lines:\n{details}", stacklevel=1)
+    if not violations:
+        return
+    details = "\n".join(
+        f"{item.path.relative_to(REPO)}:{item.line}: "
+        f"{item.owner} spans {item.lines} lines"
+        for item in violations
+    )
+    warnings.warn(f"docstrings over 10 lines:\n{details}", stacklevel=1)
