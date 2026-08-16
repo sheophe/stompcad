@@ -1,84 +1,9 @@
-"""``drawing-svg`` — an engineering drawing of the drill data (SPEC §7).
+"""Render ``DrillData`` as a standalone SVG engineering drawing.
 
-This is the sheet you hand to whoever drills the panel. It is **not** a render of
-the artwork: an earlier attempt drew the Illustrator Graphics layer with
-substitute fonts and bbox-only text metrics, which produced something that
-looked like the panel, wasn't the panel, and told the machinist nothing. Only
-drill data is drawn here — holes, dimensions, a schedule, and the pipeline's
-diagnostics as notes.
-
-What ends up on the sheet:
-
-* a border, default A4 landscape, sheet configurable
-* the reference outline as a rounded rectangle
-* chain-dash centrelines and an origin symbol at (0, 0)
-* every hole at true diameter with a centre mark and a balloon carrying its
-  ``Hole.index`` — the same number the report, the JSON and every diagnostic
-  use, so that "hole 2" names one hole across all four
-* one chain dimension per Y row (``DrillData.rows()``) with extension lines,
-  plus overall width and height
-* a hole schedule — No. / X / Y / ⌀ / TOOL — with tool numbers taken from
-  ``DrillData.tools()`` and never renumbered, and a per-tool quantity summary
-* a title block naming the enclosure the panel was identified as, and a NOTES
-  block, warnings and errors in red
-
-Nothing on the sheet runs out of its box, and **nothing leaves it in silence**.
-A panel of 120 distinct diameters used to print 36 summary lines through the
-title block and 3 off the page; a 15-row panel — ordinary work — drew its
-topmost chain dimensions off the sheet, leaving holes with no dimension beside
-them. Both came from the same shape of mistake: :meth:`layout` clamped the
-capacity arithmetic and the loops that spend it were unclamped, so the deficit
-was discarded rather than reported. Every list that can be cut short now goes
-through :func:`_allot`, which reserves the line its own marker needs, and every
-marker names what was dropped and how many — a tool is not a hole, and a sheet
-listing fewer tools than the drill file defines is ADR-0001's failure with the
-drawing as the wrong artifact.
-
-Two things about SVG that this module is careful about, both learned the hard
-way:
-
-1. **A CSS rule in ``<style>`` beats a ``fill=`` presentation attribute.** With
-   ``text{fill:#111111}`` in the stylesheet, ``<text fill="red">`` renders
-   black. Every coloured string here therefore carries ``style="fill:…"``, which
-   does win. The same trap applies to ``font-size``, so the stylesheet declares
-   none and every ``<text>`` sets its own.
-2. **Vertical dimension labels must be rotated.** An unrotated label on the
-   left-hand height dimension runs straight off the side of the sheet.
-
-**Two kinds of number live here, and the sheet is only trustworthy while they
-stay apart.** A *length* is what the model holds — a hole's position, its
-diameter, the outline, the catalogue footprint, the grid — and it is an exact
-integer nanometre that reaches the sheet through :func:`aidrill.units.format_nm`
-and nothing else. A dimension reading ``40.000`` because the model says
-``-40_000_000`` is a fact about the panel, and printing it from a float
-re-derived out of that integer would be a second rendering of a value that
-already has one. *Layout* is everything else — the scale factor, the sheet
-coordinate a label sits at, an arrowhead's geometry — and it is float
-millimetres on paper, arrived at through :func:`aidrill.units.mm_from_nm`.
-Nothing on the layout side is ever printed as a number the machinist reads.
-
-The emitter re-derives nothing and remembers nothing: no snapping, no diameter
-clustering, no deduplication, and no second copy of a pipeline setting. It reads
-``tools()``, ``tool_counts()``, ``rows()``, ``diagnostics`` and ``processing``,
-and draws what it is given. Four facts on the sheet each have exactly one honest
-source, and every one of them can go stale in silence if taken from anywhere
-else:
-
-* *Which* holes are duplicates comes from the ``duplicate-hole`` diagnostics'
-  ``hole_index`` — see :func:`_flagged_holes`. Matching on coordinates instead
-  worked only until a stage moved the survivor, and
-  ``Pipeline([Deduplicate, SnapPositions])`` is a legal order.
-* *What grid* the holes are on comes from the recorded ``snap`` run — see
-  :func:`_grid_note`. Taking it through ``DrawingOptions`` instead means taking
-  a default when the caller gives none, and data snapped at 0.5 gets stamped
-  0.25.
-* *How a diameter is spelled* comes from the drill standard the recorded
-  ``snap-diameters`` run names — see :func:`_diameter_label`. A millimetre
-  spelling is honest for the metric drawer and not for the fractional one, where
-  1/64" is 0.396875 mm and every decimal-millimetre label is a rounding of a
-  size that is exact.
-* *Which enclosure* the panel is comes from ``DrillData.enclosure`` — see
-  :func:`_enclosure_note`.
+The sheet contains the outline, holes, dimensions, schedule, title data and
+diagnostic notes; it does not render source artwork or recompute pipeline facts.
+Model lengths remain integer nanometres until formatting, while layout uses
+sheet millimetres. Capacity limits use explicit counted omission markers.
 """
 
 from __future__ import annotations
@@ -184,7 +109,7 @@ A3_LANDSCAPE = Sheet("A3", 420.0, 297.0)
 
 @dataclass(frozen=True, slots=True)
 class DrawingOptions:
-    """Options for the drawing emitter alone (ISP: no shared options bag)."""
+    """Options specific to the drawing emitter."""
 
     sheet: Sheet = A4_LANDSCAPE
     scale: float | None = None
@@ -202,11 +127,7 @@ Box = tuple[float, float, float, float]  # x0, y0, x1, y1
 
 @dataclass(frozen=True, slots=True)
 class Layout:
-    """Where everything goes on the sheet. Pure geometry, no SVG.
-
-    Separated from the drawing code so tests (and the emitter itself) can ask
-    "where would hole (x, y) land?" without parsing the output.
-    """
+    """Pure sheet geometry, independent of SVG generation."""
 
     sheet: Sheet
     border: Box
@@ -272,12 +193,7 @@ def _fmt(value: float | str) -> str:
 
 
 def _capacity(width: float, size: float) -> int:
-    """How many characters :func:`_fits` will keep at this size.
-
-    One formula, two callers. A line composed to a capacity that ``_fits``
-    disagreed with would be chopped anyway, which is how the title block's
-    candidate list came to end in an ellipsis that named no number.
-    """
+    """Return the character capacity used by :func:`_fits` at this size."""
     if width <= 0 or size <= 0:
         return 0
     return max(1, int(width / (CHAR_RATIO * size)))
@@ -296,16 +212,7 @@ def _fits(text: str, size: float, width: float) -> str:
 
 
 def _allot(count: int, room: int) -> tuple[int, int]:
-    """How many of ``count`` items to draw in ``room`` lines, and how many are left.
-
-    Not ``min(count, room)``: announcing the leftovers costs a line of its own,
-    and a marker drawn in a line that does not exist is the very failure it is
-    there to report. Both of this module's overflowing loops came from a
-    capacity that was clamped in the arithmetic and unclamped in the drawing —
-    the tool summary ran through the title block and off the page, and the chain
-    dimensions off the bottom of the sheet — so the deficit is returned here
-    rather than discarded, and every caller has to say what it did with it.
-    """
+    """Allot visible items and leftovers, reserving an omission-marker line."""
     if count <= room:
         return count, 0
     shown = max(0, room - 1)
@@ -325,11 +232,7 @@ def _fit_font(text: str, width: float, largest: float, smallest: float) -> float
 
 @register_emitter
 class DrawingSvgEmitter:
-    """Renders ``DrillData`` as an engineering drawing in SVG.
-
-    The output is a standalone SVG document whose user units are millimetres,
-    so every number in it is directly meaningful and the sheet prints 1:1.
-    """
+    """Render a standalone, millimetre-user-unit SVG engineering drawing."""
 
     name: ClassVar[str] = "drawing-svg"
     media_type: ClassVar[str] = "image/svg+xml"
@@ -426,14 +329,7 @@ class DrawingSvgEmitter:
 
     # -- layout helpers --------------------------------------------------
     def _content_half_extents(self, data: DrillData) -> tuple[float, float]:
-        """Half-width and half-height of everything drawn, in model millimetres.
-
-        Layout, not length: these two feed the fitted scale and the sheet
-        coordinate of the centrelines, and neither number is ever printed. So
-        they cross into float millimetres here — where a 5 mm floor for an empty
-        panel is a sensible thing to write — rather than carrying nanometres
-        into arithmetic that ends in a division by a sheet width.
-        """
+        """Return layout extents in model millimetres, with a 5 mm empty floor."""
         half_w = 5.0
         half_h = 5.0
         if data.reference is not None:
@@ -466,14 +362,7 @@ class DrawingSvgEmitter:
 
     # -- outlines --------------------------------------------------------
     def _draw_outlines(self, root: ET.Element, layout: Layout, data: DrillData) -> None:
-        """One panel, one outline. Which enclosure it is, the title block says.
-
-        There was a second, dashed rectangle here — the operator's own ``WxH``,
-        drawn as a check on the first. See the module docstring: once the
-        pipeline identifies the enclosure, the check either coincides with the
-        outline exactly or is better stated in words than as two rectangles a
-        millimetre apart.
-        """
+        """Draw one panel outline; enclosure identity belongs in the title block."""
         group = _sub(root, "g", **{"class": "outlines"})
         if data.reference is not None:
             self._rounded(
@@ -497,11 +386,7 @@ class DrawingSvgEmitter:
         stroke: str,
         stroke_width: float = 0.4,
     ) -> None:
-        """Draw a rounded rectangle of ``width`` × ``height`` model millimetres.
-
-        Millimetres and not nanometres, because nothing here is printed: every
-        number this method produces is a sheet coordinate or a corner radius.
-        """
+        """Draw a rounded rectangle from model-millimetre layout geometry."""
         x, y = layout.point(-width / 2.0, height / 2.0)
         radius = min(3.0, width / 4.0, height / 4.0) * layout.scale
         _sub(
@@ -640,14 +525,7 @@ class DrawingSvgEmitter:
     def _balloon(
         self, parent: ET.Element, cx: float, cy: float, radius: float, number: int
     ) -> None:
-        """The balloon carries the hole's ``index``, never its place in the tuple.
-
-        Numbering 1..n down ``data.holes`` gave the sheet a private numbering
-        that agreed with nothing: "hole 2" was the duplicate at (−40, 18) to the
-        JSON and every diagnostic, and the clean hole at (−20, 18) here. The
-        numbers are therefore not contiguous — a gap is a hole the pipeline
-        dropped or deduped, which is a fact worth reading off the sheet.
-        """
+        """Draw a balloon carrying stable ``Hole.index``, never tuple position."""
         unit = math.sqrt(0.5)
         reach = radius + 7.0
         bx = cx + unit * reach
@@ -685,16 +563,7 @@ class DrawingSvgEmitter:
         self._draw_overall(group, layout, data)
 
     def _draw_row_chains(self, parent: ET.Element, layout: Layout, data: DrillData) -> None:
-        """One chain per Y row, stacked below the panel — as many as fit.
-
-        ``layout`` reserves ``_BOTTOM_BASE + _ROW_PITCH * len(rows)`` for these
-        and then clamps the reservation to half the drawing area; this loop drew
-        one chain per row regardless. A 15-row panel — ordinary work — put its
-        topmost chains off the sheet, and because the stack is built from the
-        bottom row up, the rows that lost their dimension were the ones nearest
-        the top of the panel. Their holes were still drawn, so the sheet showed
-        holes with no dimension and no note saying one was missing.
-        """
+        """Draw as many Y-row chains as fit, then state the omitted count."""
         rows = data.rows()
         content_bottom = layout.point(0.0, -layout.half_height)[1]
         # A station is a *length*: it is subtracted from its neighbour and the
@@ -1275,20 +1144,7 @@ def _preferred_scale(raw: float) -> float:
 
 
 def _grid_note(data: DrillData) -> str:
-    """What the title block says about the grid, read from what actually ran.
-
-    The grid used to arrive through ``DrawingOptions``, defaulting to 0.25, so a
-    library consumer who snapped at 0.5 and called ``emit`` got a sheet stamped
-    with a pitch the holes had never been near. The number is a fact about the
-    data, so it comes out of the data — the *effective* pitch, which is the one
-    ``SnapPositions.describe`` reports and the one the holes are multiples of.
-
-    Two answers, both of them honest: a recorded pitch, printed at the full
-    three decimals because a pitch is a length like any other and the grid is a
-    whole number of microns, so nothing is lost; or no pitch, said out loud. A
-    hand-built ``DrillData`` never met the quantisation phase, and a
-    plausible-looking default is the failure this whole function is about.
-    """
+    """State the recorded effective grid, or explicitly that none was recorded."""
     run = data.last_run(SNAP_STAGE)
     grid_nm = None if run is None else run.get(GRID_PARAMETER)
     # ``StageRun`` payloads are deliberately generic. The model holds an ``_nm``
@@ -1304,36 +1160,12 @@ def _grid_note(data: DrillData) -> str:
 
 
 def _millimetre_label(diameter_nm: int) -> str:
-    """``⌀7.00 mm`` — the fallback spelling, when no standard was recorded.
-
-    Two decimals, which is what ``DrillStandard``'s own metric label prints, so
-    a panel that met the drill table and one that did not spell the same bit the
-    same way. Through ``format_nm`` because the diameter is an integer and this
-    is its one rendering: a float re-derived from it and formatted separately is
-    the second spelling the whole unit exists to abolish.
-    """
+    """Format the ``⌀7.00 mm`` fallback used without a recorded standard."""
     return f"⌀{format_nm(diameter_nm, 2)} mm"
 
 
 def _diameter_label(data: DrillData) -> Callable[[int], str]:
-    """How the schedule spells a diameter, taken from the standard that ran.
-
-    The drill table owns the display form, and ``DrillStandard.label`` is a
-    *function* rather than a decimal precision because no single precision can
-    serve both drawers: metric sizes are unique and truthful at 2 dp, while the
-    fractional series is truthful at none — 1/64" is 0.396875 mm, and ``⌀0.40
-    mm`` is a bit that exists nowhere. A fractional bit's honest name is its
-    fraction, which is also what is stamped on it.
-
-    Read out of provenance the way :func:`_grid_note` reads the grid, and by
-    name: ``snap-diameters`` records ``standard`` as a word, so the emitter
-    looks it up in ``DRILL_STANDARDS`` and holds no table of its own. A name the
-    registry does not hold — a hand-built standard, or a document written by a
-    later version of this tool — resolves to nothing, and the fallback states
-    millimetres rather than inventing a spelling for a drawer it cannot see.
-    Narrowing does not matter here: ``select`` copies the label through, so the
-    registry's entry spells a narrowed run's sizes exactly as the run would.
-    """
+    """Use the recorded drill standard's labels, falling back to millimetres."""
     run = data.last_run(DIAMETER_STAGE)
     name = None if run is None else run.get(STANDARD_PARAMETER)
     # ``StageRun`` payloads are generic, so a value that is not a name cannot
@@ -1351,49 +1183,9 @@ def _diameter_label(data: DrillData) -> Callable[[int], str]:
 
 
 def _enclosure_note(data: DrillData, capacity: int) -> str:
-    """What the title block says the panel is, read from the identified match.
+    """State catalogue footprint, rotation and selected part or ordered candidates.
 
-    ``HAMMOND 1590  112.40 × 60.50 mm  CANDIDATES B / B2``. Three decisions in
-    one line, each of which the drawing would otherwise get wrong:
-
-    * **The catalogue footprint, never the measured outline.** The artwork comes
-      to 113.000 × 60.000 for a 1590B; 112.40 × 60.50 is the number on the
-      datasheet the operator orders the box by, and the number every other
-      consumer of this panel has already agreed on. It is printed to the
-      catalogue's own two decimals — see ``_FOOTPRINT_DECIMALS`` — and out of the
-      integer nanometres the match holds, so the sheet and the JSON cannot state
-      one footprint two ways.
-    * **Candidates, never a part.** A 2-D outline identifies a footprint — 37
-      catalogue parts collapse into 26 footprints because many differ only in
-      height — so the sheet lists every part sharing the outline and names one
-      only when the operator declared it with ``--case``. The declared part
-      replaces the list rather than joining it: the question the list asks has
-      been answered.
-    * **The order it was given.** ``candidates`` is rendered as handed over,
-      because ordering it here would be the emitter deciding a fact the match
-      already carries. Sorting happens to be invisible today — ``footprints()``
-      sorts, so all 26 production footprints arrive alphabetical — which is
-      exactly why it must not be done here: whoever builds the match owns the
-      order, and a matcher that later ordered by height would find the drawing
-      quietly undoing it.
-
-    ``rotated`` is stated because the two numbers on the sheet would otherwise
-    contradict each other: the match keeps the catalogue's orientation while the
-    drawing dimensions the artwork's, so a turned 1590B is dimensioned 60.50 ×
-    112.40 beside an enclosure line reading 112.40 × 60.50.
-
-    No match at all is said out loud, for the reason :func:`_grid_note` says
-    ``GRID NOT RECORDED``. A missing line reads as a Hammond case nobody wrote
-    down, and "this is not a case we stock" is a legitimate outcome — the
-    catalogue holds 26 footprints and the world holds rather more.
-
-    ``capacity`` is how many characters the line may run to, and it is required
-    rather than optional because there is no honest default: a note composed
-    against no limit is one ``_fits`` is free to chop. Only the candidate list
-    is composed against it, being the only part of the line that can be
-    shortened *and still be read* — dropping a candidate and saying so leaves a
-    shorter true statement, whereas a chopped line leaves ``CANDIDATES BB /
-    BB2 / …``, from which nobody can tell whether one box was left off or three.
+    Missing matches are explicit; candidate truncation reports the omitted count.
     """
     match = data.enclosure
     if match is None:
@@ -1413,13 +1205,7 @@ def _enclosure_note(data: DrillData, capacity: int) -> str:
 
 
 def _candidate_list(designators: Sequence[str], room: int) -> str:
-    """``BB / BB2 / +2 MORE`` — the parts, and how many would not fit.
-
-    A count, never a bare ellipsis. The candidates are the boxes this artwork
-    could be for, and "two more, unnamed" is a question the reader can go and
-    answer against the datasheet; "…" is not. The names are dropped from the
-    end, so the list stays in the order the match handed it over.
-    """
+    """Fit ordered candidates, ending with a counted ``+N MORE`` marker."""
     text = " / ".join(designators)
     for keep in range(len(designators), 0, -1):
         text = " / ".join(designators[:keep])
@@ -1431,15 +1217,7 @@ def _candidate_list(designators: Sequence[str], room: int) -> str:
 
 
 def _designator(part: str, match: EnclosureMatch) -> str:
-    """``1590B`` under a ``Hammond 1590`` heading is the ``B`` of that series.
-
-    The datasheet groups the parts this way and so does the line: the series is
-    already printed, and repeating it four times over is what pushes a
-    four-candidate footprint past the width of the title block, where ``_fits``
-    truncates the last candidate away entirely. A designator that does not begin
-    with the series — or one that *is* the series — is left exactly as it came,
-    since eliding it would leave nothing to read.
-    """
+    """Elide the family prefix only when a non-empty designator remains."""
     words = match.family.split()
     # A family of no words leaves ``series`` empty, which the test below then
     # answers correctly on its own: every string starts with "" and every
@@ -1453,28 +1231,7 @@ def _designator(part: str, match: EnclosureMatch) -> str:
 
 
 def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[_PayloadValue]:
-    """The ``Hole.index`` of every hole ``Deduplicate`` kept and reported.
-
-    ``hole_index`` is the survivor's stable identity, which is why it exists: a
-    coordinate is only true until the next stage moves the hole, and
-    ``location_nm`` is written at the moment of the report. A diagnostic
-    carrying no id names no hole this emitter can place, so it rings nothing
-    rather than guessing.
-
-    Typed as ``Diagnostic.data``'s own value type and not ``int`` on purpose. The
-    payload is generic and the set is only ever tested with ``in``, so a value
-    that is not an id simply matches no hole — whereas an ``isinstance(…, int)``
-    filter would also throw away a ``3.0`` that equals, and would have correctly
-    rung, hole 3. Dropping a ring in silence is the failure this function was
-    rewritten to fix, so no filter is added to narrow the annotation.
-
-    The value type now includes a tuple of identities, because ``duplicate-hole``
-    carries ``dropped_indices`` and ``grid-ambiguous`` carries ``tied_indices``.
-    Those are the holes the pipeline did *not* keep and holes it did not single
-    out, neither of which is what the ring means — and the widening costs
-    nothing, since a tuple equals no ``Hole.index``. The one thing that must not
-    happen is a narrowing that decides which shapes are worth looking at.
-    """
+    """Return stable survivor identities named by ``duplicate-hole`` findings."""
     return frozenset(
         index
         for d in diagnostics
@@ -1483,14 +1240,5 @@ def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[_PayloadValue
 
 
 def _is_flagged(hole: Hole, flagged: frozenset[_PayloadValue]) -> bool:
-    """Identity, not geometry. Whoever the pipeline named is who gets the ring.
-
-    Two earlier versions decided this from positions. The first matched within a
-    hardcoded 0.05 mm and ringed a ⌀5 hole sitting beside a flagged ⌀7 that the
-    pipeline had correctly kept. The second matched exactly, on position and
-    diameter, and so was right only while nothing moved the survivor afterwards
-    — ``Pipeline([Deduplicate, SnapPositions])`` is a legal order, and under it
-    the ring silently vanished from the sheet while the CLI still reported the
-    duplicate.
-    """
+    """Use stable identity, never geometry, to decide whether to draw a ring."""
     return hole.index in flagged

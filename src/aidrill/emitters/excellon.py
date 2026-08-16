@@ -1,64 +1,8 @@
-"""Excellon drill-file emitter (SPEC §7).
+"""Serialise pipeline results as metric Excellon FMAT,2.
 
-This module serialises. That is all it does.
-
-It does **not** round positions, cluster diameters, drop duplicates or assign
-tool numbers of its own. Every one of those is a pipeline responsibility, and the
-one time this file took them on it produced drill files like::
-
-    T1C5.000
-    T2C7.000
-    T3C7.000
-
-— the same 7 mm bit loaded twice, two drilling passes, because a measured 6.9998
-and a measured 7.0000 were clustered *here* rather than upstream. Tool numbers
-come from :meth:`DrillData.tools`, which is also what the drawing's hole schedule
-uses, so the two cannot disagree. See ``tests/test_excellon.py`` for the
-regression that pins this.
-
-Nor does it order anything. Holes are written in the order they arrive, grouped
-under their tool; the sequence is whatever ``pipeline.SortHoles`` left behind,
-exactly as in the JSON and the drawing. This file once carried its own copy of
-``SortHoles``' reading-order key and applied it unconditionally, which meant a
-custom sort key reached the sheet but not the drill file, and the drawing's
-balloon numbers no longer matched the order the machine drilled in.
-
-The only transforms permitted are frame translation — delegated to
-:meth:`DrillData.with_origin`, never hand-rolled — and the nanometre-to-
-millimetre rendering of :func:`units.format_nm`, at the moment of formatting.
-Every length reaching here is a whole number of nanometres, so the translation is
-exact and the rendering is the only place a value is ever shortened: half the
-outline added on the way in and the same half subtracted by a reader lands back
-on the number the pipeline chose, which is what lets this file and the sheet
-beside it describe one panel in two frames without rounding between them.
-
-The file is always metric. The grid is quoted in millimetres, the catalogue is
-metric, and a professional machine takes a metric tool table, so there is no
-frame in which the ``INCH,TZ`` spelling was anyone's answer. The one operator who
-does think in inches asks for it with ``--drill-standard fractional``, which is a
-*drill table* and not a unit: the console and the sheet then print ⌀13/64" from
-the standard's own label while this file writes the size the machine drills,
-``T1C5.159``.
-
-Three invariants are therefore checked rather than assumed, because ``emit``
-serialises whatever ``DrillData`` a library consumer hands it — the CLI's own
-gate on ``worst_severity`` protects only the CLI. The data must carry no ERROR,
-the tool table must stay injective *as written*, and ``LOWER_LEFT`` must yield no
-negative coordinate. Declining to write a file is permitted; repairing one is
-not — see ``docs/adr/0001-pipeline-and-emitter-adapters.md``.
-
-Excellon is the format where each of those matters most, because it renders no
-diagnostics at all. Every other artifact this project writes carries its findings
-with it: the drawing has a NOTES block, the JSON document has ``diagnostics``.
-A drill file has nothing, so an incomplete or nonsensical one does not read as
-damaged — it reads as a drill file for a different panel, and it reads that way
-to a machinist about to put it into a machine.
-
-The header therefore also states which frame the coordinates are in. It declared
-``absolute``, ``metric`` and ``decimal`` while saying nothing about where zero
-was, so the same hole was ``X16.500Y48.000`` here and ``-40.00, 18.00`` on the
-sheet beside it — every number different, by exactly half the outline, with
-neither document explaining the other.
+Tool numbers and hole order come from ``DrillData``. Only model frame translation
+and final numeric formatting occur here. Because Excellon cannot carry findings,
+ERROR data, colliding rendered tools and negative lower-left coordinates are rejected.
 """
 
 from __future__ import annotations
@@ -84,17 +28,9 @@ _NANOMETRE_DECIMALS = 6
 
 @dataclass(frozen=True, slots=True)
 class ExcellonOptions:
-    """Output options for :class:`ExcellonEmitter`.
+    """Excellon origin, decimal precision and optional title.
 
-    ``origin``
-        ``LOWER_LEFT`` (the default) is what drilling equipment expects, because
-        it keeps every coordinate positive. It needs a reference outline to know
-        where the lower-left corner is; without one the emitter raises rather
-        than guessing.
-    ``decimals``
-        Digits after the point for both coordinates and tool diameters.
-    ``title``
-        Text for the ``;DRILL file for …`` comment. Falls back to the source path.
+    ``LOWER_LEFT`` requires a reference outline; title falls back to source path.
     """
 
     origin: Origin = Origin.LOWER_LEFT
@@ -145,24 +81,7 @@ class ExcellonEmitter:
 
     # -- internals -------------------------------------------------------
     def _reject_errors(self, data: DrillData) -> None:
-        """Refuse data a stage has already declared broken.
-
-        ``SnapDiametersToDrillTable`` implements an unmatched diameter by
-        recording an ERROR *and dropping the hole*, so error-bearing data is
-        routinely data with a hole missing from it. The CLI knows this and
-        writes no artifact at all when anything reached ERROR; a library
-        consumer driving the pipeline itself has no such gate, and the file it
-        would get here is the one failure this project is organised around —
-        not a broken drill file, but a well-formed drill file for a panel that
-        is one hole short. Nothing in the format can say otherwise.
-
-        The codes are named because the caller would otherwise have to walk the
-        diagnostics to find out which finding stopped the file, and because
-        ``code`` is the stable key: a consumer that wants to act on this — retry
-        with a wider drill table, say — can match on what it reads here. Each is
-        named once, in the order the stages found them; a panel with nine holes
-        off one table would otherwise repeat one code nine times and say nothing.
-        """
+        """Refuse ERROR-bearing data, naming distinct diagnostic codes in order."""
         errors = data.of_severity(Severity.ERROR)
         if not errors:
             return
@@ -177,25 +96,9 @@ class ExcellonEmitter:
         )
 
     def _reframe(self, data: DrillData) -> tuple[DrillData, str]:
-        """Translate into the requested frame, and say in one breath what it is.
+        """Use ``with_origin`` and return a header describing the effective frame.
 
-        The header's frame comment is built here rather than beside the other
-        header lines because this is the one place that knows both what was
-        asked for and what the shift came to. A file stating a frame it was not
-        written in would be worse than the silence it replaces, and two places
-        deciding the frame is exactly how that happens.
-
-        Frame translation itself is delegated to the shared model transform;
-        ``with_origin`` is also the authority on which origins exist, so an
-        origin neither branch below describes never reaches the header — it
-        raises three lines further down instead.
-
-        The stated half floors, because ``with_origin``'s does: an outline of an
-        odd number of nanometres has no exact half, and a comment quoting the
-        true half would name a shift the coordinates under it were not moved by.
-        A test pins the two together at a precision fine enough to tell them
-        apart, since at the three decimals this file usually writes half a
-        nanometre disappears.
+        Lower-left translation requires an outline and floors odd half-nanometres.
         """
         if self.options.origin is Origin.LOWER_LEFT:
             if data.reference is None:
@@ -216,19 +119,7 @@ class ExcellonEmitter:
             raise EmitterError(f"excellon: {exc}") from exc
 
     def _tool_tokens(self, tools: Mapping[int, int]) -> dict[int, str]:
-        """Render each nominal once, and refuse a clash.
-
-        The precision the caller asked for is where the resolution actually is,
-        not the unit: 6.9998 and 7.0000 mm are two unmistakable nominals to the
-        model — 200 nanometres apart, and no stage merged them — and one
-        ``C7.000`` at three decimals. Merging the two is the pipeline's call,
-        never this file's; all an emitter may do about a distinction it cannot
-        print is decline to.
-
-        Both nominals are named at nanometre precision, because at the file's
-        own precision they are by definition the same string, and a refusal that
-        quoted them there would say a size collides with itself.
-        """
+        """Render each nominal once, refusing collisions at requested precision."""
         seen: dict[str, int] = {}
         tokens: dict[int, str] = {}
         for diameter_nm in tools:
@@ -247,14 +138,7 @@ class ExcellonEmitter:
         return tokens
 
     def _reject_negative_coordinates(self, data: DrillData) -> None:
-        """Check the promise ``LOWER_LEFT`` makes, against what will be written.
-
-        Read from the rendered token rather than the position, so a hole a
-        fraction of a print unit outside the outline — which prints ``0.000``
-        and drills exactly where it should — is not reported as off the panel.
-        Holes are checked in pipeline order, so the index named is the first
-        offender.
-        """
+        """Reject the first rendered negative coordinate under ``LOWER_LEFT``."""
         if self.options.origin is not Origin.LOWER_LEFT:
             return
         for hole in data.holes:
@@ -275,12 +159,5 @@ class ExcellonEmitter:
         return [f"X{self._value(h.x_nm)}Y{self._value(h.y_nm)}" for h in holes]
 
     def _value(self, nanometres: int) -> str:
-        """Format one length: nanometres in, millimetres out, at the asked width.
-
-        No rounding of the underlying data — this is presentation only, and the
-        integer it reads is the one the pipeline stored. Negative zero is
-        normalised away by the shared converter, the same one the drawing's
-        schedule prints through, so the two artifacts cannot print one hole two
-        ways.
-        """
+        """Format nanometres as millimetres at the requested decimal precision."""
         return format_nm(nanometres, self.options.decimals)

@@ -1,9 +1,4 @@
-"""Deterministic hole ordering.
-
-Ordering is a pipeline concern, not an emitter one: the Excellon file, the
-drawing's balloon numbers and the JSON must list holes in the same sequence, or
-an operator checking one against another has to work out why they differ.
-"""
+"""Deterministic pipeline-level hole ordering shared by every emitter."""
 
 from __future__ import annotations
 
@@ -37,12 +32,7 @@ class SortHoles:
         self.key = _reading_order if key is None else key
 
     def describe(self) -> StageRun:
-        """Name the ordering that was applied, not the argument that chose it.
-
-        ``SortHoles()`` and ``SortHoles(key=None)`` order holes identically, so
-        both report ``"default"``; anything else reports the callable's own
-        ``__name__``, which is the only handle a reader has on what it did.
-        """
+        """Record ``default`` or the effective key callable's name."""
         if self.key is _reading_order:
             key = "default"
         else:

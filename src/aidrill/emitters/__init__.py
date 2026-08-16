@@ -1,10 +1,7 @@
-"""Output formats.
+"""Output formats and their public registry API.
 
-Importing this package imports every emitter module, which is what runs the
-``@register_emitter`` decorators and fills ``REGISTRY``. ``cli.py`` therefore
-resolves ``--emit FORMAT=PATH`` purely through :func:`get_emitter` and never
-names a concrete class: adding a format means adding a module and one line here,
-and nothing else in the codebase changes (OCP).
+Importing this package loads each emitter module so its registration decorator
+populates ``REGISTRY``.
 """
 
 from . import drawing_svg, excellon, json_out  # noqa: F401  (imported for the side effect)
