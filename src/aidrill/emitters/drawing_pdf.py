@@ -314,7 +314,12 @@ def _text_ops(text: Text, sheet: Sheet) -> list[str]:
     literal = encode_text(text.content).decode("latin-1")
 
     if text.rotate:
-        angle = math.radians(text.rotate)
+        # ``text.rotate`` is defined in the scene's Y-down frame — the same
+        # sense SVG's own ``rotate()`` reads it in. PDF text space is Y-up,
+        # and mirroring one axis reverses a rotation's sense, so the angle
+        # is negated here: without it, a label advances the opposite
+        # physical direction from the one the SVG backend draws it in.
+        angle = math.radians(-text.rotate)
         cos, sin = math.cos(angle), math.sin(angle)
         # Rotate about the anchor point, then step along the rotated baseline.
         place = (

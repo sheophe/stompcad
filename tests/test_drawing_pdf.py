@@ -133,12 +133,44 @@ def test_the_content_stream_speaks_millimetres():
 
 
 def test_the_drawing_is_not_mirrored_top_to_bottom():
-    """Y is flipped in Python, so a mark near the sheet top has a high PDF y."""
-    stream = stream_of(render(panel()))
-    ys = [float(m) for m in re.findall(r"^\S+ (\S+) m$", stream, re.MULTILINE)]
+    """A mark near the scene's top must sit high in PDF's Y-up y, and one near
+    the scene's bottom must sit low — not merely under some fixed bound, which
+    an unflipped ``_y`` also satisfies, since every scene coordinate is already
+    inside the sheet. The frame border is a mark whose scene position is known:
+    its Y-down top edge is ``layout.border``'s ``y0`` (small, near the scene's
+    top) and its bottom edge is ``y1`` (larger, near the scene's bottom)."""
+    data = panel()
+    emitter = DrawingPdfEmitter()
+    layout = emitter.layout(data)
+    x0, y0, x1, y1 = layout.border
+    stream = stream_of(emitter.emit(data))
 
-    assert ys, "expected at least one moveto"
-    assert max(ys) <= 297.0 + 1e-6
+    match = re.search(r"^(\S+) (\S+) (\S+) (\S+) re S$", stream, re.MULTILINE)
+    assert match, "expected the frame border rectangle"
+    _, rect_y, _, height = (float(v) for v in match.groups())
+
+    # A correct flip sends the scene-bottom edge (y1) to the *smaller* PDF y
+    # and the scene-top edge (y0) to the *larger* one; an unflipped ``_y``
+    # would instead leave the rectangle at (y0, y0 + height) unchanged.
+    assert rect_y == pytest.approx(layout.sheet.height - y1, abs=1e-2)
+    assert rect_y + height == pytest.approx(layout.sheet.height - y0, abs=1e-2)
+
+
+def test_the_rotated_height_label_advances_up_the_page():
+    """The overall-height label is the sheet's only rotated text, drawn with
+    ``rotate=-90`` so it reads bottom-to-top like an engineering drawing's
+    left-hand dimension. ``text.rotate`` is defined in the scene's Y-down
+    frame, so its text matrix must still advance toward *larger* PDF y —
+    the direction an un-negated angle gets backwards, silently, because
+    nothing about the SVG sheet or this PDF alone looks wrong in isolation."""
+    stream = stream_of(render(panel()))
+
+    matches = re.findall(r"(\S+) (\S+) \S+ \S+ \S+ \S+ Tm", stream)
+    assert len(matches) == 1, "expected exactly one rotated text placement"
+    cos_component, sin_component = (float(v) for v in matches[0])
+
+    assert sin_component > 0
+    assert (cos_component, sin_component) == pytest.approx((0.0, 1.0), abs=1e-3)
 
 
 # --- what it says ---------------------------------------------------------
