@@ -6,6 +6,7 @@ from decimal import ROUND_HALF_EVEN, Decimal
 
 from aidrill.units import (
     NM_PER_MM,
+    Nanometre,
     format_nm,
     mm_from_nm,
     mm_from_pt,
@@ -60,27 +61,27 @@ class TestRounding:
 
     def test_printing_ties_the_same_way_as_converting(self) -> None:
         """Printing ties the same way as converting."""
-        assert format_nm(2_500_000, decimals=0) == "3"
-        assert format_nm(-2_500_000, decimals=0) == "-3"
+        assert format_nm(Nanometre(2_500_000), decimals=0) == "3"
+        assert format_nm(Nanometre(-2_500_000), decimals=0) == "-3"
 
 
 class TestBackOut:
     def test_a_whole_nanometre_returns_to_the_millimetre_it_came_from(self) -> None:
-        assert mm_from_nm(396_875) == 0.396875
-        assert mm_from_nm(-40_000_000) == -40.0
+        assert mm_from_nm(Nanometre(396_875)) == 0.396875
+        assert mm_from_nm(Nanometre(-40_000_000)) == -40.0
         assert NM_PER_MM == 1_000_000
 
     def test_a_formatted_value_is_millimetres_at_the_asked_precision(self) -> None:
         """Nanometres are the model's unit; the operator still reads millimetres."""
-        assert format_nm(-40_000_000) == "-40.000"
-        assert format_nm(5_159_375) == "5.159"
-        assert format_nm(5_159_375, decimals=4) == "5.1594"
+        assert format_nm(Nanometre(-40_000_000)) == "-40.000"
+        assert format_nm(Nanometre(5_159_375)) == "5.159"
+        assert format_nm(Nanometre(5_159_375), decimals=4) == "5.1594"
 
 
 class TestPrinting:
     def test_a_value_that_prints_as_zero_never_prints_as_minus_zero(self) -> None:
         """A negative value rounding to zero formats unsigned so artefacts agree."""
-        assert format_nm(-400) == "0.000"
+        assert format_nm(Nanometre(-400)) == "0.000"
 
 
 def _nearest_multiple_of(quantity: Decimal, pitch_nm: int) -> int:

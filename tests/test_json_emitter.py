@@ -9,6 +9,7 @@ import pytest
 
 from aidrill.emitters.base import REGISTRY, get_emitter
 from aidrill.emitters.json_out import JsonEmitter, JsonOptions
+from aidrill.units import Millimetre, Nanometre
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -43,25 +44,25 @@ def fixture_data() -> DrillData:
     """
     given = (
         Hole(
-            x_nm=-40_000_000,
-            y_nm=18_000_000,
-            diameter_nm=7_000_000,
-            raw=RawHole(-39.9906, 18.0021, 6.9998, 4),
+            x_nm=Nanometre(-40_000_000),
+            y_nm=Nanometre(18_000_000),
+            diameter_nm=Nanometre(7_000_000),
+            raw=RawHole(Millimetre(-39.9906), Millimetre(18.0021), Millimetre(6.9998), 4),
             index=4,
         ),
         Hole(
-            x_nm=-19_000_000,
-            y_nm=-18_750_000,
-            diameter_nm=5_000_000,
-            raw=RawHole(-19.0, -18.75, 5.0002, 1),
+            x_nm=Nanometre(-19_000_000),
+            y_nm=Nanometre(-18_750_000),
+            diameter_nm=Nanometre(5_000_000),
+            raw=RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0002), 1),
             index=1,
         ),
     )
     return DrillData(
         holes=given,
         reference=ReferenceOutline.from_measurement(
-            120_000_000, 93_000_000, centre_x_nm=297_600_000, centre_y_nm=421_000_000
-        ).resized(119_500_000, 94_000_000),
+            Nanometre(120_000_000), Nanometre(93_000_000), centre_x_nm=Nanometre(297_600_000), centre_y_nm=Nanometre(421_000_000)
+        ).resized(Nanometre(119_500_000), Nanometre(94_000_000)),
         diagnostics=(
             Diagnostic.info("no-reference-outline", "nothing to check against"),
             Diagnostic.warning(
@@ -114,8 +115,8 @@ def fixture_data() -> DrillData:
         ),
         enclosure=EnclosureMatch(
             family="Hammond 1590",
-            length_nm=119_500_000,
-            width_nm=94_000_000,
+            length_nm=Nanometre(119_500_000),
+            width_nm=Nanometre(94_000_000),
             candidates=("1590C", "1590BB", "1590BBS", "1590BB2"),
             rotated=False,
             selected_part="1590BBS",
@@ -128,12 +129,12 @@ def rotated_fixture_data() -> DrillData:
     return replace(
         fixture_data(),
         reference=ReferenceOutline.from_measurement(
-            60_000_000, 113_000_000, centre_x_nm=297_600_000, centre_y_nm=421_000_000
-        ).resized(60_500_000, 112_400_000),
+            Nanometre(60_000_000), Nanometre(113_000_000), centre_x_nm=Nanometre(297_600_000), centre_y_nm=Nanometre(421_000_000)
+        ).resized(Nanometre(60_500_000), Nanometre(112_400_000)),
         enclosure=EnclosureMatch(
             family="Hammond 1550",
-            length_nm=112_400_000,
-            width_nm=60_500_000,
+            length_nm=Nanometre(112_400_000),
+            width_nm=Nanometre(60_500_000),
             candidates=("1550S", "1550A", "1550B"),
             rotated=True,
             selected_part=None,
@@ -149,12 +150,12 @@ def square_fixture_data() -> DrillData:
     return replace(
         fixture_data(),
         reference=ReferenceOutline.from_measurement(
-            121_000_000, 119_000_000, centre_x_nm=297_600_000, centre_y_nm=421_000_000
-        ).resized(120_000_000, 120_000_000),
+            Nanometre(121_000_000), Nanometre(119_000_000), centre_x_nm=Nanometre(297_600_000), centre_y_nm=Nanometre(421_000_000)
+        ).resized(Nanometre(120_000_000), Nanometre(120_000_000)),
         enclosure=EnclosureMatch(
             family="Hammond 1590",
-            length_nm=120_000_000,
-            width_nm=120_000_000,
+            length_nm=Nanometre(120_000_000),
+            width_nm=Nanometre(120_000_000),
             candidates=("1590U", "1590Q", "1590V"),
             rotated=True,
             selected_part="1590Q",
@@ -179,13 +180,13 @@ def read_panel(
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=outline,
         centre=(297.6, 421.0),
-        holes=(measured if measured is not None else RawHole(0.0, 0.0, 7.0, 4),),
+        holes=(measured if measured is not None else RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), 4),),
     )
     return quantise(
         raw,
         enclosure=IdentifyHammondFootprint(case),
         diameters=SnapDiametersToDrillTable(),
-        positions=SnapPositions(250_000),
+        positions=SnapPositions(Nanometre(250_000)),
     )
 
 
@@ -321,7 +322,7 @@ def test_missing_reference_outline_is_null_not_omitted():
         fixture_data,
         rotated_fixture_data,
         square_fixture_data,
-        lambda: read_panel(RawOutline(113.0, 60.0), case="1590b2"),
+        lambda: read_panel(RawOutline(Millimetre(113.0), Millimetre(60.0)), case="1590b2"),
     ],
     ids=["landscape", "rotated", "square", "real-run"],
 )
@@ -337,7 +338,7 @@ def test_the_sweep_reaches_every_kind_of_length_there_is():
 
     Named paths prevent an empty or partially narrowed sweep passing vacuously.
     """
-    document = parse(read_panel(RawOutline(113.0, 60.0), case="1590b2"))
+    document = parse(read_panel(RawOutline(Millimetre(113.0), Millimetre(60.0)), case="1590b2"))
 
     where = {path for path, _ in nominal_lengths(document)}
 
@@ -447,7 +448,7 @@ def test_unmatched_enclosure_is_null_not_omitted():
 
 def test_enclosure_is_what_the_quantisation_phase_found():
     """End to end, against the real catalogue rather than a hand-built match."""
-    document = parse(read_panel(RawOutline(113.0, 60.0), case="1590b2"))
+    document = parse(read_panel(RawOutline(Millimetre(113.0), Millimetre(60.0)), case="1590b2"))
 
     assert document["enclosure"] == {
         "family": "Hammond 1590",
@@ -467,7 +468,7 @@ def test_an_unrecognised_outline_leaves_the_enclosure_null_and_says_so():
     A panel this catalogue has never heard of is left exactly as measured, so
     the document must carry both halves of that: no match, and the reason.
     """
-    document = parse(read_panel(RawOutline(200.0, 45.0)))
+    document = parse(read_panel(RawOutline(Millimetre(200.0), Millimetre(45.0))))
 
     assert document["enclosure"] is None
     assert [d["code"] for d in document["diagnostics"]] == ["unknown-enclosure"]
@@ -654,14 +655,14 @@ def test_error_bearing_data_is_serialised_rather_than_refused():
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=None,
         centre=(0.0, 0.0),
-        holes=(RawHole(0.0, 18.0, 26.0, 2), RawHole(-19.0, -18.75, 5.0, 6)),
+        holes=(RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(26.0), 2), RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0), 6)),
     )
     doc = parse(
         quantise(
             raw,
             enclosure=IdentifyHammondFootprint(),
             diameters=SnapDiametersToDrillTable(),
-            positions=SnapPositions(250_000),
+            positions=SnapPositions(Nanometre(250_000)),
         )
     )
 
@@ -845,10 +846,10 @@ def test_emitter_does_not_round_or_cluster_values():
     data = DrillData(
         holes=(
             Hole(
-                x_nm=123_457,
-                y_nm=-765_432,
-                diameter_nm=6_999_800,
-                raw=RawHole(0.1234567, -0.7654321, 6.9998, 4),
+                x_nm=Nanometre(123_457),
+                y_nm=Nanometre(-765_432),
+                diameter_nm=Nanometre(6_999_800),
+                raw=RawHole(Millimetre(0.1234567), Millimetre(-0.7654321), Millimetre(6.9998), 4),
                 index=4,
             ),
             at(1_000_000, 1_000_000, index=1),

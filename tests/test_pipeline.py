@@ -18,6 +18,7 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
+from aidrill.units import Millimetre, Nanometre
 from aidrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -63,7 +64,7 @@ def test_every_stage_satisfies_the_stage_protocol(stage):
 
 @pytest.mark.parametrize(
     "quantiser",
-    [SnapPositions(250_000), SnapDiametersToDrillTable(), IdentifyHammondFootprint()],
+    [SnapPositions(Nanometre(250_000)), SnapDiametersToDrillTable(), IdentifyHammondFootprint()],
     ids=lambda q: type(q).__name__,
 )
 def test_a_quantiser_is_not_a_stage(quantiser):
@@ -79,7 +80,7 @@ def test_stages_are_pure_functions(stage):
         at(-40_000_000, 18_000_000, 7_000_000, index=4),
         at(-40_000_000, 18_000_000, 7_000_000, index=1),
         at(19_000_000, -18_750_000, 5_000_000, index=9),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
     before_holes, before_diags = data.holes, data.diagnostics
 
@@ -99,7 +100,7 @@ def test_stages_survive_empty_input(stage):
     prior = Diagnostic.info("prior", "something earlier said this")
     data = DrillData(
         holes=(),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
         diagnostics=(prior,),
         source=SourceInfo(path="test"),
     )
@@ -195,7 +196,7 @@ class TestDeduplicate:
         both = (-39.990641944444405, 17.999956944444445, 6.999816666666661)
         raw = RawDrillData(
             source=SourceInfo(path="tar.ai"),
-            reference=RawOutline(113.0, 60.0),
+            reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
             centre=(56.5, 30.0),
             holes=(RawHole(*both, 2), RawHole(*both, 5)),
         )
@@ -206,7 +207,7 @@ class TestDeduplicate:
             # ``ambiguous-enclosure`` and never reaches the dedupe this names.
             enclosure=IdentifyHammondFootprint("1590B"),
             diameters=SnapDiametersToDrillTable(),
-            positions=SnapPositions(250_000),
+            positions=SnapPositions(Nanometre(250_000)),
         )
 
         out = Deduplicate().apply(data)
@@ -329,7 +330,7 @@ def _phase(*measurements: RawHole, grid_nm: int = 250_000) -> DrillData:
     return quantise(
         RawDrillData(
             source=SourceInfo(path="panel.ai"),
-            reference=RawOutline(113.0, 60.0),
+            reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
             centre=(56.5, 30.0),
             holes=measurements,
         ),
@@ -349,8 +350,8 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
     #: diameter, same Y, so they are one hole by the time dedupe sees them —
     #: which is precisely what a fixture of two byte-identical measurements can
     #: never show, because identical copies share their residual as well.
-    ON_GRID = RawHole(0.0, 18.0, 7.0, 4)
-    TIED = RawHole(0.125, 18.0, 7.0, 9)
+    ON_GRID = RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 4)
+    TIED = RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(7.0), 9)
 
     @pytest.mark.parametrize(
         "drawn, kept, findings",
@@ -381,9 +382,9 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
         """The only tied circle on this panel is one no bit can make."""
         out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(
             _phase(
-                RawHole(-20.0, 18.0, 7.0, 4),
-                RawHole(0.125, 18.0, 30.0, 9),
-                RawHole(0.25, 18.0, 7.0, 1),
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
+                RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(30.0), 9),
+                RawHole(Millimetre(0.25), Millimetre(18.0), Millimetre(7.0), 1),
             )
         )
 
@@ -408,7 +409,7 @@ class TestCheckReferenceSize:
 
     def test_mismatch_warns(self):
         data = make_data(
-            at(0, 0, 7_000_000, index=4), reference=ReferenceOutline(112_400_000, 60_000_000)
+            at(0, 0, 7_000_000, index=4), reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_000_000))
         )
         out = CheckReferenceSize(self.DECLARED).apply(data)
         assert codes(out) == ["reference-size-mismatch"]
@@ -419,7 +420,7 @@ class TestCheckReferenceSize:
             at(-40_000_000, 18_000_000, 7_000_000, index=4),
             at(20_000_000, -18_750_000, 5_000_000, index=1),
         )
-        data = make_data(*given, reference=ReferenceOutline(100_000_000, 60_000_000))
+        data = make_data(*given, reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(60_000_000)))
         out = CheckReferenceSize(self.DECLARED).apply(data)
         assert out.holes == given
         assert out.reference == data.reference
@@ -428,23 +429,23 @@ class TestCheckReferenceSize:
         """A caller who declares a 50 000 nm slack on a panel that is 50 000 nm out typed
         the number they meant.
         """
-        on_it = make_data(reference=ReferenceOutline(113_050_000, 60_000_000))
-        assert codes(CheckReferenceSize(self.DECLARED, 50_000).apply(on_it)) == []
+        on_it = make_data(reference=ReferenceOutline(Nanometre(113_050_000), Nanometre(60_000_000)))
+        assert codes(CheckReferenceSize(self.DECLARED, Nanometre(50_000)).apply(on_it)) == []
 
-        one_nm_over = make_data(reference=ReferenceOutline(113_050_001, 60_000_000))
-        assert codes(CheckReferenceSize(self.DECLARED, 50_000).apply(one_nm_over)) == [
+        one_nm_over = make_data(reference=ReferenceOutline(Nanometre(113_050_001), Nanometre(60_000_000)))
+        assert codes(CheckReferenceSize(self.DECLARED, Nanometre(50_000)).apply(one_nm_over)) == [
             "reference-size-mismatch"
         ]
 
     def test_a_width_mismatch_alone_is_enough(self):
         """A width mismatch alone fails even when height matches."""
-        data = make_data(reference=ReferenceOutline(112_000_000, 60_000_000))
+        data = make_data(reference=ReferenceOutline(Nanometre(112_000_000), Nanometre(60_000_000)))
         assert codes(CheckReferenceSize(self.DECLARED).apply(data)) == [
             "reference-size-mismatch"
         ]
 
     def test_a_height_mismatch_alone_is_enough(self):
-        data = make_data(reference=ReferenceOutline(113_000_000, 59_000_000))
+        data = make_data(reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(59_000_000)))
         assert codes(CheckReferenceSize(self.DECLARED).apply(data)) == [
             "reference-size-mismatch"
         ]
@@ -461,7 +462,7 @@ class TestCheckReferenceSize:
 
         Asymmetric deltas distinguish swapped axes and dropped signs.
         """
-        data = make_data(reference=ReferenceOutline(112_500_000, 60_250_000))
+        data = make_data(reference=ReferenceOutline(Nanometre(112_500_000), Nanometre(60_250_000)))
 
         diagnostic = CheckReferenceSize(self.DECLARED).apply(data).diagnostics[0]
 
@@ -614,14 +615,14 @@ class TestPipelineComposition:
         """The library flow, end to end, on the shape of panel it meets."""
         raw = RawDrillData(
             source=SourceInfo(path="panel.ai"),
-            reference=RawOutline(113.0, 60.0),
+            reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
             centre=(56.5, 30.0),
             holes=(
-                RawHole(-40.003, 18.001, 6.9998, 4),
-                RawHole(-40.0, 18.0, 7.0000, 1),  # a duplicate of the above, once quantised
-                RawHole(-20.0, 18.0, 7.0001, 9),
-                RawHole(-19.0, -18.75, 5.0002, 6),
-                RawHole(19.0, -18.75, 4.9998, 2),
+                RawHole(Millimetre(-40.003), Millimetre(18.001), Millimetre(6.9998), 4),
+                RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0000), 1),  # a duplicate of the above, once quantised
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0001), 9),
+                RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0002), 6),
+                RawHole(Millimetre(19.0), Millimetre(-18.75), Millimetre(4.9998), 2),
             ),
         )
 
@@ -631,7 +632,7 @@ class TestPipelineComposition:
                 # Declared, for the reason above: 113 × 60 is a tie.
                 enclosure=IdentifyHammondFootprint("1590B"),
                 diameters=SnapDiametersToDrillTable(),
-                positions=SnapPositions(250_000),
+                positions=SnapPositions(Nanometre(250_000)),
             )
         )
 
@@ -797,7 +798,7 @@ class TestPipelineRecordsProvenance:
         after = Pipeline(stages).run(
             make_data(
                 *holes((-40_000_000, 18_000_000, 7_000_000), (19_000_000, -18_750_000, 5_000_000)),
-                reference=ReferenceOutline(113_000_000, 60_000_000),
+                reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
             )
         )
         assert [r.name for r in after.processing] == [type(s).name for s in stages]

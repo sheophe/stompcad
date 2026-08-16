@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from aidrill.enclosures import footprints
+from aidrill.units import Millimetre, Nanometre
 from aidrill.model import Diagnostic, RawOutline, Severity
 from aidrill.pipeline import IdentifyHammondFootprint, normalize_part_name
 from aidrill.pipeline import enclosure as enclosure_stage
@@ -22,7 +23,7 @@ ORIGIN = (0.0, 0.0)
 #: 1590B/1590B2's 112.40 × 60.50, so an undeclared run cannot identify it. Every
 #: test below that uses it therefore declares a case, and
 #: `TestTheFixturePanelNeedsADeclaredCase` pins that requirement on its own.
-FIXTURE = RawOutline(113.0, 60.0)
+FIXTURE = RawOutline(Millimetre(113.0), Millimetre(60.0))
 
 #: 1590B's footprint, which `FIXTURE` snaps to once a case is declared.
 B_FOOTPRINT = (112_400_000, 60_500_000)
@@ -31,7 +32,7 @@ B_FOOTPRINT = (112_400_000, 60_500_000)
 #: within tolerance in either orientation. Every test that needs a *silent,
 #: undeclared* match uses this one, because the fixture above can no longer
 #: supply it — and the axes differ, so a transposed answer cannot pass.
-UNAMBIGUOUS = RawOutline(93.0, 38.0)
+UNAMBIGUOUS = RawOutline(Millimetre(93.0), Millimetre(38.0))
 
 #: 1590A's footprint, which `UNAMBIGUOUS` snaps to.
 A_FOOTPRINT = (92_600_000, 38_500_000)
@@ -122,7 +123,7 @@ class TestIdentifyHammondFootprint:
     def test_a_near_miss_is_unknown_rather_than_the_footprint_it_nearly_is(self):
         """94.2 × 38.5 is 1.6 mm off 1590A on one axis. Outside is outside."""
         outline, match, diagnostics = IdentifyHammondFootprint().quantise(
-            RawOutline(94.2, 38.5), ORIGIN
+            RawOutline(Millimetre(94.2), Millimetre(38.5)), ORIGIN
         )
 
         assert codes(diagnostics) == ["unknown-enclosure"]
@@ -131,9 +132,9 @@ class TestIdentifyHammondFootprint:
 
     def test_the_tolerance_boundary_is_inclusive_to_the_nanometre(self):
         """1.5 mm exactly is a match; the machinist typed the number they meant."""
-        on_it = IdentifyHammondFootprint().quantise(RawOutline(94.1, 38.5), ORIGIN)
+        on_it = IdentifyHammondFootprint().quantise(RawOutline(Millimetre(94.1), Millimetre(38.5)), ORIGIN)
         one_nm_over = IdentifyHammondFootprint().quantise(
-            RawOutline(94.100001, 38.5), ORIGIN
+            RawOutline(Millimetre(94.100001), Millimetre(38.5)), ORIGIN
         )
 
         assert on_it[1] is not None
@@ -142,7 +143,7 @@ class TestIdentifyHammondFootprint:
     def test_the_measurement_is_compared_without_being_rounded_first(self):
         """Compare the measurement unrounded at the boundary that distinguishes it."""
         _, match, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(94.1000004, 38.5), ORIGIN
+            RawOutline(Millimetre(94.1000004), Millimetre(38.5)), ORIGIN
         )
 
         assert match is None
@@ -152,11 +153,11 @@ class TestIdentifyHammondFootprint:
 
         Values just inside and outside the bound reject premature rounding.
         """
-        on_it = IdentifyHammondFootprint("1590B").quantise(RawOutline(113.9, 60.5), ORIGIN)
+        on_it = IdentifyHammondFootprint("1590B").quantise(RawOutline(Millimetre(113.9), Millimetre(60.5)), ORIGIN)
         assert on_it[1] is not None, "the fixture is not a hair outside the bound"
 
         outline, match, diagnostics = IdentifyHammondFootprint("1590B").quantise(
-            RawOutline(113.9000004, 60.5), ORIGIN
+            RawOutline(Millimetre(113.9000004), Millimetre(60.5)), ORIGIN
         )
 
         assert match is None
@@ -165,11 +166,11 @@ class TestIdentifyHammondFootprint:
 
     def test_a_tighter_tolerance_rejects_what_the_default_accepts(self):
         """A 1.4 mm drawing error against a tolerance that will not have it."""
-        drawn = RawOutline(94.0, 38.0)  # 1.4 and 0.5 mm off 1590A
-        tight = IdentifyHammondFootprint(tolerance_nm=500_000)
+        drawn = RawOutline(Millimetre(94.0), Millimetre(38.0))  # 1.4 and 0.5 mm off 1590A
+        tight = IdentifyHammondFootprint(tolerance_nm=Nanometre(500_000))
         assert tight.quantise(drawn, ORIGIN)[1] is None
         assert (
-            IdentifyHammondFootprint(tolerance_nm=1_500_000).quantise(drawn, ORIGIN)[1]
+            IdentifyHammondFootprint(tolerance_nm=Nanometre(1_500_000)).quantise(drawn, ORIGIN)[1]
             is not None
         )
 
@@ -177,11 +178,11 @@ class TestIdentifyHammondFootprint:
         """One axis on the nose does not carry the other one home."""
         # Width exact, height 4 mm out.
         assert codes(
-            IdentifyHammondFootprint().quantise(RawOutline(112.0, 65.0), ORIGIN)[2]
+            IdentifyHammondFootprint().quantise(RawOutline(Millimetre(112.0), Millimetre(65.0)), ORIGIN)[2]
         ) == ["unknown-enclosure"]
         # Height exact, width 4 mm out.
         assert codes(
-            IdentifyHammondFootprint().quantise(RawOutline(108.0, 61.0), ORIGIN)[2]
+            IdentifyHammondFootprint().quantise(RawOutline(Millimetre(108.0), Millimetre(61.0)), ORIGIN)[2]
         ) == ["unknown-enclosure"]
 
     def test_a_tolerance_that_is_not_whole_nanometres_is_refused_at_construction(self):
@@ -194,15 +195,15 @@ class TestIdentifyHammondFootprint:
     def test_a_negative_tolerance_is_refused_rather_than_matching_nothing(self):
         """Reject negative tolerances rather than matching nothing silently."""
         with pytest.raises(ValueError, match="negative"):
-            IdentifyHammondFootprint(tolerance_nm=-1)
+            IdentifyHammondFootprint(tolerance_nm=Nanometre(-1))
 
     def test_a_tolerance_of_nothing_is_a_tolerance_and_is_kept(self):
         """Zero says the outline *is* a catalogue footprint, to the nanometre,
         which is a question an operator is entitled to ask."""
-        exact = IdentifyHammondFootprint(tolerance_nm=0)
+        exact = IdentifyHammondFootprint(tolerance_nm=Nanometre(0))
 
-        assert exact.quantise(RawOutline(92.6, 38.5), ORIGIN)[1] is not None
-        assert exact.quantise(RawOutline(92.600001, 38.5), ORIGIN)[1] is None
+        assert exact.quantise(RawOutline(Millimetre(92.6), Millimetre(38.5)), ORIGIN)[1] is not None
+        assert exact.quantise(RawOutline(Millimetre(92.600001), Millimetre(38.5)), ORIGIN)[1] is None
 
 
 class TestAnUnmatchedOutlineIsQuantisedOntoItself:
@@ -269,8 +270,8 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
         # 113.6 rather than 500: the size must come from the outline this
         # quantiser produced, and a payload sourced from anything else would be
         # indistinguishable on an outline nothing has snapped.
-        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=400_000).quantise(
-            RawOutline(113.6, 60.0), ORIGIN
+        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=Nanometre(400_000)).quantise(
+            RawOutline(Millimetre(113.6), Millimetre(60.0)), ORIGIN
         )
 
         assert diagnostics[0].get("width_nm") == 113_600_000
@@ -305,8 +306,8 @@ class TestTheBackplateConvention:
 
         No tolerance can therefore identify it uniquely.
         """
-        under = IdentifyHammondFootprint(tolerance_nm=1_899_999)
-        at_it = IdentifyHammondFootprint(tolerance_nm=1_900_000)
+        under = IdentifyHammondFootprint(tolerance_nm=Nanometre(1_899_999))
+        at_it = IdentifyHammondFootprint(tolerance_nm=Nanometre(1_900_000))
         face = RawOutline(*self.FACE_DRAWN_1590B)
 
         _, no_match, refused = under.quantise(face, ORIGIN)
@@ -342,7 +343,7 @@ class TestAmbiguity:
 
     def test_an_ambiguous_tie_is_an_error_not_a_choice(self):
         outline, match, diagnostics = IdentifyHammondFootprint(
-            tolerance_nm=2_000_000
+            tolerance_nm=Nanometre(2_000_000)
         ).quantise(RawOutline(*self.TIED), ORIGIN)
 
         assert codes(diagnostics) == ["ambiguous-enclosure"]
@@ -352,7 +353,7 @@ class TestAmbiguity:
 
     def test_the_tie_diagnostic_names_every_footprint_it_could_not_choose_between(self):
         """Naming one of them would be the guess this rule exists to refuse."""
-        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
+        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=Nanometre(2_000_000)).quantise(
             RawOutline(*self.TIED), ORIGIN
         )
 
@@ -396,12 +397,12 @@ class TestAmbiguity:
         assert 2 * IdentifyHammondFootprint().tolerance_nm < 4 * MM
 
         assert codes(
-            IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
+            IdentifyHammondFootprint(tolerance_nm=Nanometre(2_000_000)).quantise(
                 RawOutline(*self.TIED), ORIGIN
             )[2]
         ) == ["ambiguous-enclosure"]
 
-        _, match, diagnostics = IdentifyHammondFootprint(tolerance_nm=1_990_000).quantise(
+        _, match, diagnostics = IdentifyHammondFootprint(tolerance_nm=Nanometre(1_990_000)).quantise(
             RawOutline(*self.TIED), ORIGIN
         )
         assert match is None
@@ -419,7 +420,7 @@ class TestAmbiguity:
                 (116_000_000, 77_000_000): ("FAKE-B3",),
             },
         )
-        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
+        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=Nanometre(2_000_000)).quantise(
             RawOutline(*self.TIED), ORIGIN
         )
 
@@ -430,7 +431,7 @@ class TestAmbiguity:
 
 class TestRotation:
     #: `UNAMBIGUOUS` turned 90°: a portrait 1590A.
-    PORTRAIT = RawOutline(38.0, 93.0)
+    PORTRAIT = RawOutline(Millimetre(38.0), Millimetre(93.0))
 
     def test_a_portrait_panel_matches_its_landscape_catalogue_entry(self):
         outline, match, _ = IdentifyHammondFootprint().quantise(self.PORTRAIT, ORIGIN)
@@ -455,7 +456,7 @@ class TestRotation:
         """1590Y is 92 × 92, so both readings fit. A turn of no consequence is
         not a turn, and reporting one would put "rotated" on a drawing for a
         panel nobody rotated."""
-        _, match, _ = IdentifyHammondFootprint().quantise(RawOutline(92.4, 91.8), ORIGIN)
+        _, match, _ = IdentifyHammondFootprint().quantise(RawOutline(Millimetre(92.4), Millimetre(91.8)), ORIGIN)
 
         assert match.candidates == ("1590Y",)
         assert match.rotated is False
@@ -625,7 +626,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
     def test_a_declaration_breaks_a_tie_the_catalogue_cannot(self):
         """Two footprints fit; the operator already said which one it is."""
         outline, match, diagnostics = IdentifyHammondFootprint(
-            expected_part="1590T", tolerance_nm=2_000_000
+            expected_part="1590T", tolerance_nm=Nanometre(2_000_000)
         ).quantise(RawOutline(*self.TIED), ORIGIN)
 
         assert diagnostics == ()
@@ -638,7 +639,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
         """Declared 1590B; the outline is within tolerance of two footprints and
         neither of them is 1590B. Naming either would be the guess."""
         outline, match, diagnostics = IdentifyHammondFootprint(
-            expected_part="1590B", tolerance_nm=2_000_000
+            expected_part="1590B", tolerance_nm=Nanometre(2_000_000)
         ).quantise(RawOutline(*self.TIED), ORIGIN)
 
         assert codes(diagnostics) == ["unmatched-enclosure"]
@@ -651,7 +652,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
 
     def test_the_tie_message_names_the_parts_the_case_could_be_declared_as(self):
         """The advice is "declare the case", and a case is a part number."""
-        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
+        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=Nanometre(2_000_000)).quantise(
             RawOutline(*self.TIED), ORIGIN
         )
 
@@ -662,7 +663,7 @@ class TestADeclarationIsCheckedOnEveryOutcome:
         """The undeclared twin. ``ambiguous-enclosure`` keeps its one meaning —
         more than one footprint fits and nothing was said to choose between
         them — which is why the advice in its message is still sound."""
-        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
+        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=Nanometre(2_000_000)).quantise(
             RawOutline(*self.TIED), ORIGIN
         )
 
@@ -708,7 +709,7 @@ class TestNormalizePartName:
 
 class TestIdentifyHammondFootprintDescribe:
     def test_it_reports_the_tolerance_and_the_catalogue_it_searched(self):
-        run = IdentifyHammondFootprint(tolerance_nm=750_000).describe()
+        run = IdentifyHammondFootprint(tolerance_nm=Nanometre(750_000)).describe()
 
         assert run.name == "identify-enclosure"
         assert run.get("tolerance_nm") == 750_000
@@ -745,10 +746,10 @@ class TestTheMeasurementSurvivesTheSnap:
         nanometre.
         """
         outline, _, _ = IdentifyHammondFootprint().quantise(
-            RawOutline(113.0000004, 60.0), ORIGIN
+            RawOutline(Millimetre(113.0000004), Millimetre(60.0)), ORIGIN
         )
 
-        assert outline.raw == RawOutline(113.0000004, 60.0)
+        assert outline.raw == RawOutline(Millimetre(113.0000004), Millimetre(60.0))
 
     def test_the_snap_keeps_the_outlines_source_space_centre(self):
         """``centre_x_nm``/``centre_y_nm`` say where the outline sat on the page.
@@ -765,11 +766,11 @@ class TestTheMeasurementSurvivesTheSnap:
         measurement must still be recorded as a measurement rather than
         acquiring the catalogue's authority by coincidence."""
         outline, match, diagnostics = IdentifyHammondFootprint().quantise(
-            RawOutline(92.6, 38.5), ORIGIN
+            RawOutline(Millimetre(92.6), Millimetre(38.5)), ORIGIN
         )
 
         assert (outline.width_nm, outline.height_nm) == A_FOOTPRINT
-        assert outline.raw == RawOutline(92.6, 38.5)
+        assert outline.raw == RawOutline(Millimetre(92.6), Millimetre(38.5))
         assert match.candidates == ("1590A",)
         assert diagnostics == ()
 

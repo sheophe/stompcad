@@ -11,6 +11,7 @@ from pikepdf import Array, Dictionary, Name, String
 from aidrill.emitters import base
 from aidrill.geometry import KAPPA
 from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
+from aidrill.units import Nanometre
 
 __all__ = [
     "at",
@@ -41,8 +42,14 @@ def clean_registry():
 
 
 def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int) -> Hole:
-    """One quantised hole with an explicit identity."""
-    return Hole.from_measurement(x_nm, y_nm, diameter_nm, index=index)
+    """One quantised hole with an explicit identity.
+
+    Plain integers are branded here so a test may write the literal it means;
+    this helper is the suite's nanometre boundary.
+    """
+    return Hole.from_measurement(
+        Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm), index=index
+    )
 
 
 def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
@@ -51,7 +58,12 @@ def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
     Identity-sensitive tests use ``at`` so identity cannot equal tuple position.
     """
     return tuple(
-        Hole.from_measurement(s[0], s[1], s[2] if len(s) > 2 else 7_000_000, index=i)
+        Hole.from_measurement(
+            Nanometre(s[0]),
+            Nanometre(s[1]),
+            Nanometre(s[2] if len(s) > 2 else 7_000_000),
+            index=i,
+        )
         for i, s in enumerate(specs)
     )
 
@@ -71,11 +83,11 @@ def codes(data: DrillData) -> list[str]:
     return [d.code for d in data.diagnostics]
 
 
-def positions(data: DrillData) -> list[tuple[int, int]]:
+def positions(data: DrillData) -> list[tuple[Nanometre, Nanometre]]:
     return [(h.x_nm, h.y_nm) for h in data.holes]
 
 
-def diameters(data: DrillData) -> list[int]:
+def diameters(data: DrillData) -> list[Nanometre]:
     return [h.diameter_nm for h in data.holes]
 
 

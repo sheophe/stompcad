@@ -16,7 +16,7 @@ from aidrill.pipeline import (
     DrillStandard,
     SnapDiametersToDrillTable,
 )
-from aidrill.units import format_nm, nm_from_mm
+from aidrill.units import Nanometre, format_nm, nm_from_mm
 
 
 def measured(diameter: float, *, index: int = 4, x: float = 0.0, y: float = 0.0) -> RawHole:
@@ -299,13 +299,13 @@ class TestTheAnswerSetAndItsBoundAreCheckedWhereTheyAreDeclared:
         becomes an ``unknown-diameter`` ERROR — a report naming every hole and
         not the one number that refused them all."""
         with pytest.raises(ValueError, match="negative"):
-            SnapDiametersToDrillTable(tolerance_nm=-1)
+            SnapDiametersToDrillTable(tolerance_nm=Nanometre(-1))
 
     def test_a_bound_of_nothing_is_a_bound_and_is_kept(self):
         """Zero is a real answer — the measurement *is* a size in the table, to
         the nanometre — and refusing it would refuse a question the operator is
         entitled to ask."""
-        quantiser = SnapDiametersToDrillTable(tolerance_nm=0)
+        quantiser = SnapDiametersToDrillTable(tolerance_nm=Nanometre(0))
 
         assert quantiser.quantise(measured(7.0)) == (7_000_000, ())
         assert quantiser.quantise(measured(7.000001))[0] is None
@@ -460,8 +460,8 @@ class TestSnapDiametersToDrillTable:
     def test_a_tighter_tolerance_refuses_what_a_looser_one_accepted(self):
         hole = measured(25.25)
 
-        assert SnapDiametersToDrillTable(tolerance_nm=250_000).quantise(hole)[0] == 25_000_000
-        assert SnapDiametersToDrillTable(tolerance_nm=200_000).quantise(hole)[0] is None
+        assert SnapDiametersToDrillTable(tolerance_nm=Nanometre(250_000)).quantise(hole)[0] == 25_000_000
+        assert SnapDiametersToDrillTable(tolerance_nm=Nanometre(200_000)).quantise(hole)[0] is None
 
     def test_a_tie_goes_to_the_smaller_bit_whatever_order_the_table_is_in(self):
         """14.25 mm sits exactly between the 14.0 and 14.5 mm sizes — exactly, because 14
@@ -520,7 +520,7 @@ class TestDescribe:
         assert SnapDiametersToDrillTable().describe().name == SnapDiametersToDrillTable.name
 
     def test_it_reports_the_standard_it_quantised_against(self):
-        run = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"], 100_000).describe()
+        run = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"], Nanometre(100_000)).describe()
 
         assert run.get("standard") == "fractional"
         assert run.get("tolerance_nm") == 100_000

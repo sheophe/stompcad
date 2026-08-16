@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from aidrill.enclosures import HAMMOND_1590, Enclosure, footprints
+from aidrill.units import Nanometre
 
 REPO = Path(__file__).resolve().parent.parent
 DRAWINGS = REPO / "docs" / "parts" / "dimensions.tsv"
@@ -72,7 +73,7 @@ def test_a_footprint_names_every_part_that_shares_it():
 def test_the_1590b_is_the_size_its_drawing_prints():
     """The common 1590B has its TSV dimensions."""
     assert (
-        Enclosure("1590B", 112_400_000, 60_500_000, 31_000_000) in HAMMOND_1590
+        Enclosure("1590B", Nanometre(112_400_000), Nanometre(60_500_000), Nanometre(31_000_000)) in HAMMOND_1590
     ), "1590B must be 112.40 x 60.50 x 31.00 mm"
 
 
@@ -133,7 +134,7 @@ def test_an_enclosure_is_a_frozen_value():
 def test_an_enclosures_footprint_is_its_length_and_width():
     """Footprints use the length-width axis order."""
     assert Enclosure(
-        "1590XX", 145_200_000, 121_200_000, 39_300_000
+        "1590XX", Nanometre(145_200_000), Nanometre(121_200_000), Nanometre(39_300_000)
     ).footprint == (145_200_000, 121_200_000)
 
 

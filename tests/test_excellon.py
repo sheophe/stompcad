@@ -19,7 +19,7 @@ from aidrill.model import (
     SourceInfo,
 )
 from aidrill.protocols import Emitter
-from aidrill.units import format_nm
+from aidrill.units import Millimetre, Nanometre, format_nm
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------
@@ -41,7 +41,7 @@ def fixture_data() -> DrillData:
             (-19_000_000, -18_750_000, 5_000_000),
             (19_000_000, -18_750_000, 5_000_000),
         ),
-        reference=ReferenceOutline(width_nm=113_000_000, height_nm=60_000_000),
+        reference=ReferenceOutline(width_nm=Nanometre(113_000_000), height_nm=Nanometre(60_000_000)),
         diagnostics=(
             Diagnostic.warning(
                 "duplicate-hole", "1 coincident hole collapsed", (-40_000_000, 18_000_000)
@@ -128,7 +128,7 @@ def test_title_comment_uses_the_option_then_falls_back_to_the_source_path():
 
 
 def test_data_without_holes_still_produces_a_valid_file():
-    data = make_data(reference=ReferenceOutline(113_000_000, 60_000_000))
+    data = make_data(reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)))
     out = lines(emit(data))
 
     assert out[0] == "M48"
@@ -145,22 +145,22 @@ def test_regression_no_two_tool_definitions_share_a_diameter():
     """The pipeline maps 6.9998 and 7.0000 mm to one nominal and one tool."""
     normalised = (
         Hole(
-            x_nm=-40_000_000,
-            y_nm=18_000_000,
-            diameter_nm=7_000_000,
-            raw=RawHole(-40.0, 18.0, 6.9998, 0),
+            x_nm=Nanometre(-40_000_000),
+            y_nm=Nanometre(18_000_000),
+            diameter_nm=Nanometre(7_000_000),
+            raw=RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(6.9998), 0),
             index=0,
         ),
         Hole(
-            x_nm=-20_000_000,
-            y_nm=18_000_000,
-            diameter_nm=7_000_000,
-            raw=RawHole(-20.0, 18.0, 7.0000, 1),
+            x_nm=Nanometre(-20_000_000),
+            y_nm=Nanometre(18_000_000),
+            diameter_nm=Nanometre(7_000_000),
+            raw=RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0000), 1),
             index=1,
         ),
         at(0, -18_750_000, 5_000_000, index=2),
     )
-    data = make_data(*normalised, reference=ReferenceOutline(113_000_000, 60_000_000))
+    data = make_data(*normalised, reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)))
 
     definitions = tool_definitions(emit(data))
 
@@ -182,7 +182,7 @@ def test_tool_numbers_are_exactly_drilldata_tools():
         at(0, 0, 12_500_000, index=4),
         at(10_000_000, 0, 3_200_000, index=1),
         at(20_000_000, 0, 5_000_000, index=9),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
     definitions = tool_definitions(emit(data))
 
@@ -198,7 +198,7 @@ def test_the_tool_table_is_read_from_the_model_and_not_re_derived(monkeypatch):
     data = make_data(
         at(0, 0, 7_000_000, index=5),
         at(10_000_000, 0, 5_000_000, index=2),
-        reference=ReferenceOutline(100_000_000, 100_000_000),
+        reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
     monkeypatch.setattr(DrillData, "tools", lambda self: {7_000_000: 4, 5_000_000: 9})
 
@@ -214,7 +214,7 @@ def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
     data = make_data(
         at(-10_000_000, 0, 6_998_000, index=0),
         at(10_000_000, 0, 7_000_000, index=1),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
 
     definitions = tool_definitions(emit(data))
@@ -228,7 +228,7 @@ def test_emitter_does_not_renumber_after_a_gap_in_diameters():
         at(0, 0, 3_200_000, index=0),
         at(10_000_000, 0, 12_500_000, index=1),
         at(20_000_000, 0, 5_000_000, index=2),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
 
     assert tool_definitions(emit(data)) == {1: "3.200", 2: "5.000", 3: "12.500"}
@@ -240,7 +240,7 @@ def test_emitter_does_not_deduplicate_coincident_holes():
     data = make_data(
         at(0, 0, 7_000_000, index=0),
         at(0, 0, 7_000_000, index=1),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
 
     out = lines(emit(data))
@@ -261,7 +261,7 @@ def test_two_nominals_that_render_to_the_same_token_are_refused():
     data = make_data(
         at(0, 0, 6_999_800, index=1),
         at(10_000_000, 0, 7_000_000, index=3),
-        reference=ReferenceOutline(50_000_000, 50_000_000),
+        reference=ReferenceOutline(Nanometre(50_000_000), Nanometre(50_000_000)),
     )
 
     assert len(data.tools()) == 2  # the model still sees two nominals
@@ -279,7 +279,7 @@ def test_raising_the_precision_makes_the_same_two_nominals_representable():
     data = make_data(
         at(0, 0, 6_999_800, index=1),
         at(10_000_000, 0, 7_000_000, index=3),
-        reference=ReferenceOutline(50_000_000, 50_000_000),
+        reference=ReferenceOutline(Nanometre(50_000_000), Nanometre(50_000_000)),
     )
 
     assert tool_definitions(emit(data, decimals=4)) == {1: "6.9998", 2: "7.0000"}
@@ -294,7 +294,7 @@ def error_bearing_data() -> DrillData:
     """What ``SnapDiametersToDrillTable`` leaves behind after a bad diameter."""
     return make_data(
         at(-19_000_000, -18_750_000, 5_000_000, index=6),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     ).with_diagnostics(
         Diagnostic.error(
             "unknown-diameter",
@@ -334,7 +334,7 @@ def test_warnings_and_information_still_produce_a_drill_file():
     """
     data = make_data(
         at(0, 18_000_000, 7_000_000, index=3),
-        reference=ReferenceOutline(113_000_000, 60_000_000),
+        reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     ).with_diagnostics(
         Diagnostic.warning("duplicate-hole", "1 coincident hole collapsed", (0, 18_000_000)),
         Diagnostic.info("no-reference-outline", "nothing to check against"),
@@ -356,7 +356,7 @@ def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
     y_only = make_data(
         at(0, 0, 5_000_000, index=9),
         at(0, -60_000_000, 5_000_000, index=4),
-        reference=ReferenceOutline(50_000_000, 50_000_000),
+        reference=ReferenceOutline(Nanometre(50_000_000), Nanometre(50_000_000)),
     )
 
     with pytest.raises(EmitterError, match=r"hole 4\b"):
@@ -364,7 +364,7 @@ def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
 
     x_only = make_data(
         at(-60_000_000, 0, 5_000_000, index=7),
-        reference=ReferenceOutline(50_000_000, 50_000_000),
+        reference=ReferenceOutline(Nanometre(50_000_000), Nanometre(50_000_000)),
     )
 
     with pytest.raises(EmitterError, match=r"hole 7\b"):
@@ -379,7 +379,7 @@ def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
     """
     data = make_data(
         at(-25_000_400, 0, 7_000_000, index=0),
-        reference=ReferenceOutline(50_000_000, 50_000_000),
+        reference=ReferenceOutline(Nanometre(50_000_000), Nanometre(50_000_000)),
     )
 
     assert "X0.000Y25.000" in lines(emit(data))
@@ -472,7 +472,7 @@ def test_the_stated_shift_is_the_shift_the_coordinates_were_moved_by():
     """An odd outline has no exact half, and the header must quote the one ``with_origin``
     actually applied.
     """
-    outline = ReferenceOutline(width_nm=100_000_001, height_nm=60_000_001)
+    outline = ReferenceOutline(width_nm=Nanometre(100_000_001), height_nm=Nanometre(60_000_001))
     data = make_data(at(0, 0, 7_000_000, index=2), reference=outline)
 
     out = lines(emit(data, decimals=6))
@@ -503,7 +503,7 @@ def test_hole_order_is_preserved_not_re_sorted():
         at(-10_000_000, 10_000_000, 7_000_000, index=1),
         at(10_000_000, 10_000_000, 7_000_000, index=2),
         at(-10_000_000, -10_000_000, 7_000_000, index=3),
-        reference=ReferenceOutline(100_000_000, 100_000_000),
+        reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
 
     out = lines(emit(data))
@@ -524,7 +524,7 @@ def test_tool_blocks_stay_ascending_while_order_inside_them_is_untouched():
         at(-30_000_000, 20_000_000, 5_000_000, index=1),
         at(30_000_000, 20_000_000, 7_000_000, index=2),
         at(0, 20_000_000, 5_000_000, index=3),
-        reference=ReferenceOutline(100_000_000, 100_000_000),
+        reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
 
     out = lines(emit(data))

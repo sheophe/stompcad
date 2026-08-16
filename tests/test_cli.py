@@ -14,6 +14,7 @@ import pytest
 from aidrill import cli
 from aidrill.emitters.base import available, register_emitter
 from aidrill.errors import EmptyLayerError, LayerNotFoundError
+from aidrill.units import Millimetre, Nanometre
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -40,7 +41,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 def read(
     *,
     holes=None,
-    reference=RawOutline(99.6, 50.4),
+    reference=RawOutline(Millimetre(99.6), Millimetre(50.4)),
     diagnostics=(),
 ) -> RawDrillData:
     """Return unquantised float-millimetre input.
@@ -49,9 +50,9 @@ def read(
     """
     if holes is None:
         holes = (
-            RawHole(-20.0, 18.0, 7.0, 0),
-            RawHole(20.0, 18.0, 7.0, 1),
-            RawHole(0.0, -18.75, 5.0, 2),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 0),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 1),
+            RawHole(Millimetre(0.0), Millimetre(-18.75), Millimetre(5.0), 2),
         )
     return RawDrillData(
         source=SourceInfo(
@@ -70,16 +71,16 @@ def read(
 def document(
     *,
     holes=None,
-    reference=ReferenceOutline(112_000_000, 61_000_000),
+    reference=ReferenceOutline(Nanometre(112_000_000), Nanometre(61_000_000)),
     diagnostics=(),
     processing=(),
 ) -> DrillData:
     """A finished ``DrillData``, for the report renderers called directly."""
     if holes is None:
         holes = (
-            Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=0),
-            Hole.from_measurement(20_000_000, 18_000_000, 7_000_000, index=1),
-            Hole.from_measurement(0, -18_750_000, 5_000_000, index=2),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=0),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=1),
+            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000), index=2),
         )
     return DrillData(
         holes=tuple(holes),
@@ -344,7 +345,7 @@ def test_the_declared_standard_decides_what_a_hole_is_drilled_with(fake_source, 
 
     6.348 mm is nearer 1/4 inch than 6.3 mm, so the standards cannot agree.
     """
-    fake_source(read(holes=[RawHole(0.0, 0.0, 6.348, 4)]))
+    fake_source(read(holes=[RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(6.348), 4)]))
 
     assert cli.main([str(FIXTURE), "--drill-standard", "fractional"]) == 0
 
@@ -391,7 +392,7 @@ def test_a_narrowed_table_is_what_the_holes_are_actually_quantised_against(
     fake_source, capsys
 ):
     """With no 7 mm bit in the drawer, a 6.9998 mm hole is drilled with what is."""
-    fake_source(read(holes=[RawHole(0.0, 0.0, 6.9998, 4)]))
+    fake_source(read(holes=[RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(6.9998), 4)]))
 
     assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,6.8,12"]) == 0
 
@@ -485,7 +486,7 @@ def test_a_part_number_from_nowhere_is_a_usage_error(fake_source, capsys):
 
 def test_a_panel_that_is_no_hammond_case_still_gets_its_drill_data(fake_source, capsys):
     """A folded-aluminium one-off, or any of the enclosures we do not stock."""
-    fake_source(read(reference=RawOutline(200.0, 100.0)))
+    fake_source(read(reference=RawOutline(Millimetre(200.0), Millimetre(100.0))))
 
     assert cli.main([str(FIXTURE)]) == 1
 
@@ -641,9 +642,9 @@ def test_an_erroring_run_writes_no_artifact_at_all(fake_source, tmp_path, capsys
     fake_source(
         read(
             holes=[
-                RawHole(-20.0, 18.0, 7.0, 4),
-                RawHole(0.0, 18.0, 30.0, 1),  # no bit makes this
-                RawHole(20.0, 18.0, 5.0, 9),
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
+                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 1),  # no bit makes this
+                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0), 9),
             ]
         )
     )
@@ -800,7 +801,7 @@ def test_tool_summary_counts_come_from_the_model(capsys):
 
     data = SpyData(
         holes=document().holes,
-        reference=ReferenceOutline(112_000_000, 61_000_000),
+        reference=ReferenceOutline(Nanometre(112_000_000), Nanometre(61_000_000)),
         source=SourceInfo(path="fake.ai"),
     )
 
@@ -834,8 +835,8 @@ def test_the_tools_report_never_prints_one_diameter_as_two_tools():
     """Distinct close nominals receive enough precision to remain distinct."""
     data = document(
         holes=[
-            Hole.from_measurement(-20_000_000, 18_000_000, 6_999_800, index=6),
-            Hole.from_measurement(20_000_000, 18_000_000, 7_000_000, index=2),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(6_999_800), index=6),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
         ]
     )
     assert len(data.tools()) == 2  # the fixture must actually pose the problem
@@ -857,8 +858,8 @@ def test_the_tools_block_spells_a_bit_the_way_the_standard_that_ran_spells_it():
     """
     data = document(
         holes=[
-            Hole.from_measurement(-20_000_000, 18_000_000, 7_143_750, index=3),
-            Hole.from_measurement(0, -18_750_000, 5_159_375, index=1),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_143_750), index=3),
+            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_159_375), index=1),
         ],
         processing=[quantised_against("fractional", size_count=64)],
     )
@@ -882,8 +883,8 @@ def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools(
     """A standard's spelling may not print one diameter as two tools."""
     data = document(
         holes=[
-            Hole.from_measurement(-20_000_000, 18_000_000, 6_999_800, index=6),
-            Hole.from_measurement(20_000_000, 18_000_000, 7_000_000, index=2),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(6_999_800), index=6),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
         ],
         processing=[quantised_against("metric")],
     )
@@ -894,7 +895,7 @@ def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools(
 
 
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
-    fake_source(read(holes=[RawHole(-19.9906, 18.0021, 6.9998, 4)]))
+    fake_source(read(holes=[RawHole(Millimetre(-19.9906), Millimetre(18.0021), Millimetre(6.9998), 4)]))
     cli.main([str(FIXTURE)])
     out = capsys.readouterr().out
     assert "-20.000" in out  # nominal, after snapping to the grid
@@ -963,8 +964,8 @@ def test_a_declared_part_replaces_the_candidate_list():
         document(),
         enclosure=EnclosureMatch(
             family="Hammond 1590",
-            length_nm=119_500_000,
-            width_nm=94_000_000,
+            length_nm=Nanometre(119_500_000),
+            width_nm=Nanometre(94_000_000),
             candidates=("1590BB", "1590BB2", "1590BBS", "1590C"),
             rotated=True,
             selected_part="1590BB",
@@ -988,9 +989,9 @@ def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, cap
     fake_source(
         read(
             holes=[
-                RawHole(-20.0, 18.0, 7.0, 4),
-                RawHole(0.0, 18.0, 7.0, 1),
-                RawHole(20.0, 18.0, 7.0, 9),
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
+                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 1),
+                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 9),
             ]
         )
     )
@@ -1024,8 +1025,8 @@ def test_verbose_reports_the_quantisation_phase_as_well_as_the_stages(fake_sourc
     fake_source(
         read(
             holes=[
-                RawHole(-20.0, 18.0, 7.0, 4),
-                RawHole(0.0, 18.0, 30.0, 1),  # no bit makes this
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
+                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 1),  # no bit makes this
             ]
         )
     )

@@ -94,7 +94,7 @@ extend-immutable-calls = [
 [tool.mypy]
 python_version = "3.10"
 mypy_path = "src"
-files = ["src/aidrill"]
+files = ["src/aidrill", "tests"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true

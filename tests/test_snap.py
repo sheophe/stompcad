@@ -7,6 +7,7 @@ import random
 
 import pytest
 
+from aidrill.units import Nanometre
 from aidrill.model import Diagnostic, DrillData, Hole, RawHole, Severity, StageRun
 from aidrill.pipeline import ReviewGridTies, SnapPositions
 
@@ -26,7 +27,7 @@ def snapped(stage: SnapPositions, *measurements: RawHole) -> tuple[Hole, ...]:
             Hole(
                 x_nm=x_nm,
                 y_nm=y_nm,
-                diameter_nm=7_000_000,
+                diameter_nm=Nanometre(7_000_000),
                 raw=measurement,
                 index=measurement.index,
             )
@@ -47,14 +48,14 @@ def codes(diagnostics) -> list[str]:
 
 class TestSnapPositions:
     def test_snaps_a_measurement_onto_the_grid(self):
-        (x_nm, y_nm), diagnostics = SnapPositions(250_000).quantise(
+        (x_nm, y_nm), diagnostics = SnapPositions(Nanometre(250_000)).quantise(
             raw(-39.99, 18.01, index=4)
         )
         assert (x_nm, y_nm) == (-40_000_000, 18_000_000)
         assert diagnostics == ()
 
     def test_a_hole_already_on_the_grid_neither_moves_nor_speaks(self):
-        (x_nm, y_nm), diagnostics = SnapPositions(250_000).quantise(
+        (x_nm, y_nm), diagnostics = SnapPositions(Nanometre(250_000)).quantise(
             raw(-40.0, 18.25, index=9)
         )
         assert (x_nm, y_nm) == (-40_000_000, 18_250_000)
@@ -76,7 +77,7 @@ class TestSnapPositions:
 
         Neighbours on both sides and signs prevent an always-up rule from passing.
         """
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
 
         assert stage.quantise(raw(0.1250004, 0.0, index=7))[0][0] == 250_000
         assert stage.quantise(raw(0.1249996, 0.0, index=7))[0][0] == 0
@@ -88,7 +89,7 @@ class TestSnapPositions:
 
         0.125 and 0.375 mm resolve oppositely, excluding away-from-zero rounding.
         """
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
 
         assert stage.quantise(raw(0.125, 0.0, index=3))[0][0] == 0
         assert stage.quantise(raw(0.375, 0.0, index=3))[0][0] == 500_000
@@ -97,16 +98,16 @@ class TestSnapPositions:
 
     def test_both_axes_are_snapped(self):
         """One axis snapped and the other carried over is a live mistake."""
-        (x_nm, y_nm), _ = SnapPositions(500_000).quantise(raw(-19.4, 3.1, index=1))
+        (x_nm, y_nm), _ = SnapPositions(Nanometre(500_000)).quantise(raw(-19.4, 3.1, index=1))
         assert (x_nm, y_nm) == (-19_500_000, 3_000_000)
 
     def test_a_small_move_does_not_warn(self):
         # default warn_over is grid / 4 == 62 500 nm; this hole moves 10 000
-        _, diagnostics = SnapPositions(250_000).quantise(raw(-39.99, 18.0, index=0))
+        _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.99, 18.0, index=0))
         assert codes(diagnostics) == []
 
     def test_a_large_move_emits_an_off_grid_warning(self):
-        (x_nm, y_nm), diagnostics = SnapPositions(250_000).quantise(
+        (x_nm, y_nm), diagnostics = SnapPositions(Nanometre(250_000)).quantise(
             raw(-39.9, 18.0, index=0)
         )
         assert codes(diagnostics) == ["off-grid"]
@@ -116,8 +117,8 @@ class TestSnapPositions:
 
     def test_an_explicit_threshold_overrides_the_default(self):
         hole = raw(-39.9, 18.0, index=0)
-        assert codes(SnapPositions(250_000, warn_over_nm=200_000).quantise(hole)[1]) == []
-        assert codes(SnapPositions(250_000, warn_over_nm=50_000).quantise(hole)[1]) == [
+        assert codes(SnapPositions(Nanometre(250_000), warn_over_nm=Nanometre(200_000)).quantise(hole)[1]) == []
+        assert codes(SnapPositions(Nanometre(250_000), warn_over_nm=Nanometre(50_000)).quantise(hole)[1]) == [
             "off-grid"
         ]
 
@@ -126,7 +127,7 @@ class TestSnapPositions:
 
         A 3-4-5 offset makes either single-axis result distinct.
         """
-        _, diagnostics = SnapPositions(1_000_000).quantise(raw(0.3, -0.4, index=8))
+        _, diagnostics = SnapPositions(Nanometre(1_000_000)).quantise(raw(0.3, -0.4, index=8))
 
         assert codes(diagnostics) == ["off-grid"]
         moved_nm = diagnostics[0].get("moved_nm")
@@ -136,8 +137,8 @@ class TestSnapPositions:
     def test_the_warning_threshold_is_inclusive_at_its_own_boundary(self):
         """A 500 000 nm move is quiet at that bound and warns one nanometre below."""
         hole = raw(0.3, -0.4, index=8)
-        assert codes(SnapPositions(1_000_000, warn_over_nm=500_000).quantise(hole)[1]) == []
-        assert codes(SnapPositions(1_000_000, warn_over_nm=499_999).quantise(hole)[1]) == [
+        assert codes(SnapPositions(Nanometre(1_000_000), warn_over_nm=Nanometre(500_000)).quantise(hole)[1]) == []
+        assert codes(SnapPositions(Nanometre(1_000_000), warn_over_nm=Nanometre(499_999)).quantise(hole)[1]) == [
             "off-grid"
         ]
 
@@ -146,7 +147,7 @@ class TestSnapPositions:
 
         Identity 6 differs from its sole tuple position.
         """
-        _, diagnostics = SnapPositions(250_000).quantise(raw(-39.9, 18.0, index=6))
+        _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.9, 18.0, index=6))
 
         diag = diagnostics[0]
         assert diag.get("hole_index") == 6
@@ -155,7 +156,7 @@ class TestSnapPositions:
 
     def test_the_off_grid_message_says_which_hole_and_which_moment(self):
         """Both coordinates appear, and neither is left to be guessed at."""
-        _, diagnostics = SnapPositions(250_000).quantise(raw(-39.9, 18.0, index=6))
+        _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.9, 18.0, index=6))
         message = diagnostics[0].message
 
         assert "hole 6" in message
@@ -163,7 +164,7 @@ class TestSnapPositions:
 
     def test_regression_grid_half_moves_the_five_mm_row_a_quarter_millimetre(self):
         """At ``--grid 0.5``, the two ⌀5 holes go off-grid."""
-        stage = SnapPositions(500_000)
+        stage = SnapPositions(Nanometre(500_000))
         for index, x in ((5, -19.0), (2, 19.0)):
             (x_nm, y_nm), diagnostics = stage.quantise(raw(x, -18.75, index=index))
             assert codes(diagnostics) == ["off-grid"]
@@ -192,14 +193,14 @@ class TestSnapPositionsDescribesWhatItReallyDid:
         """``warn_over_nm`` is reported resolved, not as the ``None`` it was
         constructed with: a record of ``None`` tells a reader nothing about what
         happened to the data, and the drawing's title block reads this."""
-        run = SnapPositions(250_000).describe()
+        run = SnapPositions(Nanometre(250_000)).describe()
 
         assert run.name == "snap"
         assert run.parameters == (("grid_nm", 250_000), ("warn_over_nm", 62_500))
 
     def test_describe_reports_the_effective_grid_and_not_the_requested_one(self):
         """The sheet must never stamp a pitch the holes were not snapped to."""
-        run = SnapPositions(500).describe()
+        run = SnapPositions(Nanometre(500)).describe()
 
         assert run.parameters == (("grid_nm", 1_000), ("warn_over_nm", 250))
 
@@ -223,7 +224,7 @@ class TestTheGridIsAWholeNumberOfMicrons:
 
     def test_the_clamp_warning_names_both_the_requested_pitch_and_the_used_one(self):
         """Naming only one of them leaves the operator unable to tell which."""
-        stage = SnapPositions(500)
+        stage = SnapPositions(Nanometre(500))
         diag = stage.diagnostics[0]
 
         assert diag.severity is Severity.WARNING
@@ -232,12 +233,12 @@ class TestTheGridIsAWholeNumberOfMicrons:
         assert "0.000500" in diag.message and "0.001" in diag.message
 
     def test_a_grid_at_or_above_a_micron_raises_nothing(self):
-        assert SnapPositions(1_000).diagnostics == ()
-        assert SnapPositions(250_000).diagnostics == ()
+        assert SnapPositions(Nanometre(1_000)).diagnostics == ()
+        assert SnapPositions(Nanometre(250_000)).diagnostics == ()
 
     def test_the_clamp_is_reported_once_and_not_once_per_hole(self):
         """It is a finding about the configuration, not about a hole."""
-        stage = SnapPositions(0)
+        stage = SnapPositions(Nanometre(0))
 
         for index in (4, 1, 9):
             # Already on the clamped micron grid, so nothing else can speak.
@@ -262,16 +263,16 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
     def test_a_warning_threshold_that_is_not_an_int_is_refused_too(self, warn_over):
         """``--grid-warn=nan`` warns about every hole, including the still ones."""
         with pytest.raises(TypeError, match=r"^warn_over_nm"):
-            SnapPositions(250_000, warn_over_nm=warn_over)
+            SnapPositions(Nanometre(250_000), warn_over_nm=warn_over)
 
     def test_a_negative_warning_threshold_is_refused(self):
         """No hole can be inside it, so every hole is reported off-grid."""
         with pytest.raises(ValueError, match=r"^warn_over_nm"):
-            SnapPositions(250_000, warn_over_nm=-100_000)
+            SnapPositions(Nanometre(250_000), warn_over_nm=Nanometre(-100_000))
 
     def test_a_zero_warning_threshold_is_allowed(self):
         """"Tell me about every hole that moved at all" is a real request."""
-        stage = SnapPositions(250_000, warn_over_nm=0)
+        stage = SnapPositions(Nanometre(250_000), warn_over_nm=Nanometre(0))
 
         assert codes(stage.quantise(raw(0.0, 0.0, index=4))[1]) == []
         assert codes(stage.quantise(raw(0.01, 0.0, index=1))[1]) == ["off-grid"]
@@ -286,7 +287,7 @@ class TestReviewGridTies:
     )
     def test_a_tie_counts_on_either_axis_and_at_either_sign(self, x, y):
         """Both axes and signs count, with opposing half-to-even outcomes."""
-        assert codes(reviewed(SnapPositions(250_000), raw(x, y, index=4))) == [
+        assert codes(reviewed(SnapPositions(Nanometre(250_000)), raw(x, y, index=4))) == [
             "grid-ambiguous"
         ]
 
@@ -294,7 +295,7 @@ class TestReviewGridTies:
         """The most obvious way to draw on the wrong grid, and the one a Euclidean test
         fails hardest on.
         """
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
         measurement = raw(0.125, 0.125, index=4)
 
         assert stage.quantise(measurement)[1][0].get("moved_nm") == 176_776
@@ -302,19 +303,19 @@ class TestReviewGridTies:
 
     def test_a_tie_on_one_axis_survives_an_ordinary_residual_on_the_other(self):
         """``or``, and never ``and``."""
-        assert codes(reviewed(SnapPositions(250_000), raw(0.125, 0.031, index=4))) == [
+        assert codes(reviewed(SnapPositions(Nanometre(250_000)), raw(0.125, 0.031, index=4))) == [
             "grid-ambiguous"
         ]
 
     def test_a_hole_already_on_a_grid_point_is_not_tied(self):
         """Residual zero, and ``2 * 0 == grid_nm`` is false for any real pitch."""
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
 
         assert reviewed(stage, raw(-0.25, 0.5, index=4), raw(0.75, -1.0, index=1)) == ()
 
     def test_one_tie_among_many_is_enough_and_none_stays_quiet(self):
         """A single tie is a hole placed by a rule rather than by the artwork."""
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
         one_tie = (
             raw(0.125, 0.0, index=4),
             raw(-1.0, 0.0, index=1),
@@ -328,11 +329,11 @@ class TestReviewGridTies:
     def test_a_panel_with_no_holes_on_it_says_nothing(self):
         """No ties, nothing to say. A warning about a run with no circles in it
         is noise in front of an operator who has nothing to fix."""
-        assert reviewed(SnapPositions(250_000)) == ()
+        assert reviewed(SnapPositions(Nanometre(250_000))) == ()
 
     def test_the_finding_names_the_tied_holes_by_identity_and_not_by_position(self):
         """4, 1, 9 — and the tied ones are the first and the last."""
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
 
         (diag,) = reviewed(
             stage,
@@ -350,7 +351,7 @@ class TestReviewGridTies:
 
     def test_the_finding_is_about_the_panel_and_names_no_representative_hole(self):
         """A singular ``hole_index`` is the payload of a hole-level finding."""
-        (diag,) = reviewed(SnapPositions(250_000), raw(0.125, 0.0, index=4))
+        (diag,) = reviewed(SnapPositions(Nanometre(250_000)), raw(0.125, 0.0, index=4))
 
         # The key must be *absent*, not present and null. ``get`` cannot tell
         # those apart — its default is ``None`` too — and they are different
@@ -363,7 +364,7 @@ class TestReviewGridTies:
         """What the operator can act on is the grid they declared, so the
         sentence has to point there — the positions are not wrong, and a message
         about the holes would send them looking for a defect in the artwork."""
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
 
         (diag,) = reviewed(
             stage,
@@ -377,7 +378,7 @@ class TestReviewGridTies:
 
     def test_reviewing_the_same_panel_twice_gives_the_same_answer(self):
         """No state accumulates across calls, in either direction."""
-        stage = SnapPositions(250_000)
+        stage = SnapPositions(Nanometre(250_000))
         tied = raw(0.125, 0.0, index=4)
 
         assert codes(reviewed(stage, tied)) == ["grid-ambiguous"]
@@ -391,12 +392,12 @@ class TestReviewGridTies:
         """
         panel = (raw(0.25, 0.0, index=4), raw(-1.0, 0.0, index=1), raw(2.0, 0.0, index=9))
 
-        assert codes(reviewed(SnapPositions(500_000), *panel)) == ["grid-ambiguous"]
-        assert reviewed(SnapPositions(250_000), *panel) == ()
+        assert codes(reviewed(SnapPositions(Nanometre(500_000)), *panel)) == ["grid-ambiguous"]
+        assert reviewed(SnapPositions(Nanometre(250_000)), *panel) == ()
 
     def test_a_run_that_never_snapped_is_reviewed_against_no_pitch_at_all(self):
         """``last_run`` answers ``None``, and ``None`` is rendered, not defaulted."""
-        stage = SnapPositions(500_000)
+        stage = SnapPositions(Nanometre(500_000))
         prior = Diagnostic.info("prior", "something earlier said this")
         data = DrillData(
             holes=snapped(stage, raw(0.25, 0.0, index=4), raw(-1.0, 0.0, index=1)),
@@ -407,7 +408,7 @@ class TestReviewGridTies:
 
     def test_a_record_from_some_other_stage_is_not_a_pitch(self):
         """The pitch is looked up by name, and only ``snap`` has one to give."""
-        stage = SnapPositions(500_000)
+        stage = SnapPositions(Nanometre(500_000))
         data = DrillData(
             holes=snapped(stage, raw(0.25, 0.0, index=4))
         ).with_processing(StageRun("sort", (("key", "default"),)))
@@ -424,7 +425,7 @@ class TestReviewGridTies:
 
 def test_the_stage_reports_a_distance_it_could_not_have_got_from_hypot():
     """``math.isqrt`` floors; ``math.hypot`` returns a float that is not it."""
-    _, diagnostics = SnapPositions(1_000_000, warn_over_nm=100_000).quantise(
+    _, diagnostics = SnapPositions(Nanometre(1_000_000), warn_over_nm=Nanometre(100_000)).quantise(
         raw(0.1, 0.1, index=2)
     )
 
