@@ -196,7 +196,7 @@ def normalize_part_name(name: str) -> str:
     panel; a name this function leaves alone is reported as ``wrong-enclosure``
     naming both parts, which the operator can read and correct.
 
-    Written here rather than borrowed from ``tools/extract_1590.py``: that
+    Written here rather than borrowed from ``tools/build_catalogue.py``: that
     module is an unshipped generator, its collapse is private, and a contract
     the runtime depends on must be owned where it is used.
     """

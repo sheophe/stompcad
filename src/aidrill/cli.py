@@ -539,7 +539,7 @@ def format_source(data: DrillData) -> list[str]:
     The outline is printed twice, nominal beside measured, in the idiom the hole
     table uses four lines below for exactly the same reason.
     ``IdentifyHammondFootprint`` rewrites the measurement — the fixture panel
-    comes to 113.000 × 60.000 and leaves as the catalogue's 112 × 61 — so a
+    comes to 113.000 × 60.000 and leaves as the catalogue's 112.400 × 60.500 — so a
     report quoting only the nominal states a datasheet number as though it were
     what the artwork said, which is the failure ``ReferenceOutline.raw`` was
     added to make impossible everywhere else.

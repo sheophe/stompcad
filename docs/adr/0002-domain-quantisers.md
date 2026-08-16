@@ -11,6 +11,14 @@ does not. The per-part product PDFs it records as absent are now in `docs/parts/
 0.05 mm catalogue work is unblocked. Marked at both places it is stated, below and in
 Action Item 6, rather than edited away: an ADR is a dated record of what was known.
 
+**Amended in place 2026-08-16** — the 0.05 mm values are adopted, and the ambiguity
+arithmetic below is superseded. The decision stands: each quantity still snaps onto the
+domain's own answer set, the backplate convention still binds, and the severity policy is
+untouched. What changed is a *fact* the arithmetic rested on — "the closest pair in the
+catalogue is 4 mm apart" was true of the whole-millimetre table and is false of this one.
+Marked at the three places it is stated (the backplate section, the footprint count, and
+Action Item 6) rather than edited away.
+
 ---
 
 ## Context
@@ -44,8 +52,8 @@ to spare.
   hole *positions* are free, and those are already quantised onto a grid the operator
   declares.
 - We cannot know another builder's needs. A talk-box pedal legitimately wants a 20 mm hole
-  for the mic tube; the world holds far more enclosures than the 22 Hammond footprints we
-  ship.
+  for the mic tube; the world holds far more enclosures than the Hammond footprints we ship
+  (22 at the time of writing; 26 since the 0.05 mm adoption).
 - The expensive failure remains the one ADR-0001 named — an artifact that states something
   false and looks perfectly well-formed.
 - Single-operator project. A refusal costs a re-run; scrap aluminium costs a case, a
@@ -71,9 +79,11 @@ Five supporting decisions follow.
    `--drill-sizes` / `--no-drill-sizes`.
 2. **A measurement matching no size in the declared standard is an ERROR and the hole is
    dropped**, and a run with any ERROR writes no artifacts at all.
-3. **The catalogue stores the datasheet's whole millimetres**, generated from
-   `docs/1590.pdf` by `tools/extract_1590.py`, never typed. Adopting Hammond's 0.05 mm
-   per-part values is agreed and pending data (below).
+3. **The catalogue stores Hammond's published dimensions**, generated and never typed.
+   *(2026-08-15: the datasheet's whole millimetres, from `docs/1590.pdf` by
+   `tools/extract_1590.py`, with the 0.05 mm per-part values agreed and pending data.
+   2026-08-16: the per-part drawings' 0.05 mm figures, in exact integer nanometres, from
+   `docs/parts/dimensions.tsv` by `tools/build_catalogue.py`.)*
 4. **Silence is scoped to a unique match, and a declaration changes what silence means.**
    A unique match says nothing. On an undeclared run, no match is a WARNING and a tie is
    an ERROR. On a run that declared `--case`, every path ends in a confirmed match or an
@@ -175,6 +185,12 @@ the task a human gets wrong silently, and a wrong length means a panel drilled f
 the operator does not own — discovered in aluminium rather than in a test. The whole
 millimetre is also the number printed on the box the operator ordered.
 
+> **Amended 2026-08-16.** The *generation* argument stands and is why the adoption was a
+> new generator rather than a re-typing. The *precision* argument did not survive: whole
+> millimetres are what the series datasheet prints, not what Hammond specifies, and they
+> merge two parts the drawings distinguish. `docs/parts/dimensions.tsv` is the authority
+> now; `docs/1590.pdf` is the cross-check that the fine values round back onto it.
+
 **Why the values are not reconstructed as "imperial-exact".** Because Hammond specifies in
 **metric** and derives imperial, which is the opposite of what the shape of the numbers
 suggests. The 1590B product PDF gives 112.40 × 60.50 mm and 4.425″ × 2.382″: a clean
@@ -201,7 +217,9 @@ trusted to a per-part page: the failure is systematic, not a one-off typo, and i
 inside the tolerance where it silently becomes the panel's dimensions.
 
 **Why the catalogue was cross-checked by an independent derivation, not merely re-run.**
-`tools/extract_1590.py` reads `page.extract_tables()`, which depends on pdfplumber's cell
+`tools/extract_1590.py` (renamed `tools/build_catalogue.py` on 2026-08-16, where the same
+code now serves the coarse cross-check) reads `page.extract_tables()`, which depends on
+pdfplumber's cell
 geometry. Re-running it proves only that it is deterministic. The catalogue was therefore
 also derived a second way, deliberately sharing no code with the first: a regular
 expression over `page.extract_text()` lines, ignoring cell geometry entirely, anchored on
@@ -258,8 +276,8 @@ variations of one finding:
   and exits 0, because no stage may assume a predecessor ran. An ERROR here would mean
   that *drawing* your outline is punished while *not* drawing it is not — backwards at any
   severity. Underneath: "two footprints fit yours" is about the panel, but "we have never
-  heard of your enclosure" is about **our catalogue**, which holds 22 footprints where the
-  world holds rather more. It is the same rule the drill table follows for a 20 mm mic
+  heard of your enclosure" is about **our catalogue**, which holds 22 footprints (26 since
+  2026-08-16) where the world holds rather more. It is the same rule the drill table follows for a 20 mm mic
   tube: we cannot know what another builder is working in.
 
 **A declaration is checked on every outcome, which is what makes `--case` worth typing,
@@ -301,6 +319,13 @@ So the match carries `candidates`, and `selected_part` can only ever be filled i
 what the operator declared. Nothing may infer it from geometry; the artwork does not
 contain it.
 
+> **Amended 2026-08-16 — 26 footprints, not 22, and the example above is one of the four
+> that split.** At 0.05 mm 1590B and 1590B2 are 112.40 × 60.50 where 1590BS is
+> 112.00 × 60.50: one footprint when both rounded, two now. The rule is unchanged — an
+> outline still identifies a footprint and never a part — but a *declaration* now also
+> resolves ties the catalogue's own precision creates, which is why `tests/fixtures/tar.ai`
+> stopped identifying without a `--case`. See the amendment to the backplate section.
+
 ---
 
 ## The backplate convention
@@ -335,6 +360,31 @@ every panel. So the convention is the fix rather than a number, and
 `unknown-enclosure`'s message names it — a failure that teaches the fix costs a re-run,
 where a silent one costs a case.
 
+> **Amended 2026-08-16 — both numbers above are the whole-millimetre table's, and both
+> moved when the 0.05 mm values were adopted. The conclusion did not; it got stronger.**
+>
+> - **Required is now 1.9 mm, not 2.4.** The 2.4 was an artefact of the rounding: against
+>   1590B's *true* 112.40 × 60.50 the face-drawn 110.5 × 58.6 is out by exactly the wall
+>   draft, 1.9 mm, on both axes. The catalogue no longer inflates it.
+> - **Permitted is not a number at all any more.** Four footprint pairs now sit 0.10 to
+>   0.50 mm apart, because parts that shared an outline while both were rounded to whole
+>   millimetres no longer share one — 1590LLB against 1590LB, 1590BS against 1590B/1590B2,
+>   1590KK against 1590K, 1590D against 1590DD/1590E. Any tolerance able to absorb the
+>   error in measured artwork ties all four. There is no ceiling to be under.
+> - **What replaces the comparison is sharper than it was.** A face-drawn 1590B is 1.9 mm
+>   from its own backplate on the tighter axis **and 1.9 mm from 1590BS's**. The two
+>   thresholds are *identical*, so the two footprints become admissible at the very same
+>   tolerance: below it nothing fits, at it and above two things do. There is no widening
+>   that identifies the panel — only one that turns a refusal into a tie between two real
+>   enclosures. `tests/test_enclosure.py::TestTheBackplateConvention` pins it.
+> - **The surviving ceiling is 2.0 mm, and it now bounds something narrower**: the closest
+>   pair that is *not* one of the inherent four is still 4 mm (1590B3 against 1590T), so a
+>   *fifth* tie becomes reachable at 2.0 mm. The shipped default stays 1.5 mm, which is
+>   above the fixture's 1.0 mm error and below the 1.9 mm draft.
+>
+> The reference to `tests/test_pipeline.py` is also stale: those assertions moved to
+> `tests/test_enclosure.py` when the stage tests were split by stage.
+
 ---
 
 ## Consequences
@@ -347,7 +397,7 @@ where a silent one costs a case.
   and no artifact is written.
 - A consumer reads the enclosure straight out of the JSON document rather than
   re-implementing the matcher against the catalogue.
-- A datasheet revision is a re-run of `tools/extract_1590.py` and a red test, not a
+- A revision of Hammond's dimensions is a re-run of the generator and a red test, not a
   re-typing.
 
 **Harder**
@@ -363,8 +413,8 @@ where a silent one costs a case.
 
 **To revisit**
 
-- **0.05 mm catalogue values** — agreed, blocked on the per-part product PDFs. See the
-  int/float ripple and the `ROUND_HALF_UP` note above.
+- ~~**0.05 mm catalogue values**~~ — done 2026-08-16, in integer nanometres. See Action
+  Item 6 and the amendments above.
 - **A second, tighter diameter threshold** — "this snapped further than a real drawing
   ought to" as a WARNING is a genuinely different idea from `tolerance_mm`, which is a
   match/no-match bound. Tightening `tolerance_mm` to catch it would make a legitimate
@@ -388,10 +438,18 @@ where a silent one costs a case.
 4. [x] Withhold every artifact from a run carrying an ERROR, and print the paths not
        written
 5. [x] Carry the match into the JSON document (v4) and the drawing's title block
-6. [ ] Adopt the 0.05 mm catalogue values — model, both emitters and their tests, with
+6. [x] Adopt the 0.05 mm catalogue values — model, both emitters and their tests, with
        `decimal.ROUND_HALF_UP`. **Amended 2026-08-15:** the precondition this item was
        written against ("once the per-part product PDFs are in the repo") is met;
        `docs/parts/` and its `dimensions.tsv` hold all 37 parts, and the storage decision
-       is integer microns. Still open, no longer blocked.
+       is integer microns. Still open, no longer blocked. **Done 2026-08-16**, and in
+       integer *nanometres* rather than microns: the unit migration settled that
+       independently, every length in the model is nanometres, and a catalogue in a second
+       unit would reintroduce the conversion seam it was meant to remove. The generator
+       (`tools/build_catalogue.py`) reads `docs/parts/dimensions.tsv` through `Decimal` and
+       refuses any figure that is not a whole nanometre; `docs/1590.pdf` stays as an
+       independent coarse cross-check. The cost is the behaviour change recorded in the
+       amendments above: 26 footprints, four inherently ambiguous pairs, and a fixture
+       panel that needs `--case`.
 7. [ ] Decide whether the face-panel case can be recognised and named rather than merely
        refused
