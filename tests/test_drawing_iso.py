@@ -180,21 +180,32 @@ def test_there_are_exactly_four_centring_marks_on_the_axes_of_symmetry():
 
 
 def test_a_centring_mark_runs_from_the_trimmed_edge_past_the_frame():
-    """4.3: starting at the grid reference border, 10 mm beyond the frame."""
+    """4.3: every mark starts at the trimmed edge and runs inward, past its own
+    frame edge, by the overshoot. The left edge's border is ``FILING_BORDER``
+    (20 mm), not ``PLAIN_BORDER`` like the other three, so a test that assumed
+    one border width for every edge would be wrong exactly where it matters.
+    """
     layout = iso_layout()
+    sheet = layout.sheet
     marks = [
         item
         for item in iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
         if isinstance(item, Line) and item.cls == "centring-mark"
     ]
     top = next(m for m in marks if m.x1 == m.x2 and min(m.y1, m.y2) == 0.0)
+    bottom = next(m for m in marks if m.x1 == m.x2 and max(m.y1, m.y2) == sheet.height)
+    left = next(m for m in marks if m.y1 == m.y2 and min(m.x1, m.x2) == 0.0)
+    right = next(m for m in marks if m.y1 == m.y2 and max(m.x1, m.x2) == sheet.width)
 
     # From the trimmed edge (0) to 10 mm inside the frame, which is at y = 10.
     assert max(top.y1, top.y2) == PLAIN_BORDER + CENTRING_MARK_OVERSHOOT
+    assert min(bottom.y1, bottom.y2) == sheet.height - PLAIN_BORDER - CENTRING_MARK_OVERSHOOT
+    assert max(left.x1, left.x2) == FILING_BORDER + CENTRING_MARK_OVERSHOOT
+    assert min(right.x1, right.x2) == sheet.width - PLAIN_BORDER - CENTRING_MARK_OVERSHOOT
 
 
 def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
-    """4.5: four edges, two rectangles each."""
+    """4.5: four edges, two rectangles each, crossed so the pair actually overlaps."""
     layout = iso_layout()
     marks = [
         item
@@ -203,12 +214,27 @@ def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
     ]
 
     assert len(marks) == 8
+    corners: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
     for mark in marks:
         assert len(mark.points) == 4
         xs = {round(x, 6) for x, _ in mark.points}
         ys = {round(y, 6) for _, y in mark.points}
         sides = sorted((max(xs) - min(xs), max(ys) - min(ys)))
         assert sides == [TRIM_MARK_SHORT, TRIM_MARK_LONG]
+        corners.setdefault((min(xs), min(ys)), []).append((min(xs), min(ys), max(xs), max(ys)))
+
+    # Both rectangles at one corner share their near corner point, so grouping
+    # by it finds the pair the name promises: one per edge, four in all.
+    assert len(corners) == 4
+    for pair in corners.values():
+        assert len(pair) == 2
+        (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = pair
+        overlap_w = min(ax1, bx1) - max(ax0, bx0)
+        overlap_h = min(ay1, by1) - max(ay0, by0)
+        # e.g. at (0, 0) the boxes are [0,10]x[0,5] and [0,5]x[0,10], sharing
+        # [0,5]x[0,5] — genuinely overlapping, not merely touching an edge.
+        assert overlap_w == TRIM_MARK_SHORT
+        assert overlap_h == TRIM_MARK_SHORT
 
 
 def test_the_size_designation_sits_in_the_bottom_border_at_the_right_corner():

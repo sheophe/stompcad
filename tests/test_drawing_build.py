@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from aidrill.emitters.drawing.build import CENTRELINE_DASHES, SheetText, build_scene, pens_for
 from aidrill.emitters.drawing.layout import Layout
-from aidrill.emitters.drawing.scene import FEINT, INK, Group, Item, Line, Stroke
+from aidrill.emitters.drawing.scene import FEINT, INK, Group, Item, Line, Stroke, Text
 from aidrill.emitters.drawing.sheet import A3_LANDSCAPE, GROUP_0_7, FrameStyle, LineGroup
 from aidrill.model import DrillData, ReferenceOutline
 from aidrill.units import Nanometre
@@ -95,3 +95,30 @@ def test_a_hole_s_centre_mark_is_not_the_pen_the_panel_s_axes_are_drawn_with():
         assert mark.stroke.width == mark_width
         assert mark.stroke.dashes == (), "a short centre line is continuous"
         assert axis.stroke.dashes, "a centre line of symmetry is long-dashed dotted"
+
+
+def test_the_overflow_marker_states_the_layout_s_own_scale_not_a_pdf_literal():
+    """The PDF sheet is always 1:1, but the same marker also serves the SVG
+    sheet, which a caller can draw at any explicit scale. A panel too large
+    for its sheet even at 20:1 must be reported at 20:1, not at a hardcoded
+    1:1 — a drawing that misstates its own scale is worse than a plain one.
+    """
+    data = DrillData(
+        holes=(at(0, 0, index=1),),
+        reference=ReferenceOutline.from_measurement(
+            Nanometre(200_000_000), Nanometre(150_000_000)
+        ),
+    )
+    layout = Layout.for_sheet(A3_LANDSCAPE, data, scale=20.0, frame=FrameStyle.PLAIN)
+    assert not layout.fits, "the test needs an overflowing layout to exercise the marker"
+
+    items = build_scene(layout, data, SheetText()).items
+    notes = next(i for i in items if isinstance(i, Group) and i.cls == "notes")
+    marker = next(
+        i
+        for i in notes.items
+        if isinstance(i, Text) and i.cls == "note note-overflow" and "CONTENT EXCEEDS" in i.content
+    )
+
+    assert marker.content.startswith("SCALE 20:1")
+    assert "SCALE 1:1" not in marker.content

@@ -706,8 +706,12 @@ def _overflow_marker(layout: Layout) -> list[Item]:
     if layout.fits:
         return []
     x0, y0, x1, _ = layout.notes
+    # The PDF sheet is always 1:1, but this marker also serves the SVG sheet,
+    # which can be drawn at any explicit scale — so it names the scale the
+    # layout actually holds, the same source the title block's SCALE line
+    # reads, rather than assuming the PDF's own convention.
     required = (
-        f"SCALE 1:1 — CONTENT EXCEEDS {layout.sheet.name}; "
+        f"SCALE {layout.scale_label} — CONTENT EXCEEDS {layout.sheet.name}; "
         f"{layout.needed_width:.3f} × {layout.needed_height:.3f} mm REQUIRED"
     )
     return [
