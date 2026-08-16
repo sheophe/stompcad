@@ -62,7 +62,10 @@ re-wrap is the boundary this decision exists to make visible.
 `Micron` types the pitch **after** it has been clamped and validated, not at the argument
 where it arrives. The pitch is accepted in nanometres so that a request finer than a micron
 remains expressible and can be clamped with its own warning; a `Micron` argument would make
-that outcome unrepresentable and remove a diagnostic the operator depends on.
+that outcome unrepresentable and remove a diagnostic the operator depends on. The canonical
+nanometre pitch is then derived from the `Micron`, so wholeness is a property of how the
+pitch is built rather than a check whose result is discarded, and the two spellings of one
+pitch cannot disagree.
 
 `Millimetre` converts only toward `Nanometre`. Presentation arithmetic inside an emitter —
 scale factors, sheet coordinates, arrowhead geometry — is not a length the model holds and

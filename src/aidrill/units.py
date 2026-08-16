@@ -19,7 +19,6 @@ __all__ = [
     "NM_PER_MM",
     "NM_PER_MICRON",
     "nm_from_micron",
-    "micron_from_mm",
     "mm_from_pt",
     "nm_from_mm",
     "scaled_nm",
@@ -62,11 +61,6 @@ def mm_from_pt(points: float) -> Millimetre:
 def nm_from_mm(mm: float) -> Nanometre:
     """Convert millimetres to whole nanometres, with ties away from zero."""
     return Nanometre(int(_round_half_up(Decimal(str(mm)) * NM_PER_MM)))
-
-
-def micron_from_mm(mm: float) -> Micron:
-    """Convert millimetres to whole microns, with ties away from zero."""
-    return Micron(int(_round_half_up(Decimal(str(mm)) * NM_PER_MM / NM_PER_MICRON)))
 
 
 def nm_from_micron(microns: Micron) -> Nanometre:

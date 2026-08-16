@@ -20,6 +20,7 @@ from ..units import (
     Millimetre,
     Nanometre,
     format_nm,
+    nm_from_micron,
     nm_from_mm,
     scaled_nm,
 )
@@ -53,17 +54,19 @@ class SnapPositions:
 
     def __init__(self, grid_nm: Nanometre, warn_over_nm: Nanometre | None = None) -> None:
         self.requested_grid_nm = _whole("grid_nm", grid_nm)
-        self.grid_nm = Nanometre(max(self.requested_grid_nm, MICRON_NM))
+        clamped_nm = max(self.requested_grid_nm, MICRON_NM)
         # Only the pitch that is actually coarse enough to be used is held to
         # whole microns: a clamped one is not the pitch anything is snapped to,
         # and refusing 500 nm for not being a whole micron would refuse it for
         # the wrong reason and with the wrong remedy.
-        if self.grid_nm % MICRON_NM:
+        if clamped_nm % NM_PER_MICRON:
             raise ValueError(
                 f"grid must be a whole number of microns, got {grid_nm} nm"
             )
-        #: The effective pitch in the unit its wholeness is stated in.
-        self.grid_micron = Micron(self.grid_nm // NM_PER_MICRON)
+        #: The effective pitch, in the unit whose wholeness the check established.
+        self.grid_micron = Micron(clamped_nm // NM_PER_MICRON)
+        #: Derived from the pitch above, so the two cannot disagree.
+        self.grid_nm = nm_from_micron(self.grid_micron)
         self.diagnostics = () if self.grid_nm == self.requested_grid_nm else (self._clamped(),)
         # Only an explicitly given threshold is checked: the default is derived
         # from a grid that has already been vetted.
