@@ -402,8 +402,20 @@ def _snap_positions(args: argparse.Namespace) -> SnapPositions:
 def build_pipeline(args: argparse.Namespace) -> Pipeline:
     """dedupe → review-grid-ties → sort, after the phase and never before it.
 
-    The order is a property of *this* call, not of the stages: no stage knows or
-    may ask what ran before it.
+    The order is a property of *this* call, not of the stages: no stage may
+    **require or assert** what ran before it.
+
+    Asking is not requiring, and the distinction is load-bearing rather than a
+    softening. ``ReviewGridTies._pitch`` deliberately asks ``last_run("snap")``,
+    because the pitch the holes were really snapped to is recorded there and a
+    second copy handed in through a constructor could name a grid nothing was
+    snapped to. What keeps that inside the rule is the answer it gives when the
+    provenance is absent: no ``snap`` ran, so no pitch defines a midpoint, so
+    there is no tie to find and the data comes back untouched. It raises nothing,
+    substitutes no default, and is correct in a pipeline this function never
+    built — which is the whole of what LSP asks. A stage that refused to run
+    without a predecessor, or that quietly assumed a grid, would have asserted
+    one, and that is the design error.
 
     Every position is worth a sentence, and the first is the reason this
     pipeline is as short as it is. ``Deduplicate`` compares position and
