@@ -27,7 +27,7 @@ the source, the quantisation phase, the stages, then what interprets the answer.
 
 from .model import (
     Diagnostic, DrillData, EnclosureMatch, Hole, Origin, ParameterValue, RawDrillData, RawHole,
-    RawOutline, ReferenceOutline, Severity, SourceInfo, StageRun, Units,
+    RawOutline, ReferenceOutline, Severity, SourceInfo, StageRun,
 )
 from .protocols import Emitter, Pipeline, Source, Stage
 from .sources import AiPdfSource
@@ -43,7 +43,7 @@ from .errors import (
 
 __all__ = [
     "Diagnostic", "DrillData", "EnclosureMatch", "Hole", "Origin", "ParameterValue", "RawDrillData",
-    "RawHole", "RawOutline", "ReferenceOutline", "Severity", "SourceInfo", "StageRun", "Units",
+    "RawHole", "RawOutline", "ReferenceOutline", "Severity", "SourceInfo", "StageRun",
     "Emitter", "Pipeline", "Source", "Stage",
     "AiPdfSource",
     "quantise",
