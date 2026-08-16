@@ -127,7 +127,7 @@ def test_an_enclosure_is_a_frozen_value():
     """Catalogue entries are frozen, slotted value objects."""
     enclosure = HAMMOND_1590[0]
     with pytest.raises(dataclasses.FrozenInstanceError):
-        enclosure.length_nm = 999  # type: ignore[misc]
+        enclosure.length_nm = 999
     assert not hasattr(enclosure, "__dict__"), "slots=True, per house style"
 
 

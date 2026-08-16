@@ -112,7 +112,7 @@ def root(svg: str) -> ET.Element:
 
 def measured(x: float, y: float, diameter: float = 7.0, *, index: int) -> RawHole:
     """One circle as a source would answer it: float millimetres, unquantised."""
-    return RawHole(x, y, diameter, index)
+    return RawHole(Millimetre(x), Millimetre(y), Millimetre(diameter), index)
 
 
 def phase(
@@ -127,7 +127,7 @@ def phase(
         RawDrillData(
             source=SourceInfo(path="panel.ai", drill_layer="Drill"),
             reference=reference,
-            centre=(0.0, 0.0),
+            centre=(Millimetre(0.0), Millimetre(0.0)),
             holes=circles,
         ),
         enclosure=enclosure if enclosure is not None else IdentifyHammondFootprint(),
@@ -138,7 +138,7 @@ def phase(
 
 def outline(width_nm: int, height_nm: int) -> ReferenceOutline:
     """A reference outline whose nominal size is also its measurement."""
-    return ReferenceOutline.from_measurement(width_nm, height_nm)
+    return ReferenceOutline.from_measurement(Nanometre(width_nm), Nanometre(height_nm))
 
 
 # --------------------------------------------------------------------------
@@ -156,6 +156,19 @@ def walk(root: ET.Element, name: str) -> list[ET.Element]:
 
 def classes(element: ET.Element) -> set[str]:
     return set((element.get("class") or "").split())
+
+
+def text_of(element: ET.Element) -> str:
+    """The element's text, failing where it is missing rather than where it is parsed."""
+    assert element.text is not None, f"<{tag(element)}> carries no text"
+    return element.text
+
+
+def attr_of(element: ET.Element, name: str) -> str:
+    """The attribute's value, failing where it is missing rather than where it is parsed."""
+    value = element.get(name)
+    assert value is not None, f"<{tag(element)}> has no {name!r} attribute"
+    return value
 
 
 def by_class(root: ET.Element, cls: str, name: str | None = None) -> list[ET.Element]:
@@ -300,7 +313,7 @@ def test_output_parses_as_xml_and_is_an_svg(svg: str):
 def test_sheet_is_a4_landscape_by_default(root: ET.Element):
     assert root.get("width") == "297mm"
     assert root.get("height") == "210mm"
-    assert [float(v) for v in root.get("viewBox").split()] == [0.0, 0.0, 297.0, 210.0]
+    assert [float(v) for v in attr_of(root, "viewBox").split()] == [0.0, 0.0, 297.0, 210.0]
 
 
 def test_sheet_is_configurable(panel: DrillData):
@@ -393,13 +406,13 @@ def test_every_hole_has_a_centre_mark_and_a_numbered_balloon(panel: DrillData, r
     # centre mark = two crossing lines per hole
     assert len(by_class(root, "centre-mark", "line")) == 2 * len(panel.holes)
 
-    numbers = sorted(int(e.text) for e in by_class(root, "balloon-no", "text"))
+    numbers = sorted(int(text_of(e)) for e in by_class(root, "balloon-no", "text"))
     assert numbers == sorted(hole.index for hole in panel.holes)
 
 
 def test_balloons_number_holes_by_identity_not_by_position(panel: DrillData, root: ET.Element):
     """One number, one hole, across all four artefacts."""
-    balloons = [int(e.text) for e in by_class(root, "balloon-no", "text")]
+    balloons = [int(text_of(e)) for e in by_class(root, "balloon-no", "text")]
     assert balloons == [hole.index for hole in panel.holes]
     assert balloons != list(range(1, len(panel.holes) + 1)), (
         "the fixture's ids must not coincide with its positions, or this proves nothing"
@@ -714,7 +727,10 @@ def test_centrelines_are_chain_dashed_and_cross_the_origin(panel: DrillData):
     assert num(horizontal[0], "y1") == pytest.approx(oy)
     assert num(vertical[0], "x1") == pytest.approx(ox)
     for line in lines:
-        dashes = [float(v) for v in re.split(r"[ ,]+", line.get("stroke-dasharray").strip())]
+        dashes = [
+            float(v)
+            for v in re.split(r"[ ,]+", attr_of(line, "stroke-dasharray").strip())
+        ]
         assert len(dashes) >= 4, "centrelines must be chain-dash (long-short-long)"
 
 
@@ -858,8 +874,8 @@ def _rows_of_five(count: int) -> DrillData:
     return DrillData(
         holes=tuple(
             Hole.from_measurement(
-                -40_000_000 + 20_000_000 * column,
-                28_000_000 - pitch_nm * row,
+                Nanometre(-40_000_000 + 20_000_000 * column),
+                Nanometre(28_000_000 - pitch_nm * row),
                 Nanometre(3_000_000),
                 index=500 - (row * 5 + column),
             )
@@ -915,7 +931,7 @@ def test_schedule_has_one_row_per_hole(panel: DrillData, root: ET.Element):
 
 
 def test_schedule_columns_are_no_x_y_diameter_tool(root: ET.Element):
-    headers = [e.text for e in by_class(root, "sched-head", "text")]
+    headers = [text_of(e) for e in by_class(root, "sched-head", "text")]
     assert headers[0].upper().startswith("NO")
     assert [h.upper() for h in headers[1:3]] == ["X", "Y"]
     assert "⌀" in headers[3]
@@ -964,9 +980,11 @@ def test_schedule_tool_numbers_come_from_drilldata_tools(panel: DrillData, root:
     rows = by_class(root, "sched-row")
     for hole, row in zip(panel.holes, rows):
         cell = by_class(row, "sched-tool", "text")[0]
-        assert cell.text.lstrip("T") == str(tools[hole.diameter_nm])
+        assert text_of(cell).lstrip("T") == str(tools[hole.diameter_nm])
 
-    used = {int(by_class(r, "sched-tool", "text")[0].text.lstrip("T")) for r in rows}
+    used = {
+        int(text_of(by_class(r, "sched-tool", "text")[0]).lstrip("T")) for r in rows
+    }
     assert used == set(tools.values())
 
 
@@ -984,7 +1002,7 @@ def test_schedule_never_prints_a_negative_zero():
 
 
 def test_schedule_has_a_per_tool_summary_with_quantities(root: ET.Element):
-    summary = [e.text for e in by_class(root, "sched-summary", "text")]
+    summary = [text_of(e) for e in by_class(root, "sched-summary", "text")]
     assert len(summary) == 2
     joined = " | ".join(summary)
     assert "T1" in joined and "T2" in joined
@@ -1103,7 +1121,7 @@ def test_the_diameter_column_does_not_promise_millimetres_it_cannot_keep():
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(after))
 
-    headers = [e.text for e in by_class(root, "sched-head", "text")]
+    headers = [text_of(e) for e in by_class(root, "sched-head", "text")]
     assert headers[3] == "⌀"
     assert _sched_diameters(root) == ['⌀1/8"']
 
@@ -1199,8 +1217,8 @@ def test_a_recorded_grid_that_is_not_a_single_positive_pitch_is_not_a_grid(recor
 
 def _identified(
     *,
-    length_nm: int = 112_400_000,
-    width_nm: int = 60_500_000,
+    length_nm: Nanometre = Nanometre(112_400_000),
+    width_nm: Nanometre = Nanometre(60_500_000),
     candidates: tuple[str, ...] = ("1590B", "1590B2"),
     rotated: bool = False,
     selected_part: str | None = None,
@@ -1384,7 +1402,7 @@ def test_only_drill_data_is_drawn_never_the_artwork(panel: DrillData, root: ET.E
 
 
 def test_every_warning_message_appears_as_a_numbered_note(panel: DrillData, root: ET.Element):
-    notes = [e.text for e in by_class(root, "note", "text")]
+    notes = [text_of(e) for e in by_class(root, "note", "text")]
     joined = "\n".join(notes)
     for diagnostic in panel.diagnostics:
         if diagnostic.severity is Severity.WARNING:
@@ -1416,7 +1434,7 @@ def test_error_notes_are_red_too(panel: DrillData):
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
     errors = [e for e in by_class(root, "note", "text") if "note-error" in classes(e)]
     assert errors
-    assert "something is very wrong" in "\n".join(e.text for e in errors)
+    assert "something is very wrong" in "\n".join(text_of(e) for e in errors)
     for element in errors:
         assert (element.get("style") or "").lower().replace(" ", "").startswith("fill:#c")
 
@@ -1434,7 +1452,12 @@ def test_notes_block_is_labelled(root: ET.Element):
 
 def _many_warnings(count: int) -> DrillData:
     drilled = tuple(
-        Hole.from_measurement(-40_000_000 + 2_000_000 * i, Nanometre(0), Nanometre(3_000_000), index=i)
+        Hole.from_measurement(
+            Nanometre(-40_000_000 + 2_000_000 * i),
+            Nanometre(0),
+            Nanometre(3_000_000),
+            index=i,
+        )
         for i in range(count)
     )
     return DrillData(
@@ -1512,7 +1535,9 @@ def _every_hole_a_different_size(count: int) -> DrillData:
     return DrillData(
         holes=tuple(
             Hole.from_measurement(
-                -50_000_000 + 800_000 * i, Nanometre(20_000_000), 3_000_000 + 100_000 * i,
+                Nanometre(-50_000_000 + 800_000 * i),
+                Nanometre(20_000_000),
+                Nanometre(3_000_000 + 100_000 * i),
                 index=count - i,
             )
             for i in range(count)

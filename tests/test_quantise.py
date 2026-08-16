@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from aidrill.model import (
     Diagnostic,
+    DrillData,
     RawDrillData,
     RawHole,
     RawOutline,
     Severity,
     SourceInfo,
 )
-from aidrill.units import Millimetre, Nanometre
 from aidrill.pipeline import (
     DRILL_STANDARDS,
     IdentifyHammondFootprint,
@@ -23,6 +25,7 @@ from aidrill.pipeline import (
 from aidrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from aidrill.quantise import quantise
 from aidrill.sources import AiPdfSource
+from aidrill.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 
 #: The fixture panel's own measurement: 113.000 × 60.000, which is within
@@ -49,15 +52,15 @@ def read(
     return RawDrillData(
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=reference,
-        centre=(56.5, 30.0),
+        centre=(Millimetre(56.5), Millimetre(30.0)),
         holes=holes,
         diagnostics=diagnostics,
     )
 
 
-def phase(raw: RawDrillData, **overrides):
+def phase(raw: RawDrillData, **overrides: Any) -> DrillData:
     """``quantise`` with the CLI's defaults, unless a test names another."""
-    quantisers = {
+    quantisers: dict[str, Any] = {
         "enclosure": IdentifyHammondFootprint(DECLARED),
         "diameters": SnapDiametersToDrillTable(),
         "positions": SnapPositions(Nanometre(250_000)),
@@ -93,7 +96,7 @@ class Watched:
                 log.append("enclosure")
                 return super().quantise(outline, centre)
 
-        return WatchedEnclosure(expected_part, tolerance_nm)
+        return WatchedEnclosure(expected_part, Nanometre(tolerance_nm))
 
     def diameters(self) -> SnapDiametersToDrillTable:
         log = self.log
@@ -113,7 +116,7 @@ class Watched:
                 log.append(f"grid {hole.index}")
                 return super().quantise(hole)
 
-        return WatchedPositions(grid_nm)
+        return WatchedPositions(Nanometre(grid_nm))
 
 
 def test_the_phase_runs_enclosure_then_diameters_then_grid():

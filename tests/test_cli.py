@@ -14,7 +14,6 @@ import pytest
 from aidrill import cli
 from aidrill.emitters.base import available, register_emitter
 from aidrill.errors import EmptyLayerError, LayerNotFoundError
-from aidrill.units import Millimetre, Nanometre
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -29,6 +28,7 @@ from aidrill.model import (
     StageRun,
 )
 from aidrill.pipeline import DRILL_STANDARDS
+from aidrill.units import Millimetre, Nanometre
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 
@@ -62,7 +62,7 @@ def read(
             layers_found=("Background", "Drill"),
         ),
         reference=reference,
-        centre=(56.5, 30.0),
+        centre=(Millimetre(56.5), Millimetre(30.0)),
         holes=tuple(holes),
         diagnostics=tuple(diagnostics),
     )

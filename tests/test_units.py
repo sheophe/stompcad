@@ -4,15 +4,7 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_EVEN, Decimal
 
-from aidrill.units import (
-    NM_PER_MM,
-    Nanometre,
-    format_nm,
-    mm_from_nm,
-    mm_from_pt,
-    nm_from_mm,
-    scaled_nm,
-)
+from aidrill.units import NM_PER_MM, Nanometre, format_nm, mm_from_nm, mm_from_pt, nm_from_mm, scaled_nm
 
 
 class TestTheReturnIsAnInteger:

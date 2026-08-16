@@ -16,7 +16,7 @@ from aidrill.pipeline import (
     DrillStandard,
     SnapDiametersToDrillTable,
 )
-from aidrill.units import Nanometre, format_nm, nm_from_mm
+from aidrill.units import Millimetre, Nanometre, format_nm, nm_from_mm
 
 
 def measured(diameter: float, *, index: int = 4, x: float = 0.0, y: float = 0.0) -> RawHole:
@@ -25,7 +25,7 @@ def measured(diameter: float, *, index: int = 4, x: float = 0.0, y: float = 0.0)
     ``index`` defaults to 4 rather than 0 so that no assertion about a hole's
     identity can be satisfied by its position in a list instead.
     """
-    return RawHole(x, y, diameter, index)
+    return RawHole(Millimetre(x), Millimetre(y), Millimetre(diameter), index)
 
 
 def codes(diagnostics) -> list[str]:
@@ -180,7 +180,7 @@ class TestTheTwoStandardsAreNeverMerged:
     def test_the_registry_cannot_be_rewritten_by_one_run(self):
         """A shared mutable registry would let one caller change another's bits."""
         with pytest.raises(TypeError):
-            DRILL_STANDARDS["metric"] = DRILL_STANDARDS["fractional"]  # type: ignore[index]
+            DRILL_STANDARDS["metric"] = DRILL_STANDARDS["fractional"]
 
 
 class TestInventoryFiltering:
@@ -254,16 +254,19 @@ class TestInventoryFiltering:
             self.METRIC.select(include=(3_200_000,), exclude=(3_200_000,))
 
 
+#: Bound outside the class: a function-valued class attribute would bind as a
+#: method and take ``self`` where a diameter belongs.
+_METRIC_LABEL = DRILL_STANDARDS["metric"].label
+
+
 class TestTheAnswerSetAndItsBoundAreCheckedWhereTheyAreDeclared:
     """Reject invalid tables and bounds at construction.
 
     The bad size is not first, so validation of only the first entry cannot pass.
     """
 
-    LABEL = DRILL_STANDARDS["metric"].label
-
     def drawer(self, sizes_nm) -> DrillStandard:
-        return DrillStandard(name="drawer", sizes_nm=sizes_nm, label=self.LABEL)
+        return DrillStandard(name="drawer", sizes_nm=sizes_nm, label=_METRIC_LABEL)
 
     def test_a_size_that_is_not_whole_nanometres_is_no_size(self):
         """Every drill-table size must be plain-integer nanometres at construction."""

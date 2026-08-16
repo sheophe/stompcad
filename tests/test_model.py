@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import operator
+from typing import Any
 
 import pytest
 
@@ -71,9 +72,18 @@ _VALID_RAW_OUTLINE = RawOutline(Millimetre(113.0), Millimetre(60.0))
 #: lengths could each be dropped from their call with the whole suite staying
 #: green. Proving the X axis proves nothing about the Y.
 _GUARDED_LENGTHS = [
-    pytest.param(lambda v: Hole(v, 0, 7_000_000, _VALID_RAW_HOLE, 4), id="Hole.x_nm"),
-    pytest.param(lambda v: Hole(0, v, 7_000_000, _VALID_RAW_HOLE, 4), id="Hole.y_nm"),
-    pytest.param(lambda v: Hole(0, 0, v, _VALID_RAW_HOLE, 4), id="Hole.diameter_nm"),
+    pytest.param(
+        lambda v: Hole(v, Nanometre(0), Nanometre(7_000_000), _VALID_RAW_HOLE, 4),
+        id="Hole.x_nm",
+    ),
+    pytest.param(
+        lambda v: Hole(Nanometre(0), v, Nanometre(7_000_000), _VALID_RAW_HOLE, 4),
+        id="Hole.y_nm",
+    ),
+    pytest.param(
+        lambda v: Hole(Nanometre(0), Nanometre(0), v, _VALID_RAW_HOLE, 4),
+        id="Hole.diameter_nm",
+    ),
     pytest.param(
         lambda v: ReferenceOutline(v, Nanometre(60_000_000), raw=_VALID_RAW_OUTLINE),
         id="ReferenceOutline.width_nm",
@@ -368,7 +378,7 @@ def test_raw_is_never_none():
 def test_raw_outline_is_frozen_and_slotted():
     raw = RawOutline(Millimetre(113.0), Millimetre(60.0))
     with pytest.raises(dataclasses.FrozenInstanceError):
-        raw.width = 112.0  # type: ignore[misc]
+        raw.width = 112.0
     assert not hasattr(raw, "__dict__")
 
 
@@ -415,12 +425,12 @@ def test_from_measurement_refuses_a_non_positive_outline():
 # --------------------------------------------------------------------------
 
 
-def raw_panel(**overrides) -> RawDrillData:
+def raw_panel(**overrides: Any) -> RawDrillData:
     """Return a measured panel with holes numbered out of position order."""
-    fields = dict(
+    fields: dict[str, Any] = dict(
         source=SourceInfo(path="tar.ai"),
         reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
-        centre=(297.6, 421.0),
+        centre=(Millimetre(297.6), Millimetre(421.0)),
         holes=(
             RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0), 4),
             RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 1),
@@ -506,7 +516,7 @@ def test_a_centre_coordinate_that_is_not_a_measurement_is_refused(build, value):
 def test_raw_drill_data_is_frozen_and_slotted():
     panel = raw_panel()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        panel.reference = None  # type: ignore[misc]
+        panel.reference = None
     assert not hasattr(panel, "__dict__")
 
 
@@ -614,7 +624,7 @@ def test_candidates_given_as_a_list_are_stored_as_a_tuple():
         family="Hammond 1590",
         length_nm=Nanometre(120_000_000),
         width_nm=Nanometre(94_000_000),
-        candidates=["1590BB", "1590BB2", "1590BBS", "1590C"],  # type: ignore[arg-type]
+        candidates=["1590BB", "1590BB2", "1590BBS", "1590C"],
     )
     assert isinstance(from_list.candidates, tuple)
     assert from_list == _1590BB_FOOTPRINT
@@ -639,14 +649,14 @@ def test_a_bare_string_of_candidates_is_refused():
             family="Hammond 1590",
             length_nm=Nanometre(120_000_000),
             width_nm=Nanometre(94_000_000),
-            candidates="1590BB",  # type: ignore[arg-type]
+            candidates="1590BB",
         )
 
 
 def test_a_single_candidate_must_still_be_given_as_a_sequence():
     """The guard's real target: one designator is where the mistake is tempting."""
     with pytest.raises(TypeError):
-        EnclosureMatch("Hammond 1590", Nanometre(145_000_000), Nanometre(95_000_000), "1590DD")  # type: ignore[arg-type]
+        EnclosureMatch("Hammond 1590", Nanometre(145_000_000), Nanometre(95_000_000), "1590DD")
     assert EnclosureMatch(
         "Hammond 1590", Nanometre(145_000_000), Nanometre(95_000_000), ("1590DD",)
     ).candidates == ("1590DD",)
@@ -654,7 +664,7 @@ def test_a_single_candidate_must_still_be_given_as_a_sequence():
 
 def test_enclosure_match_is_frozen_and_slotted():
     with pytest.raises(dataclasses.FrozenInstanceError):
-        _1590BB_FOOTPRINT.selected_part = "1590C"  # type: ignore[misc]
+        _1590BB_FOOTPRINT.selected_part = "1590C"
     assert not hasattr(_1590BB_FOOTPRINT, "__dict__")
 
 
@@ -937,7 +947,12 @@ def test_a_finding_need_not_be_anywhere():
         ),
         pytest.param(
             lambda v: Diagnostic(
-                Severity.WARNING, "off-grid", "hole 4 moved", data=[["moved_nm", v]]
+                Severity.WARNING,
+                "off-grid",
+                "hole 4 moved",
+                # A JSON round trip hands back lists; the model coerces them,
+                # and this parameter exists to prove the guard sees inside one.
+                data=[["moved_nm", v]],  # type: ignore[arg-type]
             ),
             id="Diagnostic.data-as-json-shaped-lists",
         ),
@@ -995,7 +1010,7 @@ _TUPLE_BUILT_FINDING = Diagnostic(
     Severity.WARNING,
     "off-grid",
     "hole 4 moved",
-    location_nm=(-40_000_000, 18_000_000),
+    location_nm=(Nanometre(-40_000_000), Nanometre(18_000_000)),
     data=(("share", 0.25), ("tied_indices", (4, 9))),
 )
 

@@ -9,7 +9,6 @@ import pytest
 
 from aidrill.emitters.base import REGISTRY, get_emitter
 from aidrill.emitters.json_out import JsonEmitter, JsonOptions
-from aidrill.units import Millimetre, Nanometre
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -31,6 +30,7 @@ from aidrill.pipeline import (
 )
 from aidrill.protocols import Emitter, Pipeline
 from aidrill.quantise import quantise
+from aidrill.units import Millimetre, Nanometre
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------
@@ -179,7 +179,7 @@ def read_panel(
     raw = RawDrillData(
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=outline,
-        centre=(297.6, 421.0),
+        centre=(Millimetre(297.6), Millimetre(421.0)),
         holes=(measured if measured is not None else RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), 4),),
     )
     return quantise(

@@ -7,15 +7,15 @@ import random
 
 import pytest
 
-from aidrill.units import Nanometre
 from aidrill.model import Diagnostic, DrillData, Hole, RawHole, Severity, StageRun
 from aidrill.pipeline import ReviewGridTies, SnapPositions
+from aidrill.units import Millimetre, Nanometre
 
 
 def raw(x: float, y: float, *, index: int, diameter: float = 7.0) -> RawHole:
     """One measured circle. ``index`` is keyword-only so it cannot be passed
     where ``diameter`` was meant, and no test numbers its holes in order."""
-    return RawHole(x, y, diameter, index)
+    return RawHole(Millimetre(x), Millimetre(y), Millimetre(diameter), index)
 
 
 def snapped(stage: SnapPositions, *measurements: RawHole) -> tuple[Hole, ...]:

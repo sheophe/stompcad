@@ -18,7 +18,6 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.units import Millimetre, Nanometre
 from aidrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -33,6 +32,7 @@ from aidrill.pipeline import (
 )
 from aidrill.protocols import Pipeline, Stage
 from aidrill.quantise import quantise
+from aidrill.units import Millimetre, Nanometre
 from tests.conftest import at, codes, diameters, holes, make_data, positions
 
 # --------------------------------------------------------------------------
@@ -47,7 +47,7 @@ ALL_STAGES = [
     Deduplicate(),
     ReviewGridTies(),
     SortHoles(),
-    CheckReferenceSize((113_000_000, 60_000_000)),
+    CheckReferenceSize((Nanometre(113_000_000), Nanometre(60_000_000))),
 ]
 
 
@@ -197,7 +197,7 @@ class TestDeduplicate:
         raw = RawDrillData(
             source=SourceInfo(path="tar.ai"),
             reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
-            centre=(56.5, 30.0),
+            centre=(Millimetre(56.5), Millimetre(30.0)),
             holes=(RawHole(*both, 2), RawHole(*both, 5)),
         )
         data = quantise(
@@ -331,12 +331,12 @@ def _phase(*measurements: RawHole, grid_nm: int = 250_000) -> DrillData:
         RawDrillData(
             source=SourceInfo(path="panel.ai"),
             reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
-            centre=(56.5, 30.0),
+            centre=(Millimetre(56.5), Millimetre(30.0)),
             holes=measurements,
         ),
         enclosure=IdentifyHammondFootprint("1590B"),
         diameters=SnapDiametersToDrillTable(),
-        positions=SnapPositions(grid_nm),
+        positions=SnapPositions(Nanometre(grid_nm)),
     )
 
 
@@ -616,7 +616,7 @@ class TestPipelineComposition:
         raw = RawDrillData(
             source=SourceInfo(path="panel.ai"),
             reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
-            centre=(56.5, 30.0),
+            centre=(Millimetre(56.5), Millimetre(30.0)),
             holes=(
                 RawHole(Millimetre(-40.003), Millimetre(18.001), Millimetre(6.9998), 4),
                 RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0000), 1),  # a duplicate of the above, once quantised
@@ -667,7 +667,7 @@ class TestStageRunAndProcessing:
         run = StageRun("snap", (("grid_nm", 500_000),))
         assert run == StageRun("snap", (("grid_nm", 500_000),))
         with pytest.raises(dataclasses.FrozenInstanceError):
-            run.name = "sort"  # type: ignore[misc]
+            run.name = "sort"
         # slots, not just frozen: no per-instance dict to grow a stray attribute.
         assert not hasattr(run, "__dict__")
 

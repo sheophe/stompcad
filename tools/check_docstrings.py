@@ -46,7 +46,11 @@ def find_long_docstrings(
             value = expression.value
             if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
                 continue
-            lines = value.end_lineno - value.lineno + 1
+            # ``end_lineno`` is optional on an ast node in general; on a parsed
+            # Constant it is always present, and a docstring that reported none
+            # would be measured as a single line rather than crashing the audit.
+            end_lineno = value.end_lineno if value.end_lineno is not None else value.lineno
+            lines = end_lineno - value.lineno + 1
             if lines <= max_lines:
                 continue
             owner = "<module>" if isinstance(node, ast.Module) else node.name
