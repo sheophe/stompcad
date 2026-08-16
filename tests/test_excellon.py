@@ -225,6 +225,32 @@ def test_tool_numbers_are_exactly_drilldata_tools():
     assert list(definitions.values()) == ["3.200", "5.000", "12.500"]
 
 
+def test_the_tool_table_is_read_from_the_model_and_not_re_derived(monkeypatch):
+    """The numbering is looked up, not recomputed to agree.
+
+    ``{d: i for i, d in enumerate(sorted(...), start=1)}`` written inside the
+    emitter produces byte-identical output today, so no assertion against a
+    fixture can tell the two apart — and that is the whole danger, because the
+    copy is then free to drift the day ``tools()`` changes its rule, which is
+    ADR-0001's incident in its next form. Stubbing the model with a numbering
+    the emitter could not have invented — 4 and 9, largest bit first — is what
+    makes the dependency visible: the tool definitions, their order, and the
+    blocks the coordinates sit under must all follow it.
+    """
+    data = make_data(
+        at(0, 0, 7_000_000, index=5),
+        at(10_000_000, 0, 5_000_000, index=2),
+        reference=ReferenceOutline(100_000_000, 100_000_000),
+    )
+    monkeypatch.setattr(DrillData, "tools", lambda self: {7_000_000: 4, 5_000_000: 9})
+
+    text = emit(data)
+    body = lines(text)[lines(text).index("G05") + 1 : -2]
+
+    assert tool_definitions(text) == {4: "7.000", 9: "5.000"}
+    assert body == ["T4", "X50.000Y50.000", "T9", "X60.000Y50.000"]
+
+
 def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
     """Two nominals 0.002 mm apart are two tools, because the pipeline handed
     over two. Deciding that two sizes are 'really' one is a pipeline decision
@@ -448,6 +474,22 @@ def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
 
     assert "X0.000Y0.000" in out
     assert not any("-0.000" in line for line in out)
+
+
+def test_a_coordinate_on_an_exact_half_rounds_by_the_unit_boundarys_rule():
+    """One conversion, the model's own, and not a float millimetre on the way.
+
+    16.5005 mm is a coordinate the model holds exactly, as 16 500 500 nm, and
+    ``units.format_nm`` prints it ``16.501`` because ties at the boundary go
+    away from zero. Reaching the same string through ``mm_from_nm`` and then
+    ``format_mm`` is two conversions rather than one, and the intermediate
+    float is 16.500499999999999545: it prints ``16.500``, a hole half a micron
+    from where the drawing puts it and rounded the other way. Both axes, and
+    the negative one, because away-from-zero is not the same as up.
+    """
+    data = make_data(at(16_500_500, -30_000_500, 7_000_000, index=1))
+
+    assert "X16.501Y-30.001" in lines(emit(data, origin=Origin.CENTRE))
 
 
 def test_lower_left_without_a_reference_outline_raises_emitter_error():
