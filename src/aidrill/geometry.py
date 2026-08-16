@@ -1,21 +1,7 @@
-"""Plane geometry: matrices, paths, and circle recovery.
+"""Floating-point plane geometry for matrices, paths, and circle recovery.
 
-Pure maths. No I/O, no PDF library, no knowledge of holes or panels — sources
-depend on this module, never the other way round.
-
-It exists because every vector format states a circle the same awkward way:
-PostScript, PDF and SVG all lack an arc primitive, so a circle arrives as four
-cubic Beziers. Recovering "this is a 7 mm hole at (-40, 18)" from twelve
-coordinate pairs is a single, sharp problem, and per SPEC 2.2 it is solved
-exactly once, here, for every source to reuse.
-
-**Lengths here are floats, and they stay floats.** A quarter arc's control
-offset is ``KAPPA * r`` and ``KAPPA`` is irrational; a centroid is a mean of
-four coordinates; a radius is a mean of four distances. None of that is
-expressible in whole units of anything without losing the fit it is measuring,
-so the maths is floating point from end to end and the answer is handed on as
-measured. Quantising is for the phase that knows what answer set a length has
-to land on, and this module knows of none.
+Geometry remains in its source units; quantisation belongs to the phase that
+selects a domain answer.
 """
 
 from __future__ import annotations
@@ -42,16 +28,12 @@ __all__ = [
 
 Point = tuple[float, float]
 
-#: PDF ``cm`` operand order: ``a b c d e f``, meaning [[a, b], [c, d]] with the
-#: translation (e, f). Stored as a plain tuple so it is hashable, comparable and
-#: cheap — there is no behaviour here worth a class.
+#: PDF ``cm`` operands ``a b c d e f``: [[a, b], [c, d]], translated by (e, f).
 Matrix = tuple[float, float, float, float, float, float]
 
 IDENTITY: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
-#: Control-point offset, as a fraction of the radius, that makes a cubic Bezier
-#: approximate a quarter circle: 4/3 * (sqrt(2) - 1). Every drawing tool uses
-#: it, which is what makes circle recovery possible at all.
+#: Quarter-circle cubic control offset: 4/3 * (sqrt(2) - 1) times the radius.
 KAPPA: float = 0.5522847498
 
 
@@ -63,16 +45,7 @@ KAPPA: float = 0.5522847498
 def multiply(m: Matrix, n: Matrix) -> Matrix:
     """Compose two matrices: apply ``m`` first, then ``n``.
 
-    The argument order is the one PDF's ``cm`` operator needs. ``cm``
-    *concatenates* — the new matrix takes effect inside the existing one — so a
-    content-stream walker updates its state with::
-
-        ctm = multiply(cm_operands, ctm)
-
-    Getting this backwards is silent and survives most test files, because the
-    usual page CTM is a pure translation that commutes with itself. It only
-    shows up when a nested ``cm`` scales, and then every coordinate inside a
-    Form XObject is wrong.
+    For PDF ``cm`` concatenation use ``multiply(cm_operands, ctm)``.
     """
     a, b, c, d, e, f = m
     na, nb, nc, nd, ne, nf = n
@@ -115,9 +88,7 @@ class LineTo:
 class CurveTo:
     """PDF ``c``: cubic Bezier with controls ``c1``/``c2``, ending at ``end``.
 
-    The shorthand forms ``v`` and ``y`` are the caller's problem: a source
-    expands them into this full form, so nothing downstream has to remember
-    which operand each one omits.
+    Sources expand shorthand ``v`` and ``y`` operators into this form.
     """
 
     c1: Point
@@ -135,12 +106,7 @@ Segment = MoveTo | LineTo | CurveTo | ClosePath
 
 @dataclass(frozen=True, slots=True)
 class SubPath:
-    """A closed or open path in device space.
-
-    "Device space" means the CTM has already been applied: a subpath carries
-    absolute coordinates and no transform of its own. Sources resolve the
-    graphics state; this module never has to.
-    """
+    """A path in device space, with its CTM already applied."""
 
     segments: tuple[Segment, ...]
 
@@ -148,9 +114,7 @@ class SubPath:
     def anchors(self) -> tuple[Point, ...]:
         """The on-curve points, in order, control points excluded.
 
-        A closed path repeats its start point as the last anchor, exactly as
-        the stream states it. Nothing is deduplicated here — a consumer that
-        cares (``fit_circle`` does) can tell, and one that doesn't is unharmed.
+        Closed paths retain any repeated start point from the stream.
         """
         points: list[Point] = []
         for segment in self.segments:
@@ -164,16 +128,7 @@ class SubPath:
     def bbox(self) -> tuple[float, float, float, float]:
         """Axis-aligned bounds ``(x0, y0, x1, y1)`` over the anchors.
 
-        Control points are excluded deliberately. They lie outside the curve,
-        so including them would inflate the box; and for every shape this
-        library reads — rectangles, and circles/ellipses whose four anchors sit
-        on the extremes — the anchor box is the exact box. For an arbitrary
-        curve it is a slight under-estimate, which is the honest trade for
-        never over-reporting a panel outline's size.
-
-        Raises ``ValueError`` on a subpath with no on-curve points: there is no
-        defensible answer, and returning zeros would quietly poison whatever
-        picked the "largest" bbox.
+        Control points are excluded. Raises ``ValueError`` when no anchor exists.
         """
         points = self.anchors
         if not points:
@@ -190,18 +145,7 @@ class SubPath:
 
 @dataclass(frozen=True, slots=True)
 class Circle:
-    """A recovered circle, in the units of the space its subpath was in.
-
-    Which are PDF points — and the fields deliberately do not say so. Naming a
-    length is the job of the caller that knows where it came from: a fitter that
-    said millimetres would be claiming to know the CTM's business, and one that
-    said nanometres would be quantising a measurement before anything
-    downstream had said what answer set it has to land on.
-
-    Diameter, not radius, because that is what a drill chart, a tool table and
-    a designer all speak in; halving it once here avoids everyone downstream
-    doubling it back.
-    """
+    """A recovered circle in its subpath's units, expressed by diameter."""
 
     cx: float
     cy: float
@@ -211,9 +155,7 @@ class Circle:
 def _cubics(path: SubPath) -> list[tuple[Point, CurveTo]] | None:
     """Pair each cubic with its start point, or ``None`` if the path isn't all curves.
 
-    A circle is *only* curves. One stray ``LineTo`` means a rounded rectangle,
-    a pie slice or a stroke cap — never a hole — so bail rather than fit a
-    circle to the curved part of something else.
+    A second subpath, missing start, or any straight segment rejects the path.
     """
     pairs: list[tuple[Point, CurveTo]] = []
     current: Point | None = None
@@ -237,36 +179,8 @@ def _cubics(path: SubPath) -> list[tuple[Point, CurveTo]] | None:
 def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
     """Recover the circle a four-cubic path draws, or ``None`` if it isn't one.
 
-    ``tolerance`` is *relative* to the radius (0.01 = 1%), because the absolute
-    error scales with size: a 20 mm outline rounded to the PDF's two decimals
-    deviates far more in absolute terms than a 3 mm hole, and one absolute
-    tolerance cannot serve both.
-
-    Four things must hold, and each rules out a shape that a panel drawing
-    genuinely contains:
-
-    * **four cubics, closing back on themselves** — rejects rounded rectangles
-      (four cubics *and* four lines), arcs, and anything miscounted;
-    * **all four anchors equidistant from their centroid** — rejects ellipses,
-      including circles squashed by a non-uniform CTM;
-    * **consecutive anchors a quarter turn apart** — rejects the shape that
-      satisfies both of the above and the one below by taking a circle's
-      controls onto anchors a circle would never have, because ``KAPPA`` is the
-      offset for a quarter arc and only a quarter arc;
-    * **kappa-consistent controls** — rejects the four-cubic rounded square,
-      which is the case that matters. It has square bounds and four anchors on
-      a common circle, so it passes every other test; only the control offsets
-      betray it. A superellipse pushes them out towards the corners, a slack
-      rounded shape pulls them in, and either way the offset stops being
-      ``KAPPA * r`` perpendicular to the radius — and pointing the way the path
-      travels, which is what separates an arc from an inward cusp drawn on the
-      very same anchors.
-
-    The centroid/radius test is used in preference to the bounding-box test of
-    SPEC 6.4 because it is rotation invariant. They agree on axis-aligned input;
-    on a circle rotated 45 degrees by a CTM the bounding box of the anchors is
-    ``sqrt(2) * r`` across and would report the wrong diameter, or reject a
-    perfectly good hole.
+    Relative ``tolerance`` checks closure, equidistant centroid radii, quarter
+    turns, and kappa-consistent controls. The centroid test is rotation invariant.
     """
     pairs = _cubics(path)
     if pairs is None or len(pairs) != 4:
@@ -274,8 +188,7 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
 
     anchors = [start for start, _ in pairs]
 
-    # Must come back to where it started: four cubics that wander off are a
-    # curve, not a circle, whether or not a ClosePath papers over the gap.
+    # The cubics themselves must return to the start; ClosePath is insufficient.
     start = anchors[0]
     end = pairs[-1][1].end
     cx = sum(p[0] for p in anchors) / 4.0
@@ -307,26 +220,10 @@ def _quarter_turns(
     radius: float,
     slack: float,
 ) -> bool:
-    """Does each cubic span a quarter turn about the centre?
+    """Return whether consecutive radius vectors are perpendicular.
 
-    This is the precondition the kappa check never stated. ``KAPPA`` is the
-    control offset for a *ninety degree* arc and nothing else — the offset for
-    an arc of theta is ``4/3 * tan(theta/4) * r`` — so measuring controls
-    against ``KAPPA * r`` only means something once the quarters are known to be
-    quarters. Anchors at 0, 45, 180 and 225 degrees are equidistant from their
-    centroid, close on themselves, and take a circle's controls without
-    complaint; the fitter called that lumpy blob a 20.0 mm hole, which is a real
-    bit, so the drill table passed it on without a diagnostic.
-
-    Perpendicularity is the whole condition, and deliberately so. The caller has
-    already established that the four anchors are the same distance from their
-    own centroid, and equal radii about the centroid rule out the shape that
-    turns a quarter one way and a quarter back: its centroid cannot land where
-    such a shape would need it. A separate check on the *sense* of each turn
-    would be a guard that can never fire, and one of those is worse than none.
-
-    The dot product is divided by the radius so that what meets ``slack`` is a
-    length and not an area — the same currency, as in the radial test below.
+    ``KAPPA`` applies only to quarter arcs: ``4/3 * tan(theta/4) * r`` at
+    ``theta = pi/2``. Dividing the dot product by ``radius`` compares lengths.
     """
     cx, cy = centre
     spokes = [(x - cx, y - cy) for x, y in anchors]
@@ -342,28 +239,10 @@ def _kappa_consistent(
     radius: float,
     slack: float,
 ) -> bool:
-    """Are the control points where a real circle would put them?
+    """Check control length, radial component, and tangential direction.
 
-    For each quarter, the first control sits ``KAPPA * r`` beyond the start
-    anchor along the tangent, and the second sits ``KAPPA * r`` before the end
-    anchor along its tangent. Three things are checked, and dropping any one of
-    them lets a shape through that a drill would then cut:
-
-    * **length** — rejects the four-cubic rounded square, whose controls are
-      pushed out towards the corners or pulled slackly in;
-    * **radial component** — rejects controls rotated onto the radius, which
-      draw a cusp instead of an arc while keeping the length exactly right;
-    * **tangential sense** — rejects controls that are the right length, exactly
-      perpendicular, and pointing the wrong way along the tangent. Negate both
-      offsets of a real circle and every other test still sees a circle; what it
-      draws is a four-petal star with an inward cusp at every anchor.
-
-    The direction of travel is taken from the anchors, never from an offset: an
-    offset that lies about its direction is precisely what this is here to
-    catch. Two consecutive anchors turn a quarter turn about the centre, and the
-    sign of their cross product is the sense of the whole path — which also
-    keeps this right for a circle mirrored by a negative-determinant CTM, where
-    every control legitimately points the other way.
+    Each quarter's controls are tangent offsets of length ``KAPPA * radius``.
+    Travel direction comes from the anchors, preserving mirrored circles.
     """
     expected = KAPPA * radius
     cx, cy = centre
@@ -372,8 +251,7 @@ def _kappa_consistent(
     bx, by = anchors[1][0] - cx, anchors[1][1] - cy
     travel = 1.0 if (ax * by - ay * bx) >= 0.0 else -1.0
 
-    # The first control runs with the direction of travel; the second runs back
-    # against it, since it is measured from the anchor the quarter arrives at.
+    # The first control follows travel; the second points back from the end.
     for start, curve in pairs:
         for anchor, control, sense in ((start, curve.c1, 1.0), (curve.end, curve.c2, -1.0)):
             ox, oy = control[0] - anchor[0], control[1] - anchor[1]

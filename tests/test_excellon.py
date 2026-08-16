@@ -1,18 +1,4 @@
-"""Tests for the Excellon emitter (SPEC §7, PLAN task D).
-
-The regression this file exists to guard is spelled out in SPEC §2: an earlier
-version of this tool clustered near-identical measured diameters *inside* the
-Excellon writer, so a panel drawn with one 7 mm bit came back as ``T2C7.000``
-and ``T3C7.000`` — the same bit loaded twice, two drilling passes. Normalisation
-now belongs to the pipeline. The emitter reads ``DrillData.tools()`` and
-serialises; it must not round, cluster, dedupe or renumber anything.
-
-Every length a ``Hole`` or a ``ReferenceOutline`` carries is a whole number of
-nanometres, so the fixtures below are written that way — ``-40_000_000`` is the
-⌀7 at −40.00 mm. Nothing here converts on the way in: a test that quoted 40.0 and
-multiplied would be running the emitter against its own arithmetic rather than
-against the model's.
-"""
+"""Tests for Excellon emission from quantised drill data."""
 
 from __future__ import annotations
 
@@ -44,12 +30,7 @@ TOOL_DEF = re.compile(r"^T(\d+)C([0-9.]+)$")
 
 
 def fixture_data() -> DrillData:
-    """The ``tests/fixtures/tar.ai`` ground truth from SPEC §9.
-
-    Reference outline 113.000 x 60.000 mm; five ⌀7.00 at y = +18.00 and two
-    ⌀5.00 at y = −18.75, already snapped, normalised, deduped and sorted by the
-    pipeline. Exactly two distinct tools.
-    """
+    """Return the expected quantised data for ``tests/fixtures/tar.ai``."""
     return DrillData(
         holes=holes(
             (-40_000_000, 18_000_000),
@@ -156,17 +137,12 @@ def test_data_without_holes_still_produces_a_valid_file():
 
 
 # --------------------------------------------------------------------------
-# THE regression: one tool per nominal diameter, numbering owned by the model
+# one tool per nominal diameter, numbering owned by the model
 # --------------------------------------------------------------------------
 
 
 def test_regression_no_two_tool_definitions_share_a_diameter():
-    """SPEC §9 invariant. 6.9998 and 7.0000 were normalised to one nominal by the
-    pipeline; the file must therefore load one 7 mm bit, once.
-
-    The two measurements are kept on ``raw``, in millimetres, which is where the
-    difference the pipeline resolved actually lives — one nominal 7 000 000 nm
-    diameter, two circles it was fitted from."""
+    """The pipeline maps 6.9998 and 7.0000 mm to one nominal and one tool."""
     normalised = (
         Hole(
             x_nm=-40_000_000,
@@ -201,15 +177,7 @@ def test_regression_holds_for_the_fixture():
 
 
 def test_tool_numbers_are_exactly_drilldata_tools():
-    """The table written is the model's table, size for size and number for
-    number.
-
-    ``tools()`` lives on ``DrillData`` so that this file and the drawing's hole
-    schedule cannot disagree about how many bits a panel needs; an emitter that
-    built its own would be free to agree today and diverge tomorrow. The tools
-    are asserted against the mapping itself rather than against a literal, so a
-    fixture whose diameters happen to sort into the order they were written in
-    cannot pass for the numbering."""
+    """The table written is the model's table, size for size and number for number."""
     data = make_data(
         at(0, 0, 12_500_000, index=4),
         at(10_000_000, 0, 3_200_000, index=1),
@@ -226,17 +194,7 @@ def test_tool_numbers_are_exactly_drilldata_tools():
 
 
 def test_the_tool_table_is_read_from_the_model_and_not_re_derived(monkeypatch):
-    """The numbering is looked up, not recomputed to agree.
-
-    ``{d: i for i, d in enumerate(sorted(...), start=1)}`` written inside the
-    emitter produces byte-identical output today, so no assertion against a
-    fixture can tell the two apart — and that is the whole danger, because the
-    copy is then free to drift the day ``tools()`` changes its rule, which is
-    ADR-0001's incident in its next form. Stubbing the model with a numbering
-    the emitter could not have invented — 4 and 9, largest bit first — is what
-    makes the dependency visible: the tool definitions, their order, and the
-    blocks the coordinates sit under must all follow it.
-    """
+    """The numbering is looked up, not recomputed to agree."""
     data = make_data(
         at(0, 0, 7_000_000, index=5),
         at(10_000_000, 0, 5_000_000, index=2),
@@ -252,11 +210,7 @@ def test_the_tool_table_is_read_from_the_model_and_not_re_derived(monkeypatch):
 
 
 def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
-    """Two nominals 0.002 mm apart are two tools, because the pipeline handed
-    over two. Deciding that two sizes are 'really' one is a pipeline decision
-    taken once, before any emitter sees the data; an emitter that took it again
-    could define a different number of bits than the drawing lists — ADR-0001's
-    incident exactly."""
+    """The emitter preserves two nominals only 0.002 mm apart as two tools."""
     data = make_data(
         at(-10_000_000, 0, 6_998_000, index=0),
         at(10_000_000, 0, 7_000_000, index=1),
@@ -300,16 +254,10 @@ def test_emitter_does_not_deduplicate_coincident_holes():
 
 
 def test_two_nominals_that_render_to_the_same_token_are_refused():
-    """A 6.9998 and a 7.0000 mm nominal that no stage merged are two tools to
-    the model and one ``C7.000`` on the page — the ``T2C7.000`` / ``T3C7.000``
-    defect reached through formatting instead of clustering.
+    """Refuse distinct nominals that both render as ``C7.000``.
 
-    The message must name the collision, not merely report one: both nominals at
-    a precision that tells them apart, and the token they share. Quoting them at
-    the file's own three decimals would print "7.000 and 7.000 both print as
-    C7.000", which is the one sentence a refusal here must not be. Lookaheads
-    rather than a sequence, because the order it names them in is presentation,
-    and a test that fails when prose is reordered is a nuisance."""
+    6.9998 and 7.0000 mm remain separate in the model, so one token would be false.
+    """
     data = make_data(
         at(0, 0, 6_999_800, index=1),
         at(10_000_000, 0, 7_000_000, index=3),
@@ -343,13 +291,7 @@ def test_raising_the_precision_makes_the_same_two_nominals_representable():
 
 
 def error_bearing_data() -> DrillData:
-    """What ``SnapDiametersToDrillTable`` leaves behind after a bad diameter.
-
-    Two holes were drawn; the ⌀7 matched no size in the declared standard, so
-    the stage recorded an ERROR and *dropped it*. Only the ⌀5 remains, and the
-    surviving hole keeps its own identity — 6, not 0 — so nothing here can be
-    read as a position in the tuple.
-    """
+    """What ``SnapDiametersToDrillTable`` leaves behind after a bad diameter."""
     return make_data(
         at(-19_000_000, -18_750_000, 5_000_000, index=6),
         reference=ReferenceOutline(113_000_000, 60_000_000),
@@ -364,12 +306,7 @@ def error_bearing_data() -> DrillData:
 
 
 def test_data_carrying_an_error_is_refused_rather_than_written():
-    """The CLI checks ``worst_severity`` before it renders; a library consumer
-    calling the emitter directly does not, and this is the emitter that cannot
-    afford it. Excellon renders no diagnostics whatsoever, so the file left by
-    a dropped hole is not a damaged file a machinist would question — it is a
-    complete-looking drill file for a panel with one hole fewer than the artwork
-    has. The refusal names the code, so the caller need not re-derive why."""
+    """Data carrying an error is refused rather than written."""
     with pytest.raises(EmitterError, match="unknown-diameter"):
         emit(error_bearing_data())
 
@@ -391,10 +328,10 @@ def test_the_refusal_names_every_distinct_error_code_once():
 
 
 def test_warnings_and_information_still_produce_a_drill_file():
-    """The refusal is about ERROR, not about diagnostics. A duplicate-hole
-    warning is the fixture's ordinary state and exits 1 with artifacts written;
-    a guard keyed on ``data.diagnostics`` rather than on their severity would
-    refuse the panel this project ships as its worked example."""
+    """Only ERROR diagnostics forbid Excellon artefacts.
+
+    WARNING and INFO together ensure a non-empty diagnostic list still emits.
+    """
     data = make_data(
         at(0, 18_000_000, 7_000_000, index=3),
         reference=ReferenceOutline(113_000_000, 60_000_000),
@@ -412,14 +349,9 @@ def test_warnings_and_information_still_produce_a_drill_file():
 
 
 def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
-    """SPEC §7 promises LOWER_LEFT keeps every coordinate positive. A hole
-    outside the reference outline breaks that promise silently — the file still
-    parses, and the machine drives off the fixture. The offender is named by
-    ``index``, the stable identity, not by position in the tuple.
+    """LOWER_LEFT refuses holes that would produce negative coordinates.
 
-    Both axes are exercised, one alone each time: a check that tested only the
-    pair would still pass while half of it was missing, and a hole to the left
-    of the outline is at least as likely in the field as one below it.
+    Identity 4 differs from its tuple position so the error cannot name position.
     """
     y_only = make_data(
         at(0, 0, 5_000_000, index=9),
@@ -477,30 +409,14 @@ def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
 
 
 def test_a_coordinate_on_an_exact_half_rounds_by_the_unit_boundarys_rule():
-    """One conversion, the model's own, and not a float millimetre on the way.
-
-    16.5005 mm is a coordinate the model holds exactly, as 16 500 500 nm, and
-    ``units.format_nm`` prints it ``16.501`` because ties at the boundary go
-    away from zero. Reaching the same string through ``mm_from_nm`` and then
-    ``format_mm`` is two conversions rather than one, and the intermediate
-    float is 16.500499999999999545: it prints ``16.500``, a hole half a micron
-    from where the drawing puts it and rounded the other way. Both axes, and
-    the negative one, because away-from-zero is not the same as up.
-    """
+    """One conversion, the model's own, and not a float millimetre on the way."""
     data = make_data(at(16_500_500, -30_000_500, 7_000_000, index=1))
 
     assert "X16.501Y-30.001" in lines(emit(data, origin=Origin.CENTRE))
 
 
 def test_lower_left_without_a_reference_outline_raises_emitter_error():
-    """The message is asserted, not merely the exception type.
-
-    Without it this test cannot tell its own guard from the one two lines
-    below: strip the check and ``with_origin``'s ``ValueError`` is caught and
-    re-raised as an ``EmitterError`` just the same, so a bare ``pytest.raises``
-    stays green while the only thing the guard produces — the sentence telling
-    the caller which of the two ways out to take — has gone.
-    """
+    """The message is asserted, not merely the exception type."""
     data = make_data(at(0, 0, 7_000_000, index=0))
 
     with pytest.raises(EmitterError, match="origin=Origin.CENTRE or supply a reference layer"):
@@ -530,16 +446,7 @@ def test_centre_origin_needs_no_reference_outline():
 
 
 def test_the_header_says_which_frame_the_coordinates_are_in():
-    """The drill file and the sheet beside it describe one panel in two frames.
-
-    The fixture's first ⌀7 is ``-40.00, 18.00`` on the drawing and in the JSON,
-    and ``X16.500Y48.000`` here: every number differs, by exactly the half-width
-    and half-height of the outline. The file already declares ``absolute``,
-    ``metric`` and ``decimal`` and says nothing at all about where zero is, so
-    a machinist cross-checking the two documents has nothing to reconcile them
-    with. The shift is stated as well as the corner, because naming the frame
-    only tells them *that* the numbers differ.
-    """
+    """The drill file and the sheet beside it describe one panel in two frames."""
     out = lines(emit(fixture_data()))
     stated = [ln for ln in out if ln.startswith(";ORIGIN=")]
 
@@ -562,16 +469,8 @@ def test_the_header_says_centre_when_the_centre_frame_was_written():
 
 
 def test_the_stated_shift_is_the_shift_the_coordinates_were_moved_by():
-    """An odd outline has no exact half, and the header must quote the one
-    ``with_origin`` actually applied.
-
-    ``with_origin`` floors, deliberately, rather than introducing the first
-    non-integer into the model. A header that quoted the true half instead would
-    disagree with every coordinate under it by half a nanometre — invisible at
-    the three decimals this file usually writes, which is exactly why the panel
-    here is an odd number of nanometres wide and the file is written at six.
-    A machinist adding the stated shift back to a coordinate must land on the
-    number the drawing prints for the same hole.
+    """An odd outline has no exact half, and the header must quote the one ``with_origin``
+    actually applied.
     """
     outline = ReferenceOutline(width_nm=100_000_001, height_nm=60_000_001)
     data = make_data(at(0, 0, 7_000_000, index=2), reference=outline)
@@ -598,14 +497,7 @@ def test_coordinates_are_grouped_under_their_tool_ascending_by_diameter():
 
 
 def test_hole_order_is_preserved_not_re_sorted():
-    """Ordering is ``pipeline.SortHoles``' decision, not this emitter's.
-
-    The emitter used to carry a byte-identical copy of ``_reading_order`` and
-    apply it unconditionally, so any order the pipeline chose — a custom
-    ``SortHoles`` key, or none at all — was silently discarded. The drawing's
-    balloon numbers and the JSON both follow pipeline order; a drill file that
-    does not is a drill file whose sequence disagrees with the sheet beside it.
-    """
+    """Ordering is ``pipeline.SortHoles``' decision, not this emitter's."""
     data = make_data(
         at(10_000_000, -10_000_000, 7_000_000, index=0),
         at(-10_000_000, 10_000_000, 7_000_000, index=1),

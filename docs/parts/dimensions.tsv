@@ -1,9 +1,6 @@
-# Hammond 1590 external dimensions, millimetres, 0.05 mm precision.
-# Backplate ('Top View' in Hammond's drawings) — NOT the drilled face,
-# which is smaller by the wall draft. See CLAUDE.md, backplate convention.
-# Derived from docs/parts/<PART>.pdf by inverting Hammond's double-conversion
-# fault; see docs/BACKLOG.md. 'maintainer' rows were read off the drawings
-# by hand where extraction was ambiguous.
+# Upstream: Hammond's product website; published metric dimensions, one base part per row.
+# Length and width are top-view/backplate dimensions, not drilled-face dimensions.
+# source records human provenance only and is ignored by catalogue generation.
 part	length_mm	width_mm	height_mm	source
 1590LLB	50.50	50.50	25.00	extracted
 1590LB	50.55	50.60	31.00	maintainer

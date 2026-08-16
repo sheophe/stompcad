@@ -1,23 +1,4 @@
-"""Tests for the ``drawing-svg`` emitter.
-
-The emitter produces an *engineering drawing* of drill data — not a render of
-the artwork. Everything asserted here is therefore about drill data and drawing
-furniture: hole circles, balloons, dimensions, a schedule keyed to
-``DrillData.tools()``, a title block and the diagnostics as notes.
-
-No renderer is imported. The output is parsed with ``xml.etree.ElementTree`` and
-asserted on as XML, which is the only thing the emitter promises. String
-matching on the serialised markup would pass for the wrong reasons — an
-attribute that never rendered, a number that landed in the neighbouring
-element — so nothing here reads the emitted text as text.
-
-**Two kinds of number, and every assertion says which it is about.** A length is
-an integer nanometre the model holds, and the sheet's copy of it is checked
-against ``units.format_nm`` of that same integer — never against a float the
-test worked out for itself, which is the second implementation the unit exists
-to abolish. A sheet coordinate is layout, and is checked against ``Layout``'s
-own arithmetic.
-"""
+"""Tests for SVG drawing layout and rendered drill information."""
 
 from __future__ import annotations
 
@@ -74,13 +55,9 @@ CHAR_W = 0.6
 
 
 def _panel() -> DrillData:
-    """The tar.ai panel, as the quantisation phase leaves it.
+    """Return the quantised fixture panel.
 
-    The hole ids are deliberately neither sequential nor in position order. A
-    fixture numbered 0, 1, 2… makes ``hole.index`` indistinguishable from the
-    hole's place in the tuple, so an emitter that flagged the wrong one of the
-    two would still look right. Here the flagged hole is id 12, which is not a
-    position at all.
+    Hole ids are out of position order so identity and position cannot coincide.
     """
     return DrillData(
         holes=(
@@ -134,14 +111,7 @@ def root(svg: str) -> ET.Element:
 
 
 def measured(x: float, y: float, diameter: float = 7.0, *, index: int) -> RawHole:
-    """One circle as a source would answer it: float millimetres, unquantised.
-
-    Hand-built ``DrillData`` is right for most of this file — the emitter is a
-    pure function of it — but a claim about *provenance* is not. The title
-    block's grid, the schedule's diameter spelling and the enclosure line each
-    say what a quantiser did, and a hand-built ``StageRun`` can say anything.
-    Those tests start here and go through :func:`phase`.
-    """
+    """One circle as a source would answer it: float millimetres, unquantised."""
     return RawHole(x, y, diameter, index)
 
 
@@ -167,12 +137,7 @@ def phase(
 
 
 def outline(width_nm: int, height_nm: int) -> ReferenceOutline:
-    """A reference outline whose nominal size is also its measurement.
-
-    Through ``from_measurement``, never the bare constructor: a fresh
-    ``ReferenceOutline`` defaults ``raw`` to its own dimensions, which is the
-    same thing said by accident rather than on purpose.
-    """
+    """A reference outline whose nominal size is also its measurement."""
     return ReferenceOutline.from_measurement(width_nm, height_nm)
 
 
@@ -249,14 +214,7 @@ def text_box(element: ET.Element) -> tuple[float, float, float, float]:
 
 
 def extents(root: ET.Element) -> list[tuple[str, float, float, float, float]]:
-    """Every drawn thing's estimated box, as ``(what, x0, y0, x1, y1)``.
-
-    ``drawn_points`` and ``text_box`` each cover half the sheet, and a
-    containment claim that consults only one of them is half a claim: the tool
-    summary that ran off the bottom of the schedule box was text, and the chain
-    dimensions that ran off the drawing area were lines. ``what`` carries the
-    element's own text or tag so a failure names the thing that escaped.
-    """
+    """Every drawn thing's estimated box, as ``(what, x0, y0, x1, y1)``."""
     boxes = [
         ((element.text or tag(element)), *text_box(element))
         for element in walk(root, "text")
@@ -322,13 +280,7 @@ def test_default_options_match_the_spec_signature():
 
 
 def test_the_options_carry_no_grid_of_their_own():
-    """The grid is a pipeline fact, and a second copy is a second answer.
-
-    A library consumer who snaps at 0.5 and calls ``DrawingSvgEmitter().emit``
-    got a sheet stamped 0.25, because the option defaulted rather than asking
-    the data. There is nowhere to pass a grid now; the drawing reads the one the
-    holes were actually snapped to.
-    """
+    """The grid is a pipeline fact, and a second copy is a second answer."""
     assert "grid" not in {f.name for f in fields(DrawingOptions)}
     with pytest.raises(TypeError):
         DrawingOptions(grid=0.25)
@@ -392,20 +344,7 @@ def test_one_hole_circle_per_hole_at_true_diameter_and_position(panel: DrillData
 
 
 def test_the_sheet_states_the_nominal_everywhere_and_the_measurement_nowhere():
-    """The one fixture where a hole's two numbers do not coincide.
-
-    Everywhere else in this file ``Hole.raw`` equals the nominal value, because
-    ``from_measurement`` puts it there — which makes "reads ``x_nm``" and "reads
-    ``raw.x``" indistinguishable, the coincidence this repo has been bitten by
-    before. Here the panel goes through the real phase: the circles are drawn at
-    −39.9906 and snapped to −40, the outline measures 113.000 × 60.000 and is a
-    112.40 × 60.50 1590B. Three places on the sheet could quote the measurement
-    instead, and all three are checked — where the circle is drawn, what the
-    schedule says, and how big the outline rectangle is.
-
-    The measurement is not lost, it is simply not what a drilled panel is
-    described by: it stays on ``raw`` for the residual and the JSON.
-    """
+    """The one fixture where a hole's two numbers do not coincide."""
     data = phase(
         measured(-39.9906, 17.99996, 6.998, index=4),
         measured(19.9942, 17.99996, 6.998, index=1),
@@ -459,14 +398,7 @@ def test_every_hole_has_a_centre_mark_and_a_numbered_balloon(panel: DrillData, r
 
 
 def test_balloons_number_holes_by_identity_not_by_position(panel: DrillData, root: ET.Element):
-    """One number, one hole, across all four artifacts.
-
-    The balloons counted 1..n down the tuple while the JSON and every
-    diagnostic used ``Hole.index``, so "hole 2" named the duplicate at
-    (−40, 18) to one reader, the clean hole at (−20, 18) to another, and a
-    third hole to anyone indexing the array. Gaps in the numbering are the
-    point: an id missing from the sheet is a hole the pipeline dropped.
-    """
+    """One number, one hole, across all four artefacts."""
     balloons = [int(e.text) for e in by_class(root, "balloon-no", "text")]
     assert balloons == [hole.index for hole in panel.holes]
     assert balloons != list(range(1, len(panel.holes) + 1)), (
@@ -477,12 +409,7 @@ def test_balloons_number_holes_by_identity_not_by_position(panel: DrillData, roo
 def test_the_sheet_numbers_the_flagged_hole_the_way_the_diagnostic_does(
     panel: DrillData, root: ET.Element
 ):
-    """The one place the two numbering schemes can be caught disagreeing.
-
-    ``duplicate-hole`` names hole 12. Under positional numbering the schedule
-    called that same hole 1, and the sheet and the report described the panel in
-    two incompatible languages.
-    """
+    """The one place the two numbering schemes can be caught disagreeing."""
     duplicate = next(d for d in panel.diagnostics if d.code == "duplicate-hole")
     named = str(duplicate.get("hole_index"))
 
@@ -522,12 +449,7 @@ def test_undflagged_holes_are_not_red(root: ET.Element):
 
 
 def _reviewers_three_hole_case() -> DrillData:
-    """Post-``Deduplicate()`` state of ⌀7 @ (0,0), ⌀7 @ (0,0), ⌀5 @ (0.03,0).
-
-    ``Deduplicate`` collapses holes that share a position **and** a diameter,
-    both exactly, so it keeps the ⌀7 at (0, 0) and the ⌀5 at 0.03 mm along, and
-    raises one ``duplicate-hole`` naming the survivor by its id, 4.
-    """
+    """Post-``Deduplicate()`` state of ⌀7 @ (0,0), ⌀7 @ (0,0), ⌀5 @ (0.03,0)."""
     return DrillData(
         holes=(
             Hole.from_measurement(0, 0, 7_000_000, index=4),
@@ -553,13 +475,7 @@ def _reviewers_three_hole_case() -> DrillData:
 
 
 def test_a_neighbour_of_a_different_diameter_is_not_styled_as_a_duplicate():
-    """The emitter must read the diagnostic, not re-derive the predicate.
-
-    Matching on position alone painted the ⌀5 red as well: it sits 0.03 mm from
-    the flagged point, inside any positional tolerance, but ``Deduplicate``
-    never called it a duplicate because its diameter differs. The pipeline
-    decided; the sheet the machinist reads has to say the same thing.
-    """
+    """The emitter must read the diagnostic, not re-derive the predicate."""
     data = _reviewers_three_hole_case()
     emitter = DrawingSvgEmitter()
     root = ET.fromstring(emitter.emit(data))
@@ -585,10 +501,9 @@ def test_a_neighbour_of_a_different_diameter_is_not_styled_as_a_duplicate():
 
 
 def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
-    """The same case again, but decided by ``Deduplicate`` rather than by hand.
+    """The pipeline's duplicate verdict reaches both artefacts unchanged.
 
-    Whatever the stage keeps and whatever it flags is what the machinist sees:
-    two artifacts, one verdict, and no second implementation of the rule.
+    Real ``Deduplicate`` output ensures the sheet does not re-derive the rule.
     """
     raw = DrillData(
         holes=(
@@ -616,14 +531,7 @@ def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
 
 
 def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it():
-    """Identity decides, and ``location_nm`` is context the emitter ignores.
-
-    The diagnostic names hole 8, which sits 20 mm away; hole 3 sits 0.001 mm
-    from ``location_nm`` and is not the hole the pipeline kept. An emitter
-    matching on coordinates rings hole 3 — or, once anything has moved the
-    survivor, rings nothing at all. Both are the sheet disagreeing with the
-    pipeline.
-    """
+    """Identity decides, and ``location_nm`` is context the emitter ignores."""
     data = DrillData(
         holes=(
             Hole.from_measurement(1_000, 0, 7_000_000, index=3),
@@ -658,13 +566,7 @@ def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it(
 
 
 def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
-    """Two ⌀7 holes, ids 3 and 0, and a ``duplicate-hole`` carrying ``payload``.
-
-    Id 0 is in the panel deliberately. A payload that names no hole must ring
-    nothing, and the obvious way to break that is a lookup that falls back to a
-    default — ``d.get("hole_index", 0)`` — which a panel numbered from 3 upwards
-    would absorb in silence. The hole that would then light up is here.
-    """
+    """Two ⌀7 holes, ids 3 and 0, and a ``duplicate-hole`` carrying ``payload``."""
     return DrillData(
         holes=(
             Hole.from_measurement(0, 0, 7_000_000, index=3),
@@ -683,12 +585,7 @@ def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
 
 
 def test_a_duplicate_hole_diagnostic_without_an_id_flags_nothing():
-    """No id, no ring — and emphatically no guess from the coordinates.
-
-    A payload naming no hole is a finding this emitter cannot place. The NOTES
-    block still carries the warning, so nothing is lost silently; what must not
-    happen is the sheet ringing a hole the pipeline never named.
-    """
+    """No id, no ring — and emphatically no guess from the coordinates."""
     data = _one_hole_with_a_duplicate_diagnostic(
         (("diameter_nm", 7_000_000), ("dropped", 1))
     )
@@ -700,16 +597,7 @@ def test_a_duplicate_hole_diagnostic_without_an_id_flags_nothing():
 
 
 def test_a_finding_that_is_not_a_duplicate_rings_no_hole():
-    """The ring means *duplicate*, so the code is what selects it.
-
-    ``hole_index`` is carried by other findings too — ``unknown-diameter``
-    already does — and dropping the code clause turns every one of them into a
-    duplicate ring on a hole that is nothing of the sort. The CLI withholds
-    artifacts on an ERROR, so the guard is masked there; a library consumer
-    calling ``emit`` on the ``DrillData`` it was handed has no such cover, and
-    CLAUDE.md's "match on ``code``, never on ``message``" exists for exactly
-    this clause.
-    """
+    """The ring means *duplicate*, so the code is what selects it."""
     data = DrillData(
         holes=(at(0, 0, 7_000_000, index=3),),
         reference=outline(60_000_000, 40_000_000),
@@ -731,13 +619,7 @@ def test_a_finding_that_is_not_a_duplicate_rings_no_hole():
 
 
 def test_an_id_that_arrived_as_a_float_still_rings_its_hole():
-    """3.0 is hole 3. Being strict about the type would drop the ring in silence.
-
-    ``Diagnostic.data`` is a generic payload and a round trip through a document
-    format is entitled to hand back 3.0 where 3 went in. The lookup is by value,
-    so it costs nothing to accept — and the whole point of this task is that a
-    ring must not vanish without anything failing.
-    """
+    """3.0 is hole 3. Being strict about the type would drop the ring in silence."""
     data = _one_hole_with_a_duplicate_diagnostic(
         (("hole_index", 3.0), ("diameter_nm", 7_000_000))
     )
@@ -748,16 +630,7 @@ def test_an_id_that_arrived_as_a_float_still_rings_its_hole():
 
 
 def test_a_payload_of_hole_identities_rings_none_of_them():
-    """``dropped_indices`` and ``tied_indices`` name holes; neither is the ring.
-
-    Both travel as a tuple of identities, which is a shape ``hole_index`` never
-    has — and ``grid-ambiguous`` carries no ``hole_index`` at all, because every
-    tied hole is equally its subject. A lookup loose enough to ring a hole off
-    either of these would ring the holes the pipeline *dropped*, which are not
-    on the sheet, or every hole on a panel whose only fault is a declared grid.
-    The findings still reach the NOTES block; what they must not do is put ink
-    on a hole.
-    """
+    """``dropped_indices`` and ``tied_indices`` name holes; neither is the ring."""
     data = DrillData(
         holes=(
             Hole.from_measurement(0, 0, 7_000_000, index=4),
@@ -780,14 +653,7 @@ def test_a_payload_of_hole_identities_rings_none_of_them():
 
 
 def test_the_duplicate_verdict_survives_the_snap_that_produced_it():
-    """The ring follows the identity, not the coordinate the finding was written at.
-
-    The two circles are 0.03 mm apart in the artwork and coincide only once the
-    grid has had them, which is the order the quantisation phase fixes and the
-    order the fixture panel's own pair arrives in. ``Deduplicate`` then reports
-    the survivor as hole 6 — the id, never the position — and that is what the
-    sheet has to ring, whatever anything downstream does to the coordinates.
-    """
+    """The ring follows the identity, not the coordinate the finding was written at."""
     after = Deduplicate().apply(
         phase(
             measured(10.03, 5.02, index=6),
@@ -827,13 +693,7 @@ def test_reference_outline_is_a_rounded_rect_at_scale(panel: DrillData):
 
 
 def test_the_reference_outline_is_the_only_outline_drawn(panel: DrillData):
-    """One panel, one rectangle.
-
-    Structural rather than a search for some particular class name: what matters
-    is not that one spelling is absent but that nothing draws a *second* outline,
-    whatever it might be called. A sheet carrying two rectangles a millimetre
-    apart makes the machinist decide which one is the panel.
-    """
+    """One panel, one rectangle."""
     root = ET.fromstring(DrawingSvgEmitter().emit(panel))
     group = by_class(root, "outlines")[0]
     assert [tag(e) for e in group] == ["rect"]
@@ -892,16 +752,9 @@ def test_chain_dimension_values_are_hole_to_hole_distances(root: ET.Element):
 
 
 def test_a_chain_dimension_states_the_difference_of_two_hole_positions_exactly():
-    """The label is the model's subtraction, not the sheet's.
+    """Chain labels use exact model subtraction.
 
-    Three holes numbered 4, 1 and 9 and placed *out* of that order, so nothing
-    here can pass by reading a position as an identity or an identity as a
-    position. The two segments are 6.875 and 11.125 mm — deliberately not round,
-    and deliberately not equal — and each is checked against ``format_nm`` of the
-    difference of the two ``x_nm`` the model holds. A label worked out from the
-    sheet coordinates instead has been through the scale and back, and would
-    agree to two decimals and disagree at the third; a label rendered from
-    ``mm_from_nm`` would be a second rendering of a number that already has one.
+    Out-of-order ids and unequal segments reject position lookup and segment reuse.
     """
     left, middle, right = -9_000_000, -2_125_000, 9_000_000
     data = DrillData(
@@ -922,14 +775,7 @@ def test_a_chain_dimension_states_the_difference_of_two_hole_positions_exactly()
 
 
 def test_a_hole_on_the_panel_edge_is_one_station_and_not_two():
-    """A chain runs edge, hole, …, edge — and a hole *at* an edge is that edge.
-
-    Kept apart with a tolerance once, which is what integers make unnecessary and
-    what an integer makes exact: 30 000 000 is 30 000 000. Left as two stations
-    the chain draws a segment of zero length between them, with two arrowheads
-    on top of each other and a ``0.000`` on a machinist's sheet — a dimension
-    that measures nothing, printed beside one that does.
-    """
+    """A chain runs edge, hole, …, edge — and a hole *at* an edge is that edge."""
     data = DrillData(
         holes=(Hole.from_measurement(30_000_000, 0, 5_000_000, index=7),),
         reference=outline(60_000_000, 40_000_000),
@@ -942,13 +788,7 @@ def test_a_hole_on_the_panel_edge_is_one_station_and_not_two():
 
 
 def test_a_row_with_one_station_gets_no_chain_at_all():
-    """One station is a place, not a distance.
-
-    Without a reference outline there are no edge stations to measure against, so
-    a lone hole leaves a chain with nothing in it to dimension. Drawing the group
-    anyway puts an extension line on the sheet pointing at a dimension that was
-    never drawn, which reads as a dimension whose number went missing.
-    """
+    """One station is a place, not a distance."""
     data = DrillData(holes=(Hole.from_measurement(3_000_000, 4_000_000, 5_000_000, index=9),))
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
@@ -957,14 +797,7 @@ def test_a_row_with_one_station_gets_no_chain_at_all():
 
 
 def test_a_panel_of_one_row_and_no_outline_is_still_dimensioned_across():
-    """Height zero must not take the width dimension with it.
-
-    Both extents are read off the holes when there is no reference outline, and
-    a row of holes has no height at all. The guard that skips a panel with
-    nothing to measure has to want *both* extents gone, or the commonest
-    reference-less panel there is — one row of controls — loses the only
-    dimension it had.
-    """
+    """Height zero must not take the width dimension with it."""
     data = DrillData(
         holes=(
             Hole.from_measurement(-10_000_000, 0, 3_000_000, index=4),
@@ -976,12 +809,7 @@ def test_a_panel_of_one_row_and_no_outline_is_still_dimensioned_across():
 
 
 def test_a_panel_of_one_column_and_no_outline_is_still_dimensioned_down():
-    """The same claim on the other axis, which is a separate clause of the guard.
-
-    Folding the two into one test keeps one fixture and drops the other, and the
-    surviving test's name still describes the whole behaviour — so half the
-    coverage goes with nothing looking missing.
-    """
+    """A panel of one column and no outline is still dimensioned down."""
     data = DrillData(
         holes=(
             Hole.from_measurement(0, -10_000_000, 3_000_000, index=4),
@@ -1003,14 +831,7 @@ def test_overall_width_and_height_dimensions(panel: DrillData, root: ET.Element)
 
 
 def test_the_overall_dimension_is_the_outline_the_model_holds():
-    """A footprint of Hammond's 0.05 mm, which two decimals could not have shown.
-
-    112.400 × 60.500 is what ``IdentifyHammondFootprint`` snapped the outline to,
-    and it is what the sheet has to say — the number the drill file was written
-    against and the number the box is ordered by. A panel dimensioned in whole
-    millimetres beside a drill file in exact ones is the disagreement this whole
-    unit exists to stop.
-    """
+    """A footprint of Hammond's 0.05 mm, which two decimals could not have shown."""
     data = phase(measured(0.0, 0.0, index=0), reference=RawOutline(113.0, 60.0),
                  enclosure=IdentifyHammondFootprint("1590B"))
     assert data.reference is not None
@@ -1032,16 +853,7 @@ def test_vertical_dimension_text_is_rotated(root: ET.Element):
 
 
 def _rows_of_five(count: int) -> DrillData:
-    """``count`` rows of five holes, spread down a 112.40 × 60.50 panel.
-
-    A 15-row panel is ordinary work — five controls in three banks is already
-    three rows, and a row here is any distinct Y. Ids run backwards so nothing
-    in the drawing can pass by treating a position as an identity.
-
-    The pitch is a whole number of nanometres divided exactly, so every row's Y
-    is a distinct integer and ``rows()`` — which groups by exact equality — sees
-    ``count`` of them however many that is.
-    """
+    """``count`` rows of five holes, spread down a 112.40 × 60.50 panel."""
     pitch_nm = 56_000_000 // (count - 1) if count > 1 else 0
     return DrillData(
         holes=tuple(
@@ -1060,13 +872,9 @@ def _rows_of_five(count: int) -> DrillData:
 
 @pytest.mark.parametrize("rows", [5, 14, 15, 30])
 def test_every_dimension_stays_inside_the_drawing_area(rows: int):
-    """Measured thresholds: 14 rows passed the border, 15 left the sheet.
+    """All row dimensions stay inside the drawing area.
 
-    ``layout`` clamps the room it reserves for chain dimensions to half the
-    drawing area; ``_draw_row_chains`` stacked one chain per row regardless. And
-    because the chains are drawn from the bottom row up, the ones that vanish
-    are the *topmost* rows — whose holes are still drawn, with no dimension and
-    nothing saying one was left off.
+    Counts 14 and 15 straddle capacity; 30 exercises overflow.
     """
     data = _rows_of_five(rows)
     emitter = DrawingSvgEmitter()
@@ -1136,15 +944,7 @@ def test_schedule_cells_carry_the_hole_data(panel: DrillData, root: ET.Element):
 
 
 def test_a_schedule_cell_states_a_position_the_micron_apart():
-    """Three decimals, because a micron is the finest grid the pipeline allows.
-
-    ``SnapPositions`` floors the pitch at a micron on the stated grounds that the
-    drill file and this sheet both print three decimals. Print two here and that
-    floor is given away: 18.000 and 18.001 are two positions in the drill file
-    and one number on the drawing, which is the machinist reading two holes as
-    one. The ids are out of order so the row a cell belongs to cannot be
-    inferred from its place in the list.
-    """
+    """Three decimals, because a micron is the finest grid the pipeline allows."""
     data = DrillData(
         holes=(
             Hole.from_measurement(-9_000_000, 18_000_000, 3_000_000, index=4),
@@ -1171,13 +971,7 @@ def test_schedule_tool_numbers_come_from_drilldata_tools(panel: DrillData, root:
 
 
 def test_schedule_never_prints_a_negative_zero():
-    """One hole, two artifacts, one number.
-
-    A hole at −400 nm rounds to zero at three decimals. The Excellon writer
-    normalised the sign away and the schedule did not, so the drill file said
-    ``X0.000`` and the sheet beside it said ``-0.000`` — the same hole,
-    contradicted in print. Both now go through ``units.format_nm``.
-    """
+    """One hole, two artefacts, one number."""
     data = DrillData(
         holes=(Hole.from_measurement(-400, -400, 5_000_000, index=0),),
         reference=outline(60_000_000, 40_000_000),
@@ -1199,14 +993,7 @@ def test_schedule_has_a_per_tool_summary_with_quantities(root: ET.Element):
 
 
 def test_the_summary_quantities_are_the_models_tool_counts(panel: DrillData, root: ET.Element):
-    """``QTY`` is read off ``tool_counts()``, never counted again here.
-
-    That the count lives on the model is the only thing stopping this column and
-    the drill file's tool table describing one panel two ways — recount it in the
-    emitter and the sheet is free to say five ⌀7 holes where the ``.drl`` defines
-    seven. Asserted against the model's own mapping rather than a literal, so a
-    fixture change cannot quietly make the two agree by coincidence.
-    """
+    """``QTY`` is read off ``tool_counts()``, never counted again here."""
     counts = panel.tool_counts()
     tools = panel.tools()
     assert sorted(counts.values()) == [2, 5], "the fixture must have two unequal counts"
@@ -1232,19 +1019,7 @@ def _two_size_panel() -> DrillData:
 
 
 def test_the_schedule_tool_numbers_are_read_from_the_model_and_not_re_derived(monkeypatch):
-    """The numbering is looked up, not recomputed to agree.
-
-    ``{d: i for i, d in enumerate(sorted(...), start=1)}`` written inside this
-    emitter draws a byte-identical sheet today, so no assertion against a
-    fixture can tell the two apart — and that is the whole danger, because the
-    private copy is then free to drift the day ``tools()`` changes its rule,
-    leaving the sheet and the drill file naming different bits, which is
-    ADR-0001's incident in its next form. Stubbing the model with a numbering
-    the emitter could not have invented — 4 and 9, largest bit first — is what
-    makes the dependency visible, and it is asserted at *both* places the
-    mapping is read: the TOOL column of every row and the per-tool summary.
-    Assert one and the other is free to recount.
-    """
+    """The numbering is looked up, not recomputed to agree."""
     data = _two_size_panel()
     monkeypatch.setattr(DrillData, "tools", lambda self: {7_000_000: 4, 5_000_000: 9})
 
@@ -1258,13 +1033,7 @@ def test_the_schedule_tool_numbers_are_read_from_the_model_and_not_re_derived(mo
 
 
 def test_the_summary_quantities_are_read_from_the_model_and_not_recounted(monkeypatch):
-    """``QTY`` is ``tool_counts()``'s answer, not this emitter's tally.
-
-    ``sum(1 for h in data.holes if ...)`` beside the summary loop agrees with
-    the model on every fixture that exists, so only a stub the holes contradict
-    can separate reading from recounting: 90 and 40 are quantities no tally of
-    three holes could reach.
-    """
+    """``QTY`` is ``tool_counts()``'s answer, not this emitter's tally."""
     data = _two_size_panel()
     monkeypatch.setattr(DrillData, "tool_counts", lambda self: {5_000_000: 90, 7_000_000: 40})
 
@@ -1281,14 +1050,7 @@ def _sched_diameters(root: ET.Element) -> list[str]:
 
 
 def test_schedule_diameters_are_spelled_the_way_the_drill_standard_spells_them():
-    """A fractional bit's honest name is its fraction, and the standard knows it.
-
-    Deliberately the *fractional* standard: 1/8" is 3.175 mm and 9/32" is
-    7.14375, so a millimetre spelling of either is a rounding of a size that is
-    exact — and, at the schedule's two decimals, ``⌀7.14 mm`` is a bit nobody
-    stocks. The metric standard could not prove this test at all, because its
-    label and the millimetre fallback are the same string.
-    """
+    """A fractional bit's honest name is its fraction, and the standard knows it."""
     after = phase(
         measured(-20.0, 0.0, 3.18, index=0),
         measured(20.0, 0.0, 7.13, index=1),
@@ -1302,12 +1064,7 @@ def test_schedule_diameters_are_spelled_the_way_the_drill_standard_spells_them()
 
 
 def test_schedule_diameters_use_the_standard_that_actually_ran():
-    """A second standard, so the first test cannot be passing on a constant.
-
-    The same two holes quantised against the metric drawer get metric labels,
-    which is the same fact from the other side: the spelling is read out of the
-    run, not chosen by the emitter.
-    """
+    """A second standard, so the first test cannot be passing on a constant."""
     after = phase(
         measured(-20.0, 0.0, 3.18, index=0),
         measured(20.0, 0.0, 7.13, index=1),
@@ -1319,12 +1076,7 @@ def test_schedule_diameters_use_the_standard_that_actually_ran():
 
 
 def test_schedule_diameters_fall_back_to_millimetres_when_no_standard_was_recorded():
-    """A hand-built ``DrillData`` never met the drill table. Nothing to look up.
-
-    The fallback states millimetres because that is the frame the numbers are
-    in; guessing a standard would put a bit designation on the sheet that no
-    stage ever chose.
-    """
+    """A hand-built ``DrillData`` never met the drill table. Nothing to look up."""
     data = make_data(*holes((0, 0, 7_000_000)))
     assert data.last_run("snap-diameters") is None
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
@@ -1334,16 +1086,7 @@ def test_schedule_diameters_fall_back_to_millimetres_when_no_standard_was_record
 
 @pytest.mark.parametrize("recorded", ["gauge", "", True, 3.0, (3.0, 5.0)])
 def test_a_recorded_standard_that_does_not_resolve_is_not_a_standard(recorded):
-    """``StageRun`` payloads are generic; a name is only a name until it resolves.
-
-    A run recorded against a hand-built standard — or a document from a later
-    version of this tool — names something this build cannot expand into sizes
-    or a spelling. Millimetres, then, rather than a label invented here.
-
-    Every ``ParameterValue`` shape is passed through, because the registry
-    lookup is the one place a payload reaches a dict key: a value it choked on
-    would take out the whole sheet, not just this column.
-    """
+    """``StageRun`` payloads are generic; a name is only a name until it resolves."""
     data = make_data(*holes((0, 0, 7_000_000))).with_processing(
         StageRun("snap-diameters", (("standard", recorded), ("size_count", 80)))
     )
@@ -1371,16 +1114,7 @@ def test_the_diameter_column_does_not_promise_millimetres_it_cannot_keep():
 
 
 def _title_block_lines(root: ET.Element) -> list[str]:
-    """Every string inside the title block, one per ``<text>``, in sheet order.
-
-    Scoped deliberately: ``all_text`` would let a dimension label elsewhere on
-    the drawing satisfy an assertion about what the title block states.
-
-    Lines rather than one blob, because the title block is where the sheet makes
-    its claims and a claim is a whole line. ``"112 × 61" in text`` is satisfied
-    by a line that also carries a truncation ellipsis, or by two facts that
-    happen to abut across a join; ``line in lines`` is not.
-    """
+    """Return title-block text in sheet order, excluding dimension labels."""
     groups = by_class(root, "title-block-group")
     assert len(groups) == 1, "expected exactly one title block"
     return [(e.text or "") for e in walk(groups[0], "text")]
@@ -1413,12 +1147,7 @@ def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
 
 
 def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
-    """A second pitch, so the first test cannot be passing on a constant.
-
-    One pitch on its own cannot distinguish "reads the provenance" from "prints
-    something plausible"; a second one, with no round number in common with the
-    first, can.
-    """
+    """A second pitch, so the first test cannot be passing on a constant."""
     after = phase(measured(10.03, 5.02, index=0), positions=SnapPositions(100_000))
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "GRID 0.100 mm" in text
@@ -1428,15 +1157,7 @@ def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
 
 
 def test_the_title_block_states_the_effective_pitch_not_the_one_that_was_asked_for():
-    """A pitch below the micron floor is clamped, and the sheet says the clamp.
-
-    ``SnapPositions`` takes 100 nm and snaps on 1 000, because below a micron the
-    drill file and this sheet stop being able to print two grid points apart. The
-    holes are therefore multiples of 0.001 mm and nothing on the panel was ever
-    near 0.0001 — so a title block echoing the request would stamp a pitch that
-    described no hole on the sheet. ``describe()`` reports effective values for
-    exactly this, and the drawing has to read them as such.
-    """
+    """A pitch below the micron floor is clamped, and the sheet says the clamp."""
     after = phase(measured(10.03, 5.02, index=0), positions=SnapPositions(100))
     assert [d.code for d in after.diagnostics] == ["grid-too-fine"]
 
@@ -1446,12 +1167,7 @@ def test_the_title_block_states_the_effective_pitch_not_the_one_that_was_asked_f
 
 
 def test_the_title_block_does_not_invent_a_grid_when_none_was_recorded():
-    """A hand-built ``DrillData`` never met the quantisation phase. 0.25 would be a lie.
-
-    The literal is pinned, not merely the absence of 0.25: "says nothing at all"
-    satisfies "does not lie" while leaving the machinist to assume a pitch, and a
-    blank line where the grid should be does the same.
-    """
+    """A hand-built ``DrillData`` never met the quantisation phase. 0.25 would be a lie."""
     data = make_data(*holes((0, 0)))
     assert data.processing == ()
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
@@ -1460,13 +1176,7 @@ def test_the_title_block_does_not_invent_a_grid_when_none_was_recorded():
 
 
 def test_a_snap_run_that_recorded_no_pitch_at_all_is_not_a_grid():
-    """A record can exist and still not answer the question.
-
-    ``StageRun.get`` cannot tell an absent key from a null one, so a run that
-    named no pitch has to come out the same as no run — otherwise the fallback
-    is whatever ``None`` formats as, which is a line on a machinist's sheet
-    reading "GRID None mm".
-    """
+    """A record can exist and still not answer the question."""
     data = make_data(*holes((0, 0))).with_processing(StageRun("snap", ()))
     assert data.last_run("snap") is not None
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
@@ -1475,15 +1185,7 @@ def test_a_snap_run_that_recorded_no_pitch_at_all_is_not_a_grid():
 
 @pytest.mark.parametrize("recorded", [(250_000, 500_000), 0, -250_000])
 def test_a_recorded_grid_that_is_not_a_single_positive_pitch_is_not_a_grid(recorded):
-    """``StageRun`` payloads are generic, and an ``_nm`` key admits a *tuple*.
-
-    The model holds an ``_nm`` parameter to whole nanometres at construction, so
-    a string or a float cannot reach here at all — but a tuple of them can, one
-    parameter in the pipeline being a table of sizes, and neither a table nor a
-    pitch of nothing is a pitch. Reported the same way as no record: printing a
-    tuple would put a bracketed list where a number belongs, and printing a zero
-    or a negative would put a number no hole is a multiple of.
-    """
+    """``StageRun`` payloads are generic, and an ``_nm`` key admits a *tuple*."""
     data = make_data(*holes((0, 0))).with_processing(
         StageRun("snap", (("grid_nm", recorded),))
     )
@@ -1504,13 +1206,7 @@ def _identified(
     selected_part: str | None = None,
     reference: ReferenceOutline | None = None,
 ) -> DrillData:
-    """A panel whose *measured* outline is not its *catalogue* footprint.
-
-    113.000 × 60.000 against a 112.400 × 60.500 match, which is the fixture
-    panel's own error and the whole reason the identification quantiser exists.
-    Kept apart on purpose: an emitter that printed ``data.reference`` instead of
-    the match would be indistinguishable from a correct one if the two agreed.
-    """
+    """A panel whose *measured* outline is not its *catalogue* footprint."""
     return DrillData(
         holes=holes((0, 0)),
         reference=reference if reference is not None else outline(113_000_000, 60_000_000),
@@ -1526,41 +1222,23 @@ def _identified(
 
 
 def test_the_title_block_states_the_enclosure_the_pipeline_identified():
-    """Straight off a real run: outline in, footprint on the sheet.
-
-    The quantiser does the identifying; the drawing reads
-    ``DrillData.enclosure``. Asserted as a whole line, because the sheet's claim
-    is the line.
-    """
+    """Straight off a real run: outline in, footprint on the sheet."""
     after = phase(measured(10.0, 5.0, index=0), reference=RawOutline(119.6, 94.1))
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "HAMMOND 1590  119.50 × 94.00 mm  CANDIDATES BB / BB2 / BBS / C" in lines
 
 
 def test_the_enclosure_line_states_the_catalogue_footprint_not_the_measured_outline():
-    """112.40 × 60.50 is what the case is; 113.000 × 60.000 is what the artwork came to.
-
-    The datasheet number is the one a machinist can order a box by, and it is
-    the one every other consumer of this panel has already agreed on. It is also
-    the one that whole millimetres cannot state: 1590B is 112.40 where 1590BS is
-    112.00, and a title block rounding either to 112 names two enclosures at once.
-    """
+    """112.40 × 60.50 is what the case is; 113.000 × 60.000 is what the artwork came to."""
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(_identified())))
     assert "HAMMOND 1590  112.40 × 60.50 mm  CANDIDATES B / B2" in lines
     assert not [line for line in lines if "113.000" in line or "60.000" in line]
 
 
 def test_the_enclosure_line_renders_the_candidates_in_the_order_it_was_handed():
-    """A claim about the emitter: it passes the tuple through, it does not order it.
+    """Render enclosure candidates in caller order.
 
-    ``enclosures.footprints()`` sorts, so all 26 production footprints arrive
-    alphabetical and no fixture drawn from the catalogue can tell passthrough
-    from sorting — ``("1590BB", "1590BB2", "1590BBS", "1590C")`` sorts to
-    itself. These candidates are therefore hand-built out of alphabetical order,
-    which is the only fixture that distinguishes the two, and the contract it
-    pins is the emitter's: whoever builds an ``EnclosureMatch`` — a future
-    matcher, a library caller, a changed ``footprints()`` — decides the order,
-    and the drawing renders it.
+    Opposing input and lexical orders ensure re-sorting cannot pass.
     """
     data = _identified(candidates=("1590BS", "1590B", "1590B2"))
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
@@ -1568,14 +1246,7 @@ def test_the_enclosure_line_renders_the_candidates_in_the_order_it_was_handed():
 
 
 def test_a_candidate_that_does_not_carry_the_series_is_printed_whole():
-    """``1590B`` under a ``HAMMOND 1590`` heading is that series' ``B``.
-
-    The shorthand is the datasheet's, and it buys the width that keeps a
-    four-candidate footprint inside the title block. It is not a substring
-    operation, though, and the difference shows on anything the series does not
-    prefix: blind slicing turns ``PB-61`` into ``61`` — a designator that reads
-    like a dimension — and a designator that *is* the series into nothing at all.
-    """
+    """``1590B`` under a ``HAMMOND 1590`` heading is that series' ``B``."""
     data = _identified(candidates=("1590B", "1590", "PB-61"))
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
     assert "HAMMOND 1590  112.40 × 60.50 mm  CANDIDATES B / 1590 / PB-61" in lines
@@ -1593,14 +1264,7 @@ def test_the_enclosure_line_names_the_one_part_when_the_operator_declared_one():
 
 
 def test_the_declared_case_reaches_the_sheet_from_a_real_run():
-    """``--case 1590B`` is what resolves the fixture panel's own ambiguity.
-
-    113.000 × 60.000 is within tolerance of 1590BS (112.00 × 60.50) and of
-    1590B/1590B2 (112.40 × 60.50) alike, so undeclared it is an
-    ``ambiguous-enclosure`` ERROR and no sheet is written at all. Declared, the
-    quantiser names the part and the drawing states the footprint that goes with
-    it — 112.40, not the 112.00 of the case next to it in the catalogue.
-    """
+    """``--case 1590B`` is what resolves the fixture panel's own ambiguity."""
     after = phase(
         measured(10.0, 5.0, index=0),
         reference=RawOutline(113.0, 60.0),
@@ -1612,38 +1276,21 @@ def test_the_declared_case_reaches_the_sheet_from_a_real_run():
 
 
 def test_the_enclosure_line_does_not_name_a_part_when_none_was_declared():
-    """``selected_part`` is ``None`` on every run that did not declare a case.
-
-    A 2-D outline identifies a footprint and never a part, so a sheet naming one
-    it was never told is claiming knowledge that is not in the artwork — and it
-    is the plausible half of the pair a machinist would act on.
-    """
+    """``selected_part`` is ``None`` on every run that did not declare a case."""
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(_identified())))
     assert "HAMMOND 1590  112.40 × 60.50 mm  CANDIDATES B / B2" in lines
     assert not [line for line in lines if "PART" in line]
 
 
 def test_the_enclosure_line_says_the_panel_is_turned_when_it_is():
-    """The match keeps the catalogue's orientation; the artwork keeps its own.
-
-    So a portrait panel is dimensioned 60.500 × 112.400 on the drawing while its
-    enclosure line says 112.40 × 60.50 — two true numbers that read as a
-    contradiction unless the sheet says which way round the panel sits.
-    """
+    """The match keeps the catalogue's orientation; the artwork keeps its own."""
     data = _identified(rotated=True, reference=outline(60_500_000, 112_400_000))
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
     assert "HAMMOND 1590  112.40 × 60.50 mm ROTATED  CANDIDATES B / B2" in lines
 
 
 def test_a_rotated_panel_keeps_every_candidate_in_the_title_block():
-    """The one footprint in the catalogue that used to lose candidates.
-
-    119.50 × 94.00 is 1590BB, 1590BB2, 1590BBS and 1590C — four of them, which
-    ``_designator``'s elision was sized to fit. Turn the panel portrait and
-    ``ROTATED`` joins the same line, pushing the last two past the title block,
-    where they were replaced by an ellipsis that did not say how many had gone.
-    The JSON, meanwhile, listed all four.
-    """
+    """A rotated panel keeps every candidate in the title block."""
     data = phase(measured(0.0, 0.0, index=0), reference=RawOutline(94.1, 119.6))
     assert data.enclosure is not None
     assert data.enclosure.candidates == ("1590BB", "1590BB2", "1590BBS", "1590C")
@@ -1655,13 +1302,7 @@ def test_a_rotated_panel_keeps_every_candidate_in_the_title_block():
 
 
 def test_a_candidate_list_that_cannot_fit_says_how_many_it_dropped():
-    """Beyond shrinking, the line still has to end somewhere — honestly.
-
-    A bare ellipsis leaves the reader unable to tell one missing candidate from
-    three, which is the difference between ordering the right box and the wrong
-    one. Twelve candidates is not a catalogue footprint; it is the width the
-    real four-candidate case is one datasheet revision away from.
-    """
+    """Beyond shrinking, the line still has to end somewhere — honestly."""
     candidates = tuple(
         f"1590{suffix}"
         for suffix in ("B", "B2", "BS", "BB", "BB2", "BBS", "C", "D", "N1", "P", "Q", "R")
@@ -1678,13 +1319,7 @@ def test_a_candidate_list_that_cannot_fit_says_how_many_it_dropped():
 
 
 def test_the_title_block_says_so_when_no_enclosure_was_identified():
-    """No match, or no reference layer at all: the sheet says which, honestly.
-
-    The literal is pinned rather than the absence of a footprint, for the reason
-    ``GRID NOT RECORDED`` is: a line missing from the title block leaves the
-    machinist to assume the panel is a Hammond case, and "unknown enclosure" is
-    a legitimate outcome — the world holds more cases than this catalogue does.
-    """
+    """No match, or no reference layer at all: the sheet says which, honestly."""
     data = make_data(*holes((0, 0)), reference=outline(200_000_000, 33_000_000))
     assert data.enclosure is None
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(data)))
@@ -1706,15 +1341,7 @@ def test_a_panel_that_matches_nothing_still_says_so_after_a_real_run():
 
 
 def test_a_line_too_long_even_at_the_smallest_font_is_still_truncated():
-    """Shrinking buys width; it does not buy an unlimited amount of it.
-
-    A title block line is shrunk to earn its room and only then chopped, and the
-    chop still has to happen — at 1.6 mm the block holds 88 characters and this
-    title is longer than that on any sheet. Without a case that reaches the
-    floor, nothing distinguishes "fits the line" from "prints the line straight
-    through the border", because every other line on the sheet is short enough
-    that shrinking alone saves it.
-    """
+    """Shrinking buys width; it does not buy an unlimited amount of it."""
     emitter = DrawingSvgEmitter(DrawingOptions(title="PANEL " * 40))
     root = ET.fromstring(emitter.emit(_identified()))
 
@@ -1732,14 +1359,7 @@ def test_title_block_reports_the_scale(panel: DrillData):
 
 
 def test_only_drill_data_is_drawn_never_the_artwork(panel: DrillData, root: ET.Element):
-    """This is a drawing *of the drill data*, not a render of the panel artwork.
-
-    Asserted structurally rather than by searching the serialised text for a
-    layer name: ``"Graphics" not in svg`` passes for an emitter that returns
-    ``<svg/>`` and fails for a panel whose file path happens to contain the
-    word. What actually matters is that every element on the sheet is drawing
-    furniture, and that no artwork — raster or vector — was imported.
-    """
+    """This is a drawing *of the drill data*, not a render of the panel artwork."""
     assert "Graphics" in panel.source.layers_found  # the source did carry artwork
 
     assert len(by_class(root, "hole", "circle")) == len(panel.holes)
@@ -1833,13 +1453,7 @@ def _many_warnings(count: int) -> DrillData:
 
 
 def test_notes_that_do_not_fit_say_how_many_were_left_off():
-    """A note that silently vanishes is worse than one that is visibly missing.
-
-    Forty ``off-grid`` warnings cannot fit the NOTES block. Dropping the tail
-    without a word means the operator never learns that holes were moved, and
-    has no way to know the sheet is incomplete. The schedule already prints
-    "… N further holes not listed" for exactly this reason.
-    """
+    """A note that silently vanishes is worse than one that is visibly missing."""
     data = _many_warnings(40)
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
@@ -1872,7 +1486,7 @@ def test_the_notes_overflow_marker_stays_inside_the_notes_box():
 
 
 def test_the_schedule_says_how_many_holes_it_could_not_list():
-    """The schedule's own truncation path, which was never covered."""
+    """Schedule overflow reports the exact number of omitted holes."""
     drilled = tuple(
         Hole.from_measurement(
             -55_000_000 + 500_000 * i, 20_000_000 - 400_000 * (i // 40), 3_000_000, index=i
@@ -1892,13 +1506,8 @@ def test_the_schedule_says_how_many_holes_it_could_not_list():
 
 
 def _every_hole_a_different_size(count: int) -> DrillData:
-    """``count`` holes, no two the same diameter, so the tool table is as long
-    as the schedule itself.
-
-    The truncation test above uses 240 holes of *one* diameter, which is why it
-    never saw this: with one tool the summary is one line, and the capacity
-    arithmetic that subtracts the summary from the box never bites. Ids run
-    backwards so the NO. column cannot pass by coinciding with a position.
+    """``count`` holes, no two the same diameter, so the tool table is as long as the
+    schedule itself.
     """
     return DrillData(
         holes=tuple(
@@ -1914,13 +1523,9 @@ def _every_hole_a_different_size(count: int) -> DrillData:
 
 @pytest.mark.parametrize("tools", [2, 83, 120])
 def test_every_element_of_the_schedule_stays_inside_its_box(tools: int):
-    """Measured thresholds: 82 tools left the box, 83 reached the title block
-    and 118 left the page altogether — while the drill file defined every one.
+    """Every schedule element stays inside its box across capacity boundaries.
 
-    ``layout`` clamped the capacity arithmetic to zero and the summary loop
-    below it drew one line per tool regardless, so the deficit was thrown away
-    rather than reported. Asserted on *where the elements land*, because the
-    escaping branch executes on every run: line coverage said 100%.
+    Counts 2, 83 and 120 exercise compact, boundary and heavily truncated layouts.
     """
     data = _every_hole_a_different_size(tools)
     emitter = DrawingSvgEmitter()
@@ -1929,12 +1534,7 @@ def test_every_element_of_the_schedule_stays_inside_its_box(tools: int):
 
 
 def test_the_schedule_says_how_many_tools_it_could_not_list():
-    """A tool the sheet does not name is a bit the machinist does not fit.
-
-    The wording is its own: the only overflow the schedule used to print said
-    "further holes not listed", which is a true statement about a different
-    quantity and was printed while 39 tools were missing.
-    """
+    """A tool the sheet does not name is a bit the machinist does not fit."""
     data = _every_hole_a_different_size(120)
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
@@ -2112,14 +1712,7 @@ def test_single_hole_does_not_divide_by_zero():
 
 
 def test_a_sheet_with_no_room_for_a_title_block_says_nothing_rather_than_guessing():
-    """A 10 mm square sheet leaves the title block a negative width.
-
-    Every string in it is composed to a character capacity, and a box of no
-    width has a capacity of nothing — which must come out as an empty line, not
-    as a lie fitted to a width the sheet does not have. Absurd as the sheet is,
-    ``Sheet`` is a public option and the arithmetic is the same arithmetic the
-    enclosure note trusts to decide how many candidates it may name.
-    """
+    """A 10 mm square sheet leaves the title block a negative width."""
     data = _identified()
     emitter = DrawingSvgEmitter(DrawingOptions(sheet=Sheet("mini", 10.0, 10.0)))
     root = ET.fromstring(emitter.emit(data))

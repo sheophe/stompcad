@@ -1,9 +1,4 @@
-"""The three abstractions the whole design rests on.
-
-Kept deliberately narrow (ISP): a Stage knows nothing about emitters, an Emitter
-knows nothing about sources, and ``Pipeline`` depends on ``Stage`` alone (DIP).
-Only ``cli.py`` is allowed to name concrete implementations.
-"""
+"""Protocols for reading, processing, and emitting drill data."""
 
 from __future__ import annotations
 
@@ -17,19 +12,10 @@ __all__ = ["Source", "Stage", "Emitter", "Pipeline"]
 
 @runtime_checkable
 class Source(Protocol):
-    """Parses some artwork format into RawDrillData, in float millimetres.
+    """Read artwork as unquantised finite millimetres in ``RawDrillData``.
 
-    Raw is the whole of the contract: a source states the frame, states what it
-    measured in it, and nothing more. Quantising belongs to the phase that
-    knows what each length has to land on, so a source that rounded first would
-    be rounding twice with the order of the two left to chance.
-
-    The frame is millimetres and Y up, with the origin at the centre of the
-    reference outline *when the artwork has one*. When it has none there is
-    nothing to centre on, and the source says so — ``reference`` is ``None``,
-    the positions are relative to the page, and a WARNING names the frame they
-    are in. Inventing a centre instead would put every hole a plausible
-    distance from a point the artwork never established.
+    Coordinates are Y-up and centred on the reference outline when present;
+    otherwise they remain page-relative and the missing frame is diagnosed.
     """
 
     def read(self) -> RawDrillData: ...
@@ -37,24 +23,14 @@ class Source(Protocol):
 
 @runtime_checkable
 class Stage(Protocol):
-    """One preprocessing step.
-
-    Must be a pure function of its input: same DrillData in, same DrillData out.
-    Must not assert anything about which stage ran before it (LSP) — a stage that
-    only works after snapping is a design error, not a documentation problem.
-    """
+    """A deterministic preprocessing step independent of pipeline position."""
 
     name: ClassVar[str]
 
     def apply(self, data: DrillData) -> DrillData: ...
 
     def describe(self) -> StageRun:
-        """Report what this stage was configured to do, with *effective* values.
-
-        The drawing's title block must state the grid the holes were actually
-        snapped to. Threading that through the emitter's options instead meant a
-        library consumer could emit a sheet stamped 0.25 for data snapped at 0.5.
-        """
+        """Report the effective configuration applied by this stage."""
         ...
 
 
@@ -62,12 +38,8 @@ class Stage(Protocol):
 class Emitter(Protocol):
     """Serialises DrillData into one output format.
 
-    Emitters may translate frames and convert units, but must never round
-    positions, cluster diameters, drop duplicates, sort or renumber. Every one
-    of those was settled upstream — quantising fixed the positions, the
-    diameters and the enclosure; the stages after it decided which marks are
-    one hole and what order they come in — and an emitter that re-derives one
-    of them is how two artifacts come to describe the same panel differently.
+    Emitters may translate frames and convert units, but do not quantise,
+    deduplicate, sort, or renumber the model.
     """
 
     name: ClassVar[str]
@@ -104,11 +76,7 @@ class Pipeline(Sequence[Stage]):
     def run(self, data: DrillData) -> DrillData:
         """Fold the stages over ``data``, recording each one as it succeeds.
 
-        The record is appended *after* ``apply`` returns, so a stage never sees
-        provenance for itself in its own input and a stage that raises leaves no
-        claim that it ran. What the record contains is the stage's business:
-        this fold asks ``describe()`` and stores the answer, which is how it
-        stays free of any knowledge of grids, diameters or tolerances.
+        A record is appended only after ``apply`` returns successfully.
         """
         for stage in self._stages:
             data = stage.apply(data).with_processing(stage.describe())

@@ -1,17 +1,4 @@
-"""The emitter registry's contract (``aidrill.emitters.base``).
-
-The registry is what makes ``--emit FORMAT=PATH`` open/closed: adding a format
-touches only the new emitter's own file. That bargain has three terms, and each
-one is a refusal rather than a feature — an emitter without a name, or a second
-emitter squatting on a name already taken, would corrupt the mapping the CLI
-resolves through, and an unknown format must fail with the list of formats that
-*would* have worked. Those refusals were the only untested lines in the module.
-
-Every test here runs inside ``clean_registry`` (``tests/conftest.py``), which
-snapshots ``REGISTRY`` and puts it back afterwards: registering is a global side
-effect, and a test that leaks one would change what every later test — and
-``--help`` — sees.
-"""
+"""Tests for emitter registration and discovery."""
 
 from __future__ import annotations
 

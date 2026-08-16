@@ -1,16 +1,4 @@
-"""Tests for the JSON emitter (SPEC §7).
-
-JSON is the integration surface for the wider toolchain, so these tests pin the
-document *shape*, not just its contents: key order, key names and the presence of
-raw provenance are all part of the contract other tools code against.
-
-The key names are where the unit lives. A nominal length is a whole number of
-nanometres under a key ending ``_nm``; the unsuffixed values under ``raw`` are
-the float millimetres the artwork measured. ``test_no_nominal_length_is_a_float``
-sweeps the whole document for the first of those rather than checking fields one
-at a time, because a field-by-field list is a list somebody has to remember to
-extend and a sweep is not.
-"""
+"""Tests for JSON serialisation and reconstruction of drill data."""
 
 from __future__ import annotations
 
@@ -50,36 +38,8 @@ from tests.conftest import at, holes, make_data
 
 
 def fixture_data() -> DrillData:
-    """A DrillData exercising every field: nominal-vs-raw drift, a reference
-    outline, one diagnostic of each severity, full source info, and the stages
-    that produced it.
-
-    Every detail here exists to break a coincidence, because this fixture is
-    what the round-trip test's ``==`` is worth.
-
-    The hole identities are 4 and 1 — neither sequential nor equal to their
-    position in the document — because a fixture numbered 0, 1 in the order it
-    lists its holes cannot tell a serialised identity from a serialised list
-    index; gaps are what survives a Deduplicate anyway. Two of the four
-    diagnostics carry a tuple of hole identities and one carries no payload at
-    all, because a document that dropped ``data`` still round-trips an empty
-    one and a document that left a tuple a tuple still *prints* correctly. The
-    outline is *snapped* — measured 120.0 × 93.0, resized to a catalogue
-    119.5 × 94.0 — because an outline whose ``raw`` equals its nominal size
-    cannot tell a serialised measurement from a re-derived one, and the
-    round-trip test stayed green for exactly that reason while ``reference.raw``
-    was being dropped on the way out. It drifts on *both* axes, and in opposite
-    directions, so neither a copied width nor a sign error survives.
-
-    The enclosure match is the same lesson applied a third time. Its
-    ``selected_part`` is set, and set to a candidate that is neither the first
-    nor the last of the four, so neither a dropped key nor ``candidates[0]``
-    can impersonate it — ``rotated_fixture_data`` covers the ``None`` half.
-    Its ``candidates`` are listed out of alphabetical order, because a tuple
-    already in the order ``sorted()`` would produce cannot tell a passthrough
-    from a re-sort, and ADR-0001 forbids an emitter the second. And
-    ``length_nm``/``width_nm`` differ from one another, so a document that
-    transposed them would not read back identically.
+    """A DrillData exercising every field: nominal-vs-raw drift, a reference outline, one
+    diagnostic of each severity, full source info, and the stages that produced it.
     """
     given = (
         Hole(
@@ -164,32 +124,7 @@ def fixture_data() -> DrillData:
 
 
 def rotated_fixture_data() -> DrillData:
-    """A portrait panel, no case declared, and a catalogue this build cannot emit.
-
-    Only the outline and the match differ from ``fixture_data``, so both go
-    through one round-trip test. They differ in the two fields whose defaults
-    make a dropped key invisible: ``rotated`` is ``True`` here where it is
-    ``False`` there, and ``selected_part`` is ``None`` here where it names a
-    part there. A serialiser that omitted either would rebuild one fixture
-    correctly and the other silently wrong, which is the whole reason there
-    are two.
-
-    ``length_nm``/``width_nm`` stay in the catalogue's orientation — 112.40 ×
-    60.50 — while the outline is the 60.50 × 112.40 the artwork was drawn as.
-    That is not an inconsistency to tidy up: transposing the match would make
-    the footprint unfindable in the drawing it came from, and it is the one
-    thing ``rotated`` is for.
-
-    The ``family`` is deliberately **not** the shipped catalogue's, and neither
-    are the designators. ``EnclosureMatch.family`` is a free string, but
-    ``IdentifyHammondFootprint`` can only ever set it to one value, so a
-    fixture repeating that value cannot tell a serialised ``family`` from a
-    hard-coded literal — the same coincidence as an outline whose ``raw``
-    equals its nominal size. A name this build could never produce is what
-    makes the passthrough checkable; ``fixture_data`` and the end-to-end test
-    still pin the real one. These designators are the fixture's own —
-    ``enclosures.py`` is the only place that carries datasheet values.
-    """
+    """A portrait panel, no case declared, and a catalogue this build cannot emit."""
     return replace(
         fixture_data(),
         reference=ReferenceOutline.from_measurement(
@@ -207,32 +142,9 @@ def rotated_fixture_data() -> DrillData:
 
 
 def square_fixture_data() -> DrillData:
-    """A square footprint, rotated, with a case declared. It breaks a correlation.
+    """Return a rotated square footprint with a declared case.
 
-    Two fixtures were not enough, and the way they failed is the lesson. Across
-    both, ``rotated is True`` held exactly when ``selected_part is None`` and
-    exactly when the outline was portrait — so three re-derivations passed the
-    whole suite: ``match.selected_part is None``, ``match.candidates[1]``
-    keyed on rotation, and worst of all
-    ``data.reference.width_nm < data.reference.height_nm``. That last one is an
-    emitter computing a pipeline fact from geometry, which is the founding
-    rule of ADR-0001, and every *safe* spelling of the bug — dropping the key,
-    hard-coding either value — died while the *dangerous* one lived.
-
-    A square footprint decouples all three at once: 120 × 120 is neither
-    portrait nor landscape, so no comparison of the outline's axes can produce
-    ``rotated``; ``rotated`` is ``True`` here *with* a declared part, so
-    neither field can be computed from the other. Note this is the exact
-    inverse of the usual warning about square fixtures — a square is useless
-    for telling length from width, and is precisely what is needed to tell
-    rotation from portrait-ness.
-
-    1590Q, 1590U and 1590V really are all 120 × 120, so the footprint is a real
-    one. The matcher would not itself report a square as rotated — it prefers
-    the unrotated reading when both fit, because calling it a rotation would
-    put "rotated" on a drawing for a panel nobody turned — and that is the
-    point: this emitter serialises what it is handed, and must not infer that
-    combination away.
+    Equal axes prevent rotation being inferred from transposed dimensions.
     """
     return replace(
         fixture_data(),
@@ -262,13 +174,7 @@ def parse(data: DrillData, **kwargs) -> dict:
 def read_panel(
     outline: RawOutline | None, *, case: str | None = None, measured: RawHole | None = None
 ) -> DrillData:
-    """One measured panel put through the real quantisation phase.
-
-    The hand-built fixtures above pin the document's shape but could describe a
-    panel the quantisers would never produce, so every claim about what the
-    document *says* about a real run comes through here. The hole is numbered 4
-    rather than 0 for the reason every fixture in this file is.
-    """
+    """One measured panel put through the real quantisation phase."""
     raw = RawDrillData(
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=outline,
@@ -284,15 +190,7 @@ def read_panel(
 
 
 def nominal_lengths(node, path: str = "") -> list[tuple[str, object]]:
-    """Every value under an ``_nm`` key anywhere in the document, with its path.
-
-    The path is carried so a failure names the field rather than only the bad
-    number, and a tuple-valued length — ``location_nm``, a diameter table in
-    ``processing`` — is unpacked elementwise, because a check that only knew
-    what to do with a scalar would leave every size in the table unexamined.
-    That is the same asymmetry ``model._check_payload_lengths`` was written
-    with, and for the same reason.
-    """
+    """Every value under an ``_nm`` key anywhere in the document, with its path."""
     found: list[tuple[str, object]] = []
     if isinstance(node, dict):
         for key, value in node.items():
@@ -356,14 +254,7 @@ def test_top_level_key_order_is_stable_and_documented():
 
 
 def test_document_declares_its_format_and_canonical_frame():
-    """``units`` is the frame's unit, and the frame is nanometres.
-
-    The version is how a consumer knows which spelling of the shape it is
-    holding: a document whose lengths became whole nanometres under renamed
-    keys while it still called itself version 4 would tell a v4 reader nothing
-    had changed, and every length it read would be a million times too big with
-    nothing in the document to say so.
-    """
+    """``units`` is the frame's unit, and the frame is nanometres."""
     document = parse(fixture_data())
 
     assert document["format"] == "aidrill-drill-data"
@@ -404,18 +295,7 @@ def test_reference_outline_round_trips():
 
 
 def test_reference_outline_carries_what_was_measured_not_only_what_was_snapped():
-    """The nominal size is a catalogue decision; ``raw`` is the artwork.
-
-    A hole's ``raw`` has been in this document from the start. The outline's was
-    not, so a snapped panel went out stating 119.5 × 94.0 with nothing left
-    saying it had been measured at 120.0 × 93.0 — provenance leaving the system
-    through the one emitter CLAUDE.md calls the integration contract.
-
-    The two are compared here rather than merely both asserted, because the
-    claim is that they are *distinguishable*: a measurement is a float
-    millimetre and a nominal length is a whole nanometre, and they drift on
-    both axes in opposite directions so that no single copied field survives.
-    """
+    """The nominal size is a catalogue decision; ``raw`` is the artwork."""
     reference = parse(fixture_data())["reference"]
 
     assert reference["raw"] == {"width": 120.0, "height": 93.0}
@@ -446,33 +326,16 @@ def test_missing_reference_outline_is_null_not_omitted():
     ids=["landscape", "rotated", "square", "real-run"],
 )
 def test_no_nominal_length_is_a_float(build):
-    """One sweep over the whole document, rather than a list of fields.
-
-    This is the assertion the conversion exists for, and a field-by-field
-    version of it would be a list somebody has to remember to extend: a key
-    added next year holding ``112.4`` would pass every named check in this file
-    and fail only here. ``type(value) is int`` and not ``isinstance`` for the
-    reason ``model._check_nanometres`` spells it that way — ``bool`` is an
-    ``int`` in Python, and a ``True`` reaching a coordinate is a hole one
-    nanometre from the origin that no report would make look wrong.
-
-    The last fixture is a real run rather than a hand-built document, because
-    the ``processing`` payloads — a grid pitch, a tolerance, a diameter table —
-    are the ``_nm`` keys this emitter passes through untouched and never writes
-    itself, so a hand-built one only ever proves the fixture is well typed.
-    """
+    """One sweep over the whole document, rather than a list of fields."""
     document = parse(build())
 
     assert [(where, value) for where, value in nominal_lengths(document) if type(value) is not int] == []
 
 
 def test_the_sweep_reaches_every_kind_of_length_there_is():
-    """The sweep above is worth what it covers, so this says what that is.
+    """The length sweep reaches every document section.
 
-    An assertion over an empty list passes, and so does one over a list that
-    happens to miss the field that broke. Naming the paths keeps the sweep from
-    quietly narrowing: a key that stops being emitted, or stops ending ``_nm``,
-    fails here rather than turning the test above into a tautology.
+    Named paths prevent an empty or partially narrowed sweep passing vacuously.
     """
     document = parse(read_panel(RawOutline(113.0, 60.0), case="1590b2"))
 
@@ -492,15 +355,7 @@ def test_the_sweep_reaches_every_kind_of_length_there_is():
 
 
 def test_enclosure_names_the_footprint_the_panel_was_identified_as():
-    """The whole product of the matching stage, or the consumer cannot see it.
-
-    ``DrillData.enclosure`` reached no output at all: a library consumer was
-    handed a snapped panel with nothing in the document saying it had been
-    identified as a Hammond footprint, let alone which one. Re-deriving it
-    means re-implementing the matcher's tolerance rule against the catalogue —
-    a second, divergent copy of the decision, which is the defect ADR-0001
-    exists to stop.
-    """
+    """The whole product of the matching stage, or the consumer cannot see it."""
     enclosure = parse(fixture_data())["enclosure"]
 
     assert list(enclosure) == [
@@ -517,15 +372,7 @@ def test_enclosure_names_the_footprint_the_panel_was_identified_as():
 
 
 def test_enclosure_dimensions_are_nanometres_and_not_millimetres():
-    """A 1590B is 112.40 mm, so there is no whole millimetre to fall back on.
-
-    The catalogue carries Hammond's own 0.05 mm figures, and this document
-    holds no floats for a nominal length — so the only two spellings available
-    are a whole nanometre and a lie. The bytes are asserted as well as the
-    parsed value, per CLAUDE.md: a consumer in a language with one number type
-    sees no difference between ``112400000`` and ``112400000.0``, so the
-    distinction only survives if it is in the artifact.
-    """
+    """A 1590B is 112.40 mm, so there is no whole millimetre to fall back on."""
     document = parse(rotated_fixture_data())
     enclosure = document["enclosure"]
 
@@ -539,15 +386,8 @@ def test_enclosure_dimensions_are_nanometres_and_not_millimetres():
 
 
 def test_enclosure_candidates_keep_the_order_they_were_matched_in():
-    """A 2-D outline identifies a footprint, never a part, so every part sharing
-    it is named — in the order the match holds them.
-
-    Sorting here would be an emitter deciding a pipeline fact, which ADR-0001
-    forbids for the same reason it forbids rounding: the drawing and this
-    document would then present two orders of one list and the operator would
-    have to guess which was the matcher's. The fixture is deliberately not in
-    alphabetical order, because a list that already is cannot tell a
-    passthrough from a ``sorted()``.
+    """A 2-D outline identifies a footprint, never a part, so every part sharing it is
+    named — in the order the match holds them.
     """
     candidates = parse(fixture_data())["enclosure"]["candidates"]
 
@@ -556,17 +396,7 @@ def test_enclosure_candidates_keep_the_order_they_were_matched_in():
 
 
 def test_enclosure_records_whether_the_panel_was_drawn_rotated():
-    """``rotated`` says the panel is the catalogue footprint turned 90°.
-
-    It defaults to ``False``, so a document that dropped the key would describe
-    every portrait panel as landscape and nothing would contradict it. Both
-    values are asserted for that reason: the ``False`` case alone proves only
-    that something absent looks like the default.
-
-    ``family`` rides along here because the rotated fixture is the one that
-    names a catalogue this build cannot produce, and a passthrough is only
-    distinguishable from a literal where the two differ.
-    """
+    """``rotated`` says the panel is the catalogue footprint turned 90°."""
     assert parse(fixture_data())["enclosure"]["rotated"] is False
     assert parse(rotated_fixture_data())["enclosure"]["rotated"] is True
     assert parse(square_fixture_data())["enclosure"]["rotated"] is True
@@ -574,12 +404,7 @@ def test_enclosure_records_whether_the_panel_was_drawn_rotated():
 
 
 def test_enclosure_rotation_is_reported_against_an_untransposed_footprint():
-    """A rotated match keeps the catalogue's own length and width.
-
-    Transposing them to agree with the artwork would make the footprint
-    unfindable in the drawing it was read from — the panel is 60.50 × 112.40
-    and the enclosure is still the 112.40 × 60.50 1590B.
-    """
+    """A rotated match keeps the catalogue's own length and width."""
     document = parse(rotated_fixture_data())
 
     assert (document["reference"]["width_nm"], document["reference"]["height_nm"]) == (
@@ -593,18 +418,7 @@ def test_enclosure_rotation_is_reported_against_an_untransposed_footprint():
 
 
 def test_rotation_is_not_re_derivable_from_the_outline_or_the_declared_part():
-    """``rotated`` must be read off the match, never worked out from the data.
-
-    An emitter that computed ``reference.width_nm < reference.height_nm`` would
-    agree with every portrait fixture in this file and be an ADR-0001 violation
-    outright — a pipeline fact re-derived downstream. One that computed
-    ``selected_part is None`` would agree just as well, because a rotated panel
-    happened to be the undeclared one in both earlier fixtures.
-
-    The square footprint refuses both readings at once: 120 × 120 is neither
-    portrait nor landscape, and it is rotated *and* declared. This is the
-    positive claim, made where the coincidences have been removed.
-    """
+    """``rotated`` must be read off the match, never worked out from the data."""
     document = parse(square_fixture_data())
     enclosure = document["enclosure"]
 
@@ -615,13 +429,7 @@ def test_rotation_is_not_re_derivable_from_the_outline_or_the_declared_part():
 
 
 def test_enclosure_carries_the_declared_part_and_its_absence():
-    """``selected_part`` is operator knowledge, never inferred from geometry.
-
-    The artwork cannot say which of four parts sharing a footprint the panel
-    is for, so this is either what the operator declared or ``None``. Both are
-    asserted: an emitter that dropped the key, and one that hard-coded
-    ``None``, each survive a fixture that only ever declares nothing.
-    """
+    """``selected_part`` is operator knowledge, never inferred from geometry."""
     declared = parse(fixture_data())["enclosure"]
 
     assert declared["selected_part"] == "1590BBS"
@@ -638,16 +446,7 @@ def test_unmatched_enclosure_is_null_not_omitted():
 
 
 def test_enclosure_is_what_the_quantisation_phase_found():
-    """End to end, against the real catalogue rather than a hand-built match.
-
-    The fixtures above are written by hand, so they pin the document's shape but
-    could describe an enclosure the matcher would never produce. Here the
-    quantiser runs: 113 × 60 of measured artwork sits within tolerance of two
-    footprints, the declared case breaks the tie, and what comes out is the
-    catalogue's own 112.400 × 60.500 nanometres, the two parts that share it,
-    and the case the operator declared — normalised to catalogue form on the
-    way through.
-    """
+    """End to end, against the real catalogue rather than a hand-built match."""
     document = parse(read_panel(RawOutline(113.0, 60.0), case="1590b2"))
 
     assert document["enclosure"] == {
@@ -691,15 +490,7 @@ def test_holes_carry_nominal_and_raw_provenance():
 
 
 def test_a_holes_measurement_is_distinguishable_from_its_nominal_position():
-    """``raw`` is the artwork, and it must not read as a copy of the nominal.
-
-    The whole reason the field is serialised is that a consumer can see how far
-    a hole moved. A fixture whose measurement happens to equal its nominal
-    position cannot tell a serialised measurement from a nominal value divided
-    by a million, so the first hole here drifted on all three lengths and the
-    second is exact on two of them — one hole alone would let "always differs"
-    stand in for "passed through".
-    """
+    """``raw`` is the artwork, and it must not read as a copy of the nominal."""
     first, second = parse(fixture_data())["holes"]
 
     assert first["raw"]["x"] * 1_000_000 != first["x_nm"]
@@ -717,13 +508,7 @@ def test_each_hole_names_its_tool_number_from_drilldata_tools():
 
 
 def test_each_hole_carries_its_identity_not_its_position():
-    """``index`` is the hole's stable identity, and nothing else.
-
-    A consumer joins a diagnostic's ``hole_index`` back to a hole with it, so
-    emitting the position in the array — which agrees with the identity in any
-    fixture numbered 0..n-1 in document order — would silently mis-join every
-    document whose holes were sorted or deduplicated first.
-    """
+    """``index`` is the hole's stable identity, and nothing else."""
     data = make_data(
         at(10_000_000, -10_000_000, index=7),
         at(-10_000_000, 10_000_000, 5_000_000, index=2),
@@ -748,12 +533,7 @@ def test_tool_table_matches_drilldata_tools_exactly():
 
 
 def test_tool_quantities_are_the_models_tool_counts():
-    """"Holes per nominal diameter" is one computation, on the model.
-
-    It was written out three times — here, in the drawing's schedule and in the
-    CLI report — so a JSON consumer and the sheet in the operator's hand could
-    disagree about how many holes a bit drills.
-    """
+    """"Holes per nominal diameter" is one computation, on the model."""
     data = DrillData(
         holes=(
             at(0, 0, index=4),
@@ -770,18 +550,7 @@ def test_tool_quantities_are_the_models_tool_counts():
 
 
 def test_the_tool_numbering_is_read_from_the_model_and_not_re_derived(monkeypatch):
-    """The numbering is looked up, not recomputed to agree.
-
-    ``{d: i for i, d in enumerate(sorted(...), start=1)}`` written inside the
-    emitter produces byte-identical output today, so no assertion against a
-    fixture can tell the two apart — and that is the whole danger, because the
-    private copy is then free to drift the day ``tools()`` changes its rule,
-    which is ADR-0001's incident in its next form. Stubbing the model with a
-    numbering the emitter could not have invented — 4 and 9, largest bit first —
-    is what makes the dependency visible, and it is asserted at *both* places
-    the mapping is read: the tool table and every hole's ``tool`` reference. One
-    of the two would leave the other free to recount.
-    """
+    """The numbering is looked up, not recomputed to agree."""
     data = make_data(
         at(0, 0, 7_000_000, index=5),
         at(10_000_000, 0, 5_000_000, index=2),
@@ -799,13 +568,7 @@ def test_the_tool_numbering_is_read_from_the_model_and_not_re_derived(monkeypatc
 
 
 def test_the_tool_quantities_are_read_from_the_model_and_not_recounted(monkeypatch):
-    """``count`` is ``tool_counts()``'s answer, not this emitter's tally.
-
-    ``sum(1 for h in data.holes if ...)`` in the comprehension agrees with the
-    model on every fixture that exists, so only a stub the holes contradict can
-    separate reading from recounting. These quantities — 90 and 40 — are ones no
-    tally of three holes could reach.
-    """
+    """``count`` is ``tool_counts()``'s answer, not this emitter's tally."""
     data = make_data(
         at(0, 0, 7_000_000, index=5),
         at(10_000_000, 0, 5_000_000, index=2),
@@ -845,15 +608,7 @@ def test_a_diagnostic_without_a_payload_carries_an_empty_object():
 
 
 def test_a_payload_of_hole_identities_is_emitted_as_an_array():
-    """``dropped_indices`` and ``tied_indices`` are tuples in the model.
-
-    JSON has no tuple, so both come out as arrays — and the mapping
-    ``document()`` hands a caller must hold the same ``list``, or what a caller
-    embeds differs from what :func:`json.loads` gives back while the two print
-    identically. Both keys are asserted because they are produced by different
-    stages and a conversion reaching one payload and not the other would look
-    right from either finding alone.
-    """
+    """``dropped_indices`` and ``tied_indices`` are tuples in the model."""
     document = parse(fixture_data())
     duplicate, ambiguous = document["diagnostics"][1], document["diagnostics"][2]
 
@@ -864,12 +619,7 @@ def test_a_payload_of_hole_identities_is_emitted_as_an_array():
 
 
 def test_diagnostic_payloads_survive_serialisation():
-    """The duplicate's payload is the whole point of Diagnostic.data.
-
-    Without it a JSON consumer must re-derive which holes were duplicates from
-    positions alone — the exact defect ADR-0001 exists to eliminate, displaced
-    one layer out into the toolchain.
-    """
+    """The duplicate's payload is the whole point of Diagnostic.data."""
     data = make_data(*holes((0, 0), (0, 0)))
     after = Pipeline([Deduplicate()]).run(data)
     doc = json.loads(JsonEmitter().emit(after))
@@ -881,13 +631,7 @@ def test_diagnostic_payloads_survive_serialisation():
 
 
 def test_the_duplicates_payload_names_the_surviving_hole_by_identity():
-    """The same join as above, on holes whose identities are not their positions.
-
-    ``holes()`` numbers 0..n-1, so the survivor of the first pair is hole 0 at
-    array position 0 and a serialiser emitting either would pass. Here the
-    survivor is hole 6, second in the document, and the hole that went is 9 —
-    a number no position in this document takes.
-    """
+    """The duplicates payload names the surviving hole by identity."""
     data = make_data(at(50_000_000, 0, index=3), at(0, 0, index=6), at(0, 0, index=9))
     after = Pipeline([Deduplicate()]).run(data)
 
@@ -905,24 +649,7 @@ def test_the_duplicates_payload_names_the_surviving_hole_by_identity():
 
 
 def test_error_bearing_data_is_serialised_rather_than_refused():
-    """The deliberate opposite of the Excellon emitter, for the reason that
-    separates the two formats.
-
-    ``SnapDiametersToDrillTable`` reports an unmatched diameter as an ERROR and
-    drops the hole, so the drill file it would produce is one hole short and
-    says nothing about it — which is why that emitter refuses error-bearing data
-    outright. This document has ``diagnostics``, so it is not silent about
-    anything: the finding, its payload and the gap it left are all readable, and
-    the refused hole is visibly absent from a hole list that still names its
-    identities. Refusing here would deny a consumer the one artifact that can
-    tell it *why* the run failed, and would break the round trip this file is
-    built on — the fixture carries an ERROR precisely so that severity is
-    exercised.
-
-    The run is a real one rather than a hand-built finding: 26 mm is past the
-    end of the metric table, so the quantiser drops hole 2 and the document has
-    to describe a panel with a hole missing from it.
-    """
+    """JSON serialises error-bearing data for inspection."""
     raw = RawDrillData(
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=None,
@@ -950,12 +677,7 @@ def test_error_bearing_data_is_serialised_rather_than_refused():
 
 
 def test_processing_records_what_the_pipeline_did():
-    """The document states the grid these holes were snapped to.
-
-    A JSON consumer that has to be told the parameters out of band gets the
-    drawing's old bug: data snapped at 0.5 described as 0.25 by whoever wrote
-    the consumer's config.
-    """
+    """The document states the grid these holes were snapped to."""
     document = parse(fixture_data())
 
     assert [list(run) for run in document["processing"]] == [["name", "parameters"]] * 3
@@ -1014,35 +736,7 @@ def test_the_exposed_mapping_is_already_json_shaped():
     ids=["landscape-declared", "rotated-undeclared", "square-rotated-declared"],
 )
 def test_document_rebuilds_an_identical_drilldata(build):
-    """Nothing in DrillData may be lost on the way out — this is the whole point
-    of the format.
-
-    ``==`` on a frozen dataclass is only as strong as the fixture: it passed for
-    a while over holes with no identity, diagnostics with empty payloads and no
-    stage records at all, which made "nothing is lost" a claim about three
-    absent fields. It then passed over an *unsnapped* reference outline, where
-    ``raw`` equals the nominal size — so a document that dropped the outline's
-    measurement rebuilt it from the nominal values and compared equal, and the
-    claim in the first paragraph was false for a fourth field while this test
-    stayed green.
-
-    ``enclosure`` is the same trap three times over, which is why this runs
-    over three fixtures rather than one. ``rotated`` defaults to ``False`` and
-    ``selected_part`` to ``None``, so a single fixture leaving either at its
-    default would rebuild a dropped key out of the default and compare equal
-    again — that takes two. The third is the square footprint: with only the
-    first two, ``rotated`` was ``True`` in exactly the fixture that was
-    portrait and exactly the fixture that declared no part, so a serialiser
-    *computing* it from either would have rebuilt both correctly. Every field
-    below is read back **out of the document** — nothing is recomputed from
-    ``data``, or this would be testing the fixture.
-
-    The sequences go in as the ``list`` ``json.loads`` hands back, never as a
-    tuple built here: the coercion belongs to the model, and a deserialiser
-    that had to know which sequences this project wants as tuples would be one
-    more place to forget. That covers ``candidates``, a diameter table, a
-    finding's location and the tuples of hole identities inside a payload.
-    """
+    """Every ``DrillData`` field survives serialisation and reconstruction."""
     data = build()
     document = parse(data)
 
@@ -1104,19 +798,7 @@ def test_document_rebuilds_an_identical_drilldata(build):
 
 
 def test_the_identities_in_a_rebuilt_payload_are_tuples_again():
-    """A rebuilt finding must be usable, not merely printable.
-
-    ``json.load`` hands back a list for ``tied_indices`` and for
-    ``dropped_indices``, and a ``Diagnostic`` holding either compares unequal to
-    the one the pipeline produced and raises ``TypeError`` from ``hash`` — so a
-    consumer could neither match a rebuilt finding against an expected one nor
-    put it in a set. ``Diagnostic.__post_init__`` coerces, and this is the
-    document's half of that contract: the arrays have to be *there*, in the
-    payload, for the coercion to have anything to work on.
-
-    Both keys, because they come from different stages; equality *and*
-    hashability, because they fail apart.
-    """
+    """A rebuilt finding must be usable, not merely printable."""
     data = fixture_data()
     document = parse(data)
 

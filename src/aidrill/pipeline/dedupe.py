@@ -1,20 +1,7 @@
-"""Duplicate hole collapsing.
+"""Collapse holes with exactly equal nominal position and diameter.
 
-Artwork routinely carries a hole twice — a copied row, a stray paste, a circle
-that survived on two layers. Drilling the same coordinate twice is at best a
-wasted move and at worst a broken bit, so coincident holes are collapsed here,
-once, and the operator is told it happened.
-
-**Coincident means equal, exactly, on every axis.** Deciding that 6.9998 and
-7.0000 are one size belongs to ``SnapDiametersToDrillTable``; deciding that
-−39.9906 and −40.0 are one place belongs to ``SnapPositions``. A stage that
-re-decides either is the second implementation that comes to disagree with the
-first, so this one decides neither and carries no tolerance of its own — there
-is no bound here to get wrong.
-
-Exactness is also what the unit makes cheap. Every length reaching this stage is
-a whole number of nanometres, so ``==`` is the whole rule and there is no
-representation error left for a tolerance to absorb.
+The stage introduces no tolerance; quantisers own position and diameter
+normalisation.
 """
 
 from __future__ import annotations
@@ -28,37 +15,15 @@ __all__ = ["Deduplicate"]
 
 
 class Deduplicate:
-    """Collapse holes that share a position **and** a diameter, both exactly.
+    """Keep the first of holes equal in ``x_nm``, ``y_nm`` and ``diameter_nm``.
 
-    Exactness is not purity bought at the cost of catching real duplicates. A
-    duplicate in this domain is a copy-paste, and Illustrator writes the copy at
-    the original's coordinates: the shipped fixture's pair parses as
-    ``x=-39.990641944444405, y=17.999956944444445`` for *both* circles, identical
-    to the last bit and before anything has quantised them. ``SnapPositions`` is
-    deterministic on top of that, so two holes that land on one grid point land
-    on the same integer.
-
-    What a tolerance would additionally have caught is a near miss the grid did
-    not close — which is to say a hole the artwork puts somewhere else, and
-    dropping it drills one hole where the panel asks for two.
-
-    Nothing here assumes a predecessor ran. Exact equality asserts strictly less
-    about the incoming data than a tolerance did (LSP): it is the same rule
-    whether the holes were snapped first or not.
-
-    The first hole of a group in input order survives, so ordering upstream (or
-    the lack of it) fully determines the result.
+    Input order selects the survivor; near misses are retained.
     """
 
     name: ClassVar[str] = "deduplicate"
 
     def describe(self) -> StageRun:
-        """No parameters: the rule is exact coincidence and takes no number.
-
-        The record still matters even so — it is how a consumer knows the stage
-        ran at all, which is not something an empty diagnostics list can tell
-        them apart from a panel that simply had no duplicates.
-        """
+        """Record that parameter-free exact deduplication ran."""
         return StageRun(self.name, ())
 
     def apply(self, data: DrillData) -> DrillData:
@@ -77,34 +42,7 @@ class Deduplicate:
         return data.with_holes([group[0] for group in groups]).with_diagnostics(*diagnostics)
 
     def _report(self, group: list[Hole]) -> Diagnostic:
-        """Describe one collapsed group, for humans *and* for machines.
-
-        ``hole_index`` is the foreign key: the survivor's stable identity, which
-        stays true however far a later stage moves it. ``location_nm`` is the
-        survivor's coordinate *at the time of the report* and stays for human
-        context — the CLI report and the drawing's NOTES both read better with a
-        position in them — but it is no longer what a consumer matches on. It
-        was: with only a position to go by the drawing emitter re-derived which
-        holes were duplicates, a second, divergent implementation of this
-        stage's rule with its own tolerance and no diameter check, and it
-        flagged holes this stage had not.
-
-        ``dropped_indices`` names the holes that went, not merely how many.
-        Traversal order is not group order — the fixture's pair is hole 2 and
-        hole 5, three apart in a list that reaches this stage as
-        ``[2, 3, 4, 6, 7, 0, 1]`` — so a consumer reconciling artwork circles
-        against emitted holes cannot infer 5 from "the survivor is 2, one was
-        dropped". It travels as a tuple of identities, the same shape
-        ``grid-ambiguous`` uses for ``tied_indices``: one semantic type in one
-        encoding, so a consumer reading identities out of a finding does not
-        have to know which finding it came from.
-
-        ``diameter_nm`` carries the suffix every other length in a payload
-        carries, and it is not decoration: the key is the only thing telling a
-        consumer what the number means, and the model checks a length named this
-        way is a whole ``int``. ``dropped`` and ``kept`` are counts of holes
-        rather than lengths, so they stay bare.
-        """
+        """Report the survivor, dropped identities, diameter and current location."""
         survivor, dropped = group[0], group[1:]
         indices = [hole.index for hole in dropped]
         plural = "" if len(indices) == 1 else "s"

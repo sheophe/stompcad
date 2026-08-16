@@ -1,30 +1,4 @@
-"""Tests for :mod:`aidrill.geometry`.
-
-The interesting tests here are the *negative* ones. Recovering a circle from
-four cubics is easy; the whole value of ``fit_circle`` is that it refuses
-ellipses and rounded rectangles, which are the two things a panel drawing is
-full of and which a naive bounding-box fit happily mistakes for holes.
-
-A negative test alone is not enough, and this file learned that the hard way.
-``fit_circle`` rejects with a bare ``None``, so ``assert fit_circle(x) is None``
-passes for the *union* of every rejection path — and every negative fixture
-written from ``circle_path`` trips two or three guards at once. Three guards
-were each deleted with the whole suite still green, and each then admitted a
-shape reported at 10.0 or 11.0 mm: real metric bits, so the drill table waves
-them through and a tool is loaded for a hole the artwork never contained.
-
-The cure is the shape of ``test_rejects_controls_rotated_into_the_radius``, and
-every test under "one guard at a time" follows it: build a shape that defeats
-one guard, assert *positively* that the others are satisfied, and only then
-assert the rejection. ``kappa_correct_path`` exists to make that possible for
-arbitrary anchors.
-
-Everything here is a floating-point PDF point — the paths the fixtures build and
-the ``Circle`` the fitter returns alike — because ``fit_circle`` quantises
-nothing and names no unit. So every numeric expectation is a float in points,
-compared with ``PT_SLACK``, whether it is about a control offset, an anchor
-radius or a recovered centre.
-"""
+"""Tests for Bézier geometry, path fitting and reference outlines."""
 
 from __future__ import annotations
 
@@ -82,13 +56,7 @@ def circle_path(
     kappa: float = KAPPA,
     closed: bool = True,
 ) -> SubPath:
-    """Build the four-cubic path Illustrator writes for a circle.
-
-    ``ry`` different from ``r`` gives an ellipse; ``kappa`` different from
-    :data:`KAPPA` gives a rounded square (controls pushed out towards the
-    corners). Both are the shapes ``fit_circle`` has to reject, and generating
-    them from the same code as the good case keeps the negative tests honest.
-    """
+    """Build the four-cubic path Illustrator writes for a circle."""
     b = r if ry is None else ry
     kx, ky = kappa * r, kappa * b
     right = (cx + r, cy)
@@ -108,17 +76,7 @@ def circle_path(
 
 
 def cusp_path(cx: float, cy: float, r: float, *, outward: bool = True) -> SubPath:
-    """Four cubics whose controls are the right *length* and the wrong direction.
-
-    Every control sits exactly ``KAPPA * r`` from its anchor — where a circle
-    puts it — but rotated 90 degrees, so the offset runs along the radius
-    instead of along the tangent. The anchors are a circle's anchors and the
-    offsets are a circle's offsets; only their direction differs, and what it
-    draws is a four-cornered cusp, not a hole.
-
-    This is the shape the perpendicularity half of the kappa check exists for:
-    varying the offset *length* (a rounded square) never exercises it.
-    """
+    """Four cubics whose controls are the right *length* and the wrong direction."""
     k = (KAPPA * r) if outward else -(KAPPA * r)
     right, top = (cx + r, cy), (cx, cy + r)
     left, bottom = (cx - r, cy), (cx, cy - r)
@@ -141,15 +99,7 @@ def cusp_path(cx: float, cy: float, r: float, *, outward: bool = True) -> SubPat
 
 
 def star_path(r: float, cx: float = 0.0, cy: float = 0.0) -> SubPath:
-    """A circle's four cubics with *both* control offsets reflected through their anchor.
-
-    Every offset keeps its length and its (zero) radial component, so the length
-    half and the perpendicularity half of the kappa check both see a perfect
-    circle. Only the sense along the tangent is reversed, which turns each
-    quarter arc inside out and draws a four-petal star with a cusp at every
-    anchor. It is the shape that gets through when the check never asks which
-    way the tangential component points.
-    """
+    """A circle's four cubics with *both* control offsets reflected through their anchor."""
     base = circle_path(cx, cy, r)
     segments: list[object] = [base.segments[0]]
     current: Point = base.segments[0].point  # type: ignore[union-attr]
@@ -169,22 +119,7 @@ def star_path(r: float, cx: float = 0.0, cy: float = 0.0) -> SubPath:
 
 
 def kappa_correct_path(anchors: tuple[Point, ...], *, tilt: float = 0.0) -> SubPath:
-    """Four cubics on *arbitrary* anchors, carrying the controls a circle would carry.
-
-    ``circle_path`` can only vary one thing at a time and always puts its
-    anchors on the axes, which is why every shipped negative fixture trips two
-    or three guards at once and none of them is pinned. This builder separates
-    the anchors from the controls: give it any four anchors and it fits each
-    quarter with an offset of ``KAPPA * r`` — ``r`` being the mean anchor
-    radius, which is exactly what ``fit_circle`` will measure — perpendicular
-    to *that anchor's own* radius and pointing the way the anchors travel. The
-    kappa check therefore passes by construction whatever the anchors do, so a
-    shape built here fails the one guard it was built to fail and no other.
-
-    ``tilt`` rotates every offset by that many degrees out of the tangent and
-    towards the radius. The length is unchanged and the tangential component
-    stays positive, so only the radial clause of the kappa check can object.
-    """
+    """Four cubics on *arbitrary* anchors, carrying the controls a circle would carry."""
     n = len(anchors)
     cx = sum(p[0] for p in anchors) / n
     cy = sum(p[1] for p in anchors) / n
@@ -306,12 +241,7 @@ class TestMatrix:
         assert multiply(scale, translate) != multiply(translate, scale)
 
     def test_cm_concatenates_before_the_existing_ctm(self) -> None:
-        """A PDF ``cm`` prepends: new_ctm = multiply(cm_matrix, current_ctm).
-
-        This is the operator semantics task C depends on. With a page CTM that
-        scales by 2, a nested ``cm`` translating by (5, 0) must move a point by
-        10 device units, not 5 -- the translation happens in the *inner* space.
-        """
+        """A PDF ``cm`` prepends: new_ctm = multiply(cm_matrix, current_ctm)."""
         page_ctm: Matrix = (2.0, 0.0, 0.0, 2.0, 0.0, 0.0)
         cm: Matrix = (1.0, 0.0, 0.0, 1.0, 5.0, 0.0)
         ctm = multiply(cm, page_ctm)
@@ -386,14 +316,7 @@ class TestSubPath:
 
 class TestFitCircle:
     def test_recovers_a_synthetic_circle_exactly(self) -> None:
-        """Exactly, and in the points the path was stated in.
-
-        Nothing is approximate here because nothing needs to be: the anchors are
-        exact halves, so the centroid and the radius are exact and the fitter
-        does not round them onto anything afterwards. The ``float`` assertion is
-        the one that notices if it starts to — an integer answer would still
-        compare equal to 7.0 and say nothing.
-        """
+        """Exactly, and in the points the path was stated in."""
         found = fit_circle(circle_path(-40.0, 18.0, 3.5))
         assert found is not None
         assert found.cx == -40.0
@@ -427,14 +350,7 @@ class TestFitCircle:
         assert found.diameter == pytest.approx(5.0, abs=PT_SLACK)
 
     def test_recovers_a_circle_drawn_the_other_way_round(self) -> None:
-        """A mirroring CTM reverses the direction of travel; a circle survives it.
-
-        Illustrator writes its circles anticlockwise, but a ``cm`` with a
-        negative determinant — a flipped placed group, an ``-1 0 0 1`` mirror —
-        hands the fitter a clockwise one. Every control offset then points the
-        other way, so a direction check that assumes one sense would reject a
-        perfectly good hole.
-        """
+        """A mirroring CTM reverses the direction of travel; a circle survives it."""
         mirror: Matrix = (-1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), mirror))
         assert found is not None
@@ -445,13 +361,7 @@ class TestFitCircle:
         assert fit_circle(circle_path(0.0, 0.0, 4.0, closed=False)) is not None
 
     def test_the_anchor_builder_draws_a_circle_the_fitter_accepts(self) -> None:
-        """``kappa_correct_path`` on a circle's anchors is a circle.
-
-        Every isolation test below feeds this builder anchors that are wrong in
-        exactly one way and asserts the rest of ``fit_circle`` sees nothing
-        amiss. That argument is only worth anything if the builder itself makes
-        holes the fitter takes, so it is asserted here rather than assumed.
-        """
+        """``kappa_correct_path`` on a circle's anchors is a circle."""
         found = fit_circle(kappa_correct_path(((3.5, 0.0), (0.0, 3.5), (-3.5, 0.0), (0.0, -3.5))))
         assert found is not None
         assert found.diameter == pytest.approx(7.0, abs=PT_SLACK)
@@ -466,25 +376,14 @@ class TestFitCircle:
         assert fit_circle(mapped(circle_path(0.0, 0.0, 5.0), squash)) is None
 
     def test_rejects_a_four_cubic_rounded_square(self) -> None:
-        """The important negative case.
-
-        A rounded square drawn as four cubics has square anchors on a square
-        bounding box -- identical to a circle by every test except the control
-        point offsets. Only the kappa check separates them.
-        """
+        """Four cubic segments alone do not make a path circular."""
         assert fit_circle(circle_path(0.0, 0.0, 5.0, kappa=0.75)) is None
 
     def test_rejects_a_rounded_square_with_understated_controls(self) -> None:
         assert fit_circle(circle_path(0.0, 0.0, 5.0, kappa=0.35)) is None
 
     def test_rejects_controls_rotated_into_the_radius(self) -> None:
-        """The other half of the kappa check: direction, not just length.
-
-        A rounded square gets caught on offset *length*. This shape does not:
-        its controls are ``KAPPA * r`` from their anchors to the last bit, and
-        its anchors are literally a circle's anchors. Only the perpendicularity
-        test separates the arc from the cusp.
-        """
+        """Rejects controls rotated into the radius."""
         path = cusp_path(0.0, 0.0, 5.0)
 
         # the length half of the check sees nothing wrong here
@@ -502,17 +401,7 @@ class TestFitCircle:
         assert fit_circle(path) is None
 
     def test_rejects_a_cusped_star(self) -> None:
-        """The third half of the kappa check: direction *along* the tangent.
-
-        ``cusp_path`` turns the offsets onto the radius, which the
-        perpendicularity test catches. This shape does not touch the radius at
-        all — it reverses the offsets, so each one stays exactly ``KAPPA * r``
-        long and exactly perpendicular to its anchor's radius, and only its
-        sense along the direction of travel is wrong. Every test before this
-        one sees a textbook circle; what it draws is a four-petal star with an
-        inward cusp at every anchor, and drilling it would be a 7 mm hole that
-        is not there.
-        """
+        """Control offsets must follow the tangent in the circular direction."""
         path = star_path(3.5)
         real = circle_path(0.0, 0.0, 3.5)
 
@@ -625,14 +514,7 @@ class TestFitCircle:
         assert fit_circle(circle_path(7.0, 7.0, 0.0)) is None
 
     def test_rejects_a_path_whose_radius_overflows(self) -> None:
-        """The other clause of the degeneracy guard: unbounded, not vanishing.
-
-        ``radius <= 0.0`` catches the point a zero-size path collapses to. An
-        anchor radius that overflows to infinity is the opposite failure and
-        sails past that clause, and every guard after it then measures against
-        an infinite slack — so nothing objects and the fitter reports a hole of
-        infinite diameter, which snaps to no bit and drops a real hole with it.
-        """
+        """Rejects a path whose radius overflows."""
         huge = kappa_correct_path(((1e308, 0.0), (0.0, 1e308), (-1e308, 0.0), (0.0, -1e308)))
         pairs = _cubics(huge)
         assert pairs is not None
@@ -653,14 +535,7 @@ class TestFitCircle:
     # the guard a test names and that test — and only that test — fails.
 
     def test_rejects_an_oval_carrying_a_circles_controls(self) -> None:
-        """Isolates the equidistant-anchor guard.
-
-        A 12 x 10 oval, its controls built for the 11 mm circle ``fit_circle``
-        will measure. The path closes, the anchors are a quarter turn apart and
-        every control is where a circle puts it, so only the anchor radii
-        disagree. Without that guard this is drilled at 11.0 mm, which is a real
-        metric bit and passes the drill table without a murmur.
-        """
+        """Isolates the equidistant-anchor guard."""
         oval = kappa_correct_path(((6.0, 0.0), (0.0, 5.0), (-6.0, 0.0), (0.0, -5.0)))
         pairs = _cubics(oval)
         assert pairs is not None and len(pairs) == 4
@@ -673,14 +548,7 @@ class TestFitCircle:
         assert fit_circle(oval) is None
 
     def test_rejects_four_cubics_that_end_short_of_their_start(self) -> None:
-        """Isolates the path-closure guard.
-
-        The four anchors are a circle's, and the last curve is displaced along
-        its own radius so that it ends 1.2 mm out beyond the start — which
-        leaves its control offset the same length, still perpendicular to the
-        same radius and still running the way the path travels. Only the gap
-        betrays it. Without the guard this is drilled at 10.0 mm.
-        """
+        """Isolates the path-closure guard."""
         base = kappa_correct_path(((5.0, 0.0), (0.0, 5.0), (-5.0, 0.0), (0.0, -5.0)))
         last = base.segments[4]
         assert isinstance(last, CurveTo)
@@ -700,16 +568,7 @@ class TestFitCircle:
         assert fit_circle(spiral) is None
 
     def test_rejects_controls_tilted_off_the_tangent(self) -> None:
-        """Isolates the radial clause of the kappa check.
-
-        ``cusp_path`` turns each offset a full 90 degrees onto the radius, which
-        also reverses what the tangential clause looks at on half of them. This
-        one tilts by 20 degrees: every offset keeps its length exactly, keeps a
-        positive component along the direction of travel, and only picks up a
-        radial component. Both other clauses of the check are asserted here, so
-        the rejection can only be the radial one. Without it this is drilled at
-        10.0 mm.
-        """
+        """Isolates the radial clause of the kappa check."""
         tilted = kappa_correct_path(
             ((5.0, 0.0), (0.0, 5.0), (-5.0, 0.0), (0.0, -5.0)), tilt=20.0
         )
@@ -735,16 +594,7 @@ class TestFitCircle:
         assert fit_circle(tilted) is None
 
     def test_rejects_anchors_that_are_not_a_quarter_turn_apart(self) -> None:
-        """Isolates the quarter-turn guard.
-
-        Four anchors at 0, 45, 180 and 225 degrees, all 10 mm from a centroid
-        that still lands on the origin. They are equidistant, they close, and
-        their controls are ``KAPPA * r`` long, perpendicular and running the way
-        the path travels — so the kappa check passes too, because ``KAPPA`` is
-        the offset for a *quarter* arc and nothing was checking that these
-        quarters are quarters. What it draws is a lopsided blob; what it was
-        reported as is a 20.0 mm hole.
-        """
+        """Isolates the quarter-turn guard."""
         d = 10.0 / math.sqrt(2.0)
         blob = kappa_correct_path(((10.0, 0.0), (d, d), (-10.0, 0.0), (-d, -d)))
         pairs = _cubics(blob)
@@ -786,20 +636,7 @@ class TestFitCircle:
     def test_the_same_proportional_deviation_gets_the_same_answer_at_any_radius(
         self, radius: float
     ) -> None:
-        """The slack scales with the radius, and no absolute slack can do this.
-
-        ``test_default_tolerance_is_one_percent`` pins the *value* of the
-        tolerance and says nothing about what it multiplies: drop the ``*
-        radius`` and its fixture is small enough that relative and absolute
-        agree. They stop agreeing on a big hole. A 25 mm hole rounded to the two
-        decimals a PDF carries can arrive measuring 25.00 x 24.92 — 0.3% out,
-        well inside 1% — and an absolute 0.01 mm slack rejects it. **A rejected
-        circle is not a diagnostic**; it is simply not a hole, so it vanishes
-        from the drill file, the drawing and the JSON alike, at exit 0.
-
-        So: the same *proportion* must get the same verdict on a 1.2 mm hole and
-        a 25 mm one. 0.3% is accepted at both, 3% is refused at both.
-        """
+        """The slack scales with the radius, and no absolute slack can do this."""
         assert fit_circle(circle_path(0.0, 0.0, radius, ry=radius * (24.92 / 25.00))) is not None
         assert fit_circle(circle_path(0.0, 0.0, radius, ry=radius * 0.97)) is None
 
