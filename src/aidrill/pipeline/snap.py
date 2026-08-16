@@ -30,7 +30,7 @@ from typing import ClassVar
 from ..formatting import format_mm
 from ..model import Diagnostic, RawHole, StageRun
 from ..tolerance import within
-from ..units import format_nm, scaled_nm
+from ..units import format_nm, nm_from_mm, scaled_nm
 
 __all__ = ["SnapPositions"]
 
@@ -128,12 +128,16 @@ class SnapPositions:
         Euclidean distance, floored, which is five decimal places below anything
         an artifact prints.
 
-        The residual is measured against the quantised measurement rather than
-        the float, so that it is the same subtraction ``Hole.residual_nm``
-        publishes and the two can never disagree by a rounding.
+        The residual is measured against ``nm_from_mm`` of the measurement and
+        not against the float, so that it is the same subtraction
+        ``Hole.residual_nm`` publishes and the two can never disagree by a
+        rounding. Quantising the measurement is right here and wrong two lines
+        up, and the inversion is the point: "which answer is nearest" must never
+        see a rounded input, while "how far did this hole move" is a figure to
+        print, in the unit everything else is printed in.
         """
         x_nm, y_nm = self._snap(hole.x), self._snap(hole.y)
-        dx_nm, dy_nm = x_nm - _nearest_nm(hole.x), y_nm - _nearest_nm(hole.y)
+        dx_nm, dy_nm = x_nm - nm_from_mm(hole.x), y_nm - nm_from_mm(hole.y)
         distance_sq = dx_nm * dx_nm + dy_nm * dy_nm
 
         # One tolerance idiom for the whole pipeline: a move of exactly
@@ -217,17 +221,6 @@ class SnapPositions:
         """
         quotient = scaled_nm(mm) / self.grid_nm
         return int(quotient.to_integral_value(rounding=ROUND_HALF_EVEN)) * self.grid_nm
-
-
-def _nearest_nm(mm: float) -> int:
-    """The measurement in whole nanometres, for reporting how far a hole moved.
-
-    A residual is a printed figure rather than an answer chosen from a set, so
-    quantising the measurement into it is right here and wrong two lines up: the
-    subtraction has to happen between two integers, and this is the same one
-    ``Hole.residual_nm`` publishes.
-    """
-    return int(scaled_nm(mm).to_integral_value(rounding=ROUND_HALF_EVEN))
 
 
 def _whole(name: str, value: int) -> int:

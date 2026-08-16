@@ -340,7 +340,7 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
         "grid", [float("nan"), float("inf"), float("-inf"), 0.25, 250_000.0, True]
     )
     def test_a_grid_that_is_not_an_int_is_refused_at_construction(self, grid):
-        with pytest.raises(TypeError, match="grid"):
+        with pytest.raises(TypeError, match=r"^grid_nm"):
             SnapPositions(grid)
 
     @pytest.mark.parametrize(
@@ -354,12 +354,12 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
         off-grid. That is the same defect as a negative threshold, wearing a
         different value.
         """
-        with pytest.raises(TypeError, match="warn"):
+        with pytest.raises(TypeError, match=r"^warn_over_nm"):
             SnapPositions(250_000, warn_over_nm=warn_over)
 
     def test_a_negative_warning_threshold_is_refused(self):
         """No hole can be inside it, so every hole is reported off-grid."""
-        with pytest.raises(ValueError, match="warn"):
+        with pytest.raises(ValueError, match=r"^warn_over_nm"):
             SnapPositions(250_000, warn_over_nm=-100_000)
 
     def test_a_zero_warning_threshold_is_allowed(self):
