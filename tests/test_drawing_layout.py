@@ -225,3 +225,27 @@ def test_the_plain_sheet_is_still_measured_against_the_whole_drawing_space():
 
     assert plain.needed_width > plain.area[2] - plain.area[0]
     assert plain.fits
+
+
+def test_the_sheet_a_panel_takes_does_not_depend_on_how_many_diagnostics_it_has():
+    """A panel that accumulated warnings did not get bigger.
+
+    The ISO notes band is a fixed depth and states a count for the notes it
+    cannot show, exactly as the schedule and the chain stack do, so the paper a
+    panel needs is a fact about the panel rather than about its findings.
+    """
+    from aidrill.model import Diagnostic
+
+    data = panel(112_400_000, 60_500_000)
+    noisy = data.with_diagnostics(
+        *(Diagnostic.warning("off-grid", f"hole {n} moved 0.120 mm to the grid")
+          for n in range(1, 21))
+    )
+
+    quiet = choose_sheet(data, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    loud = choose_sheet(noisy, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+
+    assert quiet.sheet is A4_PORTRAIT
+    assert loud.sheet is quiet.sheet
+    assert loud.notes == quiet.notes
+    assert loud.area == quiet.area

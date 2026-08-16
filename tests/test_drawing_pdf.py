@@ -59,6 +59,17 @@ def stream_of(payload: bytes) -> str:
     return bytes(page_of(payload).Contents.read_bytes()).decode("latin-1")
 
 
+def field_value(payload: bytes, label: str) -> str:
+    """The run drawn straight after a title-block label is that field's value.
+
+    The block writes one label and then its own value per cell, so the pairing
+    is what pins a field: the value alone can be a string some other feature
+    puts on the sheet, and the label alone says nothing about what it carries.
+    """
+    shown = strings_in(payload)
+    return shown[shown.index(label) + 1]
+
+
 def strings_in(payload: bytes) -> list[str]:
     """Every literal string shown by a Tj operator, WinAnsi-decoded."""
     found = re.findall(r"\((?:[^()\\]|\\.)*\)\s*Tj", stream_of(payload))
@@ -277,7 +288,8 @@ def test_the_sheet_states_its_units_scale_and_that_it_must_not_be_scaled():
 
 
 def test_the_paper_size_field_names_the_sheet_that_was_chosen():
-    assert "A4" in strings_in(render(panel()))
+    """The field itself, not the size designation ISO 5457 puts in the border."""
+    assert field_value(render(panel()), "PAPER SIZE") == "A4"
 
 
 def test_the_mandatory_fields_a_caller_supplies_reach_the_printed_sheet():
@@ -295,11 +307,16 @@ def test_the_mandatory_fields_a_caller_supplies_reach_the_printed_sheet():
 
 
 def test_a_mandatory_field_with_no_source_prints_an_em_dash_rather_than_a_gap():
-    """Unset by default: aidrill reads artwork, not an organisation."""
-    shown = strings_in(render(panel()))
+    """Unset by default: aidrill reads artwork, not an organisation.
 
-    assert "APPROVED" in shown
-    assert "—" in shown
+    Each field is asserted with its own value, because four of them print an
+    em dash and any one of the four would satisfy a bare search for one.
+    """
+    payload = render(panel())
+
+    for label in ("DATE OF ISSUE", "APPROVED", "CREATOR"):
+        assert field_value(payload, label) == "—"
+    assert field_value(payload, "LEGAL OWNER") == "ARTIFACT INSTRUMENTS"
 
 
 def test_the_block_spans_the_full_drawing_space_width_at_the_foot_of_the_a4_sheet():
@@ -315,3 +332,16 @@ def test_the_block_spans_the_full_drawing_space_width_at_the_foot_of_the_a4_shee
     stream = stream_of(emitter.emit(data))
     bottom = layout.sheet.height - y1
     assert f"{x0:.0f} {bottom:.0f} 180 {y1 - y0:.0f} re S" in stream
+
+
+def test_notes_past_the_band_are_counted_rather_than_given_a_larger_sheet():
+    """The paper a panel needs is a fact about the panel, not about its findings."""
+    noisy = panel().with_diagnostics(
+        *(Diagnostic.warning("off-grid", f"hole {n} moved 0.120 mm to the grid")
+          for n in range(1, 21))
+    )
+    payload = render(noisy)
+    box = [float(v) for v in page_of(payload).MediaBox]
+
+    assert box == pytest.approx([0.0, 0.0, 210.0 * PT_PER_MM, 297.0 * PT_PER_MM])
+    assert "further notes not listed" in " ".join(strings_in(payload))

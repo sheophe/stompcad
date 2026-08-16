@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ...model import DrillData
 from ...units import mm_from_nm
-from .content import fit_font, note_lines
+from .content import Note, fit_font, note_lines
 from .sheet import TITLE_BLOCK_WIDTH, Box, FrameStyle, Sheet
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "SCHEDULE_MIN_WIDTH",
     "SCHEDULE_MAX_WIDTH",
     "SCHEDULE_BAND_SHARE",
+    "NOTES_BAND_HEIGHT",
     "TITLE_MIN_FONT",
 ]
 
@@ -65,6 +66,12 @@ SCHEDULE_MIN_WIDTH = 60.0
 SCHEDULE_MAX_WIDTH = 210.0
 #: What the banded schedule takes of the drawing space's height.
 SCHEDULE_BAND_SHARE = 0.28
+
+#: How deep the ISO notes band is: the heading and four notes at the size the
+#: sheet letters them. It does not count the notes, and no sheet's paper depends
+#: on how many findings a panel gathered — the panel did not get bigger. What
+#: does not fit is stated as a count, as the schedule and chain stack state one.
+NOTES_BAND_HEIGHT = 24.0
 
 #: The smallest a title block line is allowed to shrink to earn its width. A
 #: line that still does not fit at this size is truncated, so the enclosure
@@ -147,11 +154,18 @@ class Layout:
         border = sheet.space
         inner_w = border[2] - border[0]
         inner_h = border[3] - border[1]
-        iso = frame is FrameStyle.ISO_5457
+        notes = note_lines(data)
 
-        if iso:
+        if frame is FrameStyle.ISO_5457:
             title_block, schedule, foot = _iso_foot(border, inner_w, inner_h)
-            text_w = inner_w
+            note_font = _note_font(notes, inner_w)
+            # The furniture runs across the foot of the drawing space, so the
+            # notes band spans it too and the drawing keeps one box above them.
+            # The band is a fixed depth: what it cannot show it counts, and a
+            # panel that gathered findings is not a panel that grew.
+            notes_h = min(inner_h * 0.4, NOTES_BAND_HEIGHT)
+            notes_box = (border[0], foot - GUTTER - notes_h, border[2], foot - GUTTER)
+            area = (border[0], border[1], border[2], notes_box[1] - GUTTER)
         else:
             right_w = min(92.0, inner_w * 0.4)
             title_h = min(TITLE_BLOCK_HEIGHT, inner_h * TITLE_BLOCK_SHARE)
@@ -159,20 +173,8 @@ class Layout:
             title_block = (right_x, border[3] - title_h, border[2], border[3])
             schedule = (right_x, border[1], border[2], title_block[1] - 2.0)
             text_w = max(20.0, inner_w - right_w - GUTTER)
-            foot = border[3]
-
-        notes = note_lines(data)
-        note_font = min(
-            (fit_font(note.text, text_w - 5.0, 2.6, 1.5) for note in notes),
-            default=2.6,
-        )
-        notes_h = min(inner_h * 0.4, 6.0 + note_font * 1.6 * (len(notes) + 1))
-        if iso:
-            # The furniture runs across the foot of the drawing space, so the
-            # notes band spans it too and the drawing keeps one box above them.
-            notes_box = (border[0], foot - GUTTER - notes_h, border[2], foot - GUTTER)
-            area = (border[0], border[1], border[2], notes_box[1] - GUTTER)
-        else:
+            note_font = _note_font(notes, text_w)
+            notes_h = min(inner_h * 0.4, 6.0 + note_font * 1.6 * (len(notes) + 1))
             notes_box = (border[0], border[3] - notes_h, border[0] + text_w, border[3])
             area = (border[0], border[1], border[0] + text_w, notes_box[1] - GUTTER)
         area_h = max(20.0, area[3] - area[1])
@@ -211,6 +213,11 @@ class Layout:
             needed_width=2 * half_w * resolved + LEFT_ALLOWANCE + RIGHT_ALLOWANCE,
             needed_height=2 * half_h * resolved + TOP_ALLOWANCE + bottom,
         )
+
+
+def _note_font(notes: Sequence[Note], width: float) -> float:
+    """The largest size every note fits at, so one box letters them alike."""
+    return min((fit_font(note.text, width - 5.0, 2.6, 1.5) for note in notes), default=2.6)
 
 
 def _iso_foot(border: Box, inner_w: float, inner_h: float) -> tuple[Box, Box, float]:

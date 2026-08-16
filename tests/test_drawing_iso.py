@@ -470,3 +470,18 @@ def test_no_rule_in_the_block_is_a_line_of_no_length():
     assert all((rule.x1, rule.y1) != (rule.x2, rule.y2) for rule in rules)
     # One rule per interior boundary, drawn once rather than once per field.
     assert len(rules) == len(set((r.x1, r.y1, r.x2, r.y2) for r in rules))
+
+
+def test_a_value_of_exactly_its_recommended_length_is_left_alone():
+    """The count is a length the field admits, so the boundary is inclusive."""
+    from aidrill.emitters.drawing.build import SheetText
+    from aidrill.emitters.drawing.content import title_fields
+
+    def ident(text: SheetText) -> str:
+        return next(f for f in title_fields(DrillData(), text, iso_layout())
+                    if f.name == "IDENT NO").value
+
+    assert ident(SheetText(drawing_no="X" * 16)) == "X" * 16
+    # One over, and the ellipsis is inside the count rather than added to it.
+    assert ident(SheetText(drawing_no="X" * 17)) == "X" * 15 + "…"
+    assert len(ident(SheetText(drawing_no="X" * 17))) == 16
