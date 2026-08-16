@@ -6,9 +6,10 @@ requires-python = ">=3.10"
 dependencies = ["pikepdf>=9"]
 
 # pdfplumber is a development dependency and must stay one: it reads
-# docs/1590.pdf in tools/extract_1590.py to generate src/aidrill/enclosures.py,
-# and the shipped catalogue is a literal table. Nothing under src/aidrill
-# imports it, so installing aidrill must never pull it in.
+# docs/1590.pdf in tools/build_catalogue.py, which cross-checks the catalogue
+# generated from docs/parts/dimensions.tsv against the series datasheet. The
+# shipped catalogue is a literal table, so nothing under src/aidrill imports
+# pdfplumber and installing aidrill must never pull it in.
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "mutmut", "pdfplumber"]
 
@@ -95,14 +96,15 @@ warn_unreachable = true
 # `mutmut run` copies the tree into mutants/ and rewrites the sources there, so
 # anything the suite opens by relative path has to be copied alongside them.
 # tests/ and pyproject.toml come across by default; these two do not, and
-# test_enclosures.py re-extracts docs/1590.pdf through tools/extract_1590.py on
-# every run. A file whose parent directory does not exist under mutants/ fails
+# test_enclosures.py re-derives the catalogue from docs/parts/dimensions.tsv and
+# cross-checks it against docs/1590.pdf, both through tools/build_catalogue.py,
+# on every run. A file whose parent directory does not exist under mutants/ fails
 # the copy outright, which is why these name directories.
 [tool.mutmut]
 source_paths = ["src/aidrill"]
 also_copy = ["docs/", "tools/"]
 # enclosures.py is generated, and test_enclosures.py asserts that its *text on
-# disk* is what tools/extract_1590.py renders. Instrumenting it therefore fails
+# disk* is what tools/build_catalogue.py renders. Instrumenting it therefore fails
 # that test for every mutant, which aborts the whole run before any result is
 # collected. Excluding it costs nothing: it is a literal catalogue table, so a
 # mutant of it is either caught by the first assertion or meaningless.

@@ -39,10 +39,19 @@ from aidrill.quantise import quantise
 from aidrill.sources import AiPdfSource
 from tests.conftest import build_pdf, circle_ops
 
-#: The fixture panel's own measurement: 113.000 × 60.000, which the catalogue
-#: calls a 112 × 61 mm 1590B. Every test that wants a panel the enclosure
-#: quantiser recognises uses this one.
+#: The fixture panel's own measurement: 113.000 × 60.000, which is within
+#: tolerance of both 1590BS (112.00 × 60.50) and 1590B/1590B2 (112.40 × 60.50).
+#: Every test that wants a panel the enclosure quantiser recognises uses this
+#: one — together with `DECLARED` below, because on its own it is a tie.
 MEASURED = RawOutline(113.0, 60.0)
+
+#: The case `MEASURED` needs declaring. Two real enclosures fit that outline and
+#: nothing in the artwork chooses between them, so the phase's default quantiser
+#: declares one: an undeclared run raises ``ambiguous-enclosure``, which is an
+#: ERROR, and every test here would be testing the abort path instead of the one
+#: it names. That behaviour is not incidental to these tests, so it is pinned
+#: directly in ``test_enclosure.py`` rather than left to be inferred from this.
+DECLARED = "1590B"
 
 
 def read(
@@ -63,7 +72,7 @@ def read(
 def phase(raw: RawDrillData, **overrides):
     """``quantise`` with the CLI's defaults, unless a test names another."""
     quantisers = {
-        "enclosure": IdentifyHammondFootprint(),
+        "enclosure": IdentifyHammondFootprint(DECLARED),
         "diameters": SnapDiametersToDrillTable(),
         "positions": SnapPositions(250_000),
     }
@@ -138,7 +147,7 @@ def test_the_phase_runs_enclosure_then_diameters_then_grid():
 
     phase(
         read(RawHole(-20.0, 18.0, 7.0, 4)),
-        enclosure=watched.enclosure(),
+        enclosure=watched.enclosure(DECLARED),
         diameters=watched.diameters(),
         positions=watched.positions(),
     )
@@ -196,7 +205,10 @@ def test_a_run_that_stopped_records_only_what_ran():
 @pytest.mark.parametrize(
     "declared, tolerance_nm, reference, code",
     [
-        ("1590BB", DEFAULT_TOLERANCE_NM, MEASURED, "wrong-enclosure"),
+        # 1590Y's own 92 × 92, not the fixture's outline: ``wrong-enclosure``
+        # needs the panel to be *identified* and the declaration to disagree, so
+        # it is reachable only from a footprint nothing else is near.
+        ("1590BB", DEFAULT_TOLERANCE_NM, RawOutline(92.4, 91.8), "wrong-enclosure"),
         ("1590B", DEFAULT_TOLERANCE_NM, None, "unverifiable-enclosure"),
         ("1590B", DEFAULT_TOLERANCE_NM, RawOutline(200.0, 100.0), "unmatched-enclosure"),
         (None, 2_000_000, RawOutline(118.0, 78.5), "ambiguous-enclosure"),
@@ -241,14 +253,14 @@ def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, 
 def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
     """The pre-rounding counterexample, carried to the consequence that matters.
 
-    113.5000004 mm is 113 500 000.4 nm, four tenths of a nanometre outside a
-    1 500 000 nm tolerance around 1590B's 112 mm. ``test_enclosure.py`` pins the
-    quantiser's answer; what a returned tuple cannot carry is what that answer
-    costs — the run's worst severity is ERROR, which is the single thing the CLI
-    reads to withhold every artifact, and no hole was quantised for it.
+    113.9000004 mm is 113 900 000.4 nm, four tenths of a nanometre outside a
+    1 500 000 nm tolerance around 1590B's 112.4 mm. ``test_enclosure.py`` pins
+    the quantiser's answer; what a returned tuple cannot carry is what that
+    answer costs — the run's worst severity is ERROR, which is the single thing
+    the CLI reads to withhold every artifact, and no hole was quantised for it.
     """
     out = phase(
-        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(113.5000004, 61.0)),
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(113.9000004, 60.5)),
         enclosure=IdentifyHammondFootprint("1590B"),
     )
 
@@ -261,9 +273,15 @@ def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
 def test_an_enclosure_warning_does_not_stop_the_run():
     """``unknown-enclosure`` is a WARNING about *our* catalogue, not about the
     panel: the outline keeps the size it was drawn at and the artifacts are
-    still written, so the holes must still be quantised."""
+    still written, so the holes must still be quantised.
+
+    Undeclared, because the code only exists on that path: a run that named a
+    ``--case`` gets ``unmatched-enclosure`` at ERROR for the same outline, which
+    is the finding the test above covers.
+    """
     out = phase(
-        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(200.0, 100.0))
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(200.0, 100.0)),
+        enclosure=IdentifyHammondFootprint(),
     )
 
     assert codes(out) == ["unknown-enclosure"]
@@ -458,6 +476,10 @@ def test_the_sources_findings_come_before_the_phases_own():
 
     out = phase(
         read(RawHole(-20.0, 18.0, 30.0, 4), diagnostics=(prior,), reference=None),
+        # Undeclared: a declared case with no outline to check it against is
+        # ``unverifiable-enclosure``, an ERROR, and the run would stop before
+        # there were any per-hole findings to order.
+        enclosure=IdentifyHammondFootprint(),
         positions=SnapPositions(0),
     )
 
@@ -483,7 +505,7 @@ def test_a_findings_hole_index_names_the_measurement_it_was_taken_from():
 def test_the_outline_is_snapped_to_the_catalogue_and_the_measurement_is_kept():
     out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)))
 
-    assert (out.reference.width_nm, out.reference.height_nm) == (112_000_000, 61_000_000)
+    assert (out.reference.width_nm, out.reference.height_nm) == (112_400_000, 60_500_000)
     assert (out.reference.raw.width, out.reference.raw.height) == (113.0, 60.0)
     assert (out.reference.centre_x_nm, out.reference.centre_y_nm) == (56_500_000, 30_000_000)
 
@@ -491,16 +513,22 @@ def test_the_outline_is_snapped_to_the_catalogue_and_the_measurement_is_kept():
 def test_the_identified_footprint_reaches_the_document():
     out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)))
 
-    assert out.enclosure.candidates == ("1590B", "1590B2", "1590BS")
-    assert (out.enclosure.length_nm, out.enclosure.width_nm) == (112_000_000, 61_000_000)
-    assert out.enclosure.selected_part is None
+    assert out.enclosure.candidates == ("1590B", "1590B2")
+    assert (out.enclosure.length_nm, out.enclosure.width_nm) == (112_400_000, 60_500_000)
+    assert out.enclosure.selected_part == DECLARED
 
 
 def test_a_panel_with_no_reference_layer_is_quantised_all_the_same():
     """The source has already reported the absence; the phase adds nothing and
     refuses nothing. Positions are page-relative and the holes still need bits.
+
+    Undeclared: the declaration is what turns a missing outline into an ERROR,
+    and this test is about the run that claimed nothing.
     """
-    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4), reference=None))
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=None),
+        enclosure=IdentifyHammondFootprint(),
+    )
 
     assert out.reference is None
     assert out.enclosure is None
@@ -592,7 +620,10 @@ def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_p
 
     The panel is a 1590B drawn on 0.25 mm and the run declares 0.5 mm, which is
     the mistake the finding exists for: every hole lands on a midpoint, and
-    every one of them is snapped anyway.
+    every one of them is snapped anyway. The ``--case`` is declared for the
+    reason `DECLARED` gives: 112 × 61 is within tolerance of two real footprints,
+    and an undeclared run would abort on ``ambiguous-enclosure`` before a single
+    hole was snapped.
     """
     width, height = pt_from_mm(112.0), pt_from_mm(61.0)
     centre_x, centre_y = 10 + width / 2, 10 + height / 2
@@ -614,7 +645,7 @@ def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_p
 
     out = quantise(
         AiPdfSource(pdf).read(),
-        enclosure=IdentifyHammondFootprint(),
+        enclosure=IdentifyHammondFootprint(DECLARED),
         diameters=SnapDiametersToDrillTable(),
         positions=SnapPositions(500_000),
     )

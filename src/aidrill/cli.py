@@ -60,7 +60,7 @@ from .pipeline import (
 from .protocols import Emitter, Pipeline, Stage
 from .quantise import quantise
 from .sources import AiPdfSource
-from .units import NM_PER_MM, format_nm, nm_from_mm
+from .units import format_nm, nm_from_mm
 
 __all__ = [
     "main",
@@ -539,7 +539,7 @@ def format_source(data: DrillData) -> list[str]:
     The outline is printed twice, nominal beside measured, in the idiom the hole
     table uses four lines below for exactly the same reason.
     ``IdentifyHammondFootprint`` rewrites the measurement — the fixture panel
-    comes to 113.000 × 60.000 and leaves as the catalogue's 112 × 61 — so a
+    comes to 113.000 × 60.000 and leaves as the catalogue's 112.400 × 60.500 — so a
     report quoting only the nominal states a datasheet number as though it were
     what the artwork said, which is the failure ``ReferenceOutline.raw`` was
     added to make impossible everywhere else.
@@ -568,26 +568,6 @@ def format_source(data: DrillData) -> list[str]:
     return lines
 
 
-def _catalogue_mm(nanometres: int) -> str:
-    """A catalogue dimension the way the datasheet prints it: whole millimetres.
-
-    ``112``, never ``112.000``. These are the figures on the datasheet row and on
-    the box the operator ordered, and rendering them to three decimals dresses a
-    catalogue constant up as a measurement — the very distinction the report
-    keeps two columns apart one block above, where the nominal outline is printed
-    beside the raw one. The enclosure module's own ``_footprint_list`` states it
-    the same way for the same reason.
-
-    A dimension that is *not* a whole millimetre cannot have come from this
-    catalogue, and it falls back to the model's printer rather than being
-    truncated into looking like one: a library consumer may build an
-    ``EnclosureMatch`` from anything, and a silent floor would print a 112.5 mm
-    footprint as 112.
-    """
-    whole, remainder = divmod(nanometres, NM_PER_MM)
-    return str(whole) if remainder == 0 else format_nm(nanometres)
-
-
 def format_enclosure(data: DrillData) -> list[str]:
     """Which catalogue enclosure the panel was identified as being drawn for.
 
@@ -596,6 +576,13 @@ def format_enclosure(data: DrillData) -> list[str]:
     all about the case. A *mismatch* arrives as a diagnostic, which put the
     silence exactly on the success path — where the operator is looking for
     confirmation that the artwork is the box they think it is.
+
+    The footprint is printed to the same three decimals every other length in
+    this report gets, because the catalogue carries Hammond's 0.05 mm figures: a
+    1590B is 112.400 × 60.500, and rounding it to ``112 × 61`` on the way out
+    would throw away the digits that make 1590B and 1590BS two enclosures rather
+    than one. The enclosure module's ``_footprint_list`` prints the same figures
+    the same way, so the report and the diagnostics beneath it cannot drift.
 
     Two things are stated the way the drawing's title block states them, so that
     the two renderings cannot drift: the catalogue's own footprint rather than
@@ -616,7 +603,7 @@ def format_enclosure(data: DrillData) -> list[str]:
     if match is None:
         lines.append("  (not identified)")
         return lines
-    size = f"{_catalogue_mm(match.length_nm)} x {_catalogue_mm(match.width_nm)} mm"
+    size = f"{format_nm(match.length_nm)} x {format_nm(match.width_nm)} mm"
     if match.rotated:
         # The match keeps the catalogue's orientation while every dimension
         # printed elsewhere is the artwork's, so a turned panel needs saying.

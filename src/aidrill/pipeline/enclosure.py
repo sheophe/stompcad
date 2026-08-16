@@ -1,40 +1,42 @@
 """Quantise the reference outline onto the Hammond 1590 catalogue.
 
 The reference outline is *measured* artwork. The fixture panel reads
-113.000 × 60.000 mm where Hammond's datasheet says 1590B is 112 × 61, and that
-0.5 mm per side is not a drawing error the operator can see — it is what a
-bounding box of a stroked path in a PDF comes to. Everything downstream then
-inherits the wrong number: the drawing dimensions a panel that does not exist,
-and a consumer computing edge clearance from ``reference.width_nm`` is out by
-half a millimetre on the axis where a jack barrel has least to spare.
+113.000 × 60.000 mm where Hammond's drawing says 1590B is 112.400 × 60.500, and
+that half-millimetre per side is not a drawing error the operator can see — it is
+what a bounding box of a stroked path in a PDF comes to. Everything downstream
+then inherits the wrong number: the drawing dimensions a panel that does not
+exist, and a consumer computing edge clearance from ``reference.width_nm`` is out
+by half a millimetre on the axis where a jack barrel has least to spare.
 
 So this quantiser turns "roughly 112 × 61" into a named footprint and returns
 the catalogue's own dimensions. Eight things about how it does it were each
 decided the hard way:
 
 **The answer set is the catalogue, or the measurement itself.** A panel that
-matches a footprint comes back as that footprint's whole millimetres, exactly,
+matches a footprint comes back as that footprint's own nanometres, exactly,
 because those are a number Hammond publishes rather than a number we computed.
-A panel that matches nothing still comes back — quantised to whole nanometres
-and otherwise untouched — because ``unknown-enclosure`` is a WARNING, the run
-goes on, and every artifact it writes needs a frame. Returning nothing there
-would leave the drawing with no panel to dimension and the Excellon emitter no
-corner to translate to, on a panel whose only fault is not being one of the 22
-footprints this catalogue holds.
+The catalogue is held in nanometres end to end — ``footprints()`` is keyed in
+them — so nothing here converts a unit, and there is no factor of a million to
+apply twice or forget. A panel that matches nothing still comes back — quantised
+to whole nanometres and otherwise untouched — because ``unknown-enclosure`` is a
+WARNING, the run goes on, and every artifact it writes needs a frame. Returning
+nothing there would leave the drawing with no panel to dimension and the Excellon
+emitter no corner to translate to, on a panel whose only fault is not being one
+of the 26 footprints this catalogue holds.
 
 **The measurement is compared without ever being rounded.** ``scaled_nm``
 scales it into a ``Decimal`` and stops; only the *comparison* against each
 integer candidate happens. Quantising first manufactures ties the measurement
-did not have — 113.5000004 mm is four tenths of a nanometre outside a 1.5 mm
-tolerance around 112 mm, and rounding it to whole nanometres first puts it
-exactly on the boundary, inside. The catalogue is non-uniform, so there is
+did not have — 113.9000004 mm is four tenths of a nanometre outside a 1.5 mm
+tolerance around 1590B's 112.4 mm, and rounding it to whole nanometres first puts
+it exactly on the boundary, inside. The catalogue is non-uniform, so there is
 nothing to divide by and nothing else to round.
 
 **It snaps through** :meth:`ReferenceOutline.resized`, **never by constructing a
-new outline.** ``ReferenceOutline(112_000_000, 61_000_000)`` is legal code whose
+new outline.** ``ReferenceOutline(112_400_000, 60_500_000)`` is legal code whose
 ``raw`` defaults to its own dimensions — so a fresh construction quietly asserts
-that the panel was *measured* at 112 × 61 and destroys the 113 × 60 the artwork
-actually said. The measurement handed in is put on ``raw`` once, here, and every
+that the panel was *measured* at 112.4 × 60.5 and destroys the 113 × 60 the
+artwork actually said. The measurement handed in is put on ``raw`` once, here, and every
 answer below is that outline resized.
 
 **It never guesses.** An unresolved tie is ``ambiguous-enclosure`` and a declared
@@ -54,7 +56,7 @@ that *drawing* your outline is punished while *not* drawing it is not, which is
 backwards at any severity. The principle underneath: "two Hammond footprints fit
 yours" and "you declared a part your artwork contradicts" are statements about
 the operator's panel, but "we have never heard of your enclosure" is a statement
-about **our catalogue** — this tool holds 22 Hammond footprints and the world
+about **our catalogue** — this tool holds 26 Hammond footprints and the world
 holds rather more. The same rule the drill table follows: we cannot know what
 another builder is working in. The finding is raised, the run continues, the
 outline keeps the size it was drawn at, and the operator decides.
@@ -91,30 +93,47 @@ None of the three reuses ``unknown-enclosure``: that code is a WARNING about our
 catalogue on an undeclared run, and one key at two severities meaning two things
 is a key a consumer cannot act on.
 
-**A 2-D outline identifies a footprint, not a part.** 112 × 61 is 1590B, 1590B2
-*and* 1590BS — they differ only in height, which artwork does not carry. The
+**A 2-D outline identifies a footprint, not a part.** 112.40 × 60.50 is 1590B
+*and* 1590B2 — they differ only in height, which artwork does not carry. The
 match therefore names candidates, and ``selected_part`` is filled in only from
 what the operator declared.
+
+**Four footprint pairs cannot be told apart from artwork, and that is reported
+rather than resolved.** The catalogue holds Hammond's 0.05 mm figures, so parts
+that shared an outline while both were rounded to whole millimetres no longer do:
+1590BS is 112.00 × 60.50 against 1590B's 112.40 × 60.50, and 1590LLB, 1590KK and
+1590D each sit within half a millimetre of a neighbour the same way. No tolerance
+separates a 0.10 mm pair while still admitting artwork measured a millimetre off,
+which is what the fixture is, so a panel near one of these four gets
+``ambiguous-enclosure`` and needs a ``--case``. That is the honest answer: the
+enclosures genuinely differ, and rounding the key back to whole millimetres to
+avoid saying so would be this tool deciding on the operator's behalf that a
+112.00 backplate is a 112.40 one.
 
 **The catalogue holds BACKPLATE dimensions, and so must the artwork.** A 1590 is
 die-cast with drafted walls -- the datasheet says "low side wall draft angle (2°
 or less)" -- so the face that gets drilled is smaller than the backplate by
 ``2 * depth * tan(angle)`` per axis: 1.9 mm on a 1590B, 6.3 mm on a 1590V. No
-tolerance can take a face-drawn outline. Matching one needs at least 2.4 mm on
-the shallowest common part, while two footprints tie at 2.0 mm because the
-closest pair in this catalogue is 4 mm apart -- required >= 2.4, permitted
-< 2.0. So the convention is the fix, not a number, and ``_unknown``'s message
-names it: the operator this catches is the one who measured *more* carefully.
-``docs/adr/0002-domain-quantisers.md`` records the arithmetic.
+tolerance can take a face-drawn outline, and on a 1590B the reason is exact
+rather than approximate: its face measures about 110.5 × 58.6, which is 1.9 mm
+from its own 112.40 × 60.50 *and* 1.9 mm from 1590BS's 112.00 × 60.50 on the
+tighter axis. Both footprints are therefore admitted at the very same tolerance
+the face needs, so widening does not identify the panel — it only turns a refusal
+into a tie between two real enclosures. The convention is the fix, not a number,
+and ``_unknown``'s message names it: the operator this catches is the one who
+measured *more* carefully. ``docs/adr/0002-domain-quantisers.md`` records the
+arithmetic.
 
-The default tolerance of 1.5 mm is bounded by the catalogue itself, not chosen
-for the fixture: two footprints can both match one outline once they are within
-twice the tolerance of each other, and the closest approach in the 22 Hammond
-1590 footprints is 4 mm (1590B3 116 × 77 against 1590T 120 × 80). Anything below
-2 mm is therefore unambiguous everywhere, and 1.5 mm leaves room for the
-fixture's 1.0 mm error with margin to spare. ``tests/test_enclosure.py`` pins
-that derivation against the real catalogue so a datasheet revision that brings
-two footprints closer together fails loudly instead of matching two.
+The default tolerance of 1.5 mm is bounded from both sides, not chosen for the
+fixture. Below, it must absorb the error in measured artwork: the fixture is
+1.000 mm from one candidate footprint and 0.600 mm from the other. Above, it must
+stay under the wall draft, or a face-drawn panel would start matching — 1.9 mm on
+a 1590B — and it must not tie footprints that are *not* one of the four above;
+the closest such pair is 4 mm apart (1590B3 116 × 77 against 1590T 120 × 80), so
+a fifth tie becomes reachable at 2.0 mm. ``tests/test_enclosure.py`` pins both
+bounds against the real catalogue, and names the four inherent pairs, so a
+revision that changes which panels need a declared case fails loudly instead of
+changing the answer in silence.
 """
 
 from __future__ import annotations
@@ -131,7 +150,7 @@ from ..model import (
     ReferenceOutline,
     StageRun,
 )
-from ..units import NM_PER_MM, format_nm, nm_from_mm, scaled_nm
+from ..units import format_nm, nm_from_mm, scaled_nm
 
 __all__ = [
     "CATALOGUE",
@@ -177,7 +196,7 @@ def normalize_part_name(name: str) -> str:
     panel; a name this function leaves alone is reported as ``wrong-enclosure``
     naming both parts, which the operator can read and correct.
 
-    Written here rather than borrowed from ``tools/extract_1590.py``: that
+    Written here rather than borrowed from ``tools/build_catalogue.py``: that
     module is an unshipped generator, its collapse is private, and a contract
     the runtime depends on must be owned where it is used.
     """
@@ -306,12 +325,12 @@ class IdentifyHammondFootprint:
         if len(matches) > 1:
             return (measured, None, (self._ambiguous(measured, matches),))
 
-        (length_mm, width_mm), rotated = matches[0]
-        candidates = footprints()[(length_mm, width_mm)]
+        (length_nm, width_nm), rotated = matches[0]
+        candidates = footprints()[(length_nm, width_nm)]
         match = EnclosureMatch(
             family=CATALOGUE,
-            length_nm=length_mm * NM_PER_MM,
-            width_nm=width_mm * NM_PER_MM,
+            length_nm=length_nm,
+            width_nm=width_nm,
             candidates=candidates,
             # Always explicit. The field defaults to False, so a matcher that
             # forgot to work rotation out would report every portrait panel as
@@ -323,12 +342,12 @@ class IdentifyHammondFootprint:
         # The artwork's own orientation is kept — a rotated panel stays portrait
         # — while the match records the catalogue's canonical length and width.
         if rotated:
-            snapped = measured.resized(width_mm * NM_PER_MM, length_mm * NM_PER_MM)
+            snapped = measured.resized(width_nm, length_nm)
         else:
-            snapped = measured.resized(length_mm * NM_PER_MM, width_mm * NM_PER_MM)
+            snapped = measured.resized(length_nm, width_nm)
 
         if self.expected_part is not None and self.expected_part not in candidates:
-            return (snapped, match, (self._wrong(length_mm, width_mm, candidates),))
+            return (snapped, match, (self._wrong(length_nm, width_nm, candidates),))
         return (snapped, match, ())
 
     # -- matching --------------------------------------------------------
@@ -344,22 +363,26 @@ class IdentifyHammondFootprint:
         width, height = scaled_nm(outline.width), scaled_nm(outline.height)
         found: list[_Match] = []
         for footprint in sorted(footprints()):
-            length_mm, width_mm = footprint
-            if self._fits(width, height, length_mm, width_mm):
+            length_nm, width_nm = footprint
+            if self._fits(width, height, length_nm, width_nm):
                 found.append((footprint, False))
-            elif self._fits(width, height, width_mm, length_mm):
+            elif self._fits(width, height, width_nm, length_nm):
                 found.append((footprint, True))
         return found
 
     def _fits(
-        self, width: Decimal, height: Decimal, width_mm: int, height_mm: int
+        self, width: Decimal, height: Decimal, width_nm: int, height_nm: int
     ) -> bool:
         """Both axes, and both are load-bearing: an outline that is right across
         and 4 mm out top to bottom is not that enclosure."""
-        return self._near(width, width_mm) and self._near(height, height_mm)
+        return self._near(width, width_nm) and self._near(height, height_nm)
 
-    def _near(self, measured: Decimal, catalogue_mm: int) -> bool:
+    def _near(self, measured: Decimal, catalogue_nm: int) -> bool:
         """One axis, exactly, against one catalogue dimension.
+
+        The catalogue side needs no conversion — ``footprints()`` is keyed in
+        nanometres — so the only two numbers here are a measurement and a
+        constant, in one unit.
 
         The measurement arrives as a ``Decimal`` and stays one: quantising it to
         whole nanometres before the comparison would manufacture a tie it did
@@ -370,7 +393,7 @@ class IdentifyHammondFootprint:
         and is spelled to agree with it: a tolerance an operator typed is a
         number they meant, so exactly on it is inside it.
         """
-        return abs(measured - catalogue_mm * NM_PER_MM) <= self.tolerance_nm
+        return abs(measured - catalogue_nm) <= self.tolerance_nm
 
     # -- diagnostics -----------------------------------------------------
     def _unknown(self, measured: ReferenceOutline) -> Diagnostic:
@@ -385,10 +408,10 @@ class IdentifyHammondFootprint:
         most likely reason a correct panel lands here, and the operator who
         lands there is the *careful* one — they measured the face they are about
         to drill. The catalogue lists backplate dimensions, and a 1590 face is
-        smaller than its backplate by the wall draft (SPEC §6.2 does the
-        arithmetic: no tolerance can accept both a face-drawn outline and the
-        catalogue's own closest pair of footprints). A failure that teaches the
-        fix costs a re-run; one that does not costs a case.
+        smaller than its backplate by the wall draft — on a 1590B by the same
+        1.9 mm that separates it from 1590BS, so the tolerance that would reach
+        the face reaches both parts at once and identifies neither. A failure
+        that teaches the fix costs a re-run; one that does not costs a case.
         """
         return Diagnostic.warning(
             "unknown-enclosure",
@@ -405,14 +428,25 @@ class IdentifyHammondFootprint:
         )
 
     def _ambiguous(self, measured: ReferenceOutline, matches: list[_Match]) -> Diagnostic:
-        """Name every footprint that fitted. Naming one would be the guess."""
+        """Name every footprint that fitted, and every part on them.
+
+        Naming one would be the guess. Naming none of the *parts* would be
+        nearly as unhelpful: the message's advice is "declare the case", and the
+        case is a part number, so a finding that withheld the two or three
+        candidates would send the operator back to the datasheet to look up what
+        it had already computed. That advice used to be for a tie an operator had
+        to widen the tolerance to reach; now four catalogue footprints are within
+        tolerance of a neighbour at the shipped default, so this is the ordinary
+        answer for a panel near one of them — including this project's own
+        fixture — and it has to carry the fix like ``_unmatched`` does.
+        """
         tied = [footprint for footprint, _ in matches]
         return Diagnostic.error(
             "ambiguous-enclosure",
             f"reference outline {self._measured(measured)} is within "
             f"{format_nm(self.tolerance_nm)} mm of more than one {CATALOGUE} "
-            f"footprint ({_footprint_list(tied)} mm); tighten the tolerance or "
-            f"declare the case",
+            f"footprint ({_footprint_list(tied)} mm — {_candidate_list(tied)}); "
+            f"tighten the tolerance or declare the case",
             data=(
                 ("footprints", _footprint_list(tied)),
                 ("candidates", _candidate_list(tied)),
@@ -513,18 +547,18 @@ class IdentifyHammondFootprint:
         if footprint is None:
             return ()
         return (
-            ("expected_length_nm", footprint[0] * NM_PER_MM),
-            ("expected_width_nm", footprint[1] * NM_PER_MM),
+            ("expected_length_nm", footprint[0]),
+            ("expected_width_nm", footprint[1]),
         )
 
     def _expected_size(self) -> str:
-        """`` (112 × 61 mm)`` for a catalogue part, and nothing for anything else."""
+        """`` (112.400 × 60.500 mm)`` for a catalogue part, nothing for anything else."""
         footprint = self._expected_footprint()
         if footprint is None:
             return ""
-        return f" ({footprint[0]} × {footprint[1]} mm)"
+        return f" ({_footprint_list([footprint])} mm)"
 
-    def _wrong(self, length_mm: int, width_mm: int, candidates: tuple[str, ...]) -> Diagnostic:
+    def _wrong(self, length_nm: int, width_nm: int, candidates: tuple[str, ...]) -> Diagnostic:
         """Both parts, always: the requested one and the one that was drawn.
 
         Either alone leaves the operator re-deriving the other off the artwork,
@@ -534,12 +568,12 @@ class IdentifyHammondFootprint:
         return Diagnostic.error(
             "wrong-enclosure",
             f"panel declared as {self.expected_part}, but the outline is "
-            f"{length_mm} × {width_mm} mm — {identified}",
+            f"{_footprint_list([(length_nm, width_nm)])} mm — {identified}",
             data=(
                 ("requested_part", self.expected_part or ""),
                 ("identified_parts", identified),
-                ("length_nm", length_mm * NM_PER_MM),
-                ("width_nm", width_mm * NM_PER_MM),
+                ("length_nm", length_nm),
+                ("width_nm", width_nm),
             ),
         )
 
@@ -554,16 +588,23 @@ class IdentifyHammondFootprint:
         return f"{format_nm(measured.width_nm)} × {format_nm(measured.height_nm)} mm"
 
 
-def _footprint_list(footprints_mm: list[tuple[int, int]]) -> str:
-    """``116 × 77, 120 × 80`` — the catalogue's own whole millimetres.
+def _footprint_list(footprints_nm: list[tuple[int, int]]) -> str:
+    """``116.000 × 77.000, 120.000 × 80.000`` — the catalogue's own dimensions.
 
-    Unformatted, and integers: these are the figures printed on the datasheet
-    row and on the box the operator ordered, and rendering them as 116.000 would
-    dress a catalogue constant up as a measurement.
+    Through `format_nm`, like every other length this program prints, and not as
+    bare integers: the catalogue carries Hammond's 0.05 mm figures, so a 1590B is
+    112.400 × 60.500 and printing it as ``112 × 61`` would round a physical
+    constant on its way to the operator — and round it to the very whole
+    millimetres that made 1590B and 1590BS look like one enclosure. The decimals
+    are also the point of the message when two footprints tie: 112.000 × 60.500
+    against 112.400 × 60.500 says why nothing could choose between them, where
+    two identical ``112 × 61``s would read as a bug in the tool.
     """
-    return ", ".join(f"{length} × {width}" for length, width in footprints_mm)
+    return ", ".join(
+        f"{format_nm(length)} × {format_nm(width)}" for length, width in footprints_nm
+    )
 
 
-def _candidate_list(footprints_mm: list[tuple[int, int]]) -> str:
+def _candidate_list(footprints_nm: list[tuple[int, int]]) -> str:
     """Every base designator sharing any of these footprints, in the same order."""
-    return ", ".join(part for footprint in footprints_mm for part in footprints()[footprint])
+    return ", ".join(part for footprint in footprints_nm for part in footprints()[footprint])

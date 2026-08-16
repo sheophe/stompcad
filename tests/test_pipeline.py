@@ -244,7 +244,10 @@ class TestDeduplicate:
         )
         data = quantise(
             raw,
-            enclosure=IdentifyHammondFootprint(),
+            # ``tar.ai``'s 113 × 60 fits both 1590BS and 1590B/1590B2, so the
+            # case is declared: an undeclared run stops on
+            # ``ambiguous-enclosure`` and never reaches the dedupe this names.
+            enclosure=IdentifyHammondFootprint("1590B"),
             diameters=SnapDiametersToDrillTable(),
             positions=SnapPositions(250_000),
         )
@@ -654,7 +657,8 @@ class TestPipelineComposition:
         out = Pipeline([Deduplicate(), SortHoles()]).run(
             quantise(
                 raw,
-                enclosure=IdentifyHammondFootprint(),
+                # Declared, for the reason above: 113 × 60 is a tie.
+                enclosure=IdentifyHammondFootprint("1590B"),
                 diameters=SnapDiametersToDrillTable(),
                 positions=SnapPositions(250_000),
             )

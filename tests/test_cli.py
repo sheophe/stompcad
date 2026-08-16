@@ -51,15 +51,25 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 def read(
     *,
     holes=None,
-    reference=RawOutline(113.0, 60.0),
+    reference=RawOutline(99.6, 50.4),
     diagnostics=(),
 ) -> RawDrillData:
     """What a source hands the CLI: float millimetres, nothing quantised.
 
     The default panel is deliberately one the whole run leaves alone — every
     centre is already on the 0.25 mm grid, both diameters are real metric bits,
-    and 113 × 60 is the 1590B footprint — so a test asserting on an exit code or
-    a report line is not also asserting on a diagnostic it never mentioned.
+    and 99.6 × 50.4 is within tolerance of 1590G's 100.00 × 50.00 and of nothing
+    else — so a test asserting on an exit code or a report line is not also
+    asserting on a diagnostic it never mentioned.
+
+    A 1590G rather than the 1590B ``tests/fixtures/tar.ai`` is, because these
+    runs declare no ``--case``: the fixture's outline is within tolerance of two
+    real footprints and an undeclared run refuses it, which is the tool's own
+    behaviour and is pinned as such at the end of this file. A default that
+    aborted on ``ambiguous-enclosure`` would make every test here a test of the
+    abort path. 100.00 × 50.00 is still shared by two parts — 1590G and 1590G2,
+    which differ only in height — so a declared ``--case`` still has something to
+    choose between, which is what makes the flag worth testing at all.
     """
     if holes is None:
         holes = (
@@ -248,17 +258,17 @@ def quantisers_for(*argv: str) -> cli.Quantisers:
 def test_the_cli_quantises_between_the_source_and_the_pipeline(fake_source, capsys):
     """The seam, asserted where it is observable rather than by reading source.
 
-    ``read()`` measures 113 × 60 and hands over float millimetres; the report
-    prints the catalogue's 112 × 61 in whole nanometres and a tool table. Neither
-    could exist if the CLI had folded the pipeline over the raw read.
+    ``read()`` measures 99.6 × 50.4 and hands over float millimetres; the report
+    prints the catalogue's 100.000 × 50.000 in whole nanometres and a tool table.
+    Neither could exist if the CLI had folded the pipeline over the raw read.
     """
     fake_source(read())
 
     assert cli.main([str(FIXTURE)]) == 0
 
     out = capsys.readouterr().out
-    assert "112.000 x 61.000 mm" in out
-    assert "raw 113.0000 x 60.0000 mm" in out
+    assert "100.000 x 50.000 mm" in out
+    assert "raw 99.6000 x 50.4000 mm" in out
 
 
 def test_the_enclosure_is_identified_whether_or_not_a_case_was_declared():
@@ -520,8 +530,8 @@ def test_a_declared_case_reaches_the_enclosure_quantiser_in_catalogue_form():
 
 
 def test_the_declared_case_agreeing_with_the_artwork_is_silent(fake_source, capsys):
-    fake_source(read())  # a 113 x 60 outline, which is a 112 x 61 1590B
-    assert cli.main([str(FIXTURE), "--case", "1590B"]) == 0
+    fake_source(read())  # a 99.6 x 50.4 outline, which is a 100.00 x 50.00 1590G
+    assert cli.main([str(FIXTURE), "--case", "1590G2"]) == 0
 
 
 def test_a_case_that_disagrees_with_the_artwork_is_an_error(fake_source, capsys, tmp_path):
@@ -861,10 +871,10 @@ def test_report_shows_source_holes_tools_and_diagnostics(fake_source, capsys):
 
     assert "fake.ai" in out
     assert "Drill" in out and "Background" in out
-    # 112 × 61, not the 113 × 60 the artwork measured: the enclosure is
-    # identified on every panel, and the report states the catalogue's whole
-    # millimetres because those are what the holes are positioned against.
-    assert "112.000" in out and "61.000" in out
+    # 100 × 50, not the 99.6 × 50.4 the artwork measured: the enclosure is
+    # identified on every panel, and the report states the catalogue's own
+    # figures because those are what the holes are positioned against.
+    assert "100.000" in out and "50.000" in out
     assert "7.000" in out and "5.000" in out  # hole diameters
     assert "T1" in out and "T2" in out  # tool summary
     assert "something" in out and "watch out" in out
@@ -1106,9 +1116,9 @@ def report_field(out: str, label: str) -> str:
 def test_the_report_shows_the_outline_the_artwork_measured_beside_the_snapped_one(
     fake_source, capsys
 ):
-    """``IdentifyHammondFootprint`` rewrites a real measurement — the fixture
-    comes to 113.000 × 60.000 and leaves as the catalogue's 112 × 61 — and a
-    report stating only the second sends a nominal size out as though it were
+    """``IdentifyHammondFootprint`` rewrites a real measurement — this panel
+    comes to 99.600 × 50.400 and leaves as the catalogue's 100.000 × 50.000 — and
+    a report stating only the second sends a nominal size out as though it were
     what the artwork said. The hole table prints ``raw X``/``raw Y`` beside every
     nominal four lines below for exactly this reason; the outline is the same
     question one level up.
@@ -1122,8 +1132,8 @@ def test_the_report_shows_the_outline_the_artwork_measured_beside_the_snapped_on
     assert cli.main([str(FIXTURE)]) == 0
 
     reference = report_field(capsys.readouterr().out, "reference")
-    assert "112.000 x 61.000 mm" in reference
-    assert "113.0000 x 60.0000 mm" in reference
+    assert "100.000 x 50.000 mm" in reference
+    assert "99.6000 x 50.4000 mm" in reference
 
 
 def test_the_report_states_which_enclosure_the_panel_was_identified_as(fake_source, capsys):
@@ -1140,13 +1150,16 @@ def test_the_report_states_which_enclosure_the_panel_was_identified_as(fake_sour
 
     out = capsys.readouterr().out
     assert "ENCLOSURE" in out
-    assert report_field(out, "footprint") == "Hammond 1590  112 x 61 mm"
-    assert report_field(out, "candidates") == "1590B, 1590B2, 1590BS"
+    # Three decimals, like every other length in the report: the catalogue
+    # carries Hammond's 0.05 mm figures, and a 1590B printed as "112 x 61" would
+    # be indistinguishable from a 1590BS.
+    assert report_field(out, "footprint") == "Hammond 1590  100.000 x 50.000 mm"
+    assert report_field(out, "candidates") == "1590G, 1590G2"
 
 
 def test_an_enclosure_nobody_could_identify_is_said_out_loud():
     """A missing line reads as a case nobody wrote down. "This is no footprint we
-    stock" is a legitimate outcome — the catalogue holds 22 and the world holds
+    stock" is a legitimate outcome — the catalogue holds 26 and the world holds
     rather more — and it is not the same statement as saying nothing."""
     lines = cli.format_enclosure(document())
 
@@ -1159,16 +1172,16 @@ def test_a_declared_part_replaces_the_candidate_list():
     the same rule the drawing's title block follows. A turned panel says so,
     because the catalogue's own orientation is what is printed beside it.
 
-    The footprint is printed as the datasheet prints it — ``120 x 94``, whole
-    millimetres — rather than as ``120.000 x 94.000``: these are catalogue
-    constants and the report keeps them visibly apart from the measurement two
-    blocks above.
+    The footprint is printed as the catalogue holds it — ``119.500 x 94.000``,
+    to the same three decimals as every other length in the report. Hammond's
+    drawings give 0.05 mm, so rounding a footprint on the way out would print
+    1590B and 1590BS as one enclosure.
     """
     data = dataclasses.replace(
         document(),
         enclosure=EnclosureMatch(
             family="Hammond 1590",
-            length_nm=120_000_000,
+            length_nm=119_500_000,
             width_nm=94_000_000,
             candidates=("1590BB", "1590BB2", "1590BBS", "1590C"),
             rotated=True,
@@ -1178,7 +1191,10 @@ def test_a_declared_part_replaces_the_candidate_list():
 
     lines = cli.format_enclosure(data)
 
-    assert report_field("\n".join(lines), "footprint") == "Hammond 1590  120 x 94 mm (rotated)"
+    assert (
+        report_field("\n".join(lines), "footprint")
+        == "Hammond 1590  119.500 x 94.000 mm (rotated)"
+    )
     assert report_field("\n".join(lines), "part") == "1590BB"
     assert not [line for line in lines if "candidates" in line]
 
@@ -1412,7 +1428,17 @@ def test_the_console_and_the_sheet_spell_a_bit_the_same_way(tmp_path, capsys):
     svg = tmp_path / "tar.svg"
 
     code = cli.main(
-        [str(FIXTURE), "--drill-standard", "fractional", "--emit", f"drawing-svg={svg}"]
+        [
+            str(FIXTURE),
+            # The fixture fits two footprints, so its case is declared on every
+            # real-file run below; see the pair at the end of this file.
+            "--case",
+            "1590B",
+            "--drill-standard",
+            "fractional",
+            "--emit",
+            f"drawing-svg={svg}",
+        ]
     )
 
     assert code == 1  # a duplicate hole on the fixture, and nothing worse
@@ -1442,7 +1468,20 @@ def test_the_drill_file_and_the_drawing_agree_with_each_other(tmp_path, capsys):
     drl = tmp_path / "tar.drl"
     svg = tmp_path / "tar.svg"
 
-    assert cli.main([str(FIXTURE), "--emit", f"excellon={drl}", "--emit", f"drawing-svg={svg}"]) == 1
+    assert (
+        cli.main(
+            [
+                str(FIXTURE),
+                "--case",
+                "1590B",
+                "--emit",
+                f"excellon={drl}",
+                "--emit",
+                f"drawing-svg={svg}",
+            ]
+        )
+        == 1
+    )
 
     drill_text = drl.read_text(encoding="utf-8")
     root = ET.fromstring(svg.read_text(encoding="utf-8"))
@@ -1497,6 +1536,8 @@ def test_end_to_end_on_the_fixture(tmp_path, capsys):
     code = cli.main(
         [
             str(FIXTURE),
+            "--case",
+            "1590B",
             "--title",
             "TAR - FRONT PANEL",
             "--emit",
@@ -1538,7 +1579,9 @@ def test_end_to_end_on_the_fixture(tmp_path, capsys):
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
 def test_grid_half_millimetre_raises_two_off_grid_warnings(tmp_path, capsys):
     doc = tmp_path / "tar.json"
-    code = cli.main([str(FIXTURE), "--grid", "0.5", "--emit", f"json={doc}"])
+    code = cli.main(
+        [str(FIXTURE), "--case", "1590B", "--grid", "0.5", "--emit", f"json={doc}"]
+    )
     assert code == 1
 
     codes = [d["code"] for d in json.loads(doc.read_text())["diagnostics"]]
@@ -1550,33 +1593,65 @@ def test_the_fixture_panel_is_identified_as_the_case_it_was_drawn_for(capsys):
     """The 1590B footprint, and the artwork's own measurement kept beside it.
 
     The real file, parsed by the real source and quantised by the real phase:
-    the artwork measures 113.000 × 60.000 and the catalogue says 1590B is
-    112 × 61, so whole millimetres printed beside a fractional measurement is
-    the whole claim. Without ``raw`` the report would state a datasheet number
-    as though it were what the artwork said, and nothing on the page would
-    disagree.
+    the artwork measures 113.000 × 60.000 and the drawing says 1590B is
+    112.40 × 60.50, so a catalogue figure printed beside the measurement it
+    replaced is the whole claim. Without ``raw`` the report would state a
+    datasheet number as though it were what the artwork said, and nothing on the
+    page would disagree.
 
-    ``--case`` is what makes the check two-way; without it the panel is still
-    identified, which is what lets the drawing dimension whole millimetres.
+    ``--case`` is required rather than optional here, which is the pair below.
     """
     assert cli.main([str(FIXTURE), "--case", "1590B"]) == 1
 
     out = capsys.readouterr().out
     reference = report_field(out, "reference")
-    assert reference.startswith("112.000 x 61.000 mm")
+    assert reference.startswith("112.400 x 60.500 mm")
     assert re.search(r"raw 113\.0000 x 60\.000\d mm", reference), reference
-    assert report_field(out, "footprint") == "Hammond 1590  112 x 61 mm"
+    assert report_field(out, "footprint") == "Hammond 1590  112.400 x 60.500 mm"
     assert report_field(out, "part") == "1590B"
     assert report_diagnostic_groups(out) == {"warning": ["duplicate-hole"]}
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
-def test_the_fixture_panel_declared_as_the_wrong_case_exits_two(tmp_path, capsys):
-    """The real fixture, end to end: exit 2 and nothing on disk to load."""
+def test_the_fixture_panel_undeclared_is_refused_and_writes_nothing(tmp_path, capsys):
+    """The other half, and the behaviour change the fine catalogue brought.
+
+    ``tar.ai`` is a real 1590B and used to be the one panel this tool could run
+    with no arguments at all. Hammond's own 0.05 mm figures separate 1590BS
+    (112.00 × 60.50) from 1590B (112.40 × 60.50), and the artwork's 113.000 ×
+    60.000 sits within tolerance of both — 1.000 mm from one and 0.600 mm from
+    the other. No tolerance tells those apart while still admitting a panel
+    measured a millimetre off, so the honest answer is to refuse and say which
+    two enclosures fit.
+
+    Asserted against the *file system*, not only the exit code: ERROR withholds
+    every artifact, and a drill file for the wrong one of two enclosures 0.4 mm
+    apart is exactly the artifact that looks perfectly well-formed.
+    """
+    doc = tmp_path / "tar.json"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={doc}"]) == 2
+
+    out = capsys.readouterr().out
+    assert "[ambiguous-enclosure]" in out
+    assert "1590BS" in out and "1590B2" in out
+    assert not doc.exists(), "a document naming one of two enclosures reached the disk"
+
+
+@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
+def test_the_fixture_panel_declared_as_a_case_it_does_not_fit_exits_two(tmp_path, capsys):
+    """The real fixture, end to end: exit 2 and nothing on disk to load.
+
+    ``unmatched-enclosure`` rather than ``wrong-enclosure``, and the difference
+    is the point: two footprints fit this outline and neither is a 1590BB, so
+    nothing was identified and an accusation about what *was* drawn would be
+    unfounded. ``wrong-enclosure`` is reachable from a panel that matches one
+    footprint, which is asserted where the source is a stand-in.
+    """
     doc = tmp_path / "tar.json"
     assert cli.main([str(FIXTURE), "--case", "1590BB", "--emit", f"json={doc}"]) == 2
 
-    assert "[wrong-enclosure]" in capsys.readouterr().out
+    assert "[unmatched-enclosure]" in capsys.readouterr().out
     assert not doc.exists()
 
 
