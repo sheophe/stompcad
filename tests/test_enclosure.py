@@ -259,7 +259,15 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
     #: Larger than every footprint in the catalogue, on both axes, and not a
     #: whole number of millimetres: the fractional tenth is what proves the
     #: answer is the measurement rather than a rounding of it.
-    UNRECOGNISED = (500.0004, 300.0)
+    #:
+    #: The last digit is doing separate work, and it is the digit below a whole
+    #: nanometre. 500.0004 mm is *exactly* 500 000 400 nm, so a `raw` synthesised
+    #: from the nominal integer would rebuild that very float and the provenance
+    #: assertion below could not tell a kept measurement from a round trip
+    #: through the answer. 500.0004004 mm is 500 000 400.4, quantises to the same
+    #: nominal, and rebuilds as 500.0004 — which is the disagreement the
+    #: assertion needs to be able to see.
+    UNRECOGNISED = (500.0004004, 300.0)
 
     def test_the_answer_is_provably_the_measurement_and_not_a_footprint(self):
         outline, match, _ = IdentifyHammondFootprint().quantise(
@@ -272,11 +280,21 @@ class TestAnUnmatchedOutlineIsQuantisedOntoItself:
 
     def test_the_measurement_is_kept_as_the_float_the_artwork_gave(self):
         """``raw`` is what lets a consumer tell a *measured* 500 from a snapped
-        one, and it is the only place the un-quantised measurement survives."""
+        one, and it is the only place the un-quantised measurement survives.
+
+        The fixture's own arithmetic is asserted first, because this assertion
+        is only worth anything on a measurement the nominal integer cannot
+        reproduce: on a whole number of nanometres, an outline rebuilt with no
+        ``raw`` at all synthesises one that compares equal and the test passes
+        on a quantiser that has thrown the measurement away.
+        """
         outline, _, _ = IdentifyHammondFootprint().quantise(
             RawOutline(*self.UNRECOGNISED), ORIGIN
         )
 
+        assert outline.raw.width * MM != outline.width_nm, (
+            "the fixture is a whole number of nanometres"
+        )
         assert outline.raw == RawOutline(*self.UNRECOGNISED)
 
     def test_it_is_a_warning_and_the_frame_is_still_usable(self):
