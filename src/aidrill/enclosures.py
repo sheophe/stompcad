@@ -26,26 +26,10 @@ class Enclosure:
     height_nm: int
 
     def __post_init__(self) -> None:
-        """Refuse anything but a plain ``int`` for a dimension.
+        """Require each dimension to be a plain integer number of nanometres.
 
-        The three ``_nm`` names are a promise -- 112 400 000 exactly, where the
-        float 112.4 is not -- and the generator above keeping that promise is
-        not what makes it true of the class. A caller builds an ``Enclosure``
-        directly: ``tools/`` renders one per drawing, a test states a footprint
-        by hand, and a consumer of the library may hold a catalogue of its own.
-        Every one of them can hand over ``112.4``, and the value would then flow
-        through ``footprint`` into a match and out to a drawing that quotes it,
-        with nothing between the mistake and the sheet to say the number never
-        crossed ``units``.
-
-        ``type(value) is int`` and not ``isinstance``, because ``bool`` is a
-        subclass of ``int`` in Python: ``True`` reaching a width is a
-        one-nanometre case that no report would make look wrong.
-
-        Refused rather than converted, on the same reasoning as the rest of the
-        model: a float here is a figure that has not been through the unit
-        boundary, and rounding it at the point of use would put the conversion
-        in a second place.
+        ``type`` rejects both floats and ``bool``, an ``int`` subclass, so values
+        cannot bypass the unit boundary before a footprint is matched or printed.
         """
         for name in ("length_nm", "width_nm", "height_nm"):
             value = getattr(self, name)
