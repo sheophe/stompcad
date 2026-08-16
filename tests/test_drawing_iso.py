@@ -251,3 +251,86 @@ def test_the_size_designation_sits_in_the_bottom_border_at_the_right_corner():
     assert label.content == "A4"
     assert label.x > 210.0 / 2.0        # right half
     assert label.y > 297.0 - PLAIN_BORDER  # below the frame, in the border
+
+
+# --- ISO 5457 grid reference system ----------------------------------------
+
+
+def grid_text(sheet):
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.scene import Text
+
+    return [item for item in grid_reference_items(sheet) if isinstance(item, Text)]
+
+
+def test_letters_run_down_the_side_and_numerals_across_the_top():
+    """4.4: letters from the top downwards, numerals from left to right."""
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    labels = grid_text(A3_LANDSCAPE)
+    letters = [t for t in labels if t.content.isalpha()]
+    numerals = [t for t in labels if t.content.isdigit()]
+
+    # A3: 8 across, 6 down, each appearing on both sides of the sheet.
+    assert len(numerals) == 8 * 2
+    assert len(letters) == 6 * 2
+
+    down = sorted({t.content for t in letters})
+    assert down == ["A", "B", "C", "D", "E", "F"]
+    assert sorted({int(t.content) for t in numerals}) == [1, 2, 3, 4, 5, 6, 7, 8]
+
+
+def test_the_first_letter_is_at_the_top_and_the_last_at_the_bottom():
+    """Y runs down the sheet, so A has the smallest Y."""
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    letters = [t for t in grid_text(A3_LANDSCAPE) if t.content.isalpha()]
+    a_positions = [t.y for t in letters if t.content == "A"]
+    f_positions = [t.y for t in letters if t.content == "F"]
+
+    assert max(a_positions) < min(f_positions)
+
+
+def test_a4_carries_its_references_only_at_the_top_and_the_right():
+    """4.4: 'For the size A4, they are located only at the top and the right side'."""
+    from aidrill.emitters.drawing.sheet import A4_PORTRAIT
+
+    labels = grid_text(A4_PORTRAIT)
+    numerals = [t for t in labels if t.content.isdigit()]
+    letters = [t for t in labels if t.content.isalpha()]
+
+    # 4 across and 6 down, each appearing once rather than on both sides.
+    assert len(numerals) == 4
+    assert len(letters) == 6
+    assert all(t.y < 297.0 / 2.0 for t in numerals)      # top border only
+    assert all(t.x > 210.0 / 2.0 for t in letters)       # right border only
+
+
+def test_grid_characters_are_three_and_a_half_millimetres():
+    """4.4: 'The size of letters and characters is 3,5 mm'."""
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    assert all(t.size == GRID_CHARACTER_SIZE for t in grid_text(A3_LANDSCAPE))
+
+
+def test_grid_lines_are_drawn_narrow():
+    """4.4: 'shall be executed with continuous lines of 0,35 mm width'."""
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.scene import Line
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    lines = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Line)]
+
+    assert lines
+    assert all(line.stroke.width == GRID_LINE_WIDTH for line in lines)
+
+
+def test_letters_never_use_i_or_o_even_on_the_largest_sheet():
+    """A0 needs 16 letters, which is where a naive alphabet would reach I."""
+    from aidrill.emitters.drawing.sheet import A0_LANDSCAPE
+
+    used = {t.content for t in grid_text(A0_LANDSCAPE) if t.content.isalpha()}
+
+    assert len(used) == 16
+    assert "I" not in used and "O" not in used
+    assert "J" in used  # the letter that takes I's place

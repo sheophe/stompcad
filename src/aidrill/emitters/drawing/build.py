@@ -33,6 +33,9 @@ from .scene import FEINT, INK, RED, Circle, Group, Item, Line, Polygon, Rect, Sc
 from .sheet import (
     CENTRING_MARK_OVERSHOOT,
     CENTRING_MARK_WIDTH,
+    GRID_CHARACTER_SIZE,
+    GRID_LETTERS,
+    GRID_LINE_WIDTH,
     GROUP_0_7,
     PLAIN_BORDER,
     TRIM_MARK_LONG,
@@ -40,6 +43,7 @@ from .sheet import (
     FrameStyle,
     LineGroup,
     Sheet,
+    grid_divisions,
 )
 
 # ``SheetText`` is defined in ``content`` and re-exported here: ``build`` imports
@@ -54,6 +58,7 @@ __all__ = [
     "DUP_RING",
     "arrow",
     "iso_frame_items",
+    "grid_reference_items",
 ]
 
 
@@ -163,6 +168,7 @@ def iso_frame_items(layout: Layout, pens: Pens) -> list[Item]:
     ]
     items += _centring_marks(sheet, x0, y0, x1, y1)
     items += _trim_marks(sheet)
+    items += grid_reference_items(sheet)
     items.append(
         Text(
             sheet.width - PLAIN_BORDER,
@@ -209,6 +215,72 @@ def _filled_box(x: float, y: float, width: float, height: float) -> Polygon:
         ((x, y), (x + width, y), (x + width, y + height), (x, y + height)),
         INK,
         cls="trim-mark",
+    )
+
+
+def grid_reference_items(sheet: Sheet) -> list[Item]:
+    """4.4: fields lettered down and numbered across, in the border band.
+
+    A4 carries its references at the top and the right only; every larger sheet
+    carries them on both sides. Field boundaries come from ``grid_divisions``,
+    which puts the division's remainder in the corner fields.
+    """
+    across, down = sheet.grid_fields
+    if not across or not down:
+        return []
+    both_sides = sheet.name != "A4"
+    items: list[Item] = []
+    items += _grid_axis(sheet, across, horizontal=True, both_sides=both_sides)
+    items += _grid_axis(sheet, down, horizontal=False, both_sides=both_sides)
+    return items
+
+
+def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) -> list[Item]:
+    extent = sheet.width if horizontal else sheet.height
+    other = sheet.height if horizontal else sheet.width
+    pen = Stroke(GRID_LINE_WIDTH, INK)
+    items: list[Item] = []
+
+    edges = [0.0]
+    for field in grid_divisions(extent, count):
+        edges.append(edges[-1] + field)
+
+    #: The band the characters sit in: between the trimmed edge and the frame.
+    near, far = PLAIN_BORDER, other - PLAIN_BORDER
+    for boundary in edges[1:-1]:
+        if horizontal:
+            items.append(Line(boundary, 0.0, boundary, near, pen, cls="grid-line"))
+            if both_sides:
+                items.append(Line(boundary, far, boundary, other, pen, cls="grid-line"))
+        else:
+            items.append(Line(0.0, boundary, near, boundary, pen, cls="grid-line"))
+            if both_sides:
+                items.append(Line(far, boundary, other, boundary, pen, cls="grid-line"))
+
+    for index in range(count):
+        centre = (edges[index] + edges[index + 1]) / 2.0
+        # Numerals run left to right; letters run from the top downwards.
+        label = str(index + 1) if horizontal else GRID_LETTERS[index]
+        if horizontal:
+            items.append(_grid_label(centre, near / 2.0, label))
+            if both_sides:
+                items.append(_grid_label(centre, other - near / 2.0, label))
+        else:
+            # A4's letters are on the right; a larger sheet has them on both.
+            if both_sides:
+                items.append(_grid_label(near / 2.0, centre, label))
+            items.append(_grid_label(other - near / 2.0, centre, label))
+    return items
+
+
+def _grid_label(x: float, y: float, content: str) -> Text:
+    return Text(
+        x,
+        y + GRID_CHARACTER_SIZE / 3.0,
+        content,
+        GRID_CHARACTER_SIZE,
+        anchor="middle",
+        cls="grid-label",
     )
 
 
