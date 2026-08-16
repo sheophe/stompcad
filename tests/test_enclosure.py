@@ -244,6 +244,25 @@ class TestIdentifyHammondFootprint:
         with pytest.raises(TypeError):
             IdentifyHammondFootprint(tolerance_nm=True)
 
+    def test_a_negative_tolerance_is_refused_rather_than_matching_nothing(self):
+        """One step on from the float, and the failure that says nothing at all.
+
+        No outline is within a negative slack of anything, so every panel comes
+        back ``unknown-enclosure`` — a WARNING, so the run continues and writes
+        a drawing dimensioned to the artwork, with nothing anywhere saying that
+        the catalogue was never really searched.
+        """
+        with pytest.raises(ValueError, match="negative"):
+            IdentifyHammondFootprint(tolerance_nm=-1)
+
+    def test_a_tolerance_of_nothing_is_a_tolerance_and_is_kept(self):
+        """Zero says the outline *is* a catalogue footprint, to the nanometre,
+        which is a question an operator is entitled to ask."""
+        exact = IdentifyHammondFootprint(tolerance_nm=0)
+
+        assert exact.quantise(RawOutline(112.0, 61.0), ORIGIN)[1] is not None
+        assert exact.quantise(RawOutline(112.000001, 61.0), ORIGIN)[1] is None
+
 
 class TestAnUnmatchedOutlineIsQuantisedOntoItself:
     """The outline's answer set is *the catalogue, or the measurement itself*.
