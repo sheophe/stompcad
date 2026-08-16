@@ -1,11 +1,11 @@
-"""Drill standards, and snapping every measured diameter onto one of them.
+"""Drill standards, and quantising every measured diameter onto one of them.
 
-**Why this stage exists.** Measured diameters come back as 6.9998 and 7.0002 for
-what the designer drew as one 7 mm hole. Without normalisation every downstream
-consumer sees two sizes: the Excellon file loads the same bit twice, the hole
-schedule shows two tools, and a part lookup misses. An earlier version of this
-tool clustered diameters *inside the Excellon writer*, which meant the drawing
-and the drill file could legitimately disagree about how many hole sizes
+**Why this quantiser exists.** Measured diameters come back as 6.9998 and 7.0002
+for what the designer drew as one 7 mm hole. Without normalisation every
+downstream consumer sees two sizes: the Excellon file loads the same bit twice,
+the hole schedule shows two tools, and a part lookup misses. An earlier version
+of this tool clustered diameters *inside the Excellon writer*, which meant the
+drawing and the drill file could legitimately disagree about how many hole sizes
 existed. Normalisation happens here, once, before any emitter sees the data.
 
 **Why a table of real bits, and not clustering.** Clustering answers "which of
@@ -14,18 +14,26 @@ question that gets a panel drilled is "which bit do I put in the chuck?", and
 its answer set is fixed by a bit series nobody here gets to invent. Clustering
 5.02 and 5.04 into a nominal 5.03 produces a size that exists in no drawer on
 earth, and it does so silently, in the number the machinist reads. Every nominal
-diameter this stage produces comes from a declared table, or the hole is
+diameter this quantiser produces comes from a declared table, or the hole is
 refused.
+
+**Why the table is whole nanometres.** The answer set is then exact *by
+construction* rather than by tolerance: a size is an integer, "is this one of
+mine?" is equality, and the diameter a hole leaves here with is provably a row
+of the declared table rather than a rounded measurement that resembles one. The
+fractional series is what settles the unit — 1/64" is 396 875 nm exactly and
+396.875 microns, which is not a whole one, so a micron model would round the
+answer set itself.
 
 **Why a registry of standards, and never one merged table.** Metric and
 fractional bits are two different drawers, and overlaying them destroys the
 matching semantics: 3.175 mm (1/8") and 3.2 mm are 0.025 mm apart, a tenth of
-the matching tolerance, and 1/2" *is* 12.7 mm — the same physical bit, zero
-millimetres apart, under two names. Merged, the choice between neighbours would
-be decided by float ordering rather than by anything real, and the unique-label
-invariant that keeps a hole schedule readable would be unsatisfiable by
-construction. A panel is drilled with one set of bits; the operator declares
-which set, and ``cli.py`` is where they say so.
+the matching tolerance, and 1/2" *is* 12.7 mm — the same physical bit, the same
+integer, under two names. Merged, the choice between neighbours would be decided
+by table ordering rather than by anything real, and the unique-label invariant
+that keeps a hole schedule readable would be unsatisfiable by construction. A
+panel is drilled with one set of bits; the operator declares which set, and
+``cli.py`` is where they say so.
 
 **Why both series are generative rules rather than transcribed lists.** A rule
 cannot carry a transcription typo, and it is auditable by reading five lines
@@ -52,12 +60,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from fractions import Fraction
 from types import MappingProxyType
 from typing import ClassVar
 
-from ..model import Diagnostic, DrillData, Hole, ParameterValue, StageRun
-from ..tolerance import within
+from ..formatting import format_mm
+from ..model import Diagnostic, ParameterValue, RawHole, StageRun
+from ..units import format_nm, nm_from_mm, scaled_nm
 
 __all__ = [
     "METRIC_BANDS",
@@ -71,7 +81,10 @@ __all__ = [
 #: Metric: ``(start_mm, stop_mm, step_mm)`` bands, ``stop`` exclusive, so each
 #: band runs up to — and not including — the first size of the next. Sources
 #: disagree about where the pitch changes, which is exactly why this is data:
-#: switching to another preferred series is editing this tuple.
+#: switching to another preferred series is editing this tuple. Millimetres,
+#: because that is how a drill series is published and how the operator adopting
+#: another one would write it down; they cross the unit boundary once, in
+#: :func:`_metric_sizes`.
 METRIC_BANDS: tuple[tuple[float, float, float], ...] = (
     (0.5, 3.0, 0.05),
     (3.0, 14.0, 0.1),
@@ -81,54 +94,55 @@ METRIC_BANDS: tuple[tuple[float, float, float], ...] = (
 #: Fractional inch: 1/64" steps from 1/64" to a full inch.
 FRACTIONAL_SIXTY_FOURTHS = range(1, 65)
 
-#: Decimal places the metric bands are exact in. Every band step is a multiple
-#: of 0.01, so rounding here removes binary-accumulation dust (0.8500000000000001)
-#: without touching a single real size — and it is what lets the label be
-#: *truthful* at 2 dp rather than merely unique.
-_METRIC_DECIMALS = 2
+#: 1/64" in nanometres, and the pitch of the whole fractional series. Exact: an
+#: inch is 25.4 mm by definition, so 25 400 000 nm, and 64 divides it.
+_SIXTY_FOURTH_NM: int = 396_875
 
 
-def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[float, ...]:
-    """Every size the bands describe, ascending.
+def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[int, ...]:
+    """Every size the bands describe, ascending, in whole nanometres.
 
-    Counted with ``round`` rather than accumulated with ``while value < stop``:
-    the accumulated version overshoots or stops a size early depending on which
-    way the binary error of the step happens to fall, and it does so silently in
-    the middle of a band.
-
-    ``round`` and not ``int`` for the same reason one step further in. The
-    quotient is a float, and it lands just below the true count as readily as on
-    it — ``(2.9 - 0.2) / 0.1`` is ``26.999999999999996`` — so truncating drops
-    the top size of the band and leaves a series that is still ascending, still
-    gap-free, and one bit short.
+    Each band crosses the unit boundary once and is then counted in integers.
+    That is what makes the count exact: ``(stop - start) // step`` on whole
+    nanometres is the number of sizes the band holds, where a float quotient
+    lands just below the true count as readily as on it — ``(2.9 - 0.2) / 0.1``
+    is ``26.999999999999996`` — and drops the top size of a band silently, in
+    the middle of a series that is still ascending and still gap-free.
     """
-    sizes: list[float] = []
+    sizes: list[int] = []
     for start, stop, step in bands:
-        for index in range(round((stop - start) / step)):
-            sizes.append(round(start + index * step, _METRIC_DECIMALS))
+        start_nm, stop_nm, step_nm = nm_from_mm(start), nm_from_mm(stop), nm_from_mm(step)
+        for index in range((stop_nm - start_nm) // step_nm):
+            sizes.append(start_nm + index * step_nm)
     return tuple(sizes)
 
 
-def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[float, ...]:
-    """``n * 25.4 / 64``, which is exact: 1/8" is 3.175 and 1/2" is 12.7 with no
-    rounding anywhere, because the division is by a power of two."""
-    return tuple(n * 25.4 / 64 for n in sixty_fourths)
+def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[int, ...]:
+    """``n * 396 875`` nanometres, which is exact and divides nothing.
+
+    1/8" is 3 175 000 and 1/2" is 12 700 000 with no rounding anywhere. In
+    microns it would not be: 1/64" is 396.875 of them, and 56 of these 64 sizes
+    would come out as an answer set that had itself been rounded.
+    """
+    return tuple(n * _SIXTY_FOURTH_NM for n in sixty_fourths)
 
 
-def _metric_label(size_mm: float) -> str:
+def _metric_label(size_nm: int) -> str:
     """``⌀3.20 mm``. Unique *and* truthful at 2 dp across all 183 sizes."""
-    return f"⌀{size_mm:.2f} mm"
+    return f"⌀{format_nm(size_nm, 2)} mm"
 
 
-def _fractional_label(size_mm: float) -> str:
+def _fractional_label(size_nm: int) -> str:
     """``⌀1/8"`` — the fraction, because no decimal millimetre is honest.
 
     1/64" is 0.396875 mm, which no finite decimal-millimetre label states
     exactly; measured at 2, 3 and 4 decimals the fractional series is unique at
-    every precision and truthful at none. The fraction is exact, and it is also
-    what is stamped on the bit the machinist picks up.
+    every precision and truthful at none. The fraction is exact and needs no
+    arithmetic of ours — the size is a whole number of nanometres and so is an
+    inch, so ``Fraction`` reduces the two — and it is also what is stamped on
+    the bit the machinist picks up.
     """
-    return f'⌀{Fraction(round(size_mm * 64 / 25.4), 64)}"'
+    return f'⌀{Fraction(size_nm, _SIXTY_FOURTH_NM * 64)}"'
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +156,8 @@ class DrillStandard:
     """
 
     name: str
-    sizes_mm: tuple[float, ...]
-    label: Callable[[float], str]
+    sizes_nm: tuple[int, ...]
+    label: Callable[[int], str]
 
     def __post_init__(self) -> None:
         """A drawer with nothing in it drills nothing, so it is not a standard.
@@ -153,19 +167,26 @@ class DrillStandard:
         error against every hole on the panel and nothing at all pointing at the
         cause.
         """
-        if not self.sizes_mm:
+        if not self.sizes_nm:
             raise ValueError(f"the {self.name} drill standard has no sizes in it")
 
     def select(
         self,
-        include: Sequence[float] | None = None,
-        exclude: Sequence[float] | None = None,
+        include: Sequence[int] | None = None,
+        exclude: Sequence[int] | None = None,
     ) -> DrillStandard:
         """A narrowed copy holding only the bits actually in the drawer.
 
         Narrowing belongs here rather than in the standard because the standard
         is a physical constant and the drawer is not. A copy, never an edit: the
         registry is shared by every run in the process.
+
+        Membership is equality, with no slack anywhere in it. Both sides are
+        whole nanometres that came through the same unit boundary, so "is this
+        one of mine?" has an exact answer, and a lenient one would hand back a
+        bit the operator did not ask for under the name of one they did. The
+        matching tolerance is a different question, asked of a measurement, and
+        it is :class:`SnapDiametersToDrillTable`'s.
 
         A requested size the standard does not have raises, rather than being
         quietly dropped. ``--drill-sizes 3.33`` is a typo, and the silent
@@ -174,38 +195,29 @@ class DrillStandard:
         pointing at the cause. The same goes for asking a fractional standard
         for 3.2 mm: that is a real drill, but it is not one of *these*.
         """
-        sizes = self.sizes_mm
+        sizes = self.sizes_nm
         if include is not None:
             self._reject_unknown(include, "included")
-            sizes = tuple(s for s in sizes if self._holds(include, s))
+            wanted = set(include)
+            sizes = tuple(s for s in sizes if s in wanted)
         if exclude is not None:
             self._reject_unknown(exclude, "excluded")
-            sizes = tuple(s for s in sizes if not self._holds(exclude, s))
+            unwanted = set(exclude)
+            sizes = tuple(s for s in sizes if s not in unwanted)
         # An empty result raises from ``__post_init__``, where the same rule is
         # enforced for a hand-built standard. One rule, one place.
-        return replace(self, sizes_mm=sizes)
+        return replace(self, sizes_nm=sizes)
 
-    def _reject_unknown(self, requested: Sequence[float], verb: str) -> None:
-        missing = [r for r in requested if not any(self._same(s, r) for s in self.sizes_mm)]
+    def _reject_unknown(self, requested: Sequence[int], verb: str) -> None:
+        held = set(self.sizes_nm)
+        missing = [r for r in requested if r not in held]
         if missing:
-            named = ", ".join(f"{m:g}" for m in missing)
+            named = ", ".join(format_nm(m) for m in missing)
             raise ValueError(
                 f"{named} mm cannot be {verb}: no such size in the {self.name} drill "
-                f"standard, which runs {self.sizes_mm[0]:g}–{self.sizes_mm[-1]:g} mm"
+                f"standard, which runs {format_nm(self.sizes_nm[0])}–"
+                f"{format_nm(self.sizes_nm[-1])} mm"
             )
-
-    def _holds(self, requested: Sequence[float], size: float) -> bool:
-        return any(self._same(size, r) for r in requested)
-
-    @staticmethod
-    def _same(size: float, requested: float) -> bool:
-        """Two spellings of one size. Not a matching tolerance — that is the
-        stage's job, and a lenient ``select`` would silently hand back a bit the
-        operator did not ask for. This absorbs binary representation only, which
-        the drill table still has because its sizes are millimetre floats built
-        by arithmetic: the 3.2 a band generates is not always the 3.2 an
-        operator types."""
-        return within(size, requested, 1e-9)
 
 
 #: Every standard the operator may declare. A mapping proxy, because a registry
@@ -214,12 +226,12 @@ DRILL_STANDARDS: Mapping[str, DrillStandard] = MappingProxyType(
     {
         "metric": DrillStandard(
             name="metric",
-            sizes_mm=_metric_sizes(METRIC_BANDS),
+            sizes_nm=_metric_sizes(METRIC_BANDS),
             label=_metric_label,
         ),
         "fractional": DrillStandard(
             name="fractional",
-            sizes_mm=_fractional_sizes(FRACTIONAL_SIXTY_FOURTHS),
+            sizes_nm=_fractional_sizes(FRACTIONAL_SIXTY_FOURTHS),
             label=_fractional_label,
         ),
     }
@@ -232,15 +244,15 @@ DEFAULT_STANDARD = "metric"
 class SnapDiametersToDrillTable:
     """Give every hole the nominal diameter of a bit that actually exists.
 
-    ``tolerance_mm`` is how far a measurement may sit from a table size and
+    ``tolerance_nm`` is how far a measurement may sit from a table size and
     still be that size. Be clear about what it does and does not catch, because
     the honest answer is narrower than it looks: **within the series' range it
     never fires at all.** The widest gap anywhere in the metric series is the
     0.5 mm step between 14.0 and 14.5, so the furthest any measurement in
-    0.5–25.0 mm can sit from a size is exactly 0.25 — the default tolerance,
-    which ``within`` treats as inclusive. What actually protects a panel in that
-    range is the *density of the table*, not this number: the nearest bit is
-    always within half a step, and half a step is small.
+    0.5–25.0 mm can sit from a size is exactly 250 000 nm — the default
+    tolerance, and the bound is inclusive. What actually protects a panel in
+    that range is the *density of the table*, not this number: the nearest bit
+    is always within half a step, and half a step is small.
 
     What the bound really catches is a measurement **outside** the series — a
     30 mm cut-out that wants a step drill or a punch, a 0.2 mm speck, a rounded
@@ -253,13 +265,19 @@ class SnapDiametersToDrillTable:
     not this number. Tightening *this* one to catch it would make a legitimate
     14.3 mm panel an ERROR and, by the rule below, cost it the hole.
 
+    The bound reaches ``describe`` and the diagnostic payload unchanged, under a
+    key that promises whole nanometres. It is therefore neither coerced nor
+    defaulted on the way in: rounding it here would truncate a real number, and
+    accepting a millimetre float would launder it into a field a consumer reads
+    as nanometres — which is exactly what the model's payload guard refuses.
+
     **An unmatched measurement is not kept.** Retaining it and warning cannot
-    survive the invariant this stage carries: if every nominal comes from the
-    table, a retained 30.0 is a nominal that came from nowhere, and the drill
-    file would define a tool for a bit that does not exist. So the finding is an
-    ERROR — the run is not fit to drill — and the hole appears in no artifact.
-    Everything needed to find it is in the diagnostic: the hole's index, what it
-    measured, and the nearest bit there is.
+    survive the invariant this quantiser carries: if every nominal comes from
+    the table, a retained 30 000 000 is a nominal that came from nowhere, and
+    the drill file would define a tool for a bit that does not exist. So the
+    finding is an ERROR — the run is not fit to drill — and the hole appears in
+    no artifact. Everything needed to find it is in the diagnostic: the hole's
+    index, what it measured, and the nearest bit there is.
     """
 
     name: ClassVar[str] = "snap-diameters"
@@ -267,10 +285,10 @@ class SnapDiametersToDrillTable:
     def __init__(
         self,
         standard: DrillStandard = DRILL_STANDARDS[DEFAULT_STANDARD],
-        tolerance_mm: float = 0.25,
+        tolerance_nm: int = 250_000,
     ) -> None:
         self.standard = standard
-        self.tolerance_mm = float(tolerance_mm)
+        self.tolerance_nm = tolerance_nm
 
     def describe(self) -> StageRun:
         """Always the name and the count; the sizes only when they are news.
@@ -296,11 +314,11 @@ class SnapDiametersToDrillTable:
         """
         parameters: list[tuple[str, ParameterValue]] = [
             ("standard", self.standard.name),
-            ("tolerance_mm", self.tolerance_mm),
-            ("size_count", len(self.standard.sizes_mm)),
+            ("tolerance_nm", self.tolerance_nm),
+            ("size_count", len(self.standard.sizes_nm)),
         ]
         if self._narrowed():
-            parameters.append(("sizes_mm", self.standard.sizes_mm))
+            parameters.append(("sizes_nm", self.standard.sizes_nm))
         return StageRun(self.name, tuple(parameters))
 
     def _narrowed(self) -> bool:
@@ -315,35 +333,52 @@ class SnapDiametersToDrillTable:
         """
         return self.standard != DRILL_STANDARDS.get(self.standard.name)
 
-    def apply(self, data: DrillData) -> DrillData:
-        kept: list[Hole] = []
-        diagnostics: list[Diagnostic] = []
+    def quantise(self, hole: RawHole) -> tuple[int | None, tuple[Diagnostic, ...]]:
+        """The table size this measurement is, or ``None`` to drop the hole.
 
-        for hole in data.holes:
-            nearest = self._nearest(hole.diameter)
-            if not within(nearest, hole.diameter, self.tolerance_mm):
-                diagnostics.append(self._unknown(hole, nearest))
-                continue
-            kept.append(hole.with_diameter(nearest))
+        The measurement is scaled and never quantised. ``units.scaled_nm`` keeps
+        it exact, so that "which size is nearest?" is asked of the number the
+        artwork actually gave; rounding it to whole nanometres first does not
+        merely lose a fraction of one, it **manufactures a tie the measurement
+        did not have**. 5.0250004 mm is 5 025 000.4 nm and is nearer the
+        5 050 000 entry by six tenths of a nanometre, but the rounded copy sits
+        dead centre on 5 025 000 and the tie-break below — which exists to
+        resolve genuine ambiguity — then resolves a fabricated one, moving the
+        hole a whole drill size to 5 000 000.
 
-        return data.with_holes(kept).with_diagnostics(*diagnostics)
+        The comparison is exact on both sides, so it does not go through
+        ``tolerance.within``, which is typed for two whole-nanometre lengths.
+        The boundary it decides is the same one and inclusive for the same
+        reason: a bound the operator typed is a number they meant.
+        """
+        measurement_nm = scaled_nm(hole.diameter)
+        nearest_nm = self._nearest(measurement_nm)
+        if abs(measurement_nm - nearest_nm) > self.tolerance_nm:
+            return None, (self._unknown(hole, nearest_nm),)
+        return nearest_nm, ()
 
-    def _nearest(self, measured: float) -> float:
+    def _nearest(self, measurement_nm: Decimal) -> int:
         """The closest size in the table, ties going to the smaller bit.
 
         The tie-break is what stops the answer depending on the order the table
-        happens to be in: 6.35 sits exactly between the 6.3 and 6.4 metric
+        happens to be in: 14 250 000 sits exactly between the 14.0 and 14.5 mm
         sizes, and ``min`` would otherwise return whichever came first.
         """
-        return min(self.standard.sizes_mm, key=lambda size: (abs(size - measured), size))
+        return min(self.standard.sizes_nm, key=lambda size: (abs(measurement_nm - size), size))
 
-    def _unknown(self, hole: Hole, nearest: float) -> Diagnostic:
+    def _unknown(self, hole: RawHole, nearest_nm: int) -> Diagnostic:
         """Name the hole, the measurement, the closest bit — and what refused it.
 
         ``hole_index`` is the foreign key — the stable identity that survives a
-        later stage moving the hole — and ``nearest_mm`` is there so a consumer
+        later stage moving the hole — and ``nearest_nm`` is there so a consumer
         can say "you drew 30.0, the biggest bit is 25.0" without re-deriving the
-        search this stage has already done.
+        search this quantiser has already done.
+
+        The measurement and the position are quantised here and nowhere else in
+        this module: a payload key ending ``_nm`` promises whole nanometres, and
+        this is a figure to be printed rather than one to be compared. The
+        position is the measured one — no hole has been moved, and a finding
+        needs a coordinate the operator can find on the artwork.
 
         Which table refused the hole is the difference between a finding an
         operator can act on and one that misdirects them. 5.0 mm *is* a metric
@@ -360,30 +395,30 @@ class SnapDiametersToDrillTable:
         three computations. Present on both branches, so nothing has to branch
         on a key's absence to render it.
         """
-        stocked = len(self.standard.sizes_mm)
+        stocked = len(self.standard.sizes_nm)
         if self._narrowed():
             refused = (
                 f"no size in the drawer — the {self.standard.name} standard narrowed "
                 f"to {stocked} size{'' if stocked == 1 else 's'}; the nearest stocked "
-                f"bit is {self.standard.label(nearest)}"
+                f"bit is {self.standard.label(nearest_nm)}"
             )
         else:
             refused = (
                 f"no {self.standard.name} drill size — the nearest is "
-                f"{self.standard.label(nearest)}"
+                f"{self.standard.label(nearest_nm)}"
             )
         return Diagnostic.error(
             "unknown-diameter",
-            f"⌀{hole.diameter:.4f} mm at ({hole.x:.3f}, {hole.y:.3f}) is within "
-            f"{self.tolerance_mm:g} mm of {refused}; the hole has been dropped "
-            f"and appears in no artifact",
-            location=(hole.x, hole.y),
+            f"⌀{format_mm(hole.diameter, 4)} mm at ({format_mm(hole.x)}, "
+            f"{format_mm(hole.y)}) is within {format_nm(self.tolerance_nm)} mm of "
+            f"{refused}; the hole has been dropped and appears in no artifact",
+            location_nm=(nm_from_mm(hole.x), nm_from_mm(hole.y)),
             data=(
                 ("hole_index", hole.index),
-                ("diameter_mm", hole.diameter),
-                ("nearest_mm", nearest),
+                ("diameter_nm", nm_from_mm(hole.diameter)),
+                ("nearest_nm", nearest_nm),
                 ("standard", self.standard.name),
                 ("stocked_size_count", stocked),
-                ("tolerance_mm", self.tolerance_mm),
+                ("tolerance_nm", self.tolerance_nm),
             ),
         )
