@@ -30,6 +30,17 @@ from .drawing.content import (
     is_flagged,
     note_lines,
 )
+from .drawing.layout import (
+    ROW_PITCH as _ROW_PITCH,
+)
+from .drawing.layout import (
+    TITLE_MIN_FONT as _TITLE_MIN_FONT,
+)
+from .drawing.layout import (
+    Layout,
+)
+from .drawing.sheet import A3_LANDSCAPE_PLAIN as A3_LANDSCAPE
+from .drawing.sheet import A4_LANDSCAPE, Sheet
 
 __all__ = [
     "Sheet",
@@ -47,30 +58,7 @@ INK = "#111111"
 RED = "#c00000"
 FEINT = "#8a8a8a"
 
-#: Scales an engineer expects to read in a title block. The fitted scale is
-#: rounded *down* to one of these, so fitting can never overflow.
-PREFERRED_SCALES = (
-    20.0, 10.0, 5.0, 4.0, 2.0, 1.0,
-    0.5, 0.4, 0.25, 0.2, 0.1, 0.05, 0.04, 0.025, 0.02, 0.01,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class Sheet:
-    """A drawing sheet, in millimetres."""
-
-    name: str
-    width: float
-    height: float
-
-    @property
-    def margin(self) -> float:
-        return min(10.0, min(self.width, self.height) * 0.05)
-
-
-A4_LANDSCAPE = Sheet("A4", 297.0, 210.0)
 A4_PORTRAIT = Sheet("A4", 210.0, 297.0)
-A3_LANDSCAPE = Sheet("A3", 420.0, 297.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,71 +70,6 @@ class DrawingOptions:
     title: str = ""
     drawing_no: str = ""
     company: str = "ARTIFACT INSTRUMENTS"
-
-
-# ---------------------------------------------------------------------------
-# layout
-# ---------------------------------------------------------------------------
-
-Box = tuple[float, float, float, float]  # x0, y0, x1, y1
-
-
-@dataclass(frozen=True, slots=True)
-class Layout:
-    """Pure sheet geometry, independent of SVG generation."""
-
-    sheet: Sheet
-    border: Box
-    area: Box  # the drawing area proper
-    notes: Box
-    schedule: Box
-    title_block: Box
-    scale: float
-    origin_x: float
-    origin_y: float
-    half_width: float  # model half-extents of the drawn content
-    half_height: float
-    note_font: float
-
-    def point(self, x: float, y: float) -> tuple[float, float]:
-        """Model millimetres (Y up) → sheet millimetres (Y down)."""
-        return (self.origin_x + x * self.scale, self.origin_y - y * self.scale)
-
-    def length(self, mm: float) -> float:
-        return mm * self.scale
-
-    @property
-    def content(self) -> Box:
-        """The drawn content's extent on the sheet, in sheet millimetres."""
-        x0, y0 = self.point(-self.half_width, self.half_height)
-        x1, y1 = self.point(self.half_width, -self.half_height)
-        return (x0, y0, x1, y1)
-
-    @property
-    def scale_label(self) -> str:
-        if self.scale >= 1.0:
-            return f"{_trim(self.scale)}:1"
-        return f"1:{_trim(1.0 / self.scale)}"
-
-
-# space reserved inside the drawing area for drawing furniture, in sheet mm
-_LEFT_ALLOWANCE = 14.0  # left-hand height dimension (rotated label; see _draw_overall)
-_RIGHT_ALLOWANCE = 14.0  # balloons
-_TOP_ALLOWANCE = 16.0  # overall width dimension
-_BOTTOM_BASE = 12.0  # below the last chain dimension
-_ROW_PITCH = 8.0  # between stacked chain dimensions
-_GUTTER = 4.0
-
-#: The smallest a title block line is allowed to shrink to earn its width. A
-#: line that still does not fit at this size is truncated, so the enclosure
-#: note composes its candidate list against this size and no other: it is the
-#: widest string the line can ever be asked to carry.
-_TITLE_MIN_FONT = 1.6
-
-
-def _trim(value: float) -> str:
-    text = f"{value:.4f}".rstrip("0").rstrip(".")
-    return text or "0"
 
 
 def _fmt(value: float | str) -> str:
@@ -208,71 +131,7 @@ class DrawingSvgEmitter:
 
     def layout(self, data: DrillData) -> Layout:
         """Compute the sheet layout for ``data``. Pure; no drawing happens."""
-        sheet = self.options.sheet
-        margin = sheet.margin
-        border = (margin, margin, sheet.width - margin, sheet.height - margin)
-        inner_w = border[2] - border[0]
-        inner_h = border[3] - border[1]
-
-        right_w = min(92.0, inner_w * 0.4)
-        title_h = min(46.0, inner_h * 0.35)
-        right_x = border[2] - right_w
-        title_block = (right_x, border[3] - title_h, border[2], border[3])
-        schedule = (right_x, border[1], border[2], title_block[1] - 2.0)
-
-        left_w = max(20.0, inner_w - right_w - _GUTTER)
-        entries = note_lines(data)
-        note_font = min(
-            (fit_font(entry.text, left_w - 5.0, 2.6, 1.5) for entry in entries),
-            default=2.6,
-        )
-        notes_h = min(inner_h * 0.4, 6.0 + note_font * 1.6 * (len(entries) + 1))
-        notes = (border[0], border[3] - notes_h, border[0] + left_w, border[3])
-
-        area = (border[0], border[1], border[0] + left_w, notes[1] - _GUTTER)
-        area_w = area[2] - area[0]
-        area_h = max(20.0, area[3] - area[1])
-
-        rows = data.rows()
-        bottom = min(_BOTTOM_BASE + _ROW_PITCH * len(rows), area_h * 0.5)
-        usable_w = max(10.0, area_w - _LEFT_ALLOWANCE - _RIGHT_ALLOWANCE)
-        usable_h = max(10.0, area_h - _TOP_ALLOWANCE - bottom)
-
-        half_w, half_h = self._content_half_extents(data)
-        if self.options.scale is not None:
-            scale = float(self.options.scale)
-        else:
-            raw = min(usable_w / (2 * half_w), usable_h / (2 * half_h))
-            scale = _preferred_scale(raw)
-
-        return Layout(
-            sheet=sheet,
-            border=border,
-            area=area,
-            notes=notes,
-            schedule=schedule,
-            title_block=title_block,
-            scale=scale,
-            origin_x=area[0] + _LEFT_ALLOWANCE + usable_w / 2.0,
-            origin_y=area[1] + _TOP_ALLOWANCE + usable_h / 2.0,
-            half_width=half_w,
-            half_height=half_h,
-            note_font=note_font,
-        )
-
-    # -- layout helpers --------------------------------------------------
-    def _content_half_extents(self, data: DrillData) -> tuple[float, float]:
-        """Return layout extents in model millimetres, with a 5 mm empty floor."""
-        half_w = 5.0
-        half_h = 5.0
-        if data.reference is not None:
-            half_w = max(half_w, mm_from_nm(data.reference.width_nm) / 2.0)
-            half_h = max(half_h, mm_from_nm(data.reference.height_nm) / 2.0)
-        for hole in data.holes:
-            radius = mm_from_nm(hole.diameter_nm) / 2.0
-            half_w = max(half_w, abs(mm_from_nm(hole.x_nm)) + radius)
-            half_h = max(half_h, abs(mm_from_nm(hole.y_nm)) + radius)
-        return half_w, half_h
+        return Layout.for_sheet(self.options.sheet, data, scale=self.options.scale)
 
     def _sheet_title(self, data: DrillData) -> str:
         return self.options.title or data.source.path or "DRILL DRAWING"
@@ -1044,12 +903,3 @@ def _arrow(parent: ET.Element, x: float, y: float, dx: float, dy: float) -> None
         )
     )
     _sub(parent, "polygon", **{"class": "arrow"}, points=points, fill=INK, stroke="none")
-
-
-def _preferred_scale(raw: float) -> float:
-    if raw <= 0 or not math.isfinite(raw):
-        return 1.0
-    for candidate in PREFERRED_SCALES:
-        if candidate <= raw:
-            return candidate
-    return raw
