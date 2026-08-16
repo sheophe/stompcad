@@ -336,59 +336,67 @@ def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
 
 
 class TestCheckReferenceSize:
+    #: The declared panel, in whole nanometres. This stage's caller is a library
+    #: consumer whose authority is outside the catalogue, and they convert at
+    #: their own boundary rather than leaving this stage to do it a second time.
+    DECLARED = (113_000_000, 60_000_000)
+
     def test_matching_outline_is_silent(self):
-        data = make_data(at(0.0, 0.0, index=0), reference=ReferenceOutline(113.0, 60.0))
-        assert codes(CheckReferenceSize((113.0, 60.0)).apply(data)) == []
+        data = make_data(at(0, 0, 7_000_000, index=4), reference=ReferenceOutline(*self.DECLARED))
+        assert codes(CheckReferenceSize(self.DECLARED).apply(data)) == []
 
     def test_mismatch_warns(self):
-        data = make_data(at(0.0, 0.0, index=0), reference=ReferenceOutline(112.4, 60.0))
-        out = CheckReferenceSize((113.0, 60.0)).apply(data)
+        data = make_data(
+            at(0, 0, 7_000_000, index=4), reference=ReferenceOutline(112_400_000, 60_000_000)
+        )
+        out = CheckReferenceSize(self.DECLARED).apply(data)
         assert codes(out) == ["reference-size-mismatch"]
         assert out.diagnostics[0].severity is Severity.WARNING
 
     def test_is_a_pure_validator_and_returns_holes_untouched(self):
-        holes = (at(-40.0, 18.0, index=0), at(20.0, -18.75, 5.0, index=1))
-        data = make_data(*holes, reference=ReferenceOutline(100.0, 60.0))
-        out = CheckReferenceSize((113.0, 60.0)).apply(data)
+        holes = (
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            at(20_000_000, -18_750_000, 5_000_000, index=1),
+        )
+        data = make_data(*holes, reference=ReferenceOutline(100_000_000, 60_000_000))
+        out = CheckReferenceSize(self.DECLARED).apply(data)
         assert out.holes == holes
         assert out.reference == data.reference
 
-    def test_tolerance_boundary(self):
-        data = make_data(reference=ReferenceOutline(113.05, 60.0))
-        assert codes(CheckReferenceSize((113.0, 60.0), 0.05).apply(data)) == []
-        data = make_data(reference=ReferenceOutline(113.06, 60.0))
-        assert codes(CheckReferenceSize((113.0, 60.0), 0.05).apply(data)) == [
-            "reference-size-mismatch"
-        ]
+    def test_the_tolerance_boundary_is_inclusive_to_the_nanometre(self):
+        """A caller who declares a 50 000 nm slack on a panel that is 50 000 nm
+        out typed the number they meant.
 
-    def test_boundary_is_inclusive_despite_float_representation(self):
-        """Regression: 60.1 - 60.0 == 0.10000000000000142, not 0.1.
-
-        The user declared 60.0 and drew 60.1 with a 0.1 tolerance — a match they
-        typed exactly — and got a warning, because this check was the one place
-        in the pipeline that compared a float difference without any slack.
+        Exactly on the boundary and exactly one nanometre outside it: a fixture
+        sitting comfortably either side would stay green under ``<``.
         """
-        data = make_data(reference=ReferenceOutline(60.1, 60.0))
-        assert codes(CheckReferenceSize((60.0, 60.0), 0.1).apply(data)) == []
+        on_it = make_data(reference=ReferenceOutline(113_050_000, 60_000_000))
+        assert codes(CheckReferenceSize(self.DECLARED, 50_000).apply(on_it)) == []
 
-        data = make_data(reference=ReferenceOutline(60.0, 60.1))
-        assert codes(CheckReferenceSize((60.0, 60.0), 0.1).apply(data)) == []
-
-        # Slack absorbs representation error only; a real excess still warns.
-        data = make_data(reference=ReferenceOutline(60.2, 60.0))
-        assert codes(CheckReferenceSize((60.0, 60.0), 0.1).apply(data)) == [
+        one_nm_over = make_data(reference=ReferenceOutline(113_050_001, 60_000_000))
+        assert codes(CheckReferenceSize(self.DECLARED, 50_000).apply(one_nm_over)) == [
             "reference-size-mismatch"
         ]
 
-    def test_height_mismatch_alone_is_enough(self):
-        data = make_data(reference=ReferenceOutline(113.0, 59.0))
-        assert codes(CheckReferenceSize((113.0, 60.0)).apply(data)) == [
+    def test_a_width_mismatch_alone_is_enough(self):
+        """Paired with the height case below rather than folded into one
+        fixture: a guard covering two axes loses half its coverage invisibly
+        when one of the two tests goes, and the survivor's name still describes
+        the whole behaviour."""
+        data = make_data(reference=ReferenceOutline(112_000_000, 60_000_000))
+        assert codes(CheckReferenceSize(self.DECLARED).apply(data)) == [
+            "reference-size-mismatch"
+        ]
+
+    def test_a_height_mismatch_alone_is_enough(self):
+        data = make_data(reference=ReferenceOutline(113_000_000, 59_000_000))
+        assert codes(CheckReferenceSize(self.DECLARED).apply(data)) == [
             "reference-size-mismatch"
         ]
 
     def test_missing_outline_is_an_info_not_a_raise(self):
-        data = make_data(at(0.0, 0.0, index=0))
-        out = CheckReferenceSize((113.0, 60.0)).apply(data)
+        data = make_data(at(0, 0, 7_000_000, index=4))
+        out = CheckReferenceSize(self.DECLARED).apply(data)
         assert codes(out) == ["no-reference-outline"]
         assert out.diagnostics[0].severity is Severity.INFO
         assert out.holes == data.holes
@@ -398,38 +406,66 @@ class TestCheckReferenceSize:
         own arithmetic. This one rendered the deltas into prose and dropped
         them, leaving every reader to subtract the two sizes again.
 
-        The fixture is deliberately asymmetric — one axis under by 0.5, the
-        other over by 0.25 — so neither a swapped pair of axes nor a dropped
-        sign can pass. Both are exact in binary, so the payload can be pinned
-        without a tolerance.
+        The fixture is deliberately asymmetric — one axis under by 0.5 mm, the
+        other over by 0.25 mm — so neither a swapped pair of axes nor a dropped
+        sign can pass.
         """
-        data = make_data(reference=ReferenceOutline(112.5, 60.25))
+        data = make_data(reference=ReferenceOutline(112_500_000, 60_250_000))
 
-        diagnostic = CheckReferenceSize((113.0, 60.0)).apply(data).diagnostics[0]
+        diagnostic = CheckReferenceSize(self.DECLARED).apply(data).diagnostics[0]
 
-        assert (diagnostic.get("width_mm"), diagnostic.get("height_mm")) == (112.5, 60.25)
-        assert (
-            diagnostic.get("expected_width_mm"),
-            diagnostic.get("expected_height_mm"),
-        ) == (113.0, 60.0)
-        assert (diagnostic.get("delta_width_mm"), diagnostic.get("delta_height_mm")) == (
-            -0.5,
-            0.25,
+        assert (diagnostic.get("width_nm"), diagnostic.get("height_nm")) == (
+            112_500_000,
+            60_250_000,
         )
-        assert diagnostic.get("tolerance_mm") == 0.05
+        assert (
+            diagnostic.get("expected_width_nm"),
+            diagnostic.get("expected_height_nm"),
+        ) == self.DECLARED
+        assert (diagnostic.get("delta_width_nm"), diagnostic.get("delta_height_nm")) == (
+            -500_000,
+            250_000,
+        )
+        assert diagnostic.get("tolerance_nm") == 50_000
 
     def test_the_missing_outline_notice_says_what_it_was_going_to_check(self):
         """A consumer rendering this finding needs the declared size it could
         not check, and it is the one fact the stage still holds."""
         diagnostic = (
-            CheckReferenceSize((113.0, 60.0)).apply(make_data(at(0.0, 0.0, index=0)))
+            CheckReferenceSize(self.DECLARED).apply(make_data(at(0, 0, 7_000_000, index=4)))
         ).diagnostics[0]
 
         assert (
-            diagnostic.get("expected_width_mm"),
-            diagnostic.get("expected_height_mm"),
-        ) == (113.0, 60.0)
-        assert diagnostic.get("tolerance_mm") == 0.05
+            diagnostic.get("expected_width_nm"),
+            diagnostic.get("expected_height_nm"),
+        ) == self.DECLARED
+        assert diagnostic.get("tolerance_nm") == 50_000
+
+    def test_describe_reports_the_declared_panel_and_the_slack(self):
+        """Provenance in the same unit the comparison was made in. A consumer
+        reading a slack of 0.05 off a stage that compared 50 000 would be
+        reading a number the data was never checked against."""
+        run = CheckReferenceSize(self.DECLARED, 50_000).describe()
+
+        assert run.name == "check-reference-size"
+        assert (run.get("expected_width_nm"), run.get("expected_height_nm")) == self.DECLARED
+        assert run.get("tolerance_nm") == 50_000
+
+    def test_a_declared_size_that_is_not_whole_nanometres_is_refused(self):
+        """Checked at construction, where the offending value still has a call
+        site attached to it. A caller who hands over the millimetres they were
+        thinking in gets a comparison a million times too tight on every panel,
+        and the only sign of it is that every panel now mismatches.
+
+        Each of the three values separately: a guard that reads only the first
+        element of the pair would pass two of these.
+        """
+        with pytest.raises(TypeError):
+            CheckReferenceSize((113.0, 60_000_000))
+        with pytest.raises(TypeError):
+            CheckReferenceSize((113_000_000, 60.0))
+        with pytest.raises(TypeError):
+            CheckReferenceSize(self.DECLARED, 0.05)
 
 
 # --------------------------------------------------------------------------
