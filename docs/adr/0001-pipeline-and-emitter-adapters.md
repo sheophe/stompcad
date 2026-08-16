@@ -4,7 +4,7 @@
 **Date:** 2026-08-14
 **Deciders:** Pavlo Vakhnivskyi (Artifact Instruments)
 **Supersedes:** the `read_drill.py` / `emit.py` script pair
-**Amended by:** `0003-domain-quantisers.md` (2026-08-15) — the pipeline and the emitter
+**Amended by:** `0002-domain-quantisers.md` (2026-08-15) — the pipeline and the emitter
 adapters stand unchanged; what the stages quantise onto does not. The OCP claim in
 Decision 2 is qualified there and here.
 

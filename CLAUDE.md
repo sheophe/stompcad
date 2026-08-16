@@ -83,7 +83,7 @@ Source ──▶ Pipeline of Stages ──▶ Emitter ──▶ artifact
 
 **The pipeline is universal, and this is the load-bearing rule.** Snapping, diameter quantisation, deduplication and enclosure identification happen once, before any emitter sees the data. An earlier version clustered diameters inside the Excellon writer, so the drill file and the drawing could legitimately disagree about how many hole sizes a panel had — it emitted the same 7 mm bit as two tools. `docs/adr/0001-pipeline-and-emitter-adapters.md` records that incident and is worth reading before changing anything structural.
 
-**Each quantity snaps onto the domain's own answer set, not onto a number we chose.** Positions go to a declared grid, diameters to a declared drill standard (`DRILL_STANDARDS`, metric by default), and the reference outline to a Hammond 1590 catalogue footprint. We can no more make a custom bit than a custom case, which is why diameters do *not* snap to the grid: at `--grid 0.25` a measured 12.7 mm (1/2″) would become 12.75, a bit that exists in neither drawer. `docs/adr/0003-domain-quantisers.md` has the whole argument.
+**Each quantity snaps onto the domain's own answer set, not onto a number we chose.** Positions go to a declared grid, diameters to a declared drill standard (`DRILL_STANDARDS`, metric by default), and the reference outline to a Hammond 1590 catalogue footprint. We can no more make a custom bit than a custom case, which is why diameters do *not* snap to the grid: at `--grid 0.25` a measured 12.7 mm (1/2″) would become 12.75, a bit that exists in neither drawer. `docs/adr/0002-domain-quantisers.md` has the whole argument.
 
 A hole whose diameter matches no size in the declared standard is an **ERROR** and is **dropped**, and a run with any ERROR writes **no artifacts at all** — the Excellon format renders no diagnostics, so a drill file missing a hole looks perfectly well-formed.
 
@@ -104,7 +104,7 @@ The reference frame comes from the reference layer's largest non-circular path b
 
 **The Background layer must be drawn to the enclosure's BACKPLATE dimensions.** The catalogue stores backplate sizes, and a Hammond 1590 is die-cast with tapered walls ("low side wall draft angle (2° or less)", per the datasheet), so the face that actually gets drilled is smaller by `2 · d · tan θ` per axis — 1.9 mm on a 1590B, 6.3 mm on a 1590V.
 
-No tolerance can accept a face-drawn outline: matching one needs at least 2.4 mm on the shallowest common part, while two footprints tie at 2.0 mm because the closest pair in the catalogue is 4 mm apart. Required ≥ 2.4, permitted < 2.0. So the operator who carefully measures the face they are about to drill is the one who gets `unknown-enclosure` — or `unmatched-enclosure` if they declared a `--case` — which is why both messages name the convention, and why this paragraph exists. Do not "fix" it by widening `IdentifyHammondFootprint`'s tolerance; that trades a refusal for a guess between two real enclosures. `docs/adr/0003-domain-quantisers.md` has the arithmetic.
+No tolerance can accept a face-drawn outline: matching one needs at least 2.4 mm on the shallowest common part, while two footprints tie at 2.0 mm because the closest pair in the catalogue is 4 mm apart. Required ≥ 2.4, permitted < 2.0. So the operator who carefully measures the face they are about to drill is the one who gets `unknown-enclosure` — or `unmatched-enclosure` if they declared a `--case` — which is why both messages name the convention, and why this paragraph exists. Do not "fix" it by widening `IdentifyHammondFootprint`'s tolerance; that trades a refusal for a guess between two real enclosures. `docs/adr/0002-domain-quantisers.md` has the arithmetic.
 
 ### Identity and provenance
 
@@ -180,7 +180,7 @@ Property tests cover snapping idempotence, dedupe idempotence and `tools()` stab
 ## Documentation map
 
 - `docs/SPEC.md` — the specification. **Load-bearing, not a nicety**: three protocols must be understood before any concrete module makes sense. Keep it in sync; a stale spec here is a defect.
-- `docs/adr/` — architecture decisions with the incidents that drove them. 0001 is the pipeline and the emitter adapters; 0003 is the drill standards, the enclosure catalogue and the backplate convention. There is no 0002 — it was planned and never written, and the gap is left rather than renumbered.
+- `docs/adr/` — architecture decisions with the incidents that drove them. 0001 is the pipeline and the emitter adapters; 0002 is the drill standards, the enclosure catalogue and the backplate convention.
 - `docs/1590.pdf` — the Hammond datasheet `src/aidrill/enclosures.py` is generated from. It is the authority for every catalogue number; `tools/extract_1590.py` is the audit trail, and `tests/test_enclosures.py` re-extracts on every suite run.
 - `docs/parts/` — Hammond's 37 per-part drawings, plus `dimensions.tsv`, which carries the same 37 parts at 0.05 mm where `docs/1590.pdf` gives whole millimetres. **Not the shipped catalogue** — `enclosures.py` is still generated from `docs/1590.pdf`, and nothing at runtime reads this directory. `docs/parts/README.md` says what the TSV holds and where the two disagree; the adoption plan is in `docs/BACKLOG.md`.
 - `docs/BACKLOG.md` — agreed work that is deliberately not scheduled.

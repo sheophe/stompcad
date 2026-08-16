@@ -105,7 +105,7 @@ the shallowest common part, while two footprints tie at 2.0 mm because the
 closest pair in this catalogue is 4 mm apart -- required >= 2.4, permitted
 < 2.0. So the convention is the fix, not a number, and ``_unknown``'s message
 names it: the operator this catches is the one who measured *more* carefully.
-``docs/adr/0003-domain-quantisers.md`` records the arithmetic.
+``docs/adr/0002-domain-quantisers.md`` records the arithmetic.
 
 The default tolerance of 1.5 mm is bounded by the catalogue itself, not chosen
 for the fixture: two footprints can both match one outline once they are within

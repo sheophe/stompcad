@@ -308,13 +308,13 @@ class TestTheBackplateConvention:
     operator who measures the face they are about to drill is the one who lands
     on ``unknown-enclosure``, and widening the tolerance until their panel
     matched would make the tool guess between two real enclosures on every other
-    panel. ``docs/adr/0003-domain-quantisers.md`` has the arithmetic; these two
+    panel. ``docs/adr/0002-domain-quantisers.md`` has the arithmetic; these two
     tests are its two halves, and they are what a future widening has to get
     past.
     """
 
     #: A 1590B measured across its drilled face: 2.4 mm under the catalogue's
-    #: 61 mm on the tighter axis (ADR-0003).
+    #: 61 mm on the tighter axis (ADR-0002).
     FACE_DRAWN_1590B = (110.5, 58.6)
     #: 1590B3 (116 × 77) and 1590T (120 × 80) are the catalogue's closest pair,
     #: 4 mm apart. An outline halfway between them ties at 2 mm.

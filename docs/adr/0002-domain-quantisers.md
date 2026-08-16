@@ -1,4 +1,4 @@
-# ADR-0003: Domain quantisers — drill standards and the enclosure catalogue
+# ADR-0002: Domain quantisers — drill standards and the enclosure catalogue
 
 **Status:** Accepted
 **Date:** 2026-08-15
@@ -10,11 +10,6 @@
 does not. The per-part product PDFs it records as absent are now in `docs/parts/`, so the
 0.05 mm catalogue work is unblocked. Marked at both places it is stated, below and in
 Action Item 6, rather than edited away: an ADR is a dated record of what was known.
-
-> **On the numbering.** There is no ADR-0002. One was planned, covering `Hole.index` and
-> `DrillData.processing`, and the work shipped without it; those decisions are recorded in
-> the modules that carry them and in `docs/SPEC.md` §3. The gap is left rather than closed
-> so that the plan and the code keep referring to the same numbers.
 
 ---
 
