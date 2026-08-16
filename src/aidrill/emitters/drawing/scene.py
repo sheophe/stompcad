@@ -23,6 +23,7 @@ __all__ = [
     "Rect",
     "Polygon",
     "Text",
+    "Group",
     "Item",
     "Scene",
 ]
@@ -57,12 +58,17 @@ class Line:
 
 @dataclass(frozen=True, slots=True)
 class Circle:
-    """An unfilled circle. A backend without one draws four cubic Béziers."""
+    """A circle. A backend without one draws four cubic Béziers.
+
+    ``fill`` is opaque on a balloon, which has to hide the leader line and any
+    hole it lands on, and ``"none"`` everywhere else.
+    """
 
     cx: float
     cy: float
     r: float
     stroke: Stroke
+    fill: str = "none"
     cls: str = ""
 
 
@@ -103,7 +109,20 @@ class Text:
     cls: str = ""
 
 
-Item = Line | Circle | Rect | Polygon | Text
+@dataclass(frozen=True, slots=True)
+class Group:
+    """Marks that belong together, named by what they are.
+
+    One schedule row, one dimension chain, one section of the sheet: a reader
+    of the rendered drawing can select the group and get the whole of the thing
+    it names. A backend with no nesting of its own draws the children in order.
+    """
+
+    cls: str
+    items: tuple[Item, ...] = ()
+
+
+Item = Line | Circle | Rect | Polygon | Text | Group
 
 
 @dataclass(frozen=True, slots=True)

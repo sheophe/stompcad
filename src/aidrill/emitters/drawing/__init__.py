@@ -7,7 +7,7 @@ the same layout so two sheets of one panel cannot state it differently.
 
 from __future__ import annotations
 
-from .scene import FEINT, INK, RED, Circle, Item, Line, Polygon, Rect, Scene, Stroke, Text
+from .scene import FEINT, INK, RED, Circle, Group, Item, Line, Polygon, Rect, Scene, Stroke, Text
 
 __all__ = [
     "Scene",
@@ -18,6 +18,7 @@ __all__ = [
     "Rect",
     "Polygon",
     "Text",
+    "Group",
     "INK",
     "RED",
     "FEINT",
