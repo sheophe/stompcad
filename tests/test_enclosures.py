@@ -118,6 +118,38 @@ def test_every_catalogue_dimension_is_an_exact_whole_nanometre():
             assert type(value) is int, enclosure
 
 
+#: A 1590B, in the three plain ints the shipped catalogue holds it as. Every case
+#: below spoils exactly one of them, so what is being tested is the field named
+#: and not the constructor in general.
+WHOLE = {"length_nm": 112_400_000, "width_nm": 60_500_000, "height_nm": 31_000_000}
+
+
+@pytest.mark.parametrize("dimension", list(WHOLE))
+@pytest.mark.parametrize("value", [112.4, True], ids=["float", "bool"])
+def test_a_dimension_that_is_not_a_plain_int_is_refused_at_construction(dimension, value):
+    """The guard the loop above cannot reach, because the generator supplies ints.
+
+    ``HAMMOND_1590`` is green whether the class checks anything or not: the
+    values in it were written by ``render_module`` and are ints by construction.
+    So the constructor's promise has to be falsified from outside the shipped
+    table, by handing it what a caller can actually hand it.
+
+    Three fields and two values, separately, and neither axis is repetition. A
+    single case spoiling all three at once would pass with only one of them
+    guarded — the exception would be raised by the field that *is* checked and
+    the test could not tell which. And ``True`` is not a second spelling of the
+    float case: ``bool`` is a subclass of ``int``, so an ``isinstance`` guard
+    catches 112.4 and lets ``True`` through to become a one-nanometre case, which
+    is the failure this project's ``type(x) is int`` idiom exists for.
+
+    The message must name the offending field, which is why the match is
+    anchored on it: a guard that reported the wrong one would send whoever built
+    the catalogue to the wrong column.
+    """
+    with pytest.raises(TypeError, match=rf"^Enclosure\.{dimension} must be"):
+        Enclosure("1590B", **{**WHOLE, dimension: value})
+
+
 def test_the_conversion_is_exact_where_float_multiplication_is_not():
     """The one value in the shipped catalogue that the float spelling corrupts.
 
