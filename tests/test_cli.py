@@ -1304,8 +1304,11 @@ def test_the_grid_reaches_the_drawing_through_the_quantiser_not_the_options(
     # 1, not 0: a 0.5 mm grid moves a hole far enough to raise ``off-grid``.
     assert cli.main([str(FIXTURE), "--grid", "0.5", "--emit", f"drawing-svg={svg}"]) == 1
     text = svg.read_text()
-    assert "GRID 0.5 mm" in text
-    assert "GRID 0.25 mm" not in text
+    # Three decimals, like every other length on the sheet and in the drill
+    # file: the micron floor is justified by both artifacts printing three, so
+    # the stamp has to be one of them.
+    assert "GRID 0.500 mm" in text
+    assert "GRID 0.250 mm" not in text
 
 
 def test_the_output_settings_carry_no_grid():
@@ -1559,7 +1562,7 @@ def test_end_to_end_on_the_fixture(tmp_path, capsys):
     document = json.loads(doc.read_text())
     assert len(document["holes"]) == 7
     assert len(document["tools"]) == 2
-    assert sorted(t["diameter"] for t in document["tools"]) == [5.0, 7.0]
+    assert sorted(t["diameter_nm"] for t in document["tools"]) == [5_000_000, 7_000_000]
 
     codes = [d["code"] for d in document["diagnostics"]]
     assert codes.count("duplicate-hole") == 1
