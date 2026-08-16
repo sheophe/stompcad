@@ -1,0 +1,447 @@
+"""Tests for ``aidrill.quantise`` — the phase, not the three quantisers in it.
+
+What each quantiser answers is pinned in ``test_enclosure.py``,
+``test_diameters.py`` and ``test_snap.py``. What is pinned here is everything
+that only exists because they are composed: the order they run in, that an
+enclosure ERROR stops the run before a hole is touched, that a hole's identity
+survives the assembly, that the once-per-run clamp finding is not lost, and that
+the provenance records what actually happened rather than what was configured.
+
+Diagnostics are matched on ``code``, never on ``message``.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from aidrill.model import (
+    Diagnostic,
+    RawDrillData,
+    RawHole,
+    RawOutline,
+    Severity,
+    SourceInfo,
+)
+from aidrill.pipeline import (
+    DRILL_STANDARDS,
+    IdentifyHammondFootprint,
+    SnapDiametersToDrillTable,
+    SnapPositions,
+)
+from aidrill.quantise import quantise
+
+#: The fixture panel's own measurement: 113.000 × 60.000, which the catalogue
+#: calls a 112 × 61 mm 1590B. Every test that wants a panel the enclosure
+#: quantiser recognises uses this one.
+MEASURED = RawOutline(113.0, 60.0)
+
+
+def read(
+    *holes: RawHole,
+    reference: RawOutline | None = MEASURED,
+    diagnostics: tuple[Diagnostic, ...] = (),
+) -> RawDrillData:
+    """One source read, in the float millimetres a source answers in."""
+    return RawDrillData(
+        source=SourceInfo(path="panel.ai", drill_layer="Drill"),
+        reference=reference,
+        centre=(56.5, 30.0),
+        holes=holes,
+        diagnostics=diagnostics,
+    )
+
+
+def phase(raw: RawDrillData, **overrides):
+    """``quantise`` with the CLI's defaults, unless a test names another."""
+    quantisers = {
+        "enclosure": IdentifyHammondFootprint(),
+        "diameters": SnapDiametersToDrillTable(),
+        "positions": SnapPositions(250_000),
+    }
+    quantisers.update(overrides)
+    return quantise(raw, **quantisers)
+
+
+def codes(data) -> list[str]:
+    return [d.code for d in data.diagnostics]
+
+
+# ---------------------------------------------------------------------------
+# the order, which is the whole reason this is one function
+# ---------------------------------------------------------------------------
+
+
+class Watched:
+    """Quantisers that write their own name into a shared log when reached.
+
+    Subclasses rather than stand-ins, so what is observed is the real
+    composition: a stub that answered plausibly would let the phase reorder the
+    two whose answers actually depend on each other and still pass.
+    """
+
+    def __init__(self) -> None:
+        self.log: list[str] = []
+
+    def enclosure(self, expected_part: str | None = None) -> IdentifyHammondFootprint:
+        log = self.log
+
+        class WatchedEnclosure(IdentifyHammondFootprint):
+            def quantise(self, outline, centre):
+                log.append("enclosure")
+                return super().quantise(outline, centre)
+
+        return WatchedEnclosure(expected_part)
+
+    def diameters(self) -> SnapDiametersToDrillTable:
+        log = self.log
+
+        class WatchedDiameters(SnapDiametersToDrillTable):
+            def quantise(self, hole):
+                log.append(f"diameters {hole.index}")
+                return super().quantise(hole)
+
+        return WatchedDiameters()
+
+    def positions(self, grid_nm: int = 250_000) -> SnapPositions:
+        log = self.log
+
+        class WatchedPositions(SnapPositions):
+            def quantise(self, hole):
+                log.append(f"grid {hole.index}")
+                return super().quantise(hole)
+
+        return WatchedPositions(grid_nm)
+
+
+def test_the_phase_runs_enclosure_then_diameters_then_grid():
+    """The one deliberately literal statement of the order.
+
+    Order is the single thing none of the three could declare for itself, and
+    unlike the pipeline's it is not the caller's to choose either — so this is
+    where it is said. One hole, so the sequence is the whole answer: any swap of
+    the three reads differently here.
+    """
+    watched = Watched()
+
+    phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4)),
+        enclosure=watched.enclosure(),
+        diameters=watched.diameters(),
+        positions=watched.positions(),
+    )
+
+    assert watched.log == ["enclosure", "diameters 4", "grid 4"]
+
+
+def test_a_hole_the_drill_table_refuses_never_reaches_the_grid():
+    """Why diameters runs before the grid, made observable.
+
+    ``unknown-diameter`` is an ERROR that *drops* the hole, so a run that
+    snapped it to the grid first would have positioned a hole that appears in no
+    artifact. Hole 9 is a 30 mm cut-out no bit makes; holes 4 and 1 are real.
+    """
+    watched = Watched()
+
+    out = phase(
+        read(
+            RawHole(-20.0, 18.0, 7.0, 4),
+            RawHole(0.0, 18.0, 30.0, 9),
+            RawHole(20.0, 18.0, 5.0, 1),
+        ),
+        diameters=watched.diameters(),
+        positions=watched.positions(),
+    )
+
+    assert watched.log == [
+        "diameters 4",
+        "grid 4",
+        "diameters 9",  # refused, and no "grid 9" after it
+        "diameters 1",
+        "grid 1",
+    ]
+    assert [hole.index for hole in out.holes] == [4, 1]
+    assert codes(out) == ["unknown-diameter"]
+
+
+# ---------------------------------------------------------------------------
+# aborting, which a stage could not have done at all
+# ---------------------------------------------------------------------------
+
+
+def test_an_enclosure_error_stops_before_any_hole_is_quantised():
+    """A declared case the artwork contradicts withholds every artifact, so
+    quantising the holes is work for a file nobody receives.
+
+    Asserted on the *work*, not merely on the result: a phase that quantised
+    every hole and then threw them away would produce identical data and would
+    still be wrong about a panel with two thousand circles on it.
+    """
+    watched = Watched()
+
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), RawHole(20.0, 18.0, 5.0, 1)),
+        enclosure=watched.enclosure("1590BB"),  # the artwork is a 1590B
+        diameters=watched.diameters(),
+        positions=watched.positions(),
+    )
+
+    assert watched.log == ["enclosure"]
+    assert out.holes == ()
+    assert codes(out) == ["wrong-enclosure"]
+    assert out.worst_severity is Severity.ERROR
+
+
+def test_a_run_that_stopped_records_only_what_ran():
+    """A ``StageRun`` says what a quantiser *did*. A phase that recorded all
+    three regardless would tell a consumer the drill table and the grid had been
+    applied to a document holding no holes at all."""
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4)),
+        enclosure=IdentifyHammondFootprint("1590BB"),
+    )
+
+    assert [run.name for run in out.processing] == ["identify-enclosure"]
+
+
+@pytest.mark.parametrize(
+    "expected_part, reference, code",
+    [
+        ("1590BB", MEASURED, "wrong-enclosure"),
+        ("1590B", None, "unverifiable-enclosure"),
+        ("1590B", RawOutline(200.0, 100.0), "unmatched-enclosure"),
+    ],
+)
+def test_every_enclosure_error_stops_the_run(expected_part, reference, code):
+    """All three of them, because they arrive by three different paths through
+    the quantiser and only one of them was ever exercised by a single fixture."""
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=reference),
+        enclosure=IdentifyHammondFootprint(expected_part),
+    )
+
+    assert codes(out) == [code]
+    assert out.holes == ()
+
+
+def test_an_enclosure_warning_does_not_stop_the_run():
+    """``unknown-enclosure`` is a WARNING about *our* catalogue, not about the
+    panel: the outline keeps the size it was drawn at and the artifacts are
+    still written, so the holes must still be quantised."""
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(200.0, 100.0))
+    )
+
+    assert codes(out) == ["unknown-enclosure"]
+    assert [hole.index for hole in out.holes] == [4]
+    assert (out.reference.width_nm, out.reference.height_nm) == (200_000_000, 100_000_000)
+
+
+def test_a_dropped_hole_does_not_stop_the_run():
+    """``unknown-diameter`` withholds the artifacts, not the work. Every other
+    hole is still quantised, because the report has to name all of them."""
+    out = phase(
+        read(
+            RawHole(-20.0, 18.0, 30.0, 4),
+            RawHole(0.0, 18.0, 29.0, 1),
+            RawHole(20.0, 18.0, 5.0, 9),
+        )
+    )
+
+    assert codes(out) == ["unknown-diameter", "unknown-diameter"]
+    assert [hole.index for hole in out.holes] == [9]
+
+
+# ---------------------------------------------------------------------------
+# identity, which the assembly is the one place that can break
+# ---------------------------------------------------------------------------
+
+
+def test_every_finished_hole_keeps_the_number_its_measurement_had():
+    """4, 1, 9 — deliberately neither ordered nor equal to a list position.
+
+    ``Hole.__post_init__`` refuses a hole whose two identities differ, so this
+    cannot be broken quietly; it is asserted anyway because that guard is the
+    only thing standing between an assembly that renumbers and a diagnostic
+    naming a different hole than the drawing's balloon does. Numbered 0, 1, 2 the
+    assertion would pass just as happily for an implementation that enumerated.
+    """
+    out = phase(
+        read(
+            RawHole(-20.0, 18.0, 7.0, 4),
+            RawHole(0.0, 18.0, 7.0, 1),
+            RawHole(20.0, 18.0, 5.0, 9),
+        )
+    )
+
+    assert [hole.index for hole in out.holes] == [4, 1, 9]
+    assert [hole.raw.index for hole in out.holes] == [4, 1, 9]
+
+
+def test_the_measurement_travels_with_the_hole_it_was_taken_from():
+    """``raw`` is the artwork's own number, kept so a residual can be recomputed
+    rather than remembered. Each hole must carry *its* measurement, which a
+    fixture of identical circles could not show."""
+    out = phase(
+        read(RawHole(-19.9906, 18.0021, 6.9998, 4), RawHole(20.0031, -18.7, 5.0002, 1))
+    )
+
+    assert [hole.raw.x for hole in out.holes] == [-19.9906, 20.0031]
+    assert [(hole.x_nm, hole.y_nm) for hole in out.holes] == [
+        (-20_000_000, 18_000_000),
+        (20_000_000, -18_750_000),
+    ]
+    assert [hole.diameter_nm for hole in out.holes] == [7_000_000, 5_000_000]
+
+
+# ---------------------------------------------------------------------------
+# findings: the source's, the once-per-run one, and the per-hole ones
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("hole_count", [0, 1, 3])
+def test_a_clamped_grid_is_reported_exactly_once(hole_count):
+    """The finding the phase is the only thing positioned to raise.
+
+    ``SnapPositions`` sets it in its constructor, because a pitch below the
+    floor is a fact about the configuration and not about any hole. Returned per
+    hole it would repeat for every circle on the panel and vanish entirely on a
+    panel with none — which is the run where the operator most needs telling
+    that the grid they typed is not the one their holes were snapped to. Hence
+    the zero case, which is the one that actually falsifies the alternative.
+    """
+    holes = tuple(RawHole(float(i), 0.0, 7.0, index=i + 4) for i in range(hole_count))
+
+    out = phase(read(*holes), positions=SnapPositions(0))
+
+    assert codes(out).count("grid-too-fine") == 1
+    assert len(out.holes) == hole_count
+
+
+def test_an_unclamped_grid_says_nothing():
+    """The clamp finding is news, and a run that reports it on every panel is a
+    run that has trained the operator to skim past it."""
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)), positions=SnapPositions(250_000))
+    assert codes(out) == []
+
+
+def test_the_sources_own_findings_survive_the_phase():
+    """A source reports what it could not read — a reference layer with no
+    outline in it, a layer it had to guess about — and those findings are about
+    the read rather than about anything quantised. Losing them here would leave
+    the run with no record that the frame is page-relative.
+    """
+    prior = Diagnostic.warning("no-reference-outline", "the reference layer held no path")
+
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4), diagnostics=(prior,)))
+
+    assert out.diagnostics[0] is prior
+
+
+def test_the_sources_findings_come_before_the_phases_own():
+    """Order is the reading order of the report, and the read happened first.
+
+    A source finding shuffled in among the per-hole ones would have the operator
+    reading about hole 4's diameter before being told the panel has no frame.
+    """
+    prior = Diagnostic.warning("no-reference-outline", "the reference layer held no path")
+
+    out = phase(
+        read(RawHole(-20.0, 18.0, 30.0, 4), diagnostics=(prior,), reference=None),
+        positions=SnapPositions(0),
+    )
+
+    assert codes(out) == ["no-reference-outline", "grid-too-fine", "unknown-diameter"]
+
+
+def test_a_findings_hole_index_names_the_measurement_it_was_taken_from():
+    """The refusal is written by the quantiser that held the measurement, and
+    the drill file numbers what survived — so the two agree only if the phase
+    hands the measurement's own number over rather than a position."""
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4), RawHole(0.0, 18.0, 30.0, 9))
+    )
+
+    assert out.diagnostics[0].get("hole_index") == 9
+
+
+# ---------------------------------------------------------------------------
+# the frame and the conclusion
+# ---------------------------------------------------------------------------
+
+
+def test_the_outline_is_snapped_to_the_catalogue_and_the_measurement_is_kept():
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)))
+
+    assert (out.reference.width_nm, out.reference.height_nm) == (112_000_000, 61_000_000)
+    assert (out.reference.raw.width, out.reference.raw.height) == (113.0, 60.0)
+    assert (out.reference.centre_x_nm, out.reference.centre_y_nm) == (56_500_000, 30_000_000)
+
+
+def test_the_identified_footprint_reaches_the_document():
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)))
+
+    assert out.enclosure.candidates == ("1590B", "1590B2", "1590BS")
+    assert (out.enclosure.length_nm, out.enclosure.width_nm) == (112_000_000, 61_000_000)
+    assert out.enclosure.selected_part is None
+
+
+def test_a_panel_with_no_reference_layer_is_quantised_all_the_same():
+    """The source has already reported the absence; the phase adds nothing and
+    refuses nothing. Positions are page-relative and the holes still need bits.
+    """
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4), reference=None))
+
+    assert out.reference is None
+    assert out.enclosure is None
+    assert codes(out) == []
+    assert [hole.diameter_nm for hole in out.holes] == [7_000_000]
+
+
+def test_the_read_that_produced_the_document_is_carried_over():
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)))
+    assert out.source == SourceInfo(path="panel.ai", drill_layer="Drill")
+
+
+# ---------------------------------------------------------------------------
+# provenance
+# ---------------------------------------------------------------------------
+
+
+def test_the_phase_records_all_three_quantisers_in_the_order_they_ran():
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4)))
+
+    assert [run.name for run in out.processing] == [
+        "identify-enclosure",
+        "snap-diameters",
+        "snap",
+    ]
+
+
+def test_the_record_is_the_effective_configuration_not_the_arguments():
+    """The drawing's title block reads the pitch from here, so a clamped grid
+    must be recorded as the pitch the holes were really snapped to. Recording
+    the requested one would stamp a sheet with a grid no hole ever met."""
+    out = phase(
+        read(RawHole(-20.0, 18.0, 7.0, 4)),
+        diameters=SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]),
+        positions=SnapPositions(0),
+    )
+
+    assert out.last_run("snap").get("grid_nm") == 1_000
+    assert out.last_run("snap").get("warn_over_nm") == 250
+    assert out.last_run("snap-diameters").get("standard") == "fractional"
+    assert out.last_run("identify-enclosure").get("catalogue") == "Hammond 1590"
+
+
+def test_a_hole_less_panel_still_records_every_quantiser():
+    """Nothing was quantised and all three still ran: a consumer must be able to
+    tell a panel with no circles from a run that never reached the drill table.
+    """
+    out = phase(read())
+
+    assert out.holes == ()
+    assert [run.name for run in out.processing] == [
+        "identify-enclosure",
+        "snap-diameters",
+        "snap",
+    ]
