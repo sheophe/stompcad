@@ -45,6 +45,18 @@ way:
 2. **Vertical dimension labels must be rotated.** An unrotated label on the
    left-hand height dimension runs straight off the side of the sheet.
 
+**Two kinds of number live here, and the sheet is only trustworthy while they
+stay apart.** A *length* is what the model holds — a hole's position, its
+diameter, the outline, the catalogue footprint, the grid — and it is an exact
+integer nanometre that reaches the sheet through :func:`aidrill.units.format_nm`
+and nothing else. A dimension reading ``40.000`` because the model says
+``-40_000_000`` is a fact about the panel, and printing it from a float
+re-derived out of that integer would be a second rendering of a value that
+already has one. *Layout* is everything else — the scale factor, the sheet
+coordinate a label sits at, an arrowhead's geometry — and it is float
+millimetres on paper, arrived at through :func:`aidrill.units.mm_from_nm`.
+Nothing on the layout side is ever printed as a number the machinist reads.
+
 The emitter re-derives nothing and remembers nothing: no snapping, no diameter
 clustering, no deduplication, and no second copy of a pipeline setting. It reads
 ``tools()``, ``tool_counts()``, ``rows()``, ``diagnostics`` and ``processing``,
@@ -73,14 +85,14 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import ClassVar
 
-from ..formatting import format_mm
 from ..model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
 from ..pipeline import DRILL_STANDARDS
+from ..units import format_nm, mm_from_nm
 from .base import register_emitter
 
 __all__ = [
@@ -113,11 +125,36 @@ PREFERRED_SCALES = (
 
 DUP_CODE = "duplicate-hole"
 
+#: One value out of a ``Diagnostic.data`` payload, spelled here so the two
+#: functions that pass one around agree with the model rather than with each
+#: other. Kept as wide as the model declares it: narrowing is what would drop a
+#: ring in silence — see :func:`_flagged_holes`.
+_PayloadValue = float | int | str | tuple[int, ...]
+
 #: The ``StageRun`` name the title block's grid is read from, and the parameter
 #: within it. Names the *record*, not the class: the emitter reads provenance and
 #: has no import of, or opinion about, which stage wrote it.
 SNAP_STAGE = "snap"
-GRID_PARAMETER = "grid_mm"
+GRID_PARAMETER = "grid_nm"
+
+#: How many decimals of a millimetre a *position* — a schedule cell, a dimension
+#: label, an overall size — is printed to. Three, and not a matter of taste:
+#: ``SnapPositions.MICRON_NM`` floors the grid at a micron precisely because the
+#: drill file and this sheet both print three decimals, so two grid points the
+#: model holds apart cannot come out as one number on the sheet a machinist
+#: reads. Printing two here would give that floor away and let 18.000 and 18.001
+#: — two coordinates in the drill file — read as one on the drawing.
+#:
+#: A diameter is not on this list: how a bit is spelled belongs to the drill
+#: standard that chose it (see :func:`_diameter_label`), and a fractional bit has
+#: no honest decimal spelling at any precision.
+_POSITION_DECIMALS = 3
+
+#: The catalogue footprint's precision, which is Hammond's own: the per-part
+#: drawings publish 0.05 mm and the 1590B sheet prints ``112.40 [4.425]``. This
+#: is the number the operator orders the box by, so it is printed the way the
+#: datasheet they will check it against prints it.
+_FOOTPRINT_DECIMALS = 2
 
 #: The same idiom for the schedule's diameter spelling: the ``StageRun`` name
 #: the drill standard is read from, and the parameter within it. The standard
@@ -389,15 +426,23 @@ class DrawingSvgEmitter:
 
     # -- layout helpers --------------------------------------------------
     def _content_half_extents(self, data: DrillData) -> tuple[float, float]:
-        """Half-width and half-height of everything drawn in model space."""
+        """Half-width and half-height of everything drawn, in model millimetres.
+
+        Layout, not length: these two feed the fitted scale and the sheet
+        coordinate of the centrelines, and neither number is ever printed. So
+        they cross into float millimetres here — where a 5 mm floor for an empty
+        panel is a sensible thing to write — rather than carrying nanometres
+        into arithmetic that ends in a division by a sheet width.
+        """
         half_w = 5.0
         half_h = 5.0
         if data.reference is not None:
-            half_w = max(half_w, data.reference.width / 2.0)
-            half_h = max(half_h, data.reference.height / 2.0)
+            half_w = max(half_w, mm_from_nm(data.reference.width_nm) / 2.0)
+            half_h = max(half_h, mm_from_nm(data.reference.height_nm) / 2.0)
         for hole in data.holes:
-            half_w = max(half_w, abs(hole.x) + hole.diameter / 2.0)
-            half_h = max(half_h, abs(hole.y) + hole.diameter / 2.0)
+            radius = mm_from_nm(hole.diameter_nm) / 2.0
+            half_w = max(half_w, abs(mm_from_nm(hole.x_nm)) + radius)
+            half_h = max(half_h, abs(mm_from_nm(hole.y_nm)) + radius)
         return half_w, half_h
 
     def _sheet_title(self, data: DrillData) -> str:
@@ -434,8 +479,8 @@ class DrawingSvgEmitter:
             self._rounded(
                 group,
                 layout,
-                data.reference.width,
-                data.reference.height,
+                mm_from_nm(data.reference.width_nm),
+                mm_from_nm(data.reference.height_nm),
                 cls="outline",
                 stroke=INK,
                 stroke_width=0.4,
@@ -452,6 +497,11 @@ class DrawingSvgEmitter:
         stroke: str,
         stroke_width: float = 0.4,
     ) -> None:
+        """Draw a rounded rectangle of ``width`` × ``height`` model millimetres.
+
+        Millimetres and not nanometres, because nothing here is printed: every
+        number this method produces is a sheet coordinate or a corner radius.
+        """
         x, y = layout.point(-width / 2.0, height / 2.0)
         radius = min(3.0, width / 4.0, height / 4.0) * layout.scale
         _sub(
@@ -541,8 +591,8 @@ class DrawingSvgEmitter:
         flagged = _flagged_holes(data.diagnostics)
 
         for hole in data.holes:
-            cx, cy = layout.point(hole.x, hole.y)
-            radius = max(0.4, layout.length(hole.diameter) / 2.0)
+            cx, cy = layout.point(mm_from_nm(hole.x_nm), mm_from_nm(hole.y_nm))
+            radius = max(0.4, layout.length(mm_from_nm(hole.diameter_nm)) / 2.0)
             is_dup = _is_flagged(hole, flagged)
             colour = RED if is_dup else INK
 
@@ -647,7 +697,14 @@ class DrawingSvgEmitter:
         """
         rows = data.rows()
         content_bottom = layout.point(0.0, -layout.half_height)[1]
-        edge = data.reference.width / 2.0 if data.reference is not None else None
+        # A station is a *length*: it is subtracted from its neighbour and the
+        # difference is printed, so it stays an exact nanometre all the way to
+        # ``format_nm``. The floor mirrors ``DrillData.with_origin``'s, and for
+        # its reason — an outline of an odd number of nanometres has no exact
+        # half, and half a nanometre is three decimal places below anything this
+        # sheet prints, where a float edge would be a quantity the drill file and
+        # the drawing could round differently.
+        edge_nm = data.reference.width_nm // 2 if data.reference is not None else None
 
         top = content_bottom + 8.0
         # The extension lines overshoot the dimension line by 1.5, so that is
@@ -671,19 +728,24 @@ class DrawingSvgEmitter:
                 fill=RED,
             )
 
-        for level, (row_y, holes) in enumerate(ordered[:drawn]):
-            stations = [hole.x for hole in holes]
-            if edge is not None:
-                stations = [-edge, *stations, edge]
-            stations = _dedupe_sorted(stations)
-            if len(stations) < 2:
+        for level, (row_y_nm, holes) in enumerate(ordered[:drawn]):
+            stations_nm = [hole.x_nm for hole in holes]
+            if edge_nm is not None:
+                stations_nm = [-edge_nm, *stations_nm, edge_nm]
+            # ``set``, with no tolerance and nothing to choose: a station is an
+            # integer, so two of them are the same station or they are not. The
+            # band this used to collapse was absorbing float error that no
+            # longer exists — and a hole sitting on the panel edge coincides with
+            # it exactly or is a hole somewhere else.
+            stations_nm = sorted(set(stations_nm))
+            if len(stations_nm) < 2:
                 continue
 
             chain = _sub(parent, "g", **{"class": "dim-chain"})
             dim_y = content_bottom + 8.0 + _ROW_PITCH * level
 
-            for x in stations:
-                sx, sy = layout.point(x, row_y)
+            for x_nm in stations_nm:
+                sx, sy = layout.point(mm_from_nm(x_nm), mm_from_nm(row_y_nm))
                 _sub(
                     chain,
                     "line",
@@ -696,9 +758,9 @@ class DrawingSvgEmitter:
                     stroke_width=0.15,
                 )
 
-            for start, end in pairwise(stations):
-                x1 = layout.point(start, 0.0)[0]
-                x2 = layout.point(end, 0.0)[0]
+            for start_nm, end_nm in pairwise(stations_nm):
+                x1 = layout.point(mm_from_nm(start_nm), 0.0)[0]
+                x2 = layout.point(mm_from_nm(end_nm), 0.0)[0]
                 _sub(
                     chain,
                     "line",
@@ -712,7 +774,9 @@ class DrawingSvgEmitter:
                 )
                 _arrow(chain, x1, dim_y, 1.0, 0.0)
                 _arrow(chain, x2, dim_y, -1.0, 0.0)
-                label = f"{end - start:.2f}"
+                # The subtraction is the two stations', not the two sheet
+                # coordinates': ``x1`` and ``x2`` have been through the scale.
+                label = format_nm(end_nm - start_nm, _POSITION_DECIMALS)
                 _text(
                     chain,
                     (x1 + x2) / 2.0,
@@ -725,21 +789,22 @@ class DrawingSvgEmitter:
 
     def _draw_overall(self, parent: ET.Element, layout: Layout, data: DrillData) -> None:
         if data.reference is not None:
-            width, height = data.reference.width, data.reference.height
+            width_nm, height_nm = data.reference.width_nm, data.reference.height_nm
         else:
-            xs = [hole.x for hole in data.holes]
-            ys = [hole.y for hole in data.holes]
+            xs = [hole.x_nm for hole in data.holes]
+            ys = [hole.y_nm for hole in data.holes]
             if not xs:
                 return
-            width, height = max(xs) - min(xs), max(ys) - min(ys)
-        if width <= 0 and height <= 0:
+            width_nm, height_nm = max(xs) - min(xs), max(ys) - min(ys)
+        if width_nm <= 0 and height_nm <= 0:
             return
 
         group = _sub(parent, "g", **{"class": "dim-overall-group"})
 
-        if width > 0:
-            left = layout.point(-width / 2.0, 0.0)[0]
-            right = layout.point(width / 2.0, 0.0)[0]
+        if width_nm > 0:
+            half = mm_from_nm(width_nm) / 2.0
+            left = layout.point(-half, 0.0)[0]
+            right = layout.point(half, 0.0)[0]
             top = layout.point(0.0, layout.half_height)[1]
             dim_y = top - 10.0
             for x in (left, right):
@@ -771,15 +836,16 @@ class DrawingSvgEmitter:
                 group,
                 (left + right) / 2.0,
                 dim_y - 1.4,
-                f"{width:.2f}",
+                format_nm(width_nm, _POSITION_DECIMALS),
                 2.4,
                 anchor="middle",
                 cls="dim-overall",
             )
 
-        if height > 0:
-            top = layout.point(0.0, height / 2.0)[1]
-            bottom = layout.point(0.0, -height / 2.0)[1]
+        if height_nm > 0:
+            half = mm_from_nm(height_nm) / 2.0
+            top = layout.point(0.0, half)[1]
+            bottom = layout.point(0.0, -half)[1]
             left = layout.point(-layout.half_width, 0.0)[0]
             dim_x = left - 10.0
             for y in (top, bottom):
@@ -812,7 +878,7 @@ class DrawingSvgEmitter:
                 group,
                 dim_x - 1.4,
                 (top + bottom) / 2.0,
-                f"{height:.2f}",
+                format_nm(height_nm, _POSITION_DECIMALS),
                 2.4,
                 anchor="middle",
                 cls="dim-overall",
@@ -912,13 +978,16 @@ class DrawingSvgEmitter:
                 # The hole's own id, not its place in the tuple — see
                 # ``_balloon``. NO. is the column a diagnostic is joined on.
                 (str(hole.index), "sched-no"),
-                # format_mm, not an f-string: a hole at -0.0004 printed "-0.00"
-                # here while the Excellon writer printed "0.000" for the very
-                # same hole.
-                (format_mm(hole.x, 2), "sched-x"),
-                (format_mm(hole.y, 2), "sched-y"),
-                (diameter_label(hole.diameter), "sched-dia"),
-                (f"T{tools[hole.diameter]}", "sched-tool"),
+                # format_nm, not an f-string over ``mm_from_nm``: the position
+                # is an integer and this is the one rendering of it, so there is
+                # no float in between for the drill file to disagree with. It is
+                # also where the negative zero was — a hole at -400 nm printed
+                # "-0.000" here while the Excellon writer printed "0.000" for the
+                # very same hole.
+                (format_nm(hole.x_nm, _POSITION_DECIMALS), "sched-x"),
+                (format_nm(hole.y_nm, _POSITION_DECIMALS), "sched-y"),
+                (diameter_label(hole.diameter_nm), "sched-dia"),
+                (f"T{tools[hole.diameter_nm]}", "sched-tool"),
             )
             for (cx, anchor), (value, cls) in zip(columns, cells):
                 _text(
@@ -956,14 +1025,14 @@ class DrawingSvgEmitter:
             stroke=INK,
             stroke_width=0.2,
         )
-        for diameter, tool in listed:
+        for diameter_nm, tool in listed:
             y += pitch
             _text(
                 group,
                 x0 + 2.0,
                 y,
                 _fits(
-                    f"T{tool}  {diameter_label(diameter)}  QTY {counts[diameter]}",
+                    f"T{tool}  {diameter_label(diameter_nm)}  QTY {counts[diameter_nm]}",
                     font,
                     width - 4.0,
                 ),
@@ -1205,57 +1274,48 @@ def _preferred_scale(raw: float) -> float:
     return raw
 
 
-def _dedupe_sorted(values: Iterable[float], tolerance: float = 1e-6) -> list[float]:
-    ordered = sorted(values)
-    out: list[float] = []
-    for value in ordered:
-        if not out or abs(value - out[-1]) > tolerance:
-            out.append(value)
-    return out
-
-
 def _grid_note(data: DrillData) -> str:
     """What the title block says about the grid, read from what actually ran.
 
     The grid used to arrive through ``DrawingOptions``, defaulting to 0.25, so a
     library consumer who snapped at 0.5 and called ``emit`` got a sheet stamped
     with a pitch the holes had never been near. The number is a fact about the
-    data, so it comes out of the data.
+    data, so it comes out of the data — the *effective* pitch, which is the one
+    ``SnapPositions.describe`` reports and the one the holes are multiples of.
 
-    Three answers, all of them honest:
-
-    * a recorded positive pitch — print it;
-    * a recorded ``0`` — ``SnapPositions`` ran as the identity (that is exactly
-      what its ``enabled: False`` records), so say OFF rather than "GRID 0 mm",
-      which reads as a pitch;
-    * no record at all — say so. Hand-built ``DrillData`` never met a pipeline,
-      and a plausible-looking default is the failure this whole change is about.
+    Two answers, both of them honest: a recorded pitch, printed at the full
+    three decimals because a pitch is a length like any other and the grid is a
+    whole number of microns, so nothing is lost; or no pitch, said out loud. A
+    hand-built ``DrillData`` never met the quantisation phase, and a
+    plausible-looking default is the failure this whole function is about.
     """
     run = data.last_run(SNAP_STAGE)
-    grid = None if run is None else run.get(GRID_PARAMETER)
-    # ``StageRun`` payloads are deliberately generic, so a value that is not a
-    # number is not a pitch and gets the same answer as no value at all. ``bool``
-    # is excluded explicitly because it is a legal ``ParameterValue`` *and* an
-    # ``int`` in Python: a recorded ``True`` would otherwise stamp the sheet
-    # "GRID 1 mm", which is a plausible, wrong and entirely drillable number.
-    if not isinstance(grid, (int, float)) or isinstance(grid, bool):
+    grid_nm = None if run is None else run.get(GRID_PARAMETER)
+    # ``StageRun`` payloads are deliberately generic. The model holds an ``_nm``
+    # key to whole nanometres at construction — which is what rules out the
+    # ``True`` that would otherwise have stamped the sheet "GRID 0.000 mm" — but
+    # it admits a *tuple* of them, since one parameter in the pipeline is a table
+    # of sizes. A table is not a pitch, and neither is a pitch of nothing, so
+    # both get the same answer as no record at all. ``type(...) is int`` rather
+    # than ``isinstance`` on the precedent the model sets.
+    if type(grid_nm) is not int or grid_nm <= 0:
         return "GRID NOT RECORDED"
-    if grid > 0:
-        return f"GRID {_trim(float(grid))} mm"
-    return "GRID OFF"
+    return f"GRID {format_nm(grid_nm)} mm"
 
 
-def _millimetre_label(diameter: float) -> str:
+def _millimetre_label(diameter_nm: int) -> str:
     """``⌀7.00 mm`` — the fallback spelling, when no standard was recorded.
 
-    Through ``format_mm`` rather than an f-string for the reason the schedule's
-    X and Y are: a value that rounds to zero from below printed ``-0.00`` here
-    while the Excellon writer printed ``0.000`` for the same hole.
+    Two decimals, which is what ``DrillStandard``'s own metric label prints, so
+    a panel that met the drill table and one that did not spell the same bit the
+    same way. Through ``format_nm`` because the diameter is an integer and this
+    is its one rendering: a float re-derived from it and formatted separately is
+    the second spelling the whole unit exists to abolish.
     """
-    return f"⌀{format_mm(diameter, 2)} mm"
+    return f"⌀{format_nm(diameter_nm, 2)} mm"
 
 
-def _diameter_label(data: DrillData) -> Callable[[float], str]:
+def _diameter_label(data: DrillData) -> Callable[[int], str]:
     """How the schedule spells a diameter, taken from the standard that ran.
 
     The drill table owns the display form, and ``DrillStandard.label`` is a
@@ -1280,9 +1340,8 @@ def _diameter_label(data: DrillData) -> Callable[[float], str]:
     # name a standard. This guard is for the type checker rather than for the
     # output — every ``ParameterValue`` is hashable, so ``get`` would return
     # ``None`` for a non-name anyway — and it is kept because the alternative is
-    # a lookup whose key type is unchecked. Unlike ``_grid_note``'s
-    # ``isinstance``, which is load-bearing: a recorded ``True`` really would
-    # print there.
+    # a lookup whose key type is unchecked. Unlike ``_grid_note``'s guard, which
+    # is load-bearing: a tuple of pitches really would print there.
     if not isinstance(name, str):
         return _millimetre_label
     standard = DRILL_STANDARDS.get(name)
@@ -1294,15 +1353,18 @@ def _diameter_label(data: DrillData) -> Callable[[float], str]:
 def _enclosure_note(data: DrillData, capacity: int) -> str:
     """What the title block says the panel is, read from the identified match.
 
-    ``HAMMOND 1590  112 × 61 mm  CANDIDATES B / B2 / BS``. Three decisions in
+    ``HAMMOND 1590  112.40 × 60.50 mm  CANDIDATES B / B2``. Three decisions in
     one line, each of which the drawing would otherwise get wrong:
 
     * **The catalogue footprint, never the measured outline.** The artwork comes
-      to 113.000 × 60.000 for a 1590B; 112 × 61 is the number on the datasheet
-      the operator orders the box by, and the number every other consumer of
-      this panel has already agreed on.
+      to 113.000 × 60.000 for a 1590B; 112.40 × 60.50 is the number on the
+      datasheet the operator orders the box by, and the number every other
+      consumer of this panel has already agreed on. It is printed to the
+      catalogue's own two decimals — see ``_FOOTPRINT_DECIMALS`` — and out of the
+      integer nanometres the match holds, so the sheet and the JSON cannot state
+      one footprint two ways.
     * **Candidates, never a part.** A 2-D outline identifies a footprint — 37
-      catalogue parts collapse into 22 footprints because many differ only in
+      catalogue parts collapse into 26 footprints because many differ only in
       height — so the sheet lists every part sharing the outline and names one
       only when the operator declared it with ``--case``. The declared part
       replaces the list rather than joining it: the question the list asks has
@@ -1310,20 +1372,20 @@ def _enclosure_note(data: DrillData, capacity: int) -> str:
     * **The order it was given.** ``candidates`` is rendered as handed over,
       because ordering it here would be the emitter deciding a fact the match
       already carries. Sorting happens to be invisible today — ``footprints()``
-      sorts, so all 22 production footprints arrive alphabetical — which is
+      sorts, so all 26 production footprints arrive alphabetical — which is
       exactly why it must not be done here: whoever builds the match owns the
       order, and a matcher that later ordered by height would find the drawing
       quietly undoing it.
 
     ``rotated`` is stated because the two numbers on the sheet would otherwise
     contradict each other: the match keeps the catalogue's orientation while the
-    drawing dimensions the artwork's, so a turned 1590B is dimensioned 61 × 112
-    beside an enclosure line reading 112 × 61.
+    drawing dimensions the artwork's, so a turned 1590B is dimensioned 60.50 ×
+    112.40 beside an enclosure line reading 112.40 × 60.50.
 
     No match at all is said out loud, for the reason :func:`_grid_note` says
     ``GRID NOT RECORDED``. A missing line reads as a Hammond case nobody wrote
     down, and "this is not a case we stock" is a legitimate outcome — the
-    catalogue holds 22 footprints and the world holds rather more.
+    catalogue holds 26 footprints and the world holds rather more.
 
     ``capacity`` is how many characters the line may run to, and it is required
     rather than optional because there is no honest default: a note composed
@@ -1336,7 +1398,10 @@ def _enclosure_note(data: DrillData, capacity: int) -> str:
     match = data.enclosure
     if match is None:
         return "ENCLOSURE NOT IDENTIFIED"
-    size = f"{match.length_mm} × {match.width_mm} mm"
+    size = (
+        f"{format_nm(match.length_nm, _FOOTPRINT_DECIMALS)} × "
+        f"{format_nm(match.width_nm, _FOOTPRINT_DECIMALS)} mm"
+    )
     if match.rotated:
         size += " ROTATED"
     head = f"{match.family.upper()}  {size}  "
@@ -1387,13 +1452,14 @@ def _designator(part: str, match: EnclosureMatch) -> str:
     return part
 
 
-def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[float | int | str]:
+def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[_PayloadValue]:
     """The ``Hole.index`` of every hole ``Deduplicate`` kept and reported.
 
     ``hole_index`` is the survivor's stable identity, which is why it exists: a
-    coordinate is only true until the next stage moves the hole, and ``location``
-    is written at the moment of the report. A diagnostic carrying no id names no
-    hole this emitter can place, so it rings nothing rather than guessing.
+    coordinate is only true until the next stage moves the hole, and
+    ``location_nm`` is written at the moment of the report. A diagnostic
+    carrying no id names no hole this emitter can place, so it rings nothing
+    rather than guessing.
 
     Typed as ``Diagnostic.data``'s own value type and not ``int`` on purpose. The
     payload is generic and the set is only ever tested with ``in``, so a value
@@ -1401,6 +1467,13 @@ def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[float | int |
     filter would also throw away a ``3.0`` that equals, and would have correctly
     rung, hole 3. Dropping a ring in silence is the failure this function was
     rewritten to fix, so no filter is added to narrow the annotation.
+
+    The value type now includes a tuple of identities, because ``duplicate-hole``
+    carries ``dropped_indices`` and ``grid-ambiguous`` carries ``tied_indices``.
+    Those are the holes the pipeline did *not* keep and holes it did not single
+    out, neither of which is what the ring means — and the widening costs
+    nothing, since a tuple equals no ``Hole.index``. The one thing that must not
+    happen is a narrowing that decides which shapes are worth looking at.
     """
     return frozenset(
         index
@@ -1409,7 +1482,7 @@ def _flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[float | int |
     )
 
 
-def _is_flagged(hole: Hole, flagged: frozenset[float | int | str]) -> bool:
+def _is_flagged(hole: Hole, flagged: frozenset[_PayloadValue]) -> bool:
     """Identity, not geometry. Whoever the pipeline named is who gets the ring.
 
     Two earlier versions decided this from positions. The first matched within a
