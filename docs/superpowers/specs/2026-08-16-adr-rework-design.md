@@ -76,21 +76,29 @@ The figure follows this structure:
 
 ```mermaid
 flowchart LR
-    source["AiPdfSource<br/>Source"]
-    quantise["Quantisation<br/>quantise()<br/>IdentifyHammondFootprint → SnapDiametersToDrillTable → SnapPositions"]
+    source["AiPdfSource"]
+  
+    subgraph quantise["quantise()"]
+        direction TB
+        footprint["IdentifyHammondFootprint"]
+        snap_drill["SnapDiametersToDrillTable"]
+        snap_position["SnapPositions"]
+        footprint -.-> snap_drill
+        snap_drill -.-> snap_position
+    end
 
     subgraph pipeline["Pipeline"]
         direction LR
-        dedupe["Deduplicate<br/>Stage"]
-        ties["ReviewGridTies<br/>Stage"]
-        sort["SortHoles<br/>Stage"]
+        dedupe["Deduplicate"]
+        ties["ReviewGridTies"]
+        sort["SortHoles"]
         dedupe -->|DrillData| ties
         ties -->|DrillData| sort
     end
 
-    excellon["ExcellonEmitter<br/>Emitter"]
-    drawing["DrawingSvgEmitter<br/>Emitter"]
-    json["JsonEmitter<br/>Emitter"]
+    excellon["ExcellonEmitter"]
+    drawing["DrawingSvgEmitter"]
+    json["JsonEmitter"]
 
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
