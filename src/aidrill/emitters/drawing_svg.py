@@ -17,7 +17,7 @@ from typing import ClassVar
 
 from ..model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
 from ..pipeline import DRILL_STANDARDS
-from ..units import format_nm, mm_from_nm
+from ..units import Nanometre, format_nm, mm_from_nm
 from .base import register_emitter
 
 __all__ = [
@@ -573,7 +573,9 @@ class DrawingSvgEmitter:
         # half, and half a nanometre is three decimal places below anything this
         # sheet prints, where a float edge would be a quantity the drill file and
         # the drawing could round differently.
-        edge_nm = data.reference.width_nm // 2 if data.reference is not None else None
+        edge_nm = (
+            Nanometre(data.reference.width_nm // 2) if data.reference is not None else None
+        )
 
         top = content_bottom + 8.0
         # The extension lines overshoot the dimension line by 1.5, so that is
@@ -600,7 +602,7 @@ class DrawingSvgEmitter:
         for level, (row_y_nm, holes) in enumerate(ordered[:drawn]):
             stations_nm = [hole.x_nm for hole in holes]
             if edge_nm is not None:
-                stations_nm = [-edge_nm, *stations_nm, edge_nm]
+                stations_nm = [Nanometre(-edge_nm), *stations_nm, edge_nm]
             # Stations are integer nanometres, so exact equality alone identifies
             # duplicate dimension stations, including an edge-aligned hole.
             stations_nm = sorted(set(stations_nm))
@@ -642,7 +644,7 @@ class DrawingSvgEmitter:
                 _arrow(chain, x2, dim_y, -1.0, 0.0)
                 # The subtraction is the two stations', not the two sheet
                 # coordinates': ``x1`` and ``x2`` have been through the scale.
-                label = format_nm(end_nm - start_nm, _POSITION_DECIMALS)
+                label = format_nm(Nanometre(end_nm - start_nm), _POSITION_DECIMALS)
                 _text(
                     chain,
                     (x1 + x2) / 2.0,
@@ -661,7 +663,8 @@ class DrawingSvgEmitter:
             ys = [hole.y_nm for hole in data.holes]
             if not xs:
                 return
-            width_nm, height_nm = max(xs) - min(xs), max(ys) - min(ys)
+            width_nm = Nanometre(max(xs) - min(xs))
+            height_nm = Nanometre(max(ys) - min(ys))
         if width_nm <= 0 and height_nm <= 0:
             return
 
@@ -1145,15 +1148,15 @@ def _grid_note(data: DrillData) -> str:
     # than ``isinstance`` on the precedent the model sets.
     if type(grid_nm) is not int or grid_nm <= 0:
         return "GRID NOT RECORDED"
-    return f"GRID {format_nm(grid_nm)} mm"
+    return f"GRID {format_nm(Nanometre(grid_nm))} mm"
 
 
-def _millimetre_label(diameter_nm: int) -> str:
+def _millimetre_label(diameter_nm: Nanometre) -> str:
     """Format the ``⌀7.00 mm`` fallback used without a recorded standard."""
     return f"⌀{format_nm(diameter_nm, 2)} mm"
 
 
-def _diameter_label(data: DrillData) -> Callable[[int], str]:
+def _diameter_label(data: DrillData) -> Callable[[Nanometre], str]:
     """Use the recorded drill standard's labels, falling back to millimetres."""
     run = data.last_run(DIAMETER_STAGE)
     name = None if run is None else run.get(STANDARD_PARAMETER)

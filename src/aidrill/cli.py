@@ -37,7 +37,7 @@ from .pipeline import (
 from .protocols import Emitter, Pipeline, Stage
 from .quantise import quantise
 from .sources import AiPdfSource
-from .units import format_nm, nm_from_mm
+from .units import Nanometre, format_nm, nm_from_mm
 
 __all__ = [
     "main",
@@ -165,7 +165,7 @@ def parse_sizes(text: str, flag: str) -> tuple[float, ...]:
     return sizes
 
 
-def parse_length(value: float, flag: str) -> int:
+def parse_length(value: float, flag: str) -> Nanometre:
     """Convert a finite command-line millimetre value to whole nanometres."""
     if not math.isfinite(value):
         raise UsageError(f"{flag} must be a finite number of millimetres, got {value!r}")
@@ -234,7 +234,7 @@ def build_drill_standard(args: argparse.Namespace) -> DrillStandard:
         raise UsageError(str(failure)) from failure
 
 
-def _selected_sizes(text: str | None, flag: str) -> tuple[int, ...] | None:
+def _selected_sizes(text: str | None, flag: str) -> tuple[Nanometre, ...] | None:
     """Parse selected millimetre sizes into exact drill-table nanometres."""
     if text is None:
         return None
@@ -452,7 +452,7 @@ _REPORT_DECIMALS = 3
 _MAX_REPORT_DECIMALS = 6
 
 
-def _diameter_decimals(diameters: Iterable[int]) -> int:
+def _diameter_decimals(diameters: Iterable[Nanometre]) -> int:
     """Return the least 3–6 decimal places that distinguish all diameters."""
     values = list(diameters)
     decimals = _REPORT_DECIMALS
@@ -469,7 +469,7 @@ def _diameter_decimals(diameters: Iterable[int]) -> int:
 _STANDARD_PARAMETER = "standard"
 
 
-def _tool_label(data: DrillData) -> Callable[[int], str]:
+def _tool_label(data: DrillData) -> Callable[[Nanometre], str]:
     """Use the recorded standard's unique labels, or distinct millimetres."""
     tools = data.tools()
     run = data.last_run(SnapDiametersToDrillTable.name)

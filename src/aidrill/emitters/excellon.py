@@ -13,7 +13,7 @@ from typing import ClassVar
 
 from ..errors import EmitterError
 from ..model import DrillData, Hole, Origin, Severity
-from ..units import format_nm
+from ..units import Nanometre, format_nm
 from .base import register_emitter
 
 __all__ = ["ExcellonOptions", "ExcellonEmitter"]
@@ -108,8 +108,8 @@ class ExcellonEmitter:
                 )
             frame = (
                 f"lower-left corner of the reference outline, "
-                f"X{self._value(data.reference.width_nm // 2)} "
-                f"Y{self._value(data.reference.height_nm // 2)} from its centre"
+                f"X{self._value(Nanometre(data.reference.width_nm // 2))} "
+                f"Y{self._value(Nanometre(data.reference.height_nm // 2))} from its centre"
             )
         else:
             frame = "centre of the reference outline, the canonical frame"
@@ -118,10 +118,10 @@ class ExcellonEmitter:
         except ValueError as exc:  # unknown origin, or a reference lost in flight
             raise EmitterError(f"excellon: {exc}") from exc
 
-    def _tool_tokens(self, tools: Mapping[int, int]) -> dict[int, str]:
+    def _tool_tokens(self, tools: Mapping[Nanometre, int]) -> dict[Nanometre, str]:
         """Render each nominal once, refusing collisions at requested precision."""
-        seen: dict[str, int] = {}
-        tokens: dict[int, str] = {}
+        seen: dict[str, Nanometre] = {}
+        tokens: dict[Nanometre, str] = {}
         for diameter_nm in tools:
             token = self._value(diameter_nm)
             if token in seen:
@@ -158,6 +158,6 @@ class ExcellonEmitter:
         """Holes in the order they arrive. Sequence is ``SortHoles``' decision."""
         return [f"X{self._value(h.x_nm)}Y{self._value(h.y_nm)}" for h in holes]
 
-    def _value(self, nanometres: int) -> str:
+    def _value(self, nanometres: Nanometre) -> str:
         """Format nanometres as millimetres at the requested decimal precision."""
         return format_nm(nanometres, self.options.decimals)
