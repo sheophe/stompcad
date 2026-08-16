@@ -1,17 +1,4 @@
-"""Tests for the drill standards and ``SnapDiametersToDrillTable`` (SPEC §5, PLAN task B).
-
-Split out of ``test_pipeline.py``, which had grown to 2160 lines covering six
-stages with three agents about to work on it in parallel: one file per stage
-gives each agent disjoint ownership instead of a merge conflict waiting to
-happen. Diagnostics are still matched on ``code``, never on ``message`` --
-``code`` is the stable machine API and the wording is not.
-
-Every size here is a whole number of nanometres, and the tests say so in
-nanometres rather than in millimetres they would have to convert: the point of
-the unit is that a drill size is an exact integer, and a fixture written as
-``6.35`` could not tell an exact 6 350 000 from a float that merely prints like
-one.
-"""
+"""Tests for drill standards and diameter quantisation."""
 
 from __future__ import annotations
 
@@ -57,13 +44,7 @@ class TestTheMetricSeriesIsGeneratedNotTranscribed:
         assert self.METRIC.sizes_nm[-1] == 25_000_000
 
     def test_each_band_steps_at_its_own_pitch_right_up_to_the_next_one(self):
-        """The last size of a band and the first of the next, both spellings.
-
-        A band boundary moved either way shows up here rather than only in a
-        count: 2.95 is the last of the 0.05 band and 3.0 the first of the 0.1
-        band, so a first band that ran to 3.5 would put 3.05 in the table and a
-        second that started at 3.5 would take 3.0 out of it.
-        """
+        """The last size of a band and the first of the next, both spellings."""
         sizes = set(self.METRIC.sizes_nm)
         assert {2_950_000, 3_000_000, 13_900_000, 14_000_000, 14_500_000, 25_000_000} <= sizes
         assert 3_050_000 not in sizes, "the 0.05 band ran past its stop"
@@ -76,14 +57,7 @@ class TestTheMetricSeriesIsGeneratedNotTranscribed:
         assert len(set(sizes)) == len(sizes)
 
     def test_every_size_is_a_whole_number_of_nanometres_on_its_band_step(self):
-        """Exact by construction, and checkable rather than asserted.
-
-        ``type(size) is int`` and not ``isinstance``: a float that landed here
-        would be a size no comparison could ever meet exactly, and a ``bool``
-        passes an ``isinstance`` check. Each size is also a whole number of its
-        own band's step, which is what a float quotient in the generator could
-        not stay true to.
-        """
+        """Exact by construction, and checkable rather than asserted."""
         steps = {}
         for start, stop, step in METRIC_BANDS:
             for size in self.METRIC.sizes_nm:
@@ -96,17 +70,7 @@ class TestTheMetricSeriesIsGeneratedNotTranscribed:
             assert size % step_nm == 0, f"{size} is not a multiple of its band's {step_nm} step"
 
     def test_the_table_is_dense_enough_that_in_range_matching_cannot_fail(self):
-        """``SnapDiametersToDrillTable`` says so in prose; this is the arithmetic.
-
-        The widest step anywhere is the 0.5 mm one in the top band, so the
-        furthest a measurement inside 0.5–25.0 mm can sit from a size is exactly
-        half of that — which is the default tolerance, and the bound is
-        inclusive. It is the table's *density* that protects a panel in range,
-        not the tolerance number.
-
-        Derived from the series rather than restated, so a band edited to step
-        more coarsely fails here instead of leaving that docstring a lie.
-        """
+        """The maximum half-step equals the inclusive matching tolerance."""
         sizes = self.METRIC.sizes_nm
         widest = max(sizes[i + 1] - sizes[i] for i in range(len(sizes) - 1))
 
@@ -125,15 +89,10 @@ class TestTheFractionalSeriesIsExactByConstruction:
         assert self.FRACTIONAL.sizes_nm[-1] == 25_400_000
 
     def test_every_sixty_fourth_is_a_whole_number_of_nanometres(self):
-        """1/64" is 396 875 nm exactly, and this is the reason the unit is
-        nanometres rather than microns: 396.875 microns is not a whole one, and
-        56 of these 64 sizes would be rounded by a micron model — reintroducing
-        "is 396.875 the same bit as 397?", the question a fixed unit abolishes.
-
-        The literal is pinned to the definition of an inch on the first line, so
-        it cannot be a transcription; the multiplication is then asserted for
-        every size, and the type with it, so that a float division reintroduced
-        into the generator fails loudly instead of printing plausibly.
+        """1/64" is 396 875 nm exactly, and this is the reason the unit is nanometres
+        rather than microns: 396.875 microns is not a whole one, and 56 of these 64
+        sizes would be rounded by a micron model — reintroducing "is 396.875 the same
+        bit as 397?", the question a fixed unit abolishes.
         """
         assert 396_875 * 64 == nm_from_mm(25.4), "1/64 of an inch is not what it is"
 
@@ -159,23 +118,12 @@ class TestLabels:
 
     @pytest.mark.parametrize("standard", DRILL_STANDARDS.values(), ids=lambda s: s.name)
     def test_every_size_has_a_label_that_is_unique_within_its_standard(self, standard):
-        """This is what makes the drawing's schedule safe without a per-emitter guard.
-
-        It must run per standard. A decimal-millimetre label cannot serve both:
-        the metric series is unique *and* truthful at 2 dp, but 1/64" is
-        0.396875 mm, which no finite decimal-mm label states exactly — so the
-        fractional standard labels in sixty-fourths instead.
-        """
+        """This is what makes the drawing's schedule safe without a per-emitter guard."""
         labels = [standard.label(d) for d in standard.sizes_nm]
         assert len(set(labels)) == len(labels), f"{standard.name}: two sizes share a label"
 
     def test_a_metric_label_states_its_size_exactly(self):
-        """Truthful, not merely unique: every label reads back as its own size.
-
-        The round trip is the assertion. A band stepping finer than the label's
-        two decimals would print 0.525 as ``⌀0.52 mm``, a size in no drawer, and
-        a uniqueness check alone would not notice.
-        """
+        """Truthful, not merely unique: every label reads back as its own size."""
         metric = DRILL_STANDARDS["metric"]
         for size in metric.sizes_nm:
             stated = metric.label(size).removeprefix("⌀").removesuffix(" mm")
@@ -205,11 +153,7 @@ class TestLabels:
 
 class TestTheTwoStandardsAreNeverMerged:
     def test_one_size_belongs_to_both_series_under_two_names(self):
-        """1/2" *is* 12.7 mm — the same physical bit, and now the same integer.
-
-        Merged into one table it would appear twice, with two labels, and the
-        unique-label invariant above would be unsatisfiable by construction.
-        """
+        """1/2 inch and 12.7 mm are one size with standard-specific labels."""
         metric = set(DRILL_STANDARDS["metric"].sizes_nm)
         fractional = set(DRILL_STANDARDS["fractional"].sizes_nm)
         assert metric & fractional == {12_700_000}
@@ -290,19 +234,7 @@ class TestInventoryFiltering:
             self.METRIC.select(exclude=(3_330_000,))
 
     def test_a_size_one_nanometre_off_is_a_size_the_standard_does_not_have(self):
-        """Membership is exact, because both sides are exact.
-
-        The drawer and the request are whole nanometres that came through the
-        same unit boundary, so "is this one of mine?" is equality and not a
-        near-miss — a lenient answer here would hand back a bit the operator did
-        not ask for, under the name of one they did.
-
-        The refusal is matched on its own wording rather than on ``ValueError``
-        alone, because a lenient membership test raises one anyway: it accepts
-        the request, then filters nothing through and gets the empty-drawer
-        refusal instead. Two different findings, and only one of them is this
-        one.
-        """
+        """Membership is exact, because both sides are exact."""
         assert self.METRIC.select(include=(3_200_000,)).sizes_nm == (3_200_000,)
         with pytest.raises(ValueError, match="no such size"):
             self.METRIC.select(include=(3_200_001,))
@@ -323,17 +255,9 @@ class TestInventoryFiltering:
 
 
 class TestTheAnswerSetAndItsBoundAreCheckedWhereTheyAreDeclared:
-    """Both are refused at the constructor, where the caller still holds them.
+    """Reject invalid tables and bounds at construction.
 
-    Every assertion here is on a bare constructor call and nothing else, which
-    is what makes it an assertion about *this* guard: the payload guard in the
-    model refuses the same values, but only from ``describe`` — after the run
-    has quantised every hole on the panel — and a test that let the phase get
-    that far would pass on a quantiser with no guard at all.
-
-    The bad size is never the first one in the table. A check that looked at
-    ``sizes_nm[0]`` and called it a table would be indistinguishable otherwise,
-    and the invariant is about every row.
+    The bad size is not first, so validation of only the first entry cannot pass.
     """
 
     LABEL = DRILL_STANDARDS["metric"].label
@@ -391,28 +315,10 @@ class TestTheAnswerSetAndItsBoundAreCheckedWhereTheyAreDeclared:
 
 
 class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
-    """The defect ``units.scaled_nm`` exists to prevent, on the drill table.
-
-    Quantising the measurement to whole nanometres *before* asking which size is
-    nearest does not merely lose half a nanometre — it **manufactures a tie the
-    measurement did not have**, and the tie-break, which exists to resolve
-    genuine ambiguity, then resolves a fabricated one in whichever direction it
-    happens to point. The answer moves by a whole drill size.
-    """
+    """Compare measurements with the drill table before rounding them."""
 
     def test_a_measurement_a_hair_past_the_midpoint_takes_the_larger_bit(self):
-        """5.0250004 mm, against a drawer holding 5.000 and 5.050.
-
-        Exactly: 5 025 000.4 nm, which is 24 999.6 from 5 050 000 and 25 000.4
-        from 5 000 000 — the larger bit, by six tenths of a nanometre. Rounded
-        to whole nanometres first it is 5 025 000, dead centre, and the
-        smaller-bit tie-break sends it to 5 000 000: a whole size away, in the
-        number the machinist reads.
-
-        The pair has to be hand-built because the metric series steps 0.05 only
-        below 3 mm; the arithmetic is asserted here rather than trusted, so a
-        fixture that stops being a counterexample fails as one.
-        """
+        """5.0250004 mm, against a drawer holding 5.000 and 5.050."""
         drawer = DrillStandard(
             name="drawer", sizes_nm=(5_000_000, 5_050_000), label=DRILL_STANDARDS["metric"].label
         )
@@ -426,31 +332,14 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
         assert found == ()
 
     def test_the_same_hair_moves_a_bit_on_the_shipped_metric_series(self):
-        """2.9750004 mm, between the 2.95 and 3.00 sizes the standard really has.
-
-        The bespoke drawer above proves the arithmetic; this proves the series a
-        panel is actually quantised against is exposed to it, so the defect
-        cannot be dismissed as an artefact of a hand-built table.
-        """
+        """2.9750004 mm, between the 2.95 and 3.00 sizes the standard really has."""
         size, found = SnapDiametersToDrillTable().quantise(measured(2.9750004))
 
         assert size == 3_000_000
         assert found == ()
 
     def test_the_tolerance_is_decided_on_the_measurement_and_not_on_a_rounding(self):
-        """The second decision the measurement is put to, and its own branch.
-
-        "Which size is nearest?" and "is it near enough?" are asked separately,
-        so asking the first one exactly does not make the second one exact:
-        rounding the measurement for the tolerance alone leaves both tests above
-        green. 25.2500004 mm is 25 250 000.4 nm, which is 250 000.4 from the
-        biggest metric bit there is — outside the 250 000 nm bound — while the
-        rounded copy sits exactly *on* it, and the bound is inclusive.
-
-        The two answers are not a bit apart. Refused, the hole is an ERROR that
-        withholds every artifact on the run; accepted, a 25.25 mm cut-out is
-        drilled 25.00 and nothing downstream has anything to say about it.
-        """
+        """The second decision the measurement is put to, and its own branch."""
         exact = Decimal("25.2500004") * 1_000_000
         assert abs(exact - 25_000_000) > 250_000, "the fixture is inside the bound"
         assert nm_from_mm(25.2500004) - 25_000_000 == 250_000, (
@@ -465,12 +354,7 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
 
 class TestSnapDiametersToDrillTable:
     def test_bezier_noise_collapses_onto_one_bit(self):
-        """THE regression this quantiser exists for (SPEC §5.1).
-
-        6.9998 and 7.0002 are one 7 mm hole that a measurement split in two.
-        Before the pipeline owned this the Excellon writer clustered them itself
-        and the drawing did not, so the two artifacts disagreed about tool count.
-        """
+        """Bézier noise collapses onto one bit."""
         quantiser = SnapDiametersToDrillTable()
 
         low = quantiser.quantise(measured(6.9998, index=4))
@@ -480,12 +364,8 @@ class TestSnapDiametersToDrillTable:
         assert high == (7_000_000, ())
 
     def test_the_declared_standard_decides_which_bit_a_measurement_is(self):
-        """6.348 is a worn 1/4" bit *or* a wide 6.3 mm one, and no arithmetic can
-        tell which. The operator declares the drawer; the quantiser does not guess.
-
-        This is the fixture that a merged table could not have: the two answers
-        are 50 000 nm apart, well inside the 250 000 nm matching tolerance, so a
-        single sorted table would decide between them by table ordering.
+        """6.348 is a worn 1/4" bit *or* a wide 6.3 mm one, and no arithmetic can tell
+        which. The operator declares the drawer; the quantiser does not guess.
         """
         hole = measured(6.348)
 
@@ -496,14 +376,7 @@ class TestSnapDiametersToDrillTable:
         assert imperial.quantise(hole)[0] == 6_350_000
 
     def test_a_quarter_inch_bit_keeps_its_own_size_and_is_not_rounded(self):
-        """6.35 mm is a 1/4" bit, and it stays 6 350 000 nm exactly.
-
-        Two things could have taken it away and neither may. A 0.25 mm rounding
-        grid — the tolerance misused as a step — would put it at 6.25, a size no
-        bit in either series has. And 6.35 is *not* a metric size (that band
-        steps 6.3, 6.4), so a table that quietly held both series would have
-        somewhere else to put it.
-        """
+        """6.35 mm is a 1/4" bit, and it stays 6 350 000 nm exactly."""
         size, _ = SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]).quantise(
             measured(6.348)
         )
@@ -513,15 +386,7 @@ class TestSnapDiametersToDrillTable:
         assert 6_350_000 not in DRILL_STANDARDS["metric"].sizes_nm
 
     def test_a_diameter_no_bit_can_make_is_dropped_rather_than_guessed(self):
-        """A 30 mm cut-out is a step-drill or a punch, not a twist drill.
-
-        Keeping the measurement and warning cannot survive the invariant this
-        quantiser carries — every nominal diameter comes from the table —
-        because a retained 30 000 000 would be a nominal that came from nowhere,
-        and the drill file would load a bit that does not exist. So the answer
-        is ``None``: the hole appears in no artifact, and the finding is an
-        ERROR, because a drill file missing a hole looks perfectly well-formed.
-        """
+        """A 30 mm cut-out is a step-drill or a punch, not a twist drill."""
         size, found = SnapDiametersToDrillTable().quantise(measured(30.0))
 
         assert size is None
@@ -561,16 +426,7 @@ class TestSnapDiametersToDrillTable:
         assert refused == [4, 9]
 
     def test_a_narrowed_drawer_is_blamed_as_the_drawer_and_not_as_the_standard(self):
-        """5.0 *is* a metric size. What it is not in is the drawer just declared.
-
-        ``--drill-sizes 7.0`` on a panel with 5 mm holes used to report them as
-        matching "no metric drill size", which sends the operator to check the
-        one thing that is right and points away from the flag they typed.
-
-        The singular is asserted with the punctuation that follows it, because
-        "narrowed to 1 size" is a substring of "narrowed to 1 sizes" and an
-        assertion without it would pass on a count and a noun that disagree.
-        """
+        """5.0 *is* a metric size. What it is not in is the drawer just declared."""
         stocked = DRILL_STANDARDS["metric"].select(include=(7_000_000,))
         _, found = SnapDiametersToDrillTable(stocked).quantise(measured(5.0001))
         diagnostic = found[0]
@@ -582,13 +438,7 @@ class TestSnapDiametersToDrillTable:
         assert diagnostic.get("standard") == "metric"
 
     def test_an_untouched_standard_is_blamed_as_the_standard(self):
-        """The other branch, and it needs its own fixture rather than a flag.
-
-        A 30 mm cut-out is outside the whole series, so there is no drawer to
-        name: reporting one would send the operator hunting for a narrowing they
-        never asked for. The count goes out either way, so that a consumer
-        rendering the finding never has to branch on a key's absence.
-        """
+        """An untouched standard is blamed as the standard."""
         _, found = SnapDiametersToDrillTable().quantise(measured(30.0))
         diagnostic = found[0]
 
@@ -614,14 +464,8 @@ class TestSnapDiametersToDrillTable:
         assert SnapDiametersToDrillTable(tolerance_nm=200_000).quantise(hole)[0] is None
 
     def test_a_tie_goes_to_the_smaller_bit_whatever_order_the_table_is_in(self):
-        """14.25 mm sits exactly between the 14.0 and 14.5 mm sizes — exactly,
-        because 14 250 000 is an integer and both distances are 250 000.
-
-        The second half is the half that bites. Every shipped standard is
-        ascending, so ``min`` returns the smaller of a tied pair *by accident*,
-        and a test using one cannot tell the tie-break from that accident. A
-        caller may hand this quantiser a table in any order, and the answer may
-        not depend on which.
+        """14.25 mm sits exactly between the 14.0 and 14.5 mm sizes — exactly, because 14
+        250 000 is an integer and both distances are 250 000.
         """
         hole = measured(14.25)
         label = DRILL_STANDARDS["metric"].label
@@ -648,14 +492,7 @@ class TestSnapDiametersToDrillTable:
         assert [quantiser.quantise(h)[0] for h in panel] == [5_000_000, 7_000_000, 5_000_000]
 
     def test_every_nominal_it_produces_is_a_size_the_drawer_holds(self):
-        """The invariant, stated as a property over the whole series.
-
-        Every measurement inside the standard's range lands on a size the drawer
-        holds — never on a rounded value, and never on its own measurement. The
-        membership test is what makes "exact by construction" checkable rather
-        than asserted: a quantiser that returned its own rounded measurement
-        would satisfy every distance assertion and fail this one.
-        """
+        """The invariant, stated as a property over the whole series."""
         rng = random.Random(20250815)
         standard = DRILL_STANDARDS["metric"]
         quantiser = SnapDiametersToDrillTable()
@@ -687,13 +524,7 @@ class TestDescribe:
         assert run.get("size_count") == 64
 
     def test_it_records_the_sizes_that_were_actually_available(self):
-        """The narrowed drawer, written out in full, because nothing else says it.
-
-        A consumer's one likely question — "what is the nearest size this panel
-        could have used?" — is answered wrongly by the standard's name once the
-        operator has told us which bits they own. The set is run-specific, so it
-        travels with the run; it is also small, which is why it can.
-        """
+        """The narrowed drawer, written out in full, because nothing else says it."""
         drawer = DRILL_STANDARDS["metric"].select(
             include=(3_200_000, 5_000_000, 7_000_000, 12_000_000)
         )
@@ -704,14 +535,7 @@ class TestDescribe:
         assert run.get("size_count") == 4
 
     def test_an_unnarrowed_standard_is_recorded_by_name_and_count_alone(self):
-        """183 sizes a reader can look up are not worth 90 % of the document.
-
-        The name is an address into a registry of physical constants, and a
-        consumer that cannot expand it cannot use the numbers either. The key is
-        *absent* rather than empty: ``StageRun.get`` cannot tell an absent key
-        from a null one, so an empty tuple here would read as "quantised against
-        no bits at all".
-        """
+        """183 sizes a reader can look up are not worth 90 % of the document."""
         run = SnapDiametersToDrillTable().describe()
 
         assert run.get("standard") == "metric"

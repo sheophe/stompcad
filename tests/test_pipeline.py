@@ -1,21 +1,4 @@
-"""Tests for ``Deduplicate``, ``CheckReferenceSize``, ``SortHoles``, ``Pipeline``
-composition and provenance, and the package-root re-exports (SPEC §5).
-
-``SnapPositions``, ``SnapDiametersToDrillTable`` and ``IdentifyHammondFootprint``
-moved out to ``test_snap.py``, ``test_diameters.py`` and ``test_enclosure.py``
-when they stopped being stages, and what composes them is pinned in
-``test_quantise.py``. What is left here is the other half of the subpackage: the
-three classes that really are ``DrillData → DrillData``, and everything about
-folding them that belongs to no single one of them.
-
-``ALL_STAGES`` is therefore the whole of the ``Stage`` protocol's population.
-That is the point of naming it: a quantiser added to it would fail the
-conformance test below, and a stage left out of it would go unfolded and
-untested rather than quietly passing.
-
-Diagnostics are matched on ``code``, never on ``message`` — ``code`` is the
-stable machine API and the wording is not.
-"""
+"""Tests for pipeline composition, stage order and provenance."""
 
 from __future__ import annotations
 
@@ -84,13 +67,7 @@ def test_every_stage_satisfies_the_stage_protocol(stage):
     ids=lambda q: type(q).__name__,
 )
 def test_a_quantiser_is_not_a_stage(quantiser):
-    """The distinction the restructure turns on, made falsifiable.
-
-    A quantiser that grew an ``apply`` would satisfy ``Stage`` and could then be
-    dropped into ``build_pipeline``, where it would run in an order the caller
-    chose — which is precisely what ``aidrill.quantise`` exists to take out of a
-    caller's hands, because these three depend on each other's answers.
-    """
+    """Quantisers do not satisfy the stage protocol."""
     assert not isinstance(quantiser, Stage)
     assert not hasattr(quantiser, "apply")
 
@@ -118,13 +95,7 @@ def test_stages_are_pure_functions(stage):
 
 @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
 def test_stages_survive_empty_input(stage):
-    """No stage may assume it has holes, or that a predecessor ran (LSP).
-
-    Surviving means more than "returned something with no holes": a stage that
-    bailed out with a bare ``DrillData()`` would drop the reference outline, the
-    source provenance and every diagnostic raised before it, and the run would
-    carry on as though the panel had never had an outline at all.
-    """
+    """No stage may assume it has holes, or that a predecessor ran (LSP)."""
     prior = Diagnostic.info("prior", "something earlier said this")
     data = DrillData(
         holes=(),
@@ -206,15 +177,7 @@ class TestDeduplicate:
 
     @pytest.mark.parametrize("dx_nm, dy_nm", [(1_000, 0), (0, 1_000), (40_000, 40_000)])
     def test_a_hole_a_hair_away_is_a_different_hole(self, dx_nm, dy_nm):
-        """Coincidence is exact, on each axis separately.
-
-        Deciding that two nearby coordinates are one place is ``SnapPositions``'
-        job, and a near miss the grid did not close is a hole the artwork puts
-        somewhere else. Dropping it drills one hole where the panel asks for two.
-
-        Both axes are exercised on their own, because a rule written ``x == y``
-        on one of them would still pass a fixture that moved the other.
-        """
+        """Coincidence is exact, on each axis separately."""
         data = make_data(
             at(0, 0, 7_000_000, index=4), at(dx_nm, dy_nm, 7_000_000, index=1)
         )
@@ -229,14 +192,7 @@ class TestDeduplicate:
         assert len(Deduplicate().apply(data).holes) == 2
 
     def test_the_fixtures_own_duplicate_is_byte_identical_before_any_quantising(self):
-        """Why exactness is enough: a copy-paste duplicates the coordinates.
-
-        These are the two ⌀7 holes the shipped ``tar.ai`` carries, as
-        ``AiPdfSource`` measures them — equal to the last bit, with nothing
-        having quantised them. That is what a duplicate is in this domain, and it
-        is what a tolerance would really have been catching. Quantised through
-        the phase they stay equal, because quantising is deterministic.
-        """
+        """Why exactness is enough: a copy-paste duplicates the coordinates."""
         both = (-39.990641944444405, 17.999956944444445, 6.999816666666661)
         raw = RawDrillData(
             source=SourceInfo(path="tar.ai"),
@@ -267,17 +223,7 @@ class TestDeduplicate:
         assert len(Deduplicate().apply(data).holes) == 2
 
     def test_diagnostic_carries_a_machine_readable_payload(self):
-        """A consumer must be able to identify the survivor without re-deriving it.
-
-        The drawing emitter has to mark the duplicate it was told about. Given
-        only a rounded message it re-implemented this stage's rule — with its own
-        tolerance and no diameter check — and flagged holes the pipeline had not.
-        ``hole_index`` is therefore the key a consumer matches on: it names the
-        survivor and stays true however far a later stage moves it.
-        ``location_nm`` is the survivor's coordinate at the time of the report —
-        human context for the CLI and the drawing's NOTES, and no longer a
-        referent.
-        """
+        """A consumer must be able to identify the survivor without re-deriving it."""
         # Identities deliberately do not match positions: an implementation that
         # reported where the survivor sits rather than who it is would answer 0.
         survivor = at(-40_000_000, 18_000_000, 7_000_000, index=4)
@@ -315,15 +261,7 @@ class TestDeduplicate:
         assert type(diag.get("diameter_nm")) is int
 
     def test_the_diagnostic_names_the_holes_that_went_not_only_how_many(self):
-        """A count cannot be turned back into identities.
-
-        The dropped pair is 7 and 5 — out of order, not adjacent to the
-        survivor's 4, and not the two array positions they occupy. Anything
-        derived from position or from arithmetic on the survivor's id answers
-        something else here, which is the point: ``Hole.index`` exists so an
-        artwork circle can be reconciled against an emitted hole, and a hole
-        that reaches no artifact is exactly the one that needs naming.
-        """
+        """A count cannot be turned back into identities."""
         data = make_data(
             at(-40_000_000, 18_000_000, 7_000_000, index=4),
             at(-40_000_000, 18_000_000, 7_000_000, index=7),
@@ -360,13 +298,7 @@ class TestDeduplicate:
 
 
 def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
-    """The referent must survive the population changing under it.
-
-    Dropping a hole renumbers every array position after it while no identity
-    moves, and ``SortHoles`` then reorders what is left. The survivor here is
-    hole 7, it is the *second* hole in the input and the *last* in the sorted
-    output, so a referent derived from either list answers something else.
-    """
+    """The referent must survive the population changing under it."""
     data = make_data(
         at(0, 25_000_000, 7_000_000, index=3),
         at(10_000_000, 5_000_000, 7_000_000, index=7),
@@ -409,14 +341,8 @@ def _phase(*measurements: RawHole, grid_nm: int = 250_000) -> DrillData:
 
 
 class TestReviewGridTiesSeesWhatTheEmittersSee:
-    """The reason the review is a stage placed after dedupe, and not a step of
-    the quantisation phase.
-
-    ``Deduplicate`` groups on the nominal ``(x_nm, y_nm, diameter_nm)`` while a
-    tie is read off ``Hole.raw``, so the two do not agree about what "the same
-    hole" is. Two *different* measurements can collapse into one hole and
-    disagree about whether they tied — which means the verdict and the artifacts
-    can be about different populations unless the verdict waits.
+    """The reason the review is a stage placed after dedupe, and not a step of the
+    quantisation phase.
     """
 
     #: 0.000 mm and 0.125 mm both snap onto 0 at a 250 000 nm pitch: one exactly
@@ -436,36 +362,15 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
         ids=["on-grid drawn first", "tied drawn first"],
     )
     def test_the_verdict_describes_the_hole_that_survived(self, drawn, kept, findings):
-        """One panel, two traversal orders, and the answer follows the survivor.
-
-        ``Deduplicate`` keeps the first member of a group in input order, so
-        whichever circle the source reached first is the one that gets drilled.
-        Asked *before* dedupe the review sees both and warns either way — and in
-        the first case ``tied_indices`` would name hole 9, an identity that
-        appears in no drill file, no drawing and no JSON. Asked after, the
-        finding is true of the panel as it will be made.
-
-        Both cases matter. The first is the false positive the move removes; the
-        second is the warning that must survive it, because a tied hole that
-        really is drilled is exactly what the finding is for.
-
-        The ``off-grid`` in both is the phase's, about the tied measurement:
-        125 000 nm is further than the default quarter-pitch warning distance,
-        and it is raised while the hole is still a measurement, before anything
-        knows it has a twin.
-        """
+        """One panel, two traversal orders, and the answer follows the survivor."""
         out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
 
         assert [hole.index for hole in out.holes] == [kept]
         assert codes(out) == findings
 
     def test_every_named_tie_is_a_hole_the_artifacts_will_list(self):
-        """The claim underneath both cases above, stated once without a fixture
-        to lean on: a finding may not name an identity that reaches no artifact.
-
-        The drawing rings the holes a finding names and the drill file lists the
-        holes that survived, so a ``tied_indices`` naming a collapsed duplicate
-        sends an operator looking for a circle that is not on the sheet.
+        """The claim underneath both cases above, stated once without a fixture to lean on:
+        a finding may not name an identity that reaches no artefact.
         """
         for drawn in ((self.ON_GRID, self.TIED), (self.TIED, self.ON_GRID)):
             out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
@@ -476,15 +381,7 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
                 assert set(named) <= emitted, f"{diagnostic.code} named a dropped hole"
 
     def test_a_hole_the_drill_table_dropped_is_not_reviewed(self):
-        """The only tied circle on this panel is one no bit can make.
-
-        Hole 9 is a 30 mm cut-out drawn half a pitch off; ``unknown-diameter``
-        is an ERROR and drops it, so it reaches no artifact and has no business
-        casting a vote about the pitch. Every hole that *does* survive is
-        squarely on the grid, which is what makes the silence here mean
-        something: a review handed the rejected measurements as well would
-        warn, where this one has nothing to warn about.
-        """
+        """The only tied circle on this panel is one no bit can make."""
         out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(
             _phase(
                 RawHole(-20.0, 18.0, 7.0, 4),
@@ -531,11 +428,8 @@ class TestCheckReferenceSize:
         assert out.reference == data.reference
 
     def test_the_tolerance_boundary_is_inclusive_to_the_nanometre(self):
-        """A caller who declares a 50 000 nm slack on a panel that is 50 000 nm
-        out typed the number they meant.
-
-        Exactly on the boundary and exactly one nanometre outside it: a fixture
-        sitting comfortably either side would stay green under ``<``.
+        """A caller who declares a 50 000 nm slack on a panel that is 50 000 nm out typed
+        the number they meant.
         """
         on_it = make_data(reference=ReferenceOutline(113_050_000, 60_000_000))
         assert codes(CheckReferenceSize(self.DECLARED, 50_000).apply(on_it)) == []
@@ -546,10 +440,7 @@ class TestCheckReferenceSize:
         ]
 
     def test_a_width_mismatch_alone_is_enough(self):
-        """Paired with the height case below rather than folded into one
-        fixture: a guard covering two axes loses half its coverage invisibly
-        when one of the two tests goes, and the survivor's name still describes
-        the whole behaviour."""
+        """A width mismatch alone fails even when height matches."""
         data = make_data(reference=ReferenceOutline(112_000_000, 60_000_000))
         assert codes(CheckReferenceSize(self.DECLARED).apply(data)) == [
             "reference-size-mismatch"
@@ -569,13 +460,9 @@ class TestCheckReferenceSize:
         assert out.holes == data.holes
 
     def test_the_mismatch_carries_the_difference_it_already_worked_out(self):
-        """``Diagnostic.data`` exists so a consumer never re-derives a stage's
-        own arithmetic. This one rendered the deltas into prose and dropped
-        them, leaving every reader to subtract the two sizes again.
+        """The payload carries signed per-axis deltas.
 
-        The fixture is deliberately asymmetric — one axis under by 0.5 mm, the
-        other over by 0.25 mm — so neither a swapped pair of axes nor a dropped
-        sign can pass.
+        Asymmetric deltas distinguish swapped axes and dropped signs.
         """
         data = make_data(reference=ReferenceOutline(112_500_000, 60_250_000))
 
@@ -609,14 +496,7 @@ class TestCheckReferenceSize:
         assert diagnostic.get("tolerance_nm") == 50_000
 
     def test_a_declared_size_that_is_not_whole_nanometres_is_refused(self):
-        """Checked at construction, where the offending value still has a call
-        site attached to it. A caller who hands over the millimetres they were
-        thinking in gets a comparison a million times too tight on every panel,
-        and the only sign of it is that every panel now mismatches.
-
-        Each of the three values separately: a guard that reads only the first
-        element of the pair would pass two of these.
-        """
+        """Declared dimensions and tolerance must be whole nanometres."""
         with pytest.raises(TypeError):
             CheckReferenceSize((113.0, 60_000_000))
         with pytest.raises(TypeError):
@@ -674,7 +554,7 @@ class TestSortHoles:
         assert codes(SortHoles().apply(data)) == []
 
     def test_tools_are_stable_under_hole_reordering(self):
-        """SPEC §9 property: tools() does not depend on hole order."""
+        """``tools()`` does not depend on hole order."""
         given = [
             at(0, 0, 7_000_000, index=4),
             at(1_000_000, 0, 5_000_000, index=1),
@@ -720,16 +600,7 @@ class TestPipelineComposition:
         assert codes(out) == ["a", "b", "c"]
 
     def test_stage_order_is_observable(self):
-        """Sorting before deduplicating keeps a different hole.
-
-        ``Deduplicate`` keeps the first member of a group *in input order*, so
-        whatever decides the input order decides which hole survives — and
-        survives into the artifacts under its own ``index``. The two holes are
-        coincident and numbered 7 and 1, so the answer is unambiguous either way
-        round: this is not a preference, it is two different panels' worth of
-        provenance. Which order the CLI picks is ``cli.build_pipeline``'s to say
-        and nobody else's.
-        """
+        """Sorting before deduplicating keeps a different hole."""
         data = make_data(
             at(10_000_000, 5_000_000, 7_000_000, index=7),
             at(10_000_000, 5_000_000, 7_000_000, index=1),
@@ -743,18 +614,7 @@ class TestPipelineComposition:
         assert [h.index for h in sort_first.holes] == [1]
 
     def test_the_phase_and_the_pipeline_compose_into_one_tool_for_a_noisy_row(self):
-        """The library flow, end to end, on the shape of panel it meets.
-
-        Deliberately *not* a second statement of the CLI's stage order — that
-        lives in ``cli.build_pipeline`` and is pinned once, in
-        ``tests/test_cli.py``, by reading the pipeline the CLI actually builds.
-        A parallel list here has already drifted once.
-
-        What it does state is the one arrangement that is not a preference:
-        dedupe cannot run before the phase, because collapsing 6.9998 against
-        7.0000 is the drill table's answer and collapsing −40.003 against −40.0
-        is the grid's.
-        """
+        """The library flow, end to end, on the shape of panel it meets."""
         raw = RawDrillData(
             source=SourceInfo(path="panel.ai"),
             reference=RawOutline(113.0, 60.0),
@@ -814,12 +674,7 @@ class TestStageRunAndProcessing:
         assert not hasattr(run, "__dict__")
 
     def test_a_mutable_payload_is_coerced_on_the_way_in(self):
-        """The JSON emitter deserialises into this, and JSON hands back lists.
-
-        A ``StageRun`` holding a list is unhashable and compares unequal to the
-        identical record built from tuples, so a round-tripped document would
-        differ from the one it was written from — while looking right in print.
-        """
+        """The JSON emitter deserialises into this, and JSON hands back lists."""
         run = StageRun("snap-diameters", [["sizes_nm", [3_200_000, 7_000_000]]])
 
         assert run == StageRun("snap-diameters", (("sizes_nm", (3_200_000, 7_000_000)),))
@@ -868,24 +723,14 @@ class TestStageRunAndProcessing:
 
 
 class TestDescribe:
-    """Every stage reports what it was configured to do, in effective values.
-
-    Only the three stages are here. What each *quantiser* records is pinned
-    beside the quantiser, in ``test_snap.py``, ``test_diameters.py`` and
-    ``test_enclosure.py``, where the thing being recorded is also defined.
-    """
+    """Every stage reports what it was configured to do, in effective values."""
 
     @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
     def test_a_stage_describes_itself_under_its_own_name(self, stage):
         assert stage.describe().name == type(stage).name
 
     def test_deduplicate_has_nothing_to_report_but_still_reports(self):
-        """The stage has no parameters at all, and its record is not empty for it.
-
-        A reader of ``processing`` learns that deduplication ran; there is no
-        bound to publish because coincidence is exact. Publishing one anyway
-        would tell a consumer a number that decides nothing.
-        """
+        """The stage has no parameters at all, and its record is not empty for it."""
         run = Deduplicate().describe()
         assert run.name == "deduplicate"
         assert run.parameters == ()
@@ -915,12 +760,7 @@ class TestPipelineRecordsProvenance:
         assert codes(after) == []
 
     def test_a_stage_never_sees_its_own_provenance_in_its_input(self):
-        """The record says what a stage *did*, so it cannot exist before it acts.
-
-        Recording before applying would also hand every stage a record of itself
-        it had not yet earned — and if ``apply`` then raised, the history would
-        claim work that never happened.
-        """
+        """The record says what a stage *did*, so it cannot exist before it acts."""
         class Nosy:
             name = "nosy"
 
@@ -955,13 +795,7 @@ class TestPipelineRecordsProvenance:
         assert data.processing == ()
 
     def test_a_pipeline_records_its_stages_in_order(self):
-        """Read off the stages that were handed in, not from a copy of the list.
-
-        The literal spelling drifted once already — it named the CLI's order,
-        which this list has not been since the enclosure joined it — and a
-        parallel list is what let that happen quietly. What is being asserted is
-        that ``Pipeline`` records *in order*, which the input already states.
-        """
+        """Read off the stages that were handed in, not from a copy of the list."""
         stages = ALL_STAGES
         after = Pipeline(stages).run(
             make_data(
@@ -979,19 +813,7 @@ class TestPipelineRecordsProvenance:
 
 
 def test_the_flow_is_reachable_from_the_package_root():
-    """Nothing enumerates the stages or the quantisers, so the root names them.
-
-    ``build_pipeline`` is the CLI's arrangement and not the only one — SPEC
-    calls ``CheckReferenceSize`` a supported stage for a library caller, and the
-    CLI never runs it. A root exporting ``Pipeline`` and the ``Stage`` protocol
-    but no stage hands a consumer an empty pipeline and no way to fill it, and
-    exporting the quantisers without ``DRILL_STANDARDS`` leaves the one that
-    takes a table unconfigurable.
-
-    ``quantise`` is the piece with no protocol standing in for it: without it a
-    consumer holds a ``RawDrillData`` from ``AiPdfSource`` and has no supported
-    way to turn it into the ``DrillData`` every stage and every emitter takes.
-    """
+    """Nothing enumerates the stages or the quantisers, so the root names them."""
     import aidrill
 
     for name in (
@@ -1017,12 +839,7 @@ def test_the_flow_is_reachable_from_the_package_root():
 
 
 def test_the_generative_bands_stay_in_the_subpackage():
-    """The rule the root's docstring states, made falsifiable.
-
-    ``METRIC_BANDS`` is what a *different* preferred series would be written as,
-    not what running the flow needs, and the split is only worth having while
-    something fails when it blurs.
-    """
+    """The rule the root's docstring states, made falsifiable."""
     import aidrill
 
     assert not hasattr(aidrill, "METRIC_BANDS")

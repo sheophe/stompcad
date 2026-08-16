@@ -1,16 +1,4 @@
-"""Tests for the Illustrator/PDF source.
-
-The bulk of these run against ``tests/fixtures/tar.ai``, a genuine Illustrator
-30.7 native save whose contents have been verified independently. Where the
-fixture cannot exercise a rule — the ``v``/``y`` curve shorthands, Form XObjects,
-an empty drill layer — a minimal PDF is built in-test with pikepdf, because a
-synthetic file is the only way to state those cases exactly.
-
-Nothing here dedupes, snaps or clusters. Eight circles are drawn on the drill
-layer of the fixture and eight holes must come back; collapsing the coincident
-pair is the pipeline's job (SPEC 5), and a source that did it would hide the
-duplicate from the diagnostics that are supposed to report it.
-"""
+"""Tests for Illustrator/PDF measurement and layer parsing."""
 
 from __future__ import annotations
 
@@ -66,12 +54,7 @@ A4_LANDSCAPE_PT = (841.89, 595.276)
 
 
 def match_multiset(holes, expected, tol=TOL_MM):
-    """Pair each expected (x, y, d) with a distinct hole, or fail loudly.
-
-    Order is not asserted — the source reports stream order, which is a
-    property of Illustrator's save, not of this library. Multiplicity *is*
-    asserted, which is how the duplicated hole is pinned down.
-    """
+    """Pair each expected (x, y, d) with a distinct hole, or fail loudly."""
     remaining = list(holes)
     unmatched = []
     for x, y, d in expected:
@@ -90,13 +73,7 @@ def match_multiset(holes, expected, tol=TOL_MM):
 
 
 def warnings(data):
-    """The WARNING diagnostics of a read.
-
-    Spelt here rather than borrowed from ``DrillData.of_severity``: a
-    ``RawDrillData`` carries findings but answers no questions about them, and
-    reaching for a query method the type does not have is how a source ends up
-    being asked to behave like the thing it is quantised into.
-    """
+    """The WARNING diagnostics of a read."""
     return [d for d in data.diagnostics if d.severity is Severity.WARNING]
 
 
@@ -115,12 +92,7 @@ def test_satisfies_the_source_protocol():
 
 
 def test_what_comes_back_is_a_measurement(data):
-    """A source measures. Everything it hands over is still in millimetres.
-
-    ``isinstance`` against ``Source`` cannot say this — a ``Protocol`` checks
-    that ``read`` exists, never what it returns — so the one structural fact
-    the quantisation phase depends on is asserted directly.
-    """
+    """A source measures. Everything it hands over is still in millimetres."""
     assert isinstance(data, RawDrillData)
     assert isinstance(data.reference, RawOutline)
     assert all(isinstance(h, RawHole) for h in data.holes)
@@ -172,7 +144,7 @@ def test_reference_outline_is_the_largest_non_circular_background_path(data):
 
 
 def test_the_artboard_is_not_the_frame(data):
-    """A4 landscape is the sheet, not the enclosure (SPEC 6.6)."""
+    """A4 landscape is the sheet, not the enclosure."""
     assert data.reference is not None
     assert data.reference.width != pytest.approx(mm_from_pt(A4_LANDSCAPE_PT[0]), abs=0.5)
     assert data.reference.height != pytest.approx(mm_from_pt(A4_LANDSCAPE_PT[1]), abs=0.5)
@@ -193,12 +165,7 @@ def test_hole_positions_and_diameters(data):
 
 
 def test_the_duplicated_hole_is_reported_twice(data):
-    """Same geometry, different identity.
-
-    The two circles are indistinguishable as measurements — which is why
-    ``raw`` cannot serve as a hole's key — so what separates them is
-    ``index``, assigned by the source in traversal order.
-    """
+    """Same geometry, different identity."""
     coincident = [
         h
         for h in data.holes
@@ -211,15 +178,7 @@ def test_the_duplicated_hole_is_reported_twice(data):
 
 
 def test_the_identity_counter_runs_over_circles_not_over_paths(tmp_path):
-    """A path that is not a hole must not spend a hole's identity.
-
-    Counting drill-layer *paths* instead of the circles fitted out of them is
-    the plausible slip, and on this layer it shifts every index by one: the two
-    holes come back as 1 and 2. Nothing about them looks wrong afterwards —
-    both are still distinct, still deterministic, still in traversal order —
-    but every diagnostic that names a hole names the wrong one, and the
-    stray line that caused it is not in any artifact to be blamed.
-    """
+    """A path that is not a hole must not spend a hole's identity."""
     pdf = build_pdf(
         tmp_path / "counter.pdf",
         {
@@ -238,12 +197,9 @@ def test_diameters_are_not_clustered(data):
 
 
 def test_no_snapping_has_happened(data):
-    """The source reports where a circle is, not where a grid would put it.
+    """The source reports measured, unsnapped positions.
 
-    The leftmost hole is at -39.9906 mm, which no 0.25 grid contains. Snapping
-    it belongs to the quantisation phase and would move it to -40.0 — 0.0094 mm,
-    nine times the last digit the drill file prints, so this is a difference an
-    artifact shows rather than one only arithmetic can see.
+    The fixture's -39.9906 mm coordinate differs visibly from the -40 mm grid point.
     """
     assert min(h.x for h in data.holes) == pytest.approx(-39.9906, abs=TOL_MM)
 
@@ -258,7 +214,7 @@ def test_the_source_adds_no_warnings(data):
 
 
 def test_clip_rectangles_are_not_geometry():
-    """The drill layer holds two full-MediaBox clips (``re W n``) — SPEC 6.3."""
+    """The drill layer holds two full-MediaBox clips (``re W n``)."""
     source = AiPdfSource(FIXTURE)
     paths = source.layer_subpaths("Drill")
     assert len(paths) == 8
@@ -281,13 +237,7 @@ def test_a_clip_only_layer_yields_nothing(tmp_path):
 
 
 def test_an_invisible_no_paint_rectangle_cannot_become_the_reference_outline(tmp_path):
-    """``n`` paints nothing, so its path is not artwork (PDF 8.5.3.1).
-
-    An artboard-sized ``re n`` with no ``W`` is invisible in every viewer, yet it
-    is the largest rectangle on the layer. Counted as geometry it wins on area,
-    the frame becomes the artboard, and every hole is then measured from the
-    wrong centre — the failure this test exists to catch.
-    """
+    """``n`` paints nothing, so its path is not artwork (PDF 8.5.3.1)."""
     pdf = build_pdf(
         tmp_path / "nopaint.pdf",
         {
@@ -323,12 +273,7 @@ def test_a_bare_n_path_on_the_drill_layer_is_not_a_hole(tmp_path):
 
 
 def test_a_bare_n_still_ends_the_path_it_discards(tmp_path):
-    """``n`` paints nothing but *does* end the path; the next one starts clean.
-
-    Dropping the operator instead of flushing on it would leave the discarded
-    line pending, and the circle after it would come out as a two-subpath blob
-    that no longer fits.
-    """
+    """``n`` paints nothing but *does* end the path; the next one starts clean."""
     pdf = build_pdf(
         tmp_path / "discharge.pdf",
         {
@@ -343,13 +288,7 @@ def test_a_bare_n_still_ends_the_path_it_discards(tmp_path):
 
 
 def test_a_path_that_clips_and_paints_is_kept(tmp_path):
-    """SPEC 6.3 discards ``W``/``W*`` *followed by* ``n``.
-
-    ``W`` is not what makes a path invisible — ``n`` is. ``re W f`` is the
-    ordinary way to fill a shape and clip the group to it at once, and it marks
-    real ink. Throwing it away on the ``W`` alone left the panel outline
-    missing and every hole measured from the page corner instead.
-    """
+    """A clipping path remains geometry when it also paints."""
     pdf = build_pdf(
         tmp_path / "clipfill.pdf",
         {
@@ -365,11 +304,7 @@ def test_a_path_that_clips_and_paints_is_kept(tmp_path):
 
 
 def test_a_stroked_circle_that_also_clips_is_still_a_hole(tmp_path):
-    """``h W S`` strokes the circle *and* clips to it — the stroke is the hole.
-
-    Discarding it raised ``EmptyLayerError``, whose default message tells the
-    operator to give the drill circles a stroke they had already given them.
-    """
+    """``h W S`` strokes and clips the circle, so the stroke remains a hole."""
     pdf = build_pdf(
         tmp_path / "clipstroke.pdf",
         {
@@ -381,12 +316,7 @@ def test_a_stroked_circle_that_also_clips_is_still_a_hole(tmp_path):
 
 
 def test_a_clip_that_paints_nothing_is_still_discarded(tmp_path):
-    """The other side of the same rule, kept honest: ``W n`` marks nothing.
-
-    An artboard-sized ``re W n`` is what Illustrator brackets nearly every
-    group with. If keeping ``W f`` were done by keeping every ``W``, this
-    rectangle would out-area the panel and hijack the frame (SPEC 6.6).
-    """
+    """A clip that paints nothing is still discarded."""
     pdf = build_pdf(
         tmp_path / "clipmixed.pdf",
         {
@@ -420,14 +350,7 @@ def test_without_a_reference_the_frame_falls_back_to_the_page():
 
 
 def test_the_source_does_not_reuse_the_validate_stage_diagnostic_code():
-    """One key, one meaning (SPEC 3): ``code`` is what consumers match on.
-
-    ``CheckReferenceSize`` reports ``no-reference-outline`` at INFO for a
-    different finding — there was nothing to check against. This one is the
-    reference layer arriving with no usable outline, and it is a WARNING, which
-    is what pushes the run to exit 1. Sharing the key made severity depend on
-    which half of the pipeline happened to emit it.
-    """
+    """One key, one meaning: ``code`` is what consumers match on."""
     data = AiPdfSource(FIXTURE, reference_layer="Drill").read()
     assert [d.code for d in data.diagnostics] == ["reference-outline-not-found"]
 
@@ -457,12 +380,7 @@ def test_unknown_layer_in_layer_subpaths_raises():
 
 
 def test_drill_layer_with_paths_but_no_circles_says_so(tmp_path):
-    """Drawn but not round: the operator must be sent to the shapes, not the swatches.
-
-    Blaming "no fill and no stroke" here is a misdiagnosis — the line *is*
-    stroked, it is simply not a circle — and it costs the operator a hunt
-    through appearance settings that are already correct.
-    """
+    """Drawn but not round: the operator must be sent to the shapes, not the swatches."""
     pdf = build_pdf(
         tmp_path / "empty.pdf",
         {
@@ -535,11 +453,7 @@ def test_a_pdf_without_layers_raises_layer_not_found(tmp_path):
 
 
 def test_v_and_y_shorthand_curves_expand_correctly(tmp_path):
-    """``v`` reuses the current point; ``y`` reuses the endpoint (SPEC 6, PDF 8.5.2.2).
-
-    Swapping them is silent — the path still closes, it just bulges the wrong
-    way — so this is asserted at segment level rather than through a circle.
-    """
+    """``v`` reuses the current point; ``y`` reuses the endpoint."""
     pdf = build_pdf(
         tmp_path / "shorthand.pdf",
         {
@@ -617,7 +531,7 @@ def test_an_unbalanced_restore_does_not_crash(tmp_path):
 
 
 def test_form_xobjects_are_walked_with_their_matrix(tmp_path):
-    """SPEC 6.5: the CTM must be applied inside Form XObjects too."""
+    """The CTM is applied inside Form XObjects too."""
     pdf = build_pdf(
         tmp_path / "form.pdf",
         {
@@ -635,12 +549,7 @@ def test_form_xobjects_are_walked_with_their_matrix(tmp_path):
 
 
 def test_the_source_is_re_exported_from_the_package_root():
-    """There is no source registry, so the root is the only place to find one.
-
-    ``aidrill`` exports the ``Source`` protocol, and ``AiPdfSource`` is the only
-    thing that satisfies it. Nothing enumerates the implementations, so a
-    consumer who cannot name it from the root cannot start the flow at all.
-    """
+    """There is no source registry, so the root is the only place to find one."""
     import aidrill
 
     assert aidrill.AiPdfSource is AiPdfSource
@@ -649,13 +558,7 @@ def test_the_source_is_re_exported_from_the_package_root():
 
 @pytest.mark.parametrize("paint", ["s", "b", "b*"])
 def test_the_closing_painters_mark_ink(tmp_path, paint):
-    """``s``, ``b`` and ``b*`` paint, so a circle ended by any of them is a hole.
-
-    The stakes are higher than a misclassified path. An operator this source
-    does not recognise as *ending* the path leaves it pending, so it is never
-    flushed and the hole is absent from every artifact with nothing said — the
-    silent-loss failure the whole module is arranged to avoid.
-    """
+    """``s``, ``b`` and ``b*`` paint, so a circle ended by any of them is a hole."""
     pdf = build_pdf(
         tmp_path / f"closepaint-{paint.replace('*', 'star')}.pdf",
         {
@@ -765,13 +668,7 @@ def test_nested_marked_content_keeps_the_layer(tmp_path):
 
 
 def test_an_unbalanced_emc_inside_a_form_does_not_unwind_the_caller(tmp_path):
-    """A form inherits the layer stack; it must not be allowed to pop off it.
-
-    ``/Fm0 Do`` is invoked inside ``BDC /OC /MC1``, so the form's own content is
-    on the drill layer. An ``EMC`` the form never opened used to pop that
-    inherited entry, and everything the form drew afterwards lost its layer —
-    the drill circles simply vanished from the layer they were drawn on.
-    """
+    """A form inherits the layer stack; it must not be allowed to pop off it."""
     pdf = build_pdf(
         tmp_path / "emcform.pdf",
         {
@@ -784,12 +681,7 @@ def test_an_unbalanced_emc_inside_a_form_does_not_unwind_the_caller(tmp_path):
 
 
 def test_a_form_may_still_close_the_marked_content_it_opened(tmp_path):
-    """The floor stops at the inherited depth; it does not freeze the stack.
-
-    The form opens the Background layer, draws inside it, then closes it and
-    draws again. That second circle belongs to the caller's layer only — a
-    floor implemented as "never pop" would leave it on Background too.
-    """
+    """The floor stops at the inherited depth; it does not freeze the stack."""
     pdf = build_pdf(
         tmp_path / "formbdc.pdf",
         {
@@ -806,14 +698,9 @@ def test_a_form_may_still_close_the_marked_content_it_opened(tmp_path):
 
 
 def test_a_forms_own_properties_outrank_the_pages(tmp_path):
-    """``/MCn`` means whatever the *current* resource dictionary says it means.
+    """``/MCn`` uses the current resource dictionary.
 
-    Page and form both define ``/MC1``, and they define it differently: on the
-    page it is Decor, inside the form it is Drill. The ``Do`` sits on Decor, so
-    the two readings are distinguishable — the circle reaches the drill layer
-    only if the form's own ``/Properties`` was consulted. Resolving it against
-    the page's table instead leaves the circle on the layer the ``Do`` happens
-    to be on, and the drill layer comes up short with nothing said.
+    Page and form map the same name to different layers so fallback cannot pass.
     """
     pdf = build_pdf(
         tmp_path / "formprops.pdf",
@@ -828,12 +715,7 @@ def test_a_forms_own_properties_outrank_the_pages(tmp_path):
 
 
 def test_a_form_without_its_own_resources_falls_back_to_the_pages(tmp_path):
-    """Most forms carry no ``/Resources``, and their ``/MCn`` is still a layer.
-
-    Illustrator writes plenty of them. With nothing to resolve the name against,
-    every path the form draws is attributed to no layer at all — which is not an
-    error anywhere, just a drill layer that quietly comes up short.
-    """
+    """Most forms carry no ``/Resources``, and their ``/MCn`` is still a layer."""
     pdf = build_pdf(
         tmp_path / "formnoprops.pdf",
         {"Background": "10 10 200 100 re f", "Decor": "/Fm0 Do", "Drill": ""},
@@ -843,13 +725,7 @@ def test_a_form_without_its_own_resources_falls_back_to_the_pages(tmp_path):
 
 
 def test_lengths_arrive_in_millimetres(tmp_path):
-    """72 pt to the inch: the source names the unit, and the name is millimetres.
-
-    283.4646 pt is 100 mm to four decimals, and the panel is built out of the
-    point values a drawing tool would write for a round metric size — so a
-    source that forgot the conversion, or applied it twice, misses by a factor
-    of 2.8 rather than by anything a tolerance argument could cover.
-    """
+    """72 pt to the inch: the source names the unit, and the name is millimetres."""
     pdf = build_pdf(
         tmp_path / "units.pdf",
         {
@@ -920,27 +796,9 @@ def test_circles_on_the_reference_layer_are_not_the_outline(tmp_path):
 
 
 def test_the_source_rounds_nothing(data):
-    """What comes back is the measurement, and no quantiser's opinion of it.
+    """The source preserves the measured outline without rounding.
 
-    ``113.00001388888887`` is the panel as ``tar.ai`` draws it. What the value
-    rules out is every rounding that could have been done early: 113.000014 is
-    the outline put through the nanometre boundary before anything asked it to
-    be, and 112 is the outline snapped to the Hammond footprint it turns out to
-    match. That snap is ``IdentifyHammondFootprint``'s to make, and it needs a
-    measurement to make it from — a source that pre-empted either rounding
-    would leave the stage choosing a case from a number already moved.
-
-    ``float``, because ``RawOutline`` refuses an ``int``: the JSON emitter and
-    the drawing both print the measurement, so a nanometre count reaching a
-    millimetre field puts 113 000 014.000 mm on a sheet a machinist reads.
-
-    The two rulings out are not worth the same. A pre-empted *footprint* snap
-    changes every artifact — the panel becomes a 112 mm one. A pre-empted
-    *nanometre* rounding changes none: both spellings print 113.000, and the
-    half nanometre between them cannot flip which grid multiple, drill size or
-    catalogue footprint is nearest. So the trailing digits here are an
-    architectural tripwire and are kept deliberately as one, not a claim that
-    the precision matters. Do not build anything else on them.
+    113.00001388888887 differs from both nanometre rounding and catalogue snapping.
     """
     reference = data.reference
     assert reference is not None

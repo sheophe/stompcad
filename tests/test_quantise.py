@@ -1,21 +1,4 @@
-"""Tests for ``aidrill.quantise`` — the phase, not the three quantisers in it.
-
-What each quantiser answers is pinned in ``test_enclosure.py``,
-``test_diameters.py`` and ``test_snap.py``. What is pinned here is everything
-that only exists because they are composed: the order they run in, that an
-enclosure ERROR stops the run before a hole is touched, that a hole's identity
-survives the assembly, that the two once-per-run findings are not lost, and that
-the provenance records what actually happened rather than what was configured.
-
-One test at the end opens a file. Every other test in the tree builds its
-measurements by hand, which is right for a phase of pure functions and wrong for
-exactly one claim: that a residual this phase produces from *artwork* lands
-exactly on a midpoint, so that ``grid-ambiguous`` is not dead code on every real
-panel. A hand-built ``RawHole(0.125, ...)`` states a midpoint, where a drawn
-circle only approximates one.
-
-Diagnostics are matched on ``code``, never on ``message``.
-"""
+"""Tests for raw-measurement quantisation and diagnostic propagation."""
 
 from __future__ import annotations
 
@@ -92,12 +75,7 @@ def codes(data) -> list[str]:
 
 
 class Watched:
-    """Quantisers that write their own name into a shared log when reached.
-
-    Subclasses rather than stand-ins, so what is observed is the real
-    composition: a stub that answered plausibly would let the phase reorder the
-    two whose answers actually depend on each other and still pass.
-    """
+    """Quantisers that write their own name into a shared log when reached."""
 
     def __init__(self) -> None:
         self.log: list[str] = []
@@ -138,12 +116,9 @@ class Watched:
 
 
 def test_the_phase_runs_enclosure_then_diameters_then_grid():
-    """The one deliberately literal statement of the order.
+    """The phase runs enclosure, diameters and grid in order.
 
-    Order is the single thing none of the three could declare for itself, and
-    unlike the pipeline's it is not the caller's to choose either — so this is
-    where it is said. One hole, so the sequence is the whole answer: any swap of
-    the three reads differently here.
+    One hole makes every permutation observable in the shared log.
     """
     watched = Watched()
 
@@ -158,12 +133,7 @@ def test_the_phase_runs_enclosure_then_diameters_then_grid():
 
 
 def test_a_hole_the_drill_table_refuses_never_reaches_the_grid():
-    """Why diameters runs before the grid, made observable.
-
-    ``unknown-diameter`` is an ERROR that *drops* the hole, so a run that
-    snapped it to the grid first would have positioned a hole that appears in no
-    artifact. Hole 9 is a 30 mm cut-out no bit makes; holes 4 and 1 are real.
-    """
+    """Why diameters runs before the grid, made observable."""
     watched = Watched()
 
     out = phase(
@@ -217,22 +187,7 @@ def test_a_run_that_stopped_records_only_what_ran():
     ],
 )
 def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, code):
-    """All four of them, because they arrive by four different paths.
-
-    The first three are the ways a *declaration* can fail, and the fourth is not
-    a fourth spelling of them: ``ambiguous-enclosure`` is the undeclared path —
-    118 × 78.5 mm sits within 2 mm of both 1590B3 and 1590T, and with no
-    ``--case`` there is nothing to break the tie — so it is the one that reaches
-    the abort with ``expected_part`` unset. A phase that returned early on a set
-    of *codes* rather than on the severity would let exactly this one through,
-    and a matrix of the three declaration errors would not notice.
-
-    Asserted on the *work*, not merely on the result: a phase that quantised
-    every hole and then threw them away would produce identical data and would
-    still be wrong about a panel with two thousand circles on it. Hence two
-    holes, both of which the drill table and the grid would have had something
-    to say about.
-    """
+    """All four of them, because they arrive by four different paths."""
     watched = Watched()
 
     out = phase(
@@ -253,14 +208,7 @@ def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, 
 
 
 def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
-    """The pre-rounding counterexample, carried to the consequence that matters.
-
-    113.9000004 mm is 113 900 000.4 nm, four tenths of a nanometre outside a
-    1 500 000 nm tolerance around 1590B's 112.4 mm. ``test_enclosure.py`` pins
-    the quantiser's answer; what a returned tuple cannot carry is what that
-    answer costs — the run's worst severity is ERROR, which is the single thing
-    the CLI reads to withhold every artifact, and no hole was quantised for it.
-    """
+    """The pre-rounding counterexample, carried to the consequence that matters."""
     out = phase(
         read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(113.9000004, 60.5)),
         enclosure=IdentifyHammondFootprint("1590B"),
@@ -273,13 +221,9 @@ def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
 
 
 def test_an_enclosure_warning_does_not_stop_the_run():
-    """``unknown-enclosure`` is a WARNING about *our* catalogue, not about the
-    panel: the outline keeps the size it was drawn at and the artifacts are
-    still written, so the holes must still be quantised.
-
-    Undeclared, because the code only exists on that path: a run that named a
-    ``--case`` gets ``unmatched-enclosure`` at ERROR for the same outline, which
-    is the finding the test above covers.
+    """``unknown-enclosure`` is a WARNING about *our* catalogue, not about the panel: the
+    outline keeps the size it was drawn at and the artefacts are still written, so the
+    holes must still be quantised.
     """
     out = phase(
         read(RawHole(-20.0, 18.0, 7.0, 4), reference=RawOutline(200.0, 100.0)),
@@ -307,15 +251,7 @@ def test_a_dropped_hole_does_not_stop_the_run():
 
 
 def test_a_diameter_a_hair_outside_the_tolerance_costs_the_run_its_artifacts():
-    """The drill table's half of the same counterexample, at the phase.
-
-    25.2500004 mm is 250 000.4 nm from the largest metric bit, four tenths of a
-    nanometre outside the matching bound; ``test_diameters.py`` pins the refusal
-    itself. Here is what it means for the panel: hole 4 is gone from a document
-    that still carries hole 1, and the run's worst severity is ERROR — so the
-    drill file the machinist would otherwise receive, one hole short and
-    perfectly well-formed, is never written.
-    """
+    """The drill table's half of the same counterexample, at the phase."""
     out = phase(
         read(RawHole(-20.0, 18.0, 25.2500004, 4), RawHole(20.0, 18.0, 7.0, 1))
     )
@@ -331,14 +267,7 @@ def test_a_diameter_a_hair_outside_the_tolerance_costs_the_run_its_artifacts():
 
 
 def test_every_finished_hole_keeps_the_number_its_measurement_had():
-    """4, 1, 9 — deliberately neither ordered nor equal to a list position.
-
-    ``Hole.__post_init__`` refuses a hole whose two identities differ, so this
-    cannot be broken quietly; it is asserted anyway because that guard is the
-    only thing standing between an assembly that renumbers and a diagnostic
-    naming a different hole than the drawing's balloon does. Numbered 0, 1, 2 the
-    assertion would pass just as happily for an implementation that enumerated.
-    """
+    """4, 1, 9 — deliberately neither ordered nor equal to a list position."""
     out = phase(
         read(
             RawHole(-20.0, 18.0, 7.0, 4),
@@ -374,15 +303,7 @@ def test_the_measurement_travels_with_the_hole_it_was_taken_from():
 
 @pytest.mark.parametrize("hole_count", [0, 1, 3])
 def test_a_clamped_grid_is_reported_exactly_once(hole_count):
-    """The finding the phase is the only thing positioned to raise.
-
-    ``SnapPositions`` sets it in its constructor, because a pitch below the
-    floor is a fact about the configuration and not about any hole. Returned per
-    hole it would repeat for every circle on the panel and vanish entirely on a
-    panel with none — which is the run where the operator most needs telling
-    that the grid they typed is not the one their holes were snapped to. Hence
-    the zero case, which is the one that actually falsifies the alternative.
-    """
+    """The finding the phase is the only thing positioned to raise."""
     holes = tuple(RawHole(float(i), 0.0, 7.0, index=i + 4) for i in range(hole_count))
 
     out = phase(read(*holes), positions=SnapPositions(0))
@@ -399,16 +320,7 @@ def test_an_unclamped_grid_says_nothing():
 
 
 def test_the_phase_reports_a_tied_hole_as_moved_and_says_nothing_more():
-    """Whether the *panel* ties is not this phase's question to answer.
-
-    Both holes here are half a pitch out, so both are off-grid — a tie is always
-    a move worth reporting on its own. What must not appear beside them is
-    ``grid-ambiguous``: the phase runs before ``Deduplicate``, and a verdict
-    reached here can name a hole that is about to be collapsed away, or miss one
-    that survives. ``ReviewGridTies`` asks it afterwards, of the holes the
-    emitters receive, and this assertion is what stops the question quietly
-    moving back.
-    """
+    """Whether the *panel* ties is not this phase's question to answer."""
     out = phase(read(RawHole(-20.125, 18.0, 7.0, 4), RawHole(0.125, 18.0, 7.0, 1)))
 
     assert codes(out) == ["off-grid", "off-grid"]
@@ -497,11 +409,8 @@ def test_the_identified_footprint_reaches_the_document():
 
 
 def test_a_panel_with_no_reference_layer_is_quantised_all_the_same():
-    """The source has already reported the absence; the phase adds nothing and
-    refuses nothing. Positions are page-relative and the holes still need bits.
-
-    Undeclared: the declaration is what turns a missing outline into an ERROR,
-    and this test is about the run that claimed nothing.
+    """The source has already reported the absence; the phase adds nothing and refuses
+    nothing. Positions are page-relative and the holes still need bits.
     """
     out = phase(
         read(RawHole(-20.0, 18.0, 7.0, 4), reference=None),
@@ -570,44 +479,12 @@ def test_a_hole_less_panel_still_records_every_quantiser():
 
 
 def pt_from_mm(mm: float) -> float:
-    """Millimetres to PDF user-space points, the way a drawing tool would.
-
-    The fixture below is specified in the millimetres a designer would type and
-    converted here, rather than written as points chosen to come back as round
-    millimetres. That is the whole point of it: what a designer means and what
-    survives the page are different numbers.
-    """
+    """Millimetres to PDF user-space points, the way a drawing tool would."""
     return mm * 72 / 25.4
 
 
 def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_path):
-    """The one test here that opens a file, and the only kind that can prove it.
-
-    ``ReviewGridTies`` is a stage rather than part of the phase, and it appears
-    in this file all the same because what is on trial is the *residual* the
-    phase produces from artwork. Nothing hand-built can stand in for it, which
-    is the whole reason for the PDF below.
-
-    A circle drawn 10.25 mm off centre leaves ``AiPdfSource`` as
-    10.249999999999993, because the PDF operands, the CTM, the Bézier centroid
-    and the frame subtraction are all binary float before anything decimal
-    happens. An exact test on the *measurement* therefore never fires, and this
-    diagnostic would be dead code on every real panel while passing every
-    hand-built fixture in the file above.
-
-    Reading the *residual* sidesteps it: the residual is measured against
-    ``nm_from_mm`` of the measurement, so the nanometre boundary supplies a
-    ±0.5 nm window implicitly — inherited from a boundary the codebase already
-    has rather than a constant anybody chose. 10.249999999999993 mm is
-    10 250 000 nm, and the tie is exact again.
-
-    The panel is a 1590B drawn on 0.25 mm and the run declares 0.5 mm, which is
-    the mistake the finding exists for: every hole lands on a midpoint, and
-    every one of them is snapped anyway. The ``--case`` is declared for the
-    reason `DECLARED` gives: 112 × 61 is within tolerance of two real footprints,
-    and an undeclared run would abort on ``ambiguous-enclosure`` before a single
-    hole was snapped.
-    """
+    """Half-pitch geometry parsed from a PDF produces an ambiguous-grid finding."""
     width, height = pt_from_mm(112.0), pt_from_mm(61.0)
     centre_x, centre_y = 10 + width / 2, 10 + height / 2
     offsets_mm = ((-10.25, 0.0), (0.25, 5.25), (10.25, -5.25))

@@ -1,61 +1,4 @@
-"""Tests for :mod:`aidrill.model` — its units, the outline's provenance, its enclosure.
-
-The model holds two kinds of length and the first section is about nothing else.
-A *nominal* length — where a hole will actually be drilled — is a whole number of
-nanometres, because a model that will hold a float holds a quantity two artifacts
-can round differently: 7.0000000000000009 mm is one bit in a drill file and
-another in a drawing, and the panel they describe is the same panel. A
-*measurement* — what the artwork said, kept on ``raw`` — is a float millimetre,
-because it is the thing quantisation has not happened to yet.
-
-Both are guarded, in opposite directions, and both guards are at construction,
-where the offending value still has a call site to point at rather than at the
-far end of a pipeline where all that is left is a number nobody can explain.
-``bool`` is the case worth naming on the nanometre side: it is an ``int`` in
-Python, so a ``True`` that reached a coordinate would satisfy ``isinstance`` and
-be drilled at 1 nm. An ``int`` is the case worth naming on the millimetre side:
-it is a length that never crossed a unit boundary, and 40 000 000 nanometres
-sitting in a millimetre field prints as 40 000 000.000 mm on a machinist's sheet
-with nothing in the number to look wrong.
-
-``Hole`` has kept its as-measured values apart from its nominal ones since the
-snapping stage existed. ``ReferenceOutline`` did not, and a later stage snaps
-the outline to a Hammond catalogue size: the fixture panel measures
-113.000 × 60.000 mm and the datasheet says 112 × 61, so the snap rewrites a real
-measurement. Before ``raw`` existed there was nowhere left holding what the
-artwork actually said, and no way to tell a 113 that was measured from a 113
-that was snapped from something else.
-
-These tests therefore assert on both halves at once. Asserting only that
-``resized`` reports the new size would stay green under an implementation that
-overwrites ``raw`` with it, which is the exact bug the field exists to prevent.
-
-The next section covers ``EnclosureMatch``, which answers a different question
-about the same outline: *which enclosure was this panel drawn for?* Its danger
-is the opposite one — not losing information, but claiming more than the artwork
-holds. A 2-D outline identifies a **footprint**, and several Hammond parts share
-each footprint because they differ only in height, so every test below is
-written to fail the moment the type lets someone read a part number out of
-geometry.
-
-Fixtures deliberately use the 120 × 94 footprint: length and width differ, so an
-implementation that swaps them cannot pass, and its four candidates line up with
-nothing else being asserted.
-
-``Diagnostic`` and ``StageRun`` get a section of their own because they are the
-model's one open corner: their payloads are generic key/value pairs, so the
-``_nm`` suffix in a key is the only thing that says a number is a length. The
-tests there pin both halves of that — that a key naming a length is held to one,
-and that a key naming something else is not.
-
-Two further sections cover the accessors every renderer reads the document
-through, and they are here because both were fully invertible while the suite
-stayed green. ``of_severity`` was only ever asserted against documents holding
-*no* diagnostics, where the correct predicate and its exact negation both return
-``()``; ``rows`` was only ever asserted through ``len()``, which says nothing
-about the order it promises. Every test below is therefore written to fail under
-the negation of the rule it names.
-"""
+"""Tests for immutable model values, validation and processing provenance."""
 
 from __future__ import annotations
 
@@ -87,25 +30,14 @@ from aidrill.units import mm_from_nm, nm_from_mm
 
 
 def test_every_nominal_length_on_a_hole_is_an_integer():
-    """``type(...) is int``, not ``isinstance``.
-
-    ``bool`` is a subclass of ``int``, so an assertion written with
-    ``isinstance`` would accept a ``True`` that had found its way into a
-    coordinate and call it a nanometre.
-    """
+    """``type(...) is int``, not ``isinstance``."""
     hole = Hole.from_measurement(-40_000_000, 18_000_000, 7_000_000, index=4)
     for value in (hole.x_nm, hole.y_nm, hole.diameter_nm):
         assert type(value) is int
 
 
 def test_every_measured_length_on_a_hole_is_a_float_millimetre():
-    """The other half of the same claim, and the reason ``raw`` has no suffix.
-
-    ``type(...) is float`` rather than ``isinstance``, for the mirror image of
-    the reason above: an ``int`` satisfies ``isinstance(v, float)`` nowhere, but
-    it does satisfy every arithmetic use downstream, so only the exact type
-    separates 40 mm from 40 000 000 nm here.
-    """
+    """Every measured length on a hole is a float millimetre."""
     hole = Hole.from_measurement(-40_000_000, 18_000_000, 7_000_000, index=4)
     for value in (hole.raw.x, hole.raw.y, hole.raw.diameter):
         assert type(value) is float
@@ -183,25 +115,14 @@ _GUARDED_LENGTHS = [
 
 @pytest.mark.parametrize("build", _GUARDED_LENGTHS)
 def test_a_float_is_not_a_length(build):
-    """Refused at construction, where the offending value still has a call site.
-
-    A float that gets in is only ever noticed at the far end, as a drill file
-    reading ``X6.999999999`` with nothing left to say where the value came from
-    — and it is a quantity the drill file and the drawing may round differently,
-    which is one panel described by two disagreeing artifacts.
-    """
+    """Refused at construction, where the offending value still has a call site."""
     with pytest.raises(TypeError, match="nanometres"):
         build(_A_FLOAT)
 
 
 @pytest.mark.parametrize("build", _GUARDED_LENGTHS)
 def test_a_bool_is_not_a_length(build):
-    """``True`` is an ``int`` in Python, and ``isinstance(True, int)`` is
-    ``True``. A guard written that way accepts it, and a hole at ``True``
-    nanometres is a hole one millionth of a millimetre from the origin — a
-    position no report would ever make look wrong. Asserted for every guarded
-    field and not only for the float, because ``type(v) is int`` and
-    ``isinstance(v, int)`` differ on exactly this value and nothing else."""
+    """A bool is not a length."""
     with pytest.raises(TypeError, match="nanometres"):
         build(True)
 
@@ -220,20 +141,7 @@ _GUARDED_MILLIMETRES = [
 
 
 def test_a_nanometre_integer_in_a_millimetre_field_would_print_as_forty_million():
-    """Why the millimetre guard exists, stated as the sheet it keeps clean.
-
-    ``raw`` is printed: the JSON emitter serialises it and the drawing quotes
-    what the artwork measured. So a length that never crossed ``units`` on its
-    way in is not merely mistyped — it is a number a machinist reads. 40 mm
-    written as the 40 000 000 nanometres it also is comes out below, through the
-    same formatter every artifact prints millimetres with, as a plausible-looking
-    figure four orders of magnitude larger than the panel it is on.
-
-    The assertion pairs the two renderings deliberately. A guard that merely
-    raised would be pinned by the parametrised tests underneath; what those
-    cannot show is that the value it refuses is one nothing downstream would
-    catch.
-    """
+    """Why the millimetre guard exists, stated as the sheet it keeps clean."""
     x_nm = nm_from_mm(40.0)
     assert format_mm(x_nm) == "40000000.000"
     assert format_mm(mm_from_nm(x_nm)) == "40.000"
@@ -244,13 +152,7 @@ def test_a_nanometre_integer_in_a_millimetre_field_would_print_as_forty_million(
 
 @pytest.mark.parametrize("build", _GUARDED_MILLIMETRES)
 def test_an_integer_is_not_a_measurement(build):
-    """``type(v) is float``, and an ``int`` is what it is there to refuse.
-
-    A plain ``int`` is a perfectly good ``float`` argument everywhere else in
-    Python, which is what makes it dangerous here: in a millimetre field it is a
-    length that never crossed a unit boundary, and accepting it converts nothing
-    while looking entirely well-formed.
-    """
+    """``type(v) is float``, and an ``int`` is what it is there to refuse."""
     with pytest.raises(TypeError, match="millimetres"):
         build(_A_NANOMETRE_INT)
 
@@ -273,35 +175,13 @@ def test_a_bool_is_not_a_measurement(build):
 )
 @pytest.mark.parametrize("build", _GUARDED_MILLIMETRES)
 def test_a_measurement_that_is_not_finite_is_refused(build, value):
-    """A NaN is a ``float`` and would sail through a type check alone.
-
-    It then propagates silently: every comparison against it is ``False``, so a
-    NaN measurement is neither inside a tolerance nor outside one, and the stage
-    that would have reported it simply does not. The infinities are the same
-    clause's other half, and are listed because ``math.isfinite`` covers both
-    while a ``value != value`` NaN test covers only one.
-    """
+    """A NaN is a ``float`` and would sail through a type check alone."""
     with pytest.raises(TypeError, match="millimetres"):
         build(value)
 
 
 def test_translation_is_exact_however_many_times_it_is_applied():
-    """The property integers buy and floating point does not.
-
-    The obvious form of this test is the symmetric walk at the end — a thousand
-    steps of +1 nm and a thousand back — and on its own it earns nothing: in
-    millimetres the return trip retraces the rounding of the outward one step
-    for step, so ``-40.0`` walked a thousand microns out and back really does
-    come home, and the test passes on an implementation with no integers in it
-    at all.
-
-    What floating point cannot do is agree with itself about where those
-    thousand steps left off: ``-40.0`` plus ``1e-6`` a thousand times is not
-    ``-40.0`` plus ``1e-3``, and the gap is the rounding of every step in
-    between. That is not a contrived pairing — a snap nudges each hole a
-    little, a frame change moves the whole panel at once, and both numbers are
-    printed on the same sheet.
-    """
+    """The property integers buy and floating point does not."""
     hole = Hole.from_measurement(-40_000_000, 18_000_000, 7_000_000, index=4)
 
     stepped = hole
@@ -336,30 +216,14 @@ def test_a_translated_hole_keeps_its_identity_and_its_measurement():
     ],
 )
 def test_a_translation_that_is_not_a_length_is_refused(translate, value):
-    """The *parameter* is guarded, not only the field it lands in.
-
-    ``translated`` adds before it constructs, and addition normalises the
-    mistake away: ``True + 0`` is ``1``, so by the time ``replace`` reaches the
-    constructor's guard the boolean has become a whole number of nanometres and
-    the hole sits a plausible nanometre from where it started, with nothing left
-    to say a boolean was ever passed.
-
-    Both deltas, because they are two guards and not one: a call naming only
-    ``dx_nm`` would leave the Y axis exactly as unchecked as it was before.
-    """
+    """The *parameter* is guarded, not only the field it lands in."""
     hole = Hole.from_measurement(-40_000_000, 18_000_000, 7_000_000, index=4)
     with pytest.raises(TypeError, match="nanometres"):
         translate(hole, value)
 
 
 def test_the_measurement_carries_the_identity_of_the_hole_it_belongs_to():
-    """``raw.index`` is the hole's own ``index``, not the position it sits at.
-
-    Numbered out of order on purpose. Holes numbered 0, 1, 2 in the order they
-    are built make identity indistinguishable from array position, so an
-    assertion about identity silently also passes for an implementation that
-    hands each measurement whatever counter happened to be running.
-    """
+    """``raw.index`` is the hole's own ``index``, not the position it sits at."""
     holes = [
         Hole.from_measurement(-40_000_000, 18_000_000, 7_000_000, index=4),
         Hole.from_measurement(0, 18_000_000, 7_000_000, index=1),
@@ -370,19 +234,7 @@ def test_the_measurement_carries_the_identity_of_the_hole_it_belongs_to():
 
 
 def test_a_hole_cannot_be_number_4_to_a_diagnostic_and_number_9_to_an_artifact():
-    """The split identity, written out at the two ends it gets read from.
-
-    A quantiser that finds something wrong with a hole is holding the
-    measurement it was checking, so its diagnostic names the hole
-    ``raw.index``. The drill file and the drawing's balloon iterate the
-    finished holes and name that same hole ``index``. Both readings are
-    legitimate, neither consumer can see the other, and the operator reads
-    them on two sheets — so a hole carrying both numbers is one hole described
-    twice under two names, with nothing left holding the pair to notice.
-
-    Numbered 4 and 9, and neither of them 0 or 1, so that no assertion here can
-    pass by a number coinciding with the array position it was built at.
-    """
+    """The split identity, written out at the two ends it gets read from."""
     measurement = RawHole(-39.9906, 18.0004, 6.8, 4)
 
     with pytest.raises(ValueError) as refused:
@@ -410,14 +262,8 @@ def test_the_residual_is_the_nominal_position_less_the_measured_one():
 
 
 def test_the_residual_quantises_the_measurement_rather_than_reporting_millimetres():
-    """Nominal is nanometres and raw is millimetres, so the subtraction crosses
-    a unit — and the answer stays on the nominal side of it.
-
-    Built directly from a float measurement rather than through
-    ``from_measurement``, so nothing here can pass by the two sides having come
-    from one integer. A subtraction that forgot the conversion would report
-    ``-40 000 000 + 39.9906`` — an eight-figure residual on a hole that moved
-    nine microns — and it would still be a number, printed on the same sheet.
+    """Nominal is nanometres and raw is millimetres, so the subtraction crosses a unit —
+    and the answer stays on the nominal side of it.
     """
     hole = Hole(
         x_nm=-40_000_000,
@@ -496,13 +342,7 @@ def test_from_measurement_records_the_measurement_it_was_given():
 
 
 def test_a_plainly_constructed_outline_is_its_own_measurement():
-    """Two-argument construction predates this field and must keep working.
-
-    An outline nobody has snapped *is* as-measured, so ``raw`` mirroring its own
-    dimensions is the truthful answer — converted, because ``raw`` is in
-    millimetres and the nominal size is not. It means no call site has to decide
-    whether provenance is known, which is what a ``None`` here would have cost.
-    """
+    """Two-argument construction uses the nominal size as its measurement."""
     outline = ReferenceOutline(113_000_000, 60_000_000)
     assert outline.raw == RawOutline(113.0, 60.0)
 
@@ -513,14 +353,7 @@ def test_an_explicit_raw_is_never_replaced_by_the_nominal_values():
 
 
 def test_a_caller_who_really_measured_nothing_gets_that_measurement_back():
-    """The sentinel is tested by identity, and this is what that buys.
-
-    ``_MEASUREMENT_IS_NOMINAL`` is a ``RawOutline(0.0, 0.0)``, so an equality
-    test would take a caller's own zero measurement for "nobody passed one" and
-    silently overwrite it with the nominal size — provenance replaced by the
-    thing provenance exists to be told apart from. The ``is`` test cannot: the
-    outline built here is a different object.
-    """
+    """The sentinel is tested by identity, and this is what that buys."""
     outline = ReferenceOutline(113_000_000, 60_000_000, raw=RawOutline(0.0, 0.0))
     assert (outline.raw.width, outline.raw.height) == (0.0, 0.0)
 
@@ -549,13 +382,7 @@ def test_raw_outline_compares_by_value():
 
 
 def test_outlines_differing_only_in_provenance_are_not_equal():
-    """A snapped 112 × 61 and a measured one describe different panels.
-
-    This is the only test pinning ``raw`` into equality, and it has to be:
-    the JSON round-trip test can only notice a dropped measurement once its
-    own fixture carries a snapped outline, because an unsnapped one rebuilds
-    its ``raw`` from the nominal values and compares equal either way.
-    """
+    """A snapped 112 × 61 and a measured one describe different panels."""
     measured = ReferenceOutline.from_measurement(112_000_000, 61_000_000)
     snapped = ReferenceOutline.from_measurement(113_000_000, 60_000_000).resized(
         112_000_000, 61_000_000
@@ -593,12 +420,7 @@ def test_from_measurement_refuses_a_non_positive_outline():
 
 
 def raw_panel(**overrides) -> RawDrillData:
-    """A measured panel with three holes, numbered out of order on purpose.
-
-    4, 1, 9 rather than 0, 1, 2, so that identity and array position cannot be
-    the same claim: a document that renumbered its holes to their positions
-    would pass an in-order fixture without anything looking wrong.
-    """
+    """Return a measured panel with holes numbered out of position order."""
     fields = dict(
         source=SourceInfo(path="tar.ai"),
         reference=RawOutline(113.0, 60.0),
@@ -614,12 +436,7 @@ def raw_panel(**overrides) -> RawDrillData:
 
 
 def test_the_raw_field_order_is_source_reference_centre_holes():
-    """Pinned positionally, because a source builds one of these per read.
-
-    Reordering the declarations would keep every keyword call site working and
-    quietly transpose the positional ones — and ``reference`` and ``centre`` are
-    adjacent, of compatible-looking shapes, and both about the same outline.
-    """
+    """Positional construction orders source, reference, centre and holes."""
     positional = RawDrillData(
         SourceInfo(path="tar.ai"),
         RawOutline(113.0, 60.0),
@@ -651,13 +468,7 @@ def test_a_raw_document_carries_the_findings_the_source_made():
 
 
 def test_a_raw_document_may_have_no_reference_outline_at_all():
-    """``None`` is a real answer here, unlike on ``ReferenceOutline.raw``.
-
-    A reference layer holding no non-circular path leaves the source with
-    nothing to centre on; it reports page-relative positions and a WARNING
-    rather than inventing an outline, and the centre it did not find is the
-    origin it did not move anything by.
-    """
+    """``None`` is a real answer here, unlike on ``ReferenceOutline.raw``."""
     unreferenced = raw_panel(reference=None, centre=(0.0, 0.0))
     assert unreferenced.reference is None
     assert unreferenced.centre == (0.0, 0.0)
@@ -675,14 +486,7 @@ _GUARDED_CENTRE = [
 
 
 def test_a_nanometre_centre_would_displace_the_whole_panel_not_one_field():
-    """Why ``centre`` is guarded, stated as the frame it keeps.
-
-    ``centre`` is the point in source space every hole's canonical position is
-    measured from, so a value that never crossed ``units`` does not spoil one
-    field on one hole — it moves the origin, and with it every hole on the
-    panel, by six orders of magnitude. The two renderings below are the same
-    page centre; only one of them is on the artboard.
-    """
+    """Why ``centre`` is guarded, stated as the frame it keeps."""
     centre_x_nm = nm_from_mm(297.6)
     assert format_mm(centre_x_nm) == "297600000.000"
     assert format_mm(mm_from_nm(centre_x_nm)) == "297.600"
@@ -698,13 +502,7 @@ def test_a_nanometre_centre_would_displace_the_whole_panel_not_one_field():
 )
 @pytest.mark.parametrize("build", _GUARDED_CENTRE)
 def test_a_centre_coordinate_that_is_not_a_measurement_is_refused(build, value):
-    """The same guard as the raw types', reaching inside the tuple.
-
-    ``True`` puts the origin one nanometre from the page corner, and a NaN makes
-    every hole's position NaN with no comparison anywhere left to notice — both
-    of them a whole panel's worth of wrong, arriving through a field that is not
-    a value object and so has no ``__post_init__`` of its own.
-    """
+    """A centre coordinate that is not a measurement is refused."""
     with pytest.raises(TypeError, match="millimetres"):
         build(value)
 
@@ -750,12 +548,7 @@ def test_a_match_records_the_catalogue_length_and_width():
 
 
 def test_the_field_order_is_family_length_width_candidates():
-    """Pinned positionally, because the stage and the emitters agreed on it.
-
-    Length before width is the datasheet's own column order. Swapping the two
-    declarations would keep every keyword call site working and quietly
-    transpose every positional one.
-    """
+    """Positional construction orders family, dimensions and candidates."""
     positional = EnclosureMatch(
         "Hammond 1590", 120_000_000, 94_000_000, ("1590BB", "1590BB2")
     )
@@ -806,13 +599,7 @@ def test_an_operator_may_declare_the_part_without_narrowing_the_candidates():
 
 
 def test_a_declared_part_outside_the_candidates_is_not_the_models_business():
-    """Constructing this must not raise: refusing it here would pre-empt the stage.
-
-    A panel declared as one case and drawn to another is a real operator error,
-    and it has to reach the diagnostics as ``wrong-enclosure`` with both names in
-    it. An exception in the value type would instead abort the run with no
-    finding to render.
-    """
+    """Constructing this must not raise: refusing it here would pre-empt the stage."""
     mismatched = dataclasses.replace(_1590BB_FOOTPRINT, selected_part="1590A")
     assert mismatched.selected_part == "1590A"
     assert mismatched.candidates == ("1590BB", "1590BB2", "1590BBS", "1590C")
@@ -823,25 +610,14 @@ def test_a_match_is_not_rotated_unless_it_says_so():
 
 
 def test_a_rotated_match_still_reports_the_catalogue_orientation():
-    """``rotated`` describes the artwork, not a second, transposed footprint.
-
-    Storing 94 × 120 for a portrait panel would make the same enclosure appear
-    twice in the catalogue under two footprints, and a consumer comparing
-    against the datasheet would find neither.
-    """
+    """``rotated`` describes the artwork, not a second, transposed footprint."""
     portrait = dataclasses.replace(_1590BB_FOOTPRINT, rotated=True)
     assert portrait.rotated is True
     assert (portrait.length_nm, portrait.width_nm) == (120_000_000, 94_000_000)
 
 
 def test_candidates_given_as_a_list_are_stored_as_a_tuple():
-    """The same coercion ``StageRun`` and ``Diagnostic`` do, for the same reason.
-
-    A match holding a list is unhashable and compares unequal to the identical
-    match built from a tuple, so a document read back from JSON — where every
-    sequence arrives as a list — would differ from the one it was written from
-    while printing identically.
-    """
+    """Candidates given as a list are stored as a tuple."""
     from_list = EnclosureMatch(
         family="Hammond 1590",
         length_nm=120_000_000,
@@ -854,13 +630,7 @@ def test_candidates_given_as_a_list_are_stored_as_a_tuple():
 
 
 def test_the_coercion_keeps_the_order_it_was_given():
-    """Catalogue order is the caller's to choose; nothing here re-sorts it.
-
-    Deliberately out of sort order, because every other fixture in this file
-    happens to be sorted already — a ``tuple(sorted(...))`` coercion would sail
-    through all of them and only surface once a datasheet listed a footprint's
-    parts in some other order.
-    """
+    """Catalogue order is the caller's to choose; nothing here re-sorts it."""
     unsorted = EnclosureMatch(
         family="Hammond 1590",
         length_nm=120_000_000,
@@ -871,14 +641,7 @@ def test_the_coercion_keeps_the_order_it_was_given():
 
 
 def test_a_bare_string_of_candidates_is_refused():
-    """``tuple("1590B")`` is five candidates, and every one of them type-checks.
-
-    The neighbouring coercions in this module can afford not to guard: their
-    payloads are tuples of pairs, so a string fails on unpacking and says so.
-    ``candidates`` is flat, so the wrong answer is well-formed — it compares,
-    hashes, and prints "1", "5", "9", "0", "B" onto a drawing. Nothing later
-    can catch it, so construction has to.
-    """
+    """``tuple("1590B")`` is five candidates, and every one of them type-checks."""
     with pytest.raises(TypeError):
         EnclosureMatch(
             family="Hammond 1590",
@@ -1088,13 +851,7 @@ def test_two_diameters_a_nanometre_apart_are_two_tools():
 
 
 def four_findings() -> DrillData:
-    """One ERROR, one INFO and two WARNINGs, in an order no grouping produces.
-
-    The two warnings are deliberately not adjacent: a selector that returned
-    every diagnostic *except* the ones asked for would still hand back a
-    non-empty tuple, and one that lost the order they were appended in would
-    still hand back the right two.
-    """
+    """One ERROR, one INFO and two WARNINGs, in an order no grouping produces."""
     return DrillData(
         diagnostics=(
             Diagnostic.warning("off-grid", "hole 4 moved 0.12 mm"),
@@ -1123,12 +880,7 @@ def test_of_severity_selects_that_severity_and_nothing_else(severity, codes):
 
 
 def test_the_three_severities_partition_the_findings():
-    """Every diagnostic appears under exactly one severity, and none is lost.
-
-    The report groups by severity and then states a total, so a selector that
-    put a finding in two groups — or in none — would make the two halves of one
-    rendering disagree while each looked plausible on its own.
-    """
+    """Every diagnostic appears under exactly one severity, and none is lost."""
     data = four_findings()
     selected = [
         diagnostic
@@ -1166,13 +918,7 @@ def test_a_severity_does_not_compare_with_anything_else():
 
 
 def test_a_diagnostic_locates_a_finding_in_whole_nanometres():
-    """``location_nm`` is a position in the canonical frame like any other.
-
-    The suffix is the point: an unsuffixed ``location`` is the one pair in the
-    model with nothing in its name to say what unit it is in, and a stage
-    reporting where a hole ended up has the millimetres it printed in the
-    message right there to hand.
-    """
+    """``location_nm`` is a position in the canonical frame like any other."""
     finding = Diagnostic.warning(
         "off-grid", "hole 4 moved", location_nm=(-40_000_000, 18_000_000)
     )
@@ -1209,27 +955,7 @@ def test_a_finding_need_not_be_anywhere():
     ],
 )
 def test_a_payload_key_ending_nm_must_hold_whole_nanometres(build, value):
-    """The suffix is the whole contract in a payload, so it is enforced.
-
-    ``Diagnostic.data`` and ``StageRun.parameters`` are open by design — a stage
-    records what it has to record, under keys this module cannot know in
-    advance — and that openness is exactly why the key has to be held to its
-    word. ``moved_nm`` is read by the CLI report, the drawing's NOTES block and
-    the JSON alike, and a millimetre float sitting under that name prints as a
-    plausible number in all three.
-
-    Both call sites, because they are two guards: a check wired into
-    ``Diagnostic`` alone would leave every stage's provenance unchecked. And the
-    tuple case separately, because the one tuple-valued parameter in the
-    pipeline is a table of diameters — a scalar-only check would leave every
-    size in it unexamined.
-
-    The JSON-shaped case is the payload a consumer reconstructs from the
-    emitted document, and it is here because ``Diagnostic.__post_init__``
-    normalises it before checking it: a coercion that tidied the pairs into
-    tuples and left the check behind would make the one shape a library
-    consumer actually builds the only unguarded way into the model.
-    """
+    """The suffix is the whole contract in a payload, so it is enforced."""
     with pytest.raises(TypeError, match="nanometres"):
         build(value)
 
@@ -1258,12 +984,7 @@ def test_a_payload_key_ending_nm_accepts_whole_nanometres(build):
 
 
 def test_a_payload_key_that_is_not_a_length_may_hold_a_float():
-    """The rule is the suffix, not "no floats".
-
-    A ratio, an angle or a fraction is a genuine float and none of them is a
-    length; refusing them would push a stage into spelling a real number as a
-    string, which is how a consumer ends up parsing provenance back out again.
-    """
+    """The rule is the suffix, not "no floats"."""
     finding = Diagnostic.warning("off-grid", "hole 4 moved", data=(("share", 0.25),))
     run = StageRun("identify-enclosure", (("draft_angle_deg", 2.0),))
     assert finding.get("share") == 0.25
@@ -1341,22 +1062,7 @@ _FINDING_CONSTRUCTORS = [
 def test_a_finding_rebuilt_from_json_is_the_finding_it_was_written_from(
     build, location_nm, data
 ):
-    """A ``Diagnostic`` is a value object, so a list in one is a broken one.
-
-    Reading the emitted JSON back is the obvious way a library consumer
-    reconstructs a document, and ``json.load`` hands back a list for every
-    array — the location, the payload, each key/value pair inside it, and the
-    one payload value that is a sequence of its own. A finding holding any of
-    them prints exactly like the one the pipeline produced, compares unequal to
-    it, and raises ``TypeError`` from ``hash``, so the reconstruction is only
-    usable by a reader who already knows which sequences this module happens to
-    want as tuples.
-
-    Both assertions, because they fail apart: equality is what a test comparing
-    against an expected finding relies on, and hashability is what putting
-    findings in a set relies on. A coercion that reached one field and not
-    another would satisfy neither.
-    """
+    """A ``Diagnostic`` is a value object, so a list in one is a broken one."""
     rebuilt = build(location_nm, data)
     assert rebuilt == _TUPLE_BUILT_FINDING
     assert hash(rebuilt) == hash(_TUPLE_BUILT_FINDING)
@@ -1403,15 +1109,7 @@ def test_a_row_runs_left_to_right():
 
 
 def test_two_holes_a_nanometre_apart_in_y_are_two_rows():
-    """Grouping is exact, and a nanometre is the whole of what that decides.
-
-    Every Y reaching here is a multiple of the same grid, so holes on one row
-    are the identical integer and no slack has anything to absorb. Where the
-    integers differ they differ because the holes do: a nanometre is a distance
-    the model can hold, and the smallest bucket wider than zero — a micron — is
-    already 18.000 against 18.001 in the drill file, two coordinates the machine
-    drills where the drawing would dimension one row.
-    """
+    """Grouping is exact, and a nanometre is the whole of what that decides."""
     panel = row_panel(
         Hole.from_measurement(-20_000_000, 18_000_000, 7_000_000, index=3),
         Hole.from_measurement(20_000_000, 18_000_001, 7_000_000, index=8),

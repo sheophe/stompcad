@@ -1,9 +1,4 @@
-"""Generate the Hammond 1590 catalogue from the distributed TSV authority.
-
-``docs/parts/dimensions.tsv`` supplies exact dimensions, rendered as integer
-nanometres in ``src/aidrill/enclosures.py``. Regenerate that module after a TSV
-revision; do not edit it by hand.
-"""
+"""Generate the Hammond 1590 catalogue from its TSV authority."""
 
 from __future__ import annotations
 

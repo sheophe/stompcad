@@ -1,20 +1,4 @@
-"""Tests for :mod:`aidrill.tolerance` — the boundary, which is all it decides.
-
-``within`` is one line, and every one of its characters is a decision someone
-downstream reads as a promise. Two of them are pinned here:
-
-* **The boundary is inclusive.** An operator who writes ``--grid-warn 0.05``
-  means a hole that moved exactly 0.05 mm to stay quiet, and ``<`` would make
-  the flag mean something a hair tighter than it says. This went unpinned for a
-  long time: mutating ``<=`` to ``<`` left the whole suite green, because every
-  fixture sat comfortably inside or outside its tolerance and none of them sat
-  *on* it. So the tests below use distances that are exactly the tolerance, and
-  exactly one nanometre either side of it.
-* **The comparison is exact.** Lengths are whole nanometres, so there is no
-  representation error for an epsilon to absorb, and a ``within`` that widened
-  every tolerance by even a nanometre would answer a question nobody asked. A
-  zero tolerance therefore means equality and nothing else.
-"""
+"""Tests for exact inclusive integer tolerances."""
 
 from __future__ import annotations
 
