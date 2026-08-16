@@ -8,11 +8,8 @@ from pathlib import Path
 
 __all__ = ["read_drawings", "render_module", "main"]
 
-#: Spelled here rather than imported from ``aidrill.units``, on the same argument
-#: ``tests/test_enclosure.py`` makes for spelling it a third time: a generator
-#: that took the factor from the package it generates part of could not tell a
-#: correct conversion from a consistently wrong one. It is also a definition, not
-#: a decision -- there is nothing here for the two spellings to drift about.
+#: Generator-local scale factor keeps exact TSV conversion independent of the
+#: package whose catalogue this tool produces.
 _NM_PER_MM = 1_000_000
 
 #: The TSV's own columns. The fifth, ``source``, records how the maintainer

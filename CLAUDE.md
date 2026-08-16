@@ -61,12 +61,13 @@ integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies`, an
 `SortHoles`. Emitters only translate frames, convert units, format, and serialise; shared
 facts are computed once before the emitter fan-out.
 
-`cli.py` owns quantiser and stage order. A stage must not depend on or assert that another
-stage ran first. `Pipeline` depends only on the `Stage` protocol.
+`quantise()` owns enclosure, diameter, then position ordering. The CLI explicitly
+composes the post-quantisation stage order. A stage must not depend on or assert that
+another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
 ## Domain invariants
 
-- The canonical frame is millimetres, Y-up, with the origin at the reference-outline
+- Canonical coordinates use a Y-up frame with the origin at the reference-outline
   centre. Emitters convert from it through model operations.
 - Raw source lengths are finite float millimetres. Canonical lengths are integer
   nanometres, selected by exact decimal scaling before representation rounding.

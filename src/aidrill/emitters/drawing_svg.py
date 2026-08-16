@@ -601,11 +601,8 @@ class DrawingSvgEmitter:
             stations_nm = [hole.x_nm for hole in holes]
             if edge_nm is not None:
                 stations_nm = [-edge_nm, *stations_nm, edge_nm]
-            # ``set``, with no tolerance and nothing to choose: a station is an
-            # integer, so two of them are the same station or they are not. The
-            # band this used to collapse was absorbing float error that no
-            # longer exists — and a hole sitting on the panel edge coincides with
-            # it exactly or is a hole somewhere else.
+            # Stations are integer nanometres, so exact equality alone identifies
+            # duplicate dimension stations, including an edge-aligned hole.
             stations_nm = sorted(set(stations_nm))
             if len(stations_nm) < 2:
                 continue
@@ -777,13 +774,8 @@ class DrawingSvgEmitter:
         counts = data.tool_counts()
         diameter_label = _diameter_label(data)
 
-        # Two lists share one box, and both used to be sized as though the other
-        # were free. The capacity arithmetic subtracted the summary and then
-        # clamped the remainder to zero, throwing the deficit away, while the
-        # summary loop below still drew one line per tool: 120 distinct
-        # diameters put 36 lines through the title block and 3 off the page, and
-        # the only notice printed said "further holes not listed" — a true
-        # statement about a different quantity.
+        # The hole list and tool summary share the box. Capacity includes both
+        # lists and their structural lines within the available height.
         summary_lines = len(tools)
         available = (y1 - y0) - 8.0
         needed = len(data.holes) + 2 + summary_lines + 1
@@ -910,10 +902,7 @@ class DrawingSvgEmitter:
             )
         if tool_overflow:
             y += pitch
-            # Its own wording, and its own class. A tool the sheet does not name
-            # is a bit that does not get fitted, and saying "holes" about it —
-            # which is all the schedule used to say — describes the wrong
-            # quantity while the drill file quietly defines every one of them.
+            # Tool overflow names the omitted quantity separately from hole rows.
             _text(
                 group,
                 x0 + 2.0,

@@ -201,6 +201,7 @@ class TestTheGeneratedModule:
         """The renderer sorts by footprint, height, then part."""
         from tools.build_catalogue import render_module
 
+        # Opposing footprint and height orders prevent a transposed sort from passing.
         rendered = render_module(
             {
                 ("1590A", 120_000_000, 60_000_000, 57_000_000),

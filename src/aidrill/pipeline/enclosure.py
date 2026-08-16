@@ -33,9 +33,8 @@ __all__ = [
 #: the same fact.
 CATALOGUE: str = "Hammond 1590"
 
-#: 1.5 mm per axis. Derived from the catalogue's own closest pair rather than
-#: from any panel — see the module docstring, and the test that recomputes the
-#: bound from the shipped table on every run.
+#: Inclusive 1.5 mm per-axis matching slack. It remains below the 1.9 mm gap
+#: at which a face-drawn 1590B becomes ambiguous.
 DEFAULT_TOLERANCE_NM: int = 1_500_000
 
 #: The one piece of advice every "nothing fitted" message has to carry, written

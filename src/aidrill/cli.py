@@ -304,12 +304,8 @@ class OutputSettings:
 #: with its own defaults.
 _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
     ExcellonOptions: lambda s: ExcellonOptions(title=s.title),
-    # No grid here: ``--grid`` goes to ``SnapPositions`` and nowhere else, and
-    # the drawing reads the pitch back out of that stage's record. Passing it a
-    # second time made the sheet's stamp agree with the flag rather than with
-    # the holes, which is the same disagreement in miniature.
-    # No true_size either: the drawing takes the panel's real size from the
-    # enclosure the pipeline identified, not from a second declaration here.
+    # Drawing options contain presentation values only; grid pitch and panel
+    # dimensions come from canonical processing results.
     DrawingOptions: lambda s: DrawingOptions(title=s.title),
     JsonOptions: lambda s: JsonOptions(),
 }
@@ -653,10 +649,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_:  # --help exits 0; argparse usage errors do not
         return EXIT_CLEAN if not exit_.code else EXIT_USAGE
 
-    # One handler, because there was one behaviour: two byte-identical blocks
-    # invited the day somebody edited only one of them. Anything not listed here
-    # is a bug in aidrill rather than a fault in the input, and keeps its
-    # traceback — the operator should never be told a crash was their typo.
+    # Expected user-facing failures share one handler. Unexpected faults retain
+    # their tracebacks rather than being classified as invalid input.
     try:
         return _run(args, sys.stdout)
     except (UsageError, AidrillError, OSError) as failure:

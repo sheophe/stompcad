@@ -30,6 +30,10 @@ An invocation selects one to three emitters through repeatable
 `--emit FORMAT=PATH` arguments. The processing blocks, aggregate boundaries, and typed
 transfers are shown in ADR-0001, Figure 1.
 
+Emitter registration is extensible: a format maps to an emitter without changing the
+processing contract. The CLI explicitly composes the ordered post-quantisation stages;
+each stage remains independent, and `Pipeline` applies them in the supplied order.
+
 ```mermaid
 flowchart LR
     source["AiPdfSource"]
