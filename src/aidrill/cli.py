@@ -16,7 +16,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, get_args, get_type_hints
 
-from .emitters import DrawingOptions, ExcellonOptions, JsonOptions, available, get_emitter
+from .emitters import (
+    DrawingOptions,
+    ExcellonOptions,
+    JsonOptions,
+    PdfDrawingOptions,
+    available,
+    get_emitter,
+)
 from .enclosures import HAMMOND_1590
 from .errors import AidrillError
 from .formatting import format_mm
@@ -309,6 +316,9 @@ _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
     # Drawing options contain presentation values only; grid pitch and panel
     # dimensions come from canonical processing results.
     DrawingOptions: lambda s: DrawingOptions(title=s.title),
+    # The PDF sheet's ISO 7200 mandatory fields have no command-line source
+    # yet; a caller using the library supplies them directly.
+    PdfDrawingOptions: lambda s: PdfDrawingOptions(title=s.title),
     JsonOptions: lambda s: JsonOptions(),
 }
 

@@ -1378,6 +1378,46 @@ def test_the_fixture_panel_declared_as_a_case_it_does_not_fit_exits_two(tmp_path
     assert not doc.exists()
 
 
+@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
+def test_the_pdf_format_is_offered_and_writes_a_pdf(tmp_path, capsys):
+    """--emit resolves through the registry; the CLI never names a format."""
+    out = tmp_path / "panel.pdf"
+
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--emit", f"drawing-pdf={out}"])
+
+    assert code in (0, 1)
+    assert out.read_bytes().startswith(b"%PDF-1.7")
+    assert "drawing-pdf" in capsys.readouterr().out
+
+
+def test_the_pdf_emitter_receives_the_title_from_the_command_line():
+    from aidrill.emitters.drawing_pdf import DrawingPdfEmitter
+
+    emitter = cli.make_emitter("drawing-pdf", cli.OutputSettings(title="TAR PANEL"))
+
+    assert isinstance(emitter, DrawingPdfEmitter)
+    assert emitter.options.title == "TAR PANEL"
+
+
+@pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
+def test_an_error_run_withholds_the_pdf_like_every_other_artefact(tmp_path, capsys):
+    """Any error withholds every requested artefact; ADR-0001."""
+    out = tmp_path / "panel.pdf"
+
+    # No --case, so tar.ai is ambiguous-enclosure, which is an error.
+    code = cli.main([str(FIXTURE), "--emit", f"drawing-pdf={out}"])
+
+    assert code == 2
+    assert not out.exists()
+    assert "wrote nothing" in capsys.readouterr().out
+
+
+def test_the_help_lists_the_pdf_format():
+    parser = cli.build_parser()
+
+    assert "drawing-pdf" in parser.format_help()
+
+
 # ---------------------------------------------------------------------------
 # the error hierarchy
 # ---------------------------------------------------------------------------

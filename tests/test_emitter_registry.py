@@ -151,6 +151,14 @@ def test_available_is_sorted_and_complete(clean_registry):
     assert names == tuple(sorted(base.REGISTRY))
 
 
+def test_the_pdf_emitter_is_registered_under_its_own_name():
+    from aidrill.emitters import available, get_emitter
+    from aidrill.emitters.drawing_pdf import DrawingPdfEmitter
+
+    assert "drawing-pdf" in available()
+    assert get_emitter("drawing-pdf") is DrawingPdfEmitter
+
+
 # ---------------------------------------------------------------------------
 # payload dispatch at the writing site
 # ---------------------------------------------------------------------------
