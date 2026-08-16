@@ -391,6 +391,52 @@ def test_one_hole_circle_per_hole_at_true_diameter_and_position(panel: DrillData
         )
 
 
+def test_the_sheet_states_the_nominal_everywhere_and_the_measurement_nowhere():
+    """The one fixture where a hole's two numbers do not coincide.
+
+    Everywhere else in this file ``Hole.raw`` equals the nominal value, because
+    ``from_measurement`` puts it there — which makes "reads ``x_nm``" and "reads
+    ``raw.x``" indistinguishable, the coincidence this repo has been bitten by
+    before. Here the panel goes through the real phase: the circles are drawn at
+    −39.9906 and snapped to −40, the outline measures 113.000 × 60.000 and is a
+    112.40 × 60.50 1590B. Three places on the sheet could quote the measurement
+    instead, and all three are checked — where the circle is drawn, what the
+    schedule says, and how big the outline rectangle is.
+
+    The measurement is not lost, it is simply not what a drilled panel is
+    described by: it stays on ``raw`` for the residual and the JSON.
+    """
+    data = phase(
+        measured(-39.9906, 17.99996, 6.998, index=4),
+        measured(19.9942, 17.99996, 6.998, index=1),
+        reference=RawOutline(113.0, 60.0),
+        enclosure=IdentifyHammondFootprint("1590B"),
+    )
+    holes_by_id = {hole.index: hole for hole in data.holes}
+    assert (holes_by_id[4].x_nm, holes_by_id[4].y_nm) == (-40_000_000, 18_000_000)
+    assert holes_by_id[4].raw.x != mm_from_nm(holes_by_id[4].x_nm)
+    assert data.reference is not None
+    assert data.reference.width_nm == 112_400_000 != data.reference.raw.width
+
+    emitter = DrawingSvgEmitter()
+    layout = emitter.layout(data)
+    root = ET.fromstring(emitter.emit(data))
+
+    circle = by_class(root, "hole", "circle")[0]
+    assert num(circle, "cx") == pytest.approx(layout.point(-40.0, 18.0)[0], abs=1e-6)
+    assert num(circle, "cx") != pytest.approx(
+        layout.point(holes_by_id[4].raw.x, 18.0)[0], abs=1e-6
+    )
+
+    # The measurements would have printed "-39.991" and "19.994" here.
+    assert [e.text for e in by_class(root, "sched-x", "text")] == ["-40.000", "20.000"]
+    assert [e.text for e in by_class(root, "sched-dia", "text")] == ["⌀7.00 mm"] * 2
+
+    rect = by_class(root, "outline", "rect")[0]
+    assert num(rect, "width") == pytest.approx(112.4 * layout.scale)
+    assert num(rect, "height") == pytest.approx(60.5 * layout.scale)
+
+
 def test_hole_positions_are_y_up_in_model_and_y_down_on_the_sheet(panel: DrillData):
     emitter = DrawingSvgEmitter()
     layout = emitter.layout(panel)
@@ -873,6 +919,79 @@ def test_a_chain_dimension_states_the_difference_of_two_hole_positions_exactly()
         format_nm(right - middle, 3),
     ], "left to right, and each the difference of the two integers"
     assert labels == ["6.875", "11.125"]
+
+
+def test_a_hole_on_the_panel_edge_is_one_station_and_not_two():
+    """A chain runs edge, hole, …, edge — and a hole *at* an edge is that edge.
+
+    Kept apart with a tolerance once, which is what integers make unnecessary and
+    what an integer makes exact: 30 000 000 is 30 000 000. Left as two stations
+    the chain draws a segment of zero length between them, with two arrowheads
+    on top of each other and a ``0.000`` on a machinist's sheet — a dimension
+    that measures nothing, printed beside one that does.
+    """
+    data = DrillData(
+        holes=(Hole.from_measurement(30_000_000, 0, 5_000_000, index=7),),
+        reference=outline(60_000_000, 40_000_000),
+    )
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert [e.text for e in by_class(root, "dim-text", "text")] == ["60.000"]
+    chain = by_class(root, "dim-chain")[0]
+    assert len(by_class(chain, "extension", "line")) == 2, "two stations, not three"
+
+
+def test_a_row_with_one_station_gets_no_chain_at_all():
+    """One station is a place, not a distance.
+
+    Without a reference outline there are no edge stations to measure against, so
+    a lone hole leaves a chain with nothing in it to dimension. Drawing the group
+    anyway puts an extension line on the sheet pointing at a dimension that was
+    never drawn, which reads as a dimension whose number went missing.
+    """
+    data = DrillData(holes=(Hole.from_measurement(3_000_000, 4_000_000, 5_000_000, index=9),))
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert by_class(root, "dim-chain") == []
+    assert by_class(root, "dim-text", "text") == []
+
+
+def test_a_panel_of_one_row_and_no_outline_is_still_dimensioned_across():
+    """Height zero must not take the width dimension with it.
+
+    Both extents are read off the holes when there is no reference outline, and
+    a row of holes has no height at all. The guard that skips a panel with
+    nothing to measure has to want *both* extents gone, or the commonest
+    reference-less panel there is — one row of controls — loses the only
+    dimension it had.
+    """
+    data = DrillData(
+        holes=(
+            Hole.from_measurement(-10_000_000, 0, 3_000_000, index=4),
+            Hole.from_measurement(10_000_000, 0, 3_000_000, index=1),
+        ),
+    )
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+    assert [e.text for e in by_class(root, "dim-overall", "text")] == ["20.000"]
+
+
+def test_a_panel_of_one_column_and_no_outline_is_still_dimensioned_down():
+    """The same claim on the other axis, which is a separate clause of the guard.
+
+    Folding the two into one test keeps one fixture and drops the other, and the
+    surviving test's name still describes the whole behaviour — so half the
+    coverage goes with nothing looking missing.
+    """
+    data = DrillData(
+        holes=(
+            Hole.from_measurement(0, -10_000_000, 3_000_000, index=4),
+            Hole.from_measurement(0, 10_000_000, 3_000_000, index=1),
+        ),
+    )
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+    vertical = by_class(root, "dim-overall", "text")
+    assert [e.text for e in vertical] == ["20.000"]
+    assert "rotate(-90" in (vertical[0].get("transform") or "")
 
 
 def test_overall_width_and_height_dimensions(panel: DrillData, root: ET.Element):
@@ -1805,6 +1924,13 @@ def test_layout_content_extent_stays_inside_the_drawing_area(panel: DrillData):
     assert cy1 - cy0 == pytest.approx(2 * layout.half_height * layout.scale)
     assert ax0 < cx0 and cx1 < ax1
     assert ay0 < cy0 and cy1 < ay1
+
+    # The outline is the widest thing on this panel, so it is what the fitted
+    # scale has to be fitted around. Leave it out of the extents and the sheet
+    # is scaled to the holes, with the rectangle drawn past the drawing area.
+    assert panel.reference is not None
+    assert layout.half_width == pytest.approx(mm_from_nm(panel.reference.width_nm) / 2)
+    assert layout.half_height == pytest.approx(mm_from_nm(panel.reference.height_nm) / 2)
 
 
 def test_scale_none_fits_a_panel_far_bigger_than_the_sheet(panel: DrillData):
