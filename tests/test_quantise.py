@@ -4,8 +4,14 @@ What each quantiser answers is pinned in ``test_enclosure.py``,
 ``test_diameters.py`` and ``test_snap.py``. What is pinned here is everything
 that only exists because they are composed: the order they run in, that an
 enclosure ERROR stops the run before a hole is touched, that a hole's identity
-survives the assembly, that the once-per-run clamp finding is not lost, and that
+survives the assembly, that the two once-per-run findings are not lost, and that
 the provenance records what actually happened rather than what was configured.
+
+One test at the end opens a file. Every other test in the tree builds its
+measurements by hand, which is right for a phase of pure functions and wrong for
+exactly one claim: that ``grid-ambiguous`` fires on *artwork*. A hand-built
+``RawHole(0.125, ...)`` states a midpoint, where a drawn circle only
+approximates one.
 
 Diagnostics are matched on ``code``, never on ``message``.
 """
@@ -30,6 +36,8 @@ from aidrill.pipeline import (
 )
 from aidrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from aidrill.quantise import quantise
+from aidrill.sources import AiPdfSource
+from tests.conftest import build_pdf, circle_ops
 
 #: The fixture panel's own measurement: 113.000 × 60.000, which the catalogue
 #: calls a 112 × 61 mm 1590B. Every test that wants a panel the enclosure
@@ -370,6 +378,63 @@ def test_an_unclamped_grid_says_nothing():
     assert codes(out) == []
 
 
+def test_a_panel_that_ties_too_often_is_reported_once_and_after_the_holes():
+    """The phase's other once-per-run finding, and the one that needs the loop.
+
+    The clamp is known before any hole is looked at. This one cannot be: "half
+    the holes" is not a fact about any hole, so it is collected after the loop
+    rather than before it. Its place in the report is the reading order — the
+    per-hole findings, then the conclusion drawn over all of them.
+
+    Both holes are half a pitch out, so both are off-grid as well; a tie is
+    always a move worth reporting on its own, and the two findings are about
+    different things.
+    """
+    out = phase(read(RawHole(-20.125, 18.0, 7.0, 4), RawHole(0.125, 18.0, 7.0, 1)))
+
+    assert codes(out) == ["off-grid", "off-grid", "grid-ambiguous"]
+
+
+def test_a_panel_drawn_on_the_declared_grid_is_not_reported_as_ambiguous():
+    """The finding is news, and a run that raises it on every panel has trained
+    the operator to skim past it."""
+    out = phase(read(RawHole(-20.0, 18.0, 7.0, 4), RawHole(0.25, 18.0, 7.0, 1)))
+
+    assert codes(out) == []
+
+
+def test_a_panel_with_no_holes_is_never_ambiguous():
+    """``2 * 0 >= 0`` is true, so silence here is a guard and not an accident.
+
+    The zero case is the one that falsifies a threshold written as a ratio, and
+    a warning about a panel with no circles on it is noise in front of an
+    operator with nothing to fix.
+    """
+    out = phase(read())
+
+    assert codes(out) == []
+
+
+def test_a_hole_the_drill_table_dropped_counts_towards_neither_side():
+    """``review_panel`` is handed the finished holes, and a dropped one is not
+    among them.
+
+    Hole 9 is a 30 mm cut-out no bit makes, so the grid never saw it and it has
+    no residual to be tied or untied by. Counting it in the total would dilute
+    the evidence with a hole nothing measured: one tie in the two holes that
+    were quantised is half the panel and warns, while one in three would not.
+    """
+    out = phase(
+        read(
+            RawHole(-20.125, 18.0, 7.0, 4),
+            RawHole(0.0, 18.0, 30.0, 9),
+            RawHole(0.25, 18.0, 7.0, 1),
+        )
+    )
+
+    assert "grid-ambiguous" in codes(out)
+
+
 def test_the_sources_own_findings_survive_the_phase():
     """A source reports what it could not read — a reference layer with no
     outline in it, a layer it had to guess about — and those findings are about
@@ -491,3 +556,76 @@ def test_a_hole_less_panel_still_records_every_quantiser():
         "snap-diameters",
         "snap",
     ]
+
+
+# ---------------------------------------------------------------------------
+# the same finding, on artwork rather than on a fixture
+# ---------------------------------------------------------------------------
+
+
+def pt_from_mm(mm: float) -> float:
+    """Millimetres to PDF user-space points, the way a drawing tool would.
+
+    The fixture below is specified in the millimetres a designer would type and
+    converted here, rather than written as points chosen to come back as round
+    millimetres. That is the whole point of it: what a designer means and what
+    survives the page are different numbers.
+    """
+    return mm * 72 / 25.4
+
+
+def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_path):
+    """The one test here that opens a file, and the only kind that can prove it.
+
+    A circle drawn 10.25 mm off centre leaves ``AiPdfSource`` as
+    10.249999999999993, because the PDF operands, the CTM, the Bézier centroid
+    and the frame subtraction are all binary float before anything decimal
+    happens. An exact test on the *measurement* therefore never fires, and this
+    diagnostic would be dead code on every real panel while passing every
+    hand-built fixture in the file above.
+
+    Reading the *residual* sidesteps it: the residual is measured against
+    ``nm_from_mm`` of the measurement, so the nanometre boundary supplies a
+    ±0.5 nm window implicitly — inherited from a boundary the codebase already
+    has rather than a constant anybody chose. 10.249999999999993 mm is
+    10 250 000 nm, and the tie is exact again.
+
+    The panel is a 1590B drawn on 0.25 mm and the run declares 0.5 mm, which is
+    the mistake the finding exists for: every hole lands on a midpoint, and
+    every one of them is snapped anyway.
+    """
+    width, height = pt_from_mm(112.0), pt_from_mm(61.0)
+    centre_x, centre_y = 10 + width / 2, 10 + height / 2
+    offsets_mm = ((-10.25, 0.0), (0.25, 5.25), (10.25, -5.25))
+    pdf = build_pdf(
+        tmp_path / "half-pitch.pdf",
+        {
+            "Background": f"10 10 {width} {height} re f",
+            "Drill": " ".join(
+                circle_ops(
+                    centre_x + pt_from_mm(x),
+                    centre_y + pt_from_mm(y),
+                    pt_from_mm(3.5),
+                )
+                for x, y in offsets_mm
+            ),
+        },
+    )
+
+    out = quantise(
+        AiPdfSource(pdf).read(),
+        enclosure=IdentifyHammondFootprint(),
+        diameters=SnapDiametersToDrillTable(),
+        positions=SnapPositions(500_000),
+    )
+
+    assert codes(out) == ["off-grid", "off-grid", "off-grid", "grid-ambiguous"]
+    ambiguous = out.diagnostics[-1]
+    assert ambiguous.get("tied_indices") == (0, 1, 2)
+    assert ambiguous.get("tied_count") == 3
+    assert ambiguous.get("hole_count") == 3
+
+    # The claim the fixture exists for: the artwork did not survive as the
+    # midpoint it was drawn at, and the residual is one anyway.
+    assert out.holes[2].raw.x != 10.25
+    assert [hole.residual_nm[0] for hole in out.holes] == [250_000, -250_000, -250_000]

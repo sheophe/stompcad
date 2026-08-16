@@ -18,7 +18,7 @@ import random
 
 import pytest
 
-from aidrill.model import RawHole, Severity
+from aidrill.model import Hole, RawHole, Severity
 from aidrill.pipeline import SnapPositions
 
 
@@ -26,6 +26,30 @@ def raw(x: float, y: float, *, index: int, diameter: float = 7.0) -> RawHole:
     """One measured circle. ``index`` is keyword-only so it cannot be passed
     where ``diameter`` was meant, and no test numbers its holes in order."""
     return RawHole(x, y, diameter, index)
+
+
+def snapped(stage: SnapPositions, *measurements: RawHole) -> tuple[Hole, ...]:
+    """The finished holes, assembled the way the quantisation phase assembles them.
+
+    ``review_panel`` reads ``Hole.residual_nm``, which is the same subtraction
+    ``quantise`` made, so the fixtures go through the real snap rather than
+    stating a residual by hand: a ``Hole`` whose ``raw`` was written to sit half
+    a pitch away would prove the predicate reads what the test wrote and nothing
+    at all about what snapping does to a measurement.
+    """
+    holes = []
+    for measurement in measurements:
+        (x_nm, y_nm), _ = stage.quantise(measurement)
+        holes.append(
+            Hole(
+                x_nm=x_nm,
+                y_nm=y_nm,
+                diameter_nm=7_000_000,
+                raw=measurement,
+                index=measurement.index,
+            )
+        )
+    return tuple(holes)
 
 
 def codes(diagnostics) -> list[str]:
@@ -368,6 +392,192 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
 
         assert codes(stage.quantise(raw(0.0, 0.0, index=4))[1]) == []
         assert codes(stage.quantise(raw(0.01, 0.0, index=1))[1]) == ["off-grid"]
+
+
+class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
+    """Half-to-even is deterministic and says nothing about what was meant.
+
+    A hole exactly halfway between two grid points gets one of them by a rule
+    rather than by evidence. One such hole is nothing — the question genuinely
+    had two equally good answers and either is drillable. Half a panel is a
+    different fact: artwork drawn on 0.5 mm and run at ``--grid 1.0`` puts
+    *every* hole on a midpoint, and the tool drilled it without comment. The
+    holes are snapped either way; the operator is owed being told before the
+    drill finds out.
+
+    Every fixture here runs at a 250 000 nm pitch, so a tie is a residual of
+    exactly 125 000 nm on either axis.
+    """
+
+    @pytest.mark.parametrize(
+        "x, y",
+        [(0.125, 0.0), (-0.125, 0.0), (0.0, 0.375), (0.0, -0.375)],
+    )
+    def test_a_tie_counts_on_either_axis_and_at_either_sign(self, x, y):
+        """Four cases, because a plausible implementation drops half of them.
+
+        A ``Decimal`` remainder keeps the dividend's sign — ``Decimal("-1.5") %
+        1`` is ``Decimal("-0.5")`` — so the natural spelling would have counted
+        the positive residuals and silently ignored every negative one, which on
+        a centre-origin panel is half the holes. ``abs`` makes the integer form
+        sign-safe for free, and these four exist because that defect was
+        invisible until somebody went looking for it.
+
+        The Y fixtures sit on 1.5 pitches rather than 0.5 so that half-to-even
+        resolves them the other way: X yields residuals of −125 000 and
+        +125 000, Y of +125 000 and −125 000, and each axis therefore carries a
+        tie of each sign rather than the two axes agreeing on one.
+        """
+        stage = SnapPositions(250_000)
+
+        assert codes(stage.review_panel(snapped(stage, raw(x, y, index=4)))) == [
+            "grid-ambiguous"
+        ]
+
+    def test_a_hole_tied_on_both_axes_counts_where_the_scalar_distance_would_not(self):
+        """The most obvious way to draw on the wrong grid, and the one a
+        Euclidean test fails hardest on.
+
+        ``moved_nm`` is ``math.isqrt`` of the summed squares, and that equals
+        half a pitch only when exactly one axis moved half a pitch and the other
+        did not move at all. This hole moves 125 000 nm on each axis, so it is
+        176 776 nm from where it was drawn — nothing a rule looking for 125 000
+        would recognise — while both of its residuals are exact midpoints. The
+        scalar distance stays right for the off-grid report and is no use here.
+        """
+        stage = SnapPositions(250_000)
+        measurement = raw(0.125, 0.125, index=4)
+
+        assert stage.quantise(measurement)[1][0].get("moved_nm") == 176_776
+        assert codes(stage.review_panel(snapped(stage, measurement))) == [
+            "grid-ambiguous"
+        ]
+
+    def test_a_tie_on_one_axis_survives_an_ordinary_residual_on_the_other(self):
+        """``or``, and never ``and``.
+
+        A tie on either axis already proves the declared pitch is not the one
+        the artwork was drawn on. ``and`` would ask every tied hole to be offset
+        diagonally, and would score a row of pots at constant Y — offset in X
+        alone, the common case — as evidence that nothing is wrong. Here Y moves
+        31 000 nm, which is neither a tie nor nothing.
+        """
+        stage = SnapPositions(250_000)
+
+        assert codes(
+            stage.review_panel(snapped(stage, raw(0.125, 0.031, index=4)))
+        ) == ["grid-ambiguous"]
+
+    def test_a_hole_already_on_a_grid_point_is_not_tied(self):
+        """Residual zero, and ``2 * 0 == grid_nm`` is false for any real pitch.
+
+        A hole on-grid in both axes is consistent with the declared grid *and*
+        with the finer one it might have been drawn on, so it is not evidence
+        either way and the predicate abstains. Counting it would warn about
+        every well-drawn panel there is.
+        """
+        stage = SnapPositions(250_000)
+        holes = snapped(stage, raw(-0.25, 0.5, index=4), raw(0.75, -1.0, index=1))
+
+        assert stage.review_panel(holes) == ()
+
+    def test_exactly_half_the_panel_warns_and_one_hole_short_of_it_stays_quiet(self):
+        """Four holes, because half of four is two and needs no rounding.
+
+        An odd count leaves "half" to a comparison nobody typed: at three holes
+        the threshold is 1.5, so 2 of 3 sits above ``>`` and ``>=`` alike and
+        neither boundary is pinned. At four, 2 tied *is* the boundary and 1 tied
+        is the case immediately below it — the pair that tells the two spellings
+        apart.
+        """
+        stage = SnapPositions(250_000)
+        tied = (raw(0.125, 0.0, index=4), raw(0.375, 0.0, index=1))
+        quiet = (raw(-1.0, 0.0, index=9), raw(2.0, 0.0, index=7))
+
+        assert codes(stage.review_panel(snapped(stage, *tied, *quiet))) == [
+            "grid-ambiguous"
+        ]
+        assert stage.review_panel(snapped(stage, tied[0], *quiet, raw(3.0, 0.0, index=2))) == ()
+
+    def test_a_panel_with_no_holes_on_it_says_nothing(self):
+        """``2 * 0 >= 0`` is true, so the empty panel needs a guard of its own.
+
+        Spelt as a ratio it is a division by zero; spelt in integers it is a
+        comparison that quietly passes, and either way a warning about a run
+        with no circles in it is noise in front of an operator with nothing to
+        fix.
+        """
+        assert SnapPositions(250_000).review_panel(()) == ()
+
+    def test_the_finding_names_the_tied_holes_by_identity_and_not_by_position(self):
+        """4, 1, 9 — and the tied ones are the first and the last.
+
+        Numbered in order, the answer ``(0, 2)`` would be indistinguishable from
+        the positions those holes occupy in the list, and an assertion about
+        identity that also passes for position is not an assertion about
+        identity. Hole 1 sits between them, on the grid, and must not appear.
+        """
+        stage = SnapPositions(250_000)
+        holes = snapped(
+            stage,
+            raw(0.125, 0.0, index=4),
+            raw(-0.5, 0.0, index=1),
+            raw(0.0, -0.375, index=9),
+        )
+
+        diag = stage.review_panel(holes)[0]
+
+        assert diag.severity is Severity.WARNING
+        assert diag.get("tied_indices") == (4, 9)
+        assert diag.get("tied_count") == 2
+        assert diag.get("hole_count") == 3
+
+    def test_the_finding_is_about_the_panel_and_names_no_representative_hole(self):
+        """A singular ``hole_index`` is the payload of a hole-level finding.
+
+        Naming one hole out of a tied set would put an arbitrary member where
+        the cause belongs: the drawing rings whatever ``hole_index`` names, and
+        the operator would go and inspect a hole no more at fault than the two
+        beside it. There is no coordinate either — the finding is about the
+        pitch, which is nowhere on the panel.
+        """
+        stage = SnapPositions(250_000)
+        diag = stage.review_panel(snapped(stage, raw(0.125, 0.0, index=4)))[0]
+
+        assert diag.get("hole_index") is None
+        assert diag.location_nm is None
+
+    def test_the_message_says_how_many_of_how_many_and_which_pitch(self):
+        """What the operator can act on is the grid they declared, so the
+        sentence has to point there — the positions are not wrong, and a message
+        about the holes would send them looking for a defect in the artwork."""
+        stage = SnapPositions(250_000)
+        holes = snapped(
+            stage,
+            raw(0.125, 0.0, index=4),
+            raw(-0.5, 0.0, index=1),
+            raw(0.0, -0.375, index=9),
+        )
+
+        message = stage.review_panel(holes)[0].message
+
+        assert "2 of 3" in message
+        assert "0.250 mm" in message
+
+    def test_reviewing_the_same_panel_twice_gives_the_same_answer(self):
+        """No state accumulates across calls, in either direction.
+
+        A quantiser that counted ties into itself would be order-dependent, and
+        a second run over the same holes would disagree with the first. The
+        empty review at the end is the half that a tie *counter* would fail: it
+        must still be silent after two panels' worth of ties have gone past.
+        """
+        stage = SnapPositions(250_000)
+        holes = snapped(stage, raw(0.125, 0.0, index=4))
+
+        assert codes(stage.review_panel(holes)) == ["grid-ambiguous"]
+        assert codes(stage.review_panel(holes)) == ["grid-ambiguous"]
+        assert stage.review_panel(()) == ()
 
 
 def test_the_stage_reports_a_distance_it_could_not_have_got_from_hypot():
