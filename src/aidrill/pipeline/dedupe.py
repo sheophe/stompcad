@@ -94,9 +94,10 @@ class Deduplicate:
         hole 5, three apart in a list that reaches this stage as
         ``[2, 3, 4, 6, 7, 0, 1]`` — so a consumer reconciling artwork circles
         against emitted holes cannot infer 5 from "the survivor is 2, one was
-        dropped". It travels as a comma-separated string because
-        ``Diagnostic.data`` holds scalars; widening that is a change to the
-        model and belongs with one.
+        dropped". It travels as a tuple of identities, the same shape
+        ``grid-ambiguous`` uses for ``tied_indices``: one semantic type in one
+        encoding, so a consumer reading identities out of a finding does not
+        have to know which finding it came from.
 
         ``diameter_nm`` carries the suffix every other length in a payload
         carries, and it is not decoration: the key is the only thing telling a
@@ -118,7 +119,7 @@ class Deduplicate:
                 ("hole_index", survivor.index),
                 ("diameter_nm", survivor.diameter_nm),
                 ("dropped", len(dropped)),
-                ("dropped_indices", ",".join(str(index) for index in indices)),
+                ("dropped_indices", tuple(indices)),
                 ("kept", 1),
             ),
         )

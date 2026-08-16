@@ -35,7 +35,7 @@ part	length_mm	width_mm	height_mm	source
 1590P1	153.00	83.10	50.40	maintainer
 1590DD	188.00	120.00	37.00	extracted
 1590D	187.75	119.50	56.00	extracted
-1590E	188.00	120.00	82.00	extracted+glyph
+1590E	188.00	120.00	82.00	extracted
 1590F	188.00	188.00	67.00	extracted
 1590R1	191.80	111.60	61.00	extracted
 1590DE	200.20	120.20	64.30	extracted(offset (0, 0, 1))

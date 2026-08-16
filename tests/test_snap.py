@@ -544,7 +544,11 @@ class TestAPanelFullOfTiesWasDrawnOnAnotherGrid:
         stage = SnapPositions(250_000)
         diag = stage.review_panel(snapped(stage, raw(0.125, 0.0, index=4)))[0]
 
-        assert diag.get("hole_index") is None
+        # The key must be *absent*, not present and null. ``get`` cannot tell
+        # those apart — its default is ``None`` too — and they are different
+        # public shapes: a consumer routing findings by key presence reads
+        # ``"hole_index": null`` as a hole-shaped payload with no hole in it.
+        assert "hole_index" not in dict(diag.data)
         assert diag.location_nm is None
 
     def test_the_message_says_how_many_of_how_many_and_which_pitch(self):

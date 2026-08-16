@@ -328,13 +328,13 @@ class TestDeduplicate:
 
         diag = Deduplicate().apply(data).diagnostics[0]
 
-        assert diag.get("dropped_indices") == "7,5"
+        assert diag.get("dropped_indices") == (7, 5)
         assert diag.get("hole_index") == 4
 
     def test_a_lone_dropped_hole_is_still_named(self):
         data = make_data(at(0, 0, 7_000_000, index=8), at(0, 0, 7_000_000, index=3))
         diag = Deduplicate().apply(data).diagnostics[0]
-        assert diag.get("dropped_indices") == "3"
+        assert diag.get("dropped_indices") == (3,)
 
     def test_property_dedupe_is_idempotent(self):
         rng = random.Random(90210)

@@ -183,8 +183,8 @@ class SnapPositions:
         pots at constant Y — offset in X alone, the common case — as evidence
         that nothing is wrong. A hole on-grid in both axes is consistent with
         the declared grid *and* with the finer one it may have been drawn on, so
-        it is evidence either way and ``or`` correctly declines to count it: the
-        predicate flags positive evidence and abstains on ambiguity.
+        it is **not** evidence either way and ``or`` correctly declines to count
+        it: the predicate flags positive evidence and abstains on ambiguity.
 
         **Exact equality, and no ``Decimal``.** The pitch is a whole number of
         microns and therefore always even, so half of it is a whole nanometre a
