@@ -27,11 +27,12 @@ half-to-*even*, deliberately, and the two are not in competition because they
 answer different questions. Here the question is which nanometre a measurement
 *is*, and a measurement carries no meaning in its last digit's parity. There the
 question is which grid point a hole should *move to*, where a consistent bias
-walks a whole panel one way and half-to-even does not. Snapping additionally
-warns when at least half the holes land on a tie, because a panel that ties that
-often was drawn on a different grid than the one declared -- a signal this
-boundary has no equivalent of. Do not "unify" the two rules; unifying them moves
-every tied hole on every panel.
+walks a whole panel one way and half-to-even does not. A tie there is also
+reportable -- ``ReviewGridTies`` names any hole a parity rule placed, because a
+panel that ties at all may have been drawn on a different grid than the one
+declared -- where a tie here is simply resolved and never mentioned, there being
+nothing about a measurement for an operator to reconsider. Do not "unify" the
+two rules; unifying them moves every tied hole on every panel.
 
 **``Decimal(str(mm))``, not ``Decimal(mm)``.** The second is exact about the
 wrong thing: 0.05 is 0.05000000000000000277... in binary, and converting that
