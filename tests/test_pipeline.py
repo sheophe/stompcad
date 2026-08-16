@@ -475,6 +475,27 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
                 named = diagnostic.get("tied_indices", ())
                 assert set(named) <= emitted, f"{diagnostic.code} named a dropped hole"
 
+    def test_a_hole_the_drill_table_dropped_is_not_reviewed(self):
+        """The only tied circle on this panel is one no bit can make.
+
+        Hole 9 is a 30 mm cut-out drawn half a pitch off; ``unknown-diameter``
+        is an ERROR and drops it, so it reaches no artifact and has no business
+        casting a vote about the pitch. Every hole that *does* survive is
+        squarely on the grid, which is what makes the silence here mean
+        something: a review handed the rejected measurements as well would
+        warn, where this one has nothing to warn about.
+        """
+        out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(
+            _phase(
+                RawHole(-20.0, 18.0, 7.0, 4),
+                RawHole(0.125, 18.0, 30.0, 9),
+                RawHole(0.25, 18.0, 7.0, 1),
+            )
+        )
+
+        assert [hole.index for hole in out.holes] == [4, 1]
+        assert codes(out) == ["unknown-diameter"]
+
 
 # --------------------------------------------------------------------------
 # CheckReferenceSize
