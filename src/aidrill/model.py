@@ -52,7 +52,6 @@ from .units import mm_from_nm, nm_from_mm
 __all__ = [
     "Severity",
     "Origin",
-    "Units",
     "RawHole",
     "Hole",
     "RawOutline",
@@ -115,16 +114,6 @@ class Origin(Enum):
 
     CENTRE = "centre"
     LOWER_LEFT = "lower-left"
-
-
-class Units(Enum):
-    MILLIMETRES = "metric"
-    INCHES = "inch"
-
-    @property
-    def per_mm(self) -> float:
-        """Multiplier to convert a millimetre value into these units."""
-        return 1.0 if self is Units.MILLIMETRES else 1.0 / 25.4
 
 
 def _check_nanometres(owner: str, **lengths: object) -> None:

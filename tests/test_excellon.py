@@ -6,6 +6,12 @@ Excellon writer, so a panel drawn with one 7 mm bit came back as ``T2C7.000``
 and ``T3C7.000`` — the same bit loaded twice, two drilling passes. Normalisation
 now belongs to the pipeline. The emitter reads ``DrillData.tools()`` and
 serialises; it must not round, cluster, dedupe or renumber anything.
+
+Every length a ``Hole`` or a ``ReferenceOutline`` carries is a whole number of
+nanometres, so the fixtures below are written that way — ``-40_000_000`` is the
+⌀7 at −40.00 mm. Nothing here converts on the way in: a test that quoted 40.0 and
+multiplied would be running the emitter against its own arithmetic rather than
+against the model's.
 """
 
 from __future__ import annotations
@@ -25,9 +31,9 @@ from aidrill.model import (
     RawHole,
     ReferenceOutline,
     SourceInfo,
-    Units,
 )
 from aidrill.protocols import Emitter
+from aidrill.units import format_nm
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------
@@ -46,17 +52,19 @@ def fixture_data() -> DrillData:
     """
     return DrillData(
         holes=holes(
-            (-40.0, 18.0),
-            (-20.0, 18.0),
-            (0.0, 18.0),
-            (20.0, 18.0),
-            (40.0, 18.0),
-            (-19.0, -18.75, 5.0),
-            (19.0, -18.75, 5.0),
+            (-40_000_000, 18_000_000),
+            (-20_000_000, 18_000_000),
+            (0, 18_000_000),
+            (20_000_000, 18_000_000),
+            (40_000_000, 18_000_000),
+            (-19_000_000, -18_750_000, 5_000_000),
+            (19_000_000, -18_750_000, 5_000_000),
         ),
-        reference=ReferenceOutline(width=113.0, height=60.0),
+        reference=ReferenceOutline(width_nm=113_000_000, height_nm=60_000_000),
         diagnostics=(
-            Diagnostic.warning("duplicate-hole", "1 coincident hole collapsed", (-40.0, 18.0)),
+            Diagnostic.warning(
+                "duplicate-hole", "1 coincident hole collapsed", (-40_000_000, 18_000_000)
+            ),
         ),
         source=SourceInfo(path="tests/fixtures/tar.ai", drill_layer="Drill"),
     )
@@ -103,7 +111,6 @@ def test_emitter_declares_name_media_type_and_extension():
 def test_default_options_match_the_spec():
     options = ExcellonOptions()
     assert options.origin is Origin.LOWER_LEFT
-    assert options.units is Units.MILLIMETRES
     assert options.decimals == 3
 
 
@@ -140,7 +147,7 @@ def test_title_comment_uses_the_option_then_falls_back_to_the_source_path():
 
 
 def test_data_without_holes_still_produces_a_valid_file():
-    data = make_data(reference=ReferenceOutline(113.0, 60.0))
+    data = make_data(reference=ReferenceOutline(113_000_000, 60_000_000))
     out = lines(emit(data))
 
     assert out[0] == "M48"
@@ -155,13 +162,29 @@ def test_data_without_holes_still_produces_a_valid_file():
 
 def test_regression_no_two_tool_definitions_share_a_diameter():
     """SPEC §9 invariant. 6.9998 and 7.0000 were normalised to one nominal by the
-    pipeline; the file must therefore load one 7 mm bit, once."""
+    pipeline; the file must therefore load one 7 mm bit, once.
+
+    The two measurements are kept on ``raw``, in millimetres, which is where the
+    difference the pipeline resolved actually lives — one nominal 7 000 000 nm
+    diameter, two circles it was fitted from."""
     normalised = (
-        Hole(x=-40.0, y=18.0, diameter=7.0, raw=RawHole(-40.0, 18.0, 6.9998), index=0),
-        Hole(x=-20.0, y=18.0, diameter=7.0, raw=RawHole(-20.0, 18.0, 7.0000), index=1),
-        at(0.0, -18.75, 5.0, index=2),
+        Hole(
+            x_nm=-40_000_000,
+            y_nm=18_000_000,
+            diameter_nm=7_000_000,
+            raw=RawHole(-40.0, 18.0, 6.9998, 0),
+            index=0,
+        ),
+        Hole(
+            x_nm=-20_000_000,
+            y_nm=18_000_000,
+            diameter_nm=7_000_000,
+            raw=RawHole(-20.0, 18.0, 7.0000, 1),
+            index=1,
+        ),
+        at(0, -18_750_000, 5_000_000, index=2),
     )
-    data = make_data(*normalised, reference=ReferenceOutline(113.0, 60.0))
+    data = make_data(*normalised, reference=ReferenceOutline(113_000_000, 60_000_000))
 
     definitions = tool_definitions(emit(data))
 
@@ -178,11 +201,28 @@ def test_regression_holds_for_the_fixture():
 
 
 def test_tool_numbers_are_exactly_drilldata_tools():
-    data = fixture_data()
+    """The table written is the model's table, size for size and number for
+    number.
+
+    ``tools()`` lives on ``DrillData`` so that this file and the drawing's hole
+    schedule cannot disagree about how many bits a panel needs; an emitter that
+    built its own would be free to agree today and diverge tomorrow. The tools
+    are asserted against the mapping itself rather than against a literal, so a
+    fixture whose diameters happen to sort into the order they were written in
+    cannot pass for the numbering."""
+    data = make_data(
+        at(0, 0, 12_500_000, index=4),
+        at(10_000_000, 0, 3_200_000, index=1),
+        at(20_000_000, 0, 5_000_000, index=9),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
+    )
     definitions = tool_definitions(emit(data))
 
-    assert definitions == {number: f"{d:.3f}" for d, number in data.tools().items()}
+    assert definitions == {
+        number: format_nm(diameter_nm, 3) for diameter_nm, number in data.tools().items()
+    }
     assert sorted(definitions) == list(range(1, len(data.tools()) + 1))
+    assert list(definitions.values()) == ["3.200", "5.000", "12.500"]
 
 
 def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
@@ -192,9 +232,9 @@ def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
     could define a different number of bits than the drawing lists — ADR-0001's
     incident exactly."""
     data = make_data(
-        at(-10.0, 0.0, 6.998, index=0),
-        at(10.0, 0.0, 7.000, index=1),
-        reference=ReferenceOutline(113.0, 60.0),
+        at(-10_000_000, 0, 6_998_000, index=0),
+        at(10_000_000, 0, 7_000_000, index=1),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
     )
 
     definitions = tool_definitions(emit(data))
@@ -205,10 +245,10 @@ def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
 
 def test_emitter_does_not_renumber_after_a_gap_in_diameters():
     data = make_data(
-        at(0.0, 0.0, 3.2, index=0),
-        at(10.0, 0.0, 12.5, index=1),
-        at(20.0, 0.0, 5.0, index=2),
-        reference=ReferenceOutline(113.0, 60.0),
+        at(0, 0, 3_200_000, index=0),
+        at(10_000_000, 0, 12_500_000, index=1),
+        at(20_000_000, 0, 5_000_000, index=2),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
     )
 
     assert tool_definitions(emit(data)) == {1: "3.200", 2: "5.000", 3: "12.500"}
@@ -218,9 +258,9 @@ def test_emitter_does_not_deduplicate_coincident_holes():
     """Deduplication is ``pipeline.Deduplicate``'s job. If two coincident holes
     survive to the emitter, the operator asked for two hits."""
     data = make_data(
-        at(0.0, 0.0, 7.0, index=0),
-        at(0.0, 0.0, 7.0, index=1),
-        reference=ReferenceOutline(113.0, 60.0),
+        at(0, 0, 7_000_000, index=0),
+        at(0, 0, 7_000_000, index=1),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
     )
 
     out = lines(emit(data))
@@ -234,39 +274,28 @@ def test_emitter_does_not_deduplicate_coincident_holes():
 
 
 def test_two_nominals_that_render_to_the_same_token_are_refused():
-    """A measured 6.9998 and 7.0000 that no stage merged are two tools to the
-    model and one ``C7.000`` on the page — the ``T2C7.000`` / ``T3C7.000`` defect
-    reached through formatting instead of clustering. The message must name both
-    nominals and the token, so the operator need not re-derive the collision;
-    lookaheads rather than a sequence, because the order it names them in is
-    presentation, and a test that fails when prose is reordered is a nuisance."""
+    """A 6.9998 and a 7.0000 mm nominal that no stage merged are two tools to
+    the model and one ``C7.000`` on the page — the ``T2C7.000`` / ``T3C7.000``
+    defect reached through formatting instead of clustering.
+
+    The message must name the collision, not merely report one: both nominals at
+    a precision that tells them apart, and the token they share. Quoting them at
+    the file's own three decimals would print "7.000 and 7.000 both print as
+    C7.000", which is the one sentence a refusal here must not be. Lookaheads
+    rather than a sequence, because the order it names them in is presentation,
+    and a test that fails when prose is reordered is a nuisance."""
     data = make_data(
-        at(0.0, 0.0, 6.9998, index=1),
-        at(10.0, 0.0, 7.0000, index=3),
-        reference=ReferenceOutline(50.0, 50.0),
+        at(0, 0, 6_999_800, index=1),
+        at(10_000_000, 0, 7_000_000, index=3),
+        reference=ReferenceOutline(50_000_000, 50_000_000),
     )
 
     assert len(data.tools()) == 2  # the model still sees two nominals
 
-    with pytest.raises(EmitterError, match=r"(?=.*6\.9998)(?=.*\b7\.0\b)(?=.*C7\.000)"):
+    with pytest.raises(
+        EmitterError, match=r"(?=.*6\.999800)(?=.*7\.000000)(?=.*C7\.000)(?=.*3 decimals)"
+    ):
         emit(data)
-
-
-def test_inch_output_refuses_diameters_it_cannot_separate():
-    """The collision depends on the units, so the token must be built *after*
-    conversion. ``decimals=3`` in inches is only 0.0254 mm of resolution: 3.02
-    and 3.03 mm are two comfortably distinct tools in millimetres and one
-    ``0.119`` in inches."""
-    data = make_data(
-        at(0.0, 0.0, 3.02, index=0),
-        at(10.0, 0.0, 3.03, index=1),
-        reference=ReferenceOutline(50.0, 50.0),
-    )
-
-    assert tool_definitions(emit(data)) == {1: "3.020", 2: "3.030"}  # fine in mm
-
-    with pytest.raises(EmitterError, match="0.119"):
-        emit(data, units=Units.INCHES)
 
 
 def test_raising_the_precision_makes_the_same_two_nominals_representable():
@@ -274,9 +303,9 @@ def test_raising_the_precision_makes_the_same_two_nominals_representable():
     must never quietly raise the precision itself — but when the caller does,
     the very same data emits, with two genuinely distinct tools."""
     data = make_data(
-        at(0.0, 0.0, 6.9998, index=1),
-        at(10.0, 0.0, 7.0000, index=3),
-        reference=ReferenceOutline(50.0, 50.0),
+        at(0, 0, 6_999_800, index=1),
+        at(10_000_000, 0, 7_000_000, index=3),
+        reference=ReferenceOutline(50_000_000, 50_000_000),
     )
 
     assert tool_definitions(emit(data, decimals=4)) == {1: "6.9998", 2: "7.0000"}
@@ -296,13 +325,14 @@ def error_bearing_data() -> DrillData:
     read as a position in the tuple.
     """
     return make_data(
-        at(-19.0, -18.75, 5.0, index=6), reference=ReferenceOutline(113.0, 60.0)
+        at(-19_000_000, -18_750_000, 5_000_000, index=6),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
     ).with_diagnostics(
         Diagnostic.error(
             "unknown-diameter",
             "hole 2: dia 7.000 mm matches no metric drill size",
-            (0.0, 18.0),
-            data=(("hole_index", 2), ("diameter", 7.0)),
+            (0, 18_000_000),
+            data=(("hole_index", 2), ("diameter_nm", 7_000_000)),
         )
     )
 
@@ -322,7 +352,7 @@ def test_the_refusal_names_every_distinct_error_code_once():
     """Two findings of one code and one of another: the caller is told what is
     wrong with the data, not handed a repetition of the commonest failure."""
     data = error_bearing_data().with_diagnostics(
-        Diagnostic.error("unknown-diameter", "another one", (10.0, 18.0)),
+        Diagnostic.error("unknown-diameter", "another one", (10_000_000, 18_000_000)),
         Diagnostic.error("wrong-enclosure", "declared 1590B, drawn 1590BB"),
     )
 
@@ -340,80 +370,14 @@ def test_warnings_and_information_still_produce_a_drill_file():
     a guard keyed on ``data.diagnostics`` rather than on their severity would
     refuse the panel this project ships as its worked example."""
     data = make_data(
-        at(0.0, 18.0, 7.0, index=3), reference=ReferenceOutline(113.0, 60.0)
+        at(0, 18_000_000, 7_000_000, index=3),
+        reference=ReferenceOutline(113_000_000, 60_000_000),
     ).with_diagnostics(
-        Diagnostic.warning("duplicate-hole", "1 coincident hole collapsed", (0.0, 18.0)),
+        Diagnostic.warning("duplicate-hole", "1 coincident hole collapsed", (0, 18_000_000)),
         Diagnostic.info("no-reference-outline", "nothing to check against"),
     )
 
     assert "X56.500Y48.000" in lines(emit(data))
-
-
-# --------------------------------------------------------------------------
-# representability again: a value no coordinate can carry
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_a_non_finite_x_is_refused(value):
-    """``format_mm(nan)`` is ``"nan"`` and ``format_mm(inf)`` is ``"inf"``:
-    neither starts with a minus, so the lower-left promise sees nothing wrong
-    and ``Xnan`` reaches the file. It is syntactically plausible and drills
-    nowhere. ``-inf`` is checked here too, because it *is* caught by the sign
-    test — as a hole outside the outline, which is the wrong diagnosis of a
-    value that is not a position at all."""
-    data = make_data(
-        at(value, 0.0, 7.0, index=8), reference=ReferenceOutline(50.0, 50.0)
-    )
-
-    with pytest.raises(EmitterError, match=r"hole 8\b.*non-finite"):
-        emit(data)
-
-
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_a_non_finite_y_is_refused(value):
-    """The other axis, alone, so a check that lost half of itself is visible."""
-    data = make_data(
-        at(0.0, value, 7.0, index=5), reference=ReferenceOutline(50.0, 50.0)
-    )
-
-    with pytest.raises(EmitterError, match=r"hole 5\b.*non-finite"):
-        emit(data)
-
-
-@pytest.mark.parametrize("value", [float("nan"), float("inf")])
-def test_a_non_finite_diameter_is_refused(value):
-    """``T1Cnan`` is the same defect one column over: the tool table is where a
-    machinist reads which bit to load."""
-    data = make_data(
-        at(0.0, 0.0, value, index=2), reference=ReferenceOutline(50.0, 50.0)
-    )
-
-    with pytest.raises(EmitterError, match=r"hole 2\b.*non-finite"):
-        emit(data)
-
-
-def test_a_non_finite_coordinate_is_refused_in_the_centre_frame_too():
-    """Nothing about ``Xnan`` is a lower-left concern. The sign test returns
-    early for CENTRE — correctly, because negative coordinates are the whole
-    point of that frame — so a check folded into it would pass ``nan`` straight
-    through whenever the caller asked for the canonical frame."""
-    data = make_data(at(0.0, float("nan"), 7.0, index=1))
-
-    with pytest.raises(EmitterError, match="non-finite"):
-        emit(data, origin=Origin.CENTRE)
-
-
-def test_a_non_finite_reference_outline_is_refused_through_its_holes():
-    """The holes are finite; the frame they are translated into is not. The
-    check therefore reads the reframed data, which is what will be written,
-    rather than the data as handed in."""
-    data = make_data(
-        at(0.0, 0.0, 7.0, index=4), reference=ReferenceOutline(float("nan"), 60.0)
-    )
-
-    with pytest.raises(EmitterError, match=r"hole 4\b.*non-finite"):
-        emit(data)
 
 
 # --------------------------------------------------------------------------
@@ -432,16 +396,17 @@ def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
     of the outline is at least as likely in the field as one below it.
     """
     y_only = make_data(
-        at(0.0, 0.0, 5.0, index=9),
-        at(0.0, -60.0, 5.0, index=4),
-        reference=ReferenceOutline(50.0, 50.0),
+        at(0, 0, 5_000_000, index=9),
+        at(0, -60_000_000, 5_000_000, index=4),
+        reference=ReferenceOutline(50_000_000, 50_000_000),
     )
 
     with pytest.raises(EmitterError, match=r"hole 4\b"):
         emit(y_only)
 
     x_only = make_data(
-        at(-60.0, 0.0, 5.0, index=7), reference=ReferenceOutline(50.0, 50.0)
+        at(-60_000_000, 0, 5_000_000, index=7),
+        reference=ReferenceOutline(50_000_000, 50_000_000),
     )
 
     with pytest.raises(EmitterError, match=r"hole 7\b"):
@@ -450,12 +415,13 @@ def test_a_hole_outside_the_reference_outline_is_refused_in_lower_left():
 
 def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
     """The promise is about the coordinates as *written*, so the check reads the
-    rendered token, not the float behind it. A hole four ten-thousandths of a
+    rendered token, not the position behind it. A hole four ten-thousandths of a
     millimetre past the edge prints ``0.000`` and drills exactly where it should;
     refusing it would turn representation noise into an operator-facing failure.
     """
     data = make_data(
-        at(-25.0004, 0.0, 7.0, index=0), reference=ReferenceOutline(50.0, 50.0)
+        at(-25_000_400, 0, 7_000_000, index=0),
+        reference=ReferenceOutline(50_000_000, 50_000_000),
     )
 
     assert "X0.000Y25.000" in lines(emit(data))
@@ -477,8 +443,8 @@ def test_lower_left_keeps_every_coordinate_non_negative():
 
 
 def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
-    """Shared with the drawing's schedule via ``formatting.format_mm``."""
-    out = lines(emit(make_data(at(-0.0004, -0.0004, 7.0, index=0)), origin=Origin.CENTRE))
+    """Shared with the drawing's schedule via ``units.format_nm``."""
+    out = lines(emit(make_data(at(-400, -400, 7_000_000, index=0)), origin=Origin.CENTRE))
 
     assert "X0.000Y0.000" in out
     assert not any("-0.000" in line for line in out)
@@ -493,7 +459,7 @@ def test_lower_left_without_a_reference_outline_raises_emitter_error():
     stays green while the only thing the guard produces — the sentence telling
     the caller which of the two ways out to take — has gone.
     """
-    data = make_data(at(0.0, 0.0, 7.0, index=0))
+    data = make_data(at(0, 0, 7_000_000, index=0))
 
     with pytest.raises(EmitterError, match="origin=Origin.CENTRE or supply a reference layer"):
         emit(data)
@@ -516,7 +482,7 @@ def test_centre_origin_leaves_the_canonical_frame_alone():
 
 
 def test_centre_origin_needs_no_reference_outline():
-    data = make_data(at(-5.0, -5.0, 7.0, index=0))
+    data = make_data(at(-5_000_000, -5_000_000, 7_000_000, index=0))
 
     assert "X-5.000Y-5.000" in lines(emit(data, origin=Origin.CENTRE))
 
@@ -553,14 +519,29 @@ def test_the_header_says_centre_when_the_centre_frame_was_written():
     assert "X-40.000Y18.000" in out
 
 
-def test_the_stated_shift_is_in_the_units_the_file_is_written_in():
-    """56.500 mm is 2.224 inches. A shift stated in millimetres in an inch file
-    would be a second frame statement disagreeing with the coordinates under
-    it — the disagreement this line exists to end."""
-    stated = [ln for ln in lines(emit(fixture_data(), units=Units.INCHES)) if ln.startswith(";ORIGIN=")]
+def test_the_stated_shift_is_the_shift_the_coordinates_were_moved_by():
+    """An odd outline has no exact half, and the header must quote the one
+    ``with_origin`` actually applied.
 
-    assert f"{56.5 * Units.INCHES.per_mm:.3f}" in stated[0]
-    assert "56.500" not in stated[0]
+    ``with_origin`` floors, deliberately, rather than introducing the first
+    non-integer into the model. A header that quoted the true half instead would
+    disagree with every coordinate under it by half a nanometre — invisible at
+    the three decimals this file usually writes, which is exactly why the panel
+    here is an odd number of nanometres wide and the file is written at six.
+    A machinist adding the stated shift back to a coordinate must land on the
+    number the drawing prints for the same hole.
+    """
+    outline = ReferenceOutline(width_nm=100_000_001, height_nm=60_000_001)
+    data = make_data(at(0, 0, 7_000_000, index=2), reference=outline)
+
+    out = lines(emit(data, decimals=6))
+    stated = next(ln for ln in out if ln.startswith(";ORIGIN="))
+    written = next(ln for ln in out if ln.startswith("X"))
+
+    shift_x, shift_y = re.search(r"X(\S+) Y(\S+) from its centre", stated).groups()
+    at_x, at_y = re.match(r"^X(\S+?)Y(\S+)$", written).groups()
+
+    assert (shift_x, shift_y) == (at_x, at_y) == ("50.000000", "30.000000")
 
 
 def test_coordinates_are_grouped_under_their_tool_ascending_by_diameter():
@@ -584,11 +565,11 @@ def test_hole_order_is_preserved_not_re_sorted():
     does not is a drill file whose sequence disagrees with the sheet beside it.
     """
     data = make_data(
-        at(10.0, -10.0, 7.0, index=0),
-        at(-10.0, 10.0, 7.0, index=1),
-        at(10.0, 10.0, 7.0, index=2),
-        at(-10.0, -10.0, 7.0, index=3),
-        reference=ReferenceOutline(100.0, 100.0),
+        at(10_000_000, -10_000_000, 7_000_000, index=0),
+        at(-10_000_000, 10_000_000, 7_000_000, index=1),
+        at(10_000_000, 10_000_000, 7_000_000, index=2),
+        at(-10_000_000, -10_000_000, 7_000_000, index=3),
+        reference=ReferenceOutline(100_000_000, 100_000_000),
     )
 
     out = lines(emit(data))
@@ -605,11 +586,11 @@ def test_hole_order_is_preserved_not_re_sorted():
 def test_tool_blocks_stay_ascending_while_order_inside_them_is_untouched():
     """Grouping is the emitter's job; sequence is not."""
     data = make_data(
-        at(0.0, -20.0, 7.0, index=0),
-        at(-30.0, 20.0, 5.0, index=1),
-        at(30.0, 20.0, 7.0, index=2),
-        at(0.0, 20.0, 5.0, index=3),
-        reference=ReferenceOutline(100.0, 100.0),
+        at(0, -20_000_000, 7_000_000, index=0),
+        at(-30_000_000, 20_000_000, 5_000_000, index=1),
+        at(30_000_000, 20_000_000, 7_000_000, index=2),
+        at(0, 20_000_000, 5_000_000, index=3),
+        reference=ReferenceOutline(100_000_000, 100_000_000),
     )
 
     out = lines(emit(data))
@@ -633,27 +614,6 @@ def test_decimals_option_controls_coordinate_and_diameter_precision():
 
 
 # --------------------------------------------------------------------------
-# units
-# --------------------------------------------------------------------------
-
-
-def test_inches_write_inch_tz_and_divide_by_25_4():
-    out = lines(emit(fixture_data(), units=Units.INCHES))
-
-    assert "INCH,TZ" in out
-    assert "METRIC,TZ" not in out
-    assert ";FORMAT={-:-/ absolute / inch / decimal}" in out
-    assert f"T1C{5.0 / 25.4:.3f}" in out
-    assert f"X{16.5 / 25.4:.3f}Y{48.0 / 25.4:.3f}" in out
-
-
-def test_inch_conversion_uses_the_models_units_per_mm():
-    out = emit(fixture_data(), units=Units.INCHES, decimals=5)
-
-    assert f"T2C{7.0 * Units.INCHES.per_mm:.5f}" in lines(out)
-
-
-# --------------------------------------------------------------------------
 # purity
 # --------------------------------------------------------------------------
 
@@ -665,7 +625,7 @@ def test_emit_does_not_mutate_the_input_data():
     emit(data)
 
     assert data.holes == before
-    assert data.holes[0].x == -40.0
+    assert data.holes[0].x_nm == -40_000_000
 
 
 def test_emit_is_deterministic():
