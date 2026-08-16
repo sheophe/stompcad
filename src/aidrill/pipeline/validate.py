@@ -10,7 +10,7 @@ from typing import ClassVar
 
 from ..model import Diagnostic, DrillData, StageRun
 from ..tolerance import within
-from ..units import format_nm
+from ..units import Nanometre, format_nm
 
 __all__ = ["CheckReferenceSize"]
 
@@ -24,7 +24,11 @@ class CheckReferenceSize:
 
     name: ClassVar[str] = "check-reference-size"
 
-    def __init__(self, expected_nm: tuple[int, int], tolerance_nm: int = 50_000) -> None:
+    def __init__(
+        self,
+        expected_nm: tuple[Nanometre, Nanometre],
+        tolerance_nm: Nanometre = Nanometre(50_000),
+    ) -> None:
         self.expected_nm = (
             _whole_nanometres("expected width", expected_nm[0]),
             _whole_nanometres("expected height", expected_nm[1]),
@@ -58,8 +62,8 @@ class CheckReferenceSize:
                 )
             )
 
-        dw = data.reference.width_nm - expected_w
-        dh = data.reference.height_nm - expected_h
+        dw = Nanometre(data.reference.width_nm - expected_w)
+        dh = Nanometre(data.reference.height_nm - expected_h)
         # ``within``, not a bare ``<=``: the boundary is one decision and it is
         # owned there. A caller who declares a 50 000 nm slack on a panel that
         # is 50 000 nm out typed the number they meant.
@@ -79,7 +83,8 @@ class CheckReferenceSize:
                 f"{format_nm(data.reference.height_nm)} mm, declared "
                 f"{format_nm(expected_w)} × {format_nm(expected_h)} mm: "
                 f"total {_signed_mm(dw)} × {_signed_mm(dh)} mm, "
-                f"per side {_signed_mm(dw // 2)} × {_signed_mm(dh // 2)} mm",
+                f"per side {_signed_mm(Nanometre(dw // 2))} × "
+                f"{_signed_mm(Nanometre(dh // 2))} mm",
                 # The differences travel with the finding rather than only
                 # inside the sentence: they are the arithmetic this stage exists
                 # to do, and a consumer that had to parse them back out of the
@@ -98,14 +103,14 @@ class CheckReferenceSize:
         )
 
 
-def _whole_nanometres(name: str, value: int) -> int:
+def _whole_nanometres(name: str, value: Nanometre) -> Nanometre:
     """Require a plain ``int`` nanometre length, excluding floats and booleans."""
     if type(value) is not int:
         raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
     return value
 
 
-def _signed_mm(nm: int) -> str:
+def _signed_mm(nm: Nanometre) -> str:
     """Format a nanometre difference in millimetres with an explicit sign."""
     text = format_nm(nm)
     return text if text.startswith("-") else f"+{text}"

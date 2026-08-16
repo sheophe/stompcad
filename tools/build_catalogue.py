@@ -64,6 +64,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from .units import Nanometre
+
 __all__ = ["Enclosure", "HAMMOND_1590", "footprints"]
 
 
@@ -72,9 +74,9 @@ class Enclosure:
     """One catalogue part: a base designator and its outside dimensions in nanometres."""
 
     part: str
-    length_nm: int
-    width_nm: int
-    height_nm: int
+    length_nm: Nanometre
+    width_nm: Nanometre
+    height_nm: Nanometre
 
     def __post_init__(self) -> None:
         """Require each dimension to be a plain integer number of nanometres.
@@ -91,7 +93,7 @@ class Enclosure:
                 )
 
     @property
-    def footprint(self) -> tuple[int, int]:
+    def footprint(self) -> tuple[Nanometre, Nanometre]:
         """The 2-D outline, which is all a panel drawing can distinguish."""
         return (self.length_nm, self.width_nm)
 
@@ -104,7 +106,7 @@ HAMMOND_1590: tuple[Enclosure, ...] = (
 _FOOTER = ''')
 
 
-def footprints() -> Mapping[tuple[int, int], tuple[str, ...]]:
+def footprints() -> Mapping[tuple[Nanometre, Nanometre], tuple[str, ...]]:
     """Each L x W outline in nanometres, mapped to every base part that has it, sorted.
 
     Sorted, and read-only, because a matcher reports these candidates to the
@@ -115,8 +117,8 @@ def footprints() -> Mapping[tuple[int, int], tuple[str, ...]]:
     return _FOOTPRINTS
 
 
-def _build_footprints() -> Mapping[tuple[int, int], tuple[str, ...]]:
-    grouped: dict[tuple[int, int], list[str]] = {}
+def _build_footprints() -> Mapping[tuple[Nanometre, Nanometre], tuple[str, ...]]:
+    grouped: dict[tuple[Nanometre, Nanometre], list[str]] = {}
     for enclosure in HAMMOND_1590:
         grouped.setdefault(enclosure.footprint, []).append(enclosure.part)
     return MappingProxyType(
@@ -132,7 +134,8 @@ def render_module(catalogue: set[tuple[str, int, int, int]]) -> str:
     """Render ``src/aidrill/enclosures.py`` for the given TSV catalogue."""
     ordered = sorted(catalogue, key=lambda e: (e[1], e[2], e[3], e[0]))
     rows = "".join(
-        f'    Enclosure("{part}", {length:_}, {width:_}, {height:_}),\n'
+        f'    Enclosure("{part}", Nanometre({length:_}), Nanometre({width:_}), '
+        f'Nanometre({height:_})),\n'
         for part, length, width, height in ordered
     )
     return _HEADER + rows + _FOOTER

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import total_ordering
 
-from .units import mm_from_nm, nm_from_mm
+from .units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 __all__ = [
     "Severity",
@@ -115,9 +115,9 @@ class RawHole:
     available for provenance and residual calculation.
     """
 
-    x: float
-    y: float
-    diameter: float
+    x: Millimetre
+    y: Millimetre
+    diameter: Millimetre
     index: int
 
     def __post_init__(self) -> None:
@@ -132,9 +132,9 @@ class Hole:
     across transforms and must equal ``raw.index``.
     """
 
-    x_nm: int
-    y_nm: int
-    diameter_nm: int
+    x_nm: Nanometre
+    y_nm: Nanometre
+    diameter_nm: Nanometre
     raw: RawHole
     index: int
 
@@ -149,7 +149,13 @@ class Hole:
             )
 
     @classmethod
-    def from_measurement(cls, x_nm: int, y_nm: int, diameter_nm: int, index: int) -> Hole:
+    def from_measurement(
+        cls,
+        x_nm: Nanometre,
+        y_nm: Nanometre,
+        diameter_nm: Nanometre,
+        index: int,
+    ) -> Hole:
         """Build a hole whose nominal values are still its measured values.
 
         Convert nominal nanometres into the raw millimetre provenance while
@@ -165,32 +171,36 @@ class Hole:
             index=index,
         )
 
-    def moved_to(self, x_nm: int, y_nm: int) -> Hole:
+    def moved_to(self, x_nm: Nanometre, y_nm: Nanometre) -> Hole:
         return replace(self, x_nm=x_nm, y_nm=y_nm)
 
-    def with_diameter(self, diameter_nm: int) -> Hole:
+    def with_diameter(self, diameter_nm: Nanometre) -> Hole:
         return replace(self, diameter_nm=diameter_nm)
 
-    def translated(self, dx_nm: int, dy_nm: int) -> Hole:
+    def translated(self, dx_nm: Nanometre, dy_nm: Nanometre) -> Hole:
         """Translate by exact whole-nanometre deltas.
 
         Deltas are validated before addition so arithmetic cannot coerce a
         boolean into an apparently valid integer coordinate.
         """
         _check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
-        return replace(self, x_nm=self.x_nm + dx_nm, y_nm=self.y_nm + dy_nm)
+        return replace(
+            self,
+            x_nm=Nanometre(self.x_nm + dx_nm),
+            y_nm=Nanometre(self.y_nm + dy_nm),
+        )
 
     @property
-    def residual_nm(self) -> tuple[int, int, int]:
+    def residual_nm(self) -> tuple[Nanometre, Nanometre, Nanometre]:
         """(dx, dy, ddia) between nominal and measured, in nanometres.
 
         Positive values mean the nominal value is larger. Raw measurements are
         converted to nanometres for subtraction but remain unchanged.
         """
         return (
-            self.x_nm - nm_from_mm(self.raw.x),
-            self.y_nm - nm_from_mm(self.raw.y),
-            self.diameter_nm - nm_from_mm(self.raw.diameter),
+            Nanometre(self.x_nm - nm_from_mm(self.raw.x)),
+            Nanometre(self.y_nm - nm_from_mm(self.raw.y)),
+            Nanometre(self.diameter_nm - nm_from_mm(self.raw.diameter)),
         )
 
 
@@ -198,15 +208,15 @@ class Hole:
 class RawOutline:
     """The outline measured from artwork in millimetres before quantising."""
 
-    width: float
-    height: float
+    width: Millimetre
+    height: Millimetre
 
     def __post_init__(self) -> None:
         _check_millimetres("RawOutline", width=self.width, height=self.height)
 
 
 #: Sentinel replaced with nominal dimensions when no raw measurement is supplied.
-_MEASUREMENT_IS_NOMINAL = RawOutline(0.0, 0.0)
+_MEASUREMENT_IS_NOMINAL = RawOutline(Millimetre(0.0), Millimetre(0.0))
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,10 +227,10 @@ class ReferenceOutline:
     source-space starts at the page's lower-left. ``raw`` retains measurements.
     """
 
-    width_nm: int
-    height_nm: int
-    centre_x_nm: int = 0
-    centre_y_nm: int = 0
+    width_nm: Nanometre
+    height_nm: Nanometre
+    centre_x_nm: Nanometre = Nanometre(0)
+    centre_y_nm: Nanometre = Nanometre(0)
     raw: RawOutline = _MEASUREMENT_IS_NOMINAL
 
     def __post_init__(self) -> None:
@@ -244,7 +254,11 @@ class ReferenceOutline:
 
     @classmethod
     def from_measurement(
-        cls, width_nm: int, height_nm: int, centre_x_nm: int = 0, centre_y_nm: int = 0
+        cls,
+        width_nm: Nanometre,
+        height_nm: Nanometre,
+        centre_x_nm: Nanometre = Nanometre(0),
+        centre_y_nm: Nanometre = Nanometre(0),
     ) -> ReferenceOutline:
         """Build an outline whose nominal size is still its measured size.
 
@@ -259,7 +273,7 @@ class ReferenceOutline:
             raw=RawOutline(mm_from_nm(width_nm), mm_from_nm(height_nm)),
         )
 
-    def resized(self, width_nm: int, height_nm: int) -> ReferenceOutline:
+    def resized(self, width_nm: Nanometre, height_nm: Nanometre) -> ReferenceOutline:
         """Return new nominal dimensions with measurement and centre unchanged."""
         return replace(self, width_nm=width_nm, height_nm=height_nm)
 
@@ -273,8 +287,8 @@ class EnclosureMatch:
     """
 
     family: str
-    length_nm: int
-    width_nm: int
+    length_nm: Nanometre
+    width_nm: Nanometre
     candidates: tuple[str, ...]
     rotated: bool = False
     selected_part: str | None = None
@@ -304,7 +318,7 @@ class Diagnostic:
     severity: Severity
     code: str
     message: str
-    location_nm: tuple[int, int] | None = None
+    location_nm: tuple[Nanometre, Nanometre] | None = None
     #: Scalars plus tuples of hole identities for panel-wide findings.
     data: tuple[tuple[str, float | int | str | tuple[int, ...]], ...] = ()
 
@@ -402,7 +416,7 @@ class RawDrillData:
 
     source: SourceInfo
     reference: RawOutline | None
-    centre: tuple[float, float]
+    centre: tuple[Millimetre, Millimetre]
     holes: tuple[RawHole, ...]
     diagnostics: tuple[Diagnostic, ...] = ()
 
@@ -453,30 +467,30 @@ class DrillData:
         if origin is Origin.LOWER_LEFT:
             if self.reference is None:
                 raise ValueError("lower-left origin requires a reference outline")
-            dx_nm = self.reference.width_nm // 2
-            dy_nm = self.reference.height_nm // 2
+            dx_nm = Nanometre(self.reference.width_nm // 2)
+            dy_nm = Nanometre(self.reference.height_nm // 2)
             return self.with_holes(h.translated(dx_nm, dy_nm) for h in self.holes)
         raise ValueError(f"unknown origin {origin!r}")
 
     # -- derived ---------------------------------------------------------
-    def tools(self) -> Mapping[int, int]:
+    def tools(self) -> Mapping[Nanometre, int]:
         """Map nominal diameter to 1-based tool number, ascending by size."""
         return {d: i for i, d in enumerate(sorted({h.diameter_nm for h in self.holes}), start=1)}
 
-    def tool_counts(self) -> Mapping[int, int]:
+    def tool_counts(self) -> Mapping[Nanometre, int]:
         """Map nominal diameter to hole count, ascending by size."""
-        counts: dict[int, int] = {d: 0 for d in self.tools()}
+        counts: dict[Nanometre, int] = {d: 0 for d in self.tools()}
         for hole in self.holes:
             counts[hole.diameter_nm] += 1
         return counts
 
-    def rows(self) -> list[tuple[int, list[Hole]]]:
+    def rows(self) -> list[tuple[Nanometre, list[Hole]]]:
         """Holes grouped by Y, rows from the top down, each row left to right.
 
         Exact nanometre equality groups rows; ordering supports top-down layout
         and left-to-right chain dimensions.
         """
-        buckets: dict[int, list[Hole]] = {}
+        buckets: dict[Nanometre, list[Hole]] = {}
         for hole in self.holes:
             buckets.setdefault(hole.y_nm, []).append(hole)
         return [

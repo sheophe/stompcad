@@ -54,6 +54,7 @@ select = [
     "FURB105",
     "RUF007",
 ]
+
 # RUF022 (`__all__` sorted) and RUF023 (`__slots__` sorted) are deliberately
 # never selected: CLAUDE.md requires `__all__` "ordered logically rather than
 # alphabetically", and `_PathBuilder.__slots__` is ordered by lifecycle role
@@ -74,7 +75,21 @@ select = [
 # never be mutated by a caller. ``RawOutline`` earns its place beside
 # ``ReferenceOutline`` because a test helper standing in for a source has to
 # default to the measurement a source would have made.
-extend-immutable-calls = ["aidrill.model.ReferenceOutline", "aidrill.model.RawOutline"]
+#
+# The unit brands are listed for a different reason: a ``NewType`` is an
+# identity function returning its own argument, so a branded default is the
+# literal it wraps and has no state to share. Both the bare and qualified
+# spellings appear because the brands are imported by name.
+extend-immutable-calls = [
+    "aidrill.model.ReferenceOutline",
+    "aidrill.model.RawOutline",
+    "aidrill.units.Nanometre",
+    "aidrill.units.Micron",
+    "aidrill.units.Millimetre",
+    "Nanometre",
+    "Micron",
+    "Millimetre",
+]
 
 [tool.mypy]
 python_version = "3.10"

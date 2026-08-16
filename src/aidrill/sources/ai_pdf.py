@@ -27,7 +27,7 @@ from ..geometry import (
     transform,
 )
 from ..model import Diagnostic, RawDrillData, RawHole, RawOutline, SourceInfo
-from ..units import mm_from_pt
+from ..units import Millimetre, mm_from_pt
 
 __all__ = ["AiPdfSource"]
 
@@ -115,7 +115,7 @@ class AiPdfSource:
         outline = _largest_non_circular(reference_paths)
         if outline is None:
             # Without an outline, preserve page-space coordinates and diagnose it.
-            centre = (0.0, 0.0)
+            centre = (Millimetre(0.0), Millimetre(0.0))
             reference = None
             diagnostics.append(
                 Diagnostic.warning(
@@ -137,8 +137,8 @@ class AiPdfSource:
         # Stream traversal order supplies stable source identities.
         holes = tuple(
             RawHole(
-                x=mm_from_pt(c.cx) - centre[0],
-                y=mm_from_pt(c.cy) - centre[1],
+                x=Millimetre(mm_from_pt(c.cx) - centre[0]),
+                y=Millimetre(mm_from_pt(c.cy) - centre[1]),
                 diameter=mm_from_pt(c.diameter),
                 index=i,
             )

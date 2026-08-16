@@ -16,7 +16,7 @@ from typing import ClassVar
 
 from ..formatting import format_mm
 from ..model import Diagnostic, ParameterValue, RawHole, StageRun
-from ..units import format_nm, nm_from_mm, scaled_nm
+from ..units import Nanometre, format_nm, nm_from_mm, scaled_nm
 
 __all__ = [
     "METRIC_BANDS",
@@ -45,37 +45,37 @@ FRACTIONAL_SIXTY_FOURTHS = range(1, 65)
 
 #: 1/64" in nanometres, and the pitch of the whole fractional series. Exact: an
 #: inch is 25.4 mm by definition, so 25 400 000 nm, and 64 divides it.
-_SIXTY_FOURTH_NM: int = 396_875
+_SIXTY_FOURTH_NM: Nanometre = Nanometre(396_875)
 
 
-def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[int, ...]:
+def _metric_sizes(bands: Iterable[tuple[float, float, float]]) -> tuple[Nanometre, ...]:
     """Generate ascending sizes with ``(stop_nm - start_nm) // step_nm`` rows."""
-    sizes: list[int] = []
+    sizes: list[Nanometre] = []
     for start, stop, step in bands:
         start_nm, stop_nm, step_nm = nm_from_mm(start), nm_from_mm(stop), nm_from_mm(step)
         for index in range((stop_nm - start_nm) // step_nm):
-            sizes.append(start_nm + index * step_nm)
+            sizes.append(Nanometre(start_nm + index * step_nm))
     return tuple(sizes)
 
 
-def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[int, ...]:
+def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[Nanometre, ...]:
     """Generate exact sizes as ``n * 396_875`` nanometres."""
-    return tuple(n * _SIXTY_FOURTH_NM for n in sixty_fourths)
+    return tuple(Nanometre(n * _SIXTY_FOURTH_NM) for n in sixty_fourths)
 
 
-def _whole_nanometres(name: str, value: object) -> int:
+def _whole_nanometres(name: str, value: object) -> Nanometre:
     """Require a plain ``int`` nanometre length, excluding floats and booleans."""
     if type(value) is not int:
         raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
-    return value
+    return Nanometre(value)
 
 
-def _metric_label(size_nm: int) -> str:
+def _metric_label(size_nm: Nanometre) -> str:
     """``⌀3.20 mm``. Unique *and* truthful at 2 dp across all 183 sizes."""
     return f"⌀{format_nm(size_nm, 2)} mm"
 
 
-def _fractional_label(size_nm: int) -> str:
+def _fractional_label(size_nm: Nanometre) -> str:
     """Label an exact fractional-inch bit, such as ``⌀1/8\"``."""
     return f'⌀{Fraction(size_nm, _SIXTY_FOURTH_NM * 64)}"'
 
@@ -85,8 +85,8 @@ class DrillStandard:
     """One bit drawer, with exact sizes and a standard-specific label function."""
 
     name: str
-    sizes_nm: tuple[int, ...]
-    label: Callable[[int], str]
+    sizes_nm: tuple[Nanometre, ...]
+    label: Callable[[Nanometre], str]
 
     def __post_init__(self) -> None:
         """Require a non-empty table of positive plain-integer nanometre sizes."""
@@ -102,8 +102,8 @@ class DrillStandard:
 
     def select(
         self,
-        include: Sequence[int] | None = None,
-        exclude: Sequence[int] | None = None,
+        include: Sequence[Nanometre] | None = None,
+        exclude: Sequence[Nanometre] | None = None,
     ) -> DrillStandard:
         """Copy this standard with exact included or excluded stocked sizes.
 
@@ -122,7 +122,7 @@ class DrillStandard:
         # enforced for a hand-built standard. One rule, one place.
         return replace(self, sizes_nm=sizes)
 
-    def _reject_unknown(self, requested: Sequence[int], verb: str) -> None:
+    def _reject_unknown(self, requested: Sequence[Nanometre], verb: str) -> None:
         held = set(self.sizes_nm)
         missing = [r for r in requested if r not in held]
         if missing:
@@ -167,7 +167,7 @@ class SnapDiametersToDrillTable:
     def __init__(
         self,
         standard: DrillStandard = DRILL_STANDARDS[DEFAULT_STANDARD],
-        tolerance_nm: int = 250_000,
+        tolerance_nm: Nanometre = Nanometre(250_000),
     ) -> None:
         self.standard = standard
         self.tolerance_nm = _whole_nanometres("tolerance_nm", tolerance_nm)
@@ -197,7 +197,7 @@ class SnapDiametersToDrillTable:
         """Return whether the effective table cannot be rebuilt from its name."""
         return self.standard != DRILL_STANDARDS.get(self.standard.name)
 
-    def quantise(self, hole: RawHole) -> tuple[int | None, tuple[Diagnostic, ...]]:
+    def quantise(self, hole: RawHole) -> tuple[Nanometre | None, tuple[Diagnostic, ...]]:
         """Return the nearest table size or ``None`` with an ERROR.
 
         Compare the unrounded ``Decimal`` measurement at an inclusive boundary.
@@ -208,11 +208,11 @@ class SnapDiametersToDrillTable:
             return None, (self._unknown(hole, nearest_nm),)
         return nearest_nm, ()
 
-    def _nearest(self, measurement_nm: Decimal) -> int:
+    def _nearest(self, measurement_nm: Decimal) -> Nanometre:
         """Return the closest table size, choosing the smaller bit on a tie."""
         return min(self.standard.sizes_nm, key=lambda size: (abs(measurement_nm - size), size))
 
-    def _unknown(self, hole: RawHole, nearest_nm: int) -> Diagnostic:
+    def _unknown(self, hole: RawHole, nearest_nm: Nanometre) -> Diagnostic:
         """Report the hole, measured diameter, nearest bit and effective drawer."""
         stocked = len(self.standard.sizes_nm)
         if self._narrowed():

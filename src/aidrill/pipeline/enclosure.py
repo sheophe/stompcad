@@ -19,7 +19,7 @@ from ..model import (
     ReferenceOutline,
     StageRun,
 )
-from ..units import format_nm, nm_from_mm, scaled_nm
+from ..units import Nanometre, format_nm, nm_from_mm, scaled_nm
 
 __all__ = [
     "CATALOGUE",
@@ -35,7 +35,7 @@ CATALOGUE: str = "Hammond 1590"
 
 #: Inclusive 1.5 mm per-axis matching slack. It remains below the 1.9 mm gap
 #: at which a face-drawn 1590B becomes ambiguous.
-DEFAULT_TOLERANCE_NM: int = 1_500_000
+DEFAULT_TOLERANCE_NM: Nanometre = Nanometre(1_500_000)
 
 #: The one piece of advice every "nothing fitted" message has to carry, written
 #: once for the same reason ``CATALOGUE`` is: two findings say it — an
@@ -49,7 +49,7 @@ _BACKPLATE_ADVICE: str = (
 )
 
 #: One footprint that fitted, and whether the panel is that footprint turned 90°.
-_Match = tuple[tuple[int, int], bool]
+_Match = tuple[tuple[Nanometre, Nanometre], bool]
 
 
 def normalize_part_name(name: str) -> str:
@@ -67,7 +67,9 @@ class IdentifyHammondFootprint:
     name: ClassVar[str] = "identify-enclosure"
 
     def __init__(
-        self, expected_part: str | None = None, tolerance_nm: int = DEFAULT_TOLERANCE_NM
+        self,
+        expected_part: str | None = None,
+        tolerance_nm: Nanometre = DEFAULT_TOLERANCE_NM,
     ) -> None:
         # Checked once, at construction, on the precedent every length in the
         # model sets and for its reason: a float tolerance is a length that
@@ -198,13 +200,13 @@ class IdentifyHammondFootprint:
         return found
 
     def _fits(
-        self, width: Decimal, height: Decimal, width_nm: int, height_nm: int
+        self, width: Decimal, height: Decimal, width_nm: Nanometre, height_nm: Nanometre
     ) -> bool:
         """Both axes, and both are load-bearing: an outline that is right across
         and 4 mm out top to bottom is not that enclosure."""
         return self._near(width, width_nm) and self._near(height, height_nm)
 
-    def _near(self, measured: Decimal, catalogue_nm: int) -> bool:
+    def _near(self, measured: Decimal, catalogue_nm: Nanometre) -> bool:
         """Compare an unrounded measurement to one dimension, boundary inclusive."""
         return abs(measured - catalogue_nm) <= self.tolerance_nm
 
@@ -286,7 +288,7 @@ class IdentifyHammondFootprint:
             ),
         )
 
-    def _expected_footprint(self) -> tuple[int, int] | None:
+    def _expected_footprint(self) -> tuple[Nanometre, Nanometre] | None:
         """Return the declared part's catalogue footprint, or ``None``."""
         for footprint, parts in footprints().items():
             if self.expected_part in parts:
@@ -310,7 +312,9 @@ class IdentifyHammondFootprint:
             return ""
         return f" ({_footprint_list([footprint])} mm)"
 
-    def _wrong(self, length_nm: int, width_nm: int, candidates: tuple[str, ...]) -> Diagnostic:
+    def _wrong(
+        self, length_nm: Nanometre, width_nm: Nanometre, candidates: tuple[str, ...]
+    ) -> Diagnostic:
         """Report requested and identified parts as ``wrong-enclosure`` ERROR."""
         identified = ", ".join(candidates)
         return Diagnostic.error(
@@ -331,13 +335,13 @@ class IdentifyHammondFootprint:
         return f"{format_nm(measured.width_nm)} × {format_nm(measured.height_nm)} mm"
 
 
-def _footprint_list(footprints_nm: list[tuple[int, int]]) -> str:
+def _footprint_list(footprints_nm: list[tuple[Nanometre, Nanometre]]) -> str:
     """Format catalogue dimensions without losing their 0.05 mm distinctions."""
     return ", ".join(
         f"{format_nm(length)} × {format_nm(width)}" for length, width in footprints_nm
     )
 
 
-def _candidate_list(footprints_nm: list[tuple[int, int]]) -> str:
+def _candidate_list(footprints_nm: list[tuple[Nanometre, Nanometre]]) -> str:
     """Every base designator sharing any of these footprints, in the same order."""
     return ", ".join(part for footprint in footprints_nm for part in footprints()[footprint])

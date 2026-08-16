@@ -210,8 +210,14 @@ class TestTheGeneratedModule:
             }
         )
         rows = [line for line in rendered.splitlines() if line.startswith("    Enclosure(")]
+        def row(part: str, length: str, width: str, height: str) -> str:
+            return (
+                f'    Enclosure("{part}", Nanometre({length}), '
+                f"Nanometre({width}), Nanometre({height})),"
+            )
+
         assert rows == [
-            '    Enclosure("1590Z", 100_000_000, 90_000_000, 90_000_000),',
-            '    Enclosure("1590M", 120_000_000, 60_000_000, 34_000_000),',
-            '    Enclosure("1590A", 120_000_000, 60_000_000, 57_000_000),',
+            row("1590Z", "100_000_000", "90_000_000", "90_000_000"),
+            row("1590M", "120_000_000", "60_000_000", "34_000_000"),
+            row("1590A", "120_000_000", "60_000_000", "57_000_000"),
         ]
