@@ -36,7 +36,7 @@ PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
 
 # Lint and types
 ruff check src tests tools
-mypy src/aidrill
+mypy src/aidrill tests
 
 # Mutation survey
 PYTHONDONTWRITEBYTECODE=1 mutmut run
@@ -76,6 +76,7 @@ The accepted architecture is defined by:
   policy.
 - [ADR-0003](docs/adr/0003-quantisation-boundary-and-ordering.md): the quantisation
   boundary, ordering, and termination rules.
+- [ADR-0004](docs/adr/0004-unit-newtypes.md): the branded length units.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
@@ -94,6 +95,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   centre. Emitters convert from it through model operations.
 - Raw source lengths are finite float millimetres. Canonical lengths are integer
   nanometres, selected by exact decimal scaling before representation rounding.
+- Lengths carry their unit in the type: `Millimetre` for a measurement, `Nanometre` for
+  every canonical length, `Micron` for the effective grid pitch. Arithmetic drops the
+  brand, so a scaled result is re-wrapped where it becomes a length again — that re-wrap
+  is the boundary, not ceremony. Brand at a real conversion, never everywhere.
 - Positions snap to the declared grid, diameters to the selected drill standard, and the
   `Background` outline to the distributed enclosure catalogue. These answer sets are not
   interchangeable.
@@ -176,6 +181,9 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.
+- `mypy` covers `tests` as well as `src/aidrill`, because most hand-built lengths are
+  fixtures. Test helpers accept plain literals and brand them internally; direct model
+  construction wraps explicitly.
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
