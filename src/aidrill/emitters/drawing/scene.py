@@ -8,7 +8,7 @@ own frame runs the other way flips once at serialisation.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the checker
     from .sheet import Sheet
@@ -103,7 +103,7 @@ class Text:
     cls: str = ""
 
 
-Item = Union[Line, Circle, Rect, Polygon, Text]
+Item = Line | Circle | Rect | Polygon | Text
 
 
 @dataclass(frozen=True, slots=True)

@@ -68,9 +68,6 @@ select = [
 # I001 would sort it alphabetically and decouple the two, which is the same
 # objection that keeps RUF022 unselected; only here it is one file, not a rule.
 "src/aidrill/__init__.py" = ["I001"]
-# Item = Union[...] not X | Y: on 3.10 a bare | at module-level assignment is
-# evaluated eagerly before PEP 563 deferral takes effect. The Union form is required.
-"src/aidrill/emitters/drawing/scene.py" = ["UP007"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Both are frozen(slots=True) value objects, so the mutable-default hazard B008
