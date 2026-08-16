@@ -127,10 +127,10 @@ def quantise(
 
     # The second, and the reason it is collected here rather than beside the
     # first: "half the holes tied" is not a fact about any hole, so it can only
-    # be asked once every hole has one. The rule is still the grid quantiser's
-    # own — it owns the pitch, and this phase stays a composer with no domain
-    # knowledge of its own — which is why it is a second method on
-    # ``SnapPositions`` and not four lines here.
+    # be asked once every hole has one. The rule still belongs to the quantiser
+    # that owns the pitch, which is why it is a second method on
+    # ``SnapPositions`` rather than four lines here: this phase composes, and
+    # holds no domain knowledge of its own.
     findings.extend(positions.review_panel(holes))
 
     runs.append(diameters.describe())

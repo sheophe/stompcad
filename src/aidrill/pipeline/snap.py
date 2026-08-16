@@ -188,9 +188,13 @@ class SnapPositions:
 
         **Exact equality, and no ``Decimal``.** The pitch is a whole number of
         microns and therefore always even, so half of it is a whole nanometre a
-        residual can land on — a Global Constraint rather than luck, since a
-        1 001 nm grid is refused in the constructor. Hence no parity handling
-        and no band. What makes that true of *artwork* as well as of a fixture
+        residual can land on. That is guaranteed rather than lucky — a 1 001 nm
+        grid never reaches here, because the constructor refuses it — so there
+        is no parity to handle and no band to choose. An odd pitch would have
+        had a half-nanometre midpoint no residual could equal, and the finding
+        would have been silent on every panel run at one.
+
+        What makes exactness true of *artwork* as well as of a fixture
         is reading the residual: a circle drawn at a 0.375 mm offset comes off
         the page as 0.3749999999999999, because the PDF operands, the CTM, the
         Bézier centroid and the frame subtraction are all binary float before
