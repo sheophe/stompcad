@@ -63,6 +63,8 @@ processing blocks as its nodes:
   its three composed quantisers internally.
 - `Deduplicate`, `ReviewGridTies`, and `SortHoles` are separate sequential blocks enclosed
   by a `Pipeline` subgraph.
+- A decision gateway after the pipeline represents the one to three output formats selected
+  for an invocation.
 - `ExcellonEmitter`, `DrawingSvgEmitter`, and `JsonEmitter` are the terminal processing
   blocks.
 
@@ -99,12 +101,14 @@ flowchart LR
     excellon["ExcellonEmitter"]
     drawing["DrawingSvgEmitter"]
     json["JsonEmitter"]
+    selected{"--emit FORMAT=PATH<br/>argument (one to three)"}
 
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
-    sort -->|DrillData| excellon
-    sort -->|DrillData| drawing
-    sort -->|DrillData| json
+    sort -->|DrillData| selected
+    selected -->|DrillData| excellon
+    selected -->|DrillData| drawing
+    selected -->|DrillData| json
 ```
 
 ### ADR-0002: Domain answer sets and validation policy
