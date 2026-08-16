@@ -133,9 +133,10 @@ but tooling sizes and enclosure dimensions are externally constrained. It also d
 - `docs/parts/dimensions.tsv` as the checked-in catalogue authority;
 - Hammond's website as the upstream source.
 
-Ignored local manufacturer PDFs are maintenance inputs only. They are not distributed,
-are not part of the architecture, and are not a test dependency. The deleted
-`docs/1590.pdf` has no replacement inside the repository.
+Manufacturer PDFs are not distributed, are not part of the architecture, and are not a
+test dependency. The tracked `docs/parts/*.pdf` files are removed together with
+`docs/1590.pdf`; the existing ignore rule allows maintainers to keep local copies without
+adding them back to the repository.
 
 ### ADR-0003: Quantisation boundary and ordering
 
@@ -175,8 +176,8 @@ line references are not.
   provenance, generation, and validation.
 - Remove completed or stale catalogue and unit entries from `docs/BACKLOG.md`.
 - Remove every stale SPEC citation and every reference to `docs/1590.pdf`.
-- Preserve ignored `docs/parts/*.pdf` files without making them part of the repository
-  contract.
+- Remove the tracked `docs/parts/*.pdf` files and preserve their ignore rule so local
+  maintenance copies remain untracked.
 
 ### Catalogue maintenance
 
@@ -224,6 +225,6 @@ The implementation is complete when:
 
 ## Scope boundaries
 
-This work does not change package runtime behavior. It removes development-only catalogue
-maintenance paths that require the deleted PDF, while leaving quantisation, pipeline,
-emitter, and catalogue behavior unchanged. Ignored manufacturer drawings remain untouched.
+This work does not change package runtime behavior. It removes tracked manufacturer PDFs
+and development-only catalogue maintenance paths that require them, while leaving
+quantisation, pipeline, emitter, and catalogue behavior unchanged.
