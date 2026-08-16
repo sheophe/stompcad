@@ -1,7 +1,7 @@
 """Read PDF-compatible Illustrator artwork as raw drill geometry.
 
-Resolve layers and graphics state, discard unpainted paths, recover circles,
-and return float millimetres relative to the largest non-circular reference.
+Return float millimetres, outline-centred when a reference exists; otherwise
+page-relative with a diagnostic. Layers and graphics state are resolved first.
 """
 
 from __future__ import annotations
@@ -85,7 +85,11 @@ class AiPdfSource:
         return tuple(p.path for p in paths if layer in p.layers)
 
     def read(self) -> RawDrillData:
-        """Parse the file into ``RawDrillData`` in the canonical frame."""
+        """Return ``RawDrillData`` in the frame established by the artwork.
+
+        Positions are outline-centred when possible, else page-relative with a
+        diagnostic naming the fallback frame.
+        """
         names, paths = self._extract()
         self._require_layer(self.drill_layer, names)
         self._require_layer(self.reference_layer, names)
