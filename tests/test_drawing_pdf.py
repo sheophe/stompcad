@@ -112,8 +112,9 @@ def test_a_1590b_panel_is_drawn_on_a4_portrait_at_one_to_one():
 
 
 def test_a_larger_panel_grows_the_sheet_rather_than_the_scale():
+    """Wider than A4's drawing space, and no taller than A3's, so A3 it is."""
     payload = render(make_data(at(0, 0, index=1),
-                               reference=outline(300_000_000, 200_000_000)))
+                               reference=outline(300_000_000, 120_000_000)))
     box = [float(v) for v in page_of(payload).MediaBox]
 
     assert box == pytest.approx([0.0, 0.0, 420.0 * PT_PER_MM, 297.0 * PT_PER_MM])
@@ -262,3 +263,55 @@ def test_a_panel_past_a0_is_still_drawn_1_to_1_and_says_it_overflowed():
 
 def test_a_panel_that_fits_carries_no_overflow_marker():
     assert "CONTENT EXCEEDS" not in " ".join(strings_in(render(panel())))
+
+
+# --- the title block --------------------------------------------------------
+
+
+def test_the_sheet_states_its_units_scale_and_that_it_must_not_be_scaled():
+    shown = " ".join(strings_in(render(panel())))
+
+    assert "UNITS mm" in shown
+    assert "SCALE 1:1" in shown
+    assert "DO NOT SCALE" in shown
+
+
+def test_the_paper_size_field_names_the_sheet_that_was_chosen():
+    assert "A4" in strings_in(render(panel()))
+
+
+def test_the_mandatory_fields_a_caller_supplies_reach_the_printed_sheet():
+    """A title block states them; nothing else on the sheet does."""
+    options = PdfDrawingOptions(title="TAR PANEL", drawing_no="AI-0001",
+                                issue_date="2026-08-16", approved_by="P VAKHNIVSKYI",
+                                creator="AIDRILL")
+    shown = strings_in(render(panel(), options))
+
+    for value in ("TAR PANEL", "AI-0001", "2026-08-16", "P VAKHNIVSKYI", "AIDRILL"):
+        assert value in shown
+    for label in ("LEGAL OWNER", "IDENT NO", "DATE OF ISSUE", "SHEET", "TITLE",
+                  "APPROVED", "CREATOR", "DOC TYPE"):
+        assert label in shown
+
+
+def test_a_mandatory_field_with_no_source_prints_an_em_dash_rather_than_a_gap():
+    """Unset by default: aidrill reads artwork, not an organisation."""
+    shown = strings_in(render(panel()))
+
+    assert "APPROVED" in shown
+    assert "—" in shown
+
+
+def test_the_block_spans_the_full_drawing_space_width_at_the_foot_of_the_a4_sheet():
+    """ISO 7200 6 with ISO 5457 Table 1: 180 mm is A4's whole drawing space."""
+    data = panel()
+    emitter = DrawingPdfEmitter()
+    layout = emitter.layout(data)
+    x0, y0, x1, y1 = layout.title_block
+
+    assert (x1 - x0, x1, y1) == pytest.approx((180.0, layout.border[2], layout.border[3]))
+    # The drawing itself keeps clear of it.
+    assert layout.area[3] <= y0
+    stream = stream_of(emitter.emit(data))
+    bottom = layout.sheet.height - y1
+    assert f"{x0:.0f} {bottom:.0f} 180 {y1 - y0:.0f} re S" in stream

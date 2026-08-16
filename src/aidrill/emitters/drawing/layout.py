@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from ...model import DrillData
 from ...units import mm_from_nm
 from .content import fit_font, note_lines
-from .sheet import Box, FrameStyle, Sheet
+from .sheet import TITLE_BLOCK_WIDTH, Box, FrameStyle, Sheet
 
 __all__ = [
     "Layout",
@@ -28,6 +28,11 @@ __all__ = [
     "BOTTOM_BASE",
     "ROW_PITCH",
     "GUTTER",
+    "TITLE_BLOCK_HEIGHT",
+    "TITLE_BLOCK_SHARE",
+    "SCHEDULE_MIN_WIDTH",
+    "SCHEDULE_MAX_WIDTH",
+    "SCHEDULE_BAND_SHARE",
     "TITLE_MIN_FONT",
 ]
 
@@ -45,6 +50,21 @@ TOP_ALLOWANCE = 16.0  # overall width dimension
 BOTTOM_BASE = 12.0  # below the last chain dimension
 ROW_PITCH = 8.0  # between stacked chain dimensions
 GUTTER = 4.0
+
+#: The deepest the title block is drawn, and the share of a short drawing space
+#: it may take instead. ISO 7200 fixes the block's width, not its height.
+TITLE_BLOCK_HEIGHT = 46.0
+TITLE_BLOCK_SHARE = 0.35
+
+#: The narrowest a schedule can be and still rule five columns. The ISO block is
+#: a fixed 180 mm at the foot of the drawing space, so on A4 — where that is the
+#: whole width — nothing stands beside it and the schedule takes a band above.
+SCHEDULE_MIN_WIDTH = 60.0
+#: The widest it is drawn beside the block, so a large sheet keeps a table
+#: shaped like a table rather than one ruled across a metre of paper.
+SCHEDULE_MAX_WIDTH = 210.0
+#: What the banded schedule takes of the drawing space's height.
+SCHEDULE_BAND_SHARE = 0.28
 
 #: The smallest a title block line is allowed to shrink to earn its width. A
 #: line that still does not fit at this size is truncated, so the enclosure
@@ -101,17 +121,18 @@ class Layout:
 
     @property
     def fits(self) -> bool:
-        """Whether the sheet's drawing space holds the content at this scale.
+        """Whether the box the drawing occupies holds the content at this scale.
 
-        Asked against ``border`` — ISO 5457's tabulated drawing space — not the
-        narrower ``area`` a fixed-proportion schedule column leaves behind. A
-        schedule or notes box that has to omit rows has its own counted marker
-        and is not grounds to consume a larger sheet.
+        Under ISO 5457 the furniture is ruled across the foot of the tabulated
+        drawing space, so ``area`` is what is left for the drawing, and it is
+        both what the demand is capped by and what the demand is tested against.
+        The plain sheet rules its columns inside the space and has always been
+        measured against the whole of it. Either way a schedule or notes box
+        that omits rows carries its own counted marker and is not grounds to
+        consume a larger sheet.
         """
-        return (
-            self.needed_width <= self.border[2] - self.border[0]
-            and self.needed_height <= self.border[3] - self.border[1]
-        )
+        x0, y0, x1, y1 = self.area if self.frame is FrameStyle.ISO_5457 else self.border
+        return self.needed_width <= x1 - x0 and self.needed_height <= y1 - y0
 
     @classmethod
     def for_sheet(
@@ -126,26 +147,41 @@ class Layout:
         border = sheet.space
         inner_w = border[2] - border[0]
         inner_h = border[3] - border[1]
+        iso = frame is FrameStyle.ISO_5457
 
-        right_w = min(92.0, inner_w * 0.4)
-        title_h = min(46.0, inner_h * 0.35)
-        right_x = border[2] - right_w
-        title_block = (right_x, border[3] - title_h, border[2], border[3])
-        schedule = (right_x, border[1], border[2], title_block[1] - 2.0)
+        if iso:
+            title_block, schedule, foot = _iso_foot(border, inner_w, inner_h)
+            text_w = inner_w
+        else:
+            right_w = min(92.0, inner_w * 0.4)
+            title_h = min(TITLE_BLOCK_HEIGHT, inner_h * TITLE_BLOCK_SHARE)
+            right_x = border[2] - right_w
+            title_block = (right_x, border[3] - title_h, border[2], border[3])
+            schedule = (right_x, border[1], border[2], title_block[1] - 2.0)
+            text_w = max(20.0, inner_w - right_w - GUTTER)
+            foot = border[3]
 
-        left_w = max(20.0, inner_w - right_w - GUTTER)
         notes = note_lines(data)
         note_font = min(
-            (fit_font(note.text, left_w - 5.0, 2.6, 1.5) for note in notes),
+            (fit_font(note.text, text_w - 5.0, 2.6, 1.5) for note in notes),
             default=2.6,
         )
         notes_h = min(inner_h * 0.4, 6.0 + note_font * 1.6 * (len(notes) + 1))
-        notes_box = (border[0], border[3] - notes_h, border[0] + left_w, border[3])
-
-        area = (border[0], border[1], border[0] + left_w, notes_box[1] - GUTTER)
+        if iso:
+            # The furniture runs across the foot of the drawing space, so the
+            # notes band spans it too and the drawing keeps one box above them.
+            notes_box = (border[0], foot - GUTTER - notes_h, border[2], foot - GUTTER)
+            area = (border[0], border[1], border[2], notes_box[1] - GUTTER)
+        else:
+            notes_box = (border[0], border[3] - notes_h, border[0] + text_w, border[3])
+            area = (border[0], border[1], border[0] + text_w, notes_box[1] - GUTTER)
         area_h = max(20.0, area[3] - area[1])
 
         rows = data.rows()
+        # The chain stack may take half the box the drawing occupies, and no
+        # more: the rows that do not fit are stated as a counted omission. The
+        # cap is read off the same box ``fits`` measures the demand against, or
+        # the demand and the test would be about two different boxes.
         bottom = min(BOTTOM_BASE + ROW_PITCH * len(rows), area_h * 0.5)
         usable_w = max(10.0, (area[2] - area[0]) - LEFT_ALLOWANCE - RIGHT_ALLOWANCE)
         usable_h = max(10.0, area_h - TOP_ALLOWANCE - bottom)
@@ -175,6 +211,27 @@ class Layout:
             needed_width=2 * half_w * resolved + LEFT_ALLOWANCE + RIGHT_ALLOWANCE,
             needed_height=2 * half_h * resolved + TOP_ALLOWANCE + bottom,
         )
+
+
+def _iso_foot(border: Box, inner_w: float, inner_h: float) -> tuple[Box, Box, float]:
+    """Rule the title block and schedule across the foot of the drawing space.
+
+    ISO 7200 6 fixes the block at 180 mm and ISO 5457 4.1 puts it at the bottom
+    right, which on A4 is the whole width: there the schedule takes a band above
+    the block, and on a wider sheet it stands beside it. The third value is the
+    top of the foot, which is where everything above it stops.
+    """
+    block_w = min(TITLE_BLOCK_WIDTH, inner_w)
+    block_h = min(TITLE_BLOCK_HEIGHT, inner_h * TITLE_BLOCK_SHARE)
+    title_block = (border[2] - block_w, border[3] - block_h, border[2], border[3])
+    beside = inner_w - block_w - GUTTER
+    if beside >= SCHEDULE_MIN_WIDTH:
+        width = min(beside, SCHEDULE_MAX_WIDTH)
+        left = title_block[0] - GUTTER - width
+        return title_block, (left, title_block[1], left + width, border[3]), title_block[1]
+    band_h = inner_h * SCHEDULE_BAND_SHARE
+    top = title_block[1] - GUTTER - band_h
+    return title_block, (border[0], top, border[2], title_block[1] - GUTTER), top
 
 
 def content_half_extents(data: DrillData) -> tuple[float, float]:

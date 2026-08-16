@@ -41,8 +41,12 @@ def test_a_1590b_panel_takes_the_first_candidate():
 
 
 def test_a_panel_too_wide_for_a4_grows_to_a3():
-    """A4's drawing space is 180 wide; 300 mm of panel cannot be drawn 1:1 on it."""
-    layout = choose_sheet(panel(300_000_000, 200_000_000), ISO_5457_CANDIDATES,
+    """A4's drawing space is 180 wide; 300 mm of panel cannot be drawn 1:1 on it.
+
+    Wide and not tall, so it is the width that rejects A4: A3 is the same 277 mm
+    of drawing space high, and the title block takes 46 mm of that on both.
+    """
+    layout = choose_sheet(panel(300_000_000, 120_000_000), ISO_5457_CANDIDATES,
                           frame=FrameStyle.ISO_5457)
 
     assert layout.sheet is A3_LANDSCAPE
@@ -156,3 +160,68 @@ def test_the_scale_label_reads_as_an_engineer_writes_it():
 
     twice = Layout.for_sheet(A4_PORTRAIT, panel(10_000_000, 5_000_000), scale=2.0)
     assert twice.scale_label == "2:1"
+
+
+# --- the box the ISO drawing occupies -------------------------------------
+
+
+def rows_panel(count: int, *, height_nm: int = 60_000_000):
+    """A panel of ``count`` hole rows, so the chain stack is ``count`` deep."""
+    holes = tuple(
+        at(0, (index - count // 2) * 2_000_000, index=count - index)
+        for index in range(count)
+    )
+    return make_data(*holes, reference=outline(80_000_000, height_nm))
+
+
+def test_a_panel_the_iso_furniture_leaves_no_room_for_climbs_to_the_next_sheet():
+    """The ISO furniture is ruled inside the drawing space, so the box the
+    drawing occupies is what it has to fit into. Measured against the whole
+    tabulated space instead, this panel is judged to fit A4 and is then drawn
+    across the title block that occupies the foot of that space.
+    """
+    tall = panel(100_000_000, 150_000_000)
+
+    a4 = Layout.for_sheet(A4_PORTRAIT, tall, scale=1.0, frame=FrameStyle.ISO_5457)
+    assert a4.needed_height <= a4.border[3] - a4.border[1], "the whole space would take it"
+    assert a4.needed_height > a4.area[3] - a4.area[1], "the drawing box does not"
+    assert not a4.fits
+
+    chosen = choose_sheet(tall, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    assert chosen.sheet is A3_LANDSCAPE
+    # On the sheet it climbed to, the drawn content clears the title block.
+    assert chosen.content[3] <= chosen.title_block[1]
+
+
+def test_a_panel_of_many_rows_is_not_judged_to_fit_a_sheet_its_chain_stack_overruns():
+    """The stack of row chains is clamped to half the box the drawing occupies,
+    so that box has to be the one the demand is then tested against. Capped
+    against one box and tested against a wider one, a stack that wants 390 mm
+    of chains reports fitting 277 mm of paper.
+    """
+    from aidrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE
+
+    rows = 24
+    data = rows_panel(rows)
+    assert len(data.rows()) == rows, "the fixture has to stack that many chains"
+
+    a4 = Layout.for_sheet(A4_PORTRAIT, data, scale=1.0, frame=FrameStyle.ISO_5457)
+    assert not a4.fits
+
+    chosen = choose_sheet(data, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    box_h = chosen.area[3] - chosen.area[1]
+    assert chosen.needed_height <= box_h
+    # What the demand reserved for the chains, read back out of the demand.
+    reserved = chosen.needed_height - (60.0 * chosen.scale + TOP_ALLOWANCE)
+    assert reserved == pytest.approx(min(BOTTOM_BASE + ROW_PITCH * rows, box_h / 2.0))
+
+
+def test_the_plain_sheet_is_still_measured_against_the_whole_drawing_space():
+    """``PLAIN`` rules its schedule and notes inside the space and has always
+    been measured against the whole of it; the SVG sheet depends on that.
+    """
+    data = panel(170_000_000, 60_000_000)
+    plain = Layout.for_sheet(A4_LANDSCAPE, data, scale=1.0)
+
+    assert plain.needed_width > plain.area[2] - plain.area[0]
+    assert plain.fits

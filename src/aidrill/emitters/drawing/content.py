@@ -10,10 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ...model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
 from ...pipeline import DRILL_STANDARDS
 from ...units import Nanometre, format_nm
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the checker
+    from .layout import Layout
 
 __all__ = [
     "CHAR_RATIO",
@@ -25,6 +29,11 @@ __all__ = [
     "FOOTPRINT_DECIMALS",
     "DIAMETER_STAGE",
     "STANDARD_PARAMETER",
+    "TITLE_BLOCK_COLUMNS",
+    "TITLE_LABEL_FONT",
+    "TITLE_VALUE_FONT",
+    "TITLE_CELL_PADDING",
+    "ABSENT",
     "capacity",
     "fits",
     "allot",
@@ -33,9 +42,13 @@ __all__ = [
     "ToolLine",
     "Note",
     "SheetText",
+    "TitleField",
     "schedule_rows",
     "tool_summary",
     "note_lines",
+    "title_cell_width",
+    "title_fields",
+    "grid_value",
     "grid_note",
     "millimetre_label",
     "diameter_label",
@@ -90,6 +103,18 @@ FOOTPRINT_DECIMALS = 2
 #: name rather than 183 sizes.
 DIAMETER_STAGE = "snap-diameters"
 STANDARD_PARAMETER = "standard"
+
+#: The ISO 7200 block's field grid and the sizes its cells are lettered at.
+#: They live here because the cell a value is truncated to and the recommended
+#: character count that truncates it are one decision about the same value.
+TITLE_BLOCK_COLUMNS = 3
+TITLE_LABEL_FONT = 1.8
+TITLE_VALUE_FONT = 2.6
+TITLE_CELL_PADDING = 1.5
+
+#: Shown for a field ``aidrill`` has no source for. An em dash says the field
+#: exists and is empty; a blank cell reads as one that failed to render.
+ABSENT = "—"
 
 
 def capacity(width: float, size: float) -> int:
@@ -167,6 +192,20 @@ class SheetText:
     creator: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class TitleField:
+    """One ISO 7200 data field: its label, its value, and what the table says.
+
+    ``limit`` is the recommended character count of Tables 1-3, or zero where
+    the table recommends none; ``mandatory`` is the tables' own column.
+    """
+
+    name: str
+    value: str
+    limit: int
+    mandatory: bool
+
+
 def schedule_rows(data: DrillData) -> tuple[ScheduleRow, ...]:
     """Format every hole's schedule line, in the model's own hole order."""
     tools = data.tools()
@@ -209,8 +248,65 @@ def note_lines(data: DrillData) -> tuple[Note, ...]:
     return tuple(notes)
 
 
+def title_cell_width(layout: Layout) -> float:
+    """One field cell's width, which the rules and the truncation both read."""
+    x0, _, x1, _ = layout.title_block
+    return (x1 - x0) / TITLE_BLOCK_COLUMNS
+
+
+def _capped(value: str, limit: int) -> str:
+    """Hold a value to its table's recommended length; ``0`` means none given."""
+    if limit <= 0 or len(value) <= limit:
+        return value
+    return value[: limit - 1] + "…"
+
+
+def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[TitleField, ...]:
+    """The title block's fields, per ISO 7200 Tables 1-3.
+
+    Every mandatory field appears whether or not a value is known, because a
+    missing mandatory field and an empty one are different claims. Date of
+    issue, approval person and creator are the three ``aidrill`` has no source
+    for: it reads artwork, not an organisation, and reading a clock would make
+    two runs over one panel disagree.
+    """
+    room = capacity(title_cell_width(layout) - 2 * TITLE_CELL_PADDING, TITLE_VALUE_FONT)
+    source = data.source
+    stated: tuple[tuple[str, str, int, bool], ...] = (
+        ("LEGAL OWNER", text.company or ABSENT, 0, True),
+        ("TITLE", text.title or "PANEL DRILL DRAWING", 25, True),
+        ("IDENT NO", text.drawing_no or ABSENT, 16, True),
+        ("DOC TYPE", "DRILL DRAWING", 30, True),
+        ("DATE OF ISSUE", text.issue_date or ABSENT, 10, True),
+        # Table 1's count is for the sheet number alone; this cell carries the
+        # number and the total, which is the pair a reader checks a set against.
+        ("SHEET", "1 / 1", 0, True),
+        ("APPROVED", text.approved_by or ABSENT, 20, True),
+        ("CREATOR", text.creator or ABSENT, 20, True),
+        ("PAPER SIZE", layout.sheet.name, 4, False),
+        ("SCALE", layout.scale_label, 0, False),
+        ("UNITS", "mm", 0, False),
+        ("HOLES", str(len(data.holes)), 0, False),
+        ("ENCLOSURE", enclosure_note(data, room), 0, False),
+        ("GRID", grid_value(data), 0, False),
+        ("PROJECTION", "THIRD ANGLE — DO NOT SCALE", 0, False),
+        ("SOURCE", source.path or ABSENT, 0, False),
+        ("DRILL LAYER", source.drill_layer or ABSENT, 0, False),
+        ("REFERENCE LAYER", source.reference_layer or ABSENT, 0, False),
+    )
+    return tuple(
+        TitleField(name, _capped(value, limit), limit, mandatory)
+        for name, value, limit, mandatory in stated
+    )
+
+
 def grid_note(data: DrillData) -> str:
     """State the recorded effective grid, or explicitly that none was recorded."""
+    return f"GRID {grid_value(data)}"
+
+
+def grid_value(data: DrillData) -> str:
+    """The same fact as a title-block cell's value, under its own label."""
     run = data.last_run(SNAP_STAGE)
     grid_nm = None if run is None else run.get(GRID_PARAMETER)
     # ``StageRun`` payloads are deliberately generic. The model holds an ``_nm``
@@ -221,8 +317,8 @@ def grid_note(data: DrillData) -> str:
     # both get the same answer as no record at all. ``type(...) is int`` rather
     # than ``isinstance`` on the precedent the model sets.
     if type(grid_nm) is not int or grid_nm <= 0:
-        return "GRID NOT RECORDED"
-    return f"GRID {format_nm(Nanometre(grid_nm))} mm"
+        return "NOT RECORDED"
+    return f"{format_nm(Nanometre(grid_nm))} mm"
 
 
 def millimetre_label(diameter_nm: Nanometre) -> str:

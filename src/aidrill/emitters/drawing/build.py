@@ -15,6 +15,10 @@ from ...model import DrillData, Severity
 from ...units import Nanometre, format_nm, mm_from_nm
 from .content import (
     POSITION_DECIMALS,
+    TITLE_BLOCK_COLUMNS,
+    TITLE_CELL_PADDING,
+    TITLE_LABEL_FONT,
+    TITLE_VALUE_FONT,
     SheetText,
     allot,
     capacity,
@@ -26,6 +30,8 @@ from .content import (
     is_flagged,
     note_lines,
     schedule_rows,
+    title_cell_width,
+    title_fields,
     tool_summary,
 )
 from .layout import ROW_PITCH, TITLE_MIN_FONT, Layout
@@ -715,6 +721,51 @@ def _build_schedule(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
 
 
 def _build_title_block(
+    layout: Layout, data: DrillData, pens: Pens, options: SheetText
+) -> list[Item]:
+    """Rule ISO 7200's field grid; the plain sheet keeps its list of lines.
+
+    A field is a labelled cell, so a mandatory field with no value still shows
+    its label over an em dash rather than leaving the reader to guess.
+    """
+    if layout.frame is not FrameStyle.ISO_5457:
+        return _plain_title_block(layout, data, pens, options)
+
+    x0, y0, x1, y1 = layout.title_block
+    fields = title_fields(data, options, layout)
+    drawn: list[Item] = [Rect(x0, y0, x1 - x0, y1 - y0, pens.frame, cls="title-block")]
+
+    columns = TITLE_BLOCK_COLUMNS
+    rows = math.ceil(len(fields) / columns)
+    cell_w = title_cell_width(layout)
+    cell_h = (y1 - y0) / rows
+    for row in range(1, rows):
+        y = y0 + row * cell_h
+        drawn.append(Line(x0, y, x1, y, pens.dimension, cls="tb-rule"))
+    for column in range(1, columns):
+        x = x0 + column * cell_w
+        drawn.append(Line(x, y0, x, y1, pens.dimension, cls="tb-rule"))
+
+    room = cell_w - 2 * TITLE_CELL_PADDING
+    for index, field in enumerate(fields):
+        cx = x0 + (index % columns) * cell_w + TITLE_CELL_PADDING
+        cy = y0 + (index // columns) * cell_h
+        # The label sits above its value, feint, so the block reads as values
+        # with their claims attached rather than as a page of headings.
+        drawn.append(
+            Text(cx, cy + TITLE_LABEL_FONT + 0.8, field.name, TITLE_LABEL_FONT,
+                 colour=FEINT, cls="tb-label")
+        )
+        drawn.append(
+            Text(cx, cy + cell_h - TITLE_CELL_PADDING,
+                 fits(field.value, TITLE_VALUE_FONT, room), TITLE_VALUE_FONT,
+                 weight="bold" if field.name == "TITLE" else "normal", cls="tb-value")
+        )
+
+    return [Group("title-block-group", tuple(drawn))]
+
+
+def _plain_title_block(
     layout: Layout, data: DrillData, pens: Pens, options: SheetText
 ) -> list[Item]:
     x0, y0, x1, y1 = layout.title_block

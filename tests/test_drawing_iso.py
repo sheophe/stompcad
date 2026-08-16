@@ -345,3 +345,128 @@ def test_letters_never_use_i_or_o_even_on_the_largest_sheet():
     assert len(used) == 16
     assert "I" not in used and "O" not in used
     assert "J" in used  # the letter that takes I's place
+
+
+# --- ISO 7200 title block ---------------------------------------------------
+
+
+def test_every_mandatory_iso_7200_field_is_present_even_when_empty():
+    """Tables 1-3. A blank mandatory field is a stated gap, not an omission."""
+    from aidrill.emitters.drawing.build import SheetText
+    from aidrill.emitters.drawing.content import title_fields
+
+    layout = iso_layout()
+    fields = title_fields(DrillData(), SheetText(), layout)
+    mandatory = {f.name for f in fields if f.mandatory}
+
+    assert mandatory == {
+        "LEGAL OWNER",       # 5.1.2
+        "IDENT NO",          # 5.1.3
+        "DATE OF ISSUE",     # 5.1.5
+        "SHEET",             # 5.1.6
+        "TITLE",             # 5.2.2
+        "APPROVED",          # 5.3.4
+        "CREATOR",           # 5.3.5
+        "DOC TYPE",          # 5.3.6
+    }
+
+
+def test_a_field_aidrill_cannot_derive_renders_as_an_em_dash():
+    """Date of issue, approver and creator have no source in artwork."""
+    from aidrill.emitters.drawing.build import SheetText
+    from aidrill.emitters.drawing.content import title_fields
+
+    fields = {f.name: f.value for f in title_fields(DrillData(), SheetText(), iso_layout())}
+
+    assert fields["DATE OF ISSUE"] == "—"
+    assert fields["APPROVED"] == "—"
+    assert fields["CREATOR"] == "—"
+
+
+def test_supplied_values_reach_their_fields():
+    from aidrill.emitters.drawing.build import SheetText
+    from aidrill.emitters.drawing.content import title_fields
+
+    text = SheetText(title="TAR PANEL", drawing_no="AI-0001", company="ARTIFACT",
+                     issue_date="2026-08-16", approved_by="P VAKHNIVSKYI", creator="AIDRILL")
+    fields = {f.name: f.value for f in title_fields(DrillData(), text, iso_layout())}
+
+    assert fields["TITLE"] == "TAR PANEL"
+    assert fields["IDENT NO"] == "AI-0001"
+    assert fields["LEGAL OWNER"] == "ARTIFACT"
+    assert fields["DATE OF ISSUE"] == "2026-08-16"
+    assert fields["APPROVED"] == "P VAKHNIVSKYI"
+    assert fields["CREATOR"] == "AIDRILL"
+    assert fields["DOC TYPE"] == "DRILL DRAWING"
+    assert fields["SHEET"] == "1 / 1"
+
+
+def test_a_value_longer_than_its_recommended_length_is_truncated():
+    """Tables 1-3 give character counts; the field limit binds before the box does."""
+    from aidrill.emitters.drawing.build import SheetText
+    from aidrill.emitters.drawing.content import title_fields
+
+    text = SheetText(drawing_no="X" * 40, title="Y" * 40, approved_by="Z" * 40)  # 5.1.3 recommends 16
+    fields = {f.name: f for f in title_fields(DrillData(), text, iso_layout())}
+
+    assert len(fields["IDENT NO"].value) <= fields["IDENT NO"].limit == 16
+    assert len(fields["TITLE"].value) <= fields["TITLE"].limit == 25
+    assert len(fields["APPROVED"].value) <= fields["APPROVED"].limit == 20
+    # A field the tables give no count for keeps its value whole.
+    assert fields["UNITS"].limit == 0
+
+
+def test_the_block_is_one_hundred_and_eighty_wide_whatever_the_sheet():
+    """ISO 7200 6: the same title block on every paper size."""
+    from aidrill.emitters.drawing.sheet import A0_LANDSCAPE, A3_LANDSCAPE
+
+    for sheet in (A4_PORTRAIT, A3_LANDSCAPE, A0_LANDSCAPE):
+        layout = iso_layout(sheet)
+        x0, _, x1, _ = layout.title_block
+        assert x1 - x0 == pytest.approx(TITLE_BLOCK_WIDTH)
+
+
+def test_the_block_sits_in_the_bottom_right_of_the_drawing_space():
+    """5457 4.1: bottom right for A0-A3; the lower part for A4."""
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    for sheet in (A4_PORTRAIT, A3_LANDSCAPE):
+        layout = iso_layout(sheet)
+        space_x0, _, space_x1, space_y1 = sheet.space
+        x0, _, x1, y1 = layout.title_block
+        assert x1 == pytest.approx(space_x1)
+        assert y1 == pytest.approx(space_y1)
+        assert x0 >= space_x0
+    # On A4 the block is the full drawing-space width, which is why 180 was chosen.
+    assert iso_layout(A4_PORTRAIT).title_block[0] == pytest.approx(A4_PORTRAIT.space[0])
+
+
+def test_the_block_is_ruled_into_cells_that_each_carry_a_label_and_a_value():
+    """A field is a labelled box: the label says which claim the value makes."""
+    from aidrill.emitters.drawing.build import SheetText, build_scene
+    from aidrill.emitters.drawing.content import title_fields
+    from aidrill.emitters.drawing.scene import Group, Text
+
+    layout = iso_layout()
+    items = build_scene(layout, DrillData(), SheetText()).items
+    block = next(i for i in items if isinstance(i, Group) and i.cls == "title-block-group")
+    labels = [i.content for i in block.items if isinstance(i, Text) and i.cls == "tb-label"]
+    values = [i for i in block.items if isinstance(i, Text) and i.cls == "tb-value"]
+
+    assert labels == [field.name for field in title_fields(DrillData(), SheetText(), layout)]
+    assert len(values) == len(labels)
+
+
+def test_no_rule_in_the_block_is_a_line_of_no_length():
+    """A rule that starts where it ends is ink that draws nothing."""
+    from aidrill.emitters.drawing.build import SheetText, build_scene
+    from aidrill.emitters.drawing.scene import Group, Line
+
+    items = build_scene(iso_layout(), DrillData(), SheetText()).items
+    block = next(i for i in items if isinstance(i, Group) and i.cls == "title-block-group")
+    rules = [i for i in block.items if isinstance(i, Line) and i.cls == "tb-rule"]
+
+    assert rules
+    assert all((rule.x1, rule.y1) != (rule.x2, rule.y2) for rule in rules)
+    # One rule per interior boundary, drawn once rather than once per field.
+    assert len(rules) == len(set((r.x1, r.y1, r.x2, r.y2) for r in rules))
