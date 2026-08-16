@@ -157,9 +157,16 @@ def test_the_drawing_is_not_mirrored_top_to_bottom():
     x0, y0, x1, y1 = layout.border
     stream = stream_of(emitter.emit(data))
 
-    match = re.search(r"^(\S+) (\S+) (\S+) (\S+) re S$", stream, re.MULTILINE)
-    assert match, "expected the frame border rectangle"
-    _, rect_y, _, height = (float(v) for v in match.groups())
+    # Every plain rectangle in the stream, then the one whose width and height
+    # are the border's: locating it by draw order would quietly test some other
+    # box the day the frame stops being drawn first.
+    rectangles = [
+        tuple(float(v) for v in found)
+        for found in re.findall(r"^(\S+) (\S+) (\S+) (\S+) re S$", stream, re.MULTILINE)
+    ]
+    border = [r for r in rectangles if (r[2], r[3]) == pytest.approx((x1 - x0, y1 - y0))]
+    assert len(border) == 1, "expected exactly one rectangle the size of the frame border"
+    _, rect_y, _, height = border[0]
 
     # A correct flip sends the scene-bottom edge (y1) to the *smaller* PDF y
     # and the scene-top edge (y0) to the *larger* one; an unflipped ``_y``

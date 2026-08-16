@@ -108,6 +108,26 @@ def test_a0_end_fields_are_larger_than_fifty_and_a4_end_fields_are_smaller():
     assert grid_divisions(297.0, 6)[0] == pytest.approx(48.5)
 
 
+@pytest.mark.parametrize("count", [0, 1])
+def test_an_undivided_extent_is_one_field_rather_than_a_pair_of_corners(count):
+    """4.4 divides between two corner fields, which needs two fields to divide.
+
+    Below that there is nothing to divide: the extent is the field. The naive
+    arithmetic would answer a count of one with *two* fields of 130 mm.
+    """
+    assert grid_divisions(210.0, count) == (210.0,)
+
+
+def test_two_fields_are_two_corners_with_nothing_between_them():
+    """The first count that does divide, and the boundary the guard sits on.
+
+    No tabulated sheet asks for two, so this is the case that says where the
+    guard stops: at two the extent is halved between the corner fields, and
+    the remainder rule has no interior field to take 50 mm from.
+    """
+    assert grid_divisions(210.0, 2) == (105.0, 105.0)
+
+
 def test_trimming_marks_are_two_overlapping_ten_by_five_rectangles():
     """4.5."""
     assert (TRIM_MARK_LONG, TRIM_MARK_SHORT) == (10.0, 5.0)
@@ -334,6 +354,30 @@ def test_grid_lines_are_drawn_narrow():
 
     assert lines
     assert all(line.stroke.width == GRID_LINE_WIDTH for line in lines)
+
+
+@pytest.mark.parametrize(
+    ("across", "down"),
+    # Each count on its own, and both together: a sheet lettered down one edge
+    # and numbered nowhere across is not half a reference system, it is none.
+    [(0, 0), (8, 0), (0, 6)],
+)
+def test_a_sheet_with_no_tabulated_fields_carries_no_reference_system(across, down):
+    """Table 2 tabulates the counts, and the SVG sheets are not in Table 2."""
+    from aidrill.emitters.drawing.build import grid_reference_items
+
+    plain = Sheet("A3", 420.0, 297.0, fields_across=across, fields_down=down)
+
+    assert grid_reference_items(plain) == []
+
+
+def test_the_svg_sheets_are_not_lettered_because_they_are_not_iso_sheets():
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE_PLAIN, A4_LANDSCAPE
+
+    for sheet in (A4_LANDSCAPE, A3_LANDSCAPE_PLAIN):
+        assert sheet.grid_fields == (0, 0)
+        assert grid_reference_items(sheet) == []
 
 
 def test_letters_never_use_i_or_o_even_on_the_largest_sheet():

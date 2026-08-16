@@ -75,6 +75,20 @@ def test_fits_truncates_with_an_ellipsis_rather_than_clipping_silently():
     assert len(truncated) < len("A VERY LONG TITLE INDEED")
 
 
+def test_fits_gives_back_what_it_can_when_the_box_holds_no_ellipsis():
+    """A cell one character wide has no room for the … that says it was cut.
+
+    The truncation rule is shared by both backends, so a box this narrow is a
+    call any layout can make: it answers with the characters that fit rather
+    than with an ellipsis that would be the whole of the cell's content.
+    """
+    assert content.fits("PANEL", 2.6, 1.0) == "P"
+    # A size of zero leaves capacity for nothing, and nothing is what it returns.
+    assert content.fits("PANEL", 0.0, 10.0) == ""
+    # Two characters is where the ellipsis becomes affordable again.
+    assert content.fits("PANEL", 2.6, 3.3) == "P…"
+
+
 def test_a_flagged_hole_is_matched_by_identity_and_by_code():
     """Diagnostics are joined on code and hole_index, never on geometry."""
     duplicate = Diagnostic.warning(

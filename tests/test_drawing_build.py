@@ -97,6 +97,36 @@ def test_a_hole_s_centre_mark_is_not_the_pen_the_panel_s_axes_are_drawn_with():
         assert axis.stroke.dashes, "a centre line of symmetry is long-dashed dotted"
 
 
+def test_the_overall_dimension_lines_span_the_outline_they_label():
+    """The number and the span are one claim, and only the number is read.
+
+    A dimension line drawn over two thirds of the panel still prints 60.000, so
+    nothing about the label catches it: the line has to be measured against the
+    outline it dimensions.
+    """
+    data = _panel()
+    layout = Layout.for_sheet(A3_LANDSCAPE, data, scale=1.0, frame=FrameStyle.PLAIN)
+    items = build_scene(layout, data, SheetText()).items
+
+    dimensions = next(i for i in items if isinstance(i, Group) and i.cls == "dimensions")
+    overall = next(
+        i for i in dimensions.items if isinstance(i, Group) and i.cls == "dim-overall-group"
+    )
+    lines = [i for i in overall.items if isinstance(i, Line) and i.cls == "dim-line"]
+    horizontal = next(line for line in lines if line.y1 == line.y2)
+    vertical = next(line for line in lines if line.x1 == line.x2)
+
+    # 60 x 40 mm at 1:1, centred: the ends are the outline's own edges.
+    assert (horizontal.x1, horizontal.x2) == (
+        layout.point(-30.0, 0.0)[0],
+        layout.point(30.0, 0.0)[0],
+    )
+    assert (vertical.y1, vertical.y2) == (
+        layout.point(0.0, 20.0)[1],
+        layout.point(0.0, -20.0)[1],
+    )
+
+
 def test_the_overflow_marker_states_the_layout_s_own_scale_not_a_pdf_literal():
     """The PDF sheet is always 1:1, but the same marker also serves the SVG
     sheet, which a caller can draw at any explicit scale. A panel too large

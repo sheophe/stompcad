@@ -293,8 +293,9 @@ def _rect_path(rect: Rect, sheet: Sheet) -> list[str]:
 
 
 def _polygon_ops(polygon: Polygon, sheet: Sheet) -> list[str]:
-    if not polygon.points:
-        return []
+    # Arrowheads and trimming marks are the only polygons a scene holds, and
+    # both are built from a fixed tuple of corners, so the unpacking below has
+    # a first point to take.
     red, green, blue = _rgb(polygon.fill)
     (first_x, first_y), *rest = polygon.points
     path = [f"{_num(first_x)} {_num(_y(sheet, first_y))} m"]

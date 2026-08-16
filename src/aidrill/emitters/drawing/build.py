@@ -121,14 +121,19 @@ def pens_for(group: LineGroup, style: FrameStyle) -> Pens:
     )
 
 
-def arrow(x: float, y: float, dx: float, dy: float, colour: str = INK) -> Polygon:
-    """A closed filled arrowhead at (x, y) pointing along the unit vector."""
+def arrow(x: float, y: float, dx: float, dy: float) -> Polygon:
+    """A closed filled arrowhead at (x, y) pointing along the unit vector.
+
+    Always inked: a dimension line is 01.1 whatever it measures, and a
+    diagnostic is carried by the schedule row and the notes, never by the
+    colour of an arrowhead.
+    """
     length, half = 2.2, 0.7
     tail_x, tail_y = x + dx * length, y + dy * length
     px, py = -dy * half, dx * half
     return Polygon(
         ((x, y), (tail_x + px, tail_y + py), (tail_x - px, tail_y - py)),
-        colour,
+        INK,
         cls="arrow",
     )
 
@@ -513,10 +518,10 @@ def _build_overall(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     if data.reference is not None:
         width_nm, height_nm = data.reference.width_nm, data.reference.height_nm
     else:
+        # No outline, so the holes are the extent. There is always at least one:
+        # ``_build_dimensions`` returns before this on a panel with neither.
         xs = [hole.x_nm for hole in data.holes]
         ys = [hole.y_nm for hole in data.holes]
-        if not xs:
-            return []
         width_nm = Nanometre(max(xs) - min(xs))
         height_nm = Nanometre(max(ys) - min(ys))
     if width_nm <= 0 and height_nm <= 0:
@@ -576,6 +581,7 @@ def _build_overall(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
 # ---------------------------------------------------------------------------
 # schedule
 # ---------------------------------------------------------------------------
+
 
 def _build_schedule(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     x0, y0, x1, y1 = layout.schedule
@@ -651,12 +657,6 @@ def _build_schedule(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
             # The hole's own id, not its place in the tuple — see ``_balloon``.
             # NO. is the column a diagnostic is joined on.
             (str(row.number), "sched-no"),
-            # ``schedule_rows`` renders the position with ``format_nm`` rather
-            # than an f-string over ``mm_from_nm``: the position is an integer
-            # and this is the one rendering of it, so there is no float in
-            # between for the drill file to disagree with. It is also where the
-            # negative zero was — a hole at -400 nm printed "-0.000" here while
-            # the Excellon writer printed "0.000" for the very same hole.
             (row.x, "sched-x"),
             (row.y, "sched-y"),
             (row.diameter, "sched-dia"),
@@ -819,6 +819,7 @@ def _plain_title_block(
 # ---------------------------------------------------------------------------
 # notes
 # ---------------------------------------------------------------------------
+
 
 def _overflow_marker(layout: Layout) -> list[Item]:
     """Say so when the content outran the largest sheet, rather than shrinking it.

@@ -57,6 +57,10 @@ the sizes in the drawer), `--case` (the Hammond base designator the panel is dra
 file is opened, so a bad standard, an unstocked size, or a part number in no catalogue
 is a usage error rather than a diagnostic.
 
+`drawing-pdf` writes an ISO 5457 sheet at 1:1, choosing the smallest of A4 portrait,
+A3, A2, A1 and A0 landscape that holds the panel. ISO 5457 §4.1 fixes the orientation
+of each size, so there is no orientation to choose.
+
 Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage or IO
 failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `unverifiable-enclosure`, `unmatched-enclosure` and `wrong-enclosure`. `grid-too-fine`
@@ -87,6 +91,14 @@ measurements with the enclosure, drill-size, and grid answer sets, then produces
 integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies`, and
 `SortHoles`. Emitters only translate frames, convert units, format, and serialise; shared
 facts are computed once before the emitter fan-out.
+
+Both drawing emitters share `emitters/drawing/`: `content` holds the facts a sheet
+states, `layout` resolves a sheet's geometry, and `build` turns the two into a `Scene`
+of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene. They differ in
+which unknown they solve for — SVG fixes the sheet and fits the scale, PDF fixes the
+scale at 1:1 and walks the ISO 5457 candidates. `tests/test_drawing_agreement.py` parses
+both artefacts and compares what they say about one panel; the sheets may list different
+numbers of rows, but never differ about a row they both show.
 
 `quantise()` owns enclosure, diameter, then position ordering. The CLI explicitly
 composes the post-quantisation stage order. A stage must not depend on or assert that
@@ -177,11 +189,14 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   identity rather than sequence position.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
   relevant mutation. Mutation testing is a survey, not a numeric gate. Current standing:
-  **2916 mutants, 2398 killed, 506 survived**. Read it by module, not in total — `cli`
-  (216), `emitters.drawing_svg` (81) and `sources.ai_pdf` (78) account for most
-  survivors, where a mutant rewrites a help string or a layout constant and nothing
-  observable changes. A survivor in `geometry`, `pipeline.dedupe`, `quantise` or `units`
-  is the kind worth chasing.
+  **6109 mutants, 4915 killed, 1191 survived**. Read it by module, not in total —
+  `emitters.drawing.build` (507), `cli` (205), `emitters.drawing_pdf` (156),
+  `sources.ai_pdf` (78), `emitters.drawing.content` (50) and `emitters.drawing_svg` (41)
+  account for most survivors, where a mutant rewrites a help string, a cell offset or a
+  font size and nothing observable changes. The drawing modules are layout-heavy and
+  survive in proportion. A survivor in `geometry`, `pipeline.dedupe`, `quantise`,
+  `units`, `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth
+  chasing: those hold cited constants and shared facts rather than placement.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.

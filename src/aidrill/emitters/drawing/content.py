@@ -211,6 +211,11 @@ def schedule_rows(data: DrillData) -> tuple[ScheduleRow, ...]:
     tools = data.tools()
     label = diameter_label(data)
     flagged = flagged_holes(data.diagnostics)
+    # The position is rendered with ``format_nm`` rather than an f-string over
+    # ``mm_from_nm``: it is an integer and this is the one rendering of it, so
+    # there is no float in between for the drill file to disagree with. It is
+    # also where a negative zero would be — a hole at -400 nm would print
+    # "-0.000" while the Excellon writer printed "0.000" for the same hole.
     return tuple(
         ScheduleRow(
             number=hole.index,

@@ -48,3 +48,17 @@ consecutive pair cannot pass accidentally.
 
 **Acceptance:** The test checks that each row has `len(stations) - 1` `dim-line` elements,
 and a mutation that skips the first pair fails that test.
+
+## ISO 3098 lettering
+
+**Status:** Noted; no implementation agreed.
+
+**Constraint:** The PDF sheet letters in base-14 Helvetica, so it is not ISO 3098
+conformant. A true technical face (osifont, ISOCPEUR) means vendoring a TTF, subsetting
+it, and clearing its licence — and, because both drawing backends share one text-fitting
+estimate, adopting real font metrics for one would make the two sheets truncate the same
+string at different points. Both backends move together or neither does.
+
+**Acceptance:** Both sheets letter in the same conformant face, the licence is recorded
+alongside the vendored file, and the agreement tests still show the two sheets stating the
+same facts about every row they both list.

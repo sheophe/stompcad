@@ -49,8 +49,6 @@ class DrawingOptions:
 def _fmt(value: float | str) -> str:
     if isinstance(value, str):
         return value
-    if isinstance(value, int):
-        return str(value)
     text = f"{float(value):.6f}".rstrip("0").rstrip(".")
     return text or "0"
 

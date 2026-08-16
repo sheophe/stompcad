@@ -110,6 +110,10 @@ def test_a_fitted_scale_is_rounded_down_to_a_readable_one():
     assert preferred_scale(0.9) == 0.5
     assert all(preferred_scale(value) <= value for value in (0.3, 1.7, 7.9, 23.0))
     assert preferred_scale(0.001) not in PREFERRED_SCALES  # below the ladder, kept raw
+    # A ratio that lands exactly on a rung keeps that rung. Rounding *down* from
+    # it would draw a panel that fits at 1:1 at half size, on a sheet with the
+    # room for it — and 1:1 is the rung a printed template is read from.
+    assert all(preferred_scale(rung) == rung for rung in PREFERRED_SCALES)
 
 
 def test_a_degenerate_scale_request_falls_back_to_one_to_one():
