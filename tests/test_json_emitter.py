@@ -333,7 +333,10 @@ def test_no_nominal_length_is_a_float(build):
 
 
 def test_the_sweep_reaches_every_kind_of_length_there_is():
-    """The sweep above is worth what it covers, so this says what that is."""
+    """The length sweep reaches every document section.
+
+    Named paths prevent an empty or partially narrowed sweep passing vacuously.
+    """
     document = parse(read_panel(RawOutline(113.0, 60.0), case="1590b2"))
 
     where = {path for path, _ in nominal_lengths(document)}

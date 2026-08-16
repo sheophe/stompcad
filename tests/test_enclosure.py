@@ -301,7 +301,10 @@ class TestTheBackplateConvention:
         assert "backplate" in diagnostics[0].message
 
     def test_no_tolerance_at_all_identifies_a_face_drawn_panel(self):
-        """The whole arithmetic, as the one assertion that settles it."""
+        """A face-drawn 1590B matches none at 1 899 999 nm and two at 1 900 000 nm.
+
+        No tolerance can therefore identify it uniquely.
+        """
         under = IdentifyHammondFootprint(tolerance_nm=1_899_999)
         at_it = IdentifyHammondFootprint(tolerance_nm=1_900_000)
         face = RawOutline(*self.FACE_DRAWN_1590B)

@@ -199,7 +199,7 @@ def test_diameters_are_not_clustered(data):
 def test_no_snapping_has_happened(data):
     """The source reports measured, unsnapped positions.
 
-    The fixture's -39.9906 mm coordinate differs visibly from the -40 mm grid point.
+    The -39.9906 mm coordinate differs visibly from the -40 mm grid point.
     """
     assert min(h.x for h in data.holes) == pytest.approx(-39.9906, abs=TOL_MM)
 
@@ -519,7 +519,7 @@ def test_the_ctm_stack_unwinds(tmp_path):
 
 
 def test_an_unbalanced_restore_does_not_crash(tmp_path):
-    """The fixture's own stream pops past the base state; real files do this."""
+    """An extra restore beyond the base state does not crash."""
     pdf = build_pdf(
         tmp_path / "underflow.pdf",
         {
@@ -782,7 +782,7 @@ def test_the_largest_non_circular_path_wins(tmp_path):
 
 
 def test_circles_on_the_reference_layer_are_not_the_outline(tmp_path):
-    """The fixture's Background carries two 12 mm circles beside the outline."""
+    """Reference-layer circles beside the rectangle cannot become the outline."""
     pdf = build_pdf(
         tmp_path / "refcircles.pdf",
         {

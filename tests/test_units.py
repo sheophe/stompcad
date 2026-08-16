@@ -79,9 +79,7 @@ class TestBackOut:
 
 class TestPrinting:
     def test_a_value_that_prints_as_zero_never_prints_as_minus_zero(self) -> None:
-        """A hole at -400 nm printed ``X0.000`` in the drill file and ``-0.00``
-        in the drawing's schedule: two artifacts describing the same hole and
-        disagreeing in print."""
+        """A negative value rounding to zero formats unsigned so artefacts agree."""
         assert format_nm(-400) == "0.000"
 
 

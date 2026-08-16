@@ -266,10 +266,7 @@ class TestTheAnswerSetAndItsBoundAreCheckedWhereTheyAreDeclared:
         return DrillStandard(name="drawer", sizes_nm=sizes_nm, label=self.LABEL)
 
     def test_a_size_that_is_not_whole_nanometres_is_no_size(self):
-        """``7_000_000.0`` is a length that never crossed ``units``. Left alone
-        it constructs, and then crashes in ``Decimal - float`` on the first hole
-        that is quantised against it — one panel's worth of work away from the
-        argument that caused it."""
+        """Every drill-table size must be plain-integer nanometres at construction."""
         with pytest.raises(TypeError, match=r"size\[1\]"):
             self.drawer((3_200_000, 7_000_000.0))
 
@@ -339,7 +336,10 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
         assert found == ()
 
     def test_the_tolerance_is_decided_on_the_measurement_and_not_on_a_rounding(self):
-        """The second decision the measurement is put to, and its own branch."""
+        """25.2500004 mm lies outside the 250 000 nm tolerance unrounded.
+
+        Rounding first puts it exactly on the inclusive bound and would accept it.
+        """
         exact = Decimal("25.2500004") * 1_000_000
         assert abs(exact - 25_000_000) > 250_000, "the fixture is inside the bound"
         assert nm_from_mm(25.2500004) - 25_000_000 == 250_000, (
@@ -492,7 +492,10 @@ class TestSnapDiametersToDrillTable:
         assert [quantiser.quantise(h)[0] for h in panel] == [5_000_000, 7_000_000, 5_000_000]
 
     def test_every_nominal_it_produces_is_a_size_the_drawer_holds(self):
-        """The invariant, stated as a property over the whole series."""
+        """Every accepted nominal is a table size within tolerance.
+
+        Membership rejects returning the rounded measurement, which distance permits.
+        """
         rng = random.Random(20250815)
         standard = DRILL_STANDARDS["metric"]
         quantiser = SnapDiametersToDrillTable()

@@ -133,7 +133,7 @@ def test_the_phase_runs_enclosure_then_diameters_then_grid():
 
 
 def test_a_hole_the_drill_table_refuses_never_reaches_the_grid():
-    """Why diameters runs before the grid, made observable."""
+    """A hole rejected by diameter quantisation never reaches grid quantisation."""
     watched = Watched()
 
     out = phase(
@@ -236,7 +236,7 @@ def test_an_enclosure_warning_does_not_stop_the_run():
 
 
 def test_a_dropped_hole_does_not_stop_the_run():
-    """``unknown-diameter`` withholds the artifacts, not the work. Every other
+    """``unknown-diameter`` withholds the artefacts, not the work. Every other
     hole is still quantised, because the report has to name all of them."""
     out = phase(
         read(
@@ -484,7 +484,10 @@ def pt_from_mm(mm: float) -> float:
 
 
 def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_path):
-    """Half-pitch geometry parsed from a PDF produces an ambiguous-grid finding."""
+    """PDF parsing perturbs 10.25 mm, but its residual is half a 0.5 mm pitch.
+
+    Residual-based review detects the tie that raw-float equality misses.
+    """
     width, height = pt_from_mm(112.0), pt_from_mm(61.0)
     centre_x, centre_y = 10 + width / 2, 10 + height / 2
     offsets_mm = ((-10.25, 0.0), (0.25, 5.25), (10.25, -5.25))

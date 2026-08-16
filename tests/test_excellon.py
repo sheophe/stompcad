@@ -142,9 +142,7 @@ def test_data_without_holes_still_produces_a_valid_file():
 
 
 def test_regression_no_two_tool_definitions_share_a_diameter():
-    """6.9998 and 7.0000 were normalised to one nominal by the pipeline; the file must
-    therefore load one 7 mm bit, once.
-    """
+    """The pipeline maps 6.9998 and 7.0000 mm to one nominal and one tool."""
     normalised = (
         Hole(
             x_nm=-40_000_000,
@@ -212,11 +210,7 @@ def test_the_tool_table_is_read_from_the_model_and_not_re_derived(monkeypatch):
 
 
 def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
-    """Two nominals 0.002 mm apart are two tools, because the pipeline handed
-    over two. Deciding that two sizes are 'really' one is a pipeline decision
-    taken once, before any emitter sees the data; an emitter that took it again
-    could define a different number of bits than the drawing lists — ADR-0001's
-    incident exactly."""
+    """The emitter preserves two nominals only 0.002 mm apart as two tools."""
     data = make_data(
         at(-10_000_000, 0, 6_998_000, index=0),
         at(10_000_000, 0, 7_000_000, index=1),
@@ -334,10 +328,10 @@ def test_the_refusal_names_every_distinct_error_code_once():
 
 
 def test_warnings_and_information_still_produce_a_drill_file():
-    """The refusal is about ERROR, not about diagnostics. A duplicate-hole
-    warning is the fixture's ordinary state and exits 1 with artifacts written;
-    a guard keyed on ``data.diagnostics`` rather than on their severity would
-    refuse the panel this project ships as its worked example."""
+    """Only ERROR diagnostics forbid Excellon artefacts.
+
+    WARNING and INFO together ensure a non-empty diagnostic list still emits.
+    """
     data = make_data(
         at(0, 18_000_000, 7_000_000, index=3),
         reference=ReferenceOutline(113_000_000, 60_000_000),

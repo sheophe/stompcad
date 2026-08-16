@@ -11,20 +11,12 @@ _MICRON = 1_000
 
 
 def test_a_distance_exactly_on_the_tolerance_is_within_it():
-    """The inclusive boundary, which is the only thing ``within`` decides.
-
-    A number an operator typed is a number they meant. This is the test that
-    dies for ``<``.
-    """
+    """A distance exactly one micron from the target is within the boundary."""
     assert within(18_001_000, 18_000_000, _MICRON) is True
 
 
 def test_a_distance_one_nanometre_over_the_tolerance_is_not_within_it():
-    """The other side of the same boundary, one nanometre out.
-
-    Without it the inclusive test above is satisfied by a ``within`` that
-    returns ``True`` for everything.
-    """
+    """A distance one nanometre beyond the inclusive boundary is outside."""
     assert within(18_001_001, 18_000_000, _MICRON) is False
 
 

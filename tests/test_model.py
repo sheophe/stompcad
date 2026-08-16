@@ -159,11 +159,7 @@ def test_an_integer_is_not_a_measurement(build):
 
 @pytest.mark.parametrize("build", _GUARDED_MILLIMETRES)
 def test_a_bool_is_not_a_measurement(build):
-    """``True`` is an ``int``, so it is refused on this side of the boundary too
-    — and by the same clause, since ``type(True) is float`` is ``False``. Pinned
-    separately from the integer because an implementation reaching for
-    ``isinstance(v, (int, float))`` would admit both, and a ``True`` measurement
-    is one millimetre of provenance under a hole that never sat there."""
+    """A bool is not a float measurement despite being an ``int`` subclass."""
     with pytest.raises(TypeError, match="millimetres"):
         build(True)
 
@@ -538,11 +534,7 @@ _1590BB_FOOTPRINT = EnclosureMatch(
 
 
 def test_a_match_records_the_catalogue_length_and_width():
-    """Kept as given — this fixture is keyword-built, so it pins storage only.
-
-    The *order* of the two declarations is a separate claim, and the positional
-    test below is the one that earns it.
-    """
+    """Keyword construction preserves catalogue length and width independently."""
     assert _1590BB_FOOTPRINT.length_nm == 120_000_000
     assert _1590BB_FOOTPRINT.width_nm == 94_000_000
 
@@ -902,10 +894,7 @@ def test_severities_order_by_how_much_they_matter():
 
 
 def test_a_severity_does_not_compare_with_anything_else():
-    """An unorderable pair must raise ``TypeError``, which is what a caller
-    catching a comparison failure expects. Ranking the members through
-    ``list.index`` raised ``ValueError`` instead — a lookup miss reported as
-    though the comparison had been attempted."""
+    """Severity comparisons with non-severity values raise ``TypeError``."""
     with pytest.raises(TypeError):
         operator.lt(Severity.WARNING, "warning")
     with pytest.raises(TypeError):

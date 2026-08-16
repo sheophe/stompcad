@@ -501,10 +501,9 @@ def test_a_neighbour_of_a_different_diameter_is_not_styled_as_a_duplicate():
 
 
 def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
-    """The same case again, but decided by ``Deduplicate`` rather than by hand.
+    """The pipeline's duplicate verdict reaches both artefacts unchanged.
 
-    Whatever the stage keeps and whatever it flags is what the machinist sees:
-    two artifacts, one verdict, and no second implementation of the rule.
+    Real ``Deduplicate`` output ensures the sheet does not re-derive the rule.
     """
     raw = DrillData(
         holes=(
@@ -873,7 +872,10 @@ def _rows_of_five(count: int) -> DrillData:
 
 @pytest.mark.parametrize("rows", [5, 14, 15, 30])
 def test_every_dimension_stays_inside_the_drawing_area(rows: int):
-    """Measured thresholds: 14 rows passed the border, 15 left the sheet."""
+    """All row dimensions stay inside the drawing area.
+
+    Counts 14 and 15 straddle capacity; 30 exercises overflow.
+    """
     data = _rows_of_five(rows)
     emitter = DrawingSvgEmitter()
     root = ET.fromstring(emitter.emit(data))
@@ -1484,7 +1486,7 @@ def test_the_notes_overflow_marker_stays_inside_the_notes_box():
 
 
 def test_the_schedule_says_how_many_holes_it_could_not_list():
-    """The schedule's own truncation path, which was never covered."""
+    """Schedule overflow reports the exact number of omitted holes."""
     drilled = tuple(
         Hole.from_measurement(
             -55_000_000 + 500_000 * i, 20_000_000 - 400_000 * (i // 40), 3_000_000, index=i
@@ -1521,8 +1523,9 @@ def _every_hole_a_different_size(count: int) -> DrillData:
 
 @pytest.mark.parametrize("tools", [2, 83, 120])
 def test_every_element_of_the_schedule_stays_inside_its_box(tools: int):
-    """Measured thresholds: 82 tools left the box, 83 reached the title block and 118 left
-    the page altogether — while the drill file defined every one.
+    """Every schedule element stays inside its box across capacity boundaries.
+
+    Counts 2, 83 and 120 exercise compact, boundary and heavily truncated layouts.
     """
     data = _every_hole_a_different_size(tools)
     emitter = DrawingSvgEmitter()

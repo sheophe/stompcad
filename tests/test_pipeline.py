@@ -186,8 +186,7 @@ class TestDeduplicate:
         assert codes(out) == []
 
     def test_even_a_hole_one_nanometre_away_is_a_different_hole(self):
-        """No slack at all, not merely less than there was. A nanometre is the
-        smallest difference the model can hold, so this is the whole of it."""
+        """No deduplication slack: one nanometre is a distinct model position."""
         data = make_data(at(0, 0, 7_000_000, index=4), at(1, 0, 7_000_000, index=1))
         assert len(Deduplicate().apply(data).holes) == 2
 
@@ -369,9 +368,7 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
         assert codes(out) == findings
 
     def test_every_named_tie_is_a_hole_the_artifacts_will_list(self):
-        """The claim underneath both cases above, stated once without a fixture to lean on:
-        a finding may not name an identity that reaches no artefact.
-        """
+        """Every tied identity names a hole that survives into emitted artefacts."""
         for drawn in ((self.ON_GRID, self.TIED), (self.TIED, self.ON_GRID)):
             out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
             emitted = {hole.index for hole in out.holes}

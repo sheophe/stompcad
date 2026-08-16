@@ -665,10 +665,7 @@ def test_an_erroring_run_writes_no_artifact_at_all(fake_source, tmp_path, capsys
 
 
 def test_a_warning_still_gets_its_artifacts(fake_source, tmp_path, capsys):
-    """Only ERROR withholds output. A warning is a thing to look at, not a
-    reason to leave the operator with nothing — and after ``unknown-enclosure``
-    became a warning, this is the difference between "we do not stock your case"
-    and "you get no drill file"."""
+    """Only ERROR withholds output; a warning-only run writes the requested file."""
     fake_source(read(diagnostics=[Diagnostic.warning("something", "watch out")]))
     doc = tmp_path / "panel.txt"
 
@@ -677,7 +674,7 @@ def test_a_warning_still_gets_its_artifacts(fake_source, tmp_path, capsys):
 
 
 def test_every_target_is_written_on_the_happy_path(fake_source, tmp_path, capsys):
-    """Rendering to memory first must not cost anyone their artifacts."""
+    """Rendering to memory still writes every requested artefact."""
     fake_source(read())
     targets = {
         "json": tmp_path / "out.json",
@@ -1008,8 +1005,7 @@ def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, cap
 
 
 def test_verbose_reports_every_stage_the_cli_built(fake_source, capsys):
-    """The list of stages comes from ``build_pipeline``, so a stage added there
-    is covered here without anyone remembering to add it twice."""
+    """Verbose output enumerates every stage returned by ``build_pipeline``."""
     fake_source(read())
     cli.main([str(FIXTURE)])
     quiet = capsys.readouterr().out
