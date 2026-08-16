@@ -48,5 +48,8 @@ docs/superpowers/
 # Agent worktrees (native harness-managed)
 .claude/worktrees/
 
+# Agent worktrees (manual fallback)
+.worktrees/
+
 # Proprietary docs that can be found outside this repository
 docs/parts/*.pdf
