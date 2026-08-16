@@ -441,6 +441,16 @@ class TestCheckReferenceSize:
         ) == self.DECLARED
         assert diagnostic.get("tolerance_nm") == 50_000
 
+    def test_describe_reports_the_declared_panel_and_the_slack(self):
+        """Provenance in the same unit the comparison was made in. A consumer
+        reading a slack of 0.05 off a stage that compared 50 000 would be
+        reading a number the data was never checked against."""
+        run = CheckReferenceSize(self.DECLARED, 50_000).describe()
+
+        assert run.name == "check-reference-size"
+        assert (run.get("expected_width_nm"), run.get("expected_height_nm")) == self.DECLARED
+        assert run.get("tolerance_nm") == 50_000
+
     def test_a_declared_size_that_is_not_whole_nanometres_is_refused(self):
         """Checked at construction, where the offending value still has a call
         site attached to it. A caller who hands over the millimetres they were

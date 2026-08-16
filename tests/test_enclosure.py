@@ -784,6 +784,23 @@ class TestTheMeasurementSurvivesTheSnap:
         assert (outline.width_nm, outline.height_nm) == (112 * MM, 61 * MM)
         assert outline.raw == RawOutline(113.0, 60.0)
 
+    def test_the_measurement_is_the_artworks_float_not_a_round_trip_of_the_answer(self):
+        """``raw`` is what the source measured, and the distinction has a floor
+        below a nanometre.
+
+        Rebuilding it from the quantised pair — ``from_measurement`` off the two
+        integers, which is the obvious spelling and looks right — agrees with
+        the artwork everywhere a three-decimal artifact can see, and disagrees
+        here: 113.0000004 mm quantises to 113 000 000 nm, which converts back to
+        113.0. The measurement is the one number in the model that has not been
+        rounded to anything, and this is what says so.
+        """
+        outline, _, _ = IdentifyHammondFootprint().quantise(
+            RawOutline(113.0000004, 60.0), ORIGIN
+        )
+
+        assert outline.raw == RawOutline(113.0000004, 60.0)
+
     def test_the_snap_keeps_the_outlines_source_space_centre(self):
         """``centre_x_nm``/``centre_y_nm`` say where the outline sat on the page.
         A fresh construction would drop them back to the origin."""
