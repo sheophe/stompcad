@@ -99,14 +99,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MM",
         type=float,
         default=0.25,
-        help="snap grid, in whole microns (default: 0.25)",
+        help="snap grid, in millimetres; the pitch must be a whole number of microns "
+        "(default: 0.25, that is 250 microns)",
     )
     parser.add_argument(
         "--grid-warn",
         metavar="MM",
         type=float,
         default=None,
-        help="warn when a hole moves further than this (default: grid/4)",
+        help="warn when a hole moves further than this, in millimetres "
+        "(default: a quarter of the grid)",
     )
     parser.add_argument(
         "--drill-standard",

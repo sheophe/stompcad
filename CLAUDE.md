@@ -48,7 +48,9 @@ PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit dra
 
 ## Command-line contract
 
-Flags: `--drill-layer`, `--reference-layer`, `--grid`, `--grid-warn`, `--drill-standard`
+Flags: `--drill-layer`, `--reference-layer`, `--grid` and `--grid-warn` (both in
+**millimetres**; the pitch must be a whole number of microns, and one finer than a micron
+is clamped to one with `grid-too-fine`), `--drill-standard`
 (`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to
 the sizes in the drawer), `--case` (the Hammond base designator the panel is drawn for),
 `--emit FORMAT=PATH` (repeatable), `--title`, `-v`. All are resolved before the input

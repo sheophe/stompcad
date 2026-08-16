@@ -245,6 +245,25 @@ def test_the_grid_crosses_the_unit_boundary_exactly_once():
     assert quantisers_for("--grid", "0.5").positions.grid_nm == 500_000
 
 
+@pytest.mark.parametrize("flag", ["--grid", "--grid-warn"])
+def test_both_grid_flags_name_millimetres_in_their_help(flag):
+    """The help states the unit the value is read in, not one it is measured against.
+
+    A reader who takes the pitch for microns types ``--grid 250`` and gets a
+    250 mm grid: every hole collapses onto the origin, and the run reports
+    coincident holes rather than a bad unit. The help is the only thing
+    standing between that and the operator, so the unit is asserted here.
+    """
+    action = next(a for a in cli.build_parser()._actions if flag in a.option_strings)
+
+    assert action.metavar == "MM"
+    assert action.help is not None
+    # The preposition carries it: ``--grid``'s help legitimately also mentions
+    # microns, so asserting the bare word would pass on "in microns, a whole
+    # number of millimetres" -- the very transposition this guards against.
+    assert "in millimetres" in action.help
+
+
 class TestAGridThatIsNotANumberIsAUsageError:
     """Exit 3, not 1, and not an artefact full of ``XnanYnan``."""
 
