@@ -1,48 +1,7 @@
-"""Read drill geometry out of a native Adobe Illustrator save.
+"""Read PDF-compatible Illustrator artwork as raw drill geometry.
 
-A ``.ai`` file written with "Create PDF Compatible File" on — the default — is a
-valid PDF, so no Illustrator, no scripting bridge and no export step is needed:
-``pikepdf`` opens the artwork the designer actually saved.
-
-What this module does is deliberately narrow (SPEC 2.1). It walks the page's
-content stream, resolves the graphics state, recovers circles, and states them
-in millimetres relative to the reference outline. It measures and rounds
-nothing: what comes out is a ``RawDrillData``, and every length in it is the
-float the artwork drew. Quantising is the next phase's business, because only
-it knows the answer set a length has to land on — a drill size, a grid pitch, a
-catalogue footprint — and a source that rounded first would put two roundings
-in series and make their order matter.
-
-It does **not** snap, dedupe, cluster diameters or validate anything either —
-those belong to quantising and to the stages after it, and doing them here is
-precisely the layering mistake the boundary exists to prevent. Eight circles
-drawn is eight holes reported, even when two of them coincide: only
-``Deduplicate`` may decide that two marks are one hole, and only it can report
-having done so.
-
-The awkward parts of the format, all verified against a real Illustrator 30.7
-file:
-
-* **Layers are optional content.** ``/OCProperties`` → ``/OCGs`` gives the names;
-  the page's ``/Resources`` → ``/Properties`` maps ``/MCn`` tokens onto those
-  same objects, and ``BDC /OC /MCn`` in the stream is what puts a path on a
-  layer. Sublayers fold into their parent OCG and are unrecoverable, as are
-  Illustrator's object names — a ``.ai`` file carries no structure tree.
-* **Clip paths are not geometry, and neither is anything else ``n`` ends.**
-  Illustrator brackets nearly every group with an artboard-sized ``re W n``.
-  Treated as a path, that rectangle would become the largest thing on the layer
-  and hijack the reference outline. ``W`` is not what makes it invisible,
-  though — ``n`` is; a bare ``re n`` marks no ink either and is discarded on the
-  same grounds.
-* **The artboard is not the enclosure.** The fixture's panel is 113 × 60 mm on
-  an A4 sheet. The frame therefore comes from the reference layer's largest
-  non-circular path, never from ``/MediaBox`` (SPEC 6.6).
-* **A path with neither fill nor stroke is absent from the stream entirely.**
-  That is the most common reason a drill layer comes back empty, so
-  ``EmptyLayerError`` says so — but only when the layer really did arrive with
-  no paths at all. A layer full of stroked rectangles is empty for the opposite
-  reason, and telling that operator to add a stroke sends them to check the one
-  thing that is already right.
+Resolve layers and graphics state, discard unpainted paths, recover circles,
+and return float millimetres relative to the largest non-circular reference.
 """
 
 from __future__ import annotations
@@ -72,19 +31,10 @@ from ..units import mm_from_pt
 
 __all__ = ["AiPdfSource"]
 
-#: Operators that end the current path. ``n`` is one of them: it paints nothing
-#: but still discharges the path — it is how a clip-only path is disposed of.
+#: Operators that end the current path; ``n`` discharges it without painting.
 _PAINT_OPS = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"})
 
-#: Of those, the ones that mark no ink. A path ended by ``n`` is invisible in
-#: every viewer whether or not a ``W`` preceded it, so it is not artwork and
-#: must never reach the output — an unpainted artboard-sized rectangle would
-#: otherwise out-area the panel and hijack the reference frame (SPEC 6.3, 6.6).
-#:
-#: ``s``, ``b`` and ``b*`` additionally close the subpath before painting, and
-#: that closure is deliberately not recorded: a ``ClosePath`` carries no
-#: coordinate, and every consumer of a ``SubPath`` — ``anchors``, ``bbox``,
-#: ``fit_circle`` — steps over it. Recording it could not change an answer.
+#: Path-ending operators that mark no ink, whether or not clipping preceded them.
 _NO_PAINT_OPS = frozenset({"n"})
 
 #: How deep Form XObjects may nest before we assume a malicious or broken file.
@@ -100,11 +50,10 @@ class _LayerPath:
 
 
 class AiPdfSource:
-    """Reads drill geometry from a PDF-compatible ``.ai`` file.
+    """Read drill geometry from a PDF-compatible ``.ai`` file.
 
-    ``drill_layer`` supplies the circles; ``reference_layer`` supplies the panel
-    outline that defines the canonical frame — millimetres, Y up, origin at the
-    outline's centre.
+    ``drill_layer`` supplies circles; ``reference_layer`` supplies the outline
+    for a millimetre, Y-up frame centred on that outline.
     """
 
     def __init__(
@@ -130,12 +79,7 @@ class AiPdfSource:
         return self._extract()[0]
 
     def layer_subpaths(self, layer: str) -> tuple[SubPath, ...]:
-        """Painted subpaths on ``layer``, in page space, clips already dropped.
-
-        Exposed because it is the honest unit of what was read: it lets a caller
-        (and the tests) see that the artboard-sized clip rectangles never became
-        geometry, without having to infer it from the holes that came out.
-        """
+        """Return painted page-space subpaths on ``layer``, excluding clips."""
         names, paths = self._extract()
         self._require_layer(layer, names)
         return tuple(p.path for p in paths if layer in p.layers)
@@ -166,20 +110,12 @@ class AiPdfSource:
         reference_paths = [p.path for p in paths if self.reference_layer in p.layers]
         outline = _largest_non_circular(reference_paths)
         if outline is None:
-            # No frame to centre on. Reporting page-space coordinates keeps the
-            # numbers true to the file and lets the caller decide; silently
-            # falling back to the artboard centre would look plausible and be
-            # wrong (SPEC 6.6).
+            # Without an outline, preserve page-space coordinates and diagnose it.
             centre = (0.0, 0.0)
             reference = None
             diagnostics.append(
                 Diagnostic.warning(
-                    # Not ``no-reference-outline``: ``CheckReferenceSize`` uses
-                    # that key at INFO for a different finding — that there was
-                    # nothing to check the outline against. ``code`` is the
-                    # stable machine key consumers match on (SPEC 3), and one
-                    # key meaning two things at two severities defeats it, the
-                    # more so because only the WARNING moves the exit code.
+                    # Distinct from CheckReferenceSize's INFO diagnostic code.
                     "reference-outline-not-found",
                     f"layer {self.reference_layer!r} has no non-circular path to use "
                     f"as the panel outline; hole positions are page-relative, "
@@ -194,9 +130,7 @@ class AiPdfSource:
                 height=mm_from_pt(y1 - y0),
             )
 
-        # Traversal order is deterministic for a given file, so numbering the
-        # circles as they are met gives every hole an identity that is the same
-        # on every run — which is what lets a diagnostic name one.
+        # Stream traversal order supplies stable source identities.
         holes = tuple(
             RawHole(
                 x=mm_from_pt(c.cx) - centre[0],
@@ -268,12 +202,8 @@ def _ocg_name(ocg) -> str | None:
 def _oc_layers(operands, resources) -> frozenset[str]:
     """Resolve the layer a ``BDC /OC /MCn`` puts its content on.
 
-    The property is a name looked up in the *current* resource dictionary's
-    ``/Properties`` — current, not the page's, so that a Form XObject carrying
-    its own resources still resolves. Anything else (a bare ``BDC /Artifact``,
-    an inline dictionary, a dangling name) contributes no layer, which is the
-    safe answer: content whose provenance is unclear must not be attributed to
-    a layer the designer will then be told it sits on.
+    Resolve names against the current resource dictionary so Form XObjects can
+    supply their own. Unresolved or non-optional content contributes no layer.
     """
     if len(operands) < 2 or str(operands[0]) != "/OC":
         return frozenset()
@@ -296,10 +226,8 @@ def _oc_layers(operands, resources) -> frozenset[str]:
 def _walk_page(page: pikepdf.Page) -> list[_LayerPath]:
     """Every painted, non-clipping subpath on the page, in page space.
 
-    Page space here means millimetre-ready PDF points measured from the
-    ``/MediaBox`` lower-left corner: the base CTM shifts a non-zero corner back
-    to the origin so that coordinates mean the same thing whatever crop
-    Illustrator saved.
+    Page space is PDF points from the ``/MediaBox`` lower-left corner; the base
+    CTM removes a non-zero box offset.
     """
     box = [float(v) for v in page.MediaBox]
     base: Matrix = (1.0, 0.0, 0.0, 1.0, -box[0], -box[1])
@@ -318,13 +246,8 @@ def _walk(
 ) -> None:
     """Interpret one content stream, appending to ``out``.
 
-    ``marks`` is the marked-content stack inherited from the caller, so a Form
-    XObject invoked inside ``BDC /OC /MC1`` keeps its layer. Inherited is not
-    the same as owned: a stream may only close what it opened. An ``EMC`` with
-    no ``BDC`` of its own — Illustrator emits them, and so does anything that
-    concatenates streams — would otherwise pop the *caller's* entry, and every
-    path the form drew after it would come back attributed to no layer at all.
-    That is silent: the drill layer simply comes up short.
+    ``marks`` is inherited by nested forms, but each stream may close only the
+    marked-content entries it opened.
     """
     stack: list[Matrix] = []
     floor = len(marks)
@@ -338,8 +261,7 @@ def _walk(
         if op == "q":
             stack.append(builder.ctm)
         elif op == "Q":
-            # Illustrator's streams pop past their own base state; a real file
-            # does this and must not take the whole read down with it.
+            # Ignore unmatched restores at a stream's base graphics state.
             if stack:
                 builder.ctm = stack.pop()
         elif op == "cm":
@@ -360,16 +282,12 @@ def _walk(
         elif op in ("m", "l", "c", "v", "y", "h", "re"):
             builder.construct(op, operands)
         elif op in ("W", "W*"):
-            # A deliberate no-op, spelt out rather than left to fall through:
-            # clipping is not a painting decision. The operator that ends the
-            # path is what says whether it marked ink, and ``n`` is the only one
-            # that says no. Nothing about a ``W`` is worth carrying forward.
+            # Clipping does not decide whether the path paints; its terminator does.
             pass
 
         # -- path painting
         elif op in _PAINT_OPS:
-            # flush unconditionally: the path ends either way, and leaving it
-            # pending would splice it onto whatever is constructed next.
+            # Every painting operator ends the path, including non-painting ``n``.
             painted = builder.flush()
             if op in _NO_PAINT_OPS:
                 continue
@@ -391,9 +309,7 @@ def _walk(
 class _PathBuilder:
     """Accumulates path-construction operators into device-space subpaths.
 
-    Points are transformed as they arrive rather than at paint time, because the
-    CTM in force during construction is the one that counts and a stream may
-    (legally) restore a different one before painting.
+    Points use the CTM active when constructed, which may differ at paint time.
     """
 
     __slots__ = ("ctm", "_done", "_current", "_point", "_start")
@@ -458,15 +374,10 @@ class _PathBuilder:
             self._point = self._start
 
     def flush(self) -> list[SubPath]:
-        """End the path and return its subpaths, whether or not it also clips.
+        """End the path and return its subpaths, whether or not it clips.
 
-        Deciding *here* was the bug. ``W``/``W*`` only adds the path to the
-        clipping boundary; what the path marks is settled by the operator that
-        ends it, and only ``n`` marks nothing (SPEC 6.3 says ``W`` *followed by*
-        ``n``). Discarding on the ``W`` alone silently dropped every ``re W f``
-        background outline — leaving the panel with no frame — and every
-        ``h W S`` drill circle, whose absence was then reported as a layer that
-        needed a stroke it already had. The caller applies ``_NO_PAINT_OPS``.
+        The caller decides whether the terminating operator painted; ``W`` and
+        ``W*`` alone do not discard geometry.
         """
         if self._current:
             self._done.append(SubPath(tuple(self._current)))
@@ -522,9 +433,7 @@ def _form_xobject(operands, resources):
 def _numbers(operands, count: int) -> list[float] | None:
     """``count`` floats from ``operands``, or ``None`` if it isn't that shape.
 
-    Malformed operators are skipped rather than raised on: a stream that has
-    survived Illustrator's own writer is not worth aborting a whole read for,
-    and the geometry that matters is elsewhere in it.
+    Malformed operators are skipped without aborting the remaining stream.
     """
     if operands is None or len(operands) != count:
         return None
@@ -537,12 +446,8 @@ def _numbers(operands, count: int) -> list[float] | None:
 def _empty_layer(layer: str, path_count: int) -> EmptyLayerError:
     """The right ``EmptyLayerError`` for why ``layer`` yielded no circle.
 
-    Two very different faults land here and only the source can tell them apart.
-    *No paths at all* is the Illustrator trap ``EmptyLayerError`` describes by
-    default: unpainted artwork never reaches the PDF stream. *Paths, but none of
-    them circular* is a drawing problem — a rounded rectangle, a compound shape,
-    an ellipse — and it needs the operator looking at the shapes rather than at
-    their appearance settings.
+    Zero paths means no painted artwork reached the stream; a positive count
+    means every path failed the circle predicate.
     """
     error = EmptyLayerError(layer)
     if path_count:
@@ -565,12 +470,9 @@ def _as_matrix(values: Sequence[float]) -> Matrix:
 def _largest_non_circular(
     paths: Iterable[SubPath],
 ) -> tuple[float, float, float, float] | None:
-    """The bounding box of the biggest path that isn't a circle, or ``None``.
+    """Return the largest-area non-circular path's bounds, or ``None``.
 
-    Circles are excluded because a reference layer legitimately carries them —
-    the fixture's Background has two 12 mm ones — and a hole is never the panel.
-    Area picks the winner: it is the one measure that cannot be gamed by a long
-    thin centreline or a stray tick mark.
+    Circles cannot define the panel; area prevents a long thin path from winning.
     """
     best: tuple[float, float, float, float] | None = None
     best_area = 0.0

@@ -1,24 +1,4 @@
-"""Exception hierarchy. One base so a caller can catch the whole library.
-
-The hierarchy is deliberately shallow — ``AidrillError``, a source family and an
-emitter leaf — because the CLI asks it only one question: *is this fault the
-input's, or ours?* Everything raised here prints as a single line and exits 3;
-anything else keeps its traceback, because a programming error dressed up as a
-tidy usage message sends the operator hunting through artwork that was never at
-fault. Widening ``cli.main``'s catch to bare ``Exception`` would do exactly that,
-which is why the boundary is drawn by this module rather than by a keyword.
-
-The messages are product, not decoration. The person reading them is usually
-looking at a panel that appears perfectly fine on screen: paths with neither fill
-nor stroke are omitted from Illustrator's PDF stream entirely, so
-:class:`EmptyLayerError` names the remedy — give the drill circles a stroke —
-rather than reporting "no geometry" and leaving them to guess. That is also why
-it takes ``path_count``. *No paths at all* and *paths, but none of them circular*
-are different faults with different remedies, and the second message used to be
-written by the source overwriting ``.args`` after construction: half of this
-module's best writing lived outside this module, one attribute assignment away
-from a message that contradicted the class it came from.
-"""
+"""Library exception hierarchy with source- and emitter-specific failures."""
 
 from __future__ import annotations
 
@@ -42,13 +22,7 @@ class SourceError(AidrillError):
 
 
 class LayerNotFoundError(SourceError):
-    """The requested layer is not in the file — and here are the ones that are.
-
-    Layer names are the operator's own and come from ``/OCProperties``, so the
-    two likely causes are a typo and a sublayer, which folds into its parent OCG
-    and so is not a top-level name at all. Listing what was found answers both
-    without the operator reopening Illustrator.
-    """
+    """The requested layer is absent; report the available top-level layers."""
 
     def __init__(self, wanted: str, available: Iterable[str]) -> None:
         self.wanted = wanted
@@ -61,11 +35,8 @@ class LayerNotFoundError(SourceError):
 class EmptyLayerError(SourceError):
     """The layer was found, and yielded no drillable circle.
 
-    ``path_count`` is how many paths the source saw in it, and it selects between
-    two messages because it selects between two remedies: zero means the artwork
-    is unpainted and never reached the PDF stream, while any other count means
-    the shapes are there but are not circles. Only the source can tell these
-    apart, so it passes the count in; the error decides what to say about it.
+    ``path_count == 0`` means no painted paths reached the PDF stream; a positive
+    count means paths were present but none satisfied the circle predicate.
     """
 
     def __init__(self, layer: str, path_count: int = 0) -> None:
