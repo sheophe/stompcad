@@ -156,8 +156,8 @@ class Note:
 
 @dataclass(frozen=True, slots=True)
 class SheetText:
-    """The words an emitter's options contribute, so ``build_scene`` need not
-    know which emitter called it."""
+    """The words an emitter's options contribute, separated from the emitter
+    that supplied them."""
 
     title: str = ""
     drawing_no: str = ""

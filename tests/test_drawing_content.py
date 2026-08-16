@@ -59,7 +59,7 @@ def test_candidate_lists_end_in_a_counted_marker_when_they_do_not_fit():
     note = content.enclosure_note(DrillData().with_enclosure(match), 59)
 
     assert "CANDIDATES" in note
-    assert "MORE" in note
+    assert "+3 MORE" in note
 
 
 def test_allot_reserves_a_line_for_the_omission_marker():
@@ -86,6 +86,52 @@ def test_a_flagged_hole_is_matched_by_identity_and_by_code():
 
     assert content.is_flagged(at(0, 0, index=12), flagged)
     assert not content.is_flagged(at(0, 0, index=5), flagged)
+
+
+def _mixed_diameter_panel() -> DrillData:
+    """Two diameters with different hole counts, out-of-order identities.
+
+    Different counts mean a test that swapped the two quantities would fail;
+    out-of-order indices mean a test that read tuple position instead of
+    identity would fail too.
+    """
+    return make_data(
+        at(10_000_000, 0, 3_000_000, index=5),
+        at(20_000_000, 0, 3_000_000, index=1),
+        at(30_000_000, 0, 7_000_000, index=8),
+        at(40_000_000, 0, 7_000_000, index=3),
+        at(50_000_000, 0, 7_000_000, index=6),
+    )
+
+
+def test_tool_numbers_are_one_based_and_ascend_by_diameter():
+    data = _mixed_diameter_panel()
+
+    assert [line.tool for line in content.tool_summary(data)] == ["T1", "T2"]
+    assert [f"T{n}" for n in data.tools().values()] == ["T1", "T2"]
+
+
+def test_tool_quantities_count_holes_of_that_diameter_not_a_swapped_pair():
+    """The 3 mm bit drills two holes, the 7 mm bit drills three — distinct counts
+    so a summary that swapped them would be caught."""
+    data = _mixed_diameter_panel()
+
+    assert [line.quantity for line in content.tool_summary(data)] == [2, 3]
+
+
+def test_the_tool_summary_spells_diameters_the_way_the_schedule_does():
+    """The summary and the schedule must not disagree about how a bit is spelled."""
+    data = _mixed_diameter_panel()
+    label = content.diameter_label(data)
+
+    assert [line.diameter for line in content.tool_summary(data)] == [
+        label(3_000_000),
+        label(7_000_000),
+    ]
+
+
+def test_a_panel_with_no_holes_has_an_empty_tool_summary():
+    assert content.tool_summary(DrillData()) == ()
 
 
 def test_notes_fall_back_to_saying_there_were_none():
