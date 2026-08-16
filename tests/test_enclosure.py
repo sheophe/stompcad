@@ -852,6 +852,22 @@ class TestADeclarationIsCheckedOnEveryOutcome:
         assert match is None
         assert (outline.width_nm, outline.height_nm) == (118 * MM, 78_500_000)
 
+    def test_the_tie_message_names_the_parts_the_case_could_be_declared_as(self):
+        """The advice is "declare the case", and a case is a part number.
+
+        Read on the message rather than the payload, deliberately, on the same
+        grounds as the two backplate assertions: naming the candidates *is* the
+        fix this finding exists to teach, and a message that told the operator to
+        declare something without saying what would send them to the datasheet
+        for a list the quantiser had already computed.
+        """
+        _, _, diagnostics = IdentifyHammondFootprint(tolerance_nm=2_000_000).quantise(
+            RawOutline(*self.TIED), ORIGIN
+        )
+
+        assert "1590B3, 1590T" in diagnostics[0].message
+        assert "declare the case" in diagnostics[0].message
+
     def test_an_undeclared_tie_is_still_ambiguous_and_still_asks_for_a_case(self):
         """The undeclared twin. ``ambiguous-enclosure`` keeps its one meaning —
         more than one footprint fits and nothing was said to choose between

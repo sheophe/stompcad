@@ -428,14 +428,25 @@ class IdentifyHammondFootprint:
         )
 
     def _ambiguous(self, measured: ReferenceOutline, matches: list[_Match]) -> Diagnostic:
-        """Name every footprint that fitted. Naming one would be the guess."""
+        """Name every footprint that fitted, and every part on them.
+
+        Naming one would be the guess. Naming none of the *parts* would be
+        nearly as unhelpful: the message's advice is "declare the case", and the
+        case is a part number, so a finding that withheld the two or three
+        candidates would send the operator back to the datasheet to look up what
+        it had already computed. That advice used to be for a tie an operator had
+        to widen the tolerance to reach; now four catalogue footprints are within
+        tolerance of a neighbour at the shipped default, so this is the ordinary
+        answer for a panel near one of them — including this project's own
+        fixture — and it has to carry the fix like ``_unmatched`` does.
+        """
         tied = [footprint for footprint, _ in matches]
         return Diagnostic.error(
             "ambiguous-enclosure",
             f"reference outline {self._measured(measured)} is within "
             f"{format_nm(self.tolerance_nm)} mm of more than one {CATALOGUE} "
-            f"footprint ({_footprint_list(tied)} mm); tighten the tolerance or "
-            f"declare the case",
+            f"footprint ({_footprint_list(tied)} mm — {_candidate_list(tied)}); "
+            f"tighten the tolerance or declare the case",
             data=(
                 ("footprints", _footprint_list(tied)),
                 ("candidates", _candidate_list(tied)),
