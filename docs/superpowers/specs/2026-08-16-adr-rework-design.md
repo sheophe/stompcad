@@ -37,9 +37,11 @@ when a plausible competing design must be ruled out to explain the chosen bounda
 
 ### ADR-0001: Processing architecture and artifact consistency
 
-ADR-0001 defines the complete processing flow:
-
-`Source -> RawDrillData -> quantisation -> DrillData -> Pipeline -> Emitter`
+ADR-0001 defines the complete processing flow without mixing processors, aggregate
+abstractions, and transferred values at one visual level. Its flow consists of a source
+block, a quantisation block, the individual stage blocks grouped by a `Pipeline`
+boundary, and emitter blocks. Data types label the connections rather than appearing as
+nodes.
 
 It establishes these rules:
 
@@ -53,10 +55,49 @@ It establishes these rules:
 - Emitter registration is extensible, while CLI stage ordering remains an explicit
   integration point.
 
-ADR-0001 includes at least one numbered Mermaid figure. Figure 1 shows `AiPdfSource`, the
-three quantisers composed by `quantise()`, `Deduplicate`, `ReviewGridTies`, `SortHoles`,
-the transferred `RawDrillData` and `DrillData` types, and the three concrete emitters.
-It distinguishes the `Source`, `Stage`, and `Emitter` protocols from implementations.
+ADR-0001 includes at least one numbered Mermaid figure. Figure 1 uses individual
+processing blocks as its nodes:
+
+- `AiPdfSource` is the source block.
+- Quantisation is one block for visual purposes; the block identifies `quantise()` and
+  its three composed quantisers internally.
+- `Deduplicate`, `ReviewGridTies`, and `SortHoles` are separate sequential blocks enclosed
+  by a `Pipeline` subgraph.
+- `ExcellonEmitter`, `DrawingSvgEmitter`, and `JsonEmitter` are the terminal processing
+  blocks.
+
+The connection from the source block to quantisation is labelled `RawDrillData`. Every
+subsequent connection between processing blocks is labelled `DrillData`, including each
+connection inside the `Pipeline` subgraph and each branch to a concrete emitter. Data
+types never appear as peer nodes. Protocol conformance is shown as an annotation or
+stereotype on the corresponding blocks, not as extra steps in the processing flow.
+
+The figure follows this structure:
+
+```mermaid
+flowchart LR
+    source["AiPdfSource<br/>Source"]
+    quantise["Quantisation<br/>quantise()<br/>IdentifyHammondFootprint → SnapDiametersToDrillTable → SnapPositions"]
+
+    subgraph pipeline["Pipeline"]
+        direction LR
+        dedupe["Deduplicate<br/>Stage"]
+        ties["ReviewGridTies<br/>Stage"]
+        sort["SortHoles<br/>Stage"]
+        dedupe -->|DrillData| ties
+        ties -->|DrillData| sort
+    end
+
+    excellon["ExcellonEmitter<br/>Emitter"]
+    drawing["DrawingSvgEmitter<br/>Emitter"]
+    json["JsonEmitter<br/>Emitter"]
+
+    source -->|RawDrillData| quantise
+    quantise -->|DrillData| dedupe
+    sort -->|DrillData| excellon
+    sort -->|DrillData| drawing
+    sort -->|DrillData| json
+```
 
 ### ADR-0002: Domain answer sets and validation policy
 
