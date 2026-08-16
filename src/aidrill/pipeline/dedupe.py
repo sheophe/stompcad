@@ -11,6 +11,10 @@ once, and the operator is told it happened.
 re-decides either is the second implementation that comes to disagree with the
 first, so this one decides neither and carries no tolerance of its own — there
 is no bound here to get wrong.
+
+Exactness is also what the unit makes cheap. Every length reaching this stage is
+a whole number of nanometres, so ``==`` is the whole rule and there is no
+representation error left for a tolerance to absorb.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from ..model import Diagnostic, DrillData, Hole, StageRun
+from ..units import format_nm
 
 __all__ = ["Deduplicate"]
 
@@ -29,9 +34,9 @@ class Deduplicate:
     duplicate in this domain is a copy-paste, and Illustrator writes the copy at
     the original's coordinates: the shipped fixture's pair parses as
     ``x=-39.990641944444405, y=17.999956944444445`` for *both* circles, identical
-    to the last bit and before anything has snapped them. ``SnapPositions`` is
+    to the last bit and before anything has quantised them. ``SnapPositions`` is
     deterministic on top of that, so two holes that land on one grid point land
-    on the same float.
+    on the same integer.
 
     What a tolerance would additionally have caught is a near miss the grid did
     not close — which is to say a hole the artwork puts somewhere else, and
@@ -75,7 +80,7 @@ class Deduplicate:
         """Describe one collapsed group, for humans *and* for machines.
 
         ``hole_index`` is the foreign key: the survivor's stable identity, which
-        stays true however far a later stage moves it. ``location`` is the
+        stays true however far a later stage moves it. ``location_nm`` is the
         survivor's coordinate *at the time of the report* and stays for human
         context — the CLI report and the drawing's NOTES both read better with a
         position in them — but it is no longer what a consumer matches on. It
@@ -92,19 +97,26 @@ class Deduplicate:
         dropped". It travels as a comma-separated string because
         ``Diagnostic.data`` holds scalars; widening that is a change to the
         model and belongs with one.
+
+        ``diameter_nm`` carries the suffix every other length in a payload
+        carries, and it is not decoration: the key is the only thing telling a
+        consumer what the number means, and the model checks a length named this
+        way is a whole ``int``. ``dropped`` and ``kept`` are counts of holes
+        rather than lengths, so they stay bare.
         """
         survivor, dropped = group[0], group[1:]
         indices = [hole.index for hole in dropped]
         plural = "" if len(indices) == 1 else "s"
         return Diagnostic.warning(
             "duplicate-hole",
-            f"{len(group)} coincident ⌀{survivor.diameter:g} mm holes at "
-            f"({survivor.x:.3f}, {survivor.y:.3f}); kept hole {survivor.index}, "
-            f"dropped hole{plural} {', '.join(str(index) for index in indices)}",
-            location=(survivor.x, survivor.y),
+            f"{len(group)} coincident ⌀{format_nm(survivor.diameter_nm)} mm holes at "
+            f"({format_nm(survivor.x_nm)}, {format_nm(survivor.y_nm)}); kept hole "
+            f"{survivor.index}, dropped hole{plural} "
+            f"{', '.join(str(index) for index in indices)}",
+            location_nm=(survivor.x_nm, survivor.y_nm),
             data=(
                 ("hole_index", survivor.index),
-                ("diameter", survivor.diameter),
+                ("diameter_nm", survivor.diameter_nm),
                 ("dropped", len(dropped)),
                 ("dropped_indices", ",".join(str(index) for index in indices)),
                 ("kept", 1),
@@ -112,4 +124,6 @@ class Deduplicate:
         )
 
     def _same_hole(self, a: Hole, b: Hole) -> bool:
-        return a.diameter == b.diameter and a.x == b.x and a.y == b.y
+        return (
+            a.diameter_nm == b.diameter_nm and a.x_nm == b.x_nm and a.y_nm == b.y_nm
+        )
