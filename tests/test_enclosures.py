@@ -122,15 +122,24 @@ def test_the_conversion_is_exact_where_float_multiplication_is_not():
     """The one value in the shipped catalogue that the float spelling corrupts.
 
     ``float("64.60") * 1e6`` is 64599999.99999999, so ``int()`` of it is
-    64 599 999 — a 1590CE 0.4 microns shorter than the one Hammond casts. This is
-    the assertion a mutation from ``Decimal`` to ``float`` has to get past, and
-    it is asserted on the *catalogue*, not on the helper, so a generator that
-    quietly went back to floats is caught in the table it shipped.
+    64 599 999 — a 1590CE 0.4 microns shorter than the one Hammond casts.
+
+    Asserted on the *converter*, not only on the shipped table, and the
+    distinction is what makes this a test of the ``Decimal`` path rather than of
+    the file on disk. A generator mutated back to floats leaves ``enclosures.py``
+    exactly as it is until somebody re-runs it, so an assertion on
+    ``HAMMOND_1590`` alone stays green through the whole defect and only the
+    round-trip comparison notices. The shipped value is asserted too, because the
+    two agreeing is the claim: the constant that was written is the one this
+    conversion produces.
     """
+    from tools.build_catalogue import _nanometres
+
     (ce,) = [e for e in HAMMOND_1590 if e.part == "1590CE"]
 
-    assert ce.height_nm == 64_600_000
-    assert ce.height_nm != int(float("64.60") * 1e6)
+    assert _nanometres("64.60") == 64_600_000
+    assert _nanometres("64.60") != int(float("64.60") * 1e6)
+    assert ce.height_nm == _nanometres("64.60")
 
 
 def test_a_figure_finer_than_a_nanometre_is_refused_rather_than_truncated():
