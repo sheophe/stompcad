@@ -230,3 +230,35 @@ def test_a_warning_reaches_the_notes():
 
     assert "WARNING" in shown
     assert "moved 0.120 mm" in shown
+
+
+# --- sheet furniture --------------------------------------------------------
+
+
+def test_the_pdf_sheet_carries_the_iso_frame_and_the_svg_sheet_does_not():
+    """The furniture is about paper, so it is the PDF sheet that gets it."""
+    from aidrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
+
+    assert "A4" in strings_in(render(panel()))
+    assert "centring-mark" not in DrawingSvgEmitter(DrawingOptions()).emit(panel())
+
+
+# --- overflow ----------------------------------------------------------------
+
+
+def test_a_panel_past_a0_is_still_drawn_1_to_1_and_says_it_overflowed():
+    """1:1 is a fabrication guarantee, so the sheet reports rather than shrinks."""
+    huge = make_data(at(0, 0, index=1), reference=outline(2_000_000_000, 1_500_000_000))
+    payload = render(huge)
+    shown = " ".join(strings_in(payload))
+    box = [float(v) for v in page_of(payload).MediaBox]
+
+    assert box == pytest.approx([0.0, 0.0, 1189.0 * PT_PER_MM, 841.0 * PT_PER_MM])
+    assert "SCALE 1:1" in shown
+    assert "CONTENT EXCEEDS A0" in shown
+    # The overflow names the size actually required, so it is actionable.
+    assert "2000.000" in shown and "1500.000" in shown
+
+
+def test_a_panel_that_fits_carries_no_overflow_marker():
+    assert "CONTENT EXCEEDS" not in " ".join(strings_in(render(panel())))

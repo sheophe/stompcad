@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import pytest
 
+from aidrill.emitters.drawing.build import iso_frame_items, pens_for
+from aidrill.emitters.drawing.layout import Layout
+from aidrill.emitters.drawing.scene import Line, Polygon, Rect
 from aidrill.emitters.drawing.sheet import (
+    A4_PORTRAIT,
     CENTRING_MARK_OVERSHOOT,
     CENTRING_MARK_WIDTH,
     FILING_BORDER,
@@ -24,8 +28,10 @@ from aidrill.emitters.drawing.sheet import (
     TITLE_BLOCK_WIDTH,
     TRIM_MARK_LONG,
     TRIM_MARK_SHORT,
+    FrameStyle,
     grid_divisions,
 )
+from aidrill.model import DrillData
 
 
 def test_borders_are_twenty_on_the_filing_edge_and_ten_elsewhere():
@@ -130,3 +136,92 @@ def test_the_chosen_group_matches_the_widths_iso_5457_independently_mandates():
     are one system rather than two.
     """
     assert (GROUP_0_7.wide, GROUP_0_7.narrow) == (FRAME_WIDTH, GRID_LINE_WIDTH)
+
+
+# --- ISO 5457 sheet furniture ---------------------------------------------
+
+
+def iso_layout(sheet=A4_PORTRAIT):
+    return Layout.for_sheet(sheet, DrillData(), scale=1.0, frame=FrameStyle.ISO_5457)
+
+
+def test_the_frame_rectangle_is_the_tabulated_drawing_space():
+    """4.2, cross-checked against Table 1 by the box the sheet reports."""
+    layout = iso_layout()
+    items = iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
+
+    frame = next(i for i in items if isinstance(i, Rect) and i.cls == "iso-frame")
+
+    assert (frame.x, frame.y) == (FILING_BORDER, PLAIN_BORDER)
+    assert (frame.width, frame.height) == (180.0, 277.0)
+    assert frame.stroke.width == FRAME_WIDTH
+
+
+def test_there_are_exactly_four_centring_marks_on_the_axes_of_symmetry():
+    """4.3: at the ends of the two axes of symmetry of the trimmed sheet."""
+    layout = iso_layout()
+    marks = [
+        item
+        for item in iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
+        if isinstance(item, Line) and item.cls == "centring-mark"
+    ]
+
+    assert len(marks) == 4
+    assert all(mark.stroke.width == CENTRING_MARK_WIDTH for mark in marks)
+
+    half_width, half_height = 210.0 / 2.0, 297.0 / 2.0
+    # ``Line`` has no ordering (nor should it gain one just for this test), so
+    # this only needs the two groups, not a particular order within them.
+    vertical = [m for m in marks if m.x1 == m.x2]
+    horizontal = [m for m in marks if m.y1 == m.y2]
+    assert len(vertical) == 2 and len(horizontal) == 2
+    assert all(mark.x1 == half_width for mark in vertical)
+    assert all(mark.y1 == half_height for mark in horizontal)
+
+
+def test_a_centring_mark_runs_from_the_trimmed_edge_past_the_frame():
+    """4.3: starting at the grid reference border, 10 mm beyond the frame."""
+    layout = iso_layout()
+    marks = [
+        item
+        for item in iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
+        if isinstance(item, Line) and item.cls == "centring-mark"
+    ]
+    top = next(m for m in marks if m.x1 == m.x2 and min(m.y1, m.y2) == 0.0)
+
+    # From the trimmed edge (0) to 10 mm inside the frame, which is at y = 10.
+    assert max(top.y1, top.y2) == PLAIN_BORDER + CENTRING_MARK_OVERSHOOT
+
+
+def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
+    """4.5: four edges, two rectangles each."""
+    layout = iso_layout()
+    marks = [
+        item
+        for item in iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
+        if isinstance(item, Polygon) and item.cls == "trim-mark"
+    ]
+
+    assert len(marks) == 8
+    for mark in marks:
+        assert len(mark.points) == 4
+        xs = {round(x, 6) for x, _ in mark.points}
+        ys = {round(y, 6) for _, y in mark.points}
+        sides = sorted((max(xs) - min(xs), max(ys) - min(ys)))
+        assert sides == [TRIM_MARK_SHORT, TRIM_MARK_LONG]
+
+
+def test_the_size_designation_sits_in_the_bottom_border_at_the_right_corner():
+    """3.1: 'placed in the bottom border at the right corner'."""
+    from aidrill.emitters.drawing.scene import Text
+
+    layout = iso_layout()
+    label = next(
+        item
+        for item in iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
+        if isinstance(item, Text) and item.cls == "size-designation"
+    )
+
+    assert label.content == "A4"
+    assert label.x > 210.0 / 2.0        # right half
+    assert label.y > 297.0 - PLAIN_BORDER  # below the frame, in the border

@@ -30,7 +30,17 @@ from .content import (
 )
 from .layout import ROW_PITCH, TITLE_MIN_FONT, Layout
 from .scene import FEINT, INK, RED, Circle, Group, Item, Line, Polygon, Rect, Scene, Stroke, Text
-from .sheet import GROUP_0_7, FrameStyle, LineGroup
+from .sheet import (
+    CENTRING_MARK_OVERSHOOT,
+    CENTRING_MARK_WIDTH,
+    GROUP_0_7,
+    PLAIN_BORDER,
+    TRIM_MARK_LONG,
+    TRIM_MARK_SHORT,
+    FrameStyle,
+    LineGroup,
+    Sheet,
+)
 
 # ``SheetText`` is defined in ``content`` and re-exported here: ``build`` imports
 # ``content``, so defining it in this module would make that import a cycle.
@@ -43,6 +53,7 @@ __all__ = [
     "FURNITURE",
     "DUP_RING",
     "arrow",
+    "iso_frame_items",
 ]
 
 
@@ -132,8 +143,73 @@ def build_scene(layout: Layout, data: DrillData, options: SheetText) -> Scene:
 
 
 def _build_frame(layout: Layout, pens: Pens) -> list[Item]:
+    """One border for a plain sheet; the full ISO 5457 furniture otherwise."""
+    if layout.frame is FrameStyle.ISO_5457:
+        return iso_frame_items(layout, pens)
     x0, y0, x1, y1 = layout.border
     return [Rect(x0, y0, x1 - x0, y1 - y0, pens.frame, cls="border")]
+
+
+def iso_frame_items(layout: Layout, pens: Pens) -> list[Item]:
+    """The ISO 5457 sheet furniture: frame, centring marks, trimming marks.
+
+    Everything here is measured on the trimmed sheet, which is the sheet's own
+    extent; the frame is the tabulated drawing space inside it.
+    """
+    sheet = layout.sheet
+    x0, y0, x1, y1 = sheet.space
+    items: list[Item] = [
+        Rect(x0, y0, x1 - x0, y1 - y0, pens.frame, cls="iso-frame"),
+    ]
+    items += _centring_marks(sheet, x0, y0, x1, y1)
+    items += _trim_marks(sheet)
+    items.append(
+        Text(
+            sheet.width - PLAIN_BORDER,
+            sheet.height - PLAIN_BORDER / 3.0,
+            sheet.name,
+            2.5,
+            anchor="end",
+            cls="size-designation",
+        )
+    )
+    return items
+
+
+def _centring_marks(sheet: Sheet, x0: float, y0: float, x1: float, y1: float) -> list[Item]:
+    """4.3: on both axes of symmetry, from the trimmed edge past the frame."""
+    pen = Stroke(CENTRING_MARK_WIDTH, INK)
+    mid_x, mid_y = sheet.width / 2.0, sheet.height / 2.0
+    reach = CENTRING_MARK_OVERSHOOT
+    return [
+        Line(mid_x, 0.0, mid_x, y0 + reach, pen, cls="centring-mark"),
+        Line(mid_x, sheet.height, mid_x, y1 - reach, pen, cls="centring-mark"),
+        Line(0.0, mid_y, x0 + reach, mid_y, pen, cls="centring-mark"),
+        Line(sheet.width, mid_y, x1 - reach, mid_y, pen, cls="centring-mark"),
+    ]
+
+
+def _trim_marks(sheet: Sheet) -> list[Item]:
+    """4.5: two overlapping 10 x 5 rectangles in the border at each edge."""
+    marks: list[Item] = []
+    for corner_x, corner_y in (
+        (0.0, 0.0),
+        (sheet.width - TRIM_MARK_LONG, 0.0),
+        (0.0, sheet.height - TRIM_MARK_LONG),
+        (sheet.width - TRIM_MARK_LONG, sheet.height - TRIM_MARK_LONG),
+    ):
+        # The pair overlaps at the corner: one lying along each edge.
+        marks.append(_filled_box(corner_x, corner_y, TRIM_MARK_LONG, TRIM_MARK_SHORT))
+        marks.append(_filled_box(corner_x, corner_y, TRIM_MARK_SHORT, TRIM_MARK_LONG))
+    return marks
+
+
+def _filled_box(x: float, y: float, width: float, height: float) -> Polygon:
+    return Polygon(
+        ((x, y), (x + width, y), (x + width, y + height), (x, y + height)),
+        INK,
+        cls="trim-mark",
+    )
 
 
 def _build_outlines(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
@@ -621,6 +697,27 @@ def _build_title_block(
 # notes
 # ---------------------------------------------------------------------------
 
+def _overflow_marker(layout: Layout) -> list[Item]:
+    """Say so when the content outran the largest sheet, rather than shrinking it."""
+    if layout.fits:
+        return []
+    x0, y0, x1, _ = layout.notes
+    required = (
+        f"SCALE 1:1 — CONTENT EXCEEDS {layout.sheet.name}; "
+        f"{layout.needed_width:.3f} × {layout.needed_height:.3f} mm REQUIRED"
+    )
+    return [
+        Text(
+            x0 + 2.5,
+            y0 + layout.note_font * 1.6,
+            fits(required, layout.note_font, x1 - x0 - 5.0),
+            layout.note_font,
+            colour=RED,
+            cls="note note-overflow",
+        )
+    ]
+
+
 def _build_notes(layout: Layout, data: DrillData) -> list[Item]:
     x0, y0, x1, y1 = layout.notes
     drawn: list[Item] = [Rect(x0, y0, x1 - x0, y1 - y0, FURNITURE, cls="notes-box")]
@@ -628,6 +725,7 @@ def _build_notes(layout: Layout, data: DrillData) -> list[Item]:
     drawn.append(
         Text(x0 + 2.0, y0 + font * 1.6, "NOTES", font * 1.15, weight="bold", cls="notes-title")
     )
+    drawn += _overflow_marker(layout)
 
     notes = note_lines(data)
     width = x1 - x0 - 5.0
