@@ -136,11 +136,17 @@ def test_data_without_holes_still_produces_a_valid_file():
     assert out[-2:] == ["T0", "M30"]
 
 
-def test_the_emitter_refuses_data_that_was_never_routed():
+@pytest.mark.parametrize("origin", [Origin.LOWER_LEFT, Origin.CENTRE])
+def test_the_emitter_refuses_data_that_was_never_routed(origin):
+    """ADR-0006: an emitter given unrouted data raises, on every path — not
+    only ``LOWER_LEFT``, whose negative-coordinate check happens to call
+    ``numbered()``. ``CENTRE`` must refuse too, or it would emit artwork order
+    as if it were a drilling sequence.
+    """
     data = make_data(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
                      reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)))
     with pytest.raises(EmitterError, match="RouteHoles"):
-        emit(data)
+        emit(data, origin=origin)
 
 
 # --------------------------------------------------------------------------

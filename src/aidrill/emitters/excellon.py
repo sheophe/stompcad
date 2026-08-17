@@ -52,6 +52,7 @@ class ExcellonEmitter:
     # -- public ----------------------------------------------------------
     def emit(self, data: DrillData) -> str:
         self._reject_errors(data)
+        self._reject_unrouted(data)
         framed, origin_comment = self._reframe(data)
         tools = framed.tools()
         tokens = self._tool_tokens(tools)
@@ -94,6 +95,15 @@ class ExcellonEmitter:
             f"panel it does not describe; resolve the errors, or emit the json format, "
             f"which can carry them"
         )
+
+    def _reject_unrouted(self, data: DrillData) -> None:
+        """Refuse data no ``RouteHoles`` ever numbered, on every origin.
+
+        ``numbered()`` already raises for this; without a direct call the
+        check only happened to run under ``LOWER_LEFT``, whose negative-
+        coordinate scan is the only other place it is invoked.
+        """
+        data.numbered()
 
     def _reframe(self, data: DrillData) -> tuple[DrillData, str]:
         """Use ``with_origin`` and return a header describing the effective frame.
