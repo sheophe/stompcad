@@ -36,9 +36,9 @@ from .pipeline import (
     DrillStandard,
     IdentifyHammondFootprint,
     ReviewGridTies,
+    RouteHoles,
     SnapDiametersToDrillTable,
     SnapPositions,
-    SortHoles,
     normalize_part_name,
 )
 from .protocols import Emitter, Payload, Pipeline, Stage
@@ -288,7 +288,7 @@ def build_pipeline(args: argparse.Namespace) -> Pipeline:
     Review follows deduplication so it describes surviving holes; sorting is
     last. Each stage remains independently valid outside this composition.
     """
-    stages: list[Stage] = [Deduplicate(), ReviewGridTies(), SortHoles()]
+    stages: list[Stage] = [Deduplicate(), ReviewGridTies(), RouteHoles()]
     return Pipeline(stages)
 
 

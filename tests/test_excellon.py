@@ -497,7 +497,7 @@ def test_coordinates_are_grouped_under_their_tool_ascending_by_diameter():
 
 
 def test_hole_order_is_preserved_not_re_sorted():
-    """Ordering is ``pipeline.SortHoles``' decision, not this emitter's."""
+    """Ordering is ``pipeline.RouteHoles``' decision, not this emitter's."""
     data = make_data(
         at(10_000_000, -10_000_000, 7_000_000, index=1),
         at(-10_000_000, 10_000_000, 7_000_000, index=2),

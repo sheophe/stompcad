@@ -411,7 +411,7 @@ class TestReviewGridTies:
         stage = SnapPositions(Nanometre(500_000))
         data = DrillData(
             holes=snapped(stage, raw(0.25, 0.0, index=4))
-        ).with_processing(StageRun("sort", (("key", "default"),)))
+        ).with_processing(StageRun("route", (("key", "default"),)))
 
         assert ReviewGridTies().apply(data).diagnostics == ()
 

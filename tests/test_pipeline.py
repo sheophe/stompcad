@@ -26,9 +26,9 @@ from aidrill.pipeline import (
     DrillStandard,
     IdentifyHammondFootprint,
     ReviewGridTies,
+    RouteHoles,
     SnapDiametersToDrillTable,
     SnapPositions,
-    SortHoles,
 )
 from aidrill.protocols import Pipeline, Stage
 from aidrill.quantise import quantise
@@ -46,7 +46,7 @@ from tests.conftest import at, codes, diameters, holes, make_data, positions
 ALL_STAGES = [
     Deduplicate(),
     ReviewGridTies(),
-    SortHoles(),
+    RouteHoles(),
     CheckReferenceSize((Nanometre(113_000_000), Nanometre(60_000_000))),
 ]
 
@@ -305,7 +305,7 @@ def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
         at(10_000_000, 5_000_000, 7_000_000, index=1),
     )
 
-    after = Pipeline([Deduplicate(), SortHoles()]).run(data)
+    after = Pipeline([Deduplicate(), RouteHoles()]).run(data)
 
     duplicates = [d for d in after.diagnostics if d.code == "duplicate-hole"]
     assert len(duplicates) == 1
@@ -363,7 +363,7 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
     )
     def test_the_verdict_describes_the_hole_that_survived(self, drawn, kept, findings):
         """One panel, two traversal orders, and the answer follows the survivor."""
-        out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
+        out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(_phase(*drawn))
 
         assert [hole.index for hole in out.holes] == [kept]
         assert codes(out) == findings
@@ -371,7 +371,7 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
     def test_every_named_tie_is_a_hole_the_artifacts_will_list(self):
         """Every tied identity names a hole that survives into emitted artefacts."""
         for drawn in ((self.ON_GRID, self.TIED), (self.TIED, self.ON_GRID)):
-            out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(_phase(*drawn))
+            out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(_phase(*drawn))
             emitted = {hole.index for hole in out.holes}
 
             for diagnostic in out.diagnostics:
@@ -380,7 +380,7 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
 
     def test_a_hole_the_drill_table_dropped_is_not_reviewed(self):
         """The only tied circle on this panel is one no bit can make."""
-        out = Pipeline([Deduplicate(), ReviewGridTies(), SortHoles()]).run(
+        out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(
             _phase(
                 RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
                 RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(30.0), 9),
@@ -504,11 +504,11 @@ class TestCheckReferenceSize:
 
 
 # --------------------------------------------------------------------------
-# SortHoles
+# RouteHoles
 # --------------------------------------------------------------------------
 
 
-class TestSortHoles:
+class TestRouteHoles:
     def test_default_is_descending_y_then_ascending_x(self):
         data = make_data(
             at(20_000_000, -18_750_000, 5_000_000, index=4),
@@ -516,7 +516,7 @@ class TestSortHoles:
             at(-40_000_000, 18_000_000, index=9),
             at(-20_000_000, -18_750_000, 5_000_000, index=6),
         )
-        out = SortHoles().apply(data)
+        out = RouteHoles().apply(data)
         assert positions(out) == [
             (-40_000_000, 18_000_000),
             (-20_000_000, 18_000_000),
@@ -530,7 +530,7 @@ class TestSortHoles:
             at(10_000_000, 0, 3_200_000, index=1),
             at(-10_000_000, 0, 5_000_000, index=9),
         )
-        out = SortHoles(key=lambda h: h.diameter_nm).apply(data)
+        out = RouteHoles(key=lambda h: h.diameter_nm).apply(data)
         assert diameters(out) == [3_200_000, 5_000_000, 7_000_000]
 
     def test_is_deterministic_under_input_permutation(self):
@@ -541,15 +541,15 @@ class TestSortHoles:
             at(20_000_000, 18_000_000, index=6),
         ]
         rng = random.Random(7)
-        expected = SortHoles().apply(make_data(*given)).holes
+        expected = RouteHoles().apply(make_data(*given)).holes
         for _ in range(20):
             shuffled = given[:]
             rng.shuffle(shuffled)
-            assert SortHoles().apply(make_data(*shuffled)).holes == expected
+            assert RouteHoles().apply(make_data(*shuffled)).holes == expected
 
     def test_emits_no_diagnostics(self):
         data = make_data(at(0, 0, index=4), at(1_000_000, 1_000_000, index=1))
-        assert codes(SortHoles().apply(data)) == []
+        assert codes(RouteHoles().apply(data)) == []
 
     def test_tools_are_stable_under_hole_reordering(self):
         """``tools()`` does not depend on hole order."""
@@ -564,7 +564,7 @@ class TestSortHoles:
             shuffled = given[:]
             rng.shuffle(shuffled)
             assert dict(make_data(*shuffled).tools()) == expected
-            assert dict(SortHoles().apply(make_data(*shuffled)).tools()) == expected
+            assert dict(RouteHoles().apply(make_data(*shuffled)).tools()) == expected
 
 
 # --------------------------------------------------------------------------
@@ -603,7 +603,7 @@ class TestPipelineComposition:
             at(10_000_000, 5_000_000, 7_000_000, index=7),
             at(10_000_000, 5_000_000, 7_000_000, index=1),
         )
-        dedupe, sort = Deduplicate(), SortHoles(key=lambda h: h.index)
+        dedupe, sort = Deduplicate(), RouteHoles(key=lambda h: h.index)
 
         dedupe_first = Pipeline([dedupe, sort]).run(data)
         sort_first = Pipeline([sort, dedupe]).run(data)
@@ -626,7 +626,7 @@ class TestPipelineComposition:
             ),
         )
 
-        out = Pipeline([Deduplicate(), SortHoles()]).run(
+        out = Pipeline([Deduplicate(), RouteHoles()]).run(
             quantise(
                 raw,
                 # Declared, for the reason above: 113 × 60 is a tie.
@@ -667,7 +667,7 @@ class TestStageRunAndProcessing:
         run = StageRun("snap", (("grid_nm", 500_000),))
         assert run == StageRun("snap", (("grid_nm", 500_000),))
         with pytest.raises(dataclasses.FrozenInstanceError):
-            run.name = "sort"
+            run.name = "route"
         # slots, not just frozen: no per-instance dict to grow a stray attribute.
         assert not hasattr(run, "__dict__")
 
@@ -687,11 +687,11 @@ class TestStageRunAndProcessing:
     def test_with_processing_appends_without_mutating(self):
         data = make_data(at(0, 0, index=4))
         first = data.with_processing(StageRun("snap", ()))
-        second = first.with_processing(StageRun("sort", ()))
+        second = first.with_processing(StageRun("route", ()))
 
         assert data.processing == (), "with_processing mutated its receiver"
         assert [r.name for r in first.processing] == ["snap"]
-        assert [r.name for r in second.processing] == ["snap", "sort"]
+        assert [r.name for r in second.processing] == ["snap", "route"]
 
     def test_the_other_transforms_carry_the_history_forward(self):
         """Every transform returns a new value; none of them may drop provenance.
@@ -713,7 +713,7 @@ class TestStageRunAndProcessing:
         """A stage may legitimately run twice; the title block wants the last one."""
         data = make_data().with_processing(
             StageRun("snap", (("grid_nm", 1_000_000),)),
-            StageRun("sort", ()),
+            StageRun("route", ()),
             StageRun("snap", (("grid_nm", 250_000),)),
         )
         assert data.last_run("snap").get("grid_nm") == 250_000
@@ -737,17 +737,17 @@ class TestDescribe:
         def by_diameter(hole):
             return hole.diameter_nm
 
-        assert SortHoles().describe().get("key") == "default"
-        assert SortHoles(key=by_diameter).describe().get("key") == "by_diameter"
+        assert RouteHoles().describe().get("key") == "default"
+        assert RouteHoles(key=by_diameter).describe().get("key") == "by_diameter"
 
 
 class TestPipelineRecordsProvenance:
     def test_pipeline_records_what_each_stage_actually_did(self):
         data = make_data(*holes((10_000_000, 5_000_000), (-20_000_000, 5_000_000, 5_000_000)))
-        after = Pipeline([Deduplicate(), SortHoles()]).run(data)
+        after = Pipeline([Deduplicate(), RouteHoles()]).run(data)
 
-        assert [r.name for r in after.processing] == ["deduplicate", "sort"]
-        assert after.last_run("sort").get("key") == "default"
+        assert [r.name for r in after.processing] == ["deduplicate", "route"]
+        assert after.last_run("route").get("key") == "default"
 
     def test_a_stage_that_changed_nothing_still_records_that_it_ran(self):
         """An empty diagnostics list cannot tell a consumer whether a panel had
@@ -820,7 +820,7 @@ def test_the_flow_is_reachable_from_the_package_root():
         IdentifyHammondFootprint,
         Deduplicate,
         ReviewGridTies,
-        SortHoles,
+        RouteHoles,
         CheckReferenceSize,
     ):
         assert getattr(aidrill, name.__name__, None) is name

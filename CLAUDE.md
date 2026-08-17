@@ -89,7 +89,7 @@ The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline 
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
 measurements with the enclosure, drill-size, and grid answer sets, then produces canonical
 integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies`, and
-`SortHoles`. Emitters only translate frames, convert units, format, and serialise; shared
+`RouteHoles`. Emitters only translate frames, convert units, format, and serialise; shared
 facts are computed once before the emitter fan-out.
 
 Both drawing emitters share `emitters/drawing/`: `content` holds the facts a sheet

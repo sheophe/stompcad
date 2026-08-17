@@ -10,12 +10,12 @@ from ..model import DrillData, Hole, StageRun
 if TYPE_CHECKING:
     # ``sorted`` needs a key whose result can be compared with ``<``. Spelling
     # that as ``object`` types the parameter by what a key *is* rather than by
-    # what this stage does with it, and ``SortHoles(key=lambda h: h)`` then
+    # what this stage does with it, and ``RouteHoles(key=lambda h: h)`` then
     # type-checks cleanly and raises TypeError on a real panel. _typeshed is
     # not importable at runtime, which is why the import is guarded.
     from _typeshed import SupportsRichComparison
 
-__all__ = ["SortHoles"]
+__all__ = ["RouteHoles"]
 
 
 def _reading_order(hole: Hole) -> tuple[int, int]:
@@ -23,10 +23,10 @@ def _reading_order(hole: Hole) -> tuple[int, int]:
     return (-hole.y_nm, hole.x_nm)
 
 
-class SortHoles:
-    """Sort holes by ``key`` (default: descending Y, then ascending X)."""
+class RouteHoles:
+    """Order holes for emission by ``key`` (default: descending Y, then ascending X)."""
 
-    name: ClassVar[str] = "sort"
+    name: ClassVar[str] = "route"
 
     def __init__(self, key: Callable[[Hole], SupportsRichComparison] | None = None) -> None:
         self.key = _reading_order if key is None else key

@@ -14,8 +14,8 @@ from .diameters import (
     SnapDiametersToDrillTable,
 )
 from .enclosure import CATALOGUE, IdentifyHammondFootprint, normalize_part_name
+from .route import RouteHoles
 from .snap import ReviewGridTies, SnapPositions
-from .sort import SortHoles
 from .validate import CheckReferenceSize
 
 __all__ = [
@@ -29,7 +29,7 @@ __all__ = [
     "Deduplicate",
     "ReviewGridTies",
     "CheckReferenceSize",
-    "SortHoles",
+    "RouteHoles",
     "IdentifyHammondFootprint",
     "normalize_part_name",
     "CATALOGUE",

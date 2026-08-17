@@ -155,7 +155,7 @@ class ExcellonEmitter:
         return self.options.title or data.source.path or "untitled"
 
     def _coordinates(self, holes: Iterable[Hole]) -> list[str]:
-        """Holes in the order they arrive. Sequence is ``SortHoles``' decision."""
+        """Holes in the order they arrive. Sequence is ``RouteHoles``' decision."""
         return [f"X{self._value(h.x_nm)}Y{self._value(h.y_nm)}" for h in holes]
 
     def _value(self, nanometres: Nanometre) -> str:

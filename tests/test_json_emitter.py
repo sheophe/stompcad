@@ -826,7 +826,7 @@ def test_the_identities_in_a_rebuilt_payload_are_tuples_again():
 
 
 def test_hole_order_is_preserved_not_re_sorted():
-    """Ordering is ``pipeline.SortHoles``' decision, not this emitter's."""
+    """Ordering is ``pipeline.RouteHoles``' decision, not this emitter's."""
     data = DrillData(
         holes=(
             at(10_000_000, -10_000_000, index=4),
