@@ -384,7 +384,14 @@ def test_every_grid_reference_band_is_the_same_depth():
     from aidrill.emitters.drawing.scene import Line
     from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
 
-    lines = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Line)]
+    # Field divisions only. The band's own outer edge runs the other way, along
+    # the band rather than across it, so measuring it here would report the
+    # sheet's height as a band depth.
+    lines = [
+        i
+        for i in grid_reference_items(A3_LANDSCAPE)
+        if isinstance(i, Line) and i.cls == "grid-line"
+    ]
     horizontal = [line for line in lines if line.y1 == line.y2]
     vertical = [line for line in lines if line.x1 == line.x2]
     width, height = A3_LANDSCAPE.width, A3_LANDSCAPE.height
@@ -592,3 +599,66 @@ def test_a_value_of_exactly_its_recommended_length_is_left_alone():
     # One over, and the ellipsis is inside the count rather than added to it.
     assert ident(SheetText(drawing_no="X" * 17)) == "X" * 15 + "…"
     assert len(ident(SheetText(drawing_no="X" * 17))) == 16
+
+
+def test_the_reference_ticks_and_letters_land_on_the_same_edges():
+    """4.4 references A4 at the top and the right; both marks must agree.
+
+    Ticks and labels are drawn from separate loops, so nothing but this stops
+    one edge being ruled while the letters naming its fields sit on another —
+    a sheet whose zone references cannot be read at all.
+    """
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.scene import Line, Text
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE, A4_PORTRAIT
+
+    for sheet in (A4_PORTRAIT, A3_LANDSCAPE):
+        items = grid_reference_items(sheet)
+        ticks = [i for i in items if isinstance(i, Line) and i.cls == "grid-line"]
+        labels = [i for i in items if isinstance(i, Text)]
+        half_w, half_h = sheet.width / 2.0, sheet.height / 2.0
+
+        ruled = {
+            "top": any(t.x1 == t.x2 and min(t.y1, t.y2) < half_h for t in ticks),
+            "bottom": any(t.x1 == t.x2 and min(t.y1, t.y2) > half_h for t in ticks),
+            "left": any(t.y1 == t.y2 and min(t.x1, t.x2) < half_w for t in ticks),
+            "right": any(t.y1 == t.y2 and min(t.x1, t.x2) > half_w for t in ticks),
+        }
+        lettered = {
+            "top": any(t.y < half_h and t.content.isdigit() for t in labels),
+            "bottom": any(t.y > half_h and t.content.isdigit() for t in labels),
+            "left": any(t.x < half_w and t.content.isalpha() for t in labels),
+            "right": any(t.x > half_w and t.content.isalpha() for t in labels),
+        }
+        assert ruled == lettered, f"{sheet.name}: ruled {ruled} but lettered {lettered}"
+
+    # And the edges are the ones the clause names, not merely a matching pair.
+    a4 = grid_reference_items(A4_PORTRAIT)
+    a4_labels = [i for i in a4 if isinstance(i, Text)]
+    assert all(t.y < A4_PORTRAIT.height / 2.0 for t in a4_labels if t.content.isdigit())
+    assert all(t.x > A4_PORTRAIT.width / 2.0 for t in a4_labels if t.content.isalpha())
+
+
+def test_the_filing_edge_band_is_bounded_where_the_trimmed_edge_is_not_its_edge():
+    """The band stops at the filing margin, so something has to say where.
+
+    On three edges the trimmed edge bounds the band. On the filing edge the
+    band starts 10 mm in, and without its own line the margin and the band read
+    as one 20 mm strip that the field divisions only half cross.
+    """
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.scene import Line
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    edges = [
+        i
+        for i in grid_reference_items(A3_LANDSCAPE)
+        if isinstance(i, Line) and i.cls == "grid-edge"
+    ]
+
+    # Exactly one: the filing edge. The other three bands reach the trimmed edge.
+    assert len(edges) == 1
+    (edge,) = edges
+    assert edge.x1 == edge.x2 == FILING_BORDER - PLAIN_BORDER
+    assert min(edge.y1, edge.y2) == 0.0
+    assert max(edge.y1, edge.y2) == A3_LANDSCAPE.height

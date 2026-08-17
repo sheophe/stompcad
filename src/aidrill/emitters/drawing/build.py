@@ -269,31 +269,42 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
     # outside the grid reference border, so every band is the same depth and
     # the left one simply starts 10 mm further in.
     near = PLAIN_BORDER if horizontal else FILING_BORDER
-    near_edge = near - PLAIN_BORDER
     far = other - PLAIN_BORDER
-    for boundary in edges[1:-1]:
-        if horizontal:
-            items.append(Line(boundary, near_edge, boundary, near, pen, cls="grid-line"))
-            if both_sides:
-                items.append(Line(boundary, far, boundary, other, pen, cls="grid-line"))
-        else:
-            items.append(Line(near_edge, boundary, near, boundary, pen, cls="grid-line"))
-            if both_sides:
-                items.append(Line(far, boundary, other, boundary, pen, cls="grid-line"))
+
+    # Which edges carry the reference, as (outer, inner) bounds of each band.
+    # 4.4 references A4 at the top and the right only, so the side that is
+    # always drawn is the near one across the sheet and the far one down it.
+    # Ticks and labels both read this list: deciding twice is how ticks came to
+    # be drawn down one edge while the letters went down the other.
+    bands = [(near - PLAIN_BORDER, near)] if horizontal else [(other, far)]
+    if both_sides:
+        bands.append((other, far) if horizontal else (near - PLAIN_BORDER, near))
+
+    for outer, inner in bands:
+        # The band's own outer edge, where the trimmed edge is not already it.
+        # Without this the filing margin and the band read as one 20 mm strip
+        # that the field divisions only half cross.
+        if outer not in (0.0, other):
+            items.append(
+                Line(*(edges[0], outer, edges[-1], outer) if horizontal else
+                     (outer, edges[0], outer, edges[-1]), pen, cls="grid-edge")
+            )
+        for boundary in edges[1:-1]:
+            items.append(
+                Line(*(boundary, outer, boundary, inner) if horizontal else
+                     (outer, boundary, inner, boundary), pen, cls="grid-line")
+            )
 
     for index in range(count):
         centre = (edges[index] + edges[index + 1]) / 2.0
         # Numerals run left to right; letters run from the top downwards.
         label = str(index + 1) if horizontal else GRID_LETTERS[index]
-        if horizontal:
-            items.append(_grid_label(centre, near - PLAIN_BORDER / 2.0, label))
-            if both_sides:
-                items.append(_grid_label(centre, other - PLAIN_BORDER / 2.0, label))
-        else:
-            # A4's letters are on the right; a larger sheet has them on both.
-            if both_sides:
-                items.append(_grid_label(near - PLAIN_BORDER / 2.0, centre, label))
-            items.append(_grid_label(other - PLAIN_BORDER / 2.0, centre, label))
+        for outer, inner in bands:
+            middle = (outer + inner) / 2.0
+            items.append(
+                _grid_label(centre, middle, label) if horizontal
+                else _grid_label(middle, centre, label)
+            )
     return items
 
 
