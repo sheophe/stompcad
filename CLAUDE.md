@@ -195,8 +195,9 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Assert cross-artefact claims against emitted bytes by parsing each output format.
 - A test must fail when the behaviour it names is removed. Check each clause of a compound
   condition independently, and ensure a mutation changes only the behaviour under test.
-- Break accidental equality in fixtures: use out-of-order hole identities when testing
-  identity rather than sequence position.
+- Break accidental equality in fixtures: number routed holes out of tuple order, so a
+  test only passes an emitter that reads the number through `DrillData.numbered()`
+  rather than recomputing one from list position.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
   relevant mutation. Mutation testing is a survey, not a numeric gate. Current standing:
   **6109 mutants, 4915 killed, 1191 survived**. Read it by module, not in total —

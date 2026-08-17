@@ -202,7 +202,7 @@ def test_the_rotated_height_label_advances_up_the_page():
 # --- what it says ---------------------------------------------------------
 
 
-def test_the_schedule_names_holes_by_their_stable_identity():
+def test_the_schedule_names_holes_by_their_routed_number_not_their_position():
     shown = strings_in(render(panel()))
 
     assert "12" in shown

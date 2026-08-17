@@ -58,7 +58,8 @@ CHAR_W = 0.6
 def _panel() -> DrillData:
     """Return the quantised fixture panel.
 
-    Hole ids are out of position order so identity and position cannot coincide.
+    Hole numbers are out of tuple order so a number and a list position
+    cannot coincide.
     """
     return DrillData(
         holes=(
@@ -421,12 +422,14 @@ def test_every_hole_has_a_centre_mark_and_a_numbered_balloon(panel: DrillData, r
     assert numbers == sorted(number for number, _ in panel.numbered())
 
 
-def test_balloons_number_holes_by_identity_not_by_position(panel: DrillData, root: ET.Element):
+def test_balloons_read_the_number_through_numbered_not_list_position(
+    panel: DrillData, root: ET.Element
+):
     """One number, one hole, across all four artefacts."""
     balloons = [int(text_of(e)) for e in by_class(root, "balloon-no", "text")]
     assert balloons == [number for number, _ in panel.numbered()]
     assert balloons != list(range(1, len(panel.holes) + 1)), (
-        "the fixture's ids must not coincide with its positions, or this proves nothing"
+        "the fixture's numbers must not coincide with its positions, or this proves nothing"
     )
 
 

@@ -54,7 +54,9 @@ def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int | None 
 def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
     """Build and sequentially number holes from coordinate triples, from 1.
 
-    Identity-sensitive tests use ``at`` so identity cannot equal tuple position.
+    A test proving an emitter reads the number through ``DrillData.numbered()``
+    rather than list position should use ``at`` instead, whose number can be
+    given out of tuple order.
     """
     return tuple(
         Hole.from_measurement(

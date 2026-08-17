@@ -515,8 +515,9 @@ def test_each_hole_names_its_tool_number_from_drilldata_tools():
     assert [h["tool"] for h in emitted] == [tools[h.diameter_nm] for h in data.holes]
 
 
-def test_each_hole_carries_its_identity_not_its_position():
-    """``index`` is the hole's stable identity, and nothing else."""
+def test_each_hole_carries_the_number_it_was_routed_with_not_its_position():
+    """``index`` is the drill number ``RouteHoles`` assigned, read here through
+    the model rather than recomputed from the hole's position in the tuple."""
     data = make_data(
         at(10_000_000, -10_000_000, index=7),
         at(-10_000_000, 10_000_000, 5_000_000, index=2),

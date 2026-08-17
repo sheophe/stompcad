@@ -103,7 +103,7 @@ def _reference(reference: ReferenceOutline | None) -> dict[str, Any] | None:
 
 
 def _hole(hole: Hole, tool: int, number: int) -> dict[str, Any]:
-    """Emit one hole with stable model identity, not its array position."""
+    """Emit one hole with the number the caller resolved, not its array position."""
     return {
         "x_nm": hole.x_nm,
         "y_nm": hole.y_nm,

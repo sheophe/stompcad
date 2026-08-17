@@ -7,8 +7,9 @@ from aidrill.model import Diagnostic, DrillData, EnclosureMatch, Severity, Stage
 from tests.conftest import at, make_data
 
 
-def test_the_schedule_names_holes_by_identity_not_by_position():
-    """A row's NO. is Hole.index, which is why fixtures use out-of-order ids."""
+def test_the_schedule_reads_the_number_through_numbered_not_list_position():
+    """A row's NO. is what ``data.numbered()`` returns, not the row's position
+    in the tuple — proven by giving the holes numbers out of tuple order."""
     data = make_data(at(20_000_000, 0, index=9), at(-20_000_000, 0, index=4))
 
     rows = content.schedule_rows(data)
@@ -164,11 +165,11 @@ def test_a_hole_sharing_a_point_but_not_the_diameter_is_not_flagged():
 
 
 def _mixed_diameter_panel() -> DrillData:
-    """Two diameters with different hole counts, out-of-order identities.
+    """Two diameters with different hole counts, numbered out of tuple order.
 
     Different counts mean a test that swapped the two quantities would fail;
-    out-of-order indices mean a test that read tuple position instead of
-    identity would fail too.
+    out-of-order numbers mean a test that read tuple position instead of the
+    model's own number would fail too.
     """
     return make_data(
         at(10_000_000, 0, 3_000_000, index=5),

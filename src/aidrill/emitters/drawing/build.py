@@ -438,7 +438,7 @@ def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
 
 
 def _balloon(cx: float, cy: float, radius: float, number: int, pens: Pens) -> list[Item]:
-    """Place a balloon carrying stable ``Hole.index``, never tuple position."""
+    """Place a balloon carrying the model's own number, never a list position."""
     unit = math.sqrt(0.5)
     reach = radius + 7.0
     bx = cx + unit * reach

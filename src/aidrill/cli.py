@@ -434,7 +434,7 @@ def format_enclosure(data: DrillData) -> list[str]:
 
 
 def format_holes(data: DrillData) -> list[str]:
-    """Report nominal and measured holes, identified by stable ``Hole.index``."""
+    """Report nominal and measured holes, numbered through ``DrillData.numbered()``."""
     tools = data.tools()
     lines = [
         "",
