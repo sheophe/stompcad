@@ -199,15 +199,15 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   test only passes an emitter that reads the number through `DrillData.numbered()`
   rather than recomputing one from list position.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
-  relevant mutation. Mutation testing is a survey, not a numeric gate. Current standing:
-  **6109 mutants, 4915 killed, 1191 survived**. Read it by module, not in total —
-  `emitters.drawing.build` (507), `cli` (205), `emitters.drawing_pdf` (156),
-  `sources.ai_pdf` (78), `emitters.drawing.content` (50) and `emitters.drawing_svg` (41)
-  account for most survivors, where a mutant rewrites a help string, a cell offset or a
-  font size and nothing observable changes. The drawing modules are layout-heavy and
-  survive in proportion. A survivor in `geometry`, `pipeline.dedupe`, `quantise`,
-  `units`, `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth
-  chasing: those hold cited constants and shared facts rather than placement.
+  relevant mutation. Mutation testing is a survey, not a numeric gate, and no count is
+  recorded here: run it and read the current one. Read it by module, not in total.
+  `emitters.drawing.build`, `cli`, `emitters.drawing_pdf`, `sources.ai_pdf`,
+  `emitters.drawing.content` and `emitters.drawing_svg` account for most survivors, where
+  a mutant rewrites a help string, a cell offset or a font size and nothing observable
+  changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
+  `geometry`, `pipeline.dedupe`, `quantise`, `units`, `emitters.drawing.sheet` or
+  `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
+  shared facts rather than placement.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.
