@@ -604,6 +604,36 @@ def test_a_duplicate_hole_diagnostic_without_a_location_flags_nothing():
     assert "coincident" in all_text(root)  # the finding still reaches the sheet
 
 
+def test_a_hole_sharing_only_one_axis_with_the_finding_is_not_rung():
+    """Both coordinates select the hole, not either one of them.
+
+    A column of holes shares an X and a row shares a Y, so a join that
+    compared one axis would ring every hole in the finding's row or column.
+    """
+    data = DrillData(
+        holes=(
+            at(0, 0, 7_000_000, index=3),
+            at(0, 20_000_000, 7_000_000, index=1),  # same X, different Y
+            at(20_000_000, 0, 7_000_000, index=9),  # same Y, different X
+        ),
+        reference=outline(60_000_000, 40_000_000),
+        diagnostics=(
+            Diagnostic.warning(
+                "duplicate-hole",
+                "2 coincident ⌀7.000 mm holes at (0.000, 0.000)",
+                location_nm=(0, 0),
+                data=(("diameter_nm", 7_000_000), ("dropped", 1)),
+            ),
+        ),
+    )
+    root = ET.fromstring(DrawingSvgEmitter().emit(data))
+
+    assert len(by_class(root, "dup-ring", "circle")) == 1
+    assert num(by_class(root, "dup-ring", "circle")[0], "cx") == pytest.approx(
+        num([c for c in by_class(root, "hole", "circle") if "dup" in classes(c)][0], "cx")
+    )
+
+
 def test_a_finding_that_is_not_a_duplicate_rings_no_hole():
     """The ring means *duplicate*, so the code is what selects it."""
     data = DrillData(
