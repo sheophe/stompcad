@@ -64,11 +64,17 @@ def _two_opt(route: list[Hole]) -> list[Hole]:
     improved = True
     while improved:
         improved = False
+        # The route's own length is loop-invariant except when an accepted
+        # candidate replaces it, so it is recomputed there and nowhere else —
+        # not on every candidate the inner loop merely rejects.
+        current_length = _path_length(route)
         for i in range(1, len(route)):
             for j in range(i + 1, len(route)):
                 candidate = route[:i] + route[i : j + 1][::-1] + route[j + 1 :]
-                if _path_length(candidate) < _path_length(route) - 1e-9:
+                candidate_length = _path_length(candidate)
+                if candidate_length < current_length - 1e-9:
                     route, improved = candidate, True
+                    current_length = candidate_length
     return route
 
 

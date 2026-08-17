@@ -122,7 +122,7 @@ class SnapPositions:
         """Warn with the place, raw and snapped positions, pitch and movement."""
         return Diagnostic.warning(
             "off-grid",
-            f"a hole drawn at "
+            "a hole drawn at "
             f"({format_mm(hole.x, 4)}, {format_mm(hole.y, 4)}) moved "
             f"{format_nm(moved_nm, 4)} mm to "
             f"({format_nm(x_nm, 4)}, {format_nm(y_nm, 4)}) snapping to a "
