@@ -867,6 +867,17 @@ def test_two_diameters_a_nanometre_apart_are_two_tools():
     assert list(data.tools()) == [7_000_000, 7_000_001]
 
 
+def test_numbered_pairs_each_hole_with_its_own_number_in_emission_order():
+    """Not with its position: the two agree only after routing, and the
+    accessor must read the model rather than recount the tuple."""
+    data = DrillData(holes=(
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=2),
+        Hole.from_measurement(Nanometre(1_000_000), Nanometre(0), Nanometre(7_000_000), index=1),
+    ))
+    assert [n for n, _ in data.numbered()] == [2, 1]
+    assert [h.x_nm for _, h in data.numbered()] == [0, 1_000_000]
+
+
 # --------------------------------------------------------------------------
 # selecting findings by severity
 # --------------------------------------------------------------------------

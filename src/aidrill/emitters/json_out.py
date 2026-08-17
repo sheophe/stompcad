@@ -70,7 +70,9 @@ class JsonEmitter:
                 }
                 for diameter_nm, number in tools.items()
             ],
-            "holes": [_hole(h, tools[h.diameter_nm]) for h in data.holes],
+            "holes": [
+                _hole(h, tools[h.diameter_nm], number) for number, h in data.numbered()
+            ],
             "diagnostics": [_diagnostic(d) for d in data.diagnostics],
             "processing": [_stage_run(r) for r in data.processing],
             "enclosure": _enclosure(data.enclosure),
@@ -100,7 +102,7 @@ def _reference(reference: ReferenceOutline | None) -> dict[str, Any] | None:
     }
 
 
-def _hole(hole: Hole, tool: int) -> dict[str, Any]:
+def _hole(hole: Hole, tool: int, number: int) -> dict[str, Any]:
     """Emit one hole with stable model identity, not its array position."""
     return {
         "x_nm": hole.x_nm,
@@ -108,7 +110,7 @@ def _hole(hole: Hole, tool: int) -> dict[str, Any]:
         "diameter_nm": hole.diameter_nm,
         "tool": tool,
         "raw": {"x": hole.raw.x, "y": hole.raw.y, "diameter": hole.raw.diameter},
-        "index": hole.index,
+        "index": number,
     }
 
 

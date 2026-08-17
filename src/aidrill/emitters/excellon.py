@@ -141,11 +141,11 @@ class ExcellonEmitter:
         """Reject the first rendered negative coordinate under ``LOWER_LEFT``."""
         if self.options.origin is not Origin.LOWER_LEFT:
             return
-        for hole in data.holes:
+        for number, hole in data.numbered():
             x, y = self._value(hole.x_nm), self._value(hole.y_nm)
             if x.startswith("-") or y.startswith("-"):
                 raise EmitterError(
-                    f"excellon: hole {hole.index} reframes to X{x}Y{y}, a negative "
+                    f"excellon: hole {number} reframes to X{x}Y{y}, a negative "
                     f"coordinate — a lower-left origin promises every coordinate is "
                     f"positive, so this hole lies outside the reference outline; check "
                     f"the reference layer, or emit with origin=Origin.CENTRE"

@@ -406,7 +406,7 @@ def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     drawn: list[Item] = []
     flagged = flagged_holes(data.diagnostics)
 
-    for hole in data.holes:
+    for number, hole in data.numbered():
         cx, cy = layout.point(mm_from_nm(hole.x_nm), mm_from_nm(hole.y_nm))
         radius = max(0.4, layout.length(mm_from_nm(hole.diameter_nm)) / 2.0)
         is_dup = is_flagged(hole, flagged)
@@ -432,7 +432,7 @@ def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
         for dx, dy in ((arm, 0.0), (0.0, arm)):
             drawn.append(Line(cx - dx, cy - dy, cx + dx, cy + dy, mark, cls="centre-mark"))
 
-        drawn += _balloon(cx, cy, radius, hole.index, pens)
+        drawn += _balloon(cx, cy, radius, number, pens)
 
     return [Group("holes", tuple(drawn))]
 

@@ -493,6 +493,10 @@ class DrillData:
         raise ValueError(f"unknown origin {origin!r}")
 
     # -- derived ---------------------------------------------------------
+    def numbered(self) -> tuple[tuple[int, Hole], ...]:
+        """Every hole with its drill number, in emission order."""
+        return tuple((hole.index, hole) for hole in self.holes)
+
     def tools(self) -> Mapping[Nanometre, int]:
         """Map nominal diameter to 1-based tool number, ascending by size."""
         return {d: i for i, d in enumerate(sorted({h.diameter_nm for h in self.holes}), start=1)}

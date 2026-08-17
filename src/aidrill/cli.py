@@ -441,9 +441,9 @@ def format_holes(data: DrillData) -> list[str]:
         f"HOLES ({len(data.holes)})",
         "  No. Tool         X         Y      Dia  |      raw X      raw Y    raw Dia",
     ]
-    for hole in data.holes:
+    for number, hole in data.numbered():
         lines.append(
-            f"  {hole.index:>3} T{tools[hole.diameter_nm]:<3} "
+            f"  {number:>3} T{tools[hole.diameter_nm]:<3} "
             f"{format_nm(hole.x_nm):>9} {format_nm(hole.y_nm):>9} "
             f"{format_nm(hole.diameter_nm):>8}  | "
             f"{format_mm(hole.raw.x, 4):>10} {format_mm(hole.raw.y, 4):>10} "

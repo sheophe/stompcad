@@ -211,14 +211,14 @@ def schedule_rows(data: DrillData) -> tuple[ScheduleRow, ...]:
     # "-0.000" while the Excellon writer printed "0.000" for the same hole.
     return tuple(
         ScheduleRow(
-            number=hole.index,
+            number=number,
             x=format_nm(hole.x_nm, POSITION_DECIMALS),
             y=format_nm(hole.y_nm, POSITION_DECIMALS),
             diameter=label(hole.diameter_nm),
             tool=f"T{tools[hole.diameter_nm]}",
             flagged=is_flagged(hole, flagged),
         )
-        for hole in data.holes
+        for number, hole in data.numbered()
     )
 
 
