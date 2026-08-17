@@ -1,7 +1,7 @@
 """Command-line composition and reporting.
 
 Quantiser order belongs to :func:`aidrill.quantise`; post-quantisation stages
-run deduplicate → review-grid-ties → sort. Emitters are registry-resolved.
+run deduplicate → review-grid-ties → route. Emitters are registry-resolved.
 Exit codes are 0 clean, 1 warnings, 2 errors and 3 usage or I/O failure.
 """
 
@@ -283,9 +283,9 @@ def _snap_positions(args: argparse.Namespace) -> SnapPositions:
 
 
 def build_pipeline(args: argparse.Namespace) -> Pipeline:
-    """Build deduplicate → review-grid-ties → sort after quantisation.
+    """Build deduplicate → review-grid-ties → route after quantisation.
 
-    Review follows deduplication so it describes surviving holes; sorting is
+    Review follows deduplication so it describes surviving holes; ordering is
     last. Each stage remains independently valid outside this composition.
     """
     stages: list[Stage] = [Deduplicate(), ReviewGridTies(), RouteHoles()]
