@@ -91,6 +91,18 @@ def _check_millimetres(owner: str, **lengths: object) -> None:
             )
 
 
+def _tupled(value: object) -> object:
+    """Convert a value to a tuple, recursively, leaving a scalar untouched.
+
+    ``json.load`` returns a list for every array, including a nested one, so
+    a location payload such as ``tied_locations`` needs both levels turned
+    back into tuples to be hashable and to equal the value a stage built.
+    """
+    if isinstance(value, list):
+        return tuple(_tupled(element) for element in value)
+    return value
+
+
 def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> None:
     """Enforce whole nanometres for payload keys ending ``_nm``.
 
@@ -326,14 +338,19 @@ class Diagnostic:
     code: str
     message: str
     location_nm: tuple[Nanometre, Nanometre] | None = None
-    #: Scalars plus tuples of hole identities for panel-wide findings.
-    data: tuple[tuple[str, float | int | str | tuple[int, ...]], ...] = ()
+    #: Scalars, tuples of hole identities, or tuples of locations for
+    #: panel-wide findings.
+    data: tuple[
+        tuple[str, float | int | str | tuple[int, ...] | tuple[tuple[int, int], ...]], ...
+    ] = ()
 
     def __post_init__(self) -> None:
         """Normalise sequences before validating canonical nanometre lengths.
 
         ``location_nm`` may be absent for panel-wide findings. Nested list
-        payload values are converted to tuples for immutable round trips.
+        payload values are converted to tuples, recursively, for immutable
+        round trips through a location-carrying payload such as
+        ``tied_locations``.
         """
         if self.location_nm is not None:
             x_nm, y_nm = self.location_nm
@@ -342,11 +359,7 @@ class Diagnostic:
         object.__setattr__(
             self,
             "data",
-            tuple(
-                # JSON sequences arrive as lists despite the declared tuple type.
-                (key, tuple(value) if isinstance(value, list) else value)  # type: ignore[unreachable]
-                for key, value in self.data
-            ),
+            tuple((key, _tupled(value)) for key, value in self.data),
         )
         _check_payload_lengths("Diagnostic.data", self.data)
 

@@ -128,17 +128,17 @@ def test_fits_gives_back_what_it_can_when_the_box_holds_no_ellipsis():
     assert content.fits("PANEL", 2.6, 3.3) == "P…"
 
 
-def test_a_flagged_hole_is_matched_by_identity_and_by_code():
-    """Diagnostics are joined on code and hole_index, never on geometry."""
+def test_a_flagged_hole_is_matched_by_code_and_by_location():
+    """Diagnostics are joined on code and exact location, never by identity."""
     duplicate = Diagnostic.warning(
-        content.DUP_CODE, "two coincident holes", data=(("hole_index", 12),)
+        content.DUP_CODE, "two coincident holes", location_nm=(1_000_000, 2_000_000)
     )
-    other = Diagnostic.warning("off-grid", "moved", data=(("hole_index", 5),))
+    other = Diagnostic.warning("off-grid", "moved", location_nm=(3_000_000, 4_000_000))
 
     flagged = content.flagged_holes((duplicate, other))
 
-    assert content.is_flagged(at(0, 0, index=12), flagged)
-    assert not content.is_flagged(at(0, 0, index=5), flagged)
+    assert content.is_flagged(at(1_000_000, 2_000_000, index=12), flagged)
+    assert not content.is_flagged(at(3_000_000, 4_000_000, index=5), flagged)
 
 
 def _mixed_diameter_panel() -> DrillData:

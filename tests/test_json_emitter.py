@@ -70,17 +70,14 @@ def fixture_data() -> DrillData:
                 "2 coincident ⌀7.000 mm holes at (-40.000, 18.000)",
                 (-40_000_000, 18_000_000),
                 data=(
-                    ("hole_index", 4),
                     ("diameter_nm", 7_000_000),
                     ("dropped", 1),
-                    ("dropped_indices", (9,)),
-                    ("kept", 1),
                 ),
             ),
             Diagnostic.warning(
                 "grid-ambiguous",
                 "2 hole(s) sat exactly halfway between two grid points",
-                data=(("tied_indices", (4, 1)),),
+                data=(("tied_locations", ((-40_000_000, 18_000_000), (1_000_000, -1_000_000))),),
             ),
             Diagnostic.error(
                 "broken", "something gave up", (1_500_000, -2_500_000), data=(("stage", "snap"),)
@@ -608,15 +605,20 @@ def test_a_diagnostic_without_a_payload_carries_an_empty_object():
     assert diagnostics[3]["data"] == {"stage": "snap"}
 
 
-def test_a_payload_of_hole_identities_is_emitted_as_an_array():
-    """``dropped_indices`` and ``tied_indices`` are tuples in the model."""
+def test_a_payload_of_locations_is_emitted_as_an_array_of_pairs():
+    """``tied_locations`` is a tuple of coordinate tuples in the model."""
     document = parse(fixture_data())
-    duplicate, ambiguous = document["diagnostics"][1], document["diagnostics"][2]
+    ambiguous = document["diagnostics"][2]
 
-    assert duplicate["data"]["dropped_indices"] == [9]
-    assert ambiguous["data"]["tied_indices"] == [4, 1]
+    assert ambiguous["data"]["tied_locations"] == [
+        [-40_000_000, 18_000_000],
+        [1_000_000, -1_000_000],
+    ]
     embedded = JsonEmitter().document(fixture_data())
-    assert embedded["diagnostics"][2]["data"]["tied_indices"] == [4, 1]
+    assert embedded["diagnostics"][2]["data"]["tied_locations"] == [
+        [-40_000_000, 18_000_000],
+        [1_000_000, -1_000_000],
+    ]
 
 
 def test_diagnostic_payloads_survive_serialisation():
@@ -628,11 +630,11 @@ def test_diagnostic_payloads_survive_serialisation():
     assert doc["version"] == 5
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
     assert duplicate["data"]["dropped"] == 1
-    assert duplicate["data"]["hole_index"] == doc["holes"][0]["index"]
+    assert duplicate["location_nm"] == [doc["holes"][0]["x_nm"], doc["holes"][0]["y_nm"]]
 
 
-def test_the_duplicates_payload_names_the_surviving_hole_by_identity():
-    """The duplicates payload names the surviving hole by identity."""
+def test_the_duplicates_payload_names_the_surviving_hole_by_location():
+    """The duplicate's location names the surviving hole, not a number."""
     data = make_data(at(50_000_000, 0, index=3), at(0, 0, index=6), at(0, 0, index=9))
     after = Pipeline([Deduplicate()]).run(data)
 
@@ -640,12 +642,10 @@ def test_the_duplicates_payload_names_the_surviving_hole_by_identity():
 
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
     assert duplicate["data"] == {
-        "hole_index": 6,
         "diameter_nm": 7_000_000,
         "dropped": 1,
-        "dropped_indices": [9],
-        "kept": 1,
     }
+    assert duplicate["location_nm"] == [0, 0]
     assert [h["index"] for h in doc["holes"]] == [3, 6]
 
 
@@ -668,7 +668,7 @@ def test_error_bearing_data_is_serialised_rather_than_refused():
 
     dropped = next(d for d in doc["diagnostics"] if d["severity"] == "error")
     assert dropped["code"] == "unknown-diameter"
-    assert dropped["data"]["hole_index"] == 2
+    assert dropped["location_nm"] == [0, 18_000_000]
     assert [h["index"] for h in doc["holes"]] == [6]
 
 
@@ -794,11 +794,11 @@ def test_document_rebuilds_an_identical_drilldata(build):
     )
 
     assert rebuilt == data
-    assert rebuilt.diagnostics[1].get("hole_index") == 4
+    assert rebuilt.diagnostics[1].location_nm == (-40_000_000, 18_000_000)
     assert rebuilt.last_run("snap-diameters").get("sizes_nm") == (5_000_000, 7_000_000)
 
 
-def test_the_identities_in_a_rebuilt_payload_are_tuples_again():
+def test_the_locations_in_a_rebuilt_payload_are_tuples_again():
     """A rebuilt finding must be usable, not merely printable."""
     data = fixture_data()
     document = parse(data)
@@ -814,8 +814,10 @@ def test_the_identities_in_a_rebuilt_payload_are_tuples_again():
         for d in document["diagnostics"]
     )
 
-    assert rebuilt[1].get("dropped_indices") == (9,)
-    assert rebuilt[2].get("tied_indices") == (4, 1)
+    assert rebuilt[2].get("tied_locations") == (
+        (-40_000_000, 18_000_000),
+        (1_000_000, -1_000_000),
+    )
     assert rebuilt == data.diagnostics
     assert {hash(d) for d in rebuilt} == {hash(d) for d in data.diagnostics}
 

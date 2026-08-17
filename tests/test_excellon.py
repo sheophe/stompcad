@@ -298,9 +298,9 @@ def error_bearing_data() -> DrillData:
     ).with_diagnostics(
         Diagnostic.error(
             "unknown-diameter",
-            "hole 2: dia 7.000 mm matches no metric drill size",
+            "dia 7.000 mm at (0.000, 18.000) matches no metric drill size",
             (0, 18_000_000),
-            data=(("hole_index", 2), ("diameter_nm", 7_000_000)),
+            data=(("diameter_nm", 7_000_000),),
         )
     )
 

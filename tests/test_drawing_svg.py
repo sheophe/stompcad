@@ -73,15 +73,11 @@ def _panel() -> DrillData:
         diagnostics=(
             Diagnostic.warning(
                 "duplicate-hole",
-                "2 coincident ⌀7.000 mm holes at (-40.000, 18.000); kept hole 12, "
-                "dropped hole 6",
+                "2 coincident ⌀7.000 mm holes at (-40.000, 18.000); 1 hole dropped",
                 location_nm=(-40_000_000, 18_000_000),
                 data=(
-                    ("hole_index", 12),
                     ("diameter_nm", 7_000_000),
                     ("dropped", 1),
-                    ("dropped_indices", (6,)),
-                    ("kept", 1),
                 ),
             ),
             Diagnostic.info("snap", "snapped 8 holes to a 0.250 mm grid"),
@@ -424,7 +420,10 @@ def test_the_sheet_numbers_the_flagged_hole_the_way_the_diagnostic_does(
 ):
     """The one place the two numbering schemes can be caught disagreeing."""
     duplicate = next(d for d in panel.diagnostics if d.code == "duplicate-hole")
-    named = str(duplicate.get("hole_index"))
+    flagged_hole = next(
+        h for h in panel.holes if (h.x_nm, h.y_nm) == duplicate.location_nm
+    )
+    named = str(flagged_hole.index)
 
     red = [
         row
@@ -472,15 +471,11 @@ def _reviewers_three_hole_case() -> DrillData:
         diagnostics=(
             Diagnostic.warning(
                 "duplicate-hole",
-                "2 coincident ⌀7.000 mm holes at (0.000, 0.000); kept hole 4, "
-                "dropped hole 1",
+                "2 coincident ⌀7.000 mm holes at (0.000, 0.000); 1 hole dropped",
                 location_nm=(0, 0),
                 data=(
-                    ("hole_index", 4),
                     ("diameter_nm", 7_000_000),
                     ("dropped", 1),
-                    ("dropped_indices", (1,)),
-                    ("kept", 1),
                 ),
             ),
         ),
@@ -543,8 +538,8 @@ def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
     assert len(by_class(root, "dup-ring", "circle")) == 1
 
 
-def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it():
-    """Identity decides, and ``location_nm`` is context the emitter ignores."""
+def test_the_flagged_hole_is_the_one_at_the_exact_place_not_one_nearby():
+    """Location decides, exactly, and a near neighbour is not close enough."""
     data = DrillData(
         holes=(
             Hole.from_measurement(Nanometre(1_000), Nanometre(0), Nanometre(7_000_000), index=3),
@@ -554,9 +549,9 @@ def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it(
         diagnostics=(
             Diagnostic.warning(
                 "duplicate-hole",
-                "2 coincident ⌀7.000 mm holes at (0.000, 0.000)",
-                location_nm=(0, 0),
-                data=(("hole_index", 8), ("diameter_nm", 7_000_000), ("dropped", 1)),
+                "2 coincident ⌀7.000 mm holes at (20.000, 0.000)",
+                location_nm=(20_000_000, 0),
+                data=(("diameter_nm", 7_000_000), ("dropped", 1)),
             ),
         ),
     )
@@ -578,7 +573,7 @@ def test_the_flagged_hole_is_the_one_the_diagnostic_names_not_the_one_beside_it(
     assert "c00000" not in (plain[0].get("stroke") or "")
 
 
-def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
+def _one_hole_with_a_duplicate_diagnostic(payload, location_nm=(0, 0)) -> DrillData:
     """Two ⌀7 holes, ids 3 and 0, and a ``duplicate-hole`` carrying ``payload``."""
     return DrillData(
         holes=(
@@ -590,17 +585,17 @@ def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
             Diagnostic.warning(
                 "duplicate-hole",
                 "2 coincident ⌀7.000 mm holes at (0.000, 0.000)",
-                location_nm=(0, 0),
+                location_nm=location_nm,
                 data=payload,
             ),
         ),
     )
 
 
-def test_a_duplicate_hole_diagnostic_without_an_id_flags_nothing():
-    """No id, no ring — and emphatically no guess from the coordinates."""
+def test_a_duplicate_hole_diagnostic_without_a_location_flags_nothing():
+    """No location, no ring — and emphatically no guess from an index."""
     data = _one_hole_with_a_duplicate_diagnostic(
-        (("diameter_nm", 7_000_000), ("dropped", 1))
+        (("diameter_nm", 7_000_000), ("dropped", 1)), location_nm=None
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
@@ -619,7 +614,7 @@ def test_a_finding_that_is_not_a_duplicate_rings_no_hole():
                 "unknown-diameter",
                 "no metric drill size within 0.150 mm of ⌀7.130 mm; hole dropped",
                 location_nm=(0, 0),
-                data=(("hole_index", 3), ("diameter_nm", 7_130_000)),
+                data=(("diameter_nm", 7_130_000),),
             ),
         ),
     )
@@ -631,19 +626,8 @@ def test_a_finding_that_is_not_a_duplicate_rings_no_hole():
     assert "no metric drill size" in all_text(root)  # the finding still reaches the sheet
 
 
-def test_an_id_that_arrived_as_a_float_still_rings_its_hole():
-    """3.0 is hole 3. Being strict about the type would drop the ring in silence."""
-    data = _one_hole_with_a_duplicate_diagnostic(
-        (("hole_index", 3.0), ("diameter_nm", 7_000_000))
-    )
-    root = ET.fromstring(DrawingSvgEmitter().emit(data))
-
-    assert len([c for c in by_class(root, "hole", "circle") if "dup" in classes(c)]) == 1
-    assert len(by_class(root, "dup-ring", "circle")) == 1
-
-
-def test_a_payload_of_hole_identities_rings_none_of_them():
-    """``dropped_indices`` and ``tied_indices`` name holes; neither is the ring."""
+def test_a_payload_of_tied_locations_rings_none_of_them():
+    """``tied_locations`` names holes; only ``duplicate-hole`` is the ring."""
     data = DrillData(
         holes=(
             Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=4),
@@ -654,7 +638,7 @@ def test_a_payload_of_hole_identities_rings_none_of_them():
             Diagnostic.warning(
                 "grid-ambiguous",
                 "2 hole(s) sat exactly halfway between two 0.250 mm grid points",
-                data=(("tied_indices", (4, 1)),),
+                data=(("tied_locations", ((0, 0), (20_000_000, 0))),),
             ),
         ),
     )
@@ -666,7 +650,7 @@ def test_a_payload_of_hole_identities_rings_none_of_them():
 
 
 def test_the_duplicate_verdict_survives_the_snap_that_produced_it():
-    """The ring follows the identity, not the coordinate the finding was written at."""
+    """The ring follows the place, not the coordinate the finding happened to keep."""
     after = Deduplicate().apply(
         phase(
             measured(10.03, 5.02, index=6),
@@ -676,9 +660,11 @@ def test_the_duplicate_verdict_survives_the_snap_that_produced_it():
     assert [d.code for d in after.diagnostics] == ["duplicate-hole"]
     assert [h.index for h in after.holes] == [6]
 
+    survivor = after.holes[0]
     duplicate = after.diagnostics[0]
-    assert duplicate.get("hole_index") == 6
-    assert duplicate.get("dropped_indices") == (2,)
+    assert duplicate.get("hole_index") is None
+    assert duplicate.get("dropped_indices") is None
+    assert duplicate.location_nm == (survivor.x_nm, survivor.y_nm)
 
     root = ET.fromstring(DrawingSvgEmitter().emit(after))
     flagged = [c for c in by_class(root, "hole", "circle") if "dup" in classes(c)]
@@ -1466,9 +1452,9 @@ def _many_warnings(count: int) -> DrillData:
         diagnostics=tuple(
             Diagnostic.warning(
                 "off-grid",
-                f"hole {i} moved 0.120 mm to reach the 0.250 mm grid",
+                "a hole moved 0.120 mm to reach the 0.250 mm grid",
                 location_nm=(-40_000_000 + 2_000_000 * i, 0),
-                data=(("hole_index", i), ("moved_nm", 120_000), ("grid_nm", 250_000)),
+                data=(("moved_nm", 120_000), ("grid_nm", 250_000)),
             )
             for i in range(count)
         ),

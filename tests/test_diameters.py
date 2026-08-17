@@ -401,32 +401,36 @@ class TestSnapDiametersToDrillTable:
         hole that matched, so a run of clean holes is a clean run."""
         assert SnapDiametersToDrillTable().quantise(measured(7.0002))[1] == ()
 
-    def test_the_diagnostic_names_the_hole_and_the_nearest_bit(self):
-        """``data`` so a consumer need not re-measure: which hole, what it
-        measured, and the closest thing the drawer actually holds."""
+    def test_the_diagnostic_names_the_place_and_the_nearest_bit(self):
+        """``data`` so a consumer need not re-measure: what it measured, and the
+        closest thing the drawer actually holds — found by where it is, since
+        the number a later stage would assign does not exist yet."""
         _, found = SnapDiametersToDrillTable().quantise(measured(30.0, index=4, x=3.0, y=-2.0))
         diagnostic = found[0]
 
-        assert diagnostic.get("hole_index") == 4
+        assert diagnostic.get("hole_index") is None
         assert diagnostic.get("diameter_nm") == 30_000_000
         assert diagnostic.get("nearest_nm") == 25_000_000
         assert diagnostic.get("standard") == "metric"
         assert diagnostic.get("tolerance_nm") == 250_000
         assert diagnostic.location_nm == (3_000_000, -2_000_000)
 
-    def test_the_dropped_hole_is_named_by_its_identity_not_its_position(self):
-        """Holes numbered 4, 1, 9 — so a payload reporting a list position
-        cannot pass by coincidence. The two refused holes sit at positions 0 and
-        2 and are numbered 4 and 9, and it is the numbers that go out."""
+    def test_the_dropped_hole_is_named_by_its_place_not_its_identity(self):
+        """Three holes at three different places, so a payload reporting a
+        list position or a source-order number cannot pass by coincidence."""
         quantiser = SnapDiametersToDrillTable()
-        panel = (measured(30.0, index=4), measured(7.0, index=1), measured(0.1, index=9))
+        panel = (
+            measured(30.0, index=4, x=3.0, y=-2.0),
+            measured(7.0, index=1, x=10.0, y=10.0),
+            measured(0.1, index=9, x=-5.0, y=1.0),
+        )
 
         refused = []
         for hole in panel:
             _, found = quantiser.quantise(hole)
-            refused.extend(d.get("hole_index") for d in found)
+            refused.extend(d.location_nm for d in found)
 
-        assert refused == [4, 9]
+        assert refused == [(3_000_000, -2_000_000), (-5_000_000, 1_000_000)]
 
     def test_a_narrowed_drawer_is_blamed_as_the_drawer_and_not_as_the_standard(self):
         """5.0 *is* a metric size. What it is not in is the drawer just declared."""

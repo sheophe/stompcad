@@ -142,25 +142,31 @@ class TestSnapPositions:
             "off-grid"
         ]
 
-    def test_the_off_grid_diagnostic_names_the_hole_it_moved(self):
-        """The off-grid finding names the moved hole by identity.
-
-        Identity 6 differs from its sole tuple position.
-        """
+    def test_the_off_grid_diagnostic_names_the_place_it_moved_to(self):
+        """The off-grid finding names the snapped place, not the hole's identity."""
         _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.9, 18.0, index=6))
 
         diag = diagnostics[0]
-        assert diag.get("hole_index") == 6
+        assert diag.location_nm == (-40_000_000, 18_000_000)
         assert diag.get("moved_nm") == 100_000
         assert diag.get("grid_nm") == 250_000
 
-    def test_the_off_grid_message_says_which_hole_and_which_moment(self):
+    def test_the_off_grid_message_says_where_and_by_how_much(self):
         """Both coordinates appear, and neither is left to be guessed at."""
         _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.9, 18.0, index=6))
         message = diagnostics[0].message
 
-        assert "hole 6" in message
+        assert "hole 6" not in message
         assert "-39.9000" in message and "-40.0000" in message
+
+    def test_an_off_grid_finding_names_a_place_not_a_number(self):
+        """The number is assigned by a later stage, so it cannot be cited."""
+        _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.9, 18.0, index=1))
+        diag = diagnostics[0]
+
+        assert diag.get("hole_index") is None
+        assert "hole 1" not in diag.message
+        assert "-40.000" in diag.message and "18.000" in diag.message
 
     def test_regression_grid_half_moves_the_five_mm_row_a_quarter_millimetre(self):
         """At ``--grid 0.5``, the two ⌀5 holes go off-grid."""
@@ -331,8 +337,8 @@ class TestReviewGridTies:
         is noise in front of an operator who has nothing to fix."""
         assert reviewed(SnapPositions(Nanometre(250_000))) == ()
 
-    def test_the_finding_names_the_tied_holes_by_identity_and_not_by_position(self):
-        """4, 1, 9 — and the tied ones are the first and the last."""
+    def test_the_finding_names_the_tied_places_and_not_their_identities(self):
+        """Snapped at (0, 0) and (0, -500 000); the untied hole sits elsewhere."""
         stage = SnapPositions(Nanometre(250_000))
 
         (diag,) = reviewed(
@@ -343,22 +349,23 @@ class TestReviewGridTies:
         )
 
         assert diag.severity is Severity.WARNING
-        assert diag.get("tied_indices") == (4, 9)
+        assert diag.get("tied_indices") is None
+        assert diag.get("tied_locations") == ((0, 0), (0, -500_000))
         # No denominator, deliberately: nothing decides by proportion, so a hole
         # count in the payload would be context rather than evidence.
         assert "hole_count" not in dict(diag.data)
         assert "tied_count" not in dict(diag.data)
 
-    def test_the_finding_is_about_the_panel_and_names_no_representative_hole(self):
-        """A singular ``hole_index`` is the payload of a hole-level finding."""
+    def test_the_finding_is_about_the_panel_and_names_no_representative_place(self):
+        """A single ``location_nm`` is what a hole-level finding carries."""
         (diag,) = reviewed(SnapPositions(Nanometre(250_000)), raw(0.125, 0.0, index=4))
 
-        # The key must be *absent*, not present and null. ``get`` cannot tell
-        # those apart — its default is ``None`` too — and they are different
-        # public shapes: a consumer routing findings by key presence reads
-        # ``"hole_index": null`` as a hole-shaped payload with no hole in it.
-        assert "hole_index" not in dict(diag.data)
+        # ``location_nm`` must be *absent* (``None``), not present and pointing
+        # at one of several tied holes: a panel-wide finding has no single
+        # representative place, so a consumer routing findings by location
+        # must not read a stale or arbitrary one here.
         assert diag.location_nm is None
+        assert "hole_index" not in dict(diag.data)
 
     def test_the_message_says_how_many_tied_and_which_pitch(self):
         """What the operator can act on is the grid they declared, so the
@@ -421,6 +428,15 @@ class TestReviewGridTies:
 
         assert run.name == "review-grid-ties"
         assert run.parameters == ()
+
+
+def test_a_tie_finding_lists_places_not_numbers():
+    """A tie is reported by where it sits, not by a number a later stage assigns."""
+    stage = SnapPositions(Nanometre(250_000))
+    (diag,) = reviewed(stage, raw(0.125, 0.0, index=4))
+
+    assert diag.get("tied_indices") is None
+    assert diag.get("tied_locations") == ((0, 0),)
 
 
 def test_the_stage_reports_a_distance_it_could_not_have_got_from_hypot():

@@ -119,17 +119,16 @@ class SnapPositions:
     def _off_grid(
         self, hole: RawHole, x_nm: Nanometre, y_nm: Nanometre, moved_nm: Nanometre
     ) -> Diagnostic:
-        """Warn with stable identity, raw and snapped positions, pitch and movement."""
+        """Warn with the place, raw and snapped positions, pitch and movement."""
         return Diagnostic.warning(
             "off-grid",
-            f"hole {hole.index} drawn at "
+            f"a hole drawn at "
             f"({format_mm(hole.x, 4)}, {format_mm(hole.y, 4)}) moved "
             f"{format_nm(moved_nm, 4)} mm to "
             f"({format_nm(x_nm, 4)}, {format_nm(y_nm, 4)}) snapping to a "
             f"{format_nm(self.grid_nm)} mm grid",
             location_nm=(x_nm, y_nm),
             data=(
-                ("hole_index", hole.index),
                 ("moved_nm", moved_nm),
                 ("grid_nm", self.grid_nm),
             ),
@@ -159,7 +158,7 @@ class ReviewGridTies:
         grid_nm = self._pitch(data)
         if grid_nm is None:
             return data
-        tied = tuple(hole.index for hole in data.holes if _is_tied(hole, grid_nm))
+        tied = tuple((h.x_nm, h.y_nm) for h in data.holes if _is_tied(h, grid_nm))
         return data.with_diagnostics(*((_ambiguous(tied, grid_nm),) if tied else ()))
 
     def _pitch(self, data: DrillData) -> Nanometre | None:
@@ -180,15 +179,15 @@ def _axis_tied(moved_nm: Nanometre, grid_nm: Nanometre) -> bool:
     return 2 * abs(moved_nm) == grid_nm
 
 
-def _ambiguous(tied: tuple[int, ...], grid_nm: Nanometre) -> Diagnostic:
-    """Report all tied identities and the declared grid, without a denominator."""
+def _ambiguous(tied: tuple[tuple[int, int], ...], grid_nm: Nanometre) -> Diagnostic:
+    """Report every tied place and the declared grid, without a denominator."""
     return Diagnostic.warning(
         "grid-ambiguous",
         f"{len(tied)} hole(s) sat exactly halfway between two "
         f"{format_nm(grid_nm)} mm grid points and were placed by the "
         f"tie-break rather than by the artwork: the declared grid is "
         f"probably not the one the panel was drawn on",
-        data=(("tied_indices", tied),),
+        data=(("tied_locations", tied),),
     )
 
 

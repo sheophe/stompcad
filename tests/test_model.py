@@ -1022,16 +1022,17 @@ def test_a_payload_key_that_is_not_a_length_may_hold_a_float():
 #: float under a key that does not name a length, which is the one combination
 #: that would break if the ``_nm`` rule were ever widened into "a payload holds
 #: integers": a share is genuinely 0.25, and a round trip that had to spell it
-#: as a string would be a round trip that lost it. ``tied_indices`` is the one
-#: payload value that is itself a sequence — ``grid-ambiguous`` names every hole
-#: that tied, because a panel-level finding has no single hole to point at — and
-#: so the only one a fourth ``json.load`` list can arrive in.
+#: as a string would be a round trip that lost it. ``tied_locations`` is the one
+#: payload value that is itself a sequence of sequences — ``grid-ambiguous``
+#: names every place that tied, because a panel-level finding has no single
+#: hole to point at — and so the only one a nested ``json.load`` list of lists
+#: can arrive in.
 _TUPLE_BUILT_FINDING = Diagnostic(
     Severity.WARNING,
     "off-grid",
     "hole 4 moved",
     location_nm=(Nanometre(-40_000_000), Nanometre(18_000_000)),
-    data=(("share", 0.25), ("tied_indices", (4, 9))),
+    data=(("share", 0.25), ("tied_locations", ((4, 9), (1, 2)))),
 )
 
 #: One list per case, and never two at once: ``json.load`` returns a list for
@@ -1041,22 +1042,22 @@ _TUPLE_BUILT_FINDING = Diagnostic(
 _JSON_SHAPED_FINDINGS = [
     pytest.param(
         [-40_000_000, 18_000_000],
-        (("share", 0.25), ("tied_indices", (4, 9))),
+        (("share", 0.25), ("tied_locations", ((4, 9), (1, 2)))),
         id="location",
     ),
     pytest.param(
         (-40_000_000, 18_000_000),
-        [("share", 0.25), ("tied_indices", (4, 9))],
+        [("share", 0.25), ("tied_locations", ((4, 9), (1, 2)))],
         id="payload",
     ),
     pytest.param(
         (-40_000_000, 18_000_000),
-        (["share", 0.25], ("tied_indices", (4, 9))),
+        (["share", 0.25], ("tied_locations", ((4, 9), (1, 2)))),
         id="payload-pair",
     ),
     pytest.param(
         (-40_000_000, 18_000_000),
-        (("share", 0.25), ("tied_indices", [4, 9])),
+        (("share", 0.25), ("tied_locations", [[4, 9], [1, 2]])),
         id="payload-value",
     ),
 ]

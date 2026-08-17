@@ -22,7 +22,6 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the checker
 __all__ = [
     "CHAR_RATIO",
     "DUP_CODE",
-    "PayloadValue",
     "SNAP_STAGE",
     "GRID_PARAMETER",
     "POSITION_DECIMALS",
@@ -65,12 +64,6 @@ __all__ = [
 CHAR_RATIO = 0.62
 
 DUP_CODE = "duplicate-hole"
-
-#: One value out of a ``Diagnostic.data`` payload, spelled here so the two
-#: functions that pass one around agree with the model rather than with each
-#: other. Kept as wide as the model declares it: narrowing is what would drop a
-#: ring in silence — see :func:`flagged_holes`.
-PayloadValue = float | int | str | tuple[int, ...]
 
 #: The ``StageRun`` name the title block's grid is read from, and the parameter
 #: within it. Names the *record*, not the class: the emitter reads provenance and
@@ -422,15 +415,15 @@ def designator(part: str, match: EnclosureMatch) -> str:
     return part
 
 
-def flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[PayloadValue]:
-    """Return stable survivor identities named by ``duplicate-hole`` findings."""
+def flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[tuple[int, int]]:
+    """Return the places ``duplicate-hole`` findings name."""
     return frozenset(
-        index
+        d.location_nm
         for d in diagnostics
-        if d.code == DUP_CODE and (index := d.get("hole_index")) is not None
+        if d.code == DUP_CODE and d.location_nm is not None
     )
 
 
-def is_flagged(hole: Hole, flagged: frozenset[PayloadValue]) -> bool:
-    """Use stable identity, never geometry, to decide whether to draw a ring."""
-    return hole.index in flagged
+def is_flagged(hole: Hole, flagged: frozenset[tuple[int, int]]) -> bool:
+    """Match on exact whole nanometres, the one place both sides agree."""
+    return (hole.x_nm, hole.y_nm) in flagged

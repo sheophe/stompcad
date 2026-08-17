@@ -42,23 +42,18 @@ class Deduplicate:
         return data.with_holes([group[0] for group in groups]).with_diagnostics(*diagnostics)
 
     def _report(self, group: list[Hole]) -> Diagnostic:
-        """Report the survivor, dropped identities, diameter and current location."""
+        """Report the place, the diameter, and how many holes were collapsed."""
         survivor, dropped = group[0], group[1:]
-        indices = [hole.index for hole in dropped]
-        plural = "" if len(indices) == 1 else "s"
+        plural = "" if len(dropped) == 1 else "s"
         return Diagnostic.warning(
             "duplicate-hole",
             f"{len(group)} coincident ⌀{format_nm(survivor.diameter_nm)} mm holes at "
-            f"({format_nm(survivor.x_nm)}, {format_nm(survivor.y_nm)}); kept hole "
-            f"{survivor.index}, dropped hole{plural} "
-            f"{', '.join(str(index) for index in indices)}",
+            f"({format_nm(survivor.x_nm)}, {format_nm(survivor.y_nm)}); "
+            f"{len(dropped)} hole{plural} dropped",
             location_nm=(survivor.x_nm, survivor.y_nm),
             data=(
-                ("hole_index", survivor.index),
                 ("diameter_nm", survivor.diameter_nm),
                 ("dropped", len(dropped)),
-                ("dropped_indices", tuple(indices)),
-                ("kept", 1),
             ),
         )
 

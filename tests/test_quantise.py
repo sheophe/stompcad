@@ -380,15 +380,16 @@ def test_the_sources_findings_come_before_the_phases_own():
     assert codes(out) == ["no-reference-outline", "grid-too-fine", "unknown-diameter"]
 
 
-def test_a_findings_hole_index_names_the_measurement_it_was_taken_from():
+def test_a_findings_location_names_the_measurement_it_was_taken_from():
     """The refusal is written by the quantiser that held the measurement, and
-    the drill file numbers what survived — so the two agree only if the phase
-    hands the measurement's own number over rather than a position."""
+    it is checkable against the drawing only if the phase hands over the
+    measurement's own place rather than a number assigned by a later stage."""
     out = phase(
         read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 9))
     )
 
-    assert out.diagnostics[0].get("hole_index") == 9
+    assert out.diagnostics[0].get("hole_index") is None
+    assert out.diagnostics[0].location_nm == (0, 18_000_000)
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +521,10 @@ def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_p
 
     assert codes(out) == ["off-grid", "off-grid", "off-grid"]
     assert codes(reviewed) == ["off-grid", "off-grid", "off-grid", "grid-ambiguous"]
-    assert reviewed.diagnostics[-1].get("tied_indices") == (1, 2, 3)
+    assert reviewed.diagnostics[-1].get("tied_indices") is None
+    assert reviewed.diagnostics[-1].get("tied_locations") == tuple(
+        (hole.x_nm, hole.y_nm) for hole in out.holes
+    )
 
     # The claim the fixture exists for: the artwork did not survive as the
     # midpoint it was drawn at, and the residual is one anyway.

@@ -112,6 +112,17 @@ def _hole(hole: Hole, tool: int) -> dict[str, Any]:
     }
 
 
+def _listed(value: Any) -> Any:
+    """Convert a tuple to a list, recursively, leaving a scalar untouched.
+
+    A location payload such as ``tied_locations`` nests a tuple of coordinate
+    tuples, so one level of conversion is not enough to make it JSON-shaped.
+    """
+    if isinstance(value, tuple):
+        return [_listed(element) for element in value]
+    return value
+
+
 def _diagnostic(diagnostic: Diagnostic) -> dict[str, Any]:
     """Emit a finding with always-present payload; convert tuple values to lists."""
     return {
@@ -121,10 +132,7 @@ def _diagnostic(diagnostic: Diagnostic) -> dict[str, Any]:
         "location_nm": (
             None if diagnostic.location_nm is None else list(diagnostic.location_nm)
         ),
-        "data": {
-            key: list(value) if isinstance(value, tuple) else value
-            for key, value in diagnostic.data
-        },
+        "data": {key: _listed(value) for key, value in diagnostic.data},
     }
 
 
@@ -132,10 +140,7 @@ def _stage_run(run: StageRun) -> dict[str, Any]:
     """Emit effective stage parameters, converting tuple values to JSON lists."""
     return {
         "name": run.name,
-        "parameters": {
-            key: list(value) if isinstance(value, tuple) else value
-            for key, value in run.parameters
-        },
+        "parameters": {key: _listed(value) for key, value in run.parameters},
     }
 
 

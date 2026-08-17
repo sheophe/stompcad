@@ -213,7 +213,7 @@ class SnapDiametersToDrillTable:
         return min(self.standard.sizes_nm, key=lambda size: (abs(measurement_nm - size), size))
 
     def _unknown(self, hole: RawHole, nearest_nm: Nanometre) -> Diagnostic:
-        """Report the hole, measured diameter, nearest bit and effective drawer."""
+        """Report the place, measured diameter, nearest bit and effective drawer."""
         stocked = len(self.standard.sizes_nm)
         if self._narrowed():
             refused = (
@@ -233,7 +233,6 @@ class SnapDiametersToDrillTable:
             f"{refused}; the hole has been dropped and appears in no artifact",
             location_nm=(nm_from_mm(hole.x), nm_from_mm(hole.y)),
             data=(
-                ("hole_index", hole.index),
                 ("diameter_nm", nm_from_mm(hole.diameter)),
                 ("nearest_nm", nearest_nm),
                 ("standard", self.standard.name),

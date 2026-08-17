@@ -223,9 +223,7 @@ class TestDeduplicate:
         assert len(Deduplicate().apply(data).holes) == 2
 
     def test_diagnostic_carries_a_machine_readable_payload(self):
-        """A consumer must be able to identify the survivor without re-deriving it."""
-        # Identities deliberately do not match positions: an implementation that
-        # reported where the survivor sits rather than who it is would answer 0.
+        """A consumer must be able to locate the survivor without re-deriving it."""
         survivor = at(-40_000_000, 18_000_000, 7_000_000, index=4)
         data = make_data(
             survivor,
@@ -238,12 +236,24 @@ class TestDeduplicate:
 
         assert codes(out) == ["duplicate-hole"]
         diag = out.diagnostics[0]
-        assert diag.get("hole_index") == survivor.index
         assert diag.location_nm == (survivor.x_nm, survivor.y_nm)
         assert diag.location_nm == (out.holes[0].x_nm, out.holes[0].y_nm)
         assert diag.get("diameter_nm") == survivor.diameter_nm
         assert diag.get("dropped") == 2
-        assert diag.get("kept") == 1
+
+    def test_a_duplicate_finding_names_a_place_not_a_number(self):
+        """The number is assigned after this stage runs, so it cannot be cited."""
+        data = make_data(
+            at(10_000_000, 5_000_000, 7_000_000, index=7),
+            at(10_000_000, 5_000_000, 7_000_000, index=1),
+        )
+        diag = Deduplicate().apply(data).diagnostics[0]
+
+        assert diag.get("hole_index") is None
+        assert diag.get("dropped_indices") is None
+        assert diag.get("dropped") == 1
+        assert diag.location_nm == (10_000_000, 5_000_000)
+        assert "hole 7" not in diag.message and "hole 1" not in diag.message
 
     def test_the_payloads_diameter_is_whole_nanometres_under_a_key_that_says_so(self):
         """A payload key ending ``_nm`` is held to a whole ``int`` by the model,
@@ -260,8 +270,8 @@ class TestDeduplicate:
         assert diag.get("diameter_nm") == 3_200_000
         assert type(diag.get("diameter_nm")) is int
 
-    def test_the_diagnostic_names_the_holes_that_went_not_only_how_many(self):
-        """A count cannot be turned back into identities."""
+    def test_the_dropped_count_is_all_that_is_named_not_their_identities(self):
+        """The identities are assigned by a later stage, so only a count remains."""
         data = make_data(
             at(-40_000_000, 18_000_000, 7_000_000, index=4),
             at(-40_000_000, 18_000_000, 7_000_000, index=7),
@@ -271,13 +281,15 @@ class TestDeduplicate:
 
         diag = Deduplicate().apply(data).diagnostics[0]
 
-        assert diag.get("dropped_indices") == (7, 5)
-        assert diag.get("hole_index") == 4
+        assert diag.get("dropped") == 2
+        assert diag.get("dropped_indices") is None
+        assert diag.get("hole_index") is None
 
-    def test_a_lone_dropped_hole_is_still_named(self):
+    def test_a_lone_dropped_hole_is_still_counted(self):
         data = make_data(at(0, 0, 7_000_000, index=8), at(0, 0, 7_000_000, index=3))
         diag = Deduplicate().apply(data).diagnostics[0]
-        assert diag.get("dropped_indices") == (3,)
+        assert diag.get("dropped") == 1
+        assert diag.get("dropped_indices") is None
 
     def test_property_dedupe_is_idempotent(self):
         rng = random.Random(90210)
@@ -297,8 +309,8 @@ class TestDeduplicate:
             assert codes(twice) == codes(once), "second pass found new duplicates"
 
 
-def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
-    """The referent must survive the population changing under it."""
+def test_duplicate_diagnostic_identifies_the_survivor_by_location_not_by_number():
+    """The referent must survive numbering that only happens after this stage runs."""
     data = make_data(
         at(0, 25_000_000, 7_000_000, index=3),
         at(10_000_000, 5_000_000, 7_000_000, index=7),
@@ -309,12 +321,11 @@ def test_duplicate_diagnostic_identifies_the_survivor_by_index_not_position():
 
     duplicates = [d for d in after.diagnostics if d.code == "duplicate-hole"]
     assert len(duplicates) == 1
-    survivor_index = duplicates[0].get("hole_index")
-    assert survivor_index == 7
-    assert [h.index for h in after.holes] == [3, 7]
-    # The rejected design — "the survivor is at index 1 of the surviving tuple" —
-    # would name hole 7 as 1, which is a real and different hole in this fixture.
-    assert [h.index for h in after.holes].index(survivor_index) == 1
+    assert duplicates[0].location_nm == (10_000_000, 5_000_000)
+    assert {(h.x_nm, h.y_nm) for h in after.holes} == {
+        (0, 25_000_000),
+        (10_000_000, 5_000_000),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -368,15 +379,15 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
         assert [hole.index for hole in out.holes] == [kept]
         assert codes(out) == findings
 
-    def test_every_named_tie_is_a_hole_the_artifacts_will_list(self):
-        """Every tied identity names a hole that survives into emitted artefacts."""
+    def test_every_named_tie_is_a_place_the_artifacts_will_list(self):
+        """Every tied place names a hole that survives into emitted artefacts."""
         for drawn in ((self.ON_GRID, self.TIED), (self.TIED, self.ON_GRID)):
             out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(_phase(*drawn))
-            emitted = {hole.index for hole in out.holes}
+            emitted = {(hole.x_nm, hole.y_nm) for hole in out.holes}
 
             for diagnostic in out.diagnostics:
-                named = diagnostic.get("tied_indices", ())
-                assert set(named) <= emitted, f"{diagnostic.code} named a dropped hole"
+                named = diagnostic.get("tied_locations", ())
+                assert set(named) <= emitted, f"{diagnostic.code} named a dropped place"
 
     def test_a_hole_the_drill_table_dropped_is_not_reviewed(self):
         """The only tied circle on this panel is one no bit can make."""
