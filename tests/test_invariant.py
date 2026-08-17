@@ -74,6 +74,10 @@ def _synthetic_raw() -> RawDrillData:
     raising no per-hole diagnostic and holding no duplicate. This one has two
     off-grid holes, whose diagnostics finding 1 appended in arrival order, and
     a coincident pair, whose survivor finding 1 chose by arrival too.
+
+    The first two share an X and a diameter and differ only in Y, which is what
+    makes every clause of the sort key load-bearing: drop Y from it and these
+    two tie, leaving arrival order to say which diagnostic is reported first.
     """
     return RawDrillData(
         source=SourceInfo(path="synthetic.ai", drill_layer="Drill"),
@@ -81,6 +85,7 @@ def _synthetic_raw() -> RawDrillData:
         centre=(Millimetre(56.5), Millimetre(30.0)),
         holes=(
             RawHole(Millimetre(-20.13), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(-20.13), Millimetre(-18.0), Millimetre(7.0)),
             RawHole(Millimetre(20.13), Millimetre(18.0), Millimetre(5.0)),
             RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(3.0)),
             RawHole(Millimetre(0.0004), Millimetre(-0.0003), Millimetre(3.0)),
