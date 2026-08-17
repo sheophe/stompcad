@@ -53,9 +53,12 @@ PLAIN_BORDER: float = 10.0
 FRAME_WIDTH: float = 0.7
 
 #: 4.3. Centring marks are drawn at the frame's own width and run from the grid
-#: reference border to 10 mm past the frame, into the drawing space.
+#: reference border past the frame, into the drawing space. The clause spends
+#: 10 mm on that reach; this sheet spends 5, because at 10 the top mark is drawn
+#: through the overall width dimension and the side marks reach the panel. The
+#: whole mark is then the 10 mm the standard gave the reach alone.
 CENTRING_MARK_WIDTH: float = 0.7
-CENTRING_MARK_OVERSHOOT: float = 10.0
+CENTRING_MARK_OVERSHOOT: float = 5.0
 
 #: 4.4. Grid reference lines, character height, and the field length measured
 #: from the axes of symmetry.

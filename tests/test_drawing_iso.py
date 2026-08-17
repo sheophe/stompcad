@@ -58,10 +58,16 @@ def test_the_frame_is_drawn_at_zero_point_seven():
     assert FRAME_WIDTH == 0.7
 
 
-def test_centring_marks_are_zero_point_seven_and_reach_ten_past_the_frame():
-    """4.3: 0,7 mm, starting at the grid reference border, 10 mm beyond the frame."""
+def test_centring_marks_are_zero_point_seven_and_ten_millimetres_long():
+    """4.3 asks for 0,7 mm marks reaching 10 mm past the frame; the reach is halved.
+
+    A 10 mm overshoot puts the top mark through the overall width dimension and
+    the side marks into the panel. The whole mark is 10 mm instead, so the band
+    keeps its depth and only the part inside the drawing gives way.
+    """
     assert CENTRING_MARK_WIDTH == 0.7
-    assert CENTRING_MARK_OVERSHOOT == 10.0
+    assert CENTRING_MARK_OVERSHOOT == 5.0
+    assert GRID_BAND_WIDTH + CENTRING_MARK_OVERSHOOT == 10.0
 
 
 def test_grid_letters_skip_i_and_o():
