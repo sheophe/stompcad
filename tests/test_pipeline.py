@@ -287,9 +287,9 @@ class TestDeduplicate:
                 x_nm = rng.randrange(-50_000_000, 50_000_000, 250_000)
                 y_nm = rng.randrange(-25_000_000, 25_000_000, 250_000)
                 dia_nm = rng.choice([5_000_000, 7_000_000])
-                built.append(at(x_nm, y_nm, dia_nm, index=len(built)))
+                built.append(at(x_nm, y_nm, dia_nm, index=len(built) + 1))
                 if rng.random() < 0.4:  # sprinkle exact duplicates
-                    built.append(at(x_nm, y_nm, dia_nm, index=len(built)))
+                    built.append(at(x_nm, y_nm, dia_nm, index=len(built) + 1))
             stage = Deduplicate()
             once = stage.apply(make_data(*built))
             twice = stage.apply(once)

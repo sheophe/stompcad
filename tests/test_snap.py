@@ -66,7 +66,7 @@ class TestSnapPositions:
         rng = random.Random(20250815)
         for grid_nm in (1_000, 50_000, 250_000, 300_000, 1_000_000):
             stage = SnapPositions(grid_nm)
-            for index in range(60):
+            for index in range(1, 61):
                 hole = raw(rng.uniform(-60, 60), rng.uniform(-30, 30), index=index)
                 (x_nm, y_nm), _ = stage.quantise(hole)
                 assert type(x_nm) is int and type(y_nm) is int
@@ -103,12 +103,12 @@ class TestSnapPositions:
 
     def test_a_small_move_does_not_warn(self):
         # default warn_over is grid / 4 == 62 500 nm; this hole moves 10 000
-        _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.99, 18.0, index=0))
+        _, diagnostics = SnapPositions(Nanometre(250_000)).quantise(raw(-39.99, 18.0, index=1))
         assert codes(diagnostics) == []
 
     def test_a_large_move_emits_an_off_grid_warning(self):
         (x_nm, y_nm), diagnostics = SnapPositions(Nanometre(250_000)).quantise(
-            raw(-39.9, 18.0, index=0)
+            raw(-39.9, 18.0, index=1)
         )
         assert codes(diagnostics) == ["off-grid"]
         diag = diagnostics[0]
@@ -116,7 +116,7 @@ class TestSnapPositions:
         assert diag.location_nm == (x_nm, y_nm) == (-40_000_000, 18_000_000)
 
     def test_an_explicit_threshold_overrides_the_default(self):
-        hole = raw(-39.9, 18.0, index=0)
+        hole = raw(-39.9, 18.0, index=1)
         assert codes(SnapPositions(Nanometre(250_000), warn_over_nm=Nanometre(200_000)).quantise(hole)[1]) == []
         assert codes(SnapPositions(Nanometre(250_000), warn_over_nm=Nanometre(50_000)).quantise(hole)[1]) == [
             "off-grid"
@@ -176,7 +176,7 @@ class TestSnapPositions:
         rng = random.Random(20250814)
         for grid_nm in (50_000, 100_000, 250_000, 500_000, 1_000_000, 300_000):
             stage = SnapPositions(grid_nm)
-            for index in range(30):
+            for index in range(1, 31):
                 once, first = stage.quantise(
                     raw(rng.uniform(-60, 60), rng.uniform(-30, 30), index=index)
                 )

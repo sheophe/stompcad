@@ -127,9 +127,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Enclosure artwork uses published top-view/backplate dimensions, not the smaller drilled
   face. A two-dimensional outline identifies a footprint, not necessarily one part;
   ambiguous footprints require `--case`, and a declared case is always verified.
-- `Hole.index` is stable source-order identity. `ReferenceOutline.raw` preserves the
-  measured outline. Transform these values through the model rather than reconstructing
-  them.
+- `Hole.index` is stable source-order identity, numbered from 1 and refused below it.
+  Every artefact prints it unaltered — balloon, schedule, report, diagnostic message —
+  so no renderer adds an offset. `ReferenceOutline.raw` preserves the measured outline.
+  Transform these values through the model rather than reconstructing them.
 - Diagnostics, processing provenance, tool assignments, and ordering live on
   `DrillData`; emitters do not re-derive them. Match diagnostics by `code`, not message.
 

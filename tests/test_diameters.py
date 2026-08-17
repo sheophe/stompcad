@@ -504,7 +504,7 @@ class TestSnapDiametersToDrillTable:
         quantiser = SnapDiametersToDrillTable()
         measurements = [round(rng.uniform(0.5, 25.0), 4) for _ in range(200)]
 
-        for index, millimetres in enumerate(measurements):
+        for index, millimetres in enumerate(measurements, start=1):
             size, found = quantiser.quantise(measured(millimetres, index=index))
 
             assert found == ()

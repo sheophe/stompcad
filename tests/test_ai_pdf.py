@@ -187,7 +187,22 @@ def test_the_identity_counter_runs_over_circles_not_over_paths(tmp_path):
         },
     )
     holes = AiPdfSource(pdf).read().holes
-    assert [h.index for h in holes] == [0, 1]
+    assert [h.index for h in holes] == [1, 2]
+
+
+def test_the_first_hole_is_numbered_one(tmp_path):
+    """Every artefact prints this number, and a machinist counts from one.
+
+    Asserted on the lone hole of a one-hole panel, where a first index of 0
+    cannot hide behind an offset that happens to agree further down the run.
+    """
+    pdf = build_pdf(
+        tmp_path / "one.pdf",
+        {"Background": "10 10 200 100 re f", "Drill": circle_ops(60, 35, 10)},
+    )
+    holes = AiPdfSource(pdf).read().holes
+
+    assert [h.index for h in holes] == [1]
 
 
 def test_diameters_are_not_clustered(data):

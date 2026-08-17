@@ -50,9 +50,9 @@ def read(
     """
     if holes is None:
         holes = (
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 0),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 1),
-            RawHole(Millimetre(0.0), Millimetre(-18.75), Millimetre(5.0), 2),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 1),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 2),
+            RawHole(Millimetre(0.0), Millimetre(-18.75), Millimetre(5.0), 3),
         )
     return RawDrillData(
         source=SourceInfo(
@@ -78,9 +78,9 @@ def document(
     """A finished ``DrillData``, for the report renderers called directly."""
     if holes is None:
         holes = (
-            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=0),
-            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=1),
-            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000), index=2),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=1),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
+            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000), index=3),
         )
     return DrillData(
         holes=tuple(holes),
@@ -1258,8 +1258,9 @@ def test_the_drill_file_and_the_drawing_agree_with_each_other(tmp_path, capsys):
     # holes by ``Hole.index``. The literal is the fixture's traversal order, which
     # is deliberately not 1..7: were either artifact numbering by position in its
     # own list, this would read 1, 2, 3, … and pass while naming different holes
-    # than every diagnostic does.
-    assert balloons == [number for number, *_ in rows] == [2, 3, 4, 6, 7, 0, 1]
+    # than every diagnostic does. 6 is absent because it is the duplicate the
+    # pipeline dropped, and numbering runs over the artwork, not the survivors.
+    assert balloons == [number for number, *_ in rows] == [3, 4, 5, 7, 8, 1, 2]
     # The drill file is in a lower-left frame and the schedule in the centre
     # frame; the two differ by a pure translation, so the corner of the bounding
     # box recovers it without the test knowing the panel size.

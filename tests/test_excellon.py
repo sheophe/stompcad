@@ -148,17 +148,17 @@ def test_regression_no_two_tool_definitions_share_a_diameter():
             x_nm=Nanometre(-40_000_000),
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
-            raw=RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(6.9998), 0),
-            index=0,
+            raw=RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(6.9998), 1),
+            index=1,
         ),
         Hole(
             x_nm=Nanometre(-20_000_000),
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
-            raw=RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0000), 1),
-            index=1,
+            raw=RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0000), 2),
+            index=2,
         ),
-        at(0, -18_750_000, 5_000_000, index=2),
+        at(0, -18_750_000, 5_000_000, index=3),
     )
     data = make_data(*normalised, reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)))
 
@@ -212,8 +212,8 @@ def test_the_tool_table_is_read_from_the_model_and_not_re_derived(monkeypatch):
 def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
     """The emitter preserves two nominals only 0.002 mm apart as two tools."""
     data = make_data(
-        at(-10_000_000, 0, 6_998_000, index=0),
-        at(10_000_000, 0, 7_000_000, index=1),
+        at(-10_000_000, 0, 6_998_000, index=1),
+        at(10_000_000, 0, 7_000_000, index=2),
         reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
 
@@ -225,9 +225,9 @@ def test_emitter_does_not_cluster_diameters_the_pipeline_kept_apart():
 
 def test_emitter_does_not_renumber_after_a_gap_in_diameters():
     data = make_data(
-        at(0, 0, 3_200_000, index=0),
-        at(10_000_000, 0, 12_500_000, index=1),
-        at(20_000_000, 0, 5_000_000, index=2),
+        at(0, 0, 3_200_000, index=1),
+        at(10_000_000, 0, 12_500_000, index=2),
+        at(20_000_000, 0, 5_000_000, index=3),
         reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
 
@@ -238,8 +238,8 @@ def test_emitter_does_not_deduplicate_coincident_holes():
     """Deduplication is ``pipeline.Deduplicate``'s job. If two coincident holes
     survive to the emitter, the operator asked for two hits."""
     data = make_data(
-        at(0, 0, 7_000_000, index=0),
         at(0, 0, 7_000_000, index=1),
+        at(0, 0, 7_000_000, index=2),
         reference=ReferenceOutline(Nanometre(113_000_000), Nanometre(60_000_000)),
     )
 
@@ -378,7 +378,7 @@ def test_a_hole_a_fraction_of_a_print_unit_outside_the_outline_is_not_refused():
     refusing it would turn representation noise into an operator-facing failure.
     """
     data = make_data(
-        at(-25_000_400, 0, 7_000_000, index=0),
+        at(-25_000_400, 0, 7_000_000, index=1),
         reference=ReferenceOutline(Nanometre(50_000_000), Nanometre(50_000_000)),
     )
 
@@ -402,7 +402,7 @@ def test_lower_left_keeps_every_coordinate_non_negative():
 
 def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
     """Shared with the drawing's schedule via ``units.format_nm``."""
-    out = lines(emit(make_data(at(-400, -400, 7_000_000, index=0)), origin=Origin.CENTRE))
+    out = lines(emit(make_data(at(-400, -400, 7_000_000, index=1)), origin=Origin.CENTRE))
 
     assert "X0.000Y0.000" in out
     assert not any("-0.000" in line for line in out)
@@ -417,7 +417,7 @@ def test_a_coordinate_on_an_exact_half_rounds_by_the_unit_boundarys_rule():
 
 def test_lower_left_without_a_reference_outline_raises_emitter_error():
     """The message is asserted, not merely the exception type."""
-    data = make_data(at(0, 0, 7_000_000, index=0))
+    data = make_data(at(0, 0, 7_000_000, index=1))
 
     with pytest.raises(EmitterError, match="origin=Origin.CENTRE or supply a reference layer"):
         emit(data)
@@ -440,7 +440,7 @@ def test_centre_origin_leaves_the_canonical_frame_alone():
 
 
 def test_centre_origin_needs_no_reference_outline():
-    data = make_data(at(-5_000_000, -5_000_000, 7_000_000, index=0))
+    data = make_data(at(-5_000_000, -5_000_000, 7_000_000, index=1))
 
     assert "X-5.000Y-5.000" in lines(emit(data, origin=Origin.CENTRE))
 
@@ -499,10 +499,10 @@ def test_coordinates_are_grouped_under_their_tool_ascending_by_diameter():
 def test_hole_order_is_preserved_not_re_sorted():
     """Ordering is ``pipeline.SortHoles``' decision, not this emitter's."""
     data = make_data(
-        at(10_000_000, -10_000_000, 7_000_000, index=0),
-        at(-10_000_000, 10_000_000, 7_000_000, index=1),
-        at(10_000_000, 10_000_000, 7_000_000, index=2),
-        at(-10_000_000, -10_000_000, 7_000_000, index=3),
+        at(10_000_000, -10_000_000, 7_000_000, index=1),
+        at(-10_000_000, 10_000_000, 7_000_000, index=2),
+        at(10_000_000, 10_000_000, 7_000_000, index=3),
+        at(-10_000_000, -10_000_000, 7_000_000, index=4),
         reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
 
@@ -520,10 +520,10 @@ def test_hole_order_is_preserved_not_re_sorted():
 def test_tool_blocks_stay_ascending_while_order_inside_them_is_untouched():
     """Grouping is the emitter's job; sequence is not."""
     data = make_data(
-        at(0, -20_000_000, 7_000_000, index=0),
-        at(-30_000_000, 20_000_000, 5_000_000, index=1),
-        at(30_000_000, 20_000_000, 7_000_000, index=2),
-        at(0, 20_000_000, 5_000_000, index=3),
+        at(0, -20_000_000, 7_000_000, index=1),
+        at(-30_000_000, 20_000_000, 5_000_000, index=2),
+        at(30_000_000, 20_000_000, 7_000_000, index=3),
+        at(0, 20_000_000, 5_000_000, index=4),
         reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
 

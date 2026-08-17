@@ -53,7 +53,7 @@ def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int) -> Hol
 
 
 def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
-    """Build and sequentially number holes from coordinate triples.
+    """Build and sequentially number holes from coordinate triples, from 1.
 
     Identity-sensitive tests use ``at`` so identity cannot equal tuple position.
     """
@@ -64,7 +64,7 @@ def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
             Nanometre(s[2] if len(s) > 2 else 7_000_000),
             index=i,
         )
-        for i, s in enumerate(specs)
+        for i, s in enumerate(specs, start=1)
     )
 
 

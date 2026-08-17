@@ -520,7 +520,7 @@ def test_artwork_drawn_on_half_the_declared_pitch_is_reported_as_ambiguous(tmp_p
 
     assert codes(out) == ["off-grid", "off-grid", "off-grid"]
     assert codes(reviewed) == ["off-grid", "off-grid", "off-grid", "grid-ambiguous"]
-    assert reviewed.diagnostics[-1].get("tied_indices") == (0, 1, 2)
+    assert reviewed.diagnostics[-1].get("tied_indices") == (1, 2, 3)
 
     # The claim the fixture exists for: the artwork did not survive as the
     # midpoint it was drawn at, and the residual is one anyway.

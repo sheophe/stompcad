@@ -520,9 +520,9 @@ def test_the_pipelines_duplicate_verdict_reaches_the_sheet_unchanged():
     """
     raw = DrillData(
         holes=(
-            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=0),
             Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=1),
-            Hole.from_measurement(Nanometre(30_000), Nanometre(0), Nanometre(5_000_000), index=2),
+            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=2),
+            Hole.from_measurement(Nanometre(30_000), Nanometre(0), Nanometre(5_000_000), index=3),
         ),
         reference=outline(60_000_000, 40_000_000),
     )
@@ -583,7 +583,7 @@ def _one_hole_with_a_duplicate_diagnostic(payload) -> DrillData:
     return DrillData(
         holes=(
             Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=3),
-            Hole.from_measurement(Nanometre(20_000_000), Nanometre(10_000_000), Nanometre(7_000_000), index=0),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(10_000_000), Nanometre(7_000_000), index=1),
         ),
         reference=outline(60_000_000, 40_000_000),
         diagnostics=(
@@ -848,7 +848,7 @@ def test_overall_width_and_height_dimensions(panel: DrillData, root: ET.Element)
 
 def test_the_overall_dimension_is_the_outline_the_model_holds():
     """A footprint of Hammond's 0.05 mm, which two decimals could not have shown."""
-    data = phase(measured(0.0, 0.0, index=0), reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
+    data = phase(measured(0.0, 0.0, index=1), reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
                  enclosure=IdentifyHammondFootprint("1590B"))
     assert data.reference is not None
     assert (data.reference.width_nm, data.reference.height_nm) == (112_400_000, 60_500_000)
@@ -991,7 +991,7 @@ def test_schedule_tool_numbers_come_from_drilldata_tools(panel: DrillData, root:
 def test_schedule_never_prints_a_negative_zero():
     """One hole, two artefacts, one number."""
     data = DrillData(
-        holes=(Hole.from_measurement(Nanometre(-400), Nanometre(-400), Nanometre(5_000_000), index=0),),
+        holes=(Hole.from_measurement(Nanometre(-400), Nanometre(-400), Nanometre(5_000_000), index=1),),
         reference=outline(60_000_000, 40_000_000),
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
@@ -1070,8 +1070,8 @@ def _sched_diameters(root: ET.Element) -> list[str]:
 def test_schedule_diameters_are_spelled_the_way_the_drill_standard_spells_them():
     """A fractional bit's honest name is its fraction, and the standard knows it."""
     after = phase(
-        measured(-20.0, 0.0, 3.18, index=0),
-        measured(20.0, 0.0, 7.13, index=1),
+        measured(-20.0, 0.0, 3.18, index=1),
+        measured(20.0, 0.0, 7.13, index=2),
         diameters=SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]),
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(after))
@@ -1084,8 +1084,8 @@ def test_schedule_diameters_are_spelled_the_way_the_drill_standard_spells_them()
 def test_schedule_diameters_use_the_standard_that_actually_ran():
     """A second standard, so the first test cannot be passing on a constant."""
     after = phase(
-        measured(-20.0, 0.0, 3.18, index=0),
-        measured(20.0, 0.0, 7.13, index=1),
+        measured(-20.0, 0.0, 3.18, index=1),
+        measured(20.0, 0.0, 7.13, index=2),
         diameters=SnapDiametersToDrillTable(DRILL_STANDARDS["metric"]),
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(after))
@@ -1116,7 +1116,7 @@ def test_a_recorded_standard_that_does_not_resolve_is_not_a_standard(recorded):
 def test_the_diameter_column_does_not_promise_millimetres_it_cannot_keep():
     """The heading carried ``mm`` while the rows can carry inch fractions."""
     after = phase(
-        measured(0.0, 0.0, 3.18, index=0),
+        measured(0.0, 0.0, 3.18, index=1),
         diameters=SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]),
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(after))
@@ -1159,14 +1159,14 @@ def test_title_block_carries_the_required_fields(panel: DrillData):
 
 def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
     """The pitch printed on the sheet is read out of the run that did the work."""
-    after = phase(measured(10.03, 5.02, index=0), positions=SnapPositions(Nanometre(500_000)))
+    after = phase(measured(10.03, 5.02, index=1), positions=SnapPositions(Nanometre(500_000)))
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "GRID 0.500 mm" in text
 
 
 def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
     """A second pitch, so the first test cannot be passing on a constant."""
-    after = phase(measured(10.03, 5.02, index=0), positions=SnapPositions(Nanometre(100_000)))
+    after = phase(measured(10.03, 5.02, index=1), positions=SnapPositions(Nanometre(100_000)))
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "GRID 0.100 mm" in text
     # Scoped to the grid line: the title block also carries SCALE, so a bare
@@ -1176,7 +1176,7 @@ def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
 
 def test_the_title_block_states_the_effective_pitch_not_the_one_that_was_asked_for():
     """A pitch below the micron floor is clamped, and the sheet says the clamp."""
-    after = phase(measured(10.03, 5.02, index=0), positions=SnapPositions(Nanometre(100)))
+    after = phase(measured(10.03, 5.02, index=1), positions=SnapPositions(Nanometre(100)))
     assert [d.code for d in after.diagnostics] == ["grid-too-fine"]
 
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(after)))
@@ -1241,7 +1241,7 @@ def _identified(
 
 def test_the_title_block_states_the_enclosure_the_pipeline_identified():
     """Straight off a real run: outline in, footprint on the sheet."""
-    after = phase(measured(10.0, 5.0, index=0), reference=RawOutline(Millimetre(119.6), Millimetre(94.1)))
+    after = phase(measured(10.0, 5.0, index=1), reference=RawOutline(Millimetre(119.6), Millimetre(94.1)))
     lines = _title_block_lines(ET.fromstring(DrawingSvgEmitter().emit(after)))
     assert "HAMMOND 1590  119.50 × 94.00 mm  CANDIDATES BB / BB2 / BBS / C" in lines
 
@@ -1284,7 +1284,7 @@ def test_the_enclosure_line_names_the_one_part_when_the_operator_declared_one():
 def test_the_declared_case_reaches_the_sheet_from_a_real_run():
     """``--case 1590B`` is what resolves the fixture panel's own ambiguity."""
     after = phase(
-        measured(10.0, 5.0, index=0),
+        measured(10.0, 5.0, index=1),
         reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
         enclosure=IdentifyHammondFootprint("1590B"),
     )
@@ -1309,7 +1309,7 @@ def test_the_enclosure_line_says_the_panel_is_turned_when_it_is():
 
 def test_a_rotated_panel_keeps_every_candidate_in_the_title_block():
     """A rotated panel keeps every candidate in the title block."""
-    data = phase(measured(0.0, 0.0, index=0), reference=RawOutline(Millimetre(94.1), Millimetre(119.6)))
+    data = phase(measured(0.0, 0.0, index=1), reference=RawOutline(Millimetre(94.1), Millimetre(119.6)))
     assert data.enclosure is not None
     assert data.enclosure.candidates == ("1590BB", "1590BB2", "1590BBS", "1590C")
 
@@ -1351,7 +1351,7 @@ def test_a_panel_that_matches_nothing_still_says_so_after_a_real_run():
     The hand-built case above cannot prove the quantiser leaves it unset — only
     that the emitter reads it — so the two tests are not one test twice.
     """
-    after = phase(measured(0.0, 0.0, index=0), reference=RawOutline(Millimetre(200.0), Millimetre(33.0)))
+    after = phase(measured(0.0, 0.0, index=1), reference=RawOutline(Millimetre(200.0), Millimetre(33.0)))
     assert [d.code for d in after.diagnostics] == ["unknown-enclosure"]
     assert "ENCLOSURE NOT IDENTIFIED" in _title_block_lines(
         ET.fromstring(DrawingSvgEmitter().emit(after))
@@ -1456,7 +1456,7 @@ def _many_warnings(count: int) -> DrillData:
             Nanometre(-40_000_000 + 2_000_000 * i),
             Nanometre(0),
             Nanometre(3_000_000),
-            index=i,
+            index=i + 1,
         )
         for i in range(count)
     )
@@ -1512,7 +1512,7 @@ def test_the_schedule_says_how_many_holes_it_could_not_list():
     """Schedule overflow reports the exact number of omitted holes."""
     drilled = tuple(
         Hole.from_measurement(
-            -55_000_000 + 500_000 * i, 20_000_000 - 400_000 * (i // 40), Nanometre(3_000_000), index=i
+            -55_000_000 + 500_000 * i, 20_000_000 - 400_000 * (i // 40), Nanometre(3_000_000), index=i + 1
         )
         for i in range(240)
     )
@@ -1719,7 +1719,7 @@ def test_empty_drilldata_does_not_crash():
 
 
 def test_data_without_a_reference_outline_still_draws_holes():
-    data = DrillData(holes=(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(3_000_000), index=0),))
+    data = DrillData(holes=(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(3_000_000), index=1),))
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
     assert len(by_class(root, "hole", "circle")) == 1
     assert by_class(root, "outline", "rect") == []
@@ -1727,7 +1727,7 @@ def test_data_without_a_reference_outline_still_draws_holes():
 
 def test_single_hole_does_not_divide_by_zero():
     data = DrillData(
-        holes=(Hole.from_measurement(Nanometre(3_000_000), Nanometre(4_000_000), Nanometre(5_000_000), index=0),),
+        holes=(Hole.from_measurement(Nanometre(3_000_000), Nanometre(4_000_000), Nanometre(5_000_000), index=1),),
         reference=outline(50_000_000, 40_000_000),
     )
     emitter = DrawingSvgEmitter()
@@ -1767,7 +1767,7 @@ def test_many_holes_still_fit_the_schedule_and_the_sheet():
     drilled = tuple(
         Hole.from_measurement(
             -50_000_000 + 5_000_000 * i, 20_000_000 - 4_000_000 * (i // 20), Nanometre(3_000_000),
-            index=i,
+            index=i + 1,
         )
         for i in range(60)
     )

@@ -134,7 +134,8 @@ class AiPdfSource:
                 height=mm_from_pt(y1 - y0),
             )
 
-        # Stream traversal order supplies stable source identities.
+        # Stream traversal order supplies stable source identities, counting
+        # from 1: the number is printed as it stands on every artefact.
         holes = tuple(
             RawHole(
                 x=Millimetre(mm_from_pt(c.cx) - centre[0]),
@@ -142,7 +143,7 @@ class AiPdfSource:
                 diameter=mm_from_pt(c.diameter),
                 index=i,
             )
-            for i, c in enumerate(circles)
+            for i, c in enumerate(circles, start=1)
         )
 
         return RawDrillData(

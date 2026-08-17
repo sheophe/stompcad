@@ -111,8 +111,9 @@ def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> N
 class RawHole:
     """One circle as the artwork measured it, in millimetres, before quantising.
 
-    ``index`` is the stable source traversal identity. Raw values remain
-    available for provenance and residual calculation.
+    ``index`` is the stable source traversal identity, numbered from 1 because
+    artefacts print it unaltered. Raw values remain available for provenance
+    and residual calculation.
     """
 
     x: Millimetre
@@ -122,6 +123,11 @@ class RawHole:
 
     def __post_init__(self) -> None:
         _check_millimetres("RawHole", x=self.x, y=self.y, diameter=self.diameter)
+        if self.index < 1:
+            raise ValueError(
+                f"holes are numbered from 1, not {self.index}: this number is what "
+                f"the drawing balloons, the schedule and the report all print"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +135,8 @@ class Hole:
     """One drilled hole in the canonical frame.
 
     Nominal coordinates and diameter are whole nanometres. ``index`` is stable
-    across transforms and must equal ``raw.index``.
+    across transforms, must equal ``raw.index``, and inherits its floor of 1
+    from that agreement.
     """
 
     x_nm: Nanometre

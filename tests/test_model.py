@@ -258,6 +258,26 @@ def test_a_hole_cannot_be_number_4_to_a_diagnostic_and_number_9_to_an_artifact()
     assert diagnostic.get("index") == agreed.index == 4
 
 
+@pytest.mark.parametrize("index", [0, -1], ids=["zero", "negative"])
+def test_a_hole_numbered_below_one_is_refused(index):
+    """``index`` is printed as it stands, so the model holds the floor itself.
+
+    Numbering at the source alone would leave the guarantee resting on one
+    source class; a library caller assembling holes reaches the same emitters.
+    """
+    with pytest.raises(ValueError, match="numbered from 1"):
+        RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), index)
+
+    with pytest.raises(ValueError, match="numbered from 1"):
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=index)
+
+
+def test_the_lowest_hole_number_the_model_accepts_is_one():
+    """The other side of the floor: 1 is legal, so the guard is a floor and
+    not a blanket refusal that a passing rejection test could not tell apart."""
+    assert RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), 1).index == 1
+
+
 def test_the_residual_is_the_nominal_position_less_the_measured_one():
     """Positive means the nominal value is the larger, in nanometres. Named
     ``residual_nm`` because it is three lengths, and a caller printing it as
