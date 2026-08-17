@@ -2,11 +2,35 @@
 
 from __future__ import annotations
 
-from aidrill.emitters.drawing.build import CENTRELINE_DASHES, SheetText, build_scene, pens_for
-from aidrill.emitters.drawing.layout import Layout
-from aidrill.emitters.drawing.scene import FEINT, INK, Group, Item, Line, Stroke, Text
+import pytest
+
+from aidrill.emitters.drawing.build import (
+    CENTRELINE_DASHES,
+    SheetText,
+    balloon_overhang,
+    build_scene,
+    pens_for,
+)
+from aidrill.emitters.drawing.layout import (
+    CHAIN_STANDOFF,
+    LEVEL_CHAIN_LABEL,
+    MAX_BALLOON_OVERHANG,
+    RIGHT_ALLOWANCE,
+    Layout,
+)
+from aidrill.emitters.drawing.scene import (
+    FEINT,
+    INK,
+    Circle,
+    Group,
+    Item,
+    Line,
+    Polygon,
+    Stroke,
+    Text,
+)
 from aidrill.emitters.drawing.sheet import A3_LANDSCAPE, GROUP_0_7, FrameStyle, LineGroup
-from aidrill.model import DrillData, ReferenceOutline
+from aidrill.model import DrillData, Hole, ReferenceOutline
 from aidrill.units import Nanometre
 from tests.conftest import at
 
@@ -152,3 +176,255 @@ def test_the_overflow_marker_states_the_layout_s_own_scale_not_a_pdf_literal():
 
     assert marker.content.startswith("SCALE 20:1")
     assert "SCALE 1:1" not in marker.content
+
+
+# ---------------------------------------------------------------------------
+# the chain of row levels
+# ---------------------------------------------------------------------------
+
+
+def _levelled(*holes: Hole, height_nm: int = 40_000_000) -> DrillData:
+    """A 60 mm panel of the given height, carrying the holes it was handed."""
+    return DrillData(
+        holes=holes,
+        reference=ReferenceOutline.from_measurement(Nanometre(60_000_000), Nanometre(height_nm)),
+    )
+
+
+def _scene(data: DrillData, scale: float = 1.0) -> tuple[Layout, tuple[Item, ...]]:
+    layout = Layout.for_sheet(A3_LANDSCAPE, data, scale=scale, frame=FrameStyle.PLAIN)
+    return layout, build_scene(layout, data, SheetText()).items
+
+
+def _dimensions(items: tuple[Item, ...]) -> tuple[Item, ...]:
+    return next(i for i in items if isinstance(i, Group) and i.cls == "dimensions").items
+
+
+def _level_chain(items: tuple[Item, ...]) -> Group | None:
+    return next(
+        (i for i in _dimensions(items) if isinstance(i, Group) and i.cls == "dim-chain-y"), None
+    )
+
+
+def _levels(items: tuple[Item, ...]) -> list[str]:
+    chain = _level_chain(items)
+    assert chain is not None, "the panel was expected to carry a chain of levels"
+    return [i.content for i in chain.items if isinstance(i, Text) and i.cls == "dim-text"]
+
+
+def _chain_x(items: tuple[Item, ...]) -> float:
+    chain = _level_chain(items)
+    assert chain is not None, "the panel was expected to carry a chain of levels"
+    lines = [i for i in chain.items if isinstance(i, Line) and i.cls == "dim-line"]
+    assert lines and all(line.x1 == line.x2 == lines[0].x1 for line in lines)
+    return lines[0].x1
+
+
+def _balloon_reach(items: tuple[Item, ...]) -> float:
+    """The rightmost ink any balloon puts on the sheet."""
+    holes = next(i for i in items if isinstance(i, Group) and i.cls == "holes")
+    return max(i.cx + i.r for i in holes.items if isinstance(i, Circle) and i.cls == "balloon")
+
+
+def test_the_level_chain_states_every_row_and_both_outline_edges():
+    """The Y the row chains never state: each row's own height up the panel."""
+    _, items = _scene(_levelled(at(0, 10_000_000, index=1), at(20_000_000, -15_000_000, index=2)))
+
+    # 40 mm tall, so the edges are ±20 and the stations run -20, -15, 10, 20.
+    assert _levels(items) == ["5.000", "25.000", "10.000"]
+
+
+def test_the_level_chain_extends_every_station_it_dimensions():
+    """Four stations, four extension lines, each at its own station's height."""
+    layout, items = _scene(_levelled(at(0, 10_000_000, index=1), at(0, -15_000_000, index=2)))
+    chain = _level_chain(items)
+    assert chain is not None
+
+    extensions = [i for i in chain.items if isinstance(i, Line) and i.cls == "extension"]
+    assert sorted(line.y1 for line in extensions) == sorted(
+        layout.point(0.0, y)[1] for y in (-20.0, -15.0, 10.0, 20.0)
+    )
+    assert all(line.y1 == line.y2 for line in extensions), "a level's extension runs flat"
+
+
+def test_a_level_s_extension_leaves_the_first_hole_on_its_row():
+    """A row chain's extension leaves the hole it dimensions, so a level's does.
+
+    It leaves the *first* hole rather than the last, so that on its way out to
+    the chain it passes through every hole on the row and the reader can see
+    which holes the level was measured to. Leaving the outline instead would
+    draw the same line whatever the row held.
+    """
+    layout, items = _scene(
+        _levelled(
+            at(-10_000_000, 10_000_000, index=1),
+            at(25_000_000, 10_000_000, index=2),
+            at(5_000_000, -15_000_000, index=3),
+            at(20_000_000, -15_000_000, index=4),
+        )
+    )
+    chain = _level_chain(items)
+    assert chain is not None
+    starts = {
+        round(line.y1, 6): line.x1
+        for line in chain.items
+        if isinstance(line, Line) and line.cls == "extension"
+    }
+
+    def leaves(y: float) -> float:
+        return starts[round(layout.point(0.0, y)[1], 6)]
+
+    assert leaves(10.0) == pytest.approx(layout.point(-10.0, 0.0)[0]), "not the row's last"
+    assert leaves(-15.0) == pytest.approx(layout.point(5.0, 0.0)[0]), "not the row's last"
+    # The outline's own edges carry no hole, so they leave the outline. They are
+    # the panel's top and bottom, so a line drawn across would sit on the
+    # outline itself; it starts at the corner the chain stands beyond instead.
+    assert leaves(20.0) == pytest.approx(layout.point(30.0, 0.0)[0])
+    assert leaves(-20.0) == pytest.approx(layout.point(30.0, 0.0)[0])
+
+
+def test_an_edge_station_leaves_the_outline_and_not_the_content_extent():
+    """A hole hanging over the edge widens the content but not the panel.
+
+    The station is the outline's own edge, so that is where its extension line
+    starts; leaving the content extent would begin the line out in space beside
+    a panel the drawing says is 60 mm wide.
+    """
+    layout, items = _scene(_levelled(at(32_000_000, 0, index=1)))
+    chain = _level_chain(items)
+    assert chain is not None
+
+    outline_x = layout.point(30.0, 0.0)[0]
+    content_x = layout.point(layout.half_width, 0.0)[0]
+    assert content_x > outline_x, "this fixture needs the hole to hang over the edge"
+
+    top = min(
+        (line for line in chain.items if isinstance(line, Line) and line.cls == "extension"),
+        key=lambda line: line.y1,
+    )
+    assert top.x1 == pytest.approx(outline_x)
+
+
+def test_the_level_chain_is_absent_when_the_panel_has_no_holes():
+    """Two stations would restate the height the overall dimension already gives."""
+    _, items = _scene(_levelled())
+
+    assert _level_chain(items) is None
+
+
+@pytest.mark.parametrize("scale", [1.0, 0.5, 4.0])
+def test_the_level_chain_measures_stations_not_scaled_sheet_coordinates(scale: float):
+    """The subtraction is the stations', so the printed value survives the scale."""
+    _, items = _scene(_levelled(at(0, 10_000_000, index=1)), scale)
+
+    assert _levels(items) == ["30.000", "10.000"]
+
+
+def test_two_holes_on_one_level_are_one_station():
+    """Rows group by exact Y, so a shared level is dimensioned once, not twice."""
+    _, items = _scene(
+        _levelled(at(-10_000_000, 10_000_000, index=1), at(10_000_000, 10_000_000, index=2))
+    )
+
+    assert _levels(items) == ["30.000", "10.000"]
+
+
+def test_a_row_level_on_the_outline_edge_is_not_a_second_station():
+    """Exact nanometre equality collapses the hole's level into the edge's."""
+    _, items = _scene(_levelled(at(0, 20_000_000, index=1)))
+
+    assert _levels(items) == ["40.000"], "one span edge to edge, not a zero beside it"
+
+
+def test_both_chains_stand_off_the_panel_by_the_same_distance():
+    """Below and beside are one system, so they stand off alike.
+
+    Two literals that happened to agree would let one drift from the other and
+    leave the sheet's dimensions ruled at two different distances out.
+    """
+    layout, items = _scene(_levelled(at(0, 10_000_000, index=1)))
+    row = next(i for i in _dimensions(items) if isinstance(i, Group) and i.cls == "dim-chain")
+    below = next(i for i in row.items if isinstance(i, Line) and i.cls == "dim-line")
+
+    content_bottom = layout.point(0.0, -layout.half_height)[1]
+    content_right = layout.point(layout.half_width, 0.0)[0]
+
+    assert below.y1 - content_bottom == pytest.approx(_chain_x(items) - content_right)
+
+
+def test_a_level_s_arrowheads_sit_on_its_stations_and_point_outward():
+    """The tip is on the station and the tail lies inside the span it measures.
+
+    Reversed, the pair reads as a distance measured from nothing — and nothing
+    about the printed value catches it, because the value is a subtraction.
+    """
+    _, items = _scene(_levelled(at(0, 20_000_000, index=1)))
+    chain = _level_chain(items)
+    assert chain is not None
+
+    line = next(i for i in chain.items if isinstance(i, Line) and i.cls == "dim-line")
+    heads = [i for i in chain.items if isinstance(i, Polygon) and i.cls == "arrow"]
+    assert len(heads) == 2, "one span, so one arrowhead at each of its two ends"
+
+    span = sorted((line.y1, line.y2))
+    middle = sum(span) / 2.0
+    for head in heads:
+        (_, tip_y), *tail = head.points
+        assert tip_y in span, "a tip belongs on a station, not along the line"
+        assert all(abs(y - middle) < abs(tip_y - middle) for _, y in tail)
+
+
+def test_the_level_chain_hugs_the_panel_when_the_balloons_stay_inside_it():
+    """Most panels keep every balloon within the outline.
+
+    The chain stands outboard of the balloons, so on such a panel it must stand
+    off the outline itself — reserving the worst case would leave it floating in
+    a gap nothing occupies.
+    """
+    layout, items = _scene(_levelled(at(0, 10_000_000, index=1)))
+    content_right = layout.point(layout.half_width, 0.0)[0]
+
+    assert _balloon_reach(items) < content_right, "this fixture needs its balloon inside"
+    assert _chain_x(items) == pytest.approx(content_right + CHAIN_STANDOFF)
+
+
+def test_the_level_chain_clears_a_balloon_that_escapes_the_outline():
+    """A hole hard against the right edge throws its balloon past the panel."""
+    layout, items = _scene(_levelled(at(26_500_000, 0, index=1)))
+    reach = _balloon_reach(items)
+
+    assert reach > layout.point(layout.half_width, 0.0)[0], "this fixture needs it outside"
+    assert _chain_x(items) == pytest.approx(reach + CHAIN_STANDOFF)
+
+
+@pytest.mark.parametrize(
+    "hole",
+    [
+        pytest.param(at(0, 0, index=1), id="centred"),
+        pytest.param(at(26_500_000, 0, index=1), id="against-the-edge"),
+        # Small enough that the drawn radius is the floor rather than the hole,
+        # which is the case the bound is at its widest for.
+        pytest.param(at(29_999_500, 0, 1_000, index=1), id="floored-radius"),
+    ],
+)
+@pytest.mark.parametrize("scale", [1.0, 0.25, 2.0])
+def test_the_level_chain_and_its_label_stay_inside_the_right_allowance(hole: Hole, scale: float):
+    """Placement is measured, but the width budget is the scale-free bound.
+
+    ``RIGHT_ALLOWANCE`` is reserved before the scale is known, so it cannot be
+    the measured overhang. The two agree only while the measurement stays under
+    the bound the reservation is built from, which is what this checks.
+    """
+    layout, items = _scene(_levelled(hole), scale)
+    content_right = layout.point(layout.half_width, 0.0)[0]
+
+    assert balloon_overhang(layout, _levelled(hole)) <= MAX_BALLOON_OVERHANG
+    assert _chain_x(items) + LEVEL_CHAIN_LABEL <= content_right + RIGHT_ALLOWANCE
+
+
+def test_the_balloon_overhang_never_reports_a_balloon_pulled_inside_the_panel():
+    """It answers how far past the outline the balloons reach, not how far short."""
+    data = _levelled(at(0, 0, index=1))
+    layout, _ = _scene(data)
+
+    assert balloon_overhang(layout, data) == 0.0

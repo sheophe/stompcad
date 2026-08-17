@@ -833,8 +833,10 @@ def test_a_hole_on_the_panel_edge_is_one_station_and_not_two():
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
-    assert [e.text for e in by_class(root, "dim-text", "text")] == ["60.000"]
+    # Scoped to the row chain: the chain of row levels states its own stations
+    # in the same class, and this is a claim about the row's.
     chain = by_class(root, "dim-chain")[0]
+    assert [e.text for e in by_class(chain, "dim-text", "text")] == ["60.000"]
     assert len(by_class(chain, "extension", "line")) == 2, "two stations, not three"
 
 
@@ -891,6 +893,52 @@ def test_the_overall_dimension_is_the_outline_the_model_holds():
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
     overall = {e.text for e in by_class(root, "dim-overall", "text")}
     assert overall == {"112.400", "60.500"}
+
+
+def test_one_chain_of_row_levels_states_the_y_the_row_chains_never_do(
+    panel: DrillData, root: ET.Element
+):
+    """Every row shares one Y, so one chain gives the height of every hole.
+
+    The row chains run left to right and say nothing about how far up the panel
+    a row sits; without this chain that distance is on no sheet at all.
+    """
+    chains = by_class(root, "dim-chain-y")
+    assert len(chains) == 1, "one chain of levels, however many rows or columns"
+
+    assert panel.reference is not None
+    assert [e.text for e in by_class(chains[0], "dim-text", "text")] == [
+        "11.250",  # bottom edge up to the -18.750 row
+        "36.750",  # that row up to the 18.000 one
+        "12.000",  # and on to the top edge
+    ]
+    # Four stations, four extension lines: two rows and the outline's own edges.
+    assert len(by_class(chains[0], "extension", "line")) == 4
+
+
+def test_the_chain_of_row_levels_reads_bottom_to_top(root: ET.Element):
+    """ISO 129-1: a vertical dimension is read from the right of the sheet."""
+    labels = by_class(by_class(root, "dim-chain-y")[0], "dim-text", "text")
+
+    assert labels
+    assert all("rotate(-90" in (e.get("transform") or "") for e in labels)
+
+
+def test_the_chain_of_row_levels_stands_clear_of_the_panel_and_its_balloons(
+    root: ET.Element,
+):
+    """It is drawn outboard of everything, so nothing it crosses is its own."""
+    chain = by_class(root, "dim-chain-y")[0]
+    dimension = by_class(chain, "dim-line", "line")
+    assert dimension
+
+    outline = by_class(root, "outline", "rect")[0]
+    panel_right = num(outline, "x") + num(outline, "width")
+    balloons = by_class(root, "balloon", "circle")
+    reach = max(num(b, "cx") + num(b, "r") for b in balloons)
+
+    assert reach < panel_right, "this fixture keeps every balloon inside the panel"
+    assert all(num(line, "x1") > panel_right for line in dimension)
 
 
 def test_vertical_dimension_text_is_rotated(root: ET.Element):

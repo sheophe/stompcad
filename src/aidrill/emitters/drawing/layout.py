@@ -28,6 +28,12 @@ __all__ = [
     "BOTTOM_BASE",
     "ROW_PITCH",
     "GUTTER",
+    "BALLOON_LEADER",
+    "BALLOON_RADIUS",
+    "HOLE_MIN_RADIUS",
+    "CHAIN_STANDOFF",
+    "LEVEL_CHAIN_LABEL",
+    "MAX_BALLOON_OVERHANG",
     "TITLE_BLOCK_HEIGHT",
     "TITLE_BLOCK_SHARE",
     "SCHEDULE_MIN_WIDTH",
@@ -46,11 +52,39 @@ PREFERRED_SCALES = (
 
 # space reserved inside the drawing area for drawing furniture, in sheet mm
 LEFT_ALLOWANCE = 14.0  # left-hand height dimension (rotated label; see build._build_overall)
-RIGHT_ALLOWANCE = 14.0  # balloons
 TOP_ALLOWANCE = 16.0  # overall width dimension
 BOTTOM_BASE = 12.0  # below the last chain dimension
 ROW_PITCH = 8.0  # between stacked chain dimensions
 GUTTER = 4.0
+
+#: How a balloon is drawn: a leader this far beyond the hole's own radius, then
+#: a circle of this radius; and the smallest radius a hole is ever drawn at.
+#: ``build`` draws them and the right-hand reservation below budgets for them,
+#: so, like ``ROW_PITCH``, they are stated once and read from both places.
+BALLOON_LEADER = 7.0
+BALLOON_RADIUS = 3.0
+HOLE_MIN_RADIUS = 0.4
+
+#: Between the content already drawn and the first dimension line standing off
+#: it. The row chains below the panel and the chain of levels beside it read as
+#: one system, so they stand off by the one distance rather than by two literals
+#: that agree. ``LEVEL_CHAIN_LABEL`` is the room the level chain's rotated label
+#: takes outboard of itself.
+CHAIN_STANDOFF = 8.0
+LEVEL_CHAIN_LABEL = 4.0
+
+#: The furthest past the content extent a balloon can reach. It leaves its hole
+#: at 45°, so the hole's own radius — which the extent already counts — eats
+#: into the leader's horizontal component, and the bound falls out at the drawn
+#: radius that gives back the least. Most panels are nowhere near it: a balloon
+#: only escapes the outline when its hole is hard against the edge.
+MAX_BALLOON_OVERHANG = math.sqrt(0.5) * (HOLE_MIN_RADIUS + BALLOON_LEADER) + BALLOON_RADIUS
+
+#: Balloons, then the chain, then its label. A fitted sheet reserves this before
+#: it knows the scale, so it is the bound above and not the overhang ``build``
+#: measures when it places the chain; placement stays inside it because the
+#: measurement can never exceed the bound.
+RIGHT_ALLOWANCE = MAX_BALLOON_OVERHANG + CHAIN_STANDOFF + LEVEL_CHAIN_LABEL
 
 #: The deepest the title block is drawn, and the share of a short drawing space
 #: it may take instead. ISO 7200 fixes the block's width, not its height.
