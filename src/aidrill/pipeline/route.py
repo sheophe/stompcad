@@ -19,15 +19,10 @@ if TYPE_CHECKING:
 __all__ = ["RouteHoles"]
 
 
-def _reading_order(hole: Hole) -> tuple[int, int]:
-    """Descending Y, then ascending X — the order you would read the panel in."""
-    return (-hole.y_nm, hole.x_nm)
-
-
 def _total_order(hole: Hole) -> tuple[int, int, float, float, float]:
     """Reading order, then the measurement, so no two holes can tie.
 
-    ``_reading_order`` ties for two holes at one nominal point, and ``min``
+    Nominal position ties for two holes at one point, and ``min``
     would then keep whichever arrived first — input order deciding an answer
     that must be geometric. The measurement that produced each hole breaks it.
     Two holes equal in both are interchangeable, so no output distinguishes them.
@@ -97,11 +92,11 @@ class RouteHoles:
     name: ClassVar[str] = "route"
 
     def __init__(self, key: Callable[[Hole], SupportsRichComparison] | None = None) -> None:
-        self.key = _reading_order if key is None else key
+        self.key = key
 
     def describe(self) -> StageRun:
         """Record ``default`` or the effective key callable's name."""
-        if self.key is _reading_order:
+        if self.key is None:
             key = "default"
         else:
             key = getattr(self.key, "__name__", type(self.key).__name__)
@@ -109,9 +104,7 @@ class RouteHoles:
 
     def apply(self, data: DrillData) -> DrillData:
         ordered = (
-            _routed(data.holes)
-            if self.key is _reading_order
-            else sorted(data.holes, key=self.key)
+            _routed(data.holes) if self.key is None else sorted(data.holes, key=self.key)
         )
         return data.with_holes(
             hole.with_number(number) for number, hole in enumerate(ordered, start=1)
