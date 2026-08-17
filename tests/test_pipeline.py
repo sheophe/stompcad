@@ -367,16 +367,20 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
     @pytest.mark.parametrize(
         "drawn, kept, findings",
         [
-            ((ON_GRID, TIED), 4, ["off-grid", "duplicate-hole"]),
-            ((TIED, ON_GRID), 9, ["off-grid", "duplicate-hole", "grid-ambiguous"]),
+            ((ON_GRID, TIED), ON_GRID, ["off-grid", "duplicate-hole"]),
+            ((TIED, ON_GRID), TIED, ["off-grid", "duplicate-hole", "grid-ambiguous"]),
         ],
         ids=["on-grid drawn first", "tied drawn first"],
     )
     def test_the_verdict_describes_the_hole_that_survived(self, drawn, kept, findings):
-        """One panel, two traversal orders, and the answer follows the survivor."""
+        """One panel, two traversal orders, and the answer follows the survivor.
+
+        ``RouteHoles`` renumbers every survivor to 1, so the raw measurement —
+        not the now-reassigned index — is what still distinguishes them.
+        """
         out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(_phase(*drawn))
 
-        assert [hole.index for hole in out.holes] == [kept]
+        assert [hole.raw.x for hole in out.holes] == [kept.x]
         assert codes(out) == findings
 
     def test_every_named_tie_is_a_place_the_artifacts_will_list(self):
@@ -399,7 +403,7 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
             )
         )
 
-        assert [hole.index for hole in out.holes] == [4, 1]
+        assert positions(out) == [(-20_000_000, 18_000_000), (250_000, 18_000_000)]
         assert codes(out) == ["unknown-diameter"]
 
 
@@ -520,7 +524,8 @@ class TestCheckReferenceSize:
 
 
 class TestRouteHoles:
-    def test_default_is_descending_y_then_ascending_x(self):
+    def test_default_routes_tool_major_blocks_ascending_by_size(self):
+        """The 5 mm block is drilled and numbered before the 7 mm block."""
         data = make_data(
             at(20_000_000, -18_750_000, 5_000_000, index=4),
             at(-20_000_000, 18_000_000, index=1),
@@ -529,10 +534,10 @@ class TestRouteHoles:
         )
         out = RouteHoles().apply(data)
         assert positions(out) == [
-            (-40_000_000, 18_000_000),
-            (-20_000_000, 18_000_000),
             (-20_000_000, -18_750_000),
             (20_000_000, -18_750_000),
+            (-40_000_000, 18_000_000),
+            (-20_000_000, 18_000_000),
         ]
 
     def test_accepts_a_custom_key(self):
@@ -609,18 +614,29 @@ class TestPipelineComposition:
         assert codes(out) == ["a", "b", "c"]
 
     def test_stage_order_is_observable(self):
-        """Sorting before deduplicating keeps a different hole."""
-        data = make_data(
-            at(10_000_000, 5_000_000, 7_000_000, index=7),
-            at(10_000_000, 5_000_000, 7_000_000, index=1),
+        """Sorting before deduplicating keeps a different hole.
+
+        Both candidates share one quantised position, so ``RouteHoles``
+        renumbers whichever survives to 1 regardless of stage order — the raw
+        measurement, which renumbering never touches, is what still tells
+        them apart.
+        """
+        hole_a = at(10_000_000, 5_000_000, 7_000_000, index=7)
+        hole_b = at(10_000_000, 5_000_000, 7_000_000, index=1)
+        hole_a = dataclasses.replace(
+            hole_a, raw=dataclasses.replace(hole_a.raw, x=Millimetre(10.0007))
         )
+        hole_b = dataclasses.replace(
+            hole_b, raw=dataclasses.replace(hole_b.raw, x=Millimetre(9.9993))
+        )
+        data = make_data(hole_a, hole_b)
         dedupe, sort = Deduplicate(), RouteHoles(key=lambda h: h.index)
 
         dedupe_first = Pipeline([dedupe, sort]).run(data)
         sort_first = Pipeline([sort, dedupe]).run(data)
 
-        assert [h.index for h in dedupe_first.holes] == [7]
-        assert [h.index for h in sort_first.holes] == [1]
+        assert [h.raw.x for h in dedupe_first.holes] == [hole_a.raw.x]
+        assert [h.raw.x for h in sort_first.holes] == [hole_b.raw.x]
 
     def test_the_phase_and_the_pipeline_compose_into_one_tool_for_a_noisy_row(self):
         """The library flow, end to end, on the shape of panel it meets."""
@@ -650,13 +666,15 @@ class TestPipelineComposition:
         assert len(out.holes) == 4
         assert list(out.tools()) == [5_000_000, 7_000_000]
         assert codes(out) == ["duplicate-hole"]
+        # RouteHoles groups tool-major, 5 mm ascending before 7 mm, each block
+        # routed from its topmost-then-leftmost hole.
         assert positions(out) == [
-            (-40_000_000, 18_000_000),
-            (-20_000_000, 18_000_000),
             (-19_000_000, -18_750_000),
             (19_000_000, -18_750_000),
+            (-40_000_000, 18_000_000),
+            (-20_000_000, 18_000_000),
         ]
-        assert [hole.index for hole in out.holes] == [4, 9, 6, 2]
+        assert [hole.index for hole in out.holes] == [1, 2, 3, 4]
 
 
 # --------------------------------------------------------------------------

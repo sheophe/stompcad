@@ -1001,27 +1001,31 @@ def test_a_declared_part_replaces_the_candidate_list():
     assert not [line for line in lines if "candidates" in line]
 
 
-def test_the_hole_table_names_holes_by_identity_not_by_position(fake_source, capsys):
-    """The ``No.`` column is ``Hole.index``, the identity the diagnostics and the drawing's
-    balloons both use.
+def test_the_hole_table_numbers_follow_the_route_not_the_artwork_order(fake_source, capsys):
+    """The ``No.`` column is ``Hole.index``: the drill sequence ``RouteHoles``
+    assigns, the same identity the diagnostics and the drawing's balloons use —
+    not the order the circles were drawn in.
     """
     fake_source(
         read(
             holes=[
+                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 9),
                 RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
                 RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 1),
-                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 9),
             ]
         )
     )
     cli.main([str(FIXTURE)])
-    numbers = [
-        int(line.split()[0])
+    rows = [
+        line.split()
         for line in capsys.readouterr().out.splitlines()
         if line.startswith("  ") and line.split() and line.split()[0].isdigit()
     ]
+    numbers = [int(row[0]) for row in rows]
+    xs = [row[2] for row in rows]
 
-    assert numbers == [4, 1, 9]
+    assert numbers == [1, 2, 3]
+    assert xs == ["-20.000", "0.000", "20.000"], "route order, not the drawn order 20, -20, 0"
 
 
 def test_verbose_reports_every_stage_the_cli_built(fake_source, capsys):
@@ -1255,12 +1259,12 @@ def test_the_drill_file_and_the_drawing_agree_with_each_other(tmp_path, capsys):
         assert drawing_tools[tool] == diameter  # every row uses its own tool's bit
 
     # 3. the drilling order is the balloon order, grouped by tool, and both name
-    # holes by ``Hole.index``. The literal is the fixture's traversal order, which
-    # is deliberately not 1..7: were either artifact numbering by position in its
-    # own list, this would read 1, 2, 3, … and pass while naming different holes
-    # than every diagnostic does. 6 is absent because it is the duplicate the
-    # pipeline dropped, and numbering runs over the artwork, not the survivors.
-    assert balloons == [number for number, *_ in rows] == [3, 4, 5, 7, 8, 1, 2]
+    # holes by ``Hole.index`` — the drill sequence ``RouteHoles`` assigns, 1..n
+    # over the routed, deduplicated holes, not the artwork's traversal order.
+    # The position join below is the real cross-artifact check: it proves the
+    # two artifacts agree on which physical hole each number names, not merely
+    # that both count 1..7.
+    assert balloons == [number for number, *_ in rows] == [1, 2, 3, 4, 5, 6, 7]
     # The drill file is in a lower-left frame and the schedule in the centre
     # frame; the two differ by a pure translation, so the corner of the bounding
     # box recovers it without the test knowing the panel size.

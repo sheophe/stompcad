@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import replace
+from itertools import pairwise
 from typing import TYPE_CHECKING, ClassVar
 
 from ..model import DrillData, Hole, StageRun
@@ -23,8 +25,65 @@ def _reading_order(hole: Hole) -> tuple[int, int]:
     return (-hole.y_nm, hole.x_nm)
 
 
+def _distance_sq(a: Hole, b: Hole) -> int:
+    """Squared distance in whole nanometres — exact, and monotone in distance."""
+    return (a.x_nm - b.x_nm) ** 2 + (a.y_nm - b.y_nm) ** 2
+
+
+def _nearest_neighbour(block: list[Hole]) -> list[Hole]:
+    """Visit the topmost-then-leftmost hole, then always the nearest unvisited."""
+    remaining, route = list(block), []
+    cursor: Hole | None = None
+    while remaining:
+        if cursor is None:
+            nxt = min(remaining, key=_reading_order)
+        else:
+            # Bound before the lambda so the closure is over a Hole, not an
+            # Optional — mypy narrows the local, never the enclosing name.
+            here = cursor
+            nxt = min(remaining, key=lambda h: (_distance_sq(here, h), *_reading_order(h)))
+        remaining.remove(nxt)
+        route.append(nxt)
+        cursor = nxt
+    return route
+
+
+def _path_length(route: list[Hole]) -> float:
+    """Sum of leg lengths. Real distance, because a reversal changes legs
+    unequally and squared lengths would not compare correctly."""
+    return sum(_distance_sq(a, b) ** 0.5 for a, b in pairwise(route))
+
+
+def _two_opt(route: list[Hole]) -> list[Hole]:
+    """Reverse the first segment that shortens the path, keeping the start fixed."""
+    improved = True
+    while improved:
+        improved = False
+        for i in range(1, len(route)):
+            for j in range(i + 1, len(route)):
+                candidate = route[:i] + route[i : j + 1][::-1] + route[j + 1 :]
+                if _path_length(candidate) < _path_length(route) - 1e-9:
+                    route, improved = candidate, True
+    return route
+
+
+def _routed(holes: Sequence[Hole]) -> list[Hole]:
+    """Tool-major blocks, ascending by size, each routed on its own."""
+    ordered: list[Hole] = []
+    for diameter in sorted({hole.diameter_nm for hole in holes}):
+        block = [hole for hole in holes if hole.diameter_nm == diameter]
+        ordered += _two_opt(_nearest_neighbour(block))
+    return ordered
+
+
+def _renumbered(hole: Hole, number: int) -> Hole:
+    """Assign the drill sequence number, keeping ``Hole.index`` and
+    ``Hole.raw.index`` in the one identity ``Hole.__post_init__`` requires."""
+    return replace(hole, index=number, raw=replace(hole.raw, index=number))
+
+
 class RouteHoles:
-    """Order holes for emission by ``key`` (default: descending Y, then ascending X)."""
+    """Route holes tool-major by ``key`` (default: nearest-neighbour plus 2-opt per block)."""
 
     name: ClassVar[str] = "route"
 
@@ -40,4 +99,11 @@ class RouteHoles:
         return StageRun(self.name, (("key", key),))
 
     def apply(self, data: DrillData) -> DrillData:
-        return data.with_holes(sorted(data.holes, key=self.key))
+        ordered = (
+            _routed(data.holes)
+            if self.key is _reading_order
+            else sorted(data.holes, key=self.key)
+        )
+        return data.with_holes(
+            _renumbered(hole, number) for number, hole in enumerate(ordered, start=1)
+        )
