@@ -25,6 +25,17 @@ def _reading_order(hole: Hole) -> tuple[int, int]:
     return (-hole.y_nm, hole.x_nm)
 
 
+def _total_order(hole: Hole) -> tuple[int, int, float, float, float]:
+    """Reading order, then the measurement, so no two holes can tie.
+
+    ``_reading_order`` ties for two holes at one nominal point, and ``min``
+    would then keep whichever arrived first — input order deciding an answer
+    that must be geometric. The measurement that produced each hole breaks it.
+    Two holes equal in both are interchangeable, so no output distinguishes them.
+    """
+    return (-hole.y_nm, hole.x_nm, hole.raw.x, hole.raw.y, hole.raw.diameter)
+
+
 def _distance_sq(a: Hole, b: Hole) -> int:
     """Squared distance in whole nanometres — exact, and monotone in distance."""
     return (a.x_nm - b.x_nm) ** 2 + (a.y_nm - b.y_nm) ** 2
@@ -36,12 +47,12 @@ def _nearest_neighbour(block: list[Hole]) -> list[Hole]:
     cursor: Hole | None = None
     while remaining:
         if cursor is None:
-            nxt = min(remaining, key=_reading_order)
+            nxt = min(remaining, key=_total_order)
         else:
             # Bound before the lambda so the closure is over a Hole, not an
             # Optional — mypy narrows the local, never the enclosing name.
             here = cursor
-            nxt = min(remaining, key=lambda h: (_distance_sq(here, h), *_reading_order(h)))
+            nxt = min(remaining, key=lambda h: (_distance_sq(here, h), *_total_order(h)))
         remaining.remove(nxt)
         route.append(nxt)
         cursor = nxt
@@ -83,7 +94,12 @@ def _renumbered(hole: Hole, number: int) -> Hole:
 
 
 class RouteHoles:
-    """Route holes tool-major by ``key`` (default: nearest-neighbour plus 2-opt per block)."""
+    """Plan the drilling sequence and number the holes along it.
+
+    By default: one contiguous block per diameter, blocks ascending by size,
+    each routed by nearest-neighbour then 2-opt on its own. A supplied ``key``
+    replaces all of that with a flat ordering, so it can break tool contiguity.
+    """
 
     name: ClassVar[str] = "route"
 

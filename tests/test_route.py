@@ -6,9 +6,9 @@ import itertools
 
 import pytest
 
-from aidrill.model import DrillData, ReferenceOutline
+from aidrill.model import DrillData, Hole, RawHole, ReferenceOutline
 from aidrill.pipeline import RouteHoles
-from aidrill.units import Nanometre
+from aidrill.units import Millimetre, Nanometre
 from tests.conftest import at
 
 __all__: list[str] = []
@@ -18,6 +18,33 @@ def panel(*holes):
     return DrillData(
         holes=holes, reference=ReferenceOutline(Nanometre(120_000_000), Nanometre(94_000_000))
     )
+
+
+def test_two_holes_at_one_nominal_point_are_ordered_by_their_measurements():
+    """Nominal position alone ties here, and a tie must not be settled by arrival.
+
+    ``Deduplicate`` normally collapses these, but ``RouteHoles`` is an
+    independent stage and a caller may compose it alone. The measurements
+    differ, so the order is still decided by geometry rather than by input.
+    """
+    ref = ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000))
+
+    def hole(raw_x: float, index: int) -> Hole:
+        return Hole(
+            Nanometre(0),
+            Nanometre(0),
+            Nanometre(7_000_000),
+            RawHole(Millimetre(raw_x), Millimetre(0.0), Millimetre(7.0), index),
+            index,
+        )
+
+    left, right = hole(0.0001, 1), hole(0.0002, 2)
+    routes = {
+        tuple(h.raw.x for h in RouteHoles().apply(DrillData(holes=pair, reference=ref)).holes)
+        for pair in ((left, right), (right, left))
+    }
+
+    assert routes == {(0.0001, 0.0002)}, "input order reached the routed sequence"
 
 
 def test_each_tool_occupies_one_contiguous_block():
