@@ -208,17 +208,23 @@ def _centring_marks(sheet: Sheet, x0: float, y0: float, x1: float, y1: float) ->
 
 
 def _trim_marks(sheet: Sheet) -> list[Item]:
-    """4.5: two overlapping 10 x 5 rectangles in the border at each edge."""
+    """4.5: two overlapping 10 x 5 rectangles in the border at each edge.
+
+    Each pair straddles the corner it marks, so the L it forms opens away from
+    the sheet and a guillotine set to either arm cuts to the same point.
+    """
     marks: list[Item] = []
     for corner_x, corner_y in (
         (0.0, 0.0),
-        (sheet.width - TRIM_MARK_LONG, 0.0),
-        (0.0, sheet.height - TRIM_MARK_LONG),
-        (sheet.width - TRIM_MARK_LONG, sheet.height - TRIM_MARK_LONG),
+        (sheet.width, 0.0),
+        (0.0, sheet.height),
+        (sheet.width, sheet.height),
     ):
-        # The pair overlaps at the corner: one lying along each edge.
-        marks.append(_filled_box(corner_x, corner_y, TRIM_MARK_LONG, TRIM_MARK_SHORT))
-        marks.append(_filled_box(corner_x, corner_y, TRIM_MARK_SHORT, TRIM_MARK_LONG))
+        for width, height in ((TRIM_MARK_LONG, TRIM_MARK_SHORT), (TRIM_MARK_SHORT, TRIM_MARK_LONG)):
+            # Both arms run inwards from the corner, whichever corner it is.
+            x = corner_x if corner_x == 0.0 else corner_x - width
+            y = corner_y if corner_y == 0.0 else corner_y - height
+            marks.append(_filled_box(x, y, width, height))
     return marks
 
 
@@ -257,19 +263,21 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
     for field in grid_divisions(extent, count):
         edges.append(edges[-1] + field)
 
-    #: The band the characters sit in: between the trimmed edge and the frame.
-    # 4.2 widens only the left edge to the filing margin; the top, bottom and
-    # right edges keep the plain border, so the far band is always plain width
-    # even though the near band is not, on the axis running down the sheet.
+    #: The band the characters sit in, measured inwards from the frame rather
+    # than outwards from the trimmed edge. 4.2 widens the left edge to 20 mm
+    # "including the frame ... used as a filing margin", and that margin lies
+    # outside the grid reference border, so every band is the same depth and
+    # the left one simply starts 10 mm further in.
     near = PLAIN_BORDER if horizontal else FILING_BORDER
+    near_edge = near - PLAIN_BORDER
     far = other - PLAIN_BORDER
     for boundary in edges[1:-1]:
         if horizontal:
-            items.append(Line(boundary, 0.0, boundary, near, pen, cls="grid-line"))
+            items.append(Line(boundary, near_edge, boundary, near, pen, cls="grid-line"))
             if both_sides:
                 items.append(Line(boundary, far, boundary, other, pen, cls="grid-line"))
         else:
-            items.append(Line(0.0, boundary, near, boundary, pen, cls="grid-line"))
+            items.append(Line(near_edge, boundary, near, boundary, pen, cls="grid-line"))
             if both_sides:
                 items.append(Line(far, boundary, other, boundary, pen, cls="grid-line"))
 
@@ -278,13 +286,13 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
         # Numerals run left to right; letters run from the top downwards.
         label = str(index + 1) if horizontal else GRID_LETTERS[index]
         if horizontal:
-            items.append(_grid_label(centre, near / 2.0, label))
+            items.append(_grid_label(centre, near - PLAIN_BORDER / 2.0, label))
             if both_sides:
                 items.append(_grid_label(centre, other - PLAIN_BORDER / 2.0, label))
         else:
             # A4's letters are on the right; a larger sheet has them on both.
             if both_sides:
-                items.append(_grid_label(near / 2.0, centre, label))
+                items.append(_grid_label(near - PLAIN_BORDER / 2.0, centre, label))
             items.append(_grid_label(other - PLAIN_BORDER / 2.0, centre, label))
     return items
 

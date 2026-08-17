@@ -235,18 +235,34 @@ def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
     ]
 
     assert len(marks) == 8
-    corners: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
+    sheet = layout.sheet
+    boxes: list[tuple[float, float, float, float]] = []
     for mark in marks:
         assert len(mark.points) == 4
         xs = {round(x, 6) for x, _ in mark.points}
         ys = {round(y, 6) for _, y in mark.points}
         sides = sorted((max(xs) - min(xs), max(ys) - min(ys)))
         assert sides == [TRIM_MARK_SHORT, TRIM_MARK_LONG]
-        corners.setdefault((min(xs), min(ys)), []).append((min(xs), min(ys), max(xs), max(ys)))
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
 
-    # Both rectangles at one corner share their near corner point, so grouping
-    # by it finds the pair the name promises: one per edge, four in all.
+    # Each pair straddles the corner it marks rather than sharing an anchor, so
+    # the pairs are found by the sheet corner they touch — one per corner, four
+    # in all. Grouping by a common minimum instead would pass for marks that all
+    # point the same way, which is the arrangement this checks against.
+    corners: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
+    for corner_x, corner_y in (
+        (0.0, 0.0),
+        (sheet.width, 0.0),
+        (0.0, sheet.height),
+        (sheet.width, sheet.height),
+    ):
+        corners[(corner_x, corner_y)] = [
+            box
+            for box in boxes
+            if corner_x in (box[0], box[2]) and corner_y in (box[1], box[3])
+        ]
     assert len(corners) == 4
+    assert sum(len(pair) for pair in corners.values()) == 8
     for pair in corners.values():
         assert len(pair) == 2
         (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = pair
@@ -356,21 +372,51 @@ def test_grid_lines_are_drawn_narrow():
     assert all(line.stroke.width == GRID_LINE_WIDTH for line in lines)
 
 
-def test_the_left_hand_grid_ticks_reach_the_filing_edge_frame():
-    """4.2 widens only the left border to the 20 mm filing margin, so a tick
-    drawn from the trimmed edge must reach that far to meet the frame — the
-    10 mm plain border every other edge uses would stop short of it."""
+def test_every_grid_reference_band_is_the_same_depth():
+    """4.4's band sits against the frame, so all four are one depth.
+
+    4.2 widens the left border to 20 mm "including the frame ... used as a
+    filing margin", and that margin lies outside the band. Measuring the band
+    from the trimmed edge instead would draw the left one at twice the depth of
+    the other three, which is visible on the page.
+    """
     from aidrill.emitters.drawing.build import grid_reference_items
     from aidrill.emitters.drawing.scene import Line
     from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     lines = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Line)]
-    left_ticks = [line for line in lines if line.x1 == 0.0]
-    right_ticks = [line for line in lines if line.x2 == A3_LANDSCAPE.width]
+    horizontal = [line for line in lines if line.y1 == line.y2]
+    vertical = [line for line in lines if line.x1 == line.x2]
+    width, height = A3_LANDSCAPE.width, A3_LANDSCAPE.height
 
-    assert left_ticks and right_ticks
-    assert all(line.x2 == FILING_BORDER for line in left_ticks)
-    assert all(line.x1 == A3_LANDSCAPE.width - PLAIN_BORDER for line in right_ticks)
+    left = [line for line in horizontal if min(line.x1, line.x2) < width / 2.0]
+    right = [line for line in horizontal if min(line.x1, line.x2) > width / 2.0]
+    top = [line for line in vertical if min(line.y1, line.y2) < height / 2.0]
+    bottom = [line for line in vertical if min(line.y1, line.y2) > height / 2.0]
+    assert left and right and top and bottom
+
+    for band in (left, right):
+        assert all(abs(line.x2 - line.x1) == PLAIN_BORDER for line in band)
+    for band in (top, bottom):
+        assert all(abs(line.y2 - line.y1) == PLAIN_BORDER for line in band)
+
+    # The left band is inset by the filing margin rather than being deeper.
+    assert all(min(line.x1, line.x2) == FILING_BORDER - PLAIN_BORDER for line in left)
+    assert all(max(line.x1, line.x2) == FILING_BORDER for line in left)
+    assert all(max(line.x1, line.x2) == width for line in right)
+
+
+def test_a_grid_letter_sits_at_the_centre_of_its_own_band():
+    """A label centred on the trimmed edge instead would sit in the filing margin."""
+    from aidrill.emitters.drawing.build import grid_reference_items
+    from aidrill.emitters.drawing.scene import Text
+    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+
+    labels = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Text)]
+    letters = [t for t in labels if t.content.isalpha()]
+    left = sorted({t.x for t in letters if t.x < A3_LANDSCAPE.width / 2.0})
+
+    assert left == [FILING_BORDER - PLAIN_BORDER / 2.0]
 
 
 @pytest.mark.parametrize(
