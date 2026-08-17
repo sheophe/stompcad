@@ -26,6 +26,11 @@ def quantise(
     """
     findings: list[Diagnostic] = list(raw.diagnostics)
     runs: list[StageRun] = []
+    # ADR-0006: geometry alone determines output. Sorting here, before any
+    # hole is quantised, is what stops artwork traversal order from reaching
+    # per-hole diagnostics, the survivor Deduplicate keeps, and the ties
+    # ReviewGridTies reports — three leaks, one source, fixed once.
+    measurements = sorted(raw.holes, key=lambda hole: (hole.x, hole.y, hole.diameter))
 
     reference, match, identified = enclosure.quantise(raw.reference, raw.centre)
     findings.extend(identified)
@@ -46,7 +51,7 @@ def quantise(
     findings.extend(positions.diagnostics)
 
     holes: list[Hole] = []
-    for measurement in raw.holes:
+    for measurement in measurements:
         diameter_nm, refused = diameters.quantise(measurement)
         findings.extend(refused)
         if diameter_nm is None:

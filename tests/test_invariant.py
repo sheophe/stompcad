@@ -11,7 +11,15 @@ import pytest
 
 from aidrill.emitters import get_emitter
 from aidrill.emitters.json_out import JsonEmitter
-from aidrill.model import DrillData, Hole, RawHole, ReferenceOutline
+from aidrill.model import (
+    DrillData,
+    Hole,
+    RawDrillData,
+    RawHole,
+    RawOutline,
+    ReferenceOutline,
+    SourceInfo,
+)
 from aidrill.pipeline import (
     Deduplicate,
     IdentifyHammondFootprint,
@@ -55,6 +63,42 @@ def test_element_order_cannot_reach_any_artifact(panel):
     expected = artifacts(raw, case)
 
     rng = random.Random(7)
+    for _ in range(25):
+        shuffled = list(raw.holes)
+        rng.shuffle(shuffled)
+        assert artifacts(replace(raw, holes=tuple(shuffled)), case) == expected
+
+
+def _synthetic_raw() -> RawDrillData:
+    """A panel neither ``tar.ai`` nor ``pax.ai`` can exercise: both are clean,
+    raising no per-hole diagnostic and holding no duplicate. This one has two
+    off-grid holes, whose diagnostics finding 1 appended in arrival order, and
+    a coincident pair, whose survivor finding 1 chose by arrival too.
+    """
+    return RawDrillData(
+        source=SourceInfo(path="synthetic.ai", drill_layer="Drill"),
+        reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
+        centre=(Millimetre(56.5), Millimetre(30.0)),
+        holes=(
+            RawHole(Millimetre(-20.13), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(20.13), Millimetre(18.0), Millimetre(5.0)),
+            RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(3.0)),
+            RawHole(Millimetre(0.0004), Millimetre(-0.0003), Millimetre(3.0)),
+        ),
+    )
+
+
+def test_a_panel_with_diagnostics_and_a_duplicate_is_permutation_stable():
+    """The regression test for finding 1: geometry alone determines output
+    even when the panel gives arrival order something to leak through — a
+    per-hole diagnostic and a coincident pair. Must fail if the sort
+    ``quantise()`` applies to ``raw.holes`` on entry is removed.
+    """
+    case = "1590B"
+    raw = _synthetic_raw()
+    expected = artifacts(raw, case)
+
+    rng = random.Random(11)
     for _ in range(25):
         shuffled = list(raw.holes)
         rng.shuffle(shuffled)

@@ -365,23 +365,23 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
     TIED = RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(7.0))
 
     @pytest.mark.parametrize(
-        "drawn, kept, findings",
-        [
-            ((ON_GRID, TIED), ON_GRID, ["off-grid", "duplicate-hole"]),
-            ((TIED, ON_GRID), TIED, ["off-grid", "duplicate-hole", "grid-ambiguous"]),
-        ],
+        "drawn",
+        [(ON_GRID, TIED), (TIED, ON_GRID)],
         ids=["on-grid drawn first", "tied drawn first"],
     )
-    def test_the_verdict_describes_the_hole_that_survived(self, drawn, kept, findings):
-        """One panel, two traversal orders, and the answer follows the survivor.
+    def test_the_verdict_does_not_depend_on_which_measurement_arrived_first(self, drawn):
+        """ADR-0006: geometry alone decides, not traversal order.
 
-        ``RouteHoles`` renumbers every survivor to 1, so the raw measurement —
-        not the now-reassigned index — is what still distinguishes them.
+        ``quantise`` sorts measurements by ``(x, y, diameter)`` before either
+        hole is processed, so the on-grid one — the smaller ``x`` — always
+        precedes the tied one, whichever the artwork listed first. Dedupe
+        therefore always keeps the on-grid measurement, and ``ReviewGridTies``
+        never sees the tied one as a survivor to flag.
         """
         out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(_phase(*drawn))
 
-        assert [hole.raw.x for hole in out.holes] == [kept.x]
-        assert codes(out) == findings
+        assert [hole.raw.x for hole in out.holes] == [self.ON_GRID.x]
+        assert codes(out) == ["off-grid", "duplicate-hole"]
 
     def test_every_named_tie_is_a_place_the_artifacts_will_list(self):
         """Every tied place names a hole that survives into emitted artefacts."""
