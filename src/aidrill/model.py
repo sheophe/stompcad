@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import total_ordering
 
+from .errors import EmitterError
 from .units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 __all__ = [
@@ -123,48 +124,42 @@ def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> N
 class RawHole:
     """One circle as the artwork measured it, in millimetres, before quantising.
 
-    ``index`` is the stable source traversal identity, numbered from 1 because
-    artefacts print it unaltered. Raw values remain available for provenance
-    and residual calculation.
+    No traversal identity is retained: ADR-0006 forbids artwork order from
+    reaching an artifact, so raw values exist only for provenance and residual
+    calculation.
     """
 
     x: Millimetre
     y: Millimetre
     diameter: Millimetre
-    index: int
 
     def __post_init__(self) -> None:
         _check_millimetres("RawHole", x=self.x, y=self.y, diameter=self.diameter)
-        if self.index < 1:
-            raise ValueError(
-                f"holes are numbered from 1, not {self.index}: this number is what "
-                f"the drawing balloons, the schedule and the report all print"
-            )
 
 
 @dataclass(frozen=True, slots=True)
 class Hole:
     """One drilled hole in the canonical frame.
 
-    Nominal coordinates and diameter are whole nanometres. ``index`` is stable
-    across transforms, must equal ``raw.index``, and inherits its floor of 1
-    from that agreement.
+    Nominal coordinates and diameter are whole nanometres. ``index`` is the
+    drill sequence ``RouteHoles`` assigns; it is ``None`` until routed and
+    numbered from 1 thereafter.
     """
 
     x_nm: Nanometre
     y_nm: Nanometre
     diameter_nm: Nanometre
     raw: RawHole
-    index: int
+    index: int | None = None
 
     def __post_init__(self) -> None:
         _check_nanometres(
             "Hole", x_nm=self.x_nm, y_nm=self.y_nm, diameter_nm=self.diameter_nm
         )
-        if self.index != self.raw.index:
+        if self.index is not None and self.index < 1:
             raise ValueError(
-                f"a hole has one identity: Hole.index is {self.index} but its "
-                f"measurement is numbered {self.raw.index}"
+                f"holes are numbered from 1, not {self.index}: this number is what "
+                f"the drawing balloons, the schedule and the report all print"
             )
 
     @classmethod
@@ -173,22 +168,22 @@ class Hole:
         x_nm: Nanometre,
         y_nm: Nanometre,
         diameter_nm: Nanometre,
-        index: int,
     ) -> Hole:
-        """Build a hole whose nominal values are still its measured values.
+        """Build an unrouted hole whose nominal values are still its measured values.
 
-        Convert nominal nanometres into the raw millimetre provenance while
-        assigning the same stable ``index`` to both representations.
+        Convert nominal nanometres into the raw millimetre provenance. The
+        hole carries no number until ``RouteHoles`` assigns one.
         """
         return cls(
             x_nm=x_nm,
             y_nm=y_nm,
             diameter_nm=diameter_nm,
-            raw=RawHole(
-                mm_from_nm(x_nm), mm_from_nm(y_nm), mm_from_nm(diameter_nm), index
-            ),
-            index=index,
+            raw=RawHole(mm_from_nm(x_nm), mm_from_nm(y_nm), mm_from_nm(diameter_nm)),
         )
+
+    def with_number(self, number: int) -> Hole:
+        """Take the drill sequence RouteHoles assigned."""
+        return replace(self, index=number)
 
     def moved_to(self, x_nm: Nanometre, y_nm: Nanometre) -> Hole:
         return replace(self, x_nm=x_nm, y_nm=y_nm)
@@ -494,8 +489,17 @@ class DrillData:
 
     # -- derived ---------------------------------------------------------
     def numbered(self) -> tuple[tuple[int, Hole], ...]:
-        """Every hole with its drill number, in emission order."""
-        return tuple((hole.index, hole) for hole in self.holes)
+        """Every hole with its drill number, or raise if routing never ran."""
+        pairs: list[tuple[int, Hole]] = []
+        for hole in self.holes:
+            if hole.index is None:
+                raise EmitterError(
+                    "these holes carry no drill number, so no artifact can state "
+                    "a sequence — compose RouteHoles into the pipeline before "
+                    "emitting"
+                )
+            pairs.append((hole.index, hole))
+        return tuple(pairs)
 
     def tools(self) -> Mapping[Nanometre, int]:
         """Map nominal diameter to 1-based tool number, ascending by size."""

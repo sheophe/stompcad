@@ -198,7 +198,7 @@ class TestDeduplicate:
             source=SourceInfo(path="tar.ai"),
             reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
             centre=(Millimetre(56.5), Millimetre(30.0)),
-            holes=(RawHole(*both, 2), RawHole(*both, 5)),
+            holes=(RawHole(*both), RawHole(*both)),
         )
         data = quantise(
             raw,
@@ -212,7 +212,7 @@ class TestDeduplicate:
 
         out = Deduplicate().apply(data)
 
-        assert [hole.index for hole in out.holes] == [2]
+        assert len(out.holes) == 1
         assert codes(out) == ["duplicate-hole"]
 
     def test_unquantised_diameters_are_not_treated_as_equal(self):
@@ -361,8 +361,8 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
     #: diameter, same Y, so they are one hole by the time dedupe sees them —
     #: which is precisely what a fixture of two byte-identical measurements can
     #: never show, because identical copies share their residual as well.
-    ON_GRID = RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 4)
-    TIED = RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(7.0), 9)
+    ON_GRID = RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0))
+    TIED = RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(7.0))
 
     @pytest.mark.parametrize(
         "drawn, kept, findings",
@@ -397,9 +397,9 @@ class TestReviewGridTiesSeesWhatTheEmittersSee:
         """The only tied circle on this panel is one no bit can make."""
         out = Pipeline([Deduplicate(), ReviewGridTies(), RouteHoles()]).run(
             _phase(
-                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-                RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(30.0), 9),
-                RawHole(Millimetre(0.25), Millimetre(18.0), Millimetre(7.0), 1),
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+                RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(30.0)),
+                RawHole(Millimetre(0.25), Millimetre(18.0), Millimetre(7.0)),
             )
         )
 
@@ -645,11 +645,11 @@ class TestPipelineComposition:
             reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
             centre=(Millimetre(56.5), Millimetre(30.0)),
             holes=(
-                RawHole(Millimetre(-40.003), Millimetre(18.001), Millimetre(6.9998), 4),
-                RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0000), 1),  # a duplicate of the above, once quantised
-                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0001), 9),
-                RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0002), 6),
-                RawHole(Millimetre(19.0), Millimetre(-18.75), Millimetre(4.9998), 2),
+                RawHole(Millimetre(-40.003), Millimetre(18.001), Millimetre(6.9998)),
+                RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0000)),  # a duplicate of the above, once quantised
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0001)),
+                RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0002)),
+                RawHole(Millimetre(19.0), Millimetre(-18.75), Millimetre(4.9998)),
             ),
         )
 

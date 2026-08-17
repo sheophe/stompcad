@@ -103,7 +103,7 @@ class Watched:
 
         class WatchedDiameters(SnapDiametersToDrillTable):
             def quantise(self, hole):
-                log.append(f"diameters {hole.index}")
+                log.append(f"diameters {hole.x}")
                 return super().quantise(hole)
 
         return WatchedDiameters()
@@ -113,7 +113,7 @@ class Watched:
 
         class WatchedPositions(SnapPositions):
             def quantise(self, hole):
-                log.append(f"grid {hole.index}")
+                log.append(f"grid {hole.x}")
                 return super().quantise(hole)
 
         return WatchedPositions(Nanometre(grid_nm))
@@ -127,13 +127,13 @@ def test_the_phase_runs_enclosure_then_diameters_then_grid():
     watched = Watched()
 
     phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))),
         enclosure=watched.enclosure(DECLARED),
         diameters=watched.diameters(),
         positions=watched.positions(),
     )
 
-    assert watched.log == ["enclosure", "diameters 4", "grid 4"]
+    assert watched.log == ["enclosure", "diameters -20.0", "grid -20.0"]
 
 
 def test_a_hole_the_drill_table_refuses_never_reaches_the_grid():
@@ -142,22 +142,22 @@ def test_a_hole_the_drill_table_refuses_never_reaches_the_grid():
 
     out = phase(
         read(
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 9),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0), 1),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0)),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
         ),
         diameters=watched.diameters(),
         positions=watched.positions(),
     )
 
     assert watched.log == [
-        "diameters 4",
-        "grid 4",
-        "diameters 9",  # refused, and no "grid 9" after it
-        "diameters 1",
-        "grid 1",
+        "diameters -20.0",
+        "grid -20.0",
+        "diameters 0.0",  # refused, and no "grid 0.0" after it
+        "diameters 20.0",
+        "grid 20.0",
     ]
-    assert [hole.index for hole in out.holes] == [4, 1]
+    assert [hole.raw.x for hole in out.holes] == [-20.0, 20.0]
     assert codes(out) == ["unknown-diameter"]
 
 
@@ -171,7 +171,7 @@ def test_a_run_that_stopped_records_only_what_ran():
     three regardless would tell a consumer the drill table and the grid had been
     applied to a document holding no holes at all."""
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))),
         enclosure=IdentifyHammondFootprint("1590BB"),
     )
 
@@ -196,8 +196,8 @@ def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, 
 
     out = phase(
         read(
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0), 1),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
             reference=reference,
         ),
         enclosure=watched.enclosure(declared, tolerance_nm),
@@ -214,7 +214,7 @@ def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, 
 def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():
     """The pre-rounding counterexample, carried to the consequence that matters."""
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), reference=RawOutline(Millimetre(113.9000004), Millimetre(60.5))),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)), reference=RawOutline(Millimetre(113.9000004), Millimetre(60.5))),
         enclosure=IdentifyHammondFootprint("1590B"),
     )
 
@@ -230,12 +230,12 @@ def test_an_enclosure_warning_does_not_stop_the_run():
     holes must still be quantised.
     """
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), reference=RawOutline(Millimetre(200.0), Millimetre(100.0))),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)), reference=RawOutline(Millimetre(200.0), Millimetre(100.0))),
         enclosure=IdentifyHammondFootprint(),
     )
 
     assert codes(out) == ["unknown-enclosure"]
-    assert [hole.index for hole in out.holes] == [4]
+    assert [hole.raw.x for hole in out.holes] == [-20.0]
     assert (out.reference.width_nm, out.reference.height_nm) == (200_000_000, 100_000_000)
 
 
@@ -244,25 +244,25 @@ def test_a_dropped_hole_does_not_stop_the_run():
     hole is still quantised, because the report has to name all of them."""
     out = phase(
         read(
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(30.0), 4),
-            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(29.0), 1),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0), 9),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(30.0)),
+            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(29.0)),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
         )
     )
 
     assert codes(out) == ["unknown-diameter", "unknown-diameter"]
-    assert [hole.index for hole in out.holes] == [9]
+    assert [hole.raw.x for hole in out.holes] == [20.0]
 
 
 def test_a_diameter_a_hair_outside_the_tolerance_costs_the_run_its_artifacts():
     """The drill table's half of the same counterexample, at the phase."""
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(25.2500004), 4), RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 1))
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(25.2500004)), RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0)))
     )
 
     assert codes(out) == ["unknown-diameter"]
     assert out.worst_severity is Severity.ERROR
-    assert [hole.index for hole in out.holes] == [1]
+    assert [hole.raw.x for hole in out.holes] == [20.0]
 
 
 # ---------------------------------------------------------------------------
@@ -270,18 +270,21 @@ def test_a_diameter_a_hair_outside_the_tolerance_costs_the_run_its_artifacts():
 # ---------------------------------------------------------------------------
 
 
-def test_every_finished_hole_keeps_the_number_its_measurement_had():
-    """4, 1, 9 — deliberately neither ordered nor equal to a list position."""
+def test_finished_holes_leave_the_phase_unnumbered():
+    """Numbering is ``RouteHoles``' answer; quantisation assigns none.
+
+    Source order survives regardless, checkable through the measurement.
+    """
     out = phase(
         read(
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 1),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0), 9),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
         )
     )
 
-    assert [hole.index for hole in out.holes] == [4, 1, 9]
-    assert [hole.raw.index for hole in out.holes] == [4, 1, 9]
+    assert [hole.index for hole in out.holes] == [None, None, None]
+    assert [hole.raw.x for hole in out.holes] == [-20.0, 0.0, 20.0]
 
 
 def test_the_measurement_travels_with_the_hole_it_was_taken_from():
@@ -289,7 +292,7 @@ def test_the_measurement_travels_with_the_hole_it_was_taken_from():
     rather than remembered. Each hole must carry *its* measurement, which a
     fixture of identical circles could not show."""
     out = phase(
-        read(RawHole(Millimetre(-19.9906), Millimetre(18.0021), Millimetre(6.9998), 4), RawHole(Millimetre(20.0031), Millimetre(-18.7), Millimetre(5.0002), 1))
+        read(RawHole(Millimetre(-19.9906), Millimetre(18.0021), Millimetre(6.9998)), RawHole(Millimetre(20.0031), Millimetre(-18.7), Millimetre(5.0002)))
     )
 
     assert [hole.raw.x for hole in out.holes] == [-19.9906, 20.0031]
@@ -308,7 +311,7 @@ def test_the_measurement_travels_with_the_hole_it_was_taken_from():
 @pytest.mark.parametrize("hole_count", [0, 1, 3])
 def test_a_clamped_grid_is_reported_exactly_once(hole_count):
     """The finding the phase is the only thing positioned to raise."""
-    holes = tuple(RawHole(float(i), Millimetre(0.0), Millimetre(7.0), index=i + 4) for i in range(hole_count))
+    holes = tuple(RawHole(float(i), Millimetre(0.0), Millimetre(7.0)) for i in range(hole_count))
 
     out = phase(read(*holes), positions=SnapPositions(Nanometre(0)))
 
@@ -319,13 +322,13 @@ def test_a_clamped_grid_is_reported_exactly_once(hole_count):
 def test_an_unclamped_grid_says_nothing():
     """The clamp finding is news, and a run that reports it on every panel is a
     run that has trained the operator to skim past it."""
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)), positions=SnapPositions(Nanometre(250_000)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))), positions=SnapPositions(Nanometre(250_000)))
     assert codes(out) == []
 
 
 def test_the_phase_reports_a_tied_hole_as_moved_and_says_nothing_more():
     """Whether the *panel* ties is not this phase's question to answer."""
-    out = phase(read(RawHole(Millimetre(-20.125), Millimetre(18.0), Millimetre(7.0), 4), RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(7.0), 1)))
+    out = phase(read(RawHole(Millimetre(-20.125), Millimetre(18.0), Millimetre(7.0)), RawHole(Millimetre(0.125), Millimetre(18.0), Millimetre(7.0))))
 
     assert codes(out) == ["off-grid", "off-grid"]
 
@@ -333,7 +336,7 @@ def test_the_phase_reports_a_tied_hole_as_moved_and_says_nothing_more():
 def test_a_panel_drawn_on_the_declared_grid_says_nothing_at_all():
     """The findings this phase makes are news, and a run that raises one on
     every panel has trained the operator to skim past it."""
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), RawHole(Millimetre(0.25), Millimetre(18.0), Millimetre(7.0), 1)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)), RawHole(Millimetre(0.25), Millimetre(18.0), Millimetre(7.0))))
 
     assert codes(out) == []
 
@@ -355,7 +358,7 @@ def test_the_sources_own_findings_survive_the_phase():
     """
     prior = Diagnostic.warning("no-reference-outline", "the reference layer held no path")
 
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), diagnostics=(prior,)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)), diagnostics=(prior,)))
 
     assert out.diagnostics[0] is prior
 
@@ -369,7 +372,7 @@ def test_the_sources_findings_come_before_the_phases_own():
     prior = Diagnostic.warning("no-reference-outline", "the reference layer held no path")
 
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(30.0), 4), diagnostics=(prior,), reference=None),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(30.0)), diagnostics=(prior,), reference=None),
         # Undeclared: a declared case with no outline to check it against is
         # ``unverifiable-enclosure``, an ERROR, and the run would stop before
         # there were any per-hole findings to order.
@@ -385,7 +388,7 @@ def test_a_findings_location_names_the_measurement_it_was_taken_from():
     it is checkable against the drawing only if the phase hands over the
     measurement's own place rather than a number assigned by a later stage."""
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 9))
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)), RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0)))
     )
 
     assert out.diagnostics[0].get("hole_index") is None
@@ -398,7 +401,7 @@ def test_a_findings_location_names_the_measurement_it_was_taken_from():
 
 
 def test_the_outline_is_snapped_to_the_catalogue_and_the_measurement_is_kept():
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))))
 
     assert (out.reference.width_nm, out.reference.height_nm) == (112_400_000, 60_500_000)
     assert (out.reference.raw.width, out.reference.raw.height) == (113.0, 60.0)
@@ -406,7 +409,7 @@ def test_the_outline_is_snapped_to_the_catalogue_and_the_measurement_is_kept():
 
 
 def test_the_identified_footprint_reaches_the_document():
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))))
 
     assert out.enclosure.candidates == ("1590B", "1590B2")
     assert (out.enclosure.length_nm, out.enclosure.width_nm) == (112_400_000, 60_500_000)
@@ -418,7 +421,7 @@ def test_a_panel_with_no_reference_layer_is_quantised_all_the_same():
     nothing. Positions are page-relative and the holes still need bits.
     """
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4), reference=None),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)), reference=None),
         enclosure=IdentifyHammondFootprint(),
     )
 
@@ -429,7 +432,7 @@ def test_a_panel_with_no_reference_layer_is_quantised_all_the_same():
 
 
 def test_the_read_that_produced_the_document_is_carried_over():
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))))
     assert out.source == SourceInfo(path="panel.ai", drill_layer="Drill")
 
 
@@ -439,7 +442,7 @@ def test_the_read_that_produced_the_document_is_carried_over():
 
 
 def test_the_phase_records_all_three_quantisers_in_the_order_they_ran():
-    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)))
+    out = phase(read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))))
 
     assert [run.name for run in out.processing] == [
         "identify-enclosure",
@@ -453,7 +456,7 @@ def test_the_record_is_the_effective_configuration_not_the_arguments():
     must be recorded as the pitch the holes were really snapped to. Recording
     the requested one would stamp a sheet with a grid no hole ever met."""
     out = phase(
-        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4)),
+        read(RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0))),
         diameters=SnapDiametersToDrillTable(DRILL_STANDARDS["fractional"]),
         positions=SnapPositions(Nanometre(0)),
     )

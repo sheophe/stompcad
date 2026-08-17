@@ -50,9 +50,9 @@ def read(
     """
     if holes is None:
         holes = (
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 1),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 2),
-            RawHole(Millimetre(0.0), Millimetre(-18.75), Millimetre(5.0), 3),
+            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(0.0), Millimetre(-18.75), Millimetre(5.0)),
         )
     return RawDrillData(
         source=SourceInfo(
@@ -78,9 +78,9 @@ def document(
     """A finished ``DrillData``, for the report renderers called directly."""
     if holes is None:
         holes = (
-            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=1),
-            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
-            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000), index=3),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(1),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(2),
+            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000)).with_number(3),
         )
     return DrillData(
         holes=tuple(holes),
@@ -364,7 +364,7 @@ def test_the_declared_standard_decides_what_a_hole_is_drilled_with(fake_source, 
 
     6.348 mm is nearer 1/4 inch than 6.3 mm, so the standards cannot agree.
     """
-    fake_source(read(holes=[RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(6.348), 4)]))
+    fake_source(read(holes=[RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(6.348))]))
 
     assert cli.main([str(FIXTURE), "--drill-standard", "fractional"]) == 0
 
@@ -411,7 +411,7 @@ def test_a_narrowed_table_is_what_the_holes_are_actually_quantised_against(
     fake_source, capsys
 ):
     """With no 7 mm bit in the drawer, a 6.9998 mm hole is drilled with what is."""
-    fake_source(read(holes=[RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(6.9998), 4)]))
+    fake_source(read(holes=[RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(6.9998))]))
 
     assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,6.8,12"]) == 0
 
@@ -661,9 +661,9 @@ def test_an_erroring_run_writes_no_artifact_at_all(fake_source, tmp_path, capsys
     fake_source(
         read(
             holes=[
-                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 1),  # no bit makes this
-                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0), 9),
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0)),  # no bit makes this
+                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
             ]
         )
     )
@@ -854,8 +854,8 @@ def test_the_tools_report_never_prints_one_diameter_as_two_tools():
     """Distinct close nominals receive enough precision to remain distinct."""
     data = document(
         holes=[
-            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(6_999_800), index=6),
-            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(6_999_800)).with_number(6),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(2),
         ]
     )
     assert len(data.tools()) == 2  # the fixture must actually pose the problem
@@ -877,8 +877,8 @@ def test_the_tools_block_spells_a_bit_the_way_the_standard_that_ran_spells_it():
     """
     data = document(
         holes=[
-            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_143_750), index=3),
-            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_159_375), index=1),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_143_750)).with_number(3),
+            Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_159_375)).with_number(1),
         ],
         processing=[quantised_against("fractional", size_count=64)],
     )
@@ -902,8 +902,8 @@ def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools(
     """A standard's spelling may not print one diameter as two tools."""
     data = document(
         holes=[
-            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(6_999_800), index=6),
-            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
+            Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(6_999_800)).with_number(6),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(2),
         ],
         processing=[quantised_against("metric")],
     )
@@ -914,7 +914,7 @@ def test_a_standards_own_spelling_still_may_not_print_one_diameter_as_two_tools(
 
 
 def test_report_shows_raw_values_beside_nominal(fake_source, capsys):
-    fake_source(read(holes=[RawHole(Millimetre(-19.9906), Millimetre(18.0021), Millimetre(6.9998), 4)]))
+    fake_source(read(holes=[RawHole(Millimetre(-19.9906), Millimetre(18.0021), Millimetre(6.9998))]))
     cli.main([str(FIXTURE)])
     out = capsys.readouterr().out
     assert "-20.000" in out  # nominal, after snapping to the grid
@@ -1009,9 +1009,9 @@ def test_the_hole_table_numbers_follow_the_route_not_the_artwork_order(fake_sour
     fake_source(
         read(
             holes=[
-                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0), 9),
-                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 1),
+                RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(7.0)),
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0)),
             ]
         )
     )
@@ -1048,8 +1048,8 @@ def test_verbose_reports_the_quantisation_phase_as_well_as_the_stages(fake_sourc
     fake_source(
         read(
             holes=[
-                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0), 4),
-                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0), 1),  # no bit makes this
+                RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+                RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(30.0)),  # no bit makes this
             ]
         )
     )

@@ -134,16 +134,15 @@ class AiPdfSource:
                 height=mm_from_pt(y1 - y0),
             )
 
-        # Stream traversal order supplies stable source identities, counting
-        # from 1: the number is printed as it stands on every artefact.
+        # Artwork order is not a stable identity: ADR-0006 reserves numbering
+        # for RouteHoles, so no traversal position is recorded here.
         holes = tuple(
             RawHole(
                 x=Millimetre(mm_from_pt(c.cx) - centre[0]),
                 y=Millimetre(mm_from_pt(c.cy) - centre[1]),
                 diameter=mm_from_pt(c.diameter),
-                index=i,
             )
-            for i, c in enumerate(circles, start=1)
+            for c in circles
         )
 
         return RawDrillData(

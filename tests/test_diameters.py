@@ -19,13 +19,9 @@ from aidrill.pipeline import (
 from aidrill.units import Millimetre, Nanometre, format_nm, nm_from_mm
 
 
-def measured(diameter: float, *, index: int = 4, x: float = 0.0, y: float = 0.0) -> RawHole:
-    """One circle as the artwork measured it, in millimetres.
-
-    ``index`` defaults to 4 rather than 0 so that no assertion about a hole's
-    identity can be satisfied by its position in a list instead.
-    """
-    return RawHole(Millimetre(x), Millimetre(y), Millimetre(diameter), index)
+def measured(diameter: float, *, x: float = 0.0, y: float = 0.0) -> RawHole:
+    """One circle as the artwork measured it, in millimetres."""
+    return RawHole(Millimetre(x), Millimetre(y), Millimetre(diameter))
 
 
 def codes(diagnostics) -> list[str]:
@@ -360,8 +356,8 @@ class TestSnapDiametersToDrillTable:
         """Bézier noise collapses onto one bit."""
         quantiser = SnapDiametersToDrillTable()
 
-        low = quantiser.quantise(measured(6.9998, index=4))
-        high = quantiser.quantise(measured(7.0002, index=1))
+        low = quantiser.quantise(measured(6.9998))
+        high = quantiser.quantise(measured(7.0002))
 
         assert low == (7_000_000, ())
         assert high == (7_000_000, ())
@@ -405,7 +401,7 @@ class TestSnapDiametersToDrillTable:
         """``data`` so a consumer need not re-measure: what it measured, and the
         closest thing the drawer actually holds — found by where it is, since
         the number a later stage would assign does not exist yet."""
-        _, found = SnapDiametersToDrillTable().quantise(measured(30.0, index=4, x=3.0, y=-2.0))
+        _, found = SnapDiametersToDrillTable().quantise(measured(30.0, x=3.0, y=-2.0))
         diagnostic = found[0]
 
         assert diagnostic.get("hole_index") is None
@@ -420,9 +416,9 @@ class TestSnapDiametersToDrillTable:
         list position or a source-order number cannot pass by coincidence."""
         quantiser = SnapDiametersToDrillTable()
         panel = (
-            measured(30.0, index=4, x=3.0, y=-2.0),
-            measured(7.0, index=1, x=10.0, y=10.0),
-            measured(0.1, index=9, x=-5.0, y=1.0),
+            measured(30.0, x=3.0, y=-2.0),
+            measured(7.0, x=10.0, y=10.0),
+            measured(0.1, x=-5.0, y=1.0),
         )
 
         refused = []
@@ -494,7 +490,7 @@ class TestSnapDiametersToDrillTable:
     def test_distinct_sizes_stay_distinct(self):
         """Normalisation is not clustering: three measurements, two bits."""
         quantiser = SnapDiametersToDrillTable()
-        panel = (measured(5.02, index=4), measured(6.98, index=1), measured(4.99, index=9))
+        panel = (measured(5.02), measured(6.98), measured(4.99))
 
         assert [quantiser.quantise(h)[0] for h in panel] == [5_000_000, 7_000_000, 5_000_000]
 
@@ -509,7 +505,7 @@ class TestSnapDiametersToDrillTable:
         measurements = [round(rng.uniform(0.5, 25.0), 4) for _ in range(200)]
 
         for index, millimetres in enumerate(measurements, start=1):
-            size, found = quantiser.quantise(measured(millimetres, index=index))
+            size, found = quantiser.quantise(measured(millimetres))
 
             assert found == ()
             assert size in standard.sizes_nm

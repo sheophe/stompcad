@@ -9,6 +9,7 @@ import pytest
 
 from aidrill.emitters.base import REGISTRY, get_emitter
 from aidrill.emitters.json_out import JsonEmitter, JsonOptions
+from aidrill.errors import EmitterError
 from aidrill.model import (
     Diagnostic,
     DrillData,
@@ -47,14 +48,14 @@ def fixture_data() -> DrillData:
             x_nm=Nanometre(-40_000_000),
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
-            raw=RawHole(Millimetre(-39.9906), Millimetre(18.0021), Millimetre(6.9998), 4),
+            raw=RawHole(Millimetre(-39.9906), Millimetre(18.0021), Millimetre(6.9998)),
             index=4,
         ),
         Hole(
             x_nm=Nanometre(-19_000_000),
             y_nm=Nanometre(-18_750_000),
             diameter_nm=Nanometre(5_000_000),
-            raw=RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0002), 1),
+            raw=RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0002)),
             index=1,
         ),
     )
@@ -172,19 +173,21 @@ def parse(data: DrillData, **kwargs) -> dict:
 def read_panel(
     outline: RawOutline | None, *, case: str | None = None, measured: RawHole | None = None
 ) -> DrillData:
-    """One measured panel put through the real quantisation phase."""
+    """One measured panel put through the real quantisation phase, numbered
+    as if ``RouteHoles`` had already run — the JSON emitter requires a number."""
     raw = RawDrillData(
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=outline,
         centre=(Millimetre(297.6), Millimetre(421.0)),
-        holes=(measured if measured is not None else RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), 4),),
+        holes=(measured if measured is not None else RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0)),),
     )
-    return quantise(
+    data = quantise(
         raw,
         enclosure=IdentifyHammondFootprint(case),
         diameters=SnapDiametersToDrillTable(),
         positions=SnapPositions(Nanometre(250_000)),
     )
+    return data.with_holes(h.with_number(i) for i, h in enumerate(data.holes, start=1))
 
 
 def nominal_lengths(node, path: str = "") -> list[tuple[str, object]]:
@@ -222,6 +225,13 @@ def test_emitter_declares_name_media_type_and_extension():
     assert JsonEmitter.media_type == "application/json"
     assert JsonEmitter.extension == ".json"
     assert isinstance(JsonEmitter(), Emitter)
+
+
+def test_the_emitter_refuses_data_that_was_never_routed():
+    data = make_data(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
+                     reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)))
+    with pytest.raises(EmitterError, match="RouteHoles"):
+        emit(data)
 
 
 # --------------------------------------------------------------------------
@@ -655,16 +665,15 @@ def test_error_bearing_data_is_serialised_rather_than_refused():
         source=SourceInfo(path="panel.ai", drill_layer="Drill"),
         reference=None,
         centre=(0.0, 0.0),
-        holes=(RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(26.0), 2), RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0), 6)),
+        holes=(RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(26.0)), RawHole(Millimetre(-19.0), Millimetre(-18.75), Millimetre(5.0))),
     )
-    doc = parse(
-        quantise(
-            raw,
-            enclosure=IdentifyHammondFootprint(),
-            diameters=SnapDiametersToDrillTable(),
-            positions=SnapPositions(Nanometre(250_000)),
-        )
+    data = quantise(
+        raw,
+        enclosure=IdentifyHammondFootprint(),
+        diameters=SnapDiametersToDrillTable(),
+        positions=SnapPositions(Nanometre(250_000)),
     )
+    doc = parse(data.with_holes(h.with_number(6) for h in data.holes))
 
     dropped = next(d for d in doc["diagnostics"] if d["severity"] == "error")
     assert dropped["code"] == "unknown-diameter"
@@ -747,7 +756,7 @@ def test_document_rebuilds_an_identical_drilldata(build):
                 x_nm=h["x_nm"],
                 y_nm=h["y_nm"],
                 diameter_nm=h["diameter_nm"],
-                raw=RawHole(h["raw"]["x"], h["raw"]["y"], h["raw"]["diameter"], h["index"]),
+                raw=RawHole(h["raw"]["x"], h["raw"]["y"], h["raw"]["diameter"]),
                 index=h["index"],
             )
             for h in document["holes"]
@@ -851,7 +860,7 @@ def test_emitter_does_not_round_or_cluster_values():
                 x_nm=Nanometre(123_457),
                 y_nm=Nanometre(-765_432),
                 diameter_nm=Nanometre(6_999_800),
-                raw=RawHole(Millimetre(0.1234567), Millimetre(-0.7654321), Millimetre(6.9998), 4),
+                raw=RawHole(Millimetre(0.1234567), Millimetre(-0.7654321), Millimetre(6.9998)),
                 index=4,
             ),
             at(1_000_000, 1_000_000, index=1),

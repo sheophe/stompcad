@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import pikepdf
@@ -165,44 +164,28 @@ def test_hole_positions_and_diameters(data):
 
 
 def test_the_duplicated_hole_is_reported_twice(data):
-    """Same geometry, different identity."""
+    """Same geometry, read as two holes: the source does not deduplicate."""
     coincident = [
         h
         for h in data.holes
         if abs(h.x - (-39.9906)) <= TOL_MM and abs(h.y - 18.0) <= TOL_MM
     ]
     assert len(coincident) == 2
-    # Every field but ``index``, and it stays exhaustive as RawHole gains more.
-    assert replace(coincident[0], index=coincident[1].index) == coincident[1]
-    assert coincident[0].index != coincident[1].index
+    assert coincident[0] == coincident[1]
 
 
-def test_the_identity_counter_runs_over_circles_not_over_paths(tmp_path):
-    """A path that is not a hole must not spend a hole's identity."""
-    pdf = build_pdf(
-        tmp_path / "counter.pdf",
-        {
-            "Background": "10 10 200 100 re f",
-            "Drill": "20 20 m 40 40 l S " + circle_ops(60, 35, 10) + " " + circle_ops(150, 35, 8),
-        },
-    )
-    holes = AiPdfSource(pdf).read().holes
-    assert [h.index for h in holes] == [1, 2]
+def test_the_source_assigns_no_hole_numbers(tmp_path):
+    """Numbering is the route's answer, and the source has not routed anything.
 
-
-def test_the_first_hole_is_numbered_one(tmp_path):
-    """Every artefact prints this number, and a machinist counts from one.
-
-    Asserted on the lone hole of a one-hole panel, where a first index of 0
-    cannot hide behind an offset that happens to agree further down the run.
+    ``RawHole`` carries no ``index`` field at all, per ADR-0006: artwork order
+    must not reach an artifact, so there is no attribute left to ask for it.
     """
     pdf = build_pdf(
-        tmp_path / "one.pdf",
+        tmp_path / "unrouted.pdf",
         {"Background": "10 10 200 100 re f", "Drill": circle_ops(60, 35, 10)},
     )
-    holes = AiPdfSource(pdf).read().holes
-
-    assert [h.index for h in holes] == [1]
+    (hole,) = AiPdfSource(pdf).read().holes
+    assert not hasattr(hole, "index")
 
 
 def test_diameters_are_not_clustered(data):

@@ -10,6 +10,7 @@ import pikepdf
 import pytest
 
 from aidrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions, encode_text
+from aidrill.errors import EmitterError
 from aidrill.model import Diagnostic, DrillData, ReferenceOutline, SourceInfo
 from aidrill.units import Nanometre
 from tests.conftest import at, make_data
@@ -82,6 +83,12 @@ def strings_in(payload: bytes) -> list[str]:
 
 
 # --- the artefact ---------------------------------------------------------
+
+
+def test_the_emitter_refuses_data_that_was_never_routed():
+    data = make_data(at(0, 0, 7_000_000), reference=outline(100_000_000, 100_000_000))
+    with pytest.raises(EmitterError, match="RouteHoles"):
+        render(data)
 
 
 def test_the_emitter_returns_bytes_that_open_as_a_pdf():

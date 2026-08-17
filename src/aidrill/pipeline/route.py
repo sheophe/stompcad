@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import replace
 from itertools import pairwise
 from typing import TYPE_CHECKING, ClassVar
 
@@ -87,12 +86,6 @@ def _routed(holes: Sequence[Hole]) -> list[Hole]:
     return ordered
 
 
-def _renumbered(hole: Hole, number: int) -> Hole:
-    """Assign the drill sequence number, keeping ``Hole.index`` and
-    ``Hole.raw.index`` in the one identity ``Hole.__post_init__`` requires."""
-    return replace(hole, index=number, raw=replace(hole.raw, index=number))
-
-
 class RouteHoles:
     """Plan the drilling sequence and number the holes along it.
 
@@ -121,5 +114,5 @@ class RouteHoles:
             else sorted(data.holes, key=self.key)
         )
         return data.with_holes(
-            _renumbered(hole, number) for number, hole in enumerate(ordered, start=1)
+            hole.with_number(number) for number, hole in enumerate(ordered, start=1)
         )

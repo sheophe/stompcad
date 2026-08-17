@@ -1,7 +1,7 @@
 """Quantise raw millimetres into canonical nanometres.
 
 Enclosure identification may abort; accepted holes then take drill-table
-diameters before grid positions. Source identities remain unchanged.
+diameters before grid positions. Holes leave this stage unnumbered.
 """
 
 from __future__ import annotations
@@ -58,9 +58,7 @@ def quantise(
                 x_nm=x_nm,
                 y_nm=y_nm,
                 diameter_nm=diameter_nm,
-                # Preserve the source identity even when earlier holes were dropped.
                 raw=measurement,
-                index=measurement.index,
             )
         )
 

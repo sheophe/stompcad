@@ -41,15 +41,14 @@ def clean_registry():
         base.REGISTRY.update(saved)
 
 
-def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int) -> Hole:
-    """One quantised hole with an explicit identity.
+def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int | None = None) -> Hole:
+    """One quantised hole, numbered as if RouteHoles had already run.
 
     Plain integers are branded here so a test may write the literal it means;
     this helper is the suite's nanometre boundary.
     """
-    return Hole.from_measurement(
-        Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm), index=index
-    )
+    hole = Hole.from_measurement(Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm))
+    return hole if index is None else hole.with_number(index)
 
 
 def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
@@ -62,8 +61,7 @@ def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:
             Nanometre(s[0]),
             Nanometre(s[1]),
             Nanometre(s[2] if len(s) > 2 else 7_000_000),
-            index=i,
-        )
+        ).with_number(i)
         for i, s in enumerate(specs, start=1)
     )
 

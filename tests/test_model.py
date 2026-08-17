@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from aidrill.errors import EmitterError
 from aidrill.formatting import format_mm
 from aidrill.model import (
     Diagnostic,
@@ -32,14 +33,14 @@ from aidrill.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 def test_every_nominal_length_on_a_hole_is_an_integer():
     """``type(...) is int``, not ``isinstance``."""
-    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4)
+    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4)
     for value in (hole.x_nm, hole.y_nm, hole.diameter_nm):
         assert type(value) is int
 
 
 def test_every_measured_length_on_a_hole_is_a_float_millimetre():
     """Every measured length on a hole is a float millimetre."""
-    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4)
+    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4)
     for value in (hole.raw.x, hole.raw.y, hole.raw.diameter):
         assert type(value) is float
     assert (hole.raw.x, hole.raw.y, hole.raw.diameter) == (-40.0, 18.0, 7.0)
@@ -59,7 +60,7 @@ _A_NANOMETRE_INT = 7_000_000
 #: builds a ``RawOutline`` out of the very values being tested and *that* guard
 #: raises, so the outline's own guard could be deleted and the test would still
 #: pass on someone else's work.
-_VALID_RAW_HOLE = RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), 4)
+_VALID_RAW_HOLE = RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0))
 _VALID_RAW_OUTLINE = RawOutline(Millimetre(113.0), Millimetre(60.0))
 
 #: Every ``(owner, field)`` pair the model guards as whole nanometres, one
@@ -142,9 +143,9 @@ def test_a_bool_is_not_a_length(build):
 #: one strict helper taking separate keyword arguments, so a call that quietly
 #: stops naming a field leaves that field unchecked and says nothing about it.
 _GUARDED_MILLIMETRES = [
-    pytest.param(lambda v: RawHole(v, Millimetre(0.0), Millimetre(7.0), 4), id="RawHole.x"),
-    pytest.param(lambda v: RawHole(Millimetre(0.0), v, Millimetre(7.0), 4), id="RawHole.y"),
-    pytest.param(lambda v: RawHole(Millimetre(0.0), Millimetre(0.0), v, 4), id="RawHole.diameter"),
+    pytest.param(lambda v: RawHole(v, Millimetre(0.0), Millimetre(7.0)), id="RawHole.x"),
+    pytest.param(lambda v: RawHole(Millimetre(0.0), v, Millimetre(7.0)), id="RawHole.y"),
+    pytest.param(lambda v: RawHole(Millimetre(0.0), Millimetre(0.0), v), id="RawHole.diameter"),
     pytest.param(lambda v: RawOutline(v, Millimetre(60.0)), id="RawOutline.width"),
     pytest.param(lambda v: RawOutline(Millimetre(113.0), v), id="RawOutline.height"),
 ]
@@ -157,7 +158,7 @@ def test_a_nanometre_integer_in_a_millimetre_field_would_print_as_forty_million(
     assert format_mm(mm_from_nm(x_nm)) == "40.000"
 
     with pytest.raises(TypeError, match="millimetres"):
-        RawHole(x_nm, Millimetre(0.0), Millimetre(7.0), 4)
+        RawHole(x_nm, Millimetre(0.0), Millimetre(7.0))
 
 
 @pytest.mark.parametrize("build", _GUARDED_MILLIMETRES)
@@ -188,7 +189,7 @@ def test_a_measurement_that_is_not_finite_is_refused(build, value):
 
 def test_translation_is_exact_however_many_times_it_is_applied():
     """The property integers buy and floating point does not."""
-    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4)
+    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4)
 
     stepped = hole
     for _ in range(1000):
@@ -206,11 +207,11 @@ def test_translation_is_exact_however_many_times_it_is_applied():
 def test_a_translated_hole_keeps_its_identity_and_its_measurement():
     """``translated`` moves the nominal position and nothing else. Rebuilding
     the hole would renumber it and overwrite what the artwork measured."""
-    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4)
+    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4)
     moved = hole.translated(Nanometre(56_000_000), Nanometre(30_500_000))
     assert (moved.x_nm, moved.y_nm) == (16_000_000, 48_500_000)
     assert moved.index == 4
-    assert moved.raw == RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0), 4)
+    assert moved.raw == RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0))
 
 
 @pytest.mark.parametrize("value", [_A_FLOAT, True], ids=["float", "bool"])
@@ -223,39 +224,14 @@ def test_a_translated_hole_keeps_its_identity_and_its_measurement():
 )
 def test_a_translation_that_is_not_a_length_is_refused(translate, value):
     """The *parameter* is guarded, not only the field it lands in."""
-    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4)
+    hole = Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4)
     with pytest.raises(TypeError, match="nanometres"):
         translate(hole, value)
 
 
-def test_the_measurement_carries_the_identity_of_the_hole_it_belongs_to():
-    """``raw.index`` is the hole's own ``index``, not the position it sits at."""
-    holes = [
-        Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4),
-        Hole.from_measurement(Nanometre(0), Nanometre(18_000_000), Nanometre(7_000_000), index=1),
-        Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=9),
-    ]
-    assert [hole.index for hole in holes] == [4, 1, 9]
-    assert [hole.raw.index for hole in holes] == [4, 1, 9]
-
-
-def test_a_hole_cannot_be_number_4_to_a_diagnostic_and_number_9_to_an_artifact():
-    """The split identity, written out at the two ends it gets read from."""
-    measurement = RawHole(Millimetre(-39.9906), Millimetre(18.0004), Millimetre(6.8), 4)
-
-    with pytest.raises(ValueError) as refused:
-        Hole(-40_000_000, 18_000_000, 7_000_000, measurement, 9)
-
-    # Both numbers: a refusal naming one of them leaves the caller to guess
-    # which of the two identities is the one it got wrong.
-    assert "4" in str(refused.value)
-    assert "9" in str(refused.value)
-
-    agreed = Hole(-40_000_000, 18_000_000, 7_000_000, measurement, 4)
-    diagnostic = Diagnostic.error(
-        "unknown-diameter", "no bit that size", data=(("index", agreed.raw.index),)
-    )
-    assert diagnostic.get("index") == agreed.index == 4
+def test_an_unrouted_hole_has_no_number():
+    hole = Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000))
+    assert hole.index is None
 
 
 @pytest.mark.parametrize("index", [0, -1], ids=["zero", "negative"])
@@ -266,23 +242,36 @@ def test_a_hole_numbered_below_one_is_refused(index):
     source class; a library caller assembling holes reaches the same emitters.
     """
     with pytest.raises(ValueError, match="numbered from 1"):
-        RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), index)
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(index)
 
+
+def test_zero_is_still_refused_even_though_none_is_allowed():
+    """Both halves: a guard that allowed ``None`` by allowing everything would
+    pass a test that only checked ``None``."""
     with pytest.raises(ValueError, match="numbered from 1"):
-        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=index)
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(0)
 
 
 def test_the_lowest_hole_number_the_model_accepts_is_one():
     """The other side of the floor: 1 is legal, so the guard is a floor and
     not a blanket refusal that a passing rejection test could not tell apart."""
-    assert RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0), 1).index == 1
+    hole = Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(1)
+    assert hole.index == 1
+
+
+def test_numbered_refuses_data_that_was_never_routed():
+    data = DrillData(holes=(
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
+    ))
+    with pytest.raises(EmitterError, match="RouteHoles"):
+        data.numbered()
 
 
 def test_the_residual_is_the_nominal_position_less_the_measured_one():
     """Positive means the nominal value is the larger, in nanometres. Named
     ``residual_nm`` because it is three lengths, and a caller printing it as
     millimetres would be three decimal places out with nothing to notice."""
-    hole = Hole.from_measurement(Nanometre(-39_990_600), Nanometre(18_000_400), Nanometre(6_800_000), index=4)
+    hole = Hole.from_measurement(Nanometre(-39_990_600), Nanometre(18_000_400), Nanometre(6_800_000)).with_number(4)
     snapped = hole.moved_to(Nanometre(-40_000_000), Nanometre(18_000_000)).with_diameter(Nanometre(7_000_000))
     assert snapped.residual_nm == (-9_400, -400, 200_000)
 
@@ -295,7 +284,7 @@ def test_the_residual_quantises_the_measurement_rather_than_reporting_millimetre
         x_nm=Nanometre(-40_000_000),
         y_nm=Nanometre(18_000_000),
         diameter_nm=Nanometre(7_000_000),
-        raw=RawHole(Millimetre(-39.9906), Millimetre(18.0004), Millimetre(6.8), 4),
+        raw=RawHole(Millimetre(-39.9906), Millimetre(18.0004), Millimetre(6.8)),
         index=4,
     )
     assert hole.residual_nm == (-9_400, -400, 200_000)
@@ -446,15 +435,15 @@ def test_from_measurement_refuses_a_non_positive_outline():
 
 
 def raw_panel(**overrides: Any) -> RawDrillData:
-    """Return a measured panel with holes numbered out of position order."""
+    """Return a measured panel whose holes are distinguishable by position."""
     fields: dict[str, Any] = dict(
         source=SourceInfo(path="tar.ai"),
         reference=RawOutline(Millimetre(113.0), Millimetre(60.0)),
         centre=(Millimetre(297.6), Millimetre(421.0)),
         holes=(
-            RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0), 4),
-            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0), 1),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(12.7), 9),
+            RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(0.0), Millimetre(18.0), Millimetre(7.0)),
+            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(12.7)),
         ),
     )
     fields.update(overrides)
@@ -467,17 +456,16 @@ def test_the_raw_field_order_is_source_reference_centre_holes():
         SourceInfo(path="tar.ai"),
         RawOutline(Millimetre(113.0), Millimetre(60.0)),
         (297.6, 421.0),
-        (RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0), 4),),
+        (RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0)),),
     )
     assert positional.source == SourceInfo(path="tar.ai")
     assert positional.reference == RawOutline(Millimetre(113.0), Millimetre(60.0))
     assert positional.centre == (297.6, 421.0)
-    assert positional.holes == (RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0), 4),)
+    assert positional.holes == (RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(7.0)),)
 
 
 def test_a_raw_document_keeps_its_holes_in_the_order_it_was_given():
-    """Traversal order is the source's answer, and identity rides on it."""
-    assert [hole.index for hole in raw_panel().holes] == [4, 1, 9]
+    """Traversal order is the source's answer."""
     assert [hole.x for hole in raw_panel().holes] == [-40.0, 0.0, 20.0]
 
 
@@ -498,7 +486,7 @@ def test_a_raw_document_may_have_no_reference_outline_at_all():
     unreferenced = raw_panel(reference=None, centre=(0.0, 0.0))
     assert unreferenced.reference is None
     assert unreferenced.centre == (0.0, 0.0)
-    assert [hole.index for hole in unreferenced.holes] == [4, 1, 9]
+    assert [hole.x for hole in unreferenced.holes] == [-40.0, 0.0, 20.0]
 
 
 #: The centre's two coordinates, one builder each. Listed separately for the
@@ -728,7 +716,7 @@ def test_with_enclosure_keeps_everything_else_the_pipeline_has_accumulated():
     """Guards the ``replace``: rebuilding a ``DrillData`` around the match would
     silently discard the holes, the findings and the stage history."""
     data = DrillData(
-        holes=(Hole.from_measurement(Nanometre(7_000_000), Nanometre(-3_000_000), Nanometre(12_000_000), index=4),),
+        holes=(Hole.from_measurement(Nanometre(7_000_000), Nanometre(-3_000_000), Nanometre(12_000_000)).with_number(4),),
         reference=ReferenceOutline.from_measurement(Nanometre(113_000_000), Nanometre(60_000_000)),
         diagnostics=(Diagnostic.warning("off-grid", "hole 4 is off grid"),),
         source=SourceInfo(path="tar.ai"),
@@ -764,7 +752,7 @@ def test_the_enclosure_survives_the_other_transforms():
     data = DrillData(
         reference=ReferenceOutline.from_measurement(Nanometre(120_000_000), Nanometre(94_000_000))
     ).with_enclosure(_1590BB_FOOTPRINT)
-    holes = [Hole.from_measurement(Nanometre(7_000_000), Nanometre(-3_000_000), Nanometre(12_000_000), index=4)]
+    holes = [Hole.from_measurement(Nanometre(7_000_000), Nanometre(-3_000_000), Nanometre(12_000_000)).with_number(4)]
     assert data.with_holes(holes).enclosure is _1590BB_FOOTPRINT
     assert data.with_diagnostics(Diagnostic.info("note", "something")).enclosure is (
         _1590BB_FOOTPRINT
@@ -793,8 +781,8 @@ def test_a_lower_left_origin_shifts_every_hole_by_half_the_outline():
     """
     data = DrillData(
         holes=(
-            Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4),
-            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(12_000_000), index=2),
+            Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4),
+            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(12_000_000)).with_number(2),
         ),
         reference=ReferenceOutline.from_measurement(Nanometre(112_000_000), Nanometre(61_000_000)),
     )
@@ -812,7 +800,7 @@ def test_an_odd_outline_still_yields_whole_nanometres():
     """An outline of an odd number of nanometres has no exact half, and the
     shift floors rather than producing the first float in the model."""
     data = DrillData(
-        holes=(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=3),),
+        holes=(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(3),),
         reference=ReferenceOutline.from_measurement(Nanometre(112_000_001), Nanometre(61_000_003)),
     )
 
@@ -823,7 +811,7 @@ def test_an_odd_outline_still_yields_whole_nanometres():
 
 def test_the_centre_origin_is_the_frame_the_holes_are_already_in():
     data = DrillData(
-        holes=(Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=4),),
+        holes=(Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(4),),
         reference=ReferenceOutline.from_measurement(Nanometre(112_000_000), Nanometre(61_000_000)),
     )
     assert data.with_origin(Origin.CENTRE) is data
@@ -831,7 +819,7 @@ def test_the_centre_origin_is_the_frame_the_holes_are_already_in():
 
 def test_a_lower_left_origin_without_an_outline_refuses_to_guess():
     """There is no defensible answer without knowing where the corner is."""
-    data = DrillData(holes=(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=3),))
+    data = DrillData(holes=(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(3),))
     with pytest.raises(ValueError):
         data.with_origin(Origin.LOWER_LEFT)
 
@@ -846,9 +834,9 @@ def test_tools_number_the_distinct_diameters_ascending():
     drawing's hole schedule cannot disagree about how many bits a panel needs."""
     data = DrillData(
         holes=(
-            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(12_000_000), index=4),
-            Hole.from_measurement(Nanometre(10_000_000), Nanometre(0), Nanometre(7_000_000), index=1),
-            Hole.from_measurement(Nanometre(20_000_000), Nanometre(0), Nanometre(12_000_000), index=7),
+            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(12_000_000)).with_number(4),
+            Hole.from_measurement(Nanometre(10_000_000), Nanometre(0), Nanometre(7_000_000)).with_number(1),
+            Hole.from_measurement(Nanometre(20_000_000), Nanometre(0), Nanometre(12_000_000)).with_number(7),
         )
     )
     assert data.tools() == {7_000_000: 1, 12_000_000: 2}
@@ -860,8 +848,8 @@ def test_two_diameters_a_nanometre_apart_are_two_tools():
     question with an exact answer: nothing here clusters."""
     data = DrillData(
         holes=(
-            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=4),
-            Hole.from_measurement(Nanometre(10_000_000), Nanometre(0), Nanometre(7_000_001), index=1),
+            Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(4),
+            Hole.from_measurement(Nanometre(10_000_000), Nanometre(0), Nanometre(7_000_001)).with_number(1),
         )
     )
     assert list(data.tools()) == [7_000_000, 7_000_001]
@@ -871,8 +859,8 @@ def test_numbered_pairs_each_hole_with_its_own_number_in_emission_order():
     """Not with its position: the two agree only after routing, and the
     accessor must read the model rather than recount the tuple."""
     data = DrillData(holes=(
-        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000), index=2),
-        Hole.from_measurement(Nanometre(1_000_000), Nanometre(0), Nanometre(7_000_000), index=1),
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(2),
+        Hole.from_measurement(Nanometre(1_000_000), Nanometre(0), Nanometre(7_000_000)).with_number(1),
     ))
     assert [n for n, _ in data.numbered()] == [2, 1]
     assert [h.x_nm for _, h in data.numbered()] == [0, 1_000_000]
@@ -1119,9 +1107,9 @@ def test_rows_run_from_the_top_of_the_panel_down():
     not reorder the sheet, it changes *which* rows lose their dimension when the
     stack runs out of room."""
     panel = row_panel(
-        Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000), index=7),
-        Hole.from_measurement(Nanometre(0), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
-        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(3_000_000), index=5),
+        Hole.from_measurement(Nanometre(0), Nanometre(-18_750_000), Nanometre(5_000_000)).with_number(7),
+        Hole.from_measurement(Nanometre(0), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(2),
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(3_000_000)).with_number(5),
     )
 
     assert [y for y, _ in panel.rows()] == [18_000_000, 0, -18_750_000]
@@ -1133,9 +1121,9 @@ def test_a_row_runs_left_to_right():
     position, so neither a reversal nor "whatever order they arrived in" passes.
     """
     panel = row_panel(
-        Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=6),
-        Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=2),
-        Hole.from_measurement(Nanometre(0), Nanometre(18_000_000), Nanometre(7_000_000), index=9),
+        Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(6),
+        Hole.from_measurement(Nanometre(-40_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(2),
+        Hole.from_measurement(Nanometre(0), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(9),
     )
 
     ((_, holes),) = panel.rows()
@@ -1147,8 +1135,8 @@ def test_a_row_runs_left_to_right():
 def test_two_holes_a_nanometre_apart_in_y_are_two_rows():
     """Grouping is exact, and a nanometre is the whole of what that decides."""
     panel = row_panel(
-        Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=3),
-        Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_001), Nanometre(7_000_000), index=8),
+        Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(3),
+        Hole.from_measurement(Nanometre(20_000_000), Nanometre(18_000_001), Nanometre(7_000_000)).with_number(8),
     )
 
     assert [y for y, _ in panel.rows()] == [18_000_001, 18_000_000]
@@ -1159,8 +1147,8 @@ def test_two_holes_half_a_millimetre_apart_are_two_rows():
     A bucket wide enough to swallow it would dimension two rows of holes as one.
     """
     panel = row_panel(
-        Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000), index=3),
-        Hole.from_measurement(Nanometre(20_000_000), Nanometre(17_500_000), Nanometre(7_000_000), index=8),
+        Hole.from_measurement(Nanometre(-20_000_000), Nanometre(18_000_000), Nanometre(7_000_000)).with_number(3),
+        Hole.from_measurement(Nanometre(20_000_000), Nanometre(17_500_000), Nanometre(7_000_000)).with_number(8),
     )
 
     assert [y for y, _ in panel.rows()] == [18_000_000, 17_500_000]

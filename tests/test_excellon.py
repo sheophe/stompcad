@@ -136,6 +136,13 @@ def test_data_without_holes_still_produces_a_valid_file():
     assert out[-2:] == ["T0", "M30"]
 
 
+def test_the_emitter_refuses_data_that_was_never_routed():
+    data = make_data(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
+                     reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)))
+    with pytest.raises(EmitterError, match="RouteHoles"):
+        emit(data)
+
+
 # --------------------------------------------------------------------------
 # one tool per nominal diameter, numbering owned by the model
 # --------------------------------------------------------------------------
@@ -148,14 +155,14 @@ def test_regression_no_two_tool_definitions_share_a_diameter():
             x_nm=Nanometre(-40_000_000),
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
-            raw=RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(6.9998), 1),
+            raw=RawHole(Millimetre(-40.0), Millimetre(18.0), Millimetre(6.9998)),
             index=1,
         ),
         Hole(
             x_nm=Nanometre(-20_000_000),
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
-            raw=RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0000), 2),
+            raw=RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0000)),
             index=2,
         ),
         at(0, -18_750_000, 5_000_000, index=3),

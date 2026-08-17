@@ -34,7 +34,7 @@ def test_two_holes_at_one_nominal_point_are_ordered_by_their_measurements():
             Nanometre(0),
             Nanometre(0),
             Nanometre(7_000_000),
-            RawHole(Millimetre(raw_x), Millimetre(0.0), Millimetre(7.0), index),
+            RawHole(Millimetre(raw_x), Millimetre(0.0), Millimetre(7.0)),
             index,
         )
 
@@ -54,7 +54,7 @@ def test_two_holes_at_one_nominal_point_are_ordered_by_their_measurements():
         Nanometre(0),
         Nanometre(50_000_000),
         Nanometre(7_000_000),
-        RawHole(Millimetre(0.0), Millimetre(50.0), Millimetre(7.0), 3),
+        RawHole(Millimetre(0.0), Millimetre(50.0), Millimetre(7.0)),
         3,
     )
     steps = {
