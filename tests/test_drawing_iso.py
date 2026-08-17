@@ -17,6 +17,7 @@ from aidrill.emitters.drawing.sheet import (
     CENTRING_MARK_WIDTH,
     FILING_BORDER,
     FRAME_WIDTH,
+    GRID_BAND_WIDTH,
     GRID_CHARACTER_SIZE,
     GRID_FIELD_LENGTH,
     GRID_LETTERS,
@@ -220,20 +221,20 @@ def test_a_centring_mark_runs_from_the_grid_band_past_the_frame():
     right = next(m for m in marks if m.y1 == m.y2 and min(m.x1, m.x2) > sheet.width / 2.0)
 
     # Each runs from its band's outer edge to the overshoot past its frame edge.
-    assert min(top.y1, top.y2) == PLAIN_BORDER - PLAIN_BORDER
+    assert min(top.y1, top.y2) == PLAIN_BORDER - GRID_BAND_WIDTH
     assert max(top.y1, top.y2) == PLAIN_BORDER + CENTRING_MARK_OVERSHOOT
-    assert max(bottom.y1, bottom.y2) == sheet.height
+    assert max(bottom.y1, bottom.y2) == sheet.height - PLAIN_BORDER + GRID_BAND_WIDTH
     assert min(bottom.y1, bottom.y2) == sheet.height - PLAIN_BORDER - CENTRING_MARK_OVERSHOOT
     # The filing edge: the band starts a plain border in, so the mark does too.
-    assert min(left.x1, left.x2) == FILING_BORDER - PLAIN_BORDER
+    assert min(left.x1, left.x2) == FILING_BORDER - GRID_BAND_WIDTH
     assert max(left.x1, left.x2) == FILING_BORDER + CENTRING_MARK_OVERSHOOT
-    assert max(right.x1, right.x2) == sheet.width
+    assert max(right.x1, right.x2) == sheet.width - PLAIN_BORDER + GRID_BAND_WIDTH
     assert min(right.x1, right.x2) == sheet.width - PLAIN_BORDER - CENTRING_MARK_OVERSHOOT
 
-    # One depth of band plus one overshoot, on all four.
+    # One band depth plus one overshoot, on all four.
     for mark in marks:
         length = abs(mark.x2 - mark.x1) + abs(mark.y2 - mark.y1)
-        assert length == PLAIN_BORDER + CENTRING_MARK_OVERSHOOT
+        assert length == GRID_BAND_WIDTH + CENTRING_MARK_OVERSHOOT
 
 
 def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
@@ -414,14 +415,14 @@ def test_every_grid_reference_band_is_the_same_depth():
     assert left and right and top and bottom
 
     for band in (left, right):
-        assert all(abs(line.x2 - line.x1) == PLAIN_BORDER for line in band)
+        assert all(abs(line.x2 - line.x1) == GRID_BAND_WIDTH for line in band)
     for band in (top, bottom):
-        assert all(abs(line.y2 - line.y1) == PLAIN_BORDER for line in band)
+        assert all(abs(line.y2 - line.y1) == GRID_BAND_WIDTH for line in band)
 
     # The left band is inset by the filing margin rather than being deeper.
-    assert all(min(line.x1, line.x2) == FILING_BORDER - PLAIN_BORDER for line in left)
+    assert all(min(line.x1, line.x2) == FILING_BORDER - GRID_BAND_WIDTH for line in left)
     assert all(max(line.x1, line.x2) == FILING_BORDER for line in left)
-    assert all(max(line.x1, line.x2) == width for line in right)
+    assert all(min(line.x1, line.x2) == width - PLAIN_BORDER for line in right)
 
 
 def test_a_grid_letter_sits_at_the_centre_of_its_own_band():
@@ -434,7 +435,7 @@ def test_a_grid_letter_sits_at_the_centre_of_its_own_band():
     letters = [t for t in labels if t.content.isalpha()]
     left = sorted({t.x for t in letters if t.x < A3_LANDSCAPE.width / 2.0})
 
-    assert left == [FILING_BORDER - PLAIN_BORDER / 2.0]
+    assert left == [FILING_BORDER - GRID_BAND_WIDTH / 2.0]
 
 
 @pytest.mark.parametrize(
@@ -650,26 +651,31 @@ def test_the_reference_ticks_and_letters_land_on_the_same_edges():
     assert all(t.x > A4_PORTRAIT.width / 2.0 for t in a4_labels if t.content.isalpha())
 
 
-def test_the_filing_edge_band_is_bounded_where_the_trimmed_edge_is_not_its_edge():
-    """The band stops at the filing margin, so something has to say where.
+def test_the_band_stands_clear_of_the_trimmed_edge_on_every_side():
+    """The band is its own width, against the frame, so a margin stays blank.
 
-    On three edges the trimmed edge bounds the band. On the filing edge the
-    band starts 10 mm in, and without its own line the margin and the band read
-    as one 20 mm strip that the field divisions only half cross.
+    4.2 gives the borders but never the band's depth; Figure 4 does. The band
+    hugs the frame, so what each border leaves outside it differs: a plain
+    border keeps 5 mm clear and the filing edge keeps 15 mm. A band drawn out
+    to the trimmed edge instead would swallow the filing margin whole.
     """
-    from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.scene import Line
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    layout = iso_layout()
+    sheet = layout.sheet
+    items = iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
 
-    edges = [
-        i
-        for i in grid_reference_items(A3_LANDSCAPE)
-        if isinstance(i, Line) and i.cls == "grid-edge"
-    ]
+    frame = next(i for i in items if isinstance(i, Rect) and i.cls == "iso-frame")
+    band = next(i for i in items if isinstance(i, Rect) and i.cls == "grid-band")
 
-    # Exactly one: the filing edge. The other three bands reach the trimmed edge.
-    assert len(edges) == 1
-    (edge,) = edges
-    assert edge.x1 == edge.x2 == FILING_BORDER - PLAIN_BORDER
-    assert min(edge.y1, edge.y2) == 0.0
-    assert max(edge.y1, edge.y2) == A3_LANDSCAPE.height
+    # The band encloses the frame by its own width on all four sides.
+    assert band.x == frame.x - GRID_BAND_WIDTH
+    assert band.y == frame.y - GRID_BAND_WIDTH
+    assert band.width == frame.width + 2 * GRID_BAND_WIDTH
+    assert band.height == frame.height + 2 * GRID_BAND_WIDTH
+    assert band.stroke.width == GRID_LINE_WIDTH
+
+    # What that leaves between the band and the paper: 4.2's borders, less the
+    # band. The filing edge keeps three times what the others do.
+    assert band.x == FILING_BORDER - GRID_BAND_WIDTH
+    assert band.y == PLAIN_BORDER - GRID_BAND_WIDTH
+    assert sheet.width - (band.x + band.width) == PLAIN_BORDER - GRID_BAND_WIDTH
+    assert sheet.height - (band.y + band.height) == PLAIN_BORDER - GRID_BAND_WIDTH

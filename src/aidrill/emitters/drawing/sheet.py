@@ -25,6 +25,7 @@ __all__ = [
     "GRID_LINE_WIDTH",
     "GRID_CHARACTER_SIZE",
     "GRID_FIELD_LENGTH",
+    "GRID_BAND_WIDTH",
     "GRID_LETTERS",
     "TRIM_MARK_LONG",
     "TRIM_MARK_SHORT",
@@ -61,6 +62,11 @@ CENTRING_MARK_OVERSHOOT: float = 10.0
 GRID_LINE_WIDTH: float = 0.35
 GRID_CHARACTER_SIZE: float = 3.5
 GRID_FIELD_LENGTH: float = 50.0
+#: The depth of the band itself, taken from Figure 4 rather than the prose,
+#: which gives the border widths but never the band's own. It sits against the
+#: frame, so the rest of each border stays clear: 5 mm of margin outside it on
+#: three edges and 15 mm on the filing edge.
+GRID_BAND_WIDTH: float = 5.0
 #: 4.4. "capital letters (I and O shall not be used)".
 GRID_LETTERS: str = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 

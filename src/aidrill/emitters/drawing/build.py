@@ -40,6 +40,7 @@ from .sheet import (
     CENTRING_MARK_OVERSHOOT,
     CENTRING_MARK_WIDTH,
     FILING_BORDER,
+    GRID_BAND_WIDTH,
     GRID_CHARACTER_SIZE,
     GRID_LETTERS,
     GRID_LINE_WIDTH,
@@ -175,8 +176,20 @@ def iso_frame_items(layout: Layout, pens: Pens) -> list[Item]:
     """
     sheet = layout.sheet
     x0, y0, x1, y1 = sheet.space
+    band = GRID_BAND_WIDTH
     items: list[Item] = [
         Rect(x0, y0, x1 - x0, y1 - y0, pens.frame, cls="iso-frame"),
+        # The band's own outer boundary. With the frame it reads as one ruled
+        # strip of ``band`` depth, standing clear of the trimmed edge so the
+        # rest of each border — and the whole filing margin — stays blank.
+        Rect(
+            x0 - band,
+            y0 - band,
+            (x1 - x0) + 2 * band,
+            (y1 - y0) + 2 * band,
+            Stroke(GRID_LINE_WIDTH, INK),
+            cls="grid-band",
+        ),
     ]
     items += _centring_marks(sheet, x0, y0, x1, y1)
     items += _trim_marks(sheet)
@@ -204,7 +217,7 @@ def _centring_marks(sheet: Sheet, x0: float, y0: float, x1: float, y1: float) ->
     pen = Stroke(CENTRING_MARK_WIDTH, INK)
     mid_x, mid_y = sheet.width / 2.0, sheet.height / 2.0
     reach = CENTRING_MARK_OVERSHOOT
-    band = PLAIN_BORDER
+    band = GRID_BAND_WIDTH
     return [
         Line(mid_x, y0 - band, mid_x, y0 + reach, pen, cls="centring-mark"),
         Line(mid_x, y1 + band, mid_x, y1 - reach, pen, cls="centring-mark"),
@@ -269,11 +282,9 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
     for field in grid_divisions(extent, count):
         edges.append(edges[-1] + field)
 
-    #: The band the characters sit in, measured inwards from the frame rather
-    # than outwards from the trimmed edge. 4.2 widens the left edge to 20 mm
-    # "including the frame ... used as a filing margin", and that margin lies
-    # outside the grid reference border, so every band is the same depth and
-    # the left one simply starts 10 mm further in.
+    #: The band sits against the frame, so it is one depth on every edge and
+    # the borders differ only in how much margin they leave outside it: 4.2's
+    # filing edge keeps 15 mm clear where the other three keep 5.
     near = PLAIN_BORDER if horizontal else FILING_BORDER
     far = other - PLAIN_BORDER
 
@@ -282,19 +293,13 @@ def _grid_axis(sheet: Sheet, count: int, *, horizontal: bool, both_sides: bool) 
     # always drawn is the near one across the sheet and the far one down it.
     # Ticks and labels both read this list: deciding twice is how ticks came to
     # be drawn down one edge while the letters went down the other.
-    bands = [(near - PLAIN_BORDER, near)] if horizontal else [(other, far)]
+    near_band = (near - GRID_BAND_WIDTH, near)
+    far_band = (far + GRID_BAND_WIDTH, far)
+    bands = [near_band] if horizontal else [far_band]
     if both_sides:
-        bands.append((other, far) if horizontal else (near - PLAIN_BORDER, near))
+        bands.append(far_band if horizontal else near_band)
 
     for outer, inner in bands:
-        # The band's own outer edge, where the trimmed edge is not already it.
-        # Without this the filing margin and the band read as one 20 mm strip
-        # that the field divisions only half cross.
-        if outer not in (0.0, other):
-            items.append(
-                Line(*(edges[0], outer, edges[-1], outer) if horizontal else
-                     (outer, edges[0], outer, edges[-1]), pen, cls="grid-edge")
-            )
         for boundary in edges[1:-1]:
             items.append(
                 Line(*(boundary, outer, boundary, inner) if horizontal else
