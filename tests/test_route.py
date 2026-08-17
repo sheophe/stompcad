@@ -39,12 +39,29 @@ def test_two_holes_at_one_nominal_point_are_ordered_by_their_measurements():
         )
 
     left, right = hole(0.0001, 1), hole(0.0002, 2)
-    routes = {
+
+    # The pair alone exercises the block's start rule: whichever wins is first.
+    starts = {
         tuple(h.raw.x for h in RouteHoles().apply(DrillData(holes=pair, reference=ref)).holes)
         for pair in ((left, right), (right, left))
     }
+    assert starts == {(0.0001, 0.0002)}, "input order chose the block's start"
 
-    assert routes == {(0.0001, 0.0002)}, "input order reached the routed sequence"
+    # A third hole, unambiguously topmost, takes the start and leaves the tie to
+    # be settled a step later — the nearest-neighbour comparison, not the start
+    # rule. Both are equidistant from it, so only the tie-break can order them.
+    top = Hole(
+        Nanometre(0),
+        Nanometre(50_000_000),
+        Nanometre(7_000_000),
+        RawHole(Millimetre(0.0), Millimetre(50.0), Millimetre(7.0), 3),
+        3,
+    )
+    steps = {
+        tuple(h.raw.x for h in RouteHoles().apply(DrillData(holes=t, reference=ref)).holes)
+        for t in ((top, left, right), (top, right, left))
+    }
+    assert steps == {(0.0, 0.0001, 0.0002)}, "input order reached a nearest-neighbour step"
 
 
 def test_each_tool_occupies_one_contiguous_block():
