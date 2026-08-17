@@ -31,8 +31,14 @@ It plans the drilling sequence and is the only place holes are ordered or number
 - Each block routes independently of every other. The move between blocks happens while
   the bit is being changed, so it is not optimised.
 - Within a block: nearest-neighbour with visited tracking from the block's
-  topmost-then-leftmost hole, ties broken by `(-y_nm, x_nm)`, then 2-opt improvement with
-  the start hole fixed, sweeping `i < j` and taking the first improving reversal.
+  topmost-then-leftmost hole, then 2-opt improvement with the start hole fixed, sweeping
+  `i < j` and taking the first improving reversal.
+- Ties break on `(-y_nm, x_nm)` and then on the measurement the hole was quantised from.
+  Nominal position alone is not a total order: two holes can share one nominal point,
+  and `min` would otherwise keep whichever the caller listed first. `Deduplicate`
+  collapses such a pair, but stages are independent and a caller may omit it. Two holes
+  equal in both nominal and measured values are interchangeable, so no output can
+  distinguish them.
 
 Every rule is geometric; none consults input order. ADR-0006, Figure 1 shows the phases.
 
