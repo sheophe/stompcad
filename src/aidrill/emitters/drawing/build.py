@@ -29,6 +29,7 @@ from .content import (
     grid_note,
     is_flagged,
     note_lines,
+    row_chains,
     schedule_rows,
     title_cell_width,
     title_fields,
@@ -522,25 +523,14 @@ def _build_dimensions(layout: Layout, data: DrillData, pens: Pens) -> list[Item]
 
 
 def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
-    """Build as many Y-row chains as fit, then state the omitted count."""
-    rows = data.rows()
+    """Build as many row chains as fit, then state the omitted count."""
     content_bottom = layout.point(0.0, -layout.half_height)[1]
-    # A station is a *length*: it is subtracted from its neighbour and the
-    # difference is printed, so it stays an exact nanometre all the way to
-    # ``format_nm``. The floor mirrors ``DrillData.with_origin``'s, and for
-    # its reason — an outline of an odd number of nanometres has no exact
-    # half, and half a nanometre is three decimal places below anything this
-    # sheet prints, where a float edge would be a quantity the drill file and
-    # the drawing could round differently.
-    edge_nm = Nanometre(data.reference.width_nm // 2) if data.reference is not None else None
-
     top = content_bottom + CHAIN_STANDOFF
     # The extension lines overshoot the dimension line by 1.5, so that is
     # the lowest ink a chain puts on the sheet.
     room = int((layout.area[3] - 1.5 - top) / ROW_PITCH) + 1
-    # Bottom row first, which is the order they stack away from the panel.
-    ordered = list(reversed(rows))
-    count, omitted = allot(len(ordered), room)
+    chains = row_chains(data)
+    count, omitted = allot(len(chains), room)
 
     drawn: list[Item] = []
     if omitted:
@@ -549,7 +539,8 @@ def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]
                 layout.area[0] + 2.0,
                 top + ROW_PITCH * count,
                 fits(
-                    f"… {omitted} further row dimensions not shown",
+                    # Chains, not rows: one of these may dimension several rows.
+                    f"… {omitted} further dimension chains not shown",
                     2.2,
                     layout.area[2] - layout.area[0] - 4.0,
                 ),
@@ -559,24 +550,19 @@ def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]
             )
         )
 
-    for level, (row_y_nm, holes) in enumerate(ordered[:count]):
-        stations_nm = [hole.x_nm for hole in holes]
-        if edge_nm is not None:
-            stations_nm = [Nanometre(-edge_nm), *stations_nm, edge_nm]
-        # Stations are integer nanometres, so exact equality alone identifies
-        # duplicate dimension stations, including an edge-aligned hole.
-        stations_nm = sorted(set(stations_nm))
-        if len(stations_nm) < 2:
-            continue
-
+    for level, row_chain in enumerate(chains[:count]):
         chain: list[Item] = []
         dim_y = content_bottom + CHAIN_STANDOFF + ROW_PITCH * level
+        # Eager, as the chain of levels is: the extensions leave the highest
+        # row the chain serves, so on the way down they pass through the holes
+        # of every row it serves and show which rows those are.
+        leave_y = layout.point(0.0, mm_from_nm(row_chain.top_nm))[1]
 
-        for x_nm in stations_nm:
-            sx, sy = layout.point(mm_from_nm(x_nm), mm_from_nm(row_y_nm))
-            chain.append(Line(sx, sy, sx, dim_y + 1.5, pens.feint, cls="extension"))
+        for x_nm in row_chain.stations_nm:
+            sx = layout.point(mm_from_nm(x_nm), 0.0)[0]
+            chain.append(Line(sx, leave_y, sx, dim_y + 1.5, pens.feint, cls="extension"))
 
-        for start_nm, end_nm in pairwise(stations_nm):
+        for start_nm, end_nm in pairwise(row_chain.stations_nm):
             x1 = layout.point(mm_from_nm(start_nm), 0.0)[0]
             x2 = layout.point(mm_from_nm(end_nm), 0.0)[0]
             chain.append(Line(x1, dim_y, x2, dim_y, pens.dimension, cls="dim-line"))

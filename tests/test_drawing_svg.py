@@ -952,12 +952,17 @@ def test_vertical_dimension_text_is_rotated(root: ET.Element):
 
 
 def _rows_of_five(count: int) -> DrillData:
-    """``count`` rows of five holes, spread down a 112.40 × 60.50 panel."""
+    """``count`` rows of five holes, spread down a 112.40 × 60.50 panel.
+
+    Each row is stepped 0.2 mm along X so no two share a pattern of stations:
+    rows drilled alike share one chain, and a panel of identical rows would
+    stack one chain deep however many rows it had.
+    """
     pitch_nm = 56_000_000 // (count - 1) if count > 1 else 0
     return DrillData(
         holes=tuple(
             Hole.from_measurement(
-                Nanometre(-40_000_000 + 20_000_000 * column),
+                Nanometre(-40_000_000 + 20_000_000 * column + 200_000 * row),
                 Nanometre(28_000_000 - pitch_nm * row),
                 Nanometre(3_000_000)).with_number(500 - (row * 5 + column))
             for row in range(count)
@@ -980,11 +985,13 @@ def test_every_dimension_stays_inside_the_drawing_area(rows: int):
     assert_within(emitter.layout(data).area, by_class(root, "dimensions")[0], "the drawing area")
 
 
-def test_the_drawing_says_how_many_row_dimensions_it_could_not_draw():
+def test_the_drawing_says_how_many_dimension_chains_it_could_not_draw():
     """A hole with no dimension beside it is a hole nobody can locate.
 
     Same rule as the notes and the schedule: a fact that disappears without
-    trace is worse than one that is visibly missing.
+    trace is worse than one that is visibly missing. The count is of chains,
+    not rows: rows drilled to one pattern share a chain, so this fixture steps
+    each row along X to keep the two numbers the same.
     """
     data = _rows_of_five(30)
     root = ET.fromstring(DrawingSvgEmitter().emit(data))

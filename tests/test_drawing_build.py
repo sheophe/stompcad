@@ -336,6 +336,102 @@ def test_a_row_level_on_the_outline_edge_is_not_a_second_station():
     assert _levels(items) == ["40.000"], "one span edge to edge, not a zero beside it"
 
 
+def _row_chains(items: tuple[Item, ...]) -> list[Group]:
+    return [i for i in _dimensions(items) if isinstance(i, Group) and i.cls == "dim-chain"]
+
+
+def _corners() -> DrillData:
+    """Four holes at the corners of a rectangle: two rows, one pattern of X."""
+    return _levelled(
+        at(-25_000_000, 15_000_000, index=1),
+        at(25_000_000, 15_000_000, index=2),
+        at(-25_000_000, -15_000_000, index=3),
+        at(25_000_000, -15_000_000, index=4),
+        height_nm=50_000_000,
+    )
+
+
+def test_two_rows_drilled_to_one_pattern_share_one_chain():
+    """Drawn twice it states the same distances twice.
+
+    The second chain takes a second band of the sheet to say nothing the first
+    has not, so the panel's drawing grows without its dimensions gaining a fact.
+    """
+    data = _corners()
+    _, items = _scene(data)
+    chains = _row_chains(items)
+
+    assert len(data.rows()) == 2, "the fixture has to be two rows"
+    assert len(chains) == 1
+    assert [t.content for t in chains[0].items if isinstance(t, Text)] == [
+        "5.000",
+        "50.000",
+        "5.000",
+    ]
+
+
+def test_rows_of_different_patterns_keep_a_chain_each():
+    """Only an identical pattern is a repeat; a different one is a fact."""
+    data = _levelled(
+        at(-25_000_000, 15_000_000, index=1),
+        at(25_000_000, 15_000_000, index=2),
+        at(-10_000_000, -15_000_000, index=3),
+        height_nm=50_000_000,
+    )
+    _, items = _scene(data)
+
+    assert len(_row_chains(items)) == 2
+
+
+def test_the_stack_places_a_chain_by_the_lowest_row_it_serves():
+    """Chains stack away from the panel as the rows they dimension do.
+
+    A chain serving two rows is placed by the lower of them. Placed by the
+    upper it would be filed behind a chain whose rows are entirely above its
+    own, and the two would reach past each other to their stations.
+    """
+    _, items = _scene(
+        _levelled(
+            at(-25_000_000, 20_000_000, index=1),
+            at(25_000_000, 20_000_000, index=2),
+            at(-10_000_000, 0, index=3),
+            at(-25_000_000, -20_000_000, index=4),
+            at(25_000_000, -20_000_000, index=5),
+            height_nm=50_000_000,
+        )
+    )
+    chains = _row_chains(items)
+    assert len(chains) == 2, "the outer rows share a pattern, the middle one differs"
+
+    def labels(chain: Group) -> list[str]:
+        return [i.content for i in chain.items if isinstance(i, Text)]
+
+    def dim_y(chain: Group) -> float:
+        return next(i for i in chain.items if isinstance(i, Line) and i.cls == "dim-line").y1
+
+    # The shared chain reaches down to -20, below the middle row, so it is the
+    # one nearest the panel however high its other row sits.
+    assert labels(chains[0]) == ["5.000", "50.000", "5.000"]
+    assert labels(chains[1]) == ["20.000", "40.000"]
+    assert dim_y(chains[0]) < dim_y(chains[1]), "drawn in the order they stack outwards"
+
+
+def test_a_shared_chain_s_extensions_leave_the_highest_row_it_serves():
+    """Eager, as the chain of levels is.
+
+    On the way down the line passes through every row's holes at that station,
+    so the reader can see which rows the one chain was drawn for.
+    """
+    layout, items = _scene(_corners())
+    (chain,) = _row_chains(items)
+
+    extensions = [i for i in chain.items if isinstance(i, Line) and i.cls == "extension"]
+    assert extensions
+    assert all(line.y1 == pytest.approx(layout.point(0.0, 15.0)[1]) for line in extensions), (
+        "not the lower row it also serves"
+    )
+
+
 def test_both_chains_stand_off_the_panel_by_the_same_distance():
     """Below and beside are one system, so they stand off alike.
 

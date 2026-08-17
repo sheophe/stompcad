@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ...model import DrillData
 from ...units import mm_from_nm
-from .content import Note, fit_font, note_lines
+from .content import Note, fit_font, note_lines, row_chains
 from .sheet import TITLE_BLOCK_WIDTH, Box, FrameStyle, Sheet
 
 __all__ = [
@@ -213,12 +213,13 @@ class Layout:
             area = (border[0], border[1], border[0] + text_w, notes_box[1] - GUTTER)
         area_h = max(20.0, area[3] - area[1])
 
-        rows = data.rows()
-        # The chain stack may take half the box the drawing occupies, and no
-        # more: the rows that do not fit are stated as a counted omission. The
-        # cap is read off the same box ``fits`` measures the demand against, or
-        # the demand and the test would be about two different boxes.
-        bottom = min(BOTTOM_BASE + ROW_PITCH * len(rows), area_h * 0.5)
+        # Chains, not rows: rows drilled to one pattern of X share a chain and
+        # take one band between them. The stack may take half the box the
+        # drawing occupies, and no more; the chains that do not fit are stated
+        # as a counted omission. The cap is read off the same box ``fits``
+        # measures the demand against, or the demand and the test would be
+        # about two different boxes.
+        bottom = min(BOTTOM_BASE + ROW_PITCH * len(row_chains(data)), area_h * 0.5)
         usable_w = max(10.0, (area[2] - area[0]) - LEFT_ALLOWANCE - RIGHT_ALLOWANCE)
         usable_h = max(10.0, area_h - TOP_ALLOWANCE - bottom)
 
