@@ -84,6 +84,8 @@ The accepted architecture is defined by:
   boundary, ordering, and termination rules.
 - [ADR-0004](docs/adr/0004-unit-newtypes.md): the branded length units.
 - [ADR-0005](docs/adr/0005-binary-emitter-payloads.md): the binary emitter payload.
+- [ADR-0006](docs/adr/0006-toolpath-ordering-and-hole-numbering.md): toolpath ordering and
+  hole numbering.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
@@ -127,10 +129,14 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Enclosure artwork uses published top-view/backplate dimensions, not the smaller drilled
   face. A two-dimensional outline identifies a footprint, not necessarily one part;
   ambiguous footprints require `--case`, and a declared case is always verified.
-- `Hole.index` is stable source-order identity, numbered from 1 and refused below it.
-  Every artefact prints it unaltered — balloon, schedule, report, diagnostic message —
-  so no renderer adds an offset. `ReferenceOutline.raw` preserves the measured outline.
-  Transform these values through the model rather than reconstructing them.
+- Geometry alone determines output: two inputs representing the same geometry produce
+  byte-identical artefacts, whatever their element order. No rule may consult input
+  order — see [ADR-0006](docs/adr/0006-toolpath-ordering-and-hole-numbering.md).
+- `Hole.index` is the drill sequence, `1…n`, assigned only by `RouteHoles` and `None`
+  before it. Each tool occupies one contiguous block; holes route within a block.
+  Emitters read numbers through `DrillData.numbered()`, which refuses unrouted data.
+- `ReferenceOutline.raw` preserves the measured outline. Transform these values through
+  the model rather than reconstructing them.
 - Diagnostics, processing provenance, tool assignments, and ordering live on
   `DrillData`; emitters do not re-derive them. Match diagnostics by `code`, not message.
 
