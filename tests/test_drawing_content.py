@@ -131,7 +131,10 @@ def test_fits_gives_back_what_it_can_when_the_box_holds_no_ellipsis():
 def test_a_flagged_hole_is_matched_by_code_and_by_location():
     """Diagnostics are joined on code and exact location, never by identity."""
     duplicate = Diagnostic.warning(
-        content.DUP_CODE, "two coincident holes", location_nm=(1_000_000, 2_000_000)
+        content.DUP_CODE,
+        "two coincident holes",
+        location_nm=(1_000_000, 2_000_000),
+        data=(("diameter_nm", 7_000_000), ("dropped", 1)),
     )
     other = Diagnostic.warning("off-grid", "moved", location_nm=(3_000_000, 4_000_000))
 
@@ -139,6 +142,25 @@ def test_a_flagged_hole_is_matched_by_code_and_by_location():
 
     assert content.is_flagged(at(1_000_000, 2_000_000, index=12), flagged)
     assert not content.is_flagged(at(3_000_000, 4_000_000, index=5), flagged)
+
+
+def test_a_hole_sharing_a_point_but_not_the_diameter_is_not_flagged():
+    """A ⌀3 hole sharing a point with a duplicated ⌀7 pair must not ring: the
+    old ``hole_index`` join could not make this mistake, but joining on
+    ``location_nm`` alone can — ``diameter_nm`` in the finding's payload is
+    what tells them apart.
+    """
+    duplicate = Diagnostic.warning(
+        content.DUP_CODE,
+        "two coincident ⌀7.000 mm holes",
+        location_nm=(1_000_000, 2_000_000),
+        data=(("diameter_nm", 7_000_000), ("dropped", 1)),
+    )
+
+    flagged = content.flagged_holes((duplicate,))
+
+    assert content.is_flagged(at(1_000_000, 2_000_000, 7_000_000, index=12), flagged)
+    assert not content.is_flagged(at(1_000_000, 2_000_000, 3_000_000, index=5), flagged)
 
 
 def _mixed_diameter_panel() -> DrillData:

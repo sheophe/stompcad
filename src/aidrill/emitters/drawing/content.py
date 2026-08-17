@@ -415,15 +415,25 @@ def designator(part: str, match: EnclosureMatch) -> str:
     return part
 
 
-def flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[tuple[int, int]]:
-    """Return the places ``duplicate-hole`` findings name."""
-    return frozenset(
-        d.location_nm
-        for d in diagnostics
-        if d.code == DUP_CODE and d.location_nm is not None
-    )
+def flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[tuple[int, int, int]]:
+    """Return the (place, diameter) pairs ``duplicate-hole`` findings name.
+
+    Location alone is not enough: a ⌀3 hole can share a point with a
+    duplicated ⌀7 pair, and only ``diameter_nm`` from the finding's own
+    payload tells them apart.
+    """
+    flagged: set[tuple[int, int, int]] = set()
+    for d in diagnostics:
+        if d.code != DUP_CODE or d.location_nm is None:
+            continue
+        diameter_nm = d.get("diameter_nm")
+        if diameter_nm is None:
+            continue
+        x_nm, y_nm = d.location_nm
+        flagged.add((x_nm, y_nm, diameter_nm))
+    return frozenset(flagged)
 
 
-def is_flagged(hole: Hole, flagged: frozenset[tuple[int, int]]) -> bool:
-    """Match on exact whole nanometres, the one place both sides agree."""
-    return (hole.x_nm, hole.y_nm) in flagged
+def is_flagged(hole: Hole, flagged: frozenset[tuple[int, int, int]]) -> bool:
+    """Match on exact whole nanometres and diameter, the two both sides agree."""
+    return (hole.x_nm, hole.y_nm, hole.diameter_nm) in flagged
