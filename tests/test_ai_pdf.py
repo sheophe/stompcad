@@ -105,7 +105,7 @@ def test_default_layer_names_match_the_spec():
 
 
 def test_layers_can_be_listed_without_reading_geometry():
-    assert AiPdfSource(FIXTURE).layers() == ("Background", "Drill", "Graphics", "Hardware")
+    assert AiPdfSource(FIXTURE).layers() == ("Background", "Drill")
 
 
 def test_repr_states_both_layer_choices():
@@ -114,7 +114,7 @@ def test_repr_states_both_layer_choices():
 
 
 def test_source_info_records_every_layer_found(data):
-    assert data.source.layers_found == ("Background", "Drill", "Graphics", "Hardware")
+    assert data.source.layers_found == ("Background", "Drill")
     assert data.source.drill_layer == "Drill"
     assert data.source.reference_layer == "Background"
     assert data.source.path == str(FIXTURE)
@@ -379,8 +379,8 @@ def test_unknown_drill_layer_lists_every_real_layer():
     with pytest.raises(LayerNotFoundError) as exc:
         AiPdfSource(FIXTURE, drill_layer="Holes").read()
     assert exc.value.wanted == "Holes"
-    assert set(exc.value.available) == {"Background", "Drill", "Graphics", "Hardware"}
-    for name in ("Background", "Drill", "Graphics", "Hardware"):
+    assert set(exc.value.available) == {"Background", "Drill"}
+    for name in ("Background", "Drill"):
         assert name in str(exc.value)
 
 
