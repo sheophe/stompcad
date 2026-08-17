@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from aidrill.emitters import get_emitter
-from aidrill.model import DrillData, Hole
+from aidrill.emitters.json_out import JsonEmitter
+from aidrill.model import DrillData, Hole, RawHole, ReferenceOutline
 from aidrill.pipeline import (
     Deduplicate,
     IdentifyHammondFootprint,
@@ -21,7 +22,7 @@ from aidrill.pipeline import (
 )
 from aidrill.quantise import quantise
 from aidrill.sources import AiPdfSource
-from aidrill.units import Nanometre
+from aidrill.units import Millimetre, Nanometre
 
 __all__: list[str] = []
 
@@ -85,3 +86,32 @@ def test_a_concentric_pair_is_ordered_by_geometry_not_by_arrival():
         for p in itertools.permutations(pair)
     }
     assert len(outputs) == 1
+
+
+def test_a_tie_inside_one_block_cannot_reach_the_emitted_bytes():
+    """Two holes of one size at one nominal point, told apart only by what they
+    measured. ``Deduplicate`` collapses such a pair, so this is what a caller
+    composing ``RouteHoles`` alone gets — and ``raw`` is serialised, so which
+    one is numbered first is observable. Regression: this ordering was decided
+    by arrival until the routing tie-break fell through to the measurement.
+
+    The permutation test above cannot see this: its fixtures tie only across
+    blocks, and within a block 2-opt converges either arrival order to one tour.
+    """
+    ref = ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000))
+
+    def hole(raw_x: float) -> Hole:
+        return Hole(
+            Nanometre(0),
+            Nanometre(0),
+            Nanometre(7_000_000),
+            RawHole(Millimetre(raw_x), Millimetre(0.0), Millimetre(7.0)),
+        )
+
+    pair = (hole(0.0001), hole(0.0002))
+    rendered = {
+        JsonEmitter().emit(routed(DrillData(holes=order, reference=ref)))
+        for order in itertools.permutations(pair)
+    }
+
+    assert len(rendered) == 1, "arrival order reached the emitted bytes"
