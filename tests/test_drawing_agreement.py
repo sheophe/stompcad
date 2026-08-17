@@ -179,6 +179,22 @@ def test_both_sheets_carry_the_same_diagnostic_text():
         assert note.text in pdf
 
 
+def test_both_sheets_state_the_same_row_levels():
+    """The SVG fits a scale to its sheet and the PDF walks the ISO ladder at 1:1,
+    so the chain of levels is drawn at two sizes. Its values are differences of
+    stations rather than of sheet coordinates, so the numbers must still agree —
+    a level the two sheets disagreed about is a row drilled at two heights.
+    """
+    data = panel()
+    # 60.500 tall, rows at -18.750 and 18.000: bottom edge, both rows, top edge.
+    levels = ["11.500", "36.750", "12.250"]
+
+    svg, pdf = svg_strings(data), pdf_strings(data)
+    for level in levels:
+        assert level in svg, f"the SVG sheet never states the level {level}"
+        assert level in pdf, f"the PDF sheet never states the level {level}"
+
+
 def test_both_sheets_report_the_same_hole_count_and_source():
     data = panel()
 
@@ -223,19 +239,20 @@ def test_a_rotated_label_advances_the_same_physical_way_on_both_sheets():
     rotated = _svg_rotated(data)
     placements = _pdf_rotated(data)
 
-    assert len(rotated) == 1, "expected exactly one rotated run on the SVG sheet"
-    assert len(placements) == 1, "expected exactly one rotated placement in the PDF"
+    assert rotated, "expected a rotated run on the SVG sheet"
+    assert len(rotated) == len(placements), "one sheet rotated a label the other did not"
 
-    (content, angle), (cos_pdf, sin_pdf) = rotated[0], placements[0]
-    assert content in pdf_strings(data)
-    # The SVG advance is (cos, sin) with Y running down the page; the PDF's is
-    # (a, b) with Y running up. Comparing them means flipping one of the two.
-    across = math.cos(math.radians(angle))
-    up_the_page = -math.sin(math.radians(angle))
+    shown = pdf_strings(data)
+    for (content, angle), (cos_pdf, sin_pdf) in zip(rotated, placements, strict=True):
+        assert content in shown
+        # The SVG advance is (cos, sin) with Y running down the page; the PDF's
+        # is (a, b) with Y running up. Comparing them flips one of the two.
+        across = math.cos(math.radians(angle))
+        up_the_page = -math.sin(math.radians(angle))
 
-    assert (across, up_the_page) == pytest.approx((cos_pdf, sin_pdf), abs=1e-3)
-    # And it really is a label running up the page, not merely two agreeing zeros.
-    assert up_the_page > 0.9
+        assert (across, up_the_page) == pytest.approx((cos_pdf, sin_pdf), abs=1e-3)
+        # And it really is a label running up the page, not two agreeing zeros.
+        assert up_the_page > 0.9
 
 
 # --- what a crowded sheet is allowed to differ about ------------------------

@@ -38,6 +38,8 @@ __all__ = [
     "allot",
     "fit_font",
     "ScheduleRow",
+    "RowChain",
+    "row_chains",
     "ToolLine",
     "Note",
     "SheetText",
@@ -153,6 +155,55 @@ class ScheduleRow:
     diameter: str
     tool: str
     flagged: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RowChain:
+    """The X stations one chain dimensions, and the rows it dimensions for."""
+
+    stations_nm: tuple[Nanometre, ...]
+    rows_nm: tuple[Nanometre, ...]
+
+    @property
+    def top_nm(self) -> Nanometre:
+        """The highest row served: where the chain's extension lines leave."""
+        return max(self.rows_nm)
+
+    @property
+    def bottom_nm(self) -> Nanometre:
+        """The lowest row served, which is what stacks the chain."""
+        return min(self.rows_nm)
+
+
+def row_chains(data: DrillData) -> list[RowChain]:
+    """Group the rows into the chains that dimension them, bottom of panel first.
+
+    Two rows drilled to one pattern of X are one chain: drawn twice it states
+    the same distances twice and spends a second band of the sheet saying
+    nothing new. A row of fewer than two stations is a place, not a distance,
+    and is dimensioned by the chain of levels alone.
+    """
+    # A station is a *length*: the printed value is a difference of two of
+    # them, so it stays an exact nanometre all the way to ``format_nm``. The
+    # floor mirrors ``DrillData.with_origin``'s, and for its reason — an
+    # outline of an odd number of nanometres has no exact half, and a float
+    # edge would be a quantity the drill file and the drawing could round
+    # differently.
+    edge_nm = Nanometre(data.reference.width_nm // 2) if data.reference is not None else None
+    grouped: dict[tuple[Nanometre, ...], list[Nanometre]] = {}
+    for row_y_nm, holes in data.rows():
+        stations = [hole.x_nm for hole in holes]
+        if edge_nm is not None:
+            stations = [Nanometre(-edge_nm), *stations, edge_nm]
+        # Exact equality alone identifies duplicate stations, an edge-aligned
+        # hole included, because every one of them is an integer nanometre.
+        pattern = tuple(sorted(set(stations)))
+        if len(pattern) < 2:
+            continue
+        grouped.setdefault(pattern, []).append(row_y_nm)
+    chains = [RowChain(pattern, tuple(rows)) for pattern, rows in grouped.items()]
+    # Bottom first, which is the order they stack away from the panel.
+    return sorted(chains, key=lambda chain: chain.bottom_nm)
 
 
 @dataclass(frozen=True, slots=True)

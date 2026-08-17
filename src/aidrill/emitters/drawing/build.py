@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass
 from itertools import pairwise
 
-from ...model import DrillData, Severity
+from ...model import DrillData, Hole, Severity
 from ...units import Nanometre, format_nm, mm_from_nm
 from .content import (
     POSITION_DECIMALS,
@@ -29,12 +29,22 @@ from .content import (
     grid_note,
     is_flagged,
     note_lines,
+    row_chains,
     schedule_rows,
     title_cell_width,
     title_fields,
     tool_summary,
 )
-from .layout import ROW_PITCH, TITLE_MIN_FONT, Layout
+from .layout import (
+    BALLOON_LEADER,
+    BALLOON_RADIUS,
+    CHAIN_STANDOFF,
+    HOLE_MIN_RADIUS,
+    LEVEL_CHAIN_LABEL,
+    ROW_PITCH,
+    TITLE_MIN_FONT,
+    Layout,
+)
 from .scene import FEINT, INK, RED, Circle, Group, Item, Line, Polygon, Rect, Scene, Stroke, Text
 from .sheet import (
     CENTRING_MARK_OVERSHOOT,
@@ -65,6 +75,7 @@ __all__ = [
     "FURNITURE",
     "DUP_RING",
     "arrow",
+    "balloon_overhang",
     "iso_frame_items",
     "grid_reference_items",
 ]
@@ -408,7 +419,7 @@ def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
 
     for number, hole in data.numbered():
         cx, cy = layout.point(mm_from_nm(hole.x_nm), mm_from_nm(hole.y_nm))
-        radius = max(0.4, layout.length(mm_from_nm(hole.diameter_nm)) / 2.0)
+        radius = _hole_radius(layout, hole)
         is_dup = is_flagged(hole, flagged)
         colour = RED if is_dup else INK
 
@@ -437,22 +448,60 @@ def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     return [Group("holes", tuple(drawn))]
 
 
+def _hole_radius(layout: Layout, hole: Hole) -> float:
+    """The radius a hole is drawn at, which never falls below the floor."""
+    return max(HOLE_MIN_RADIUS, layout.length(mm_from_nm(hole.diameter_nm)) / 2.0)
+
+
+def _balloon_offset(radius: float) -> float:
+    """How far a balloon's centre stands from its hole, on either axis.
+
+    The leader runs at 45°, so the two components are equal and the horizontal
+    one alone answers how far right of its hole a balloon reaches.
+    """
+    return math.sqrt(0.5) * (radius + BALLOON_LEADER)
+
+
+def _balloon_centre(cx: float, cy: float, radius: float) -> tuple[float, float]:
+    """Where a hole's balloon sits: up and to the right, clear of the hole."""
+    offset = _balloon_offset(radius)
+    return (cx + offset, cy - offset)
+
+
+def balloon_overhang(layout: Layout, data: DrillData) -> float:
+    """How far past the content's right extent the balloons actually reach.
+
+    Never negative. On most panels every balloon stays inside the outline, and
+    what stands outboard of them should then stand off the outline itself rather
+    than off a worst case that did not happen.
+    """
+    right = layout.point(layout.half_width, 0.0)[0]
+    reach = max(
+        (
+            layout.point(mm_from_nm(hole.x_nm), 0.0)[0]
+            + _balloon_offset(_hole_radius(layout, hole))
+            + BALLOON_RADIUS
+            for hole in data.holes
+        ),
+        default=right,
+    )
+    return max(0.0, reach - right)
+
+
 def _balloon(cx: float, cy: float, radius: float, number: int, pens: Pens) -> list[Item]:
     """Place a balloon carrying the model's own number, never a list position."""
     unit = math.sqrt(0.5)
-    reach = radius + 7.0
-    bx = cx + unit * reach
-    by = cy - unit * reach
+    bx, by = _balloon_centre(cx, cy, radius)
     return [
         Line(
             cx + unit * radius,
             cy - unit * radius,
-            bx - unit * 3.0,
-            by + unit * 3.0,
+            bx - unit * BALLOON_RADIUS,
+            by + unit * BALLOON_RADIUS,
             pens.dimension,
             cls="leader",
         ),
-        Circle(bx, by, 3.0, FURNITURE, fill="#ffffff", cls="balloon"),
+        Circle(bx, by, BALLOON_RADIUS, FURNITURE, fill="#ffffff", cls="balloon"),
         Text(bx, by + 0.9, str(number), 2.6, anchor="middle", cls="balloon-no"),
     ]
 
@@ -465,30 +514,23 @@ def _balloon(cx: float, cy: float, radius: float, number: int, pens: Pens) -> li
 def _build_dimensions(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     if not data.holes and data.reference is None:
         return []
-    drawn = _build_row_chains(layout, data, pens) + _build_overall(layout, data, pens)
+    drawn = (
+        _build_row_chains(layout, data, pens)
+        + _build_level_chain(layout, data, pens)
+        + _build_overall(layout, data, pens)
+    )
     return [Group("dimensions", tuple(drawn))]
 
 
 def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
-    """Build as many Y-row chains as fit, then state the omitted count."""
-    rows = data.rows()
+    """Build as many row chains as fit, then state the omitted count."""
     content_bottom = layout.point(0.0, -layout.half_height)[1]
-    # A station is a *length*: it is subtracted from its neighbour and the
-    # difference is printed, so it stays an exact nanometre all the way to
-    # ``format_nm``. The floor mirrors ``DrillData.with_origin``'s, and for
-    # its reason — an outline of an odd number of nanometres has no exact
-    # half, and half a nanometre is three decimal places below anything this
-    # sheet prints, where a float edge would be a quantity the drill file and
-    # the drawing could round differently.
-    edge_nm = Nanometre(data.reference.width_nm // 2) if data.reference is not None else None
-
-    top = content_bottom + 8.0
+    top = content_bottom + CHAIN_STANDOFF
     # The extension lines overshoot the dimension line by 1.5, so that is
     # the lowest ink a chain puts on the sheet.
     room = int((layout.area[3] - 1.5 - top) / ROW_PITCH) + 1
-    # Bottom row first, which is the order they stack away from the panel.
-    ordered = list(reversed(rows))
-    count, omitted = allot(len(ordered), room)
+    chains = row_chains(data)
+    count, omitted = allot(len(chains), room)
 
     drawn: list[Item] = []
     if omitted:
@@ -497,7 +539,8 @@ def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]
                 layout.area[0] + 2.0,
                 top + ROW_PITCH * count,
                 fits(
-                    f"… {omitted} further row dimensions not shown",
+                    # Chains, not rows: one of these may dimension several rows.
+                    f"… {omitted} further dimension chains not shown",
                     2.2,
                     layout.area[2] - layout.area[0] - 4.0,
                 ),
@@ -507,24 +550,19 @@ def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]
             )
         )
 
-    for level, (row_y_nm, holes) in enumerate(ordered[:count]):
-        stations_nm = [hole.x_nm for hole in holes]
-        if edge_nm is not None:
-            stations_nm = [Nanometre(-edge_nm), *stations_nm, edge_nm]
-        # Stations are integer nanometres, so exact equality alone identifies
-        # duplicate dimension stations, including an edge-aligned hole.
-        stations_nm = sorted(set(stations_nm))
-        if len(stations_nm) < 2:
-            continue
-
+    for level, row_chain in enumerate(chains[:count]):
         chain: list[Item] = []
-        dim_y = content_bottom + 8.0 + ROW_PITCH * level
+        dim_y = content_bottom + CHAIN_STANDOFF + ROW_PITCH * level
+        # Eager, as the chain of levels is: the extensions leave the highest
+        # row the chain serves, so on the way down they pass through the holes
+        # of every row it serves and show which rows those are.
+        leave_y = layout.point(0.0, mm_from_nm(row_chain.top_nm))[1]
 
-        for x_nm in stations_nm:
-            sx, sy = layout.point(mm_from_nm(x_nm), mm_from_nm(row_y_nm))
-            chain.append(Line(sx, sy, sx, dim_y + 1.5, pens.feint, cls="extension"))
+        for x_nm in row_chain.stations_nm:
+            sx = layout.point(mm_from_nm(x_nm), 0.0)[0]
+            chain.append(Line(sx, leave_y, sx, dim_y + 1.5, pens.feint, cls="extension"))
 
-        for start_nm, end_nm in pairwise(stations_nm):
+        for start_nm, end_nm in pairwise(row_chain.stations_nm):
             x1 = layout.point(mm_from_nm(start_nm), 0.0)[0]
             x2 = layout.point(mm_from_nm(end_nm), 0.0)[0]
             chain.append(Line(x1, dim_y, x2, dim_y, pens.dimension, cls="dim-line"))
@@ -547,6 +585,78 @@ def _build_row_chains(layout: Layout, data: DrillData, pens: Pens) -> list[Item]
         drawn.append(Group("dim-chain", tuple(chain)))
 
     return drawn
+
+
+def _build_level_chain(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
+    """Dimension each row's height once, between the outline's own edges.
+
+    A row is one Y, so a single chain of levels gives the height of every hole
+    the sheet draws; one chain per column would restate these same distances
+    once per column. A panel with no holes has no level the overall height
+    dimension has not already stated, so it gets no chain.
+    """
+    if not data.holes:
+        return []
+    # A station is a *length*, as in ``_build_row_chains``, and for that
+    # function's reason: the printed value is a difference of two of them and
+    # stays an exact nanometre all the way to ``format_nm``.
+    edge_nm = Nanometre(data.reference.height_nm // 2) if data.reference is not None else None
+    # ``rows`` sorts each row left to right, so the first hole is the far one
+    # from the chain. A level's extension leaves there rather than beside the
+    # chain, so on its way out it passes through every hole on the row and
+    # shows which holes the level was measured to.
+    first_nm = {row_y_nm: holes[0].x_nm for row_y_nm, holes in data.rows()}
+    stations_nm = list(first_nm)
+    if edge_nm is not None:
+        stations_nm = [Nanometre(-edge_nm), *stations_nm, edge_nm]
+    stations_nm = sorted(set(stations_nm))
+    if len(stations_nm) < 2:
+        return []
+
+    right = layout.point(layout.half_width, 0.0)[0]
+    # Measured, not reserved: the balloons are inside the outline on most
+    # panels, and the chain should stand off the outline when they are.
+    dim_x = right + balloon_overhang(layout, data) + CHAIN_STANDOFF
+    # An outline edge is a station with no hole on it, so its extension leaves
+    # the outline — at the corner the chain stands beyond, because those two
+    # stations are the panel's own top and bottom and a line drawn across from
+    # the far side would lie along the outline itself. ``edge_nm`` is not None
+    # wherever one of those stations is.
+    outline_x = (
+        layout.point(mm_from_nm(Nanometre(data.reference.width_nm // 2)), 0.0)[0]
+        if data.reference is not None
+        else right
+    )
+
+    chain: list[Item] = []
+    for y_nm in stations_nm:
+        sy = layout.point(0.0, mm_from_nm(y_nm))[1]
+        start_nm = first_nm.get(y_nm)
+        sx = outline_x if start_nm is None else layout.point(mm_from_nm(start_nm), 0.0)[0]
+        chain.append(Line(sx, sy, dim_x + 1.5, sy, pens.feint, cls="extension"))
+
+    for start_nm, end_nm in pairwise(stations_nm):
+        y1 = layout.point(0.0, mm_from_nm(start_nm))[1]
+        y2 = layout.point(0.0, mm_from_nm(end_nm))[1]
+        chain.append(Line(dim_x, y1, dim_x, y2, pens.dimension, cls="dim-line"))
+        chain.append(arrow(dim_x, y1, 0.0, -1.0))
+        chain.append(arrow(dim_x, y2, 0.0, 1.0))
+        label = format_nm(Nanometre(end_nm - start_nm), POSITION_DECIMALS)
+        chain.append(
+            Text(
+                # Rotated, so the glyphs grow back towards the line from this
+                # baseline: half the label's own room places them within it.
+                dim_x + LEVEL_CHAIN_LABEL / 2.0,
+                (y1 + y2) / 2.0,
+                fits(label, 2.2, abs(y2 - y1) + 6.0),
+                2.2,
+                anchor="middle",
+                rotate=-90.0,
+                cls="dim-text",
+            )
+        )
+
+    return [Group("dim-chain-y", tuple(chain))]
 
 
 def _build_overall(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:

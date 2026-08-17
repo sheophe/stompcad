@@ -833,8 +833,10 @@ def test_a_hole_on_the_panel_edge_is_one_station_and_not_two():
     )
     root = ET.fromstring(DrawingSvgEmitter().emit(data))
 
-    assert [e.text for e in by_class(root, "dim-text", "text")] == ["60.000"]
+    # Scoped to the row chain: the chain of row levels states its own stations
+    # in the same class, and this is a claim about the row's.
     chain = by_class(root, "dim-chain")[0]
+    assert [e.text for e in by_class(chain, "dim-text", "text")] == ["60.000"]
     assert len(by_class(chain, "extension", "line")) == 2, "two stations, not three"
 
 
@@ -893,6 +895,52 @@ def test_the_overall_dimension_is_the_outline_the_model_holds():
     assert overall == {"112.400", "60.500"}
 
 
+def test_one_chain_of_row_levels_states_the_y_the_row_chains_never_do(
+    panel: DrillData, root: ET.Element
+):
+    """Every row shares one Y, so one chain gives the height of every hole.
+
+    The row chains run left to right and say nothing about how far up the panel
+    a row sits; without this chain that distance is on no sheet at all.
+    """
+    chains = by_class(root, "dim-chain-y")
+    assert len(chains) == 1, "one chain of levels, however many rows or columns"
+
+    assert panel.reference is not None
+    assert [e.text for e in by_class(chains[0], "dim-text", "text")] == [
+        "11.250",  # bottom edge up to the -18.750 row
+        "36.750",  # that row up to the 18.000 one
+        "12.000",  # and on to the top edge
+    ]
+    # Four stations, four extension lines: two rows and the outline's own edges.
+    assert len(by_class(chains[0], "extension", "line")) == 4
+
+
+def test_the_chain_of_row_levels_reads_bottom_to_top(root: ET.Element):
+    """ISO 129-1: a vertical dimension is read from the right of the sheet."""
+    labels = by_class(by_class(root, "dim-chain-y")[0], "dim-text", "text")
+
+    assert labels
+    assert all("rotate(-90" in (e.get("transform") or "") for e in labels)
+
+
+def test_the_chain_of_row_levels_stands_clear_of_the_panel_and_its_balloons(
+    root: ET.Element,
+):
+    """It is drawn outboard of everything, so nothing it crosses is its own."""
+    chain = by_class(root, "dim-chain-y")[0]
+    dimension = by_class(chain, "dim-line", "line")
+    assert dimension
+
+    outline = by_class(root, "outline", "rect")[0]
+    panel_right = num(outline, "x") + num(outline, "width")
+    balloons = by_class(root, "balloon", "circle")
+    reach = max(num(b, "cx") + num(b, "r") for b in balloons)
+
+    assert reach < panel_right, "this fixture keeps every balloon inside the panel"
+    assert all(num(line, "x1") > panel_right for line in dimension)
+
+
 def test_vertical_dimension_text_is_rotated(root: ET.Element):
     vertical = [
         e
@@ -904,12 +952,17 @@ def test_vertical_dimension_text_is_rotated(root: ET.Element):
 
 
 def _rows_of_five(count: int) -> DrillData:
-    """``count`` rows of five holes, spread down a 112.40 × 60.50 panel."""
+    """``count`` rows of five holes, spread down a 112.40 × 60.50 panel.
+
+    Each row is stepped 0.2 mm along X so no two share a pattern of stations:
+    rows drilled alike share one chain, and a panel of identical rows would
+    stack one chain deep however many rows it had.
+    """
     pitch_nm = 56_000_000 // (count - 1) if count > 1 else 0
     return DrillData(
         holes=tuple(
             Hole.from_measurement(
-                Nanometre(-40_000_000 + 20_000_000 * column),
+                Nanometre(-40_000_000 + 20_000_000 * column + 200_000 * row),
                 Nanometre(28_000_000 - pitch_nm * row),
                 Nanometre(3_000_000)).with_number(500 - (row * 5 + column))
             for row in range(count)
@@ -932,11 +985,13 @@ def test_every_dimension_stays_inside_the_drawing_area(rows: int):
     assert_within(emitter.layout(data).area, by_class(root, "dimensions")[0], "the drawing area")
 
 
-def test_the_drawing_says_how_many_row_dimensions_it_could_not_draw():
+def test_the_drawing_says_how_many_dimension_chains_it_could_not_draw():
     """A hole with no dimension beside it is a hole nobody can locate.
 
     Same rule as the notes and the schedule: a fact that disappears without
-    trace is worse than one that is visibly missing.
+    trace is worse than one that is visibly missing. The count is of chains,
+    not rows: rows drilled to one pattern share a chain, so this fixture steps
+    each row along X to keep the two numbers the same.
     """
     data = _rows_of_five(30)
     root = ET.fromstring(DrawingSvgEmitter().emit(data))

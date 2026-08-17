@@ -170,9 +170,14 @@ def test_the_scale_label_reads_as_an_engineer_writes_it():
 
 
 def rows_panel(count: int, *, height_nm: int = 60_000_000):
-    """A panel of ``count`` hole rows, so the chain stack is ``count`` deep."""
+    """A panel of ``count`` hole rows, so the chain stack is ``count`` deep.
+
+    Each row is stepped 0.2 mm along X so no two share a pattern of stations.
+    Rows drilled alike share one chain, so a column of identical rows would
+    stack one deep however many rows it had, and stack nothing here.
+    """
     holes = tuple(
-        at(0, (index - count // 2) * 2_000_000, index=count - index)
+        at(index * 200_000, (index - count // 2) * 2_000_000, index=count - index)
         for index in range(count)
     )
     return make_data(*holes, reference=outline(80_000_000, height_nm))
@@ -218,6 +223,33 @@ def test_a_panel_of_many_rows_is_not_judged_to_fit_a_sheet_its_chain_stack_overr
     # What the demand reserved for the chains, read back out of the demand.
     reserved = chosen.needed_height - (60.0 * chosen.scale + TOP_ALLOWANCE)
     assert reserved == pytest.approx(min(BOTTOM_BASE + ROW_PITCH * rows, box_h / 2.0))
+
+
+def test_rows_drilled_to_one_pattern_reserve_one_chain_between_them():
+    """The stack reserves per chain, not per row.
+
+    Twelve rows drilled alike are one chain, so the drawing keeps the height
+    eleven further bands would have taken from it — and a panel is no longer
+    driven onto larger paper by rows whose dimensions it never draws.
+    """
+    from aidrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE
+
+    count = 12
+    alike = make_data(
+        *(
+            at(sign * 20_000_000, (index - count // 2) * 2_000_000, index=index * 2 + step + 1)
+            for index in range(count)
+            for step, sign in enumerate((-1, 1))
+        ),
+        reference=outline(80_000_000, 60_000_000),
+    )
+    assert len(alike.rows()) == count, "the fixture has to be that many rows"
+
+    layout = Layout.for_sheet(A4_PORTRAIT, alike, scale=1.0, frame=FrameStyle.ISO_5457)
+    reserved = layout.needed_height - (60.0 * layout.scale + TOP_ALLOWANCE)
+
+    assert reserved == pytest.approx(BOTTOM_BASE + ROW_PITCH), "one chain's band"
+    assert reserved < BOTTOM_BASE + ROW_PITCH * count, "not one band per row"
 
 
 def test_the_plain_sheet_is_still_measured_against_the_whole_drawing_space():

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ...model import DrillData
 from ...units import mm_from_nm
-from .content import Note, fit_font, note_lines
+from .content import Note, fit_font, note_lines, row_chains
 from .sheet import TITLE_BLOCK_WIDTH, Box, FrameStyle, Sheet
 
 __all__ = [
@@ -28,6 +28,12 @@ __all__ = [
     "BOTTOM_BASE",
     "ROW_PITCH",
     "GUTTER",
+    "BALLOON_LEADER",
+    "BALLOON_RADIUS",
+    "HOLE_MIN_RADIUS",
+    "CHAIN_STANDOFF",
+    "LEVEL_CHAIN_LABEL",
+    "MAX_BALLOON_OVERHANG",
     "TITLE_BLOCK_HEIGHT",
     "TITLE_BLOCK_SHARE",
     "SCHEDULE_MIN_WIDTH",
@@ -46,11 +52,39 @@ PREFERRED_SCALES = (
 
 # space reserved inside the drawing area for drawing furniture, in sheet mm
 LEFT_ALLOWANCE = 14.0  # left-hand height dimension (rotated label; see build._build_overall)
-RIGHT_ALLOWANCE = 14.0  # balloons
 TOP_ALLOWANCE = 16.0  # overall width dimension
 BOTTOM_BASE = 12.0  # below the last chain dimension
 ROW_PITCH = 8.0  # between stacked chain dimensions
 GUTTER = 4.0
+
+#: How a balloon is drawn: a leader this far beyond the hole's own radius, then
+#: a circle of this radius; and the smallest radius a hole is ever drawn at.
+#: ``build`` draws them and the right-hand reservation below budgets for them,
+#: so, like ``ROW_PITCH``, they are stated once and read from both places.
+BALLOON_LEADER = 7.0
+BALLOON_RADIUS = 3.0
+HOLE_MIN_RADIUS = 0.4
+
+#: Between the content already drawn and the first dimension line standing off
+#: it. The row chains below the panel and the chain of levels beside it read as
+#: one system, so they stand off by the one distance rather than by two literals
+#: that agree. ``LEVEL_CHAIN_LABEL`` is the room the level chain's rotated label
+#: takes outboard of itself.
+CHAIN_STANDOFF = 8.0
+LEVEL_CHAIN_LABEL = 4.0
+
+#: The furthest past the content extent a balloon can reach. It leaves its hole
+#: at 45°, so the hole's own radius — which the extent already counts — eats
+#: into the leader's horizontal component, and the bound falls out at the drawn
+#: radius that gives back the least. Most panels are nowhere near it: a balloon
+#: only escapes the outline when its hole is hard against the edge.
+MAX_BALLOON_OVERHANG = math.sqrt(0.5) * (HOLE_MIN_RADIUS + BALLOON_LEADER) + BALLOON_RADIUS
+
+#: Balloons, then the chain, then its label. A fitted sheet reserves this before
+#: it knows the scale, so it is the bound above and not the overhang ``build``
+#: measures when it places the chain; placement stays inside it because the
+#: measurement can never exceed the bound.
+RIGHT_ALLOWANCE = MAX_BALLOON_OVERHANG + CHAIN_STANDOFF + LEVEL_CHAIN_LABEL
 
 #: The deepest the title block is drawn, and the share of a short drawing space
 #: it may take instead. ISO 7200 fixes the block's width, not its height.
@@ -179,12 +213,13 @@ class Layout:
             area = (border[0], border[1], border[0] + text_w, notes_box[1] - GUTTER)
         area_h = max(20.0, area[3] - area[1])
 
-        rows = data.rows()
-        # The chain stack may take half the box the drawing occupies, and no
-        # more: the rows that do not fit are stated as a counted omission. The
-        # cap is read off the same box ``fits`` measures the demand against, or
-        # the demand and the test would be about two different boxes.
-        bottom = min(BOTTOM_BASE + ROW_PITCH * len(rows), area_h * 0.5)
+        # Chains, not rows: rows drilled to one pattern of X share a chain and
+        # take one band between them. The stack may take half the box the
+        # drawing occupies, and no more; the chains that do not fit are stated
+        # as a counted omission. The cap is read off the same box ``fits``
+        # measures the demand against, or the demand and the test would be
+        # about two different boxes.
+        bottom = min(BOTTOM_BASE + ROW_PITCH * len(row_chains(data)), area_h * 0.5)
         usable_w = max(10.0, (area[2] - area[0]) - LEFT_ALLOWANCE - RIGHT_ALLOWANCE)
         usable_h = max(10.0, area_h - TOP_ALLOWANCE - bottom)
 

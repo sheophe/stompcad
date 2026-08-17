@@ -182,21 +182,22 @@ def test_the_drawing_is_not_mirrored_top_to_bottom():
     assert rect_y + height == pytest.approx(layout.sheet.height - y0, abs=1e-2)
 
 
-def test_the_rotated_height_label_advances_up_the_page():
-    """The overall-height label is the sheet's only rotated text, drawn with
-    ``rotate=-90`` so it reads bottom-to-top like an engineering drawing's
-    left-hand dimension. ``text.rotate`` is defined in the scene's Y-down
-    frame, so its text matrix must still advance toward *larger* PDF y —
-    the direction an un-negated angle gets backwards, silently, because
+def test_every_rotated_label_advances_up_the_page():
+    """The overall height and the chain of row levels are the sheet's rotated
+    text, all drawn with ``rotate=-90`` so they read bottom-to-top like an
+    engineering drawing's vertical dimensions. ``text.rotate`` is defined in the
+    scene's Y-down frame, so every text matrix must still advance toward *larger*
+    PDF y — the direction an un-negated angle gets backwards, silently, because
     nothing about the SVG sheet or this PDF alone looks wrong in isolation."""
     stream = stream_of(render(panel()))
 
     matches = re.findall(r"(\S+) (\S+) \S+ \S+ \S+ \S+ Tm", stream)
-    assert len(matches) == 1, "expected exactly one rotated text placement"
-    cos_component, sin_component = (float(v) for v in matches[0])
+    assert matches, "expected the sheet to place rotated text at all"
+    for match in matches:
+        cos_component, sin_component = (float(v) for v in match)
 
-    assert sin_component > 0
-    assert (cos_component, sin_component) == pytest.approx((0.0, 1.0), abs=1e-3)
+        assert sin_component > 0
+        assert (cos_component, sin_component) == pytest.approx((0.0, 1.0), abs=1e-3)
 
 
 # --- what it says ---------------------------------------------------------
