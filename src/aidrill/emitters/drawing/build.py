@@ -195,15 +195,21 @@ def iso_frame_items(layout: Layout, pens: Pens) -> list[Item]:
 
 
 def _centring_marks(sheet: Sheet, x0: float, y0: float, x1: float, y1: float) -> list[Item]:
-    """4.3: on both axes of symmetry, from the trimmed edge past the frame."""
+    """4.3: on both axes of symmetry, from the band's edge past the frame.
+
+    Each mark starts at the grid reference border rather than at the trimmed
+    edge, so on the filing side it begins where that band does and not out in
+    the margin the band leaves clear.
+    """
     pen = Stroke(CENTRING_MARK_WIDTH, INK)
     mid_x, mid_y = sheet.width / 2.0, sheet.height / 2.0
     reach = CENTRING_MARK_OVERSHOOT
+    band = PLAIN_BORDER
     return [
-        Line(mid_x, 0.0, mid_x, y0 + reach, pen, cls="centring-mark"),
-        Line(mid_x, sheet.height, mid_x, y1 - reach, pen, cls="centring-mark"),
-        Line(0.0, mid_y, x0 + reach, mid_y, pen, cls="centring-mark"),
-        Line(sheet.width, mid_y, x1 - reach, mid_y, pen, cls="centring-mark"),
+        Line(mid_x, y0 - band, mid_x, y0 + reach, pen, cls="centring-mark"),
+        Line(mid_x, y1 + band, mid_x, y1 - reach, pen, cls="centring-mark"),
+        Line(x0 - band, mid_y, x0 + reach, mid_y, pen, cls="centring-mark"),
+        Line(x1 + band, mid_y, x1 - reach, mid_y, pen, cls="centring-mark"),
     ]
 
 

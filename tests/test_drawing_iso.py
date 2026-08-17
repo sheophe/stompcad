@@ -200,11 +200,12 @@ def test_there_are_exactly_four_centring_marks_on_the_axes_of_symmetry():
     assert all(mark.y1 == half_height for mark in horizontal)
 
 
-def test_a_centring_mark_runs_from_the_trimmed_edge_past_the_frame():
-    """4.3: every mark starts at the trimmed edge and runs inward, past its own
-    frame edge, by the overshoot. The left edge's border is ``FILING_BORDER``
-    (20 mm), not ``PLAIN_BORDER`` like the other three, so a test that assumed
-    one border width for every edge would be wrong exactly where it matters.
+def test_a_centring_mark_runs_from_the_grid_band_past_the_frame():
+    """4.3: 'starting at the grid reference border and extending 10 mm beyond
+    the drawing frame'. The band is one depth on every edge, so every mark is
+    one length — on the filing side it begins where the band does rather than
+    out in the margin the band leaves clear, which would make it 10 mm longer
+    than its three siblings.
     """
     layout = iso_layout()
     sheet = layout.sheet
@@ -213,16 +214,26 @@ def test_a_centring_mark_runs_from_the_trimmed_edge_past_the_frame():
         for item in iso_frame_items(layout, pens_for(GROUP_0_7, FrameStyle.ISO_5457))
         if isinstance(item, Line) and item.cls == "centring-mark"
     ]
-    top = next(m for m in marks if m.x1 == m.x2 and min(m.y1, m.y2) == 0.0)
-    bottom = next(m for m in marks if m.x1 == m.x2 and max(m.y1, m.y2) == sheet.height)
-    left = next(m for m in marks if m.y1 == m.y2 and min(m.x1, m.x2) == 0.0)
-    right = next(m for m in marks if m.y1 == m.y2 and max(m.x1, m.x2) == sheet.width)
+    top = next(m for m in marks if m.x1 == m.x2 and min(m.y1, m.y2) < sheet.height / 2.0)
+    bottom = next(m for m in marks if m.x1 == m.x2 and min(m.y1, m.y2) > sheet.height / 2.0)
+    left = next(m for m in marks if m.y1 == m.y2 and min(m.x1, m.x2) < sheet.width / 2.0)
+    right = next(m for m in marks if m.y1 == m.y2 and min(m.x1, m.x2) > sheet.width / 2.0)
 
-    # From the trimmed edge (0) to 10 mm inside the frame, which is at y = 10.
+    # Each runs from its band's outer edge to the overshoot past its frame edge.
+    assert min(top.y1, top.y2) == PLAIN_BORDER - PLAIN_BORDER
     assert max(top.y1, top.y2) == PLAIN_BORDER + CENTRING_MARK_OVERSHOOT
+    assert max(bottom.y1, bottom.y2) == sheet.height
     assert min(bottom.y1, bottom.y2) == sheet.height - PLAIN_BORDER - CENTRING_MARK_OVERSHOOT
+    # The filing edge: the band starts a plain border in, so the mark does too.
+    assert min(left.x1, left.x2) == FILING_BORDER - PLAIN_BORDER
     assert max(left.x1, left.x2) == FILING_BORDER + CENTRING_MARK_OVERSHOOT
+    assert max(right.x1, right.x2) == sheet.width
     assert min(right.x1, right.x2) == sheet.width - PLAIN_BORDER - CENTRING_MARK_OVERSHOOT
+
+    # One depth of band plus one overshoot, on all four.
+    for mark in marks:
+        length = abs(mark.x2 - mark.x1) + abs(mark.y2 - mark.y1)
+        assert length == PLAIN_BORDER + CENTRING_MARK_OVERSHOOT
 
 
 def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
