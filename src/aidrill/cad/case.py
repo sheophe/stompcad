@@ -119,12 +119,49 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     normal[axis] = outermost[2]
     return Faces(
         drilled=outermost[3],
-        inner=inner[3],
+        inner=_with_companions(planes, inner, axis),
         plate_nm=nm_from_mm(thickness),
         outward=(normal[0], normal[1], normal[2]),
         drilled_position_mm=outermost[1],
         inner_position_mm=inner[1],
     )
+
+
+def _with_companions(
+    planes: list[tuple[float, float, float, Any]],
+    inner: tuple[float, float, float, Any],
+    axis: int,
+) -> Any:
+    """The inner face bundled with nearby same-facing planar faces, as one compound.
+
+    A raised feature's own flat top never shows up in the inner face's own
+    wire boundary: the hole cut for it is, by construction, exactly coplanar
+    with the floor around it, so its true height is invisible from the hole's
+    own geometry. Bundling every other candidate flat patch within the
+    floor's own footprint lets ``region.py`` pair each hole with the face
+    that actually carries its height, without ``find_faces`` guessing which
+    hole is which.
+    """
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    builder.Add(compound, inner[3])
+
+    footprint = bounding_box_mm(inner[3])
+    in_plane = [index for index in range(3) if index != axis]
+    for _area, position, outward, face in planes:
+        if outward != inner[2] or nm_from_mm(position) == nm_from_mm(inner[1]):
+            continue
+        box = bounding_box_mm(face)
+        if all(
+            footprint[index] - 0.01 <= box[index] and box[index + 3] <= footprint[index + 3] + 0.01
+            for index in in_plane
+        ):
+            builder.Add(compound, face)
+    return compound
 
 
 def _outermost(
@@ -149,7 +186,14 @@ def _outermost(
 def _facing(
     planes: list[tuple[float, float, float, Any]], drilled: tuple[float, float, float, Any]
 ) -> tuple[float, float, float, Any]:
-    """The nearest parallel face that looks back at ``drilled``."""
+    """The nearest parallel face that looks back at ``drilled``, ties broken by area.
+
+    A cast floor with holes for raised lettering can tessellate into many small
+    coplanar patches alongside the true floor; kernel-float noise then makes
+    their distances differ below nanometre precision. Rounding the distance to
+    whole nanometres before comparing collapses that noise so the tie is broken
+    by area, as ``_outermost`` already does, rather than by explorer order.
+    """
     inward = -drilled[2]
     candidates = [
         item
@@ -158,18 +202,27 @@ def _facing(
     ]
     if not candidates:
         raise AidrillError("no flat face backs the drilled face")
-    return min(candidates, key=lambda item: abs(item[1] - drilled[1]))
+    return min(
+        candidates,
+        key=lambda item: (abs(nm_from_mm(item[1]) - nm_from_mm(drilled[1])), -item[0]),
+    )
 
 
 def build_frame(faces: Faces, axis: int) -> Frame:
     """Right-handed ``(u, v, w)`` with ``w`` the outward normal.
 
     Seen from outside the face — that is, looking along ``-w`` — ``u`` runs
-    right and ``v`` up, which is what the panel drawing shows.
+    right and ``v`` up, which is what the panel drawing shows. ``u`` is built
+    from the higher-indexed axis of the two the drill axis leaves free, so it
+    lands on the lower-indexed one: a reference chosen from the axis ``u``
+    must avoid, rather than a fixed guess, needs no near-parallel guard and
+    keeps which kernel axis is "right" a function of the model, not luck.
     """
     w = faces.outward
-    reference = (1.0, 0.0, 0.0) if abs(w[0]) < 0.9 else (0.0, 1.0, 0.0)
-    u = _normalise(_cross(reference, w))
+    other = max(index for index in range(3) if index != axis)
+    reference = [0.0, 0.0, 0.0]
+    reference[other] = 1.0
+    u = _normalise(_cross(tuple(reference), w))
     v = _cross(w, u)
     origin = [0.0, 0.0, 0.0]
     origin[axis] = faces.drilled_position_mm
