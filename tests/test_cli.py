@@ -1551,3 +1551,52 @@ def test_the_report_names_the_model_face_and_play_area():
     assert "CASE MODEL" in lines
     assert "1590BB" in lines
     assert "box" in lines
+
+
+# ---------------------------------------------------------------------------
+# case flags are validated unconditionally, whether or not a model was given
+# ---------------------------------------------------------------------------
+
+
+def test_an_invalid_case_face_is_a_usage_error_with_no_case_model(capsys):
+    """A typo in --case-face must not wait for --case-model to be caught."""
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--case-face", "flange"])
+
+    assert code == 3
+    assert "--case-face" in capsys.readouterr().err
+
+
+def test_a_negative_case_margin_is_a_usage_error_with_no_case_model(capsys):
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--case-margin", "-5"])
+
+    assert code == 3
+    assert "--case-margin" in capsys.readouterr().err
+
+
+def test_a_zero_case_margin_is_a_usage_error_with_no_case_model(capsys):
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--case-margin", "0"])
+
+    assert code == 3
+    assert "--case-margin" in capsys.readouterr().err
+
+
+def test_an_invalid_case_face_is_caught_before_the_file_is_even_opened(capsys):
+    """The panel need not exist: the flag is wrong regardless of the input."""
+    code = cli.main(["/no/such/panel.ai", "--case-face", "flange"])
+
+    assert code == 3
+    assert "--case-face" in capsys.readouterr().err
+
+
+def test_an_unreadable_case_model_is_caught_before_the_file_is_even_opened(capsys):
+    code = cli.main(["/no/such/panel.ai", "--case-model", "/nonexistent.stp"])
+
+    assert code == 3
+    assert "--case-model" in capsys.readouterr().err
+
+
+def test_emitting_step_without_a_model_is_caught_before_the_file_is_even_opened(capsys):
+    code = cli.main(["/no/such/panel.ai", "--emit", "step=x.stp"])
+
+    assert code == 3
+    assert "--case-model" in capsys.readouterr().err

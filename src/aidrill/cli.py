@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="clearance between the bit and the nearest non-flat feature, in "
-        "millimetres; also the relief-versus-structure threshold (default: 1.0)",
+        "millimetres (default: 1.0)",
     )
     parser.add_argument(
         "--emit",
@@ -287,18 +287,24 @@ def _selected_sizes(text: str | None, flag: str) -> tuple[Nanometre, ...] | None
 
 
 def build_case_model(args: argparse.Namespace) -> CaseModel | None:
-    """Load the supplied case model, or ``None`` when none was given."""
-    if args.case_model is None:
-        return None
+    """Load the supplied case model, or ``None`` when none was given.
+
+    ``--case-face`` and ``--case-margin`` are validated whether or not a
+    model was supplied: they are flags the user typed either way, and a bad
+    value must not wait on ``--case-model`` being added to be caught.
+    """
+    face = parse_face(args.case_face)
     margin_nm = parse_length(args.case_margin, "--case-margin")
     if margin_nm <= 0:
         raise UsageError("--case-margin must be a positive number of millimetres")
+    if args.case_model is None:
+        return None
     from .cad import load_case_model
 
     try:
         return load_case_model(
             Path(args.case_model),
-            face=parse_face(args.case_face),
+            face=face,
             margin_nm=margin_nm,
             part=None if args.case is None else parse_case(args.case),
         )
