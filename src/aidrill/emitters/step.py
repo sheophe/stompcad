@@ -37,6 +37,11 @@ _VOLATILE_ENTITY = re.compile(
 )
 #: The writer's own "<write.step.product.name> <counter>.1" wrapper product;
 #: never a real part name, which always keeps the name it was read with.
+#: Matches by *content*, not by entity id, because the wrapper's own id is
+#: itself one of the unstable counters this module exists to erase: a real
+#: source part literally named "aidrill 1.2" would be silently rewritten by
+#: this pattern too. No fixture exercises that collision and there is no
+#: id-based alternative available through this kernel's bindings.
 _VOLATILE_VERSION = re.compile(rb"'aidrill \d+\.\d+'")
 _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 
@@ -210,18 +215,19 @@ def _label_name(label: Any) -> str:
 
 
 def _drill_compound(model: Any, data: DrillData) -> Any | None:
-    """One compound of bounded cylinders, one per hole in ``data.holes`` order.
+    """One compound of bounded cylinders, sorted into drill-number order.
 
-    That order is already the canonicalised tuple ``quantise`` produced, not
-    a sort performed here: ``data.numbered()`` reads ``Hole.index`` off each
-    entry rather than deriving a sequence from list position.
+    ``data.numbered()`` pairs each hole with its ``Hole.index`` but yields
+    them in tuple order, not index order, so the sort below is explicit:
+    the compound's build order must be a function of the numbering alone,
+    never of the tuple order a caller happened to hand in (ADR-0006).
     """
     from OCP.BRep import BRep_Builder
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
     from OCP.TopoDS import TopoDS_Compound
 
-    holes = data.numbered()
+    holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
         return None
 
@@ -272,6 +278,14 @@ def _silence_stdout() -> Iterator[None]:
         os.close(saved)
 
 
+# Kernel-side resets were tried first and abandoned (Task 12 investigation):
+# ``STEPControl_Controller.Init_s()`` and a fresh ``XSControl_WorkSession``
+# per call both leave the counters below unaffected, and no
+# ``Interface_Static`` key touches either one — ``write.step.product.name``
+# only substitutes the wrapper product's *prefix*, never the "<counter>.1"
+# suffix appended after it, and the NAUO counter has no exposed key at all.
+# Post-processing the written bytes is not a workaround pending a better
+# fix; it is the only route this kernel's bindings leave open.
 def _normalise(payload: bytes) -> bytes:
     """Erase the two process-global OCC counters from one written file.
 
@@ -307,6 +321,15 @@ def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
     Interface_Static.SetCVal_s("write.step.product.name", "aidrill")
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
+    # Colour is not part of this emitter's contract, and carrying it costs
+    # determinism: STYLED_ITEM entities reference the label they colour by
+    # entity number, and two independent reads of the identical source file
+    # populate the reader's colour-to-label map in different hash order, so
+    # those references (and nothing geometric) differ between writes. Found
+    # by bisecting a byte diff between two fresh loads of one file down to a
+    # STYLED_ITEM's target reference (see task-13-report.md); no regex over
+    # the written bytes can restore a correspondence the reader never fixed.
+    writer.SetColorMode(False)
     with _silence_stdout():
         writer.Transfer(document)
 

@@ -337,3 +337,73 @@ def test_emitting_is_silent_on_stdout(capfd):
     captured = capfd.readouterr()
 
     assert captured.out == ""
+
+
+def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
+    """A clock reading in the header only shows up between processes."""
+    import subprocess
+    import sys
+    import textwrap
+
+    model_path = _model_path()
+    script = textwrap.dedent(
+        f"""
+        import sys
+        sys.path.insert(0, "src")
+        from pathlib import Path
+        from aidrill.cad import load_case_model
+        from aidrill.emitters.step import StepEmitter, StepOptions
+        from aidrill.model import DrillData, Hole
+        from aidrill.units import Nanometre
+
+        model = load_case_model(Path({str(model_path)!r}), face="box",
+                                 margin_nm=Nanometre(1_000_000))
+        hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
+                                     Nanometre(6_000_000)).with_number(1)
+        payload = StepEmitter(StepOptions(model=model)).emit(DrillData(holes=(hole,)))
+        sys.stdout.buffer.write(payload)
+        """
+    )
+    runs = [
+        subprocess.run([sys.executable, "-c", script], capture_output=True, check=True).stdout
+        for _ in range(2)
+    ]
+
+    assert runs[0] == runs[1]
+
+
+def test_the_emitted_timestamp_is_copied_from_the_source_model():
+    """The contract, asserted directly. A year heuristic would depend on today.
+
+    OCC's own writer emits ``FILE_NAME`` with no ``/* time_stamp */`` field
+    comment — that style belongs to the *source* Hammond file (ST-Developer
+    output), not to what this emitter writes — so the stamp is read out by
+    position, the second quoted string in ``FILE_NAME(...)``, not by name.
+    """
+    from aidrill.cad.step import source_timestamp
+    from tests.conftest import at
+
+    payload = _emit(at(0, 0, 6 * MM, index=1)).decode("latin-1")
+    stamp = payload.split("FILE_NAME(")[1].split("'")[3]
+
+    assert stamp == source_timestamp(_model_path())
+
+
+def test_tuple_order_does_not_reach_the_output():
+    """ADR-0006: no rule may consult input order, kernel included."""
+    from tests.conftest import at
+
+    a = at(0, 0, 6 * MM, index=1)
+    b = at(8 * MM, 0, 6 * MM, index=2)
+
+    assert _emit(a, b) == _emit(b, a)
+
+
+def test_hole_numbering_and_not_position_orders_the_cut():
+    """Identical geometry numbered differently still cuts the same solid."""
+    from tests.conftest import at
+
+    forward = _emit(at(0, 0, 6 * MM, index=1), at(8 * MM, 0, 6 * MM, index=2))
+    swapped = _emit(at(0, 0, 6 * MM, index=2), at(8 * MM, 0, 6 * MM, index=1))
+
+    assert forward == swapped
