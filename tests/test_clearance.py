@@ -73,6 +73,23 @@ def test_the_bit_radius_and_not_the_centre_decides_the_edge_case():
     assert codes(outside) == ["hole-off-face"]
 
 
+def test_an_odd_diameter_rounds_the_bit_up_not_down():
+    """An odd nanometre diameter must round the bit radius up, never down.
+
+    The play area's edge sits at x = 50 mm. A ⌀7,000,001 nm hole's floor
+    radius (3,500,000 nm) exactly reaches it -- passing, if the check
+    truncates. Its ceiling radius (3,500,001 nm) overhangs by one nanometre,
+    which is the direction a safety check must round in: when in doubt
+    whether a hole fits, refuse it.
+    """
+    model = FakeCase()
+    x1 = model.play_area_nm[2]
+
+    result = run(model, at(x1 - 3_500_000, 0, 7_000_001, index=1))
+
+    assert codes(result) == ["hole-off-face"]
+
+
 def test_no_hole_is_dropped_by_the_stage():
     """Clearance diagnoses; it never edits geometry, so artefacts still agree."""
     model = FakeCase(bosses=((30 * MM, 30 * MM, 5 * MM),))

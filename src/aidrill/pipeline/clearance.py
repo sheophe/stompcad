@@ -50,9 +50,12 @@ class CheckCaseClearance:
     def apply(self, data: DrillData) -> DrillData:
         diagnostics = [d for d in (self._cross_check(data),) if d is not None]
         for hole in data.holes:
-            rejection = self.model.classify(
-                hole.x_nm, hole.y_nm, Nanometre(hole.diameter_nm // 2)
-            )
+            # Ceiling, not floor: an odd-nanometre diameter must round the bit
+            # radius up, never down. Floor division is optimistic by half a
+            # nanometre, biasing a marginal hole towards passing -- the wrong
+            # direction for a check whose job is to stop metal being cut.
+            radius_nm = Nanometre(-(-hole.diameter_nm // 2))
+            rejection = self.model.classify(hole.x_nm, hole.y_nm, radius_nm)
             if rejection is not None:
                 diagnostics.append(self._reject(hole, rejection))
         return data.with_diagnostics(*diagnostics)
