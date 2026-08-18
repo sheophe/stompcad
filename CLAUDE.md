@@ -249,3 +249,20 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Kernel tests run against real Hammond models fetched at run time, never committed.
   They are opt-in behind `--hammond`; a standard run skips them. Coverage targets for
   `cad/` and `emitters/step.py` are measured under that command, not the default one.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are local markdown under `.scratch/<feature>/`; this repo has
+no remote. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, unrenamed, carried on each issue's `Status:` line.
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CLAUDE.md` and `docs/adr/` at the root, no `CONTEXT.md` yet.
+See `docs/agents/domain.md`.
