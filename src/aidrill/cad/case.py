@@ -87,6 +87,8 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
+    centre = sum(bounding_box_mm(solid.shape)[i] for i in (axis, axis + 3)) / 2.0
+
     planes: list[tuple[float, float, float, Any]] = []
     explorer = TopExp_Explorer(solid.shape, TopAbs_ShapeEnum.TopAbs_FACE)
     while explorer.More():
@@ -110,7 +112,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
             f"{solid.name} has fewer than two planar faces normal to the drill axis"
         )
 
-    outermost = _outermost(planes)
+    outermost = _outermost(planes, centre, solid.name)
     inner = _facing(planes, outermost)
     thickness = abs(inner[1] - outermost[1])
     normal = [0.0, 0.0, 0.0]
@@ -125,16 +127,23 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     )
 
 
-def _outermost(planes: list[tuple[float, float, float, Any]]) -> tuple[float, float, float, Any]:
-    """The drilled face: the largest planar face normal to the axis.
+def _outermost(
+    planes: list[tuple[float, float, float, Any]], centre: float, name: str
+) -> tuple[float, float, float, Any]:
+    """The drilled face: the largest outward-facing planar face on the axis.
 
-    A bounding-box position extremum is not reliable — a lid's skirt tip can
-    sit further along the axis than its actual cap plate. Area is: the main
-    plate is always the biggest flat surface a casting offers, bigger than any
-    boss, rim, shoulder or lettering relief that might sit at a more extreme
-    position without being the face anyone would drill.
+    Orientation filters rather than breaks ties: a candidate must sit on the
+    far side of the solid's own centre in the direction its own normal
+    claims (``(position - centre) * outward > 0``), so an internal floor or
+    boss pad can never masquerade as the drilled face by facing the wrong
+    way. Area then picks among survivors, since a lid's skirt tip can sit
+    further along the axis than its actual cap plate, which is always the
+    biggest flat surface a casting offers.
     """
-    return max(planes, key=lambda item: item[0])
+    candidates = [item for item in planes if (item[1] - centre) * item[2] > 0]
+    if not candidates:
+        raise AidrillError(f"{name} has no planar face along this axis that faces outward")
+    return max(candidates, key=lambda item: item[0])
 
 
 def _facing(

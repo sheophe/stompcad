@@ -13,7 +13,7 @@ from aidrill.emitters import base
 from aidrill.geometry import KAPPA
 from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
 from aidrill.units import Nanometre
-from tests.hammond import hammond_b, hammond_bb  # noqa: F401  (pytest fixtures)
+from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
 __all__ = [
     "at",

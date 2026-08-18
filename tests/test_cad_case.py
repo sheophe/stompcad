@@ -9,10 +9,16 @@ pytest.importorskip("OCP", reason="needs aidrill[step]")
 from aidrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
 from aidrill.cad.step import read_step  # noqa: E402
 from aidrill.units import Nanometre  # noqa: E402
+from tests.hammond import MODELS  # noqa: E402
 
 pytestmark = pytest.mark.hammond
 
 FOOTPRINT = (Nanometre(119_500_000), Nanometre(94_000_000))
+
+#: The fixture that supplies each catalogued model's cached STEP file.
+_FIXTURE_OF = {
+    "1590BB": "hammond_bb", "1590B": "hammond_b", "1590A": "hammond_a", "1590Y": "hammond_y",
+}
 
 
 @pytest.fixture(scope="module")
@@ -122,3 +128,28 @@ def test_the_frame_is_orthonormal(document):
     for a in (frame.u, frame.v, frame.w):
         assert pytest.approx(sum(c * c for c in a), abs=1e-9) == 1.0
     assert pytest.approx(sum(a * b for a, b in zip(frame.u, frame.v)), abs=1e-9) == 0.0
+
+
+@pytest.mark.parametrize("part", sorted(MODELS))
+def test_the_plate_thickness_is_correct_for_every_catalogued_model(request, part):
+    """Guards against a wrong-face selection that only the 1590BB would miss.
+
+    1590Y has a square 92.0 x 92.0 footprint; its height (42.0 mm) differs
+    from the footprint enough that ``drill_axis`` still resolves it to one
+    axis without ambiguity — asserted below alongside the plate figures.
+    """
+    model = MODELS[part]
+    path = request.getfixturevalue(_FIXTURE_OF[part])
+    document = read_step(path)
+    footprint = (
+        Nanometre(round(model.footprint_mm[0] * 1_000_000)),
+        Nanometre(round(model.footprint_mm[1] * 1_000_000)),
+    )
+
+    axis = drill_axis(document, footprint)
+    box = find_faces(select_solid(document, "box"), axis)
+    lid = find_faces(select_solid(document, "lid"), axis)
+
+    assert box.plate_nm == round(model.box_plate_mm * 1_000_000)
+    assert lid.plate_nm == round(model.lid_plate_mm * 1_000_000)
+    assert box.outward[axis] == -lid.outward[axis]

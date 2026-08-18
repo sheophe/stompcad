@@ -9,8 +9,8 @@ import pytest
 from tests.hammond import MODELS, HammondModel, cache_dir, model_path  # noqa: F401
 
 
-def test_the_catalogue_covers_both_models_the_kernel_tests_use():
-    assert set(MODELS) == {"1590BB", "1590B"}
+def test_the_catalogue_covers_the_models_the_kernel_tests_use():
+    assert set(MODELS) == {"1590BB", "1590B", "1590A", "1590Y"}
 
 
 def test_each_model_records_the_measurements_tests_assert_against():
