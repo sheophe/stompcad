@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, get_args, get_type_hints
 
+from .cad import CaseModel
 from .emitters import (
     DrawingOptions,
     ExcellonOptions,
@@ -32,6 +33,7 @@ from .pipeline import (
     CATALOGUE,
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
+    CheckCaseClearance,
     Deduplicate,
     DrillStandard,
     IdentifyHammondFootprint,
@@ -53,7 +55,9 @@ __all__ = [
     "build_quantisers",
     "Quantisers",
     "build_drill_standard",
+    "build_case_model",
     "parse_case",
+    "parse_face",
     "parse_sizes",
     "parse_length",
 ]
@@ -145,6 +149,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"the {CATALOGUE} base designator the panel is drawn for, e.g. 1590B",
     )
     parser.add_argument(
+        "--case-model",
+        metavar="PATH",
+        default=None,
+        help="a STEP model of the enclosure; enables clearance checking and "
+        "is required by --emit step (see tools/fetch_case_model.py)",
+    )
+    parser.add_argument(
+        "--case-face",
+        metavar="SIDE",
+        default="box",
+        help="which side the panel is drilled into: box or lid (default: box)",
+    )
+    parser.add_argument(
+        "--case-margin",
+        metavar="MM",
+        type=float,
+        default=1.0,
+        help="clearance between the bit and the nearest non-flat feature, in "
+        "millimetres; also the relief-versus-structure threshold (default: 1.0)",
+    )
+    parser.add_argument(
         "--emit",
         metavar="FORMAT=PATH",
         action="append",
@@ -207,6 +232,17 @@ def parse_case(text: str) -> str:
     )
 
 
+_FACES = ("box", "lid")
+
+
+def parse_face(text: str) -> str:
+    """Normalise the drilled side, rejecting anything else as a usage error."""
+    face = text.strip().lower()
+    if face not in _FACES:
+        raise UsageError(f"--case-face {text!r} must be one of: {', '.join(_FACES)}")
+    return face
+
+
 def parse_emit(spec: str) -> tuple[str, Path]:
     """``"fmt=path"`` → ``("fmt", Path("path"))``. The format is not checked here."""
     name, separator, path = spec.partition("=")
@@ -250,6 +286,26 @@ def _selected_sizes(text: str | None, flag: str) -> tuple[Nanometre, ...] | None
     return tuple(nm_from_mm(size) for size in parse_sizes(text, flag))
 
 
+def build_case_model(args: argparse.Namespace) -> CaseModel | None:
+    """Load the supplied case model, or ``None`` when none was given."""
+    if args.case_model is None:
+        return None
+    margin_nm = parse_length(args.case_margin, "--case-margin")
+    if margin_nm <= 0:
+        raise UsageError("--case-margin must be a positive number of millimetres")
+    from .cad import load_case_model
+
+    try:
+        return load_case_model(
+            Path(args.case_model),
+            face=parse_face(args.case_face),
+            margin_nm=margin_nm,
+            part=None if args.case is None else parse_case(args.case),
+        )
+    except AidrillError as failure:
+        raise UsageError(f"--case-model: {failure}") from failure
+
+
 @dataclass(frozen=True, slots=True)
 class Quantisers:
     """The run's named quantisers; :func:`quantise` owns their ordering."""
@@ -283,12 +339,16 @@ def _snap_positions(args: argparse.Namespace) -> SnapPositions:
 
 
 def build_pipeline(args: argparse.Namespace) -> Pipeline:
-    """Build deduplicate → review-grid-ties → route after quantisation.
+    """Build deduplicate → review-grid-ties → route, then clearance if asked.
 
     Review follows deduplication so it describes surviving holes; ordering is
-    last. Each stage remains independently valid outside this composition.
+    last among the geometry stages. Clearance only diagnoses, so it runs after
+    numbering and every stage remains independently valid.
     """
     stages: list[Stage] = [Deduplicate(), ReviewGridTies(), RouteHoles()]
+    model = getattr(args, "case_model_object", None)
+    if model is not None:
+        stages.append(CheckCaseClearance(model))
     return Pipeline(stages)
 
 
@@ -306,6 +366,7 @@ class OutputSettings:
     """Command-line values from which emitter-specific options are built."""
 
     title: str = ""
+    case_model: Any | None = None
 
 
 #: Keyed by options **class**, never by format name. An emitter whose options
@@ -356,7 +417,7 @@ def make_emitter(name: str, settings: OutputSettings) -> Emitter:
 
 
 def settings_from(args: argparse.Namespace) -> OutputSettings:
-    return OutputSettings(title=args.title)
+    return OutputSettings(title=args.title, case_model=getattr(args, "case_model_object", None))
 
 
 def run_pipeline(
@@ -431,6 +492,25 @@ def format_enclosure(data: DrillData) -> list[str]:
     else:
         lines.append(_field("candidates", ", ".join(match.candidates)))
     return lines
+
+
+def format_case(model: CaseModel | None) -> list[str]:
+    """Report the supplied model, the drilled side, and the usable area."""
+    if model is None:
+        return []
+    x0, y0, x1, y1 = model.play_area_nm
+    return [
+        "",
+        "CASE MODEL",
+        _field("part", f"{model.part}  ({model.face})"),
+        _field("plate", f"{format_nm(model.plate_nm)} mm"),
+        _field(
+            "play area",
+            f"{format_nm(Nanometre(x1 - x0))} x {format_nm(Nanometre(y1 - y0))} mm"
+            f"  |  x {format_nm(x0)}…{format_nm(x1)}"
+            f"  y {format_nm(y0)}…{format_nm(y1)}",
+        ),
+    ]
 
 
 def format_holes(data: DrillData) -> list[str]:
@@ -547,8 +627,8 @@ def format_summary(data: DrillData) -> list[str]:
     return ["", ", ".join(parts)]
 
 
-def format_report(data: DrillData) -> str:
-    lines = format_source(data) + format_enclosure(data) + format_holes(data)
+def format_report(data: DrillData, model: CaseModel | None = None) -> str:
+    lines = format_source(data) + format_enclosure(data) + format_case(model) + format_holes(data)
     lines += format_tools(data)
     lines += format_diagnostics(data)
     return "\n".join(lines)
@@ -613,14 +693,20 @@ def _withheld(targets: Iterable[tuple[Emitter, Path]]) -> list[str]:
 
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
+    if any(name == "step" for name, _ in targets) and args.case_model is None:
+        raise UsageError("--emit step=PATH needs --case-model PATH")
+
+    # Everything the command line can get wrong is resolved before the input is
+    # opened: a bad standard, an unstocked size, a grid that is not a number, a
+    # part number in no catalogue and an unloadable case model are all usage
+    # errors, not diagnostics.
+    args.case_margin_nm = parse_length(args.case_margin, "--case-margin")
+    args.case_model_object = build_case_model(args)
     settings = settings_from(args)
     # Resolve every format before touching the input file: an unknown format is
     # a usage error and should not wait on a PDF parse to be reported.
     emitters = [(make_emitter(name, settings), path) for name, path in targets]
 
-    # Everything the command line can get wrong is resolved before the input is
-    # opened: a bad standard, an unstocked size, a grid that is not a number and
-    # a part number in no catalogue are all usage errors, not diagnostics.
     quantisers = build_quantisers(args)
     pipeline = build_pipeline(args)
     raw = read_source(args)
@@ -645,7 +731,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     data = run_pipeline(pipeline, data, trace)
 
-    print(format_report(data), file=out)
+    print(format_report(data, model=args.case_model_object), file=out)
 
     if emitters:
         print(file=out)

@@ -1462,3 +1462,92 @@ def test_empty_layer_blames_the_shapes_when_paths_were_seen():
 
 def test_the_two_empty_layer_causes_do_not_read_alike():
     assert str(EmptyLayerError("Drill")) != str(EmptyLayerError("Drill", path_count=3))
+
+
+# ---------------------------------------------------------------------------
+# the case model: flags, pipeline composition and the report
+# ---------------------------------------------------------------------------
+
+
+def test_case_face_accepts_only_box_or_lid():
+    from aidrill.cli import UsageError, parse_face
+
+    assert parse_face("box") == "box"
+    assert parse_face("LID") == "lid"
+    with pytest.raises(UsageError, match="box"):
+        parse_face("flange")
+
+
+def test_emitting_step_without_a_case_model_is_a_usage_error(tmp_path, capsys):
+    from aidrill.cli import main
+
+    code = main(["panel.ai", "--emit", f"step={tmp_path / 'o.stp'}"])
+
+    assert code == 3
+    assert "--case-model" in capsys.readouterr().err
+
+
+def test_an_unreadable_case_model_is_a_usage_error(tmp_path, capsys):
+    from aidrill.cli import main
+
+    code = main(["panel.ai", "--case-model", str(tmp_path / "absent.stp")])
+
+    assert code == 3
+
+
+def test_a_negative_case_margin_is_a_usage_error(tmp_path, capsys):
+    from aidrill.cli import main
+
+    code = main(["panel.ai", "--case-model", "x.stp", "--case-margin", "-1"])
+
+    assert code == 3
+    assert "--case-margin" in capsys.readouterr().err
+
+
+def test_the_case_margin_default_is_one_millimetre():
+    from aidrill.cli import build_parser
+
+    args = build_parser().parse_args(["panel.ai"])
+
+    assert args.case_margin == 1.0
+
+
+def test_the_case_face_default_is_box():
+    from aidrill.cli import build_parser
+
+    args = build_parser().parse_args(["panel.ai"])
+
+    assert args.case_face == "box"
+
+
+def test_no_case_model_leaves_the_pipeline_unchanged():
+    from aidrill.cli import build_parser, build_pipeline
+
+    args = build_parser().parse_args(["panel.ai"])
+
+    assert [stage.name for stage in build_pipeline(args)] == [
+        "deduplicate", "review-grid-ties", "route"
+    ]
+
+
+def test_a_case_model_appends_the_clearance_stage_last():
+    from aidrill.cli import build_parser, build_pipeline
+    from aidrill.units import Nanometre
+    from tests.test_clearance import FakeCase
+
+    args = build_parser().parse_args(["panel.ai"])
+    args.case_model_object = FakeCase()
+    args.case_margin_nm = Nanometre(1_000_000)
+
+    assert [stage.name for stage in build_pipeline(args)][-1] == "check-case-clearance"
+
+
+def test_the_report_names_the_model_face_and_play_area():
+    from aidrill.cli import format_case
+    from tests.test_clearance import FakeCase
+
+    lines = "\n".join(format_case(FakeCase()))
+
+    assert "CASE MODEL" in lines
+    assert "1590BB" in lines
+    assert "box" in lines
