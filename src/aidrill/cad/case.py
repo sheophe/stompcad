@@ -27,6 +27,14 @@ _MATCH_TOLERANCE_MM = 0.6
 
 _FACE_KEYWORDS = {"box": "BOX", "lid": "LID"}
 
+#: Below this fraction of a level's own outer-wire area that isn't real
+#: surface (1 - true area / outer-wire area), a level is a candidate plate;
+#: at or above it, a ring, flange or skirt. Measured on the four cached
+#: models: every plate sits at 3.7% or under, every ring at 83.3% or over --
+#: a 79-point gap with nothing between them, so 50% is that gap's midpoint,
+#: not a tuned value.
+_HOLED_FRACTION_LIMIT = 0.5
+
 
 @dataclass(frozen=True)
 class Faces:
@@ -38,6 +46,9 @@ class Faces:
     outward: tuple[float, float, float]
     drilled_position_mm: float
     inner_position_mm: float
+    #: The drilled solid's own bounding-box span per kernel axis, millimetres.
+    #: ``build_frame`` reads this to pick which free axis is "right".
+    footprint_mm: tuple[float, float, float]
 
 
 def drill_axis(document: StepDocument, footprint_nm: tuple[Nanometre, Nanometre]) -> int:
@@ -87,7 +98,13 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
-    centre = sum(bounding_box_mm(solid.shape)[i] for i in (axis, axis + 3)) / 2.0
+    solid_bbox = bounding_box_mm(solid.shape)
+    centre = sum(solid_bbox[i] for i in (axis, axis + 3)) / 2.0
+    footprint_mm = (
+        solid_bbox[3] - solid_bbox[0],
+        solid_bbox[4] - solid_bbox[1],
+        solid_bbox[5] - solid_bbox[2],
+    )
 
     planes: list[tuple[float, float, float, Any]] = []
     explorer = TopExp_Explorer(solid.shape, TopAbs_ShapeEnum.TopAbs_FACE)
@@ -107,119 +124,173 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
                 planes.append((props.Mass(), position, outward, face))
         explorer.Next()
 
-    if len(planes) < 2:
+    levels = _plates(_levels(planes))
+    if len(levels) < 2:
         raise AidrillError(
             f"{solid.name} has fewer than two planar faces normal to the drill axis"
         )
 
-    outermost = _outermost(planes, centre, solid.name)
-    inner = _facing(planes, outermost)
-    thickness = abs(inner[1] - outermost[1])
+    drilled = _drilled_level(levels, centre, solid.name)
+    inner = _inner_level(levels, drilled)
+    companion = _nearest_companion_level(levels, inner)
+    thickness = abs(inner.position - drilled.position)
     normal = [0.0, 0.0, 0.0]
-    normal[axis] = outermost[2]
+    normal[axis] = drilled.outward
     return Faces(
-        drilled=outermost[3],
-        inner=_with_companions(planes, inner, axis),
+        drilled=_compound(drilled.faces),
+        inner=_compound(inner.faces + (companion.faces if companion else ())),
         plate_nm=nm_from_mm(thickness),
         outward=(normal[0], normal[1], normal[2]),
-        drilled_position_mm=outermost[1],
-        inner_position_mm=inner[1],
+        drilled_position_mm=drilled.position,
+        inner_position_mm=inner.position,
+        footprint_mm=footprint_mm,
     )
 
 
-def _with_companions(
-    planes: list[tuple[float, float, float, Any]],
-    inner: tuple[float, float, float, Any],
-    axis: int,
-) -> Any:
-    """The inner face bundled with nearby same-facing planar faces, as one compound.
+@dataclass(frozen=True)
+class _Level:
+    """Every coplanar planar candidate at one axis position, sharing one facing.
 
-    A raised feature's own flat top never shows up in the inner face's own
-    wire boundary: the hole cut for it is, by construction, exactly coplanar
-    with the floor around it, so its true height is invisible from the hole's
-    own geometry. Bundling every other candidate flat patch within the
-    floor's own footprint lets ``region.py`` pair each hole with the face
-    that actually carries its height, without ``find_faces`` guessing which
-    hole is which.
+    A single physical plane can tessellate into several disconnected patches
+    (a floor plus stray coplanar slivers cut by nearby features), which is
+    why a level is a *set* of faces rather than one: grouping by position
+    first, then reasoning about the group, is what keeps that tessellation
+    from being mistaken for competing candidates.
     """
+
+    position: float
+    area: float
+    outward: float
+    faces: tuple[Any, ...]
+
+
+def _levels(planes: list[tuple[float, float, float, Any]]) -> list[_Level]:
+    """Group same-facing planar candidates into levels by rounded axis position.
+
+    Kernel-float noise can make two patches of the same physical plane report
+    axis positions that differ in the 13th decimal place; rounding to whole
+    nanometres before grouping removes that noise at its source, rather than
+    working around it later with a distance-based tie-break.
+    """
+    groups: dict[tuple[int, float], list[tuple[float, float, Any]]] = {}
+    for area, position, outward, face in planes:
+        groups.setdefault((nm_from_mm(position), outward), []).append((area, position, face))
+    return [
+        _Level(
+            position=members[0][1],
+            area=sum(item[0] for item in members),
+            outward=outward,
+            faces=tuple(item[2] for item in members),
+        )
+        for (_position_nm, outward), members in groups.items()
+    ]
+
+
+def _plates(levels: list[_Level]) -> list[_Level]:
+    """Levels that are mostly solid material, not a ring, flange or skirt.
+
+    A level's outer-wire area is rebuilt the way ``build_region`` rebuilds a
+    face's own outer boundary; comparing it with the true surface area is a
+    topological signal a ring can't fake by being small. Filtering happens
+    on the level's aggregate areas, not per face: the box floor's level
+    holds one 9260 mm2 unholed patch alongside nine tiny slivers, and
+    judging the slivers individually would discard the patch with them.
+    """
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.ShapeAnalysis import ShapeAnalysis
+
+    kept = []
+    for level in levels:
+        outer_area = 0.0
+        for face in level.faces:
+            surface = BRep_Tool.Surface_s(face)
+            capped = BRepBuilderAPI_MakeFace(surface, ShapeAnalysis.OuterWire_s(face), True)
+            if not capped.IsDone():
+                raise AidrillError("could not rebuild a level member's outer boundary")
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(capped.Face(), props)
+            outer_area += props.Mass()
+        if outer_area > 0 and (1.0 - level.area / outer_area) < _HOLED_FRACTION_LIMIT:
+            kept.append(level)
+    return kept
+
+
+def _drilled_level(levels: list[_Level], centre: float, name: str) -> _Level:
+    """The outward-facing level with the greatest total area.
+
+    Orientation filters rather than breaks ties: a level must sit on the far
+    side of the solid's own centre in the direction it faces
+    (``(position - centre) * outward > 0``), so a lid's thin skirt-tip level
+    can never masquerade as the drilled face by facing the wrong way. Area
+    then picks among survivors, since the cap or floor plate is always the
+    largest flat surface a casting offers.
+    """
+    candidates = [level for level in levels if (level.position - centre) * level.outward > 0]
+    if not candidates:
+        raise AidrillError(f"{name} has no planar face along this axis that faces outward")
+    return max(candidates, key=lambda level: level.area)
+
+
+def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
+    """The largest-area level facing back at ``drilled``.
+
+    A small raised pad or a lettering fragment forms its own level nearer
+    the drilled face than the true floor; picking by total area rather than
+    nearest position is what keeps a pad such as the 1590Y's 25 x 10 mm one
+    from outranking its 84 x 84 mm floor.
+    """
+    inward = -drilled.outward
+    candidates = [level for level in levels if level.outward == inward]
+    if not candidates:
+        raise AidrillError("no flat face backs the drilled face")
+    return max(candidates, key=lambda level: level.area)
+
+
+def _nearest_companion_level(levels: list[_Level], inner: _Level) -> _Level | None:
+    """The same-facing level physically closest to ``inner``, if any.
+
+    A raised feature's own flat top is never part of the inner level's own
+    wire boundary -- the hole cut for it is, by construction, exactly
+    coplanar with the level around it -- so the nearest other same-facing
+    level is where ``region.py`` finds the faces that carry its true height.
+    """
+    candidates = [level for level in levels if level.outward == inner.outward and level is not inner]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda level: abs(level.position - inner.position))
+
+
+def _compound(faces: tuple[Any, ...]) -> Any:
+    """Bundle ``faces`` into one ``TopoDS_Compound``."""
     from OCP.BRep import BRep_Builder
     from OCP.TopoDS import TopoDS_Compound
 
     compound = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(compound)
-    builder.Add(compound, inner[3])
-
-    footprint = bounding_box_mm(inner[3])
-    in_plane = [index for index in range(3) if index != axis]
-    for _area, position, outward, face in planes:
-        if outward != inner[2] or nm_from_mm(position) == nm_from_mm(inner[1]):
-            continue
-        box = bounding_box_mm(face)
-        if all(
-            footprint[index] - 0.01 <= box[index] and box[index + 3] <= footprint[index + 3] + 0.01
-            for index in in_plane
-        ):
-            builder.Add(compound, face)
+    for face in faces:
+        builder.Add(compound, face)
     return compound
-
-
-def _outermost(
-    planes: list[tuple[float, float, float, Any]], centre: float, name: str
-) -> tuple[float, float, float, Any]:
-    """The drilled face: the largest outward-facing planar face on the axis.
-
-    Orientation filters rather than breaks ties: a candidate must sit on the
-    far side of the solid's own centre in the direction its own normal
-    claims (``(position - centre) * outward > 0``), so an internal floor or
-    boss pad can never masquerade as the drilled face by facing the wrong
-    way. Area then picks among survivors, since a lid's skirt tip can sit
-    further along the axis than its actual cap plate, which is always the
-    biggest flat surface a casting offers.
-    """
-    candidates = [item for item in planes if (item[1] - centre) * item[2] > 0]
-    if not candidates:
-        raise AidrillError(f"{name} has no planar face along this axis that faces outward")
-    return max(candidates, key=lambda item: item[0])
-
-
-def _facing(
-    planes: list[tuple[float, float, float, Any]], drilled: tuple[float, float, float, Any]
-) -> tuple[float, float, float, Any]:
-    """The nearest parallel face that looks back at ``drilled``, ties broken by area.
-
-    A cast floor with holes for raised lettering can tessellate into many small
-    coplanar patches alongside the true floor; kernel-float noise then makes
-    their distances differ below nanometre precision. Rounding the distance to
-    whole nanometres before comparing collapses that noise so the tie is broken
-    by area, as ``_outermost`` already does, rather than by explorer order.
-    """
-    inward = -drilled[2]
-    candidates = [
-        item
-        for item in planes
-        if item[2] == inward and abs(item[1] - drilled[1]) > 1e-9
-    ]
-    if not candidates:
-        raise AidrillError("no flat face backs the drilled face")
-    return min(
-        candidates,
-        key=lambda item: (abs(nm_from_mm(item[1]) - nm_from_mm(drilled[1])), -item[0]),
-    )
 
 
 def build_frame(faces: Faces, axis: int) -> Frame:
     """Right-handed ``(u, v, w)`` with ``w`` the outward normal.
 
     Seen from outside the face — that is, looking along ``-w`` — ``u`` runs
-    right and ``v`` up, which is what the panel drawing shows. ``u`` is built
-    from the higher-indexed axis of the two the drill axis leaves free, so it
-    lands on the lower-indexed one: a reference chosen from the axis ``u``
-    must avoid, rather than a fixed guess, needs no near-parallel guard and
-    keeps which kernel axis is "right" a function of the model, not luck.
+    right and ``v`` up, which is what the panel drawing shows. ``u`` is the
+    free axis carrying the larger measured footprint span, so which kernel
+    axis is "right" is read from the model rather than assumed from index
+    order; a square footprint ties, and the lower-indexed free axis wins
+    that tie, arbitrarily but deterministically — a square enclosure truly
+    has no preferred in-plane orientation.
     """
     w = faces.outward
-    other = max(index for index in range(3) if index != axis)
+    free = [index for index in range(3) if index != axis]
+    lead = max(free, key=lambda index: (nm_from_mm(faces.footprint_mm[index]), -index))
+    other = next(index for index in free if index != lead)
     reference = [0.0, 0.0, 0.0]
     reference[other] = 1.0
     u = _normalise(_cross(tuple(reference), w))

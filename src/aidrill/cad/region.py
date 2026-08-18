@@ -19,6 +19,13 @@ from .base import Frame
 
 __all__ = ["classify_bounds", "build_region", "region_bbox_nm", "contains"]
 
+#: How close a companion's in-plane footprint must sit to a hole's own to
+#: count as its match. Measured gaps top out at ~4e-7 mm across every cached
+#: model (kernel-float noise); 0.01 mm is four orders of magnitude looser
+#: than that and still far tighter than the spacing between distinct
+#: features, so it cannot pair a hole with an unrelated patch.
+_COMPANION_MATCH_MM = 0.01
+
 
 def classify_bounds(
     face: Any, axis: int, margin_nm: Nanometre
@@ -81,18 +88,32 @@ def build_region(face: Any, axis: int, margin_nm: Nanometre) -> Any:
 def region_bbox_nm(
     region: Any, frame: Frame, axis: int
 ) -> tuple[Nanometre, Nanometre, Nanometre, Nanometre]:
-    """The region's extent in canonical face coordinates, as nanometres."""
+    """The region's extent in canonical face coordinates, as nanometres.
+
+    Every Hammond floor happens to sit centred on the kernel origin with
+    ``u``/``v`` axis-aligned, which would let a bbox read straight off the
+    kernel axes pass unnoticed; each in-plane corner is projected through
+    ``frame`` instead, so an off-centre or rotated floor is handled too.
+    """
     from .step import bounding_box_mm
 
     box = bounding_box_mm(region)
     in_plane = [index for index in range(3) if index != axis]
-    lows = [box[index] for index in in_plane]
-    highs = [box[index + 3] for index in in_plane]
+    corners = []
+    for a in (box[in_plane[0]], box[in_plane[0] + 3]):
+        for b in (box[in_plane[1]], box[in_plane[1] + 3]):
+            point = [0.0, 0.0, 0.0]
+            point[in_plane[0]] = a
+            point[in_plane[1]] = b
+            point[axis] = box[axis]
+            corners.append(_to_canonical(frame, (point[0], point[1], point[2])))
+    xs = [corner[0] for corner in corners]
+    ys = [corner[1] for corner in corners]
     return (
-        nm_from_mm(min(lows[0], highs[0])),
-        nm_from_mm(min(lows[1], highs[1])),
-        nm_from_mm(max(lows[0], highs[0])),
-        nm_from_mm(max(lows[1], highs[1])),
+        nm_from_mm(min(xs)),
+        nm_from_mm(min(ys)),
+        nm_from_mm(max(xs)),
+        nm_from_mm(max(ys)),
     )
 
 
@@ -193,8 +214,10 @@ def _proud_mm(
     """How far the hole's best-matching companion stands from the floor plane.
 
     The companion whose in-plane footprint is closest to the hole's own is
-    its true feature; with no companion at all the height is unmeasured, so
-    this reports it as unboundedly proud rather than assuming it is shallow.
+    its true feature, but only within ``_COMPANION_MATCH_MM``: with no
+    companion close enough — including none at all — the height is
+    unmeasured, so this reports it as unboundedly proud rather than
+    assuming it is shallow.
     """
     from .step import bounding_box_mm
 
@@ -207,7 +230,7 @@ def _proud_mm(
                   for index in in_plane)
         if best_gap is None or gap < best_gap:
             best_gap, best_position = gap, other[axis]
-    if best_position is None:
+    if best_position is None or best_gap is None or best_gap > _COMPANION_MATCH_MM:
         return float("inf")
     return abs(best_position - plane_at)
 
@@ -238,3 +261,12 @@ def _to_model(frame: Frame, x_nm: Nanometre, y_nm: Nanometre) -> tuple[float, fl
         origin[1] + x * frame.u[1] + y * frame.v[1],
         origin[2] + x * frame.u[2] + y * frame.v[2],
     )
+
+
+def _to_canonical(frame: Frame, point_mm: tuple[float, float, float]) -> tuple[float, float]:
+    """The inverse of ``_to_model``: project a model point onto ``frame``'s own axes."""
+    origin = tuple(mm_from_nm(value) for value in frame.origin_nm)
+    relative = tuple(p - o for p, o in zip(point_mm, origin))
+    x = sum(r * c for r, c in zip(relative, frame.u))
+    y = sum(r * c for r, c in zip(relative, frame.v))
+    return (x, y)

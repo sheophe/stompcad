@@ -42,7 +42,7 @@ MODELS: Mapping[str, HammondModel] = MappingProxyType(
         "1590BB": HammondModel("1590BB", (119.5, 94.0), 34.0, 2.25, 2.0),
         "1590B": HammondModel("1590B", (112.4, 60.5), 31.0, 2.0, 2.0),
         "1590A": HammondModel("1590A", (92.6, 38.5), 31.0, 1.6, 2.0),
-        "1590Y": HammondModel("1590Y", (92.0, 92.0), 42.0, 2.25, 3.2),
+        "1590Y": HammondModel("1590Y", (92.0, 92.0), 42.0, 2.50, 3.2),
     }
 )
 

@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("OCP", reason="needs aidrill[step]")
 
-from aidrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
+from aidrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid  # noqa: E402
 from aidrill.cad.step import read_step  # noqa: E402
 from aidrill.units import Nanometre  # noqa: E402
 from tests.hammond import MODELS  # noqa: E402
@@ -128,6 +128,65 @@ def test_the_frame_is_orthonormal(document):
     for a in (frame.u, frame.v, frame.w):
         assert pytest.approx(sum(c * c for c in a), abs=1e-9) == 1.0
     assert pytest.approx(sum(a * b for a, b in zip(frame.u, frame.v)), abs=1e-9) == 0.0
+
+
+def _frame_for(request, part: str) -> tuple[int, Faces, Faces]:
+    """The drill axis and box/lid ``Faces`` for a catalogued model, by designator."""
+    model = MODELS[part]
+    document = read_step(request.getfixturevalue(_FIXTURE_OF[part]))
+    footprint = (
+        Nanometre(round(model.footprint_mm[0] * 1_000_000)),
+        Nanometre(round(model.footprint_mm[1] * 1_000_000)),
+    )
+    axis = drill_axis(document, footprint)
+    box = find_faces(select_solid(document, "box"), axis)
+    lid = find_faces(select_solid(document, "lid"), axis)
+    return axis, box, lid
+
+
+@pytest.mark.parametrize("part", sorted(MODELS))
+def test_u_runs_along_the_wider_free_axis(request, part):
+    """``u`` lands on whichever free kernel axis carries the larger footprint span.
+
+    The 1590Y's 92 x 92 mm footprint ties, so neither free axis is "wider"
+    and there is nothing to assert here for it — the remaining-axis and
+    anti-parallel properties below hold for it regardless.
+    """
+    if MODELS[part].footprint_mm[0] == MODELS[part].footprint_mm[1]:
+        pytest.skip("square footprint: u's axis is an arbitrary, documented tie-break")
+    axis, box, _lid = _frame_for(request, part)
+    frame = build_frame(box, axis)
+
+    free = [index for index in range(3) if index != axis]
+    wider = max(free, key=lambda index: box.footprint_mm[index])
+
+    assert abs(frame.u[wider]) == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("part", sorted(MODELS))
+def test_v_lands_on_the_free_axis_u_did_not_take(request, part):
+    """``v`` always takes the one free axis ``u`` left over, square or not."""
+    axis, box, _lid = _frame_for(request, part)
+    frame = build_frame(box, axis)
+
+    free = [index for index in range(3) if index != axis]
+    u_axis = next(index for index in free if abs(frame.u[index]) > 0.5)
+    v_axis = next(index for index in free if index != u_axis)
+
+    assert abs(frame.v[v_axis]) == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("part", sorted(MODELS))
+def test_box_and_lid_frames_face_opposite_ways(request, part):
+    """Each face is drilled from its own outside, so the same canonical +X
+    must land on opposite kernel directions for box and lid — including the
+    square-footprint 1590Y, where the tie-break must still agree between them.
+    """
+    axis, box, lid = _frame_for(request, part)
+    box_frame = build_frame(box, axis)
+    lid_frame = build_frame(lid, axis)
+
+    assert pytest.approx(box_frame.u, abs=1e-6) == tuple(-c for c in lid_frame.u)
 
 
 @pytest.mark.parametrize("part", sorted(MODELS))

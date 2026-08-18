@@ -6,8 +6,9 @@ import pytest
 
 pytest.importorskip("OCP", reason="needs aidrill[step]")
 
+from aidrill.cad.base import Frame  # noqa: E402
 from aidrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
-from aidrill.cad.region import build_region, classify_bounds, contains  # noqa: E402
+from aidrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm  # noqa: E402
 from aidrill.cad.step import read_step  # noqa: E402
 from aidrill.units import Nanometre  # noqa: E402
 
@@ -121,3 +122,43 @@ def test_the_margin_and_not_only_the_radius_decides_the_edge(box):
 
     assert generous
     assert not tight
+
+
+def test_region_bbox_nm_reports_the_real_floor_on_the_1590bb(box):
+    """A sanity check against the measured 1590BB floor, not just a synthetic shape."""
+    axis, faces, frame = box
+    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+
+    x0, y0, x1, y1 = region_bbox_nm(region, frame, axis)
+
+    assert (x1 - x0) / MM == pytest.approx(110.66, abs=0.01)
+    assert (y1 - y0) / MM == pytest.approx(85.16, abs=0.01)
+
+
+def test_region_bbox_nm_transforms_through_the_frame_not_kernel_axes():
+    """A floor off the kernel origin must still report canonical extents.
+
+    Every cached Hammond floor happens to be centred on the kernel origin
+    with ``u``/``v`` axis-aligned, which would let a bug that read the
+    kernel bounding box straight through -- ignoring ``frame`` entirely --
+    pass unnoticed. This builds a synthetic, off-centre face directly, with
+    no downloaded model involved, to catch exactly that bug.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+
+    axis = 1
+    polygon = BRepBuilderAPI_MakePolygon()
+    for x, z in ((90.0, 40.0), (110.0, 40.0), (110.0, 60.0), (90.0, 60.0)):
+        polygon.Add(gp_Pnt(x, 0.0, z))
+    polygon.Close()
+    face = BRepBuilderAPI_MakeFace(polygon.Wire()).Face()
+
+    # Origin sits at kernel x = 50, so a bug reading kernel bounds straight
+    # through would report (90, 40, 110, 60) instead of the shifted extent.
+    frame = Frame(
+        origin_nm=(nm(50.0), Nanometre(0), Nanometre(0)),
+        u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+    )
+
+    assert region_bbox_nm(face, frame, axis) == (nm(40.0), nm(40.0), nm(60.0), nm(60.0))
