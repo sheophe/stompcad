@@ -252,6 +252,14 @@ def _label_entry(label: Any) -> str:
     return text.ToCString()
 
 
+# Re-establishing the cut solid's own colour was tried and abandoned: neither
+# re-linking the referred label to its original XCAFDoc_ColorTool colour
+# label nor re-setting the RGB value directly, at solid, component, or
+# per-face granularity, before or after UpdateAssemblies, changes the
+# written STYLED_ITEM count. A SetShape to an unchanged shape (no real cut)
+# keeps its colour, so the mechanism is sound; STEPCAFControl_Writer simply
+# does not serialise colour for a shape it had to replace. No further
+# in-kernel route is exposed through this binding to force it.
 def _count_colour_assignments(document: Any, touched: frozenset[str]) -> int:
     """Distinct shapes coloured in ``document``, excluding cut solids.
 

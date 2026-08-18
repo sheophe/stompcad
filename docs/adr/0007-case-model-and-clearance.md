@@ -44,12 +44,32 @@ agree about which holes are drillable, not just the one artefact that happens to
 the case model. An emitter-local check would let a STEP file and a drawing disagree
 about a hole the same invocation rejected.
 
-**Byte identity holds for identical inputs under a pinned kernel version, not across
-versions.** A third-party kernel now writes the STEP bytes, so the existing "geometry
-alone determines output" guarantee is restated precisely rather than left to imply a
-guarantee `aidrill` does not itself make: pin `cadquery-ocp` exactly, copy
-`FILE_NAME.time_stamp` from the source model rather than reading a clock, and order cut
-tools by `Hole.index`. Byte identity across kernel versions is a non-goal.
+**The guarantee is that identical inputs produce a geometrically and visually identical
+model. Byte identity is how that is enforced, not what is promised.** A third-party
+kernel now writes the STEP bytes, so the existing "geometry alone determines output"
+guarantee is restated precisely rather than left to imply one `aidrill` does not make.
+
+Byte identity is the preferred enforcement because it is cheap, total, and cannot be
+argued with: pin `cadquery-ocp` exactly, copy `FILE_NAME.time_stamp` from the source
+model rather than reading a clock, order cut tools by `Hole.index`, and canonicalise
+what the kernel emits in a non-deterministic order — today the translator's instance
+counter, the assembly-occurrence names, and the colour chains, whose order comes from
+pointer-hashed maps rebuilt on every write. Byte identity across kernel versions is a
+non-goal.
+
+Two exemptions follow from stating the guarantee this way rather than the proxy.
+
+*Environment-derived metadata* — timestamps, user names, host names, absolute paths,
+random identifiers — is pinned to a deterministic value where possible and excluded
+from byte comparison where not, with the reason recorded at the point of exclusion. It
+describes the machine, not the panel, so it cannot make two models differ.
+
+*Where byte identity is unreachable*, a test compares the property that actually
+matters instead of its representation: the same solids with the same geometry, the same
+product names, and the same colours attached to the same parts. A test that can only
+express itself bitwise will, when the bytes drift for a semantically empty reason, be
+weakened or deleted — and the real invariant goes with it. The obligation is to test the
+property, and to reach for bytes only because they happen to be a sound proxy for it.
 
 **The clearance rule is the flat inner face's outer boundary eroded by the margin.**
 Hammond plates are flat, and a die-cast flat face's outer boundary is by construction

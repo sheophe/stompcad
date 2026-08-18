@@ -472,3 +472,136 @@ def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_sile
 
     with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN.*likely needs updating"):
         _emit(at(0, 0, 6 * MM, index=1))
+
+
+def _colours_by_product(document) -> dict:
+    """Every coloured product name in a document, deduplicated by referred label."""
+    from OCP.Quantity import Quantity_Color
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
+
+    def name_of(label):
+        holder = TDataStd_Name()
+        if label.FindAttribute(TDataStd_Name.GetID_s(), holder):
+            return str(holder.Get().ToExtString())
+        return ""
+
+    def leaves(label, out):
+        if XCAFDoc_ShapeTool.IsAssembly_s(label):
+            children = TDF_LabelSequence()
+            XCAFDoc_ShapeTool.GetComponents_s(label, children)
+            for index in range(1, children.Length() + 1):
+                leaves(children.Value(index), out)
+        else:
+            out.append(label)
+
+    free = TDF_LabelSequence()
+    shape_tool.GetFreeShapes(free)
+    components: list = []
+    for index in range(1, free.Length() + 1):
+        leaves(free.Value(index), components)
+
+    colours: dict = {}
+    for component in components:
+        referred = TDF_Label()
+        target = referred if XCAFDoc_ShapeTool.GetReferredShape_s(component, referred) else component
+        name = name_of(target)
+        if name in colours:
+            continue
+        colour = Quantity_Color()
+        has = color_tool.GetColor(
+            XCAFDoc_ShapeTool.GetShape_s(target), XCAFDoc_ColorType.XCAFDoc_ColorSurf, colour
+        )
+        if has:
+            colours[name] = (round(colour.Red(), 2), round(colour.Green(), 2), round(colour.Blue(), 2))
+    return colours
+
+
+def test_the_drilled_solids_own_colour_does_not_survive_a_cut(tmp_path):
+    """A known OpenCASCADE writer limitation, documented rather than hidden.
+
+    Re-establishing ``XCAFDoc_ColorTool``'s assignment on the label
+    ``SetShape`` replaced does not make ``STEPCAFControl_Writer`` serialise
+    it (tried at solid, component and per-face granularity). The untouched
+    LID and SCREW keep their exact source colours; the drilled BOX's does
+    not survive, which is why ``_count_colour_assignments`` excludes the
+    label ``cut_shape`` touched rather than expecting the full source count.
+    """
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+
+    source = _colours_by_product(read_step(_model_path()).document)
+    result = _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path)
+    written = _colours_by_product(result.document)
+
+    assert written["1590BB-BBS-C LID"] == source["1590BB-BBS-C LID"]
+    assert written["SC530 (screw #6-32X 1_2'' FH)"] == source["SC530 (screw #6-32X 1_2'' FH)"]
+    assert "1590BB BOX" not in written
+
+
+def test_two_emissions_describe_the_same_model(tmp_path):
+    """Byte identity is the enforcement mechanism; this is what it proxies for.
+
+    The guarantee is a geometrically and visually identical model, not
+    identical bytes for their own sake — bytes are cheap and total to
+    check but pinned to a kernel-internal layout this codebase does not
+    control. Compares two processes' emissions by product names, per-solid
+    volume and bounding box, and colour-to-solid mapping as a set: a
+    reordering that leaves the model unchanged still passes, a colour on
+    the wrong part or missing would not.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    from aidrill.cad.step import bounding_box_mm, read_step
+
+    model_path = _model_path()
+    src_path = Path(__file__).resolve().parents[1] / "src"
+    script = textwrap.dedent(
+        f"""
+        import sys
+        sys.path.insert(0, {str(src_path)!r})
+        from pathlib import Path
+        from aidrill.cad import load_case_model
+        from aidrill.emitters.step import StepEmitter, StepOptions
+        from aidrill.model import DrillData, Hole
+        from aidrill.units import Nanometre
+
+        model = load_case_model(Path({str(model_path)!r}), face="box",
+                                 margin_nm=Nanometre(1_000_000))
+        hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
+                                     Nanometre(6_000_000)).with_number(1)
+        payload = StepEmitter(StepOptions(model=model)).emit(DrillData(holes=(hole,)))
+        sys.stdout.buffer.write(payload)
+        """
+    )
+    results = []
+    for index in range(2):
+        payload = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, check=True
+        ).stdout
+        target = tmp_path / f"out{index}.stp"
+        target.write_bytes(payload)
+        results.append(read_step(target))
+
+    first, second = results
+    first_names = {solid.name for solid in first.solids}
+    second_names = {solid.name for solid in second.solids}
+    assert first_names == second_names
+
+    for name in first_names:
+        one = next(s for s in first.solids if s.name == name)
+        two = next(s for s in second.solids if s.name == name)
+        # Ø6 mm through a 2.25 mm plate is 63.6 mm^3; a missing hole would
+        # show up as a difference two orders of magnitude past this margin.
+        assert _volume(one.shape) == pytest.approx(_volume(two.shape), abs=0.1)
+        assert bounding_box_mm(one.shape) == pytest.approx(bounding_box_mm(two.shape), abs=1e-3)
+
+    first_colours = set(_colours_by_product(first.document).items())
+    second_colours = set(_colours_by_product(second.document).items())
+    assert first_colours == second_colours
