@@ -110,24 +110,26 @@ class StepEmitter:
 
         model = self.options.model
         assert model is not None, "__init__ already refused a missing model"
-        document, undo = cut_shape(model, data)
+        document, undo, touched = cut_shape(model, data)
         try:
             with tempfile.TemporaryDirectory() as scratch:
                 target = Path(scratch) / "out.stp"
-                _write(document, target, self.options.title, model.document_timestamp)
+                _write(document, target, self.options.title, model.document_timestamp, touched)
                 return target.read_bytes()
         finally:
             undo()
 
 
-def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None]]:
+def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None], frozenset[str]]:
     """Replace the drilled solid in the model's document with a cut copy.
 
     The solid is located by product-name keyword, walking the assembly tree
     the way ``select_solid`` does — not by ``IsSame`` against
     ``target_shape``, whose location may differ from the one carried by the
-    document's own label. Returns the mutated document and an ``undo``
-    closure that restores every changed label to its pre-cut shape.
+    document's own label. Returns the mutated document, an ``undo`` closure
+    that restores every changed label to its pre-cut shape, and the entry
+    strings of the labels it changed (``_write`` needs these: a label whose
+    shape is replaced here does not keep its colour in the written STEP).
     """
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
@@ -136,7 +138,7 @@ def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None]]:
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     tools = _drill_compound(model, data)
     if tools is None:
-        return document, lambda: None
+        return document, lambda: None, frozenset()
 
     keyword = "BOX" if model.face == "box" else "LID"
     originals: list[tuple[Any, Any]] = []
@@ -159,7 +161,8 @@ def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None]]:
             tool.SetShape(referred, original)
         tool.UpdateAssemblies()
 
-    return document, undo
+    touched = frozenset(_label_entry(referred) for referred, _ in originals)
+    return document, undo, touched
 
 
 def _cut_component(
@@ -232,6 +235,65 @@ def _label_name(label: Any) -> str:
     return ""  # pragma: no cover - every label this kernel returns to us is named;
     # a hand-built label with no attributes at all crashes this OCP binding's own
     # FindAttribute before reaching this line, so no test can safely construct one
+
+
+def _label_entry(label: Any) -> str:
+    """A label's document-unique tag path, stable across shape mutation.
+
+    Unlike a shape's own identity, a label's entry string survives
+    ``SetShape``: it is what lets ``_count_colour_assignments`` recognise
+    "the same label" before and after ``cut_shape`` replaces its geometry.
+    """
+    from OCP.TCollection import TCollection_AsciiString
+    from OCP.TDF import TDF_Tool
+
+    text = TCollection_AsciiString()
+    TDF_Tool.Entry_s(label, text)
+    return text.ToCString()
+
+
+def _count_colour_assignments(document: Any, touched: frozenset[str]) -> int:
+    """Distinct shapes coloured in ``document``, excluding cut solids.
+
+    A cut solid keeps its ``XCAFDoc_ColorTool`` assignment (``SetShape``
+    does not clear it) but not its written colour, so counting ``touched``
+    labels in would overcount against what the writer actually produces.
+    Excluding them is what makes this agree with the real output rather
+    than approximate it. A component referring to one label twice (four
+    screw instances, one product) counts once, matching one written chain.
+    """
+    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
+
+    def leaves(label: Any, out: list[Any]) -> None:
+        if XCAFDoc_ShapeTool.IsAssembly_s(label):
+            children = TDF_LabelSequence()
+            XCAFDoc_ShapeTool.GetComponents_s(label, children)
+            for index in range(1, children.Length() + 1):
+                leaves(children.Value(index), out)
+        else:
+            out.append(label)
+
+    free = TDF_LabelSequence()
+    shape_tool.GetFreeShapes(free)
+    components: list[Any] = []
+    for index in range(1, free.Length() + 1):
+        leaves(free.Value(index), components)
+
+    coloured: set[str] = set()
+    for component in components:
+        referred = TDF_Label()
+        target = referred if XCAFDoc_ShapeTool.GetReferredShape_s(component, referred) \
+            else component
+        entry = _label_entry(target)
+        if entry in touched:
+            continue
+        if color_tool.IsSet(target, XCAFDoc_ColorType.XCAFDoc_ColorSurf):
+            coloured.add(entry)
+    return len(coloured)
 
 
 def _drill_compound(model: Any, data: DrillData) -> Any | None:
@@ -323,11 +385,10 @@ def _normalise(payload: bytes) -> bytes:
     def renumber(match: re.Match[bytes]) -> bytes:
         return match.group(1) + str(next(counter)).encode("ascii") + match.group(3)
 
-    payload = _VOLATILE_NAUO_ID.sub(renumber, payload)
-    return _reslot_colours(payload)
+    return _VOLATILE_NAUO_ID.sub(renumber, payload)
 
 
-def _reslot_colours(payload: bytes) -> bytes:
+def _reslot_colours(payload: bytes, expected: int) -> bytes:
     """Re-seat each colour chain into the numeric slot content order picks.
 
     ``STEPCAFControl_Writer::WriteColors`` hashes on the ``TShape`` pointer
@@ -339,6 +400,18 @@ def _reslot_colours(payload: bytes) -> bytes:
     own encounter order assigned, renumbering only that chain's own nine ids.
     """
     chains = list(_COLOUR_CHAIN.finditer(payload))
+    # Checked unconditionally, before the "nothing to reorder" shortcut
+    # below: a silent count mismatch — not just zero matches — is exactly
+    # what a future OpenCASCADE upgrade reshaping this chain would produce,
+    # and reordering nothing looks identical to reordering correctly unless
+    # the count is verified against ``expected``, the source document's own.
+    if len(chains) != expected:
+        raise EmitterError(
+            f"the source document assigns {expected} colour(s), but "
+            f"{len(chains)} STYLED_ITEM chain(s) were found in the written "
+            "STEP; _COLOUR_CHAIN in aidrill.emitters.step likely needs "
+            "updating for this OpenCASCADE version's colour-chain shape"
+        )
     if len(chains) < 2:
         return payload
 
@@ -365,7 +438,9 @@ def _reslot_colours(payload: bytes) -> bytes:
     return b"".join(pieces)
 
 
-def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
+def _write(
+    document: Any, path: Any, title: str, timestamp: str, touched: frozenset[str]
+) -> None:
     """Write the XCAF document with a header that carries no clock reading."""
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
     from OCP.Interface import Interface_Static
@@ -380,6 +455,7 @@ def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
     Interface_Static.SetCVal_s("write.step.product.name", "aidrill")
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
+    expected = _count_colour_assignments(document, touched)
     with _silence_stdout():
         writer.Transfer(document)
 
@@ -389,4 +465,5 @@ def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
         header.SetAuthorValue(1, TCollection_HAsciiString(""))
         header.SetOriginatingSystem(TCollection_HAsciiString(f"aidrill {_VERSION}"))
         writer.Write(str(path))
-    path.write_bytes(_normalise(path.read_bytes()))
+    payload = _normalise(path.read_bytes())
+    path.write_bytes(_reslot_colours(payload, expected))

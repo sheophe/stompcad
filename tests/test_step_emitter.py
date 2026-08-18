@@ -62,15 +62,35 @@ def test_the_emitter_module_imports_without_the_kernel():
     assert result.stdout.strip() == "False"
 
 
-def test_reslot_colours_leaves_a_payload_with_no_colour_chains_untouched():
-    """Pure bytes-in bytes-out below the two-chain floor: no kernel needed.
+def test_reslot_colours_leaves_a_colourless_payload_untouched():
+    """Pure bytes-in bytes-out: no kernel needed, and no OCP model to fake.
 
-    The real, hammond-gated cases (``test_step_cut.py``) always carry at
-    least two coloured shapes, so this is the only path to the ``< 2``
-    guard — a payload with zero ``STYLED_ITEM`` chains must round trip.
+    Stands in for "a genuinely colourless enclosure": no cached Hammond
+    fixture is colourless, so this reasons the case through directly rather
+    than building one — a payload with zero ``STYLED_ITEM`` chains and an
+    ``expected`` of zero is exactly what a colourless document would count
+    to, and must round trip rather than raise.
     """
     from aidrill.emitters.step import _reslot_colours
 
     payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SOMETHING();\nENDSEC;\n"
 
-    assert _reslot_colours(payload) == payload
+    assert _reslot_colours(payload, expected=0) == payload
+
+
+def test_reslot_colours_raises_when_the_chain_count_does_not_match():
+    """The guard the fix round added: a silent zero-chain match is a bug.
+
+    Simulates ``_COLOUR_CHAIN`` drifting out of sync with what the writer
+    actually produced (an OpenCASCADE upgrade reshaping the chain, a typo
+    in the pattern) without needing OCP: a payload carrying no matchable
+    chain, compared against a document that (per the source) assigns one
+    colour, must raise rather than silently pass the mismatch through.
+    """
+    from aidrill.emitters.step import _reslot_colours
+    from aidrill.errors import EmitterError
+
+    payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SOMETHING();\nENDSEC;\n"
+
+    with pytest.raises(EmitterError, match=r"assigns 1 colour.*0 STYLED_ITEM"):
+        _reslot_colours(payload, expected=1)

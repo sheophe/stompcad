@@ -447,3 +447,28 @@ def test_drill_compound_builds_children_in_index_order_not_tuple_order():
 
     assert forward == [(0.0, -28.875, -0.0), (8.0, -28.875, -0.0)]
     assert forward == backward
+
+
+def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_silently(monkeypatch):
+    """A ``_COLOUR_CHAIN`` that no longer matches must not pass silently.
+
+    Zero chains matched against a coloured document is exactly what a
+    future OpenCASCADE upgrade reshaping this entity chain would produce;
+    without the count check this looks like "nothing to reorder" and every
+    other test in this module still passes. ``monkeypatch`` restores
+    ``_COLOUR_CHAIN`` afterwards, so this cannot leak into another test.
+    """
+    import re
+
+    from aidrill.emitters import step as step_module
+    from aidrill.errors import EmitterError
+    from tests.conftest import at
+
+    broken = re.compile(
+        re.sub(rb"STYLED_ITEM", rb"STYLED_ITEM_ZZZ", step_module._COLOUR_CHAIN.pattern),
+        step_module._COLOUR_CHAIN.flags,
+    )
+    monkeypatch.setattr(step_module, "_COLOUR_CHAIN", broken)
+
+    with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN.*likely needs updating"):
+        _emit(at(0, 0, 6 * MM, index=1))
