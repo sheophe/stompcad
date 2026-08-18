@@ -2,11 +2,19 @@
 
 Presentation only in the sense that matters: every hole, its position and its
 diameter were decided before this module ran. The kernel is imported inside
-the methods, so importing the emitter registry stays free of it.
+the methods, so importing the emitter registry stays free of it. Two OCC
+process-global counters (a translator product-name suffix and the assembly
+usage occurrence ids) are not resettable through any exposed API, so
+``_write`` normalises them out of the written bytes afterwards instead.
 """
 
 from __future__ import annotations
 
+import contextlib
+import itertools
+import os
+import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -20,6 +28,17 @@ __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
 
 #: Recorded in the header so a reader can tell which release cut the holes.
 _VERSION = "0.1.0"
+
+#: One physical-file entity, wrapped or not, that may carry a volatile
+#: counter (see the module docstring). ``DOTALL`` so a line-wrapped entity
+#: matches as a whole; entity bodies here never contain a literal ``);``.
+_VOLATILE_ENTITY = re.compile(
+    rb"(#\d+ = (?:NEXT_ASSEMBLY_USAGE_OCCURRENCE|PRODUCT)\(.*?\);)", re.DOTALL
+)
+#: The writer's own "<write.step.product.name> <counter>.1" wrapper product;
+#: never a real part name, which always keeps the name it was read with.
+_VOLATILE_VERSION = re.compile(rb"'aidrill \d+\.\d+'")
+_VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 
 
 def require_kernel() -> None:
@@ -55,26 +74,35 @@ class StepEmitter:
             raise EmitterError(str(failure)) from failure
 
     def emit(self, data: DrillData) -> bytes:
-        """Cut every numbered hole and serialise the whole assembly."""
+        """Cut every numbered hole, write STEP, then undo the cut in place.
+
+        The supplied model is restored before returning, so a second
+        ``emit`` on the same instance sees the pristine geometry again: this
+        emitter only translates and serialises, it does not own state.
+        """
         import tempfile
         from pathlib import Path
 
         model = self.options.model
         assert model is not None, "__init__ already refused a missing model"
-        document = cut_shape(model, data)
-        with tempfile.TemporaryDirectory() as scratch:
-            target = Path(scratch) / "out.stp"
-            _write(document, target, self.options.title, model.document_timestamp)
-            return target.read_bytes()
+        document, undo = cut_shape(model, data)
+        try:
+            with tempfile.TemporaryDirectory() as scratch:
+                target = Path(scratch) / "out.stp"
+                _write(document, target, self.options.title, model.document_timestamp)
+                return target.read_bytes()
+        finally:
+            undo()
 
 
-def cut_shape(model: Any, data: DrillData) -> Any:
+def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None]]:
     """Replace the drilled solid in the model's document with a cut copy.
 
     The solid is located by product-name keyword, walking the assembly tree
     the way ``select_solid`` does — not by ``IsSame`` against
     ``target_shape``, whose location may differ from the one carried by the
-    document's own label.
+    document's own label. Returns the mutated document and an ``undo``
+    closure that restores every changed label to its pre-cut shape.
     """
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
@@ -83,13 +111,14 @@ def cut_shape(model: Any, data: DrillData) -> Any:
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     tools = _drill_compound(model, data)
     if tools is None:
-        return document
+        return document, lambda: None
 
     keyword = "BOX" if model.face == "box" else "LID"
+    originals: list[tuple[Any, Any]] = []
     free = TDF_LabelSequence()
     tool.GetFreeShapes(free)
     cut_any = any(
-        _cut_component(tool, free.Value(index), keyword, tools)
+        _cut_component(tool, free.Value(index), keyword, tools, originals)
         for index in range(1, free.Length() + 1)
     )
     if not cut_any:
@@ -99,10 +128,18 @@ def cut_shape(model: Any, data: DrillData) -> Any:
     # shape does not retroactively rebuild it, so the writer would otherwise
     # serialise the stale, uncut aggregate.
     tool.UpdateAssemblies()
-    return document
+
+    def undo() -> None:
+        for referred, original in originals:
+            tool.SetShape(referred, original)
+        tool.UpdateAssemblies()
+
+    return document, undo
 
 
-def _cut_component(tool: Any, label: Any, keyword: str, tools: Any) -> bool:
+def _cut_component(
+    tool: Any, label: Any, keyword: str, tools: Any, originals: list[tuple[Any, Any]]
+) -> bool:
     """Recurse into an assembly; cut the first ``keyword``-matching leaf."""
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
@@ -111,15 +148,17 @@ def _cut_component(tool: Any, label: Any, keyword: str, tools: Any) -> bool:
         children = TDF_LabelSequence()
         XCAFDoc_ShapeTool.GetComponents_s(label, children)
         return any(
-            _cut_component(tool, children.Value(index), keyword, tools)
+            _cut_component(tool, children.Value(index), keyword, tools, originals)
             for index in range(1, children.Length() + 1)
         )
     if keyword not in _label_name(label).upper():
         return False
-    return _cut_leaf(tool, label, tools)
+    return _cut_leaf(tool, label, tools, originals)
 
 
-def _cut_leaf(tool: Any, label: Any, tools: Any) -> bool:
+def _cut_leaf(
+    tool: Any, label: Any, tools: Any, originals: list[tuple[Any, Any]]
+) -> bool:
     """Cut one placed leaf shape and write the result back through its label.
 
     A component label is a reference: its own ``GetShape_s`` bakes in the
@@ -133,7 +172,7 @@ def _cut_leaf(tool: Any, label: Any, tools: Any) -> bool:
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     placed = XCAFDoc_ShapeTool.GetShape_s(label)
-    if placed.IsNull():
+    if placed.IsNull():  # pragma: no cover - a label matched by name always carries a shape
         return False
     cut = BRepAlgoAPI_Cut(placed, tools)
     cut.Build()
@@ -143,10 +182,18 @@ def _cut_leaf(tool: Any, label: Any, tools: Any) -> bool:
 
     referred = TDF_Label()
     if XCAFDoc_ShapeTool.GetReferredShape_s(label, referred):
+        original = XCAFDoc_ShapeTool.GetShape_s(referred)
         location = XCAFDoc_ShapeTool.GetLocation_s(label)
         tool.SetShape(referred, result.Located(location.Inverted()))
+        originals.append((referred, original))
     else:
-        tool.SetShape(label, result)
+        # A bare top-level shape, not an assembly component: no placement to
+        # undo before writing it back. Every Hammond fixture is an assembly,
+        # so this is a fallback for a single-solid STEP file this codebase
+        # has no fixture for, not a path these tests can reach.
+        original = XCAFDoc_ShapeTool.GetShape_s(label)  # pragma: no cover
+        tool.SetShape(label, result)  # pragma: no cover
+        originals.append((label, original))  # pragma: no cover
     return True
 
 
@@ -157,11 +204,18 @@ def _label_name(label: Any) -> str:
     holder = TDataStd_Name()
     if label.FindAttribute(TDataStd_Name.GetID_s(), holder):
         return str(holder.Get().ToExtString())
-    return ""
+    return ""  # pragma: no cover - every label this kernel returns to us is named;
+    # a hand-built label with no attributes at all crashes this OCP binding's own
+    # FindAttribute before reaching this line, so no test can safely construct one
 
 
 def _drill_compound(model: Any, data: DrillData) -> Any | None:
-    """One compound of bounded cylinders, in canonical hole order."""
+    """One compound of bounded cylinders, one per hole in ``data.holes`` order.
+
+    That order is already the canonicalised tuple ``quantise`` produced, not
+    a sort performed here: ``data.numbered()`` reads ``Hole.index`` off each
+    entry rather than deriving a sequence from list position.
+    """
     from OCP.BRep import BRep_Builder
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
@@ -199,6 +253,45 @@ def _face_point(model: Any, hole: Any, overshoot: float) -> tuple[float, float, 
     )
 
 
+@contextlib.contextmanager
+def _silence_stdout() -> Iterator[None]:
+    """Suppress OCC's C++ progress banners, invisible to Python-level redirects.
+
+    OCC writes its transfer statistics through the C runtime, bypassing
+    ``sys.stdout`` entirely, so only redirecting the OS file descriptor
+    itself keeps a clean report from an ``aidrill`` invocation.
+    """
+    saved = os.dup(1)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 1)
+        yield
+    finally:
+        os.dup2(saved, 1)
+        os.close(devnull)
+        os.close(saved)
+
+
+def _normalise(payload: bytes) -> bytes:
+    """Erase the two process-global OCC counters from one written file.
+
+    Neither the translator's per-write product-name suffix nor the assembly
+    usage occurrence ids are resettable through any API this kernel exposes.
+    Rewriting bytes after the fact is honest and fully deterministic; each
+    affected entity is first rejoined onto one line, since the writer's own
+    line-wrap column depends on how many digits the volatile counter had
+    that call, which would otherwise leak process history back in.
+    """
+    payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
+    payload = _VOLATILE_VERSION.sub(b"'aidrill'", payload)
+    counter = itertools.count(1)
+
+    def renumber(match: re.Match[bytes]) -> bytes:
+        return match.group(1) + str(next(counter)).encode("ascii") + match.group(3)
+
+    return _VOLATILE_NAUO_ID.sub(renumber, payload)
+
+
 def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
     """Write the XCAF document with a header that carries no clock reading."""
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
@@ -208,13 +301,19 @@ def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
     from OCP.XSControl import XSControl_WorkSession
 
     Interface_Static.SetCVal_s("write.step.schema", "AP214IS")
+    # Load-bearing for determinism, not just cosmetic: fixes the prefix the
+    # translator's auto-generated wrapper product uses, which ``_normalise``
+    # then strips the volatile "<counter>.1" suffix from.
+    Interface_Static.SetCVal_s("write.step.product.name", "aidrill")
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
-    writer.Transfer(document)
+    with _silence_stdout():
+        writer.Transfer(document)
 
-    header = APIHeaderSection_MakeHeader(session.Model())
-    header.SetName(TCollection_HAsciiString(title or "aidrill"))
-    header.SetTimeStamp(TCollection_HAsciiString(timestamp))
-    header.SetAuthorValue(1, TCollection_HAsciiString(""))
-    header.SetOriginatingSystem(TCollection_HAsciiString(f"aidrill {_VERSION}"))
-    writer.Write(str(path))
+        header = APIHeaderSection_MakeHeader(session.Model())
+        header.SetName(TCollection_HAsciiString(title or "aidrill"))
+        header.SetTimeStamp(TCollection_HAsciiString(timestamp))
+        header.SetAuthorValue(1, TCollection_HAsciiString(""))
+        header.SetOriginatingSystem(TCollection_HAsciiString(f"aidrill {_VERSION}"))
+        writer.Write(str(path))
+    path.write_bytes(_normalise(path.read_bytes()))

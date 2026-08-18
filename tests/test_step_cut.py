@@ -1,0 +1,339 @@
+"""The STEP emitter's cut, its determinism, and the round trip it survives.
+
+Split from ``test_step_emitter.py``: everything here needs the geometry
+kernel and (mostly) a downloaded Hammond model, so the whole module is
+gated behind ``--hammond``. ``test_step_emitter.py`` stays runnable without
+either, which is the point of its own two OCP-free tests.
+"""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import pytest
+
+ocp = pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+pytestmark = pytest.mark.hammond
+
+MM = 1_000_000
+
+
+def _model_path():
+    """The cached 1590BB, fetched on demand. Skips the test if unobtainable."""
+    from tests.hammond import require_model
+
+    return require_model("1590BB")
+
+
+def _model(face: str = "box"):
+    from aidrill.cad import load_case_model
+    from aidrill.units import Nanometre
+
+    return load_case_model(_model_path(), face=face, margin_nm=Nanometre(1 * MM))
+
+
+def _emit(*holes, face="box", model=None):
+    from aidrill.emitters.step import StepEmitter, StepOptions
+    from tests.conftest import make_data
+
+    return StepEmitter(StepOptions(model=model or _model(face))).emit(make_data(*holes))
+
+
+def _reload(payload: bytes, tmp_path: Path):
+    from aidrill.cad.step import read_step
+
+    target = tmp_path / "out.stp"
+    target.write_bytes(payload)
+    return read_step(target)
+
+
+def _volume(shape) -> float:
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, props)
+    return props.Mass()
+
+
+def test_the_payload_is_bytes():
+    from tests.conftest import at
+
+    assert isinstance(_emit(at(0, 0, 6 * MM, index=1)), bytes)
+
+
+def test_the_payload_is_a_step_file():
+    from tests.conftest import at
+
+    assert _emit(at(0, 0, 6 * MM, index=1)).startswith(b"ISO-10303-21;")
+
+
+def test_the_output_reloads_as_a_valid_solid(tmp_path):
+    from OCP.BRepCheck import BRepCheck_Analyzer
+
+    from tests.conftest import at
+
+    document = _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path)
+
+    for solid in document.solids:
+        assert BRepCheck_Analyzer(solid.shape).IsValid()
+
+
+def test_the_assembly_and_its_product_names_survive_the_round_trip(tmp_path):
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+
+    document = _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path)
+    names = {solid.name.upper() for solid in document.solids}
+
+    # The 1590BB assembly is box, lid, and four instances of one screw.
+    assert len(document.solids) == len(read_step(_model_path()).solids)
+    assert any("BOX" in name for name in names)
+    assert any("LID" in name for name in names)
+
+
+def test_the_volume_removed_matches_the_holes_drilled(tmp_path):
+    """pi r^2 t is an authority no self-consistent bad topology can fake."""
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+
+    before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
+    document = _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path)
+    after = {s.name: _volume(s.shape) for s in document.solids}
+
+    model = _model()
+    plate_mm = model.plate_nm / 1_000_000
+    expected = math.pi * 3.0**2 * plate_mm
+    removed = sum(before.values()) - sum(after.values())
+
+    assert removed == pytest.approx(expected, rel=0.02)
+
+
+def test_only_the_drilled_side_loses_material(tmp_path):
+    """An unbounded cylinder would punch the lid as well."""
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+
+    before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
+    after = {s.name: _volume(s.shape)
+             for s in _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path).solids}
+
+    for name, volume in before.items():
+        if "BOX" in name.upper():
+            assert after[name] < volume
+        else:
+            # A STEP write/read round trip re-serialises every coordinate
+            # through ASCII text, so an untouched solid's volume survives
+            # only to that text precision, not bit-for-bit; the screws are
+            # small enough that this shows up as a relative, not absolute,
+            # tolerance would need to be loose enough to hide a real cut.
+            assert after[name] == pytest.approx(volume, abs=0.05)
+
+
+def test_two_holes_remove_twice_as_much_as_one(tmp_path):
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+
+    base = sum(_volume(s.shape) for s in read_step(_model_path()).solids)
+    one = sum(_volume(s.shape)
+              for s in _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path).solids)
+    two = sum(_volume(s.shape) for s in _reload(
+        _emit(at(0, 0, 6 * MM, index=1), at(6 * MM, 0, 6 * MM, index=2)), tmp_path).solids)
+
+    assert (base - two) == pytest.approx(2 * (base - one), rel=0.02)
+
+
+def test_the_hole_is_cut_where_the_frame_puts_it(tmp_path):
+    """An off-centre hole must move the drilled solid's bounding box hole, not mirror.
+
+    A weak first check: an undrilled box also leaves the outer bbox
+    unchanged, and this alone cannot tell a correctly placed hole from its
+    mirror image. See ``test_the_hole_lands_at_the_canonical_position_not_its_mirror``
+    for the assertion that actually pins down *where* the bore is.
+    """
+    from aidrill.cad.step import bounding_box_mm, read_step
+    from tests.conftest import at
+
+    document = _reload(_emit(at(10 * MM, 0, 6 * MM, index=1)), tmp_path)
+    (box,) = [s for s in document.solids if "BOX" in s.name.upper()]
+
+    assert bounding_box_mm(box.shape) == pytest.approx(
+        bounding_box_mm([s for s in read_step(_model_path()).solids
+                         if "BOX" in s.name.upper()][0].shape), abs=1e-3
+    ), "cutting a through-hole must not change the solid's outer extent"
+
+
+def test_the_hole_lands_at_the_canonical_position_not_its_mirror(tmp_path):
+    """The one assertion that actually matters: for a drawing that drills aluminium.
+
+    Emits a hole at canonical ``(+10, 0)`` and probes the reloaded solid,
+    at mid-plate depth, at both ``(+10, 0)`` and its mirror ``(-10, 0)``:
+    the drilled point must read outside the solid, the untouched mirror
+    point inside. Negating both in-plane terms in ``_face_point`` — the
+    exact mirror bug this guards against — was confirmed by hand to flip
+    both assertions (reported in ``task-12-report.md``); the bounding-box
+    check above passes unchanged under that same perturbation.
+    """
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_State
+
+    from tests.conftest import at
+
+    model = _model()
+    document = _reload(_emit(at(10 * MM, 0, 6 * MM, index=1), model=model), tmp_path)
+    (box,) = [s for s in document.solids if "BOX" in s.name.upper()]
+
+    frame = model.frame
+    origin = tuple(value / 1_000_000 for value in frame.origin_nm)
+    depth_mm = (model.plate_nm / 1_000_000) / 2  # mid-plate: solidly inside real material
+
+    def classify(x_mm: float, y_mm: float):
+        point = tuple(
+            origin[i] + x_mm * frame.u[i] + y_mm * frame.v[i] - depth_mm * frame.w[i]
+            for i in range(3)
+        )
+        return BRepClass3d_SolidClassifier(box.shape, gp_Pnt(*point), 1e-6).State()
+
+    assert classify(10.0, 0.0) == TopAbs_State.TopAbs_OUT, "the drilled point is still solid"
+    assert classify(-10.0, 0.0) == TopAbs_State.TopAbs_IN, "the mirror point was cut instead"
+
+
+def test_emitting_with_no_holes_leaves_the_model_unchanged(tmp_path):
+    from aidrill.cad.step import read_step
+
+    before = sum(_volume(s.shape) for s in read_step(_model_path()).solids)
+    after = sum(_volume(s.shape) for s in _reload(_emit(), tmp_path).solids)
+
+    assert after == pytest.approx(before, rel=1e-6)
+
+
+def test_a_hole_over_cast_lettering_cuts_cleanly(tmp_path):
+    """The three-surface case the bounded-boolean strategy was chosen for.
+
+    ``BB_PROBES["relief"]`` sits on a letter: the drill crosses the outer
+    wall, the letter-shaped hole in the floor, the letter body, and exits
+    through the letter's own top face at a different level. Nothing else in
+    this suite exercises a hole placed over lettering.
+    """
+    from OCP.BRepCheck import BRepCheck_Analyzer
+
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+    from tests.hammond import BB_PROBES
+
+    x_mm, y_mm = BB_PROBES["relief"]
+    hole = at(round(x_mm * MM), round(y_mm * MM), 6 * MM, index=1)
+    document = _reload(_emit(hole), tmp_path)
+
+    for solid in document.solids:
+        assert BRepCheck_Analyzer(solid.shape).IsValid()
+
+    (box,) = [s for s in document.solids if "BOX" in s.name.upper()]
+    before = [s for s in read_step(_model_path()).solids if "BOX" in s.name.upper()][0]
+    assert _volume(box.shape) < _volume(before.shape)
+
+
+def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
+    """Exercises the branch where the first component tried does not match.
+
+    The BOX component is visited before LID in this assembly's own order,
+    so cutting ``face="lid"`` is also the only test that walks past a
+    keyword mismatch before finding its match.
+    """
+    from aidrill.cad.step import read_step
+    from tests.conftest import at
+
+    before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
+    after = {s.name: _volume(s.shape)
+             for s in _reload(_emit(at(0, 0, 6 * MM, index=1), face="lid"), tmp_path).solids}
+
+    for name, volume in before.items():
+        if "LID" in name.upper():
+            assert after[name] < volume
+        else:
+            assert after[name] == pytest.approx(volume, abs=0.05)
+
+
+def test_no_matching_component_is_an_emitter_error():
+    """``_label_name`` never matching anything is the same failure a
+    renamed or mis-supplied model would produce — worth a named diagnostic,
+    not a silent no-op."""
+    from aidrill.emitters import step as step_module
+    from aidrill.errors import EmitterError
+    from tests.conftest import at, make_data
+
+    def never_named(label: object) -> str:
+        return ""
+
+    model = _model()
+    original = step_module._label_name
+    step_module._label_name = never_named
+    try:
+        with pytest.raises(EmitterError, match="no component named"):
+            step_module.cut_shape(model, make_data(at(0, 0, 6 * MM, index=1)))
+    finally:
+        step_module._label_name = original
+
+
+def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
+    """``IsDone() is False`` is not observed on any cached model; forced here."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    from aidrill.emitters import step as step_module
+    from aidrill.errors import EmitterError
+    from tests.conftest import at, make_data
+
+    monkeypatch.setattr(BRepAlgoAPI_Cut, "IsDone", lambda self: False)
+
+    with pytest.raises(EmitterError, match="boolean cut failed"):
+        step_module.cut_shape(_model(), make_data(at(0, 0, 6 * MM, index=1)))
+
+
+def test_five_emits_in_one_process_are_byte_identical():
+    """OCC's process-global product-version and NAUO-id counters must not
+    leak into the payload: this is the invariant Task 13 depends on."""
+    from tests.conftest import at
+
+    model = _model()
+    hole = at(0, 0, 6 * MM, index=1)
+
+    payloads = [_emit(hole, model=model) for _ in range(5)]
+
+    assert len(set(payloads)) == 1
+
+
+def test_emitting_twice_from_one_model_returns_the_same_bytes():
+    """``emit`` must not leave the supplied model mutated: a second call on
+    the same instance is the test that would catch it, since ``_emit()``'s
+    helper reloads a fresh model from disk every other test in this file."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    from tests.conftest import at
+
+    model = _model()
+    hole = at(0, 0, 6 * MM, index=1)
+
+    first = _emit(hole, model=model)
+    second = _emit(hole, model=model)
+
+    assert first == second
+
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(model.target_shape, props)
+    assert props.Mass() == pytest.approx(52352.83977753624, rel=1e-9)
+
+
+def test_emitting_is_silent_on_stdout(capfd):
+    """OCC's C++ progress banners bypass Python-level capture; only an
+    OS-file-descriptor check proves they are actually suppressed."""
+    from tests.conftest import at
+
+    capfd.readouterr()
+    _emit(at(0, 0, 6 * MM, index=1))
+    captured = capfd.readouterr()
+
+    assert captured.out == ""
