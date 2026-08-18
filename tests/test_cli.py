@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import re
@@ -29,8 +30,14 @@ from aidrill.model import (
 )
 from aidrill.pipeline import DRILL_STANDARDS
 from aidrill.units import Millimetre, Nanometre
+from tests.conftest import build_pdf, circle_ops
+from tests.hammond import BB_PROBES, require_model
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
+
+#: The 1590BB's published top-view footprint (ADR-0007): what real artwork
+#: draws the ``Background`` rectangle to, not the smaller drilled face.
+_BB_FOOTPRINT_MM = (119.5, 94.0)
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +108,51 @@ def quantised_against(standard: str, size_count: int = 183) -> StageRun:
     return StageRun("snap-diameters", (("standard", standard), ("size_count", size_count)))
 
 
+def _pt_from_mm(mm: float) -> float:
+    """Millimetres to PDF user-space points, the way a drawing tool would."""
+    return mm * 72 / 25.4
+
+
+def _bb_panel(tmp_path: Path, name: str, x_mm: float, y_mm: float, diameter_mm: float) -> Path:
+    """One drill circle on a ``Background`` drawn to the 1590BB's own footprint.
+
+    Canonical coordinates are millimetres with Y up and the origin at the
+    footprint's centre, which is exactly how ``build_pdf``'s page coordinates
+    are used here: the rectangle's own centre is the origin the hole offset is
+    measured from.
+    """
+    width, height = (_pt_from_mm(size) for size in _BB_FOOTPRINT_MM)
+    centre_x, centre_y = 10 + width / 2, 10 + height / 2
+    return build_pdf(
+        tmp_path / name,
+        {
+            "Background": f"10 10 {width} {height} re f",
+            "Drill": circle_ops(
+                centre_x + _pt_from_mm(x_mm),
+                centre_y + _pt_from_mm(y_mm),
+                _pt_from_mm(diameter_mm / 2),
+            ),
+        },
+    )
+
+
+def _panel_with_a_hole_in_a_boss(tmp_path: Path) -> Path:
+    """A ⌀4 mm hole inside the play area but inside a boss bite (THROUGH_BOSS)."""
+    x, y = BB_PROBES["boss"]
+    return _bb_panel(tmp_path, "boss.ai", x, y, 4.0)
+
+
+def _panel_with_a_central_hole(tmp_path: Path) -> Path:
+    """A ⌀6 mm hole in the clear middle of the floor: nothing rejects it."""
+    x, y = BB_PROBES["clear"]
+    return _bb_panel(tmp_path, "clear.ai", x, y, 6.0)
+
+
+def _model_path() -> Path:
+    """The cached 1590BB model, fetched if needed; skips when unobtainable."""
+    return require_model("1590BB")
+
+
 @pytest.fixture
 def fake_source(monkeypatch):
     """Install a stand-in for ``AiPdfSource``. Returns an ``install`` callable."""
@@ -159,11 +211,47 @@ def test_unregistering_the_dummy_leaves_the_registry_as_it_was(clean_registry):
     assert "dummy-test-format" not in available()
 
 
+def _docstring_constants(tree: ast.AST) -> set[int]:
+    """``id()`` of every string-literal ``Constant`` node that is a docstring.
+
+    A docstring is a plain identifying comment, indistinguishable in prose
+    from an identifier such as ``StepOptions`` -- neither leaks into what the
+    CLI prints or compares against, so a format name inside one is not the
+    rule this test enforces.
+    """
+    ids = set()
+    holders = [tree, *(
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    )]
+    for holder in holders:
+        body = getattr(holder, "body", None)
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            ids.add(id(body[0].value))
+    return ids
+
+
 def test_cli_source_never_names_a_registered_format(clean_registry):
-    """``cli.py`` may name options classes, never format names (OCP)."""
-    source = Path(cli.__file__).read_text()
+    """A format name may reach ``cli.py`` only through the registry.
+
+    A whole-file substring search is a landmine now a format is named
+    ``step``: this module is about pipeline *steps*, so an identifier like
+    ``StepOptions`` would trip it by accident. Checking only string-literal
+    ``Constant`` nodes, docstrings excluded, targets the real rule: no
+    literal may dispatch on, or name, a format in help or an error message.
+    """
+    tree = ast.parse(Path(cli.__file__).read_text())
+    excluded = _docstring_constants(tree)
+    literals = [
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and id(node) not in excluded
+    ]
     for name in available():
-        assert name not in source, f"cli.py hardcodes the format name {name!r}"
+        assert not any(name in literal for literal in literals), (
+            f"cli.py hardcodes the format name {name!r} in a string literal"
+        )
 
 
 def test_help_lists_the_registry(clean_registry, capsys):
@@ -1462,3 +1550,194 @@ def test_empty_layer_blames_the_shapes_when_paths_were_seen():
 
 def test_the_two_empty_layer_causes_do_not_read_alike():
     assert str(EmptyLayerError("Drill")) != str(EmptyLayerError("Drill", path_count=3))
+
+
+# ---------------------------------------------------------------------------
+# the case model: flags, pipeline composition and the report
+# ---------------------------------------------------------------------------
+
+
+def test_case_face_accepts_only_box_or_lid():
+    from aidrill.cli import UsageError, parse_face
+
+    assert parse_face("box") == "box"
+    assert parse_face("LID") == "lid"
+    with pytest.raises(UsageError, match="box"):
+        parse_face("flange")
+
+
+def test_emitting_step_without_a_case_model_is_a_usage_error(tmp_path, capsys):
+    from aidrill.cli import main
+
+    code = main(["panel.ai", "--emit", f"step={tmp_path / 'o.stp'}"])
+
+    assert code == 3
+    assert "--case-model" in capsys.readouterr().err
+
+
+def test_an_unreadable_case_model_is_a_usage_error(tmp_path, capsys):
+    from aidrill.cli import main
+
+    code = main(["panel.ai", "--case-model", str(tmp_path / "absent.stp")])
+
+    assert code == 3
+
+
+def test_a_negative_case_margin_is_a_usage_error(tmp_path, capsys):
+    from aidrill.cli import main
+
+    code = main(["panel.ai", "--case-model", "x.stp", "--case-margin", "-1"])
+
+    assert code == 3
+    assert "--case-margin" in capsys.readouterr().err
+
+
+def test_the_case_margin_default_is_one_millimetre():
+    from aidrill.cli import build_parser
+
+    args = build_parser().parse_args(["panel.ai"])
+
+    assert args.case_margin == 1.0
+
+
+def test_the_case_face_default_is_box():
+    from aidrill.cli import build_parser
+
+    args = build_parser().parse_args(["panel.ai"])
+
+    assert args.case_face == "box"
+
+
+def test_no_case_model_leaves_the_pipeline_unchanged():
+    from aidrill.cli import build_parser, build_pipeline
+
+    args = build_parser().parse_args(["panel.ai"])
+
+    assert [stage.name for stage in build_pipeline(args)] == [
+        "deduplicate", "review-grid-ties", "route"
+    ]
+
+
+def test_a_case_model_appends_the_clearance_stage_last():
+    from aidrill.cli import build_parser, build_pipeline
+    from tests.test_clearance import FakeCase
+
+    args = build_parser().parse_args(["panel.ai"])
+    args.case_model_object = FakeCase()
+
+    assert [stage.name for stage in build_pipeline(args)][-1] == "check-case-clearance"
+
+
+def test_the_report_names_the_model_face_and_play_area():
+    from aidrill.cli import format_case
+    from tests.test_clearance import FakeCase
+
+    lines = "\n".join(format_case(FakeCase()))
+
+    assert "CASE MODEL" in lines
+    assert "1590BB" in lines
+    assert "box" in lines
+
+
+# ---------------------------------------------------------------------------
+# case flags are validated unconditionally, whether or not a model was given
+# ---------------------------------------------------------------------------
+
+
+def test_an_invalid_case_face_is_a_usage_error_with_no_case_model(capsys):
+    """A typo in --case-face must not wait for --case-model to be caught."""
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--case-face", "flange"])
+
+    assert code == 3
+    assert "--case-face" in capsys.readouterr().err
+
+
+def test_a_negative_case_margin_is_a_usage_error_with_no_case_model(capsys):
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--case-margin", "-5"])
+
+    assert code == 3
+    assert "--case-margin" in capsys.readouterr().err
+
+
+def test_a_zero_case_margin_is_a_usage_error_with_no_case_model(capsys):
+    code = cli.main([str(FIXTURE), "--case", "1590B", "--case-margin", "0"])
+
+    assert code == 3
+    assert "--case-margin" in capsys.readouterr().err
+
+
+def test_an_invalid_case_face_is_caught_before_the_file_is_even_opened(capsys):
+    """The panel need not exist: the flag is wrong regardless of the input."""
+    code = cli.main(["/no/such/panel.ai", "--case-face", "flange"])
+
+    assert code == 3
+    assert "--case-face" in capsys.readouterr().err
+
+
+def test_an_unreadable_case_model_is_caught_before_the_file_is_even_opened(capsys):
+    code = cli.main(["/no/such/panel.ai", "--case-model", "/nonexistent.stp"])
+
+    assert code == 3
+    assert "--case-model" in capsys.readouterr().err
+
+
+def test_emitting_step_without_a_model_is_caught_before_the_file_is_even_opened(capsys):
+    code = cli.main(["/no/such/panel.ai", "--emit", "step=x.stp"])
+
+    assert code == 3
+    assert "--case-model" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# end to end: a real Hammond model, through the whole command line
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.hammond
+def test_a_clearance_error_withholds_every_artefact(tmp_path, capsys):
+    """Any error withholds every requested artefact, including the drill file."""
+    pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+    from aidrill.cli import main
+
+    panel = _panel_with_a_hole_in_a_boss(tmp_path)
+    drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
+    code = main([
+        str(panel), "--case", "1590BB", "--case-model", str(_model_path()), "--case-face", "box",
+        "--emit", f"excellon={drl}", "--emit", f"step={stp}",
+    ])
+
+    assert code == 2
+    assert not drl.exists()
+    assert not stp.exists()
+    assert "wrote nothing" in capsys.readouterr().out
+
+
+@pytest.mark.hammond
+def test_a_clean_run_writes_both_artefacts(tmp_path):
+    pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+    from aidrill.cli import main
+
+    panel = _panel_with_a_central_hole(tmp_path)
+    drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
+    code = main([
+        str(panel), "--case", "1590BB", "--case-model", str(_model_path()),
+        "--emit", f"excellon={drl}", "--emit", f"step={stp}",
+    ])
+
+    assert code == 0
+    assert drl.exists() and stp.exists()
+
+
+@pytest.mark.hammond
+def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, capsys):
+    pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+    from aidrill.cli import main
+
+    panel = _panel_with_a_hole_in_a_boss(tmp_path)
+    code = main([str(panel), "--case", "1590BB", "--case-model", str(_model_path())])
+
+    assert code == 2
+    assert "hole-through-boss" in capsys.readouterr().out

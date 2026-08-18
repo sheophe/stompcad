@@ -14,9 +14,10 @@ from .quantise import quantise
 from .pipeline import (
     SnapPositions, SnapDiametersToDrillTable, Deduplicate, IdentifyHammondFootprint,
     CheckReferenceSize, ReviewGridTies, RouteHoles, DrillStandard, DRILL_STANDARDS,
-    DEFAULT_STANDARD,
+    DEFAULT_STANDARD, CheckCaseClearance,
 )
 from .enclosures import Enclosure, HAMMOND_1590, footprints
+from .cad import CaseModel, Frame, Rejection, load_case_model
 from .errors import (
     AidrillError, EmitterError, EmptyLayerError, LayerNotFoundError, SourceError,
 )
@@ -29,7 +30,8 @@ __all__ = [
     "quantise",
     "SnapPositions", "SnapDiametersToDrillTable", "Deduplicate", "IdentifyHammondFootprint",
     "CheckReferenceSize", "ReviewGridTies", "RouteHoles", "DrillStandard", "DRILL_STANDARDS",
-    "DEFAULT_STANDARD",
+    "DEFAULT_STANDARD", "CheckCaseClearance",
     "Enclosure", "HAMMOND_1590", "footprints",
+    "CaseModel", "Frame", "Rejection", "load_case_model",
     "AidrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]

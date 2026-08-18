@@ -7,8 +7,11 @@ this repository.
 
 `aidrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
 artefacts. `DrillData` is the library integration contract and the JSON emitter is its
-serialised form. Enclosure modelling, KiCad data, clearance checking, and component
-semantics are outside the package's scope.
+serialised form. KiCad data and component semantics are outside the package's scope.
+Enclosure geometry enters only as a supplied model: `aidrill` never synthesises an
+enclosure, and reads one only to verify clearance and to cut the holes it has already
+decided on. Acquiring that model is not the package's job — see
+`tools/fetch_case_model.py`.
 
 The output is used to drill aluminium, so every artefact from one invocation must agree.
 
@@ -20,6 +23,15 @@ Python 3.10 or later is required. Create the development environment with:
 uv venv
 uv pip install -e ".[dev]"
 source .venv/bin/activate
+```
+
+The STEP features (`--case-model`, `--emit step=…`) are behind an optional
+`aidrill[step]` extra, not part of `.[dev]`: it pins the `cadquery-ocp` geometry
+kernel, which pulls in vtk and matplotlib transitively and is far larger than the
+base install. Add it only when you need those features:
+
+```bash
+uv pip install -e ".[dev,step]"
 ```
 
 Run the project checks and tools from the repository root:
@@ -38,12 +50,21 @@ PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
 ruff check src tests tools
 mypy src/aidrill tests
 
+# Kernel tests against real Hammond models (downloads and caches them)
+PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --hammond --tb=short
+
 # Mutation survey
 PYTHONDONTWRITEBYTECODE=1 mutmut run
 mutmut results
 
 # Run the tool
 PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
+
+# Cut a supplied Hammond enclosure and check clearance (needs aidrill[step])
+python tools/fetch_case_model.py 1590BB   # downloads and prints the cached .stp path
+PYTHONPATH=src python -m aidrill.cli PANEL.ai --case 1590BB \
+  --case-model ~/.cache/aidrill/cases/1590BB.stp \
+  --emit step=out.stp
 ```
 
 ## Command-line contract
@@ -53,9 +74,11 @@ Flags: `--drill-layer`, `--reference-layer`, `--grid` and `--grid-warn` (both in
 is clamped to one with `grid-too-fine`), `--drill-standard`
 (`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to
 the sizes in the drawer), `--case` (the Hammond base designator the panel is drawn for),
-`--emit FORMAT=PATH` (repeatable), `--title`, `-v`. All are resolved before the input
-file is opened, so a bad standard, an unstocked size, or a part number in no catalogue
-is a usage error rather than a diagnostic.
+`--case-model`, `--case-face` and `--case-margin` (a supplied enclosure model, which
+face it is drilled against, and the clearance margin), `--emit FORMAT=PATH`
+(repeatable), `--title`, `-v`. All are resolved before the input file is opened, so a
+bad standard, an unstocked size, or a part number in no catalogue is a usage error
+rather than a diagnostic.
 
 `drawing-pdf` writes an ISO 5457 sheet at 1:1, choosing the smallest of A4 portrait,
 A3, A2, A1 and A0 landscape that holds the panel. ISO 5457 §4.1 fixes the orientation
@@ -63,8 +86,9 @@ of each size, so there is no orientation to choose.
 
 Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage or IO
 failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
-`unverifiable-enclosure`, `unmatched-enclosure` and `wrong-enclosure`. `grid-too-fine`
-and `grid-ambiguous` are warnings and reach exit 1.
+`unverifiable-enclosure`, `unmatched-enclosure`, `wrong-enclosure`, `hole-off-face`,
+`hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine` and
+`grid-ambiguous` are warnings and reach exit 1.
 
 `tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2` (112.40 × 60.50)
 and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it is
@@ -86,6 +110,8 @@ The accepted architecture is defined by:
 - [ADR-0005](docs/adr/0005-binary-emitter-payloads.md): the binary emitter payload.
 - [ADR-0006](docs/adr/0006-toolpath-ordering-and-hole-numbering.md): toolpath ordering and
   hole numbering.
+- [ADR-0007](docs/adr/0007-case-model-and-clearance.md): supplied case models,
+  clearance, and the optional kernel.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
@@ -216,5 +242,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   construction wraps explicitly.
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.
+- Clearance-rule tests use a fake `CaseModel`; kernel-backed tests skip when
+  `aidrill[step]` is absent.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
   claimed rule is not evidence.
+- Kernel tests run against real Hammond models fetched at run time, never committed.
+  They are opt-in behind `--hammond`; a standard run skips them. Coverage targets for
+  `cad/` and `emitters/step.py` are measured under that command, not the default one.

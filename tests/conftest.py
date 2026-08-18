@@ -8,10 +8,12 @@ import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
 
+from aidrill.cad import Frame, Rejection
 from aidrill.emitters import base
 from aidrill.geometry import KAPPA
 from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
 from aidrill.units import Nanometre
+from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
 __all__ = [
     "at",
@@ -23,7 +25,10 @@ __all__ = [
     "positions",
     "circle_ops",
     "build_pdf",
+    "FakeCase",
 ]
+
+_MM = 1_000_000
 
 
 @pytest.fixture
@@ -171,3 +176,75 @@ def build_pdf(
     pdf.pages.append(page)
     pdf.save(path)
     return path
+
+
+class FakeCase:
+    """A rectangular play area with optional boss discs and a lid overlay.
+
+    Distances are nanometres. ``bosses`` reject as THROUGH_BOSS, ``behind`` as
+    OBSTRUCTED, so a test can aim at exactly one code.
+    """
+
+    part = "1590BB"
+    face = "box"
+    footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
+    plate_nm = Nanometre(2_250_000)
+    frame = Frame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30 * _MM)),
+        u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+    )
+
+    def __init__(
+        self, half_x=50 * _MM, half_y=40 * _MM, bosses=(), behind=(), margin_nm=1_000_000
+    ):
+        self.play_area_nm = (
+            Nanometre(-half_x), Nanometre(-half_y), Nanometre(half_x), Nanometre(half_y)
+        )
+        self.bosses = bosses
+        self.behind = behind
+        self.margin_nm = Nanometre(margin_nm)
+
+    def classify(self, x_nm, y_nm, radius_nm):
+        x0, y0, x1, y1 = self.play_area_nm
+        for cx, cy, r in self.bosses:
+            if (x_nm - cx) ** 2 + (y_nm - cy) ** 2 < (r + radius_nm) ** 2:
+                return Rejection.THROUGH_BOSS
+        for cx, cy, r in self.behind:
+            if (x_nm - cx) ** 2 + (y_nm - cy) ** 2 < (r + radius_nm) ** 2:
+                return Rejection.OBSTRUCTED
+        if not (x0 <= x_nm - radius_nm and x_nm + radius_nm <= x1):
+            return Rejection.OFF_FACE
+        if not (y0 <= y_nm - radius_nm and y_nm + radius_nm <= y1):
+            return Rejection.OFF_FACE
+        return None
+
+
+def pytest_addoption(parser) -> None:
+    """Add --hammond, which enables tests needing a downloaded Hammond model."""
+    parser.addoption(
+        "--hammond",
+        action="store_true",
+        default=False,
+        help="run tests that need a real Hammond STEP model (downloads and caches it)",
+    )
+
+
+def pytest_configure(config) -> None:
+    config.addinivalue_line(
+        "markers", "hammond: needs a real Hammond model; run with --hammond"
+    )
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    """Skip hammond-marked tests unless --hammond was given.
+
+    Deliberately not an ``addopts`` deselection: CLAUDE.md's documented full-suite
+    command passes ``-o addopts=``, which would blank it and silently re-enable
+    every one of these.
+    """
+    if config.getoption("--hammond"):
+        return
+    skip = pytest.mark.skip(reason="needs a real Hammond model; run: pytest --hammond")
+    for item in items:
+        if "hammond" in item.keywords:
+            item.add_marker(skip)
