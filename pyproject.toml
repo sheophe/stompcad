@@ -22,6 +22,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["hammond: needs a real Hammond STEP model; run with --hammond"]
 
 # A gate that has never been green is not a gate, it is where a real finding
 # hides. Both tools below are configured to be clean, so a new error means a

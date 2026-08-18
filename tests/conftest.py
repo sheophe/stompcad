@@ -13,6 +13,7 @@ from aidrill.emitters import base
 from aidrill.geometry import KAPPA
 from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
 from aidrill.units import Nanometre
+from tests.hammond import hammond_b, hammond_bb  # noqa: F401  (pytest fixtures)
 
 __all__ = [
     "at",
@@ -216,3 +217,34 @@ class FakeCase:
         if not (y0 <= y_nm - radius_nm and y_nm + radius_nm <= y1):
             return Rejection.OFF_FACE
         return None
+
+
+def pytest_addoption(parser) -> None:
+    """Add --hammond, which enables tests needing a downloaded Hammond model."""
+    parser.addoption(
+        "--hammond",
+        action="store_true",
+        default=False,
+        help="run tests that need a real Hammond STEP model (downloads and caches it)",
+    )
+
+
+def pytest_configure(config) -> None:
+    config.addinivalue_line(
+        "markers", "hammond: needs a real Hammond model; run with --hammond"
+    )
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    """Skip hammond-marked tests unless --hammond was given.
+
+    Deliberately not an ``addopts`` deselection: CLAUDE.md's documented full-suite
+    command passes ``-o addopts=``, which would blank it and silently re-enable
+    every one of these.
+    """
+    if config.getoption("--hammond"):
+        return
+    skip = pytest.mark.skip(reason="needs a real Hammond model; run: pytest --hammond")
+    for item in items:
+        if "hammond" in item.keywords:
+            item.add_marker(skip)

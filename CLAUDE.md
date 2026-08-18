@@ -41,6 +41,9 @@ PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
 ruff check src tests tools
 mypy src/aidrill tests
 
+# Kernel tests against real Hammond models (downloads and caches them)
+PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --hammond --tb=short
+
 # Mutation survey
 PYTHONDONTWRITEBYTECODE=1 mutmut run
 mutmut results
@@ -228,3 +231,6 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `aidrill[step]` is absent.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
   claimed rule is not evidence.
+- Kernel tests run against real Hammond models fetched at run time, never committed.
+  They are opt-in behind `--hammond`; a standard run skips them. Coverage targets for
+  `cad/` and `emitters/step.py` are measured under that command, not the default one.
