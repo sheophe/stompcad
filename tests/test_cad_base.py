@@ -45,6 +45,16 @@ def test_an_object_missing_classify_does_not_satisfy_the_protocol():
     class Incomplete:
         part = "x"
         face = "box"
+        footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
+        plate_nm = Nanometre(2_250_000)
+        play_area_nm = (
+            Nanometre(-50_000_000), Nanometre(-40_000_000),
+            Nanometre(50_000_000), Nanometre(40_000_000),
+        )
+        frame = Frame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+            u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+        )
 
     assert not isinstance(Incomplete(), CaseModel)
 

@@ -4,6 +4,7 @@ Quantisers form the mandatory boundary in ADR-0003; stages are independent
 ``DrillData -> DrillData`` transforms composed by ``Pipeline``.
 """
 
+from .clearance import CheckCaseClearance
 from .dedupe import Deduplicate
 from .diameters import (
     DEFAULT_STANDARD,
@@ -29,6 +30,7 @@ __all__ = [
     "Deduplicate",
     "ReviewGridTies",
     "CheckReferenceSize",
+    "CheckCaseClearance",
     "RouteHoles",
     "IdentifyHammondFootprint",
     "normalize_part_name",
