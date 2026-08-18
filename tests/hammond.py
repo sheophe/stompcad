@@ -7,13 +7,14 @@ tests assert against, cross-checked against aidrill's own catalogue.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+
+from tools.fetch_case_model import cache_dir
 
 __all__ = [
     "HammondModel", "MODELS", "BB_PROBES", "BB_RELIEF_MM",
@@ -72,13 +73,6 @@ BB_PROBES: Mapping[str, tuple[float, float]] = MappingProxyType(
 #: threshold is the margin, so a margin either side of this value must flip the
 #: classification. Sweeping the parameter replaces a fixture built to order.
 BB_RELIEF_MM = 0.5
-
-
-def cache_dir() -> Path:
-    """Where fetch_case_model.py caches models; the two must not disagree."""
-    root = os.environ.get("XDG_CACHE_HOME")
-    base = Path(root) if root else Path.home() / ".cache"
-    return base / "aidrill" / "cases"
 
 
 def model_path(part: str) -> Path | None:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.fetch_case_model import PART_PATTERN, check_part, extract, url_for
+from tools.fetch_case_model import PART_PATTERN, cache_dir, check_part, extract, url_for
 
 
 def _archive(path: Path, names: dict[str, bytes]) -> Path:
@@ -36,6 +36,51 @@ def test_the_safety_pattern_rejects_path_traversal_independently_of_the_catalogu
 
 def test_the_url_names_the_part_archive():
     assert url_for("1590BB") == "https://www.hammfg.com/files/parts/stp/1590BB.zip"
+
+
+def test_the_download_request_identifies_itself(monkeypatch):
+    """hammfg.com answers urllib's default User-Agent with 403.
+
+    Patched at urlopen rather than at download: patching download is what let
+    this ship broken, because it mocks away the only line that talks to a server.
+    """
+    seen = {}
+
+    class _Response:
+        def read(self):
+            return b"payload"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _urlopen(request, *args, **kwargs):
+        seen["agent"] = request.get_header("User-agent")
+        seen["url"] = request.full_url
+        return _Response()
+
+    from tools import fetch_case_model
+
+    monkeypatch.setattr(fetch_case_model, "urlopen", _urlopen)
+
+    assert fetch_case_model.download("https://example.invalid/x.zip") == b"payload"
+    assert seen["agent"], "the request must carry a User-Agent"
+    assert "aidrill" in seen["agent"]
+    assert seen["url"] == "https://example.invalid/x.zip"
+
+
+def test_cache_dir_is_home_cache_aidrill_cases_by_default(monkeypatch):
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+
+    assert cache_dir() == Path.home() / ".cache" / "aidrill" / "cases"
+
+
+def test_cache_dir_honours_xdg_cache_home(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+
+    assert cache_dir() == tmp_path / "aidrill" / "cases"
 
 
 def test_extract_writes_the_stp_into_the_cache_and_returns_its_path(tmp_path: Path):

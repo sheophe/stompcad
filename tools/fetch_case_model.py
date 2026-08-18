@@ -8,6 +8,7 @@ be ported verbatim. The safety check is a self-contained pattern with no
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -15,16 +16,33 @@ import tempfile
 import zipfile
 from collections.abc import Sequence
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
-__all__ = ["PART_PATTERN", "check_part", "url_for", "download", "extract", "main"]
+__all__ = [
+    "PART_PATTERN", "cache_dir", "check_part", "url_for", "download", "extract", "main",
+]
 
 #: The only shape a designator may take. This, not the catalogue, is what makes
 #: URL and archive-path construction safe when the file is lifted out of here.
 PART_PATTERN = re.compile(r"[0-9]{4}[A-Z0-9]{0,4}")
 
 _BASE = "https://www.hammfg.com/files/parts/stp"
-_DEFAULT_CACHE = Path.home() / ".cache" / "aidrill" / "cases"
+
+#: hammfg.com refuses urllib's default User-Agent with a 403, so the request
+#: names the tool. Not evasion: it is a truthful identifier, and a courtesy to
+#: whoever reads the server log.
+_USER_AGENT = "aidrill/0.1 (+https://www.hammfg.com/ case-model fetcher)"
+
+
+def cache_dir() -> Path:
+    """Where models are cached: ``$XDG_CACHE_HOME/aidrill/cases``, or ``~/.cache`` under it.
+
+    The sole owner of this location; ``tests.hammond.cache_dir`` re-exports it so
+    the two can never disagree about where a downloaded model lands.
+    """
+    root = os.environ.get("XDG_CACHE_HOME")
+    base = Path(root) if root else Path.home() / ".cache"
+    return base / "aidrill" / "cases"
 
 
 def check_part(text: str) -> str:
@@ -47,7 +65,8 @@ def url_for(part: str) -> str:
 
 def download(url: str) -> bytes:
     """Fetch an archive. Separated so tests can replace it."""
-    with urlopen(url) as response:  # noqa: S310 - fixed https host, pattern-checked path
+    request = Request(url, headers={"User-Agent": _USER_AGENT})
+    with urlopen(request) as response:  # noqa: S310 - fixed https host, pattern-checked path
         return bytes(response.read())
 
 
@@ -76,9 +95,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Download and cache a Hammond STEP model; print its path.",
     )
     parser.add_argument("part", metavar="PART", help="base designator, e.g. 1590BB")
+    default_cache = cache_dir()
     parser.add_argument(
-        "--cache-dir", metavar="DIR", type=Path, default=_DEFAULT_CACHE,
-        help=f"where models are cached (default: {_DEFAULT_CACHE})",
+        "--cache-dir", metavar="DIR", type=Path, default=default_cache,
+        help=f"where models are cached (default: {default_cache})",
     )
     args = parser.parse_args(argv)
 
