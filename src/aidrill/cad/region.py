@@ -163,7 +163,7 @@ def _floor_face(face: Any) -> Any:
 
     ``find_faces`` bundles the floor with candidate companion faces into a
     compound, so callers here must first pick the floor back out by area,
-    exactly as ``case._outermost`` picks the drilled face.
+    exactly as ``case._inner_level``/``_drilled_level`` pick by area too.
     """
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps

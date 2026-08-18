@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..errors import AidrillError
-from ..units import Nanometre, nm_from_mm
+from ..units import Nanometre, mm_from_nm, nm_from_mm
 from .base import Frame
 from .step import StepDocument, StepSolid, bounding_box_mm
 
@@ -38,7 +38,13 @@ _HOLED_FRACTION_LIMIT = 0.5
 
 @dataclass(frozen=True)
 class Faces:
-    """The two planar faces bounding a drilled plate, and its thickness."""
+    """The drilled and inner sides of a plate, and its thickness.
+
+    ``drilled`` and ``inner`` are each a ``TopoDS_Compound``: a level's own
+    coplanar patches for ``drilled``, and the inner level's patches plus its
+    nearest companion level's for ``inner`` -- never a single bare
+    ``TopoDS_Face``, since a level is a set of faces by construction.
+    """
 
     drilled: Any
     inner: Any
@@ -89,7 +95,7 @@ def select_solid(document: StepDocument, face: str) -> StepSolid:
 
 
 def find_faces(solid: StepSolid, axis: int) -> Faces:
-    """Find the outermost planar face along ``axis`` and the flat face behind it."""
+    """Find the drilled plate level along ``axis`` and the level behind it."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.BRepGProp import BRepGProp
     from OCP.GeomAbs import GeomAbs_SurfaceType
@@ -99,7 +105,6 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     from OCP.TopoDS import TopoDS
 
     solid_bbox = bounding_box_mm(solid.shape)
-    centre = sum(solid_bbox[i] for i in (axis, axis + 3)) / 2.0
     footprint_mm = (
         solid_bbox[3] - solid_bbox[0],
         solid_bbox[4] - solid_bbox[1],
@@ -130,7 +135,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
             f"{solid.name} has fewer than two planar faces normal to the drill axis"
         )
 
-    drilled = _drilled_level(levels, centre, solid.name)
+    drilled = _drilled_level(levels, solid_bbox, axis, solid.name)
     inner = _inner_level(levels, drilled)
     companion = _nearest_companion_level(levels, inner)
     thickness = abs(inner.position - drilled.position)
@@ -170,19 +175,22 @@ def _levels(planes: list[tuple[float, float, float, Any]]) -> list[_Level]:
     Kernel-float noise can make two patches of the same physical plane report
     axis positions that differ in the 13th decimal place; rounding to whole
     nanometres before grouping removes that noise at its source, rather than
-    working around it later with a distance-based tie-break.
+    working around it later with a distance-based tie-break. A level's own
+    ``position`` is read back from that same rounded key, not from whichever
+    member the explorer happened to visit first, so it cannot vary with
+    traversal order.
     """
     groups: dict[tuple[int, float], list[tuple[float, float, Any]]] = {}
     for area, position, outward, face in planes:
         groups.setdefault((nm_from_mm(position), outward), []).append((area, position, face))
     return [
         _Level(
-            position=members[0][1],
+            position=mm_from_nm(Nanometre(position_nm)),
             area=sum(item[0] for item in members),
             outward=outward,
             faces=tuple(item[2] for item in members),
         )
-        for (_position_nm, outward), members in groups.items()
+        for (position_nm, outward), members in groups.items()
     ]
 
 
@@ -218,20 +226,35 @@ def _plates(levels: list[_Level]) -> list[_Level]:
     return kept
 
 
-def _drilled_level(levels: list[_Level], centre: float, name: str) -> _Level:
-    """The outward-facing level with the greatest total area.
+def _drilled_level(
+    levels: list[_Level], solid_bbox: tuple[float, float, float, float, float, float],
+    axis: int, name: str,
+) -> _Level:
+    """The one plate level sitting at the solid's own extreme along ``axis``.
 
-    Orientation filters rather than breaks ties: a level must sit on the far
-    side of the solid's own centre in the direction it faces
-    (``(position - centre) * outward > 0``), so a lid's thin skirt-tip level
-    can never masquerade as the drilled face by facing the wrong way. Area
-    then picks among survivors, since the cap or floor plate is always the
-    largest flat surface a casting offers.
+    A level survives only if nothing of the solid lies beyond it along its
+    own outward normal -- position matches the bbox minimum facing ``-``,
+    the maximum facing ``+``. Assumes nothing (a foot, a boss, an ear)
+    protrudes past the drilled plate along the drill axis: true for these
+    four models, not a law of castings. Runs after ``_plates``, since a
+    rim sits at this extreme too and must already be gone. One survivor is
+    expected; a second is an error, not a pick.
     """
-    candidates = [level for level in levels if (level.position - centre) * level.outward > 0]
+    low, high = solid_bbox[axis], solid_bbox[axis + 3]
+    candidates = [
+        level for level in levels
+        if (level.outward < 0 and nm_from_mm(level.position) == nm_from_mm(low))
+        or (level.outward > 0 and nm_from_mm(level.position) == nm_from_mm(high))
+    ]
     if not candidates:
         raise AidrillError(f"{name} has no planar face along this axis that faces outward")
-    return max(candidates, key=lambda level: level.area)
+    if len(candidates) > 1:
+        raise AidrillError(
+            f"{name} has {len(candidates)} planar levels at its own bounding-box extreme "
+            f"along this axis, at positions "
+            f"{', '.join(f'{level.position:.4f}' for level in candidates)}"
+        )
+    return candidates[0]
 
 
 def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
@@ -240,10 +263,15 @@ def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
     A small raised pad or a lettering fragment forms its own level nearer
     the drilled face than the true floor; picking by total area rather than
     nearest position is what keeps a pad such as the 1590Y's 25 x 10 mm one
-    from outranking its 84 x 84 mm floor.
+    from outranking its 84 x 84 mm floor. A level coincident with ``drilled``
+    itself is excluded on top of the opposite-facing filter, so a degenerate
+    zero-thickness plate can never silently win and zero the plate thickness.
     """
     inward = -drilled.outward
-    candidates = [level for level in levels if level.outward == inward]
+    candidates = [
+        level for level in levels
+        if level.outward == inward and nm_from_mm(level.position) != nm_from_mm(drilled.position)
+    ]
     if not candidates:
         raise AidrillError("no flat face backs the drilled face")
     return max(candidates, key=lambda level: level.area)

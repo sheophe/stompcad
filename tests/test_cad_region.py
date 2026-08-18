@@ -107,6 +107,17 @@ def test_a_hole_in_a_notched_corner_is_outside_the_region(box):
     assert not contains(region, frame, axis, nm(x), nm(y), Nanometre(2 * MM), Nanometre(1 * MM))
 
 
+def test_a_hole_off_the_floor_is_outside_the_region(box):
+    """The fourth ``BB_PROBES`` entry, exercised where the other three are."""
+    from tests.hammond import BB_PROBES
+
+    axis, faces, frame = box
+    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+    x, y = BB_PROBES["off_face"]
+
+    assert not contains(region, frame, axis, nm(x), nm(y), Nanometre(1 * MM), Nanometre(1 * MM))
+
+
 def test_the_margin_and_not_only_the_radius_decides_the_edge(box):
     """A bit that fits geometrically must still be refused inside the margin.
 
@@ -162,3 +173,49 @@ def test_region_bbox_nm_transforms_through_the_frame_not_kernel_axes():
     )
 
     assert region_bbox_nm(face, frame, axis) == (nm(40.0), nm(40.0), nm(60.0), nm(60.0))
+
+
+def test_classify_bounds_ignores_a_companion_too_far_from_the_hole():
+    """A companion whose footprint sits nowhere near a hole must not pair with it.
+
+    Synthetic, no downloaded model: a floor with one hole, and a companion
+    face positioned far from that hole's own footprint. ``_COMPANION_MATCH_MM``
+    exists to keep this from pairing -- setting it to ``inf`` would let any
+    companion pair with any hole regardless of distance, and no cached
+    model's gaps (all measured under ~1e-7 mm) can exercise that guard.
+    """
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+    from OCP.TopoDS import TopoDS, TopoDS_Compound
+
+    axis = 1
+
+    def rectangle(y, corners):
+        polygon = BRepBuilderAPI_MakePolygon()
+        for x, z in corners:
+            polygon.Add(gp_Pnt(x, y, z))
+        polygon.Close()
+        return polygon.Wire()
+
+    outer = rectangle(0.0, [(-50.0, -50.0), (50.0, -50.0), (50.0, 50.0), (-50.0, 50.0)])
+    hole = rectangle(0.0, [(-20.0, -20.0), (-10.0, -20.0), (-10.0, -10.0), (-20.0, -10.0)])
+    builder = BRepBuilderAPI_MakeFace(outer)
+    builder.Add(TopoDS.Wire_s(hole.Reversed()))
+    floor = builder.Face()
+
+    # Proud (y = 0.4), but 60 mm from the hole's own footprint -- far beyond
+    # any plausible companion match.
+    companion_wire = rectangle(0.4, [(30.0, 30.0), (40.0, 30.0), (40.0, 40.0), (30.0, 40.0)])
+    companion = BRepBuilderAPI_MakeFace(companion_wire).Face()
+
+    compound = TopoDS_Compound()
+    compound_builder = BRep_Builder()
+    compound_builder.MakeCompound(compound)
+    compound_builder.Add(compound, floor)
+    compound_builder.Add(compound, companion)
+
+    structure, relief = classify_bounds(compound, axis, Nanometre(100 * MM))
+
+    assert len(structure) == 1
+    assert relief == []

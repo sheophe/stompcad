@@ -148,19 +148,22 @@ def _frame_for(request, part: str) -> tuple[int, Faces, Faces]:
 def test_u_runs_along_the_wider_free_axis(request, part):
     """``u`` lands on whichever free kernel axis carries the larger footprint span.
 
-    The 1590Y's 92 x 92 mm footprint ties, so neither free axis is "wider"
-    and there is nothing to assert here for it — the remaining-axis and
-    anti-parallel properties below hold for it regardless.
+    The 1590Y's 92 x 92 mm footprint ties at nanometre precision, so its
+    expectation is the documented tie-break (the lower-indexed free axis)
+    instead of a skip: a silent 90-degree rotation is geometrically
+    invisible to the outline on this one model, so this is the test that
+    must catch it, not one that steps aside for it.
     """
-    if MODELS[part].footprint_mm[0] == MODELS[part].footprint_mm[1]:
-        pytest.skip("square footprint: u's axis is an arbitrary, documented tie-break")
     axis, box, _lid = _frame_for(request, part)
     frame = build_frame(box, axis)
 
     free = [index for index in range(3) if index != axis]
-    wider = max(free, key=lambda index: box.footprint_mm[index])
+    if MODELS[part].footprint_mm[0] == MODELS[part].footprint_mm[1]:
+        expected = min(free)
+    else:
+        expected = max(free, key=lambda index: box.footprint_mm[index])
 
-    assert abs(frame.u[wider]) == pytest.approx(1.0, abs=1e-6)
+    assert abs(frame.u[expected]) == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("part", sorted(MODELS))
