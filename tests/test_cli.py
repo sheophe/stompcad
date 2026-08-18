@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import re
@@ -210,11 +211,47 @@ def test_unregistering_the_dummy_leaves_the_registry_as_it_was(clean_registry):
     assert "dummy-test-format" not in available()
 
 
+def _docstring_constants(tree: ast.AST) -> set[int]:
+    """``id()`` of every string-literal ``Constant`` node that is a docstring.
+
+    A docstring is a plain identifying comment, indistinguishable in prose
+    from an identifier such as ``StepOptions`` -- neither leaks into what the
+    CLI prints or compares against, so a format name inside one is not the
+    rule this test enforces.
+    """
+    ids = set()
+    holders = [tree, *(
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    )]
+    for holder in holders:
+        body = getattr(holder, "body", None)
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            ids.add(id(body[0].value))
+    return ids
+
+
 def test_cli_source_never_names_a_registered_format(clean_registry):
-    """``cli.py`` may name options classes, never format names (OCP)."""
-    source = Path(cli.__file__).read_text()
+    """A format name may reach ``cli.py`` only through the registry.
+
+    A whole-file substring search is a landmine now a format is named
+    ``step``: this module is about pipeline *steps*, so an identifier like
+    ``StepOptions`` would trip it by accident. Checking only string-literal
+    ``Constant`` nodes, docstrings excluded, targets the real rule: no
+    literal may dispatch on, or name, a format in help or an error message.
+    """
+    tree = ast.parse(Path(cli.__file__).read_text())
+    excluded = _docstring_constants(tree)
+    literals = [
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and id(node) not in excluded
+    ]
     for name in available():
-        assert name not in source, f"cli.py hardcodes the format name {name!r}"
+        assert not any(name in literal for literal in literals), (
+            f"cli.py hardcodes the format name {name!r} in a string literal"
+        )
 
 
 def test_help_lists_the_registry(clean_registry, capsys):
@@ -1583,12 +1620,10 @@ def test_no_case_model_leaves_the_pipeline_unchanged():
 
 def test_a_case_model_appends_the_clearance_stage_last():
     from aidrill.cli import build_parser, build_pipeline
-    from aidrill.units import Nanometre
     from tests.test_clearance import FakeCase
 
     args = build_parser().parse_args(["panel.ai"])
     args.case_model_object = FakeCase()
-    args.case_margin_nm = Nanometre(1_000_000)
 
     assert [stage.name for stage in build_pipeline(args)][-1] == "check-case-clearance"
 

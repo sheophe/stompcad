@@ -21,9 +21,16 @@ __all__ = [
 ]
 
 #: How far a measured span may differ from the catalogue and still match, in
-#: millimetres. Hammond publishes to 0.1 mm; a tenth either way is generous
-#: without letting a 1590B pass as a 1590BS.
-_MATCH_TOLERANCE_MM = 0.6
+#: millimetres. This is inert on the production path: ``loader._footprint_and_axis``
+#: measures the footprint from the model's own spans and asks for the axis that
+#: matches it, so the comparison always succeeds regardless of the tolerance's
+#: value. It still bounds a caller who passes a genuine catalogue footprint --
+#: the library contract ``drill_axis`` exposes and ``tests/test_cad_case.py``
+#: exercises directly -- so it is kept honest rather than left arbitrary: 1590B
+#: (112.40 mm) and 1590BS (112.00 mm) are 0.40 mm apart, so 0.6 mm would let one
+#: match the other's catalogue footprint. 0.05 mm is generous against Hammond's
+#: 0.1 mm publication rounding while staying well inside that 0.40 mm gap.
+_MATCH_TOLERANCE_MM = 0.05
 
 _FACE_KEYWORDS = {"box": "BOX", "lid": "LID"}
 
@@ -38,15 +45,13 @@ _HOLED_FRACTION_LIMIT = 0.5
 
 @dataclass(frozen=True)
 class Faces:
-    """The drilled and inner sides of a plate, and its thickness.
+    """The inner side of a plate, and its thickness.
 
-    ``drilled`` and ``inner`` are each a ``TopoDS_Compound``: a level's own
-    coplanar patches for ``drilled``, and the inner level's patches plus its
-    nearest companion level's for ``inner`` -- never a single bare
+    ``inner`` is a ``TopoDS_Compound``: the inner level's own coplanar
+    patches plus its nearest companion level's -- never a single bare
     ``TopoDS_Face``, since a level is a set of faces by construction.
     """
 
-    drilled: Any
     inner: Any
     plate_nm: Nanometre
     outward: tuple[float, float, float]
@@ -58,7 +63,16 @@ class Faces:
 
 
 def drill_axis(document: StepDocument, footprint_nm: tuple[Nanometre, Nanometre]) -> int:
-    """Return the index of the axis normal to the catalogue footprint plane."""
+    """Return the index of the axis normal to the catalogue footprint plane.
+
+    ``loader._footprint_and_axis``, the sole production caller, measures
+    ``footprint_nm`` from ``document`` itself before asking for the matching
+    axis, so the comparison here always succeeds and the raise below is
+    unreachable on that path. It is reachable, and exercised, by a caller
+    that supplies a genuine catalogue footprint instead -- the library
+    contract this function offers, which ``tests/test_cad_case.py`` tests
+    directly.
+    """
     spans = assembly_spans(document)
     wanted = sorted(float(nm) / 1_000_000 for nm in footprint_nm)
     for axis in range(3):
@@ -142,7 +156,6 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     normal = [0.0, 0.0, 0.0]
     normal[axis] = drilled.outward
     return Faces(
-        drilled=_compound(drilled.faces),
         inner=_compound(inner.faces + (companion.faces if companion else ())),
         plate_nm=nm_from_mm(thickness),
         outward=(normal[0], normal[1], normal[2]),

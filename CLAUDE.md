@@ -25,6 +25,15 @@ uv pip install -e ".[dev]"
 source .venv/bin/activate
 ```
 
+The STEP features (`--case-model`, `--emit step=…`) are behind an optional
+`aidrill[step]` extra, not part of `.[dev]`: it pins the `cadquery-ocp` geometry
+kernel, which pulls in vtk and matplotlib transitively and is far larger than the
+base install. Add it only when you need those features:
+
+```bash
+uv pip install -e ".[dev,step]"
+```
+
 Run the project checks and tools from the repository root:
 
 ```bash
@@ -50,6 +59,12 @@ mutmut results
 
 # Run the tool
 PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
+
+# Cut a supplied Hammond enclosure and check clearance (needs aidrill[step])
+python tools/fetch_case_model.py 1590BB   # downloads and prints the cached .stp path
+PYTHONPATH=src python -m aidrill.cli PANEL.ai --case 1590BB \
+  --case-model ~/.cache/aidrill/cases/1590BB.stp \
+  --emit step=out.stp
 ```
 
 ## Command-line contract

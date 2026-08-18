@@ -73,8 +73,12 @@ class CheckCaseClearance:
     def _cross_check(self, data: DrillData) -> Diagnostic | None:
         """Compare the model's footprint with the identified enclosure.
 
-        An unidentified panel has nothing to compare against, so the check is
-        skipped with an INFO rather than guessed at.
+        Unidentified: skipped with an INFO, not guessed at. Exact nanometre
+        equality, stricter than ``case.py``'s 0.05 mm or ``enclosure.py``'s
+        1.5 mm, because this gates an exit-2 error withholding every
+        artefact. Safe because it is measured: all four cached Hammond
+        models' in-plane spans round to their catalogue nanometre exactly.
+        Revisit if a future model's bbox carries a nanometre of noise.
         """
         match = data.enclosure
         if match is None:

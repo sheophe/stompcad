@@ -37,11 +37,16 @@ class OcpCaseModel:
     own_frame: Frame
     box_region: Any | None
     box_frame: Frame | None
-    drilled_face: Any
     drilled_position_mm: float
     inner_position_mm: float
     # Beyond the CaseModel protocol: what the emitter needs to cut and write.
     document: Any
+    # ``cut_shape`` deliberately does not read this back (see its own
+    # docstring): it locates the drilled solid by walking the document's own
+    # label tree, not by comparing against a shape captured at load time.
+    # Kept anyway as an independent handle a test can use to confirm ``emit``
+    # leaves the supplied model's own solid pristine, without relying on the
+    # same label-tree walk the code under test uses to make that change.
     target_shape: Any
     document_timestamp: str
 
@@ -109,7 +114,6 @@ def load_case_model(
         own_frame=own_frame,
         box_region=box_region,
         box_frame=box_frame,
-        drilled_face=faces.drilled,
         drilled_position_mm=faces.drilled_position_mm,
         inner_position_mm=faces.inner_position_mm,
         document=document.document,

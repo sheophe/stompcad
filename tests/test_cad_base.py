@@ -84,3 +84,18 @@ def test_importing_aidrill_does_not_import_the_kernel():
         capture_output=True, text=True, check=True,
     )
     assert result.stdout.strip() == "False"
+
+
+def test_importing_aidrill_cli_does_not_import_the_kernel():
+    """``import aidrill`` is covered above; the CLI module has its own import
+    graph (``.cad``, ``.emitters``, ``.pipeline``) and a module-level OCP
+    import placed directly in ``cli.py`` would not be caught by that test
+    alone."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import aidrill.cli, sys; print('OCP' in sys.modules)"],
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout.strip() == "False"

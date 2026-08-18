@@ -30,7 +30,15 @@ _TIMESTAMP_PATTERN = re.compile(r"time_stamp\s*\*?/?\s*'([^']*)'")
 
 
 def source_timestamp(path: Path) -> str:
-    """The source file's FILE_NAME time stamp, or the epoch when absent."""
+    """The source file's ``/* time_stamp */`` comment marker, or the epoch when absent.
+
+    This matches ST-Developer's comment above ``FILE_NAME``, not the
+    ``FILE_NAME`` field itself, so re-feeding an aidrill-written STEP file
+    back in as ``--case-model`` drops provenance to the epoch even though
+    the file carries a real stamp -- aidrill's own writer does not emit that
+    comment. Determinism is unaffected: every write from one source still
+    copies the same value, whatever it is.
+    """
     head = path.read_bytes()[:4096].decode("latin-1")
     found = _TIMESTAMP_PATTERN.search(head)
     return found.group(1) if found else _EPOCH

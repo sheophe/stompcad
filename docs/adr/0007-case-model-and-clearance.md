@@ -35,7 +35,8 @@ valid solid and round-tripping an XCAF assembly is kernel work under any algorit
 and once that dependency is paid for, a second hand-rolled geometry implementation for
 clearance would be a second authority on one question. `cad/base.py` defines the
 `CaseModel` protocol in pure Python so that `import aidrill` never imports the kernel;
-`cad/ocp.py` is the OCP-backed implementation, imported lazily.
+`cad/step.py`, `cad/case.py`, `cad/region.py` and `cad/loader.py` are the OCP-backed
+implementation, imported lazily.
 
 **Clearance is a stage, not emitter-local.** `CheckCaseClearance` runs in the
 `Pipeline` alongside `Deduplicate`, `ReviewGridTies`, and `RouteHoles`, because its
@@ -137,6 +138,22 @@ A base `pip install aidrill` is unchanged. Running `CheckCaseClearance` or
 `StepEmitter` without `aidrill[step]` raises an error naming the remedy; `make_emitter`
 runs before the panel is opened, so a missing extra is caught early rather than after
 processing.
+
+`aidrill[step]` costs more than its own 62 MB wheel: `cadquery-ocp` pulls in `vtk`
+transitively, and `vtk` in turn pulls in `matplotlib`, neither of which the emitter or
+the clearance stage uses. Paid only by an install that opts in, never by the base
+package.
+
+The colour promise above has one exemption, found while implementing it rather than
+predicted: the *drilled* solid's own colour cannot survive the cut. Re-establishing
+`XCAFDoc_ColorTool`'s assignment after `SetShape` replaces a label's geometry does not
+work through this kernel's bindings, in any of solid, component or per-face
+granularity, before or after `UpdateAssemblies` — `STEPCAFControl_Writer` gives a
+replaced shape a synthesised wrapper `PRODUCT` instead of reusing the original label's
+`PRODUCT_DEFINITION`, and no colour call reaches a product the writer had to invent.
+Every solid the cut does not touch keeps its colour untouched; only the one or two
+drilled faces lose theirs, and that loss is what the semantic-equivalence test records
+rather than hides.
 
 `CheckCaseClearance` and `load_case_model` each gain one line in
 `src/aidrill/__init__.py`, matching how a new stage or source is exported. `StepEmitter`

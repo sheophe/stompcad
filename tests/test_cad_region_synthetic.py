@@ -135,7 +135,7 @@ def test_obstructed_is_reachable_with_a_genuine_raised_boss():
         frame=own_frame, margin_nm=Nanometre(0), axis=AXIS,
         own_region=own_region, own_frame=own_frame,
         box_region=box_region, box_frame=own_frame,
-        drilled_face=own_floor, drilled_position_mm=0.0, inner_position_mm=0.0,
+        drilled_position_mm=0.0, inner_position_mm=0.0,
         document=None, target_shape=None, document_timestamp="",
     )
 
@@ -179,7 +179,7 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
         frame=own_frame, margin_nm=Nanometre(0), axis=AXIS,
         own_region=own_region, own_frame=own_frame,
         box_region=box_region, box_frame=box_frame,
-        drilled_face=own_floor, drilled_position_mm=0.0, inner_position_mm=0.0,
+        drilled_position_mm=0.0, inner_position_mm=0.0,
         document=None, target_shape=None, document_timestamp="",
     )
 

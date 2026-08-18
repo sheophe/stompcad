@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.hammond import MODELS, HammondModel, cache_dir, model_path  # noqa: F401
+from tests.hammond import MODELS, cache_dir, model_path
 
 
 def test_the_catalogue_covers_the_models_the_kernel_tests_use():

@@ -708,7 +708,6 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
     # part number in no catalogue and an unloadable case model are all usage
     # errors, not diagnostics.
-    args.case_margin_nm = parse_length(args.case_margin, "--case-margin")
     args.case_model_object = build_case_model(args)
     settings = settings_from(args)
     # Resolve every format before touching the input file: an unknown format is
