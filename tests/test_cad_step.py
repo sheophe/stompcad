@@ -30,6 +30,32 @@ def test_a_repeated_component_is_expanded_once_per_instance(document):
     assert len(document.named("screw")) == 4
 
 
+def test_each_screw_instance_is_placed_where_the_assembly_puts_it(document):
+    """Four solids at one point would satisfy a count; these must differ.
+
+    XCAF distinguishes a component's referred shape from its located one.
+    Returning the referred shape would stack every instance at the origin
+    and still yield four solids, so the count alone proves nothing.
+    """
+    from aidrill.cad.step import bounding_box_mm
+
+    centres = set()
+    for screw in document.named("screw"):
+        x0, y0, z0, x1, y1, z1 = bounding_box_mm(screw.shape)
+        centres.add((round((x0 + x1) / 2, 2), round((y0 + y1) / 2, 2), round((z0 + z1) / 2, 2)))
+
+    assert len(centres) == 4
+
+    # The real 1590BB places its four screw bosses symmetrically: two X
+    # positions crossed with two Z positions, all at the same depth (Y).
+    xs = sorted({c[0] for c in centres})
+    ys = sorted({c[1] for c in centres})
+    zs = sorted({c[2] for c in centres})
+    assert xs == [-54.75, 54.75]
+    assert ys == [-1.92]
+    assert zs == [-42.0, 42.0]
+
+
 def test_solids_carry_their_product_names(document):
     names = {solid.name.upper() for solid in document.solids}
 
