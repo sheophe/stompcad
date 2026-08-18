@@ -232,13 +232,13 @@ def _drilled_level(
 ) -> _Level:
     """The one plate level sitting at the solid's own extreme along ``axis``.
 
-    A level survives only if nothing of the solid lies beyond it along its
-    own outward normal -- position matches the bbox minimum facing ``-``,
-    the maximum facing ``+``. Assumes nothing (a foot, a boss, an ear)
-    protrudes past the drilled plate along the drill axis: true for these
-    four models, not a law of castings. Runs after ``_plates``, since a
-    rim sits at this extreme too and must already be gone. One survivor is
-    expected; a second is an error, not a pick.
+    Depends on ``solid_bbox``, not just the candidate levels: a level
+    survives only if nothing of the solid lies beyond it along its own
+    outward normal -- position matches the bbox minimum facing ``-``, the
+    maximum facing ``+``. Not a law of solids: a closed cuboid has a flat
+    plate at both ends, and both survive. A Hammond box or lid narrows to
+    one only because ``_plates`` already removed its open end's rim -- a
+    second survivor is real and reachable, so it is reported, not picked.
     """
     low, high = solid_bbox[axis], solid_bbox[axis + 3]
     candidates = [
@@ -248,7 +248,7 @@ def _drilled_level(
     ]
     if not candidates:
         raise AidrillError(f"{name} has no planar face along this axis that faces outward")
-    if len(candidates) > 1:  # pragma: no cover - a valid shell has one plate per extreme
+    if len(candidates) > 1:
         raise AidrillError(
             f"{name} has {len(candidates)} planar levels at its own bounding-box extreme "
             f"along this axis, at positions "
