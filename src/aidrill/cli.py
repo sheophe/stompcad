@@ -22,6 +22,7 @@ from .emitters import (
     ExcellonOptions,
     JsonOptions,
     PdfDrawingOptions,
+    StepOptions,
     available,
     get_emitter,
 )
@@ -152,8 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-model",
         metavar="PATH",
         default=None,
-        help="a STEP model of the enclosure; enables clearance checking and "
-        "is required by --emit step (see tools/fetch_case_model.py)",
+        help="a STEP model of the enclosure; enables clearance checking "
+        "(see tools/fetch_case_model.py)",
     )
     parser.add_argument(
         "--case-face",
@@ -387,6 +388,9 @@ _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
     # yet; a caller using the library supplies them directly.
     PdfDrawingOptions: lambda s: PdfDrawingOptions(title=s.title),
     JsonOptions: lambda s: JsonOptions(),
+    # The model is resolved before the input file is opened; the emitter only
+    # cuts what quantisation and the pipeline already agreed on.
+    StepOptions: lambda s: StepOptions(model=s.case_model, title=s.title),
 }
 
 
@@ -642,18 +646,18 @@ def format_report(data: DrillData, model: CaseModel | None = None) -> str:
 
 def format_stage(stage: Stage, before: DrillData, after: DrillData) -> str:
     """One line of ``--verbose`` per-stage detail."""
-    return _format_step(stage.name, len(before.holes), before.diagnostics, after)
+    return _format_trace(stage.name, len(before.holes), before.diagnostics, after)
 
 
 def format_phase(before: RawDrillData, after: DrillData) -> str:
     """Format quantisation using the same trace line as pipeline stages."""
-    return _format_step("quantise", len(before.holes), before.diagnostics, after)
+    return _format_trace("quantise", len(before.holes), before.diagnostics, after)
 
 
-def _format_step(
+def _format_trace(
     name: str, holes_before: int, diagnostics_before: tuple[Diagnostic, ...], after: DrillData
 ) -> str:
-    """Format hole drops and diagnostic additions for one processing step."""
+    """Format hole drops and diagnostic additions for one pipeline phase."""
     added = len(after.diagnostics) - len(diagnostics_before)
     dropped = holes_before - len(after.holes)
     notes = []
@@ -699,8 +703,6 @@ def _withheld(targets: Iterable[tuple[Emitter, Path]]) -> list[str]:
 
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
-    if any(name == "step" for name, _ in targets) and args.case_model is None:
-        raise UsageError("--emit step=PATH needs --case-model PATH")
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
