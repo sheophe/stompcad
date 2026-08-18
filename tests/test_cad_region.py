@@ -258,3 +258,98 @@ def test_floor_face_rejects_a_compound_with_no_planar_face():
 
     with pytest.raises(AidrillError, match="no planar face"):
         _floor_face(compound)
+
+
+@pytest.fixture(scope="module")
+def bb_box(hammond_bb):
+    from aidrill.cad import load_case_model
+
+    return load_case_model(hammond_bb, face="box", margin_nm=Nanometre(1 * MM))
+
+
+@pytest.fixture(scope="module")
+def bb_lid(hammond_bb):
+    from aidrill.cad import load_case_model
+
+    return load_case_model(hammond_bb, face="lid", margin_nm=Nanometre(1 * MM))
+
+
+def test_the_loaded_model_satisfies_the_protocol(bb_box):
+    from aidrill.cad import CaseModel
+
+    assert isinstance(bb_box, CaseModel)
+
+
+def test_the_loaded_box_reports_its_plate_and_footprint(bb_box):
+    assert bb_box.plate_nm == 2_250_000
+    assert sorted(bb_box.footprint_nm) == [94_000_000, 119_500_000]
+
+
+def test_the_loaded_lid_reports_its_own_thinner_plate(bb_lid):
+    """Box and lid are different plates; a shared constant would hide it."""
+    assert bb_lid.plate_nm == 2_000_000
+
+
+def test_the_loaded_box_classifies_a_corner_as_through_boss(bb_box):
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["boss"]
+
+    assert bb_box.classify(nm(x), nm(y), Nanometre(2 * MM)) is Rejection.THROUGH_BOSS
+
+
+def test_the_loaded_box_classifies_an_overhanging_hole_as_off_face(bb_box):
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["off_face"]
+
+    assert bb_box.classify(nm(x), nm(y), Nanometre(2 * MM)) is Rejection.OFF_FACE
+
+
+def test_the_two_rejections_are_told_apart_by_where_the_hole_is(bb_box):
+    """Both refuse the hole; a rule collapsing them would still pass each alone."""
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    boss = bb_box.classify(*(nm(v) for v in BB_PROBES["boss"]), Nanometre(2 * MM))
+    edge = bb_box.classify(*(nm(v) for v in BB_PROBES["off_face"]), Nanometre(2 * MM))
+
+    assert boss is Rejection.THROUGH_BOSS
+    assert edge is Rejection.OFF_FACE
+    assert boss is not edge
+
+
+def test_the_loaded_box_accepts_a_hole_in_clear_space(bb_box):
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["clear"]
+
+    assert bb_box.classify(nm(x), nm(y), Nanometre(3 * MM)) is None
+
+
+def test_the_loaded_box_accepts_a_hole_over_the_cast_lettering(bb_box):
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["relief"]
+
+    assert bb_box.classify(nm(x), nm(y), Nanometre(1 * MM)) is None
+
+
+def test_the_lid_is_obstructed_where_the_box_has_a_boss(bb_lid):
+    """The lid's own face has no notches; the box's region supplies them."""
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["boss"]
+
+    assert bb_lid.classify(nm(x), nm(y), Nanometre(2 * MM)) is Rejection.OBSTRUCTED
+
+
+def test_the_lid_accepts_a_hole_in_clear_space(bb_lid):
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["clear"]
+
+    assert bb_lid.classify(nm(x), nm(y), Nanometre(3 * MM)) is None
