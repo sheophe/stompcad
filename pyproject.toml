@@ -7,6 +7,7 @@ dependencies = ["pikepdf>=9"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "mutmut"]
+step = ["cadquery-ocp==7.9.3.1.1"]
 
 [project.scripts]
 aidrill = "aidrill.cli:main"
@@ -112,10 +113,21 @@ warn_unreachable = true
 # directories.
 [tool.mutmut]
 source_paths = ["src/aidrill"]
-also_copy = ["docs/", "tools/"]
+also_copy = ["docs/", "tools/", "tests/fixtures/"]
 # enclosures.py is generated, and test_enclosures.py asserts that its *text on
 # disk* is what tools/build_catalogue.py renders. Instrumenting it therefore fails
 # that test for every mutant, which aborts the whole run before any result is
 # collected. Excluding it costs nothing: it is a literal catalogue table, so a
 # mutant of it is either caught by the first assertion or meaningless.
 do_not_mutate = ["src/aidrill/enclosures.py"]
+
+[tool.uv]
+# cadquery-ocp pulls numpy in transitively (via vtk/matplotlib) with no version
+# declared by aidrill itself, so uv resolves whatever numpy release supports the
+# interpreter running the install. Numpy >=2.3 declares Requires-Python >=3.11 and
+# its bundled stub uses PEP 695 `type` statements unconditionally, which mypy
+# rejects against this project's python_version = "3.10" target — a tooling
+# mismatch, not a real incompatibility, since aidrill never imports numpy itself.
+# Capping below that keeps `mypy src/aidrill tests` clean on any interpreter this
+# project supports without touching python_version or the step extra's contents.
+constraint-dependencies = ["numpy<2.3"]
