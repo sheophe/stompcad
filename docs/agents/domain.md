@@ -14,13 +14,13 @@ directory.
   sections define the vocabulary (canonical frame, answer set, quantisation
   boundary, branded length units, reference outline, tool block) that the code
   and its tests already speak.
-- **`CONTEXT.md`** at the repo root, once one exists.
+- **`CONTEXT.md`** at the repo root — the glossary.
 - **`docs/adr/`** — read the ADRs that touch the area you are about to work in.
   There are seven, `0001`–`0007`; `CLAUDE.md`'s *Architecture* section lists
   what each one decides, so read that list first and open only what is
   relevant.
 
-If `CONTEXT.md` does not exist, **proceed silently**. Don't flag its absence;
+If a document listed here does not exist, **proceed silently**. Don't flag its absence;
 don't suggest creating it upfront. The `/domain-modeling` skill (reached via
 `/grill-with-docs` and `/improve-codebase-architecture`) creates it lazily when
 terms actually get resolved.
@@ -29,12 +29,12 @@ terms actually get resolved.
 
 ```
 /
-├── CLAUDE.md                          ← working glossary until CONTEXT.md exists
-├── CONTEXT.md                         ← not yet created
+├── CLAUDE.md                          ← the rules that govern the vocabulary
+├── CONTEXT.md                         ← the glossary itself
 ├── docs/adr/
 │   ├── 0001-pipeline-and-emitter-adapters.md
 │   ├── …
-│   └── 0007-case-model-and-clearance.md
+│   └── 0008-workspace-and-shared-geometry-core.md
 └── src/aidrill/
 ```
 
