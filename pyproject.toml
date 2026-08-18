@@ -104,6 +104,14 @@ warn_unreachable = true
 # it in one step would mean a gate that is red on arrival. docs/BACKLOG.md
 # carries it as scoped follow-up work.
 
+[[tool.mypy.overrides]]
+# cadquery-ocp is a compiled extension with no py.typed marker, so every OCP
+# symbol is Any to mypy. Narrow to OCP alone: the point of the gate is aidrill's
+# own types, and a blanket ignore_missing_imports would hide a genuine missing
+# dependency anywhere else.
+module = ["OCP.*"]
+ignore_missing_imports = true
+
 # `mutmut run` copies the tree into mutants/ and rewrites the sources there, so
 # anything the suite opens by relative path has to be copied alongside them.
 # tests/ and pyproject.toml come across by default; these two do not, and
