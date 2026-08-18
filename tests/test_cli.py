@@ -29,8 +29,14 @@ from aidrill.model import (
 )
 from aidrill.pipeline import DRILL_STANDARDS
 from aidrill.units import Millimetre, Nanometre
+from tests.conftest import build_pdf, circle_ops
+from tests.hammond import BB_PROBES, require_model
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
+
+#: The 1590BB's published top-view footprint (ADR-0007): what real artwork
+#: draws the ``Background`` rectangle to, not the smaller drilled face.
+_BB_FOOTPRINT_MM = (119.5, 94.0)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +105,51 @@ def document(
 def quantised_against(standard: str, size_count: int = 183) -> StageRun:
     """The provenance ``SnapDiametersToDrillTable`` leaves behind."""
     return StageRun("snap-diameters", (("standard", standard), ("size_count", size_count)))
+
+
+def _pt_from_mm(mm: float) -> float:
+    """Millimetres to PDF user-space points, the way a drawing tool would."""
+    return mm * 72 / 25.4
+
+
+def _bb_panel(tmp_path: Path, name: str, x_mm: float, y_mm: float, diameter_mm: float) -> Path:
+    """One drill circle on a ``Background`` drawn to the 1590BB's own footprint.
+
+    Canonical coordinates are millimetres with Y up and the origin at the
+    footprint's centre, which is exactly how ``build_pdf``'s page coordinates
+    are used here: the rectangle's own centre is the origin the hole offset is
+    measured from.
+    """
+    width, height = (_pt_from_mm(size) for size in _BB_FOOTPRINT_MM)
+    centre_x, centre_y = 10 + width / 2, 10 + height / 2
+    return build_pdf(
+        tmp_path / name,
+        {
+            "Background": f"10 10 {width} {height} re f",
+            "Drill": circle_ops(
+                centre_x + _pt_from_mm(x_mm),
+                centre_y + _pt_from_mm(y_mm),
+                _pt_from_mm(diameter_mm / 2),
+            ),
+        },
+    )
+
+
+def _panel_with_a_hole_in_a_boss(tmp_path: Path) -> Path:
+    """A ⌀4 mm hole inside the play area but inside a boss bite (THROUGH_BOSS)."""
+    x, y = BB_PROBES["boss"]
+    return _bb_panel(tmp_path, "boss.ai", x, y, 4.0)
+
+
+def _panel_with_a_central_hole(tmp_path: Path) -> Path:
+    """A ⌀6 mm hole in the clear middle of the floor: nothing rejects it."""
+    x, y = BB_PROBES["clear"]
+    return _bb_panel(tmp_path, "clear.ai", x, y, 6.0)
+
+
+def _model_path() -> Path:
+    """The cached 1590BB model, fetched if needed; skips when unobtainable."""
+    return require_model("1590BB")
 
 
 @pytest.fixture
@@ -1600,3 +1651,58 @@ def test_emitting_step_without_a_model_is_caught_before_the_file_is_even_opened(
 
     assert code == 3
     assert "--case-model" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# end to end: a real Hammond model, through the whole command line
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.hammond
+def test_a_clearance_error_withholds_every_artefact(tmp_path, capsys):
+    """Any error withholds every requested artefact, including the drill file."""
+    pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+    from aidrill.cli import main
+
+    panel = _panel_with_a_hole_in_a_boss(tmp_path)
+    drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
+    code = main([
+        str(panel), "--case", "1590BB", "--case-model", str(_model_path()), "--case-face", "box",
+        "--emit", f"excellon={drl}", "--emit", f"step={stp}",
+    ])
+
+    assert code == 2
+    assert not drl.exists()
+    assert not stp.exists()
+    assert "wrote nothing" in capsys.readouterr().out
+
+
+@pytest.mark.hammond
+def test_a_clean_run_writes_both_artefacts(tmp_path):
+    pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+    from aidrill.cli import main
+
+    panel = _panel_with_a_central_hole(tmp_path)
+    drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
+    code = main([
+        str(panel), "--case", "1590BB", "--case-model", str(_model_path()),
+        "--emit", f"excellon={drl}", "--emit", f"step={stp}",
+    ])
+
+    assert code == 0
+    assert drl.exists() and stp.exists()
+
+
+@pytest.mark.hammond
+def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, capsys):
+    pytest.importorskip("OCP", reason="needs aidrill[step]")
+
+    from aidrill.cli import main
+
+    panel = _panel_with_a_hole_in_a_boss(tmp_path)
+    code = main([str(panel), "--case", "1590BB", "--case-model", str(_model_path())])
+
+    assert code == 2
+    assert "hole-through-boss" in capsys.readouterr().out
