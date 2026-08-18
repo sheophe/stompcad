@@ -64,9 +64,19 @@ MODELS: Mapping[str, HammondModel] = MappingProxyType(
 #:                     any clearance -- the margin cancels on both sides): a
 #:                     hole at ``"boss"`` is always refused by the lid's own
 #:                     boundary, at every margin, and can never demonstrate a
-#:                     cross-part OBSTRUCTED. ``"lid_obstructed"`` below does.
+#:                     cross-part OBSTRUCTED.
 #:   cast lettering    13 inner bounds standing 0.50 mm proud of the box floor,
-#:                     in two columns near x = 41.1 and x = 46.6
+#:                     in two columns near x = 41.1 and x = 46.6. Never
+#:                     structure since fix round 2 -- pedal builders drill
+#:                     straight through lettering, and its background is
+#:                     often flush or recessed on other castings, so height
+#:                     alone was never a sound relief/structure signal (see
+#:                     ``region._STRUCTURE_HEIGHT_MM``). With no non-corner
+#:                     structure on any cached model (box 12-13 inner holes,
+#:                     all lettering; lid 0), and the corner notches always
+#:                     caught by the lid's own face first, OBSTRUCTED does
+#:                     not occur on any cached model -- it is demonstrated
+#:                     synthetically in ``tests/test_cad_region_synthetic.py``.
 BB_PROBES: Mapping[str, tuple[float, float]] = MappingProxyType(
     {
         # Middle of the floor: clear of everything, on both box and lid.
@@ -77,23 +87,17 @@ BB_PROBES: Mapping[str, tuple[float, float]] = MappingProxyType(
         "boss": (51.0, 38.5),
         # Beyond the floor's outline once the margin is taken off.
         "off_face": (55.0, 0.0),
-        # On a cast letter. Must pass at margin 1.0 and fail at margin 0.4 —
-        # the boundary a real model cannot place but a swept parameter can.
+        # On a cast letter -- always relief, at every margin, since fix
+        # round 2 (this used to fail below a 0.4 mm margin; it no longer can).
         "relief": (41.12, 7.12),
-        # A lid canonical point that reframes onto "relief"'s own letter,
-        # mirrored in x -- the lid is viewed from the other side, so the
-        # same canonical x is the box's -x (see loader.classify/region.reframe).
-        # Below the lettering's own 0.50 mm relief height it is OBSTRUCTED
-        # by the box, while "relief" negated (its mirror image) reframes
-        # onto clear box metal and stays open. Demonstrates the one lid
-        # obstruction "boss" cannot: own face clear, box behind it not.
-        "lid_obstructed": (-41.12, 7.12),
     }
 )
 
-#: How proud the cast lettering stands, in millimetres. The relief-versus-structure
-#: threshold is the margin, so a margin either side of this value must flip the
-#: classification. Sweeping the parameter replaces a fixture built to order.
+#: How proud the cast lettering stands, in millimetres. Below
+#: ``region._STRUCTURE_HEIGHT_MM`` (2.0 mm) by a wide margin, and never the
+#: relief/structure threshold itself since fix round 2 -- that constant is
+#: fixed, not swept from this value. Kept for the height itself, which the
+#: docstring above and ``region.py``'s module comment both cite.
 BB_RELIEF_MM = 0.5
 
 

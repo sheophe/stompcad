@@ -2,11 +2,11 @@
 
 A die-cast flat face is the locus of nominal wall thickness, so its outer
 boundary already excludes every boss. A raised feature's hole in that face
-is exactly coplanar with the floor by construction, so its height is
-invisible from the hole's own geometry; ``find_faces`` bundles each floor
-with candidate companions so a hole pairs with the face that actually
-carries its height. A hole is relief unless its companion stands proud by
-more than the margin, in which case it is structure.
+is coplanar with the floor by construction, so its height is invisible from
+the hole's own geometry; ``find_faces`` bundles each floor with candidate
+companions so a hole pairs with the face carrying its height. Relief unless
+a companion stands proud, towards the drilled face, past
+``_STRUCTURE_HEIGHT_MM``; a receding companion removes material, never structure.
 """
 
 from __future__ import annotations
@@ -29,14 +29,27 @@ __all__ = [
 #: features, so it cannot pair a hole with an unrelated patch.
 _COMPANION_MATCH_MM = 0.01
 
+#: How far a companion must stand proud, towards the drilled face, before it
+#: is structure rather than cast relief. Not a clearance: pedal builders
+#: drill straight through lettering, and on many castings its background is
+#: flush or recessed, so height above the floor -- not distance from a bit
+#: -- is what tells relief from a real boss. Cast lettering measures 0.50 mm
+#: proud on the 1590BB (``tests.hammond.BB_RELIEF_MM``) and is often flush
+#: or recessed; a moulded boss or standoff is millimetres. 2.0 mm sits in
+#: that gap with 4x headroom over the tallest lettering measured. No cached
+#: model's own structure needs this exact value -- see the synthetic tests
+#: in ``tests/test_cad_region_synthetic.py``.
+_STRUCTURE_HEIGHT_MM = 2.0
 
-def classify_bounds(
-    face: Any, axis: int, margin_nm: Nanometre
-) -> tuple[list[Any], list[Any]]:
+
+def classify_bounds(face: Any, axis: int, outward: float) -> tuple[list[Any], list[Any]]:
     """Split the floor's inner wires into structure and cast relief.
 
-    A hole whose companion face stands proud of the floor by more than the
-    margin is structure; a hole with no companion is structure too, since an
+    ``outward`` is the drilled face's own outward normal component along
+    ``axis`` (``Faces.outward[axis]``): a companion nearer the drilled face
+    than the floor is proud, one further away recedes and is never
+    structure -- ``_proud_mm`` needs the sign to tell those apart, not just
+    a distance. A hole with no companion is structure too, since an
     unmeasured depth is never safe to assume shallow.
     """
     from OCP.ShapeAnalysis import ShapeAnalysis
@@ -50,7 +63,6 @@ def classify_bounds(
     companions = _companions(face, floor)
     outer = ShapeAnalysis.OuterWire_s(floor)
     plane_at = bounding_box_mm(floor)[axis]
-    limit = mm_from_nm(margin_nm)
     in_plane = [index for index in range(3) if index != axis]
 
     structure: list[Any] = []
@@ -59,13 +71,13 @@ def classify_bounds(
     while explorer.More():
         wire = TopoDS.Wire_s(explorer.Current())
         if not wire.IsSame(outer):
-            proud = _proud_mm(wire, companions, plane_at, axis, in_plane)
-            (structure if proud > limit else relief).append(wire)
+            proud = _proud_mm(wire, companions, plane_at, axis, in_plane, outward)
+            (structure if proud > _STRUCTURE_HEIGHT_MM else relief).append(wire)
         explorer.Next()
     return structure, relief
 
 
-def build_region(face: Any, axis: int, margin_nm: Nanometre) -> Any:
+def build_region(face: Any, axis: int, outward: float) -> Any:
     """A face covering the drillable area: outer wire, minus structure wires."""
     from OCP.BRep import BRep_Tool
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
@@ -79,7 +91,7 @@ def build_region(face: Any, axis: int, margin_nm: Nanometre) -> Any:
         raise AidrillError("could not rebuild the flat face's drillable area")
     region = builder.Face()
 
-    structure, _ = classify_bounds(face, axis, margin_nm)
+    structure, _ = classify_bounds(face, axis, outward)
     for wire in structure:
         adder = BRepBuilderAPI_MakeFace(region)
         adder.Add(TopoDS.Wire_s(wire.Reversed()))
@@ -296,15 +308,17 @@ def _companions(face: Any, floor: Any) -> list[Any]:
 
 
 def _proud_mm(
-    wire: Any, companions: list[Any], plane_at: float, axis: int, in_plane: list[int]
+    wire: Any, companions: list[Any], plane_at: float, axis: int, in_plane: list[int],
+    outward: float,
 ) -> float:
-    """How far the hole's best-matching companion stands from the floor plane.
+    """How far the hole's best-matching companion stands proud of the floor.
 
     The companion whose in-plane footprint is closest to the hole's own is
-    its true feature, but only within ``_COMPANION_MATCH_MM``: with no
-    companion close enough — including none at all — the height is
-    unmeasured, so this reports it as unboundedly proud rather than
-    assuming it is shallow.
+    its true feature, but only within ``_COMPANION_MATCH_MM``: with no match
+    -- including none at all -- the height is unmeasured, reported as
+    unboundedly proud rather than assumed shallow. Signed, not a distance:
+    nearer the drilled face (towards ``outward``) is positive and proud;
+    further away recedes into the material and is negative -- never structure.
     """
     from .step import bounding_box_mm
 
@@ -319,7 +333,7 @@ def _proud_mm(
             best_gap, best_position = gap, other[axis]
     if best_position is None or best_gap is None or best_gap > _COMPANION_MATCH_MM:
         return float("inf")
-    return abs(best_position - plane_at)
+    return (plane_at - best_position) * outward
 
 
 def _boundary(region: Any) -> Any:

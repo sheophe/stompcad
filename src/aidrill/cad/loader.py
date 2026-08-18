@@ -87,13 +87,13 @@ def load_case_model(
 
     solid = select_solid(document, face)
     faces = find_faces(solid, axis)
-    own_region = build_region(faces.inner, axis, margin_nm)
+    own_region = build_region(faces.inner, axis, faces.outward[axis])
     own_frame = build_frame(faces, axis)
 
     box_region = box_frame = None
     if face == "lid":
         box_faces = find_faces(select_solid(document, "box"), axis)
-        box_region = build_region(box_faces.inner, axis, margin_nm)
+        box_region = build_region(box_faces.inner, axis, box_faces.outward[axis])
         box_frame = build_frame(box_faces, axis)
 
     return OcpCaseModel(

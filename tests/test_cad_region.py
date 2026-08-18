@@ -31,69 +31,44 @@ def box(hammond_bb):
     return axis, faces, build_frame(faces, axis)
 
 
-def test_the_cast_lettering_is_relief_at_the_default_margin(box):
-    """13 letters stand 0.50 mm proud; at a 1.0 mm margin none is structure."""
+def test_the_cast_lettering_is_always_relief(box):
+    """13 letters stand 0.50 mm proud, far under the fixed 2.0 mm structure
+    height (``region._STRUCTURE_HEIGHT_MM``) -- lettering is relief because
+    it is lettering, not because of where a threshold sits (fix round 2:
+    pedal builders drill straight through it, and margin is bit clearance
+    now, unrelated to this decision).
+    """
     axis, faces, _ = box
 
-    structure, relief = classify_bounds(faces.inner, axis, Nanometre(1 * MM))
+    structure, relief = classify_bounds(faces.inner, axis, faces.outward[axis])
 
     assert len(relief) == 13
     assert structure == []
 
 
-def test_the_same_lettering_is_structure_below_its_own_height(box):
-    """Sweeping the margin past 0.50 mm must flip every letter to structure.
-
-    A real casting cannot place a feature at exactly `margin - 0.01`, so the
-    parameter moves instead of the geometry. This is the boundary test.
+def test_a_hole_over_the_cast_lettering_stays_open_at_every_margin(box):
+    """The margin sweep that used to flip lettering to structure is gone --
+    ``classify_bounds`` no longer takes a margin at all, so a hole over a
+    letter stays open (``"relief"``) whatever bit clearance is asked for.
     """
-    axis, faces, _ = box
+    from tests.hammond import BB_PROBES
 
-    structure, relief = classify_bounds(faces.inner, axis, nm(0.4))
+    axis, faces, frame = box
+    region = build_region(faces.inner, axis, faces.outward[axis])
+    x, y = BB_PROBES["relief"]
 
-    assert len(structure) == 13
-    assert relief == []
-
-
-def test_the_threshold_is_the_margin_and_not_a_hard_coded_height(box):
-    axis, faces, _ = box
-
-    lenient, _ = classify_bounds(faces.inner, axis, nm(0.6))
-    strict, _ = classify_bounds(faces.inner, axis, nm(0.4))
-
-    assert len(strict) > len(lenient)
+    for margin_mm in (0.1, 0.4, 0.6, 1.0):
+        assert contains(region, frame, axis, nm(x), nm(y), Nanometre(1 * MM), nm(margin_mm))
 
 
 def test_a_hole_in_clear_space_is_inside_the_region(box):
     from tests.hammond import BB_PROBES
 
     axis, faces, frame = box
-    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+    region = build_region(faces.inner, axis, faces.outward[axis])
     x, y = BB_PROBES["clear"]
 
     assert contains(region, frame, axis, nm(x), nm(y), Nanometre(3 * MM), Nanometre(1 * MM))
-
-
-def test_a_hole_over_the_cast_lettering_is_inside_the_region(box):
-    """Drilling away part of the word HAMMOND is legal; this is the false positive."""
-    from tests.hammond import BB_PROBES
-
-    axis, faces, frame = box
-    region = build_region(faces.inner, axis, Nanometre(1 * MM))
-    x, y = BB_PROBES["relief"]
-
-    assert contains(region, frame, axis, nm(x), nm(y), Nanometre(1 * MM), Nanometre(1 * MM))
-
-
-def test_the_same_hole_is_outside_the_region_below_the_lettering_height(box):
-    """Once the letters count as structure, the region must lose them."""
-    from tests.hammond import BB_PROBES
-
-    axis, faces, frame = box
-    region = build_region(faces.inner, axis, nm(0.4))
-    x, y = BB_PROBES["relief"]
-
-    assert not contains(region, frame, axis, nm(x), nm(y), Nanometre(1 * MM), nm(0.4))
 
 
 def test_a_hole_in_a_notched_corner_is_outside_the_region(box):
@@ -101,7 +76,7 @@ def test_a_hole_in_a_notched_corner_is_outside_the_region(box):
     from tests.hammond import BB_PROBES
 
     axis, faces, frame = box
-    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+    region = build_region(faces.inner, axis, faces.outward[axis])
     x, y = BB_PROBES["boss"]
 
     assert not contains(region, frame, axis, nm(x), nm(y), Nanometre(2 * MM), Nanometre(1 * MM))
@@ -112,7 +87,7 @@ def test_a_hole_off_the_floor_is_outside_the_region(box):
     from tests.hammond import BB_PROBES
 
     axis, faces, frame = box
-    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+    region = build_region(faces.inner, axis, faces.outward[axis])
     x, y = BB_PROBES["off_face"]
 
     assert not contains(region, frame, axis, nm(x), nm(y), Nanometre(1 * MM), Nanometre(1 * MM))
@@ -125,7 +100,7 @@ def test_the_margin_and_not_only_the_radius_decides_the_edge(box):
     0.53 mm, so a 0.1 mm margin admits it and a 3 mm margin must not.
     """
     axis, faces, frame = box
-    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+    region = build_region(faces.inner, axis, faces.outward[axis])
     x = nm(53.8)
 
     generous = contains(region, frame, axis, x, Nanometre(0), Nanometre(1 * MM), nm(0.1))
@@ -138,7 +113,7 @@ def test_the_margin_and_not_only_the_radius_decides_the_edge(box):
 def test_region_bbox_nm_reports_the_real_floor_on_the_1590bb(box):
     """A sanity check against the measured 1590BB floor, not just a synthetic shape."""
     axis, faces, frame = box
-    region = build_region(faces.inner, axis, Nanometre(1 * MM))
+    region = build_region(faces.inner, axis, faces.outward[axis])
 
     x0, y0, x1, y1 = region_bbox_nm(region, frame, axis)
 
@@ -215,7 +190,7 @@ def test_classify_bounds_ignores_a_companion_too_far_from_the_hole():
     compound_builder.Add(compound, floor)
     compound_builder.Add(compound, companion)
 
-    structure, relief = classify_bounds(compound, axis, Nanometre(100 * MM))
+    structure, relief = classify_bounds(compound, axis, 1.0)
 
     assert len(structure) == 1
     assert relief == []
@@ -238,7 +213,7 @@ def test_classify_bounds_accepts_a_bare_face_not_only_a_compound():
     polygon.Close()
     face = BRepBuilderAPI_MakeFace(polygon.Wire()).Face()
 
-    structure, relief = classify_bounds(face, axis, Nanometre(1 * MM))
+    structure, relief = classify_bounds(face, axis, 1.0)
 
     assert structure == []
     assert relief == []
@@ -272,15 +247,6 @@ def bb_lid(hammond_bb):
     from aidrill.cad import load_case_model
 
     return load_case_model(hammond_bb, face="lid", margin_nm=Nanometre(1 * MM))
-
-
-@pytest.fixture(scope="module")
-def bb_lid_relief_margin(hammond_bb):
-    """A lid model at margin 0.4 -- below the cast lettering's 0.50 mm relief
-    height, so the box's own lettering counts as structure through it."""
-    from aidrill.cad import load_case_model
-
-    return load_case_model(hammond_bb, face="lid", margin_nm=nm(0.4))
 
 
 def test_the_loaded_model_satisfies_the_protocol(bb_box):
@@ -391,38 +357,21 @@ def test_the_lid_accepts_a_hole_over_its_own_clear_metal(bb_lid):
     assert bb_lid.classify(nm(x), nm(y), Nanometre(1 * MM)) is None
 
 
-def test_the_lid_is_obstructed_by_the_boxs_lettering_beneath_it(bb_lid_relief_margin):
-    """A genuine own-face-clears/box-blocks ``OBSTRUCTED`` -- the one the
-    corner notches can never demonstrate (see ``BB_PROBES``'s module
-    comment). ``"lid_obstructed"`` reframes onto the box's own cast
-    lettering, below its 0.50 mm relief height where it counts as structure.
+def test_obstructed_is_unreachable_on_the_cached_1590bb(bb_lid):
+    """Fix round 2: lettering is never structure, so it can never obstruct;
+    the corner notches are always caught by the lid's own face first (see
+    ``test_the_lid_corner_relief_is_refused_by_its_own_face_not_the_box``
+    above). Every probe this module has clears the box, or is refused by
+    the lid's own face before the box is ever consulted -- ``OBSTRUCTED``
+    genuinely does not occur on this model. It is demonstrated synthetically
+    in ``tests/test_cad_region_synthetic.py`` instead.
     """
     from aidrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
-    x, y = BB_PROBES["lid_obstructed"]
-
-    assert bb_lid_relief_margin.classify(nm(x), nm(y), Nanometre(1 * MM)) is Rejection.OBSTRUCTED
-
-
-def test_the_lid_check_reframes_into_the_boxs_own_orientation(bb_lid_relief_margin):
-    """Lid canonical x is the box's model -x (the two are viewed from
-    opposite sides); getting this wrong flags the wrong hole and lets the
-    real collision through. At margin 0.4 the cast lettering (real model
-    x ~= +41.1, +46.6 only) becomes structure: the mirror of
-    ``"lid_obstructed"`` lands on clear box metal and stays open, while
-    ``"lid_obstructed"`` itself sits over a letter and is blocked.
-    """
-    from aidrill.cad import Rejection
-    from tests.hammond import BB_PROBES
-
-    ox, oy = BB_PROBES["lid_obstructed"]
-
-    over_lettering = bb_lid_relief_margin.classify(nm(ox), nm(oy), Nanometre(1 * MM))
-    clear_metal = bb_lid_relief_margin.classify(nm(-ox), nm(oy), Nanometre(1 * MM))
-
-    assert over_lettering is Rejection.OBSTRUCTED
-    assert clear_metal is None
+    for name in ("clear", "boss", "off_face", "relief"):
+        x, y = BB_PROBES[name]
+        assert bb_lid.classify(nm(x), nm(y), Nanometre(2 * MM)) is not Rejection.OBSTRUCTED
 
 
 def test_the_rejection_code_does_not_change_with_drill_size(bb_box):
