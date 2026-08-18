@@ -56,16 +56,29 @@ class Frame:
 
 @runtime_checkable
 class CaseModel(Protocol):
-    """A supplied enclosure, reduced to what clearance and cutting need."""
+    """A supplied enclosure, reduced to what clearance and cutting need.
 
-    part: str
-    face: str
-    footprint_nm: tuple[Nanometre, Nanometre]
-    plate_nm: Nanometre
-    play_area_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre]
-    #: Clearance the play area was already eroded by, at construction.
-    margin_nm: Nanometre
-    frame: Frame
+    Declared as read-only properties, not plain attributes: a frozen,
+    slotted implementation's fields are themselves read-only, and mypy
+    only matches a Protocol's structural members when settability agrees.
+    """
+
+    @property
+    def part(self) -> str: ...
+    @property
+    def face(self) -> str: ...
+    @property
+    def footprint_nm(self) -> tuple[Nanometre, Nanometre]: ...
+    @property
+    def plate_nm(self) -> Nanometre: ...
+    @property
+    def play_area_nm(self) -> tuple[Nanometre, Nanometre, Nanometre, Nanometre]: ...
+    @property
+    def margin_nm(self) -> Nanometre:
+        """Clearance the play area was already eroded by, at construction."""
+        ...
+    @property
+    def frame(self) -> Frame: ...
 
     def classify(
         self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre

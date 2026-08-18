@@ -53,7 +53,18 @@ MODELS: Mapping[str, HammondModel] = MappingProxyType(
 #:   box inner floor   outer bound +/-55.33 x +/-42.58, with concave r=5.17 arcs
 #:                     centred on the four boss axes at (+/-54.75, +/-42.00)
 #:   box drilled face  114.97 x 89.47, inset from the 119.5 x 94.0 footprint
-#:   lid inner face    +/-54.56 x +/-41.81, one bound, no notches
+#:   lid inner face    +/-54.56 x +/-41.81; also concave, with its own r=5.94
+#:                     corner-relief arcs centred on (+/-55.00, +/-42.25) --
+#:                     no *inner* notch wires (``classify_bounds`` finds none),
+#:                     but the outer wire itself is bitten at all four corners,
+#:                     for the box's screw posts, exactly as the box's own is.
+#:                     Offset from the box's own centre by only ~0.35 mm and
+#:                     0.77 mm wider in radius, the lid's own corner relief
+#:                     entirely contains the box's (0.35 + 5.17 < 5.94, for
+#:                     any clearance -- the margin cancels on both sides): a
+#:                     hole at ``"boss"`` is always refused by the lid's own
+#:                     boundary, at every margin, and can never demonstrate a
+#:                     cross-part OBSTRUCTED. ``"lid_obstructed"`` below does.
 #:   cast lettering    13 inner bounds standing 0.50 mm proud of the box floor,
 #:                     in two columns near x = 41.1 and x = 46.6
 BB_PROBES: Mapping[str, tuple[float, float]] = MappingProxyType(
@@ -69,6 +80,14 @@ BB_PROBES: Mapping[str, tuple[float, float]] = MappingProxyType(
         # On a cast letter. Must pass at margin 1.0 and fail at margin 0.4 —
         # the boundary a real model cannot place but a swept parameter can.
         "relief": (41.12, 7.12),
+        # A lid canonical point that reframes onto "relief"'s own letter,
+        # mirrored in x -- the lid is viewed from the other side, so the
+        # same canonical x is the box's -x (see loader.classify/region.reframe).
+        # Below the lettering's own 0.50 mm relief height it is OBSTRUCTED
+        # by the box, while "relief" negated (its mirror image) reframes
+        # onto clear box metal and stays open. Demonstrates the one lid
+        # obstruction "boss" cannot: own face clear, box behind it not.
+        "lid_obstructed": (-41.12, 7.12),
     }
 )
 

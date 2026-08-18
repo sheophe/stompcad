@@ -274,6 +274,15 @@ def bb_lid(hammond_bb):
     return load_case_model(hammond_bb, face="lid", margin_nm=Nanometre(1 * MM))
 
 
+@pytest.fixture(scope="module")
+def bb_lid_relief_margin(hammond_bb):
+    """A lid model at margin 0.4 -- below the cast lettering's 0.50 mm relief
+    height, so the box's own lettering counts as structure through it."""
+    from aidrill.cad import load_case_model
+
+    return load_case_model(hammond_bb, face="lid", margin_nm=nm(0.4))
+
+
 def test_the_loaded_model_satisfies_the_protocol(bb_box):
     from aidrill.cad import CaseModel
 
@@ -337,14 +346,21 @@ def test_the_loaded_box_accepts_a_hole_over_the_cast_lettering(bb_box):
     assert bb_box.classify(nm(x), nm(y), Nanometre(1 * MM)) is None
 
 
-def test_the_lid_is_obstructed_where_the_box_has_a_boss(bb_lid):
-    """The lid's own face has no notches; the box's region supplies them."""
+def test_the_lid_corner_relief_is_refused_by_its_own_face_not_the_box(bb_lid):
+    """The lid has its own corner relief for the box's screw posts too.
+
+    Measured (see ``tests.hammond.BB_PROBES``'s module comment): the lid's
+    own corner arc (r=5.94 about canonical (55.00, 42.25)) sits only ~0.35 mm
+    from the box's own mirrored one (r=5.17) and is 0.77 mm wider -- wide
+    enough to contain it entirely, at any margin. ``"boss"`` is always
+    refused by the lid's own boundary before the box is ever consulted.
+    """
     from aidrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     x, y = BB_PROBES["boss"]
 
-    assert bb_lid.classify(nm(x), nm(y), Nanometre(2 * MM)) is Rejection.OBSTRUCTED
+    assert bb_lid.classify(nm(x), nm(y), Nanometre(2 * MM)) is Rejection.THROUGH_BOSS
 
 
 def test_the_lid_accepts_a_hole_in_clear_space(bb_lid):
@@ -353,3 +369,77 @@ def test_the_lid_accepts_a_hole_in_clear_space(bb_lid):
     x, y = BB_PROBES["clear"]
 
     assert bb_lid.classify(nm(x), nm(y), Nanometre(3 * MM)) is None
+
+
+def test_the_lid_rejects_a_hole_off_its_own_face(bb_lid):
+    """The lid's own boundary, not the box's, decides ``OFF_FACE`` for it."""
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["off_face"]
+
+    assert bb_lid.classify(nm(x), nm(y), Nanometre(2 * MM)) is Rejection.OFF_FACE
+
+
+def test_the_lid_accepts_a_hole_over_its_own_clear_metal(bb_lid):
+    """``"relief"`` is a box coordinate, but read as the lid's own it lands
+    on plain, feature-free lid metal -- nowhere near a lid corner relief."""
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["relief"]
+
+    assert bb_lid.classify(nm(x), nm(y), Nanometre(1 * MM)) is None
+
+
+def test_the_lid_is_obstructed_by_the_boxs_lettering_beneath_it(bb_lid_relief_margin):
+    """A genuine own-face-clears/box-blocks ``OBSTRUCTED`` -- the one the
+    corner notches can never demonstrate (see ``BB_PROBES``'s module
+    comment). ``"lid_obstructed"`` reframes onto the box's own cast
+    lettering, below its 0.50 mm relief height where it counts as structure.
+    """
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    x, y = BB_PROBES["lid_obstructed"]
+
+    assert bb_lid_relief_margin.classify(nm(x), nm(y), Nanometre(1 * MM)) is Rejection.OBSTRUCTED
+
+
+def test_the_lid_check_reframes_into_the_boxs_own_orientation(bb_lid_relief_margin):
+    """Lid canonical x is the box's model -x (the two are viewed from
+    opposite sides); getting this wrong flags the wrong hole and lets the
+    real collision through. At margin 0.4 the cast lettering (real model
+    x ~= +41.1, +46.6 only) becomes structure: the mirror of
+    ``"lid_obstructed"`` lands on clear box metal and stays open, while
+    ``"lid_obstructed"`` itself sits over a letter and is blocked.
+    """
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    ox, oy = BB_PROBES["lid_obstructed"]
+
+    over_lettering = bb_lid_relief_margin.classify(nm(ox), nm(oy), Nanometre(1 * MM))
+    clear_metal = bb_lid_relief_margin.classify(nm(-ox), nm(oy), Nanometre(1 * MM))
+
+    assert over_lettering is Rejection.OBSTRUCTED
+    assert clear_metal is None
+
+
+def test_the_rejection_code_does_not_change_with_drill_size(bb_box):
+    """``OFF_FACE`` vs ``THROUGH_BOSS`` names a place, not a drill size.
+
+    A bbox-inset check flips code with radius at the same point (the bug
+    this guards against); naming the boundary element responsible cannot.
+    """
+    from aidrill.cad import Rejection
+    from tests.hammond import BB_PROBES
+
+    radii_mm = (0.1, 0.3, 0.5, 1.0, 1.5, 2.0, 3.0)
+
+    edge_x, edge_y = BB_PROBES["off_face"]
+    edge_codes = {bb_box.classify(nm(edge_x), nm(edge_y), nm(r)) for r in radii_mm}
+    assert edge_codes == {Rejection.OFF_FACE}
+
+    boss_x, boss_y = BB_PROBES["boss"]
+    boss_codes = {bb_box.classify(nm(boss_x), nm(boss_y), nm(r)) for r in radii_mm}
+    assert boss_codes == {Rejection.THROUGH_BOSS}

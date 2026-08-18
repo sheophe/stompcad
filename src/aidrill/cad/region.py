@@ -17,7 +17,10 @@ from ..errors import AidrillError
 from ..units import Nanometre, mm_from_nm, nm_from_mm
 from .base import Frame
 
-__all__ = ["classify_bounds", "build_region", "region_bbox_nm", "contains"]
+__all__ = [
+    "classify_bounds", "build_region", "region_bbox_nm", "contains", "reframe",
+    "clearance_reason",
+]
 
 #: How close a companion's in-plane footprint must sit to a hole's own to
 #: count as its match. Measured gaps top out at ~4e-7 mm across every cached
@@ -156,6 +159,90 @@ def contains(
     if not distance.IsDone():
         raise AidrillError("could not measure clearance to the region boundary")
     return distance.Value() >= clearance
+
+
+def reframe(
+    x_nm: Nanometre, y_nm: Nanometre, source: Frame, target: Frame
+) -> tuple[Nanometre, Nanometre]:
+    """Restate a canonical point registered on ``source`` in ``target``'s frame.
+
+    A box and its lid are viewed from opposite sides, so the same canonical
+    ``x`` is a different model ``x`` on each; a point measured against one
+    face's region must be converted through model space before it means
+    anything against the other's.
+    """
+    model = _to_model(source, x_nm, y_nm)
+    x_mm, y_mm = _to_canonical(target, model)
+    return nm_from_mm(x_mm), nm_from_mm(y_mm)
+
+
+def clearance_reason(region: Any, frame: Frame, axis: int, x_nm: Nanometre, y_nm: Nanometre) -> str:
+    """Which kind of boundary is nearest a point that failed ``contains``.
+
+    ``region``'s own inner wires are exactly the structure wires
+    ``build_region`` subtracted, so wire membership alone names
+    ``"structure"``. An outer-wire arc is ``"concave"`` (a boss bitten
+    straight into the boundary -- see ``case._plates``) when its centre
+    lies outside the region, else ``"convex"``. These partition every edge
+    ``contains`` measured, so whichever is nearest is the true reason.
+    """
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    from OCP.GeomAbs import GeomAbs_CurveType
+    from OCP.gp import gp_Pnt
+    from OCP.ShapeAnalysis import ShapeAnalysis
+    from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_State
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS, TopoDS_Compound
+
+    from .step import bounding_box_mm
+
+    def edge_group(edge: Any, on_outer: bool) -> str:
+        if not on_outer:
+            return "structure"
+        adaptor = BRepAdaptor_Curve(edge)
+        if adaptor.GetType() == GeomAbs_CurveType.GeomAbs_Circle:
+            centre = adaptor.Circle().Location()
+            classifier = BRepClass_FaceClassifier(region, centre, 1e-7)
+            if classifier.State() != TopAbs_State.TopAbs_IN:
+                return "concave"
+        return "convex"
+
+    def nearest_mm(vertex: Any, edges: list[Any]) -> float:
+        if not edges:
+            return float("inf")
+        compound = TopoDS_Compound()
+        builder = BRep_Builder()
+        builder.MakeCompound(compound)
+        for edge in edges:
+            builder.Add(compound, edge)
+        distance = BRepExtrema_DistShapeShape(vertex, compound)
+        if not distance.IsDone():
+            raise AidrillError("could not measure clearance to a boundary edge group")
+        return distance.Value()
+
+    point = list(_to_model(frame, x_nm, y_nm))
+    plane_at = bounding_box_mm(region)[axis]
+    point[axis] = plane_at
+    vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(*point)).Vertex()
+
+    outer = ShapeAnalysis.OuterWire_s(region)
+    groups: dict[str, list[Any]] = {"structure": [], "concave": [], "convex": []}
+    wires = TopExp_Explorer(region, TopAbs_ShapeEnum.TopAbs_WIRE)
+    while wires.More():
+        wire = TopoDS.Wire_s(wires.Current())
+        on_outer = wire.IsSame(outer)
+        edges = TopExp_Explorer(wire, TopAbs_ShapeEnum.TopAbs_EDGE)
+        while edges.More():
+            edge = TopoDS.Edge_s(edges.Current())
+            groups[edge_group(edge, on_outer)].append(edge)
+            edges.Next()
+        wires.Next()
+
+    return min(groups, key=lambda key: nearest_mm(vertex, groups[key]))
 
 
 def _floor_face(face: Any) -> Any:

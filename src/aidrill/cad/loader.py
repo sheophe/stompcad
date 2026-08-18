@@ -1,8 +1,10 @@
 """Load a supplied STEP file into a queryable case model.
 
 The kernel is imported here and nowhere above, so ``import aidrill`` stays
-free of it. The lid's play area is intersected with the box's, because a lid
-hole is obstructed by the box's bosses once the enclosure is assembled.
+free of it. A lid hole is checked against the box's own region too, because
+it would be obstructed by what sits behind it once the enclosure is
+assembled; ``play_area_nm`` still reports only the drilled part's own play
+area -- it is provenance for that one face, not the combined check.
 """
 
 from __future__ import annotations
@@ -16,15 +18,12 @@ from .base import CaseModel, Frame, Rejection
 
 __all__ = ["OcpCaseModel", "load_case_model"]
 
+_THROUGH: frozenset[str] = frozenset({"structure", "concave"})
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class OcpCaseModel:
-    """A kernel-backed case model. Built by :func:`load_case_model`.
-
-    Not frozen, unlike this codebase's value objects: mypy treats a frozen
-    dataclass's fields as read-only, which fails structural matching against
-    ``CaseModel``'s plain (settable) attributes. Nothing here mutates it.
-    """
+    """A kernel-backed case model. Built by :func:`load_case_model`."""
 
     part: str
     face: str
@@ -39,10 +38,6 @@ class OcpCaseModel:
     box_region: Any | None
     box_frame: Frame | None
     drilled_face: Any
-    #: The drilled face's own extent -- larger than ``play_area_nm``, which is
-    #: the inset floor. Separates a hole that misses the panel entirely from
-    #: one that lands on it but meets a boss or rib.
-    drilled_extent_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre]
     drilled_position_mm: float
     inner_position_mm: float
     # Beyond the CaseModel protocol: what the emitter needs to cut and write.
@@ -55,40 +50,27 @@ class OcpCaseModel:
     ) -> Rejection | None:
         """Reject a hole the casting cannot take, naming which rule refused it.
 
-        A lid's own boundary is drawn tight around the box's corner posts, so
-        it can fail on its own right where the box already explains why; the
-        box is checked first so that shared cause is reported once, as
-        ``OBSTRUCTED``, rather than misread as the lid's own edge or boss.
+        The drilled part's own face decides first: ``OFF_FACE`` or
+        ``THROUGH_BOSS`` for a failure against its own boundary. Only a hole
+        its own face accepts is then checked against what sits behind it --
+        an ``OBSTRUCTED`` verdict never overrides what the part's own
+        geometry already refused for a different reason.
         """
-        from .region import contains
+        from .region import clearance_reason, contains, reframe
 
-        if self.box_region is not None and self.box_frame is not None and not contains(
-            self.box_region, self.box_frame, self.axis, x_nm, y_nm, radius_nm, self.margin_nm
-        ):
-            return Rejection.OBSTRUCTED
         if not contains(
             self.own_region, self.own_frame, self.axis, x_nm, y_nm, radius_nm, self.margin_nm
         ):
-            if self._within_drilled_extent(x_nm, y_nm, radius_nm):
-                return Rejection.THROUGH_BOSS
-            return Rejection.OFF_FACE
+            reason = clearance_reason(self.own_region, self.own_frame, self.axis, x_nm, y_nm)
+            return Rejection.THROUGH_BOSS if reason in _THROUGH else Rejection.OFF_FACE
+        if self.box_region is None or self.box_frame is None:
+            return None
+        box_x, box_y = reframe(x_nm, y_nm, self.own_frame, self.box_frame)
+        if not contains(
+            self.box_region, self.box_frame, self.axis, box_x, box_y, radius_nm, self.margin_nm
+        ):
+            return Rejection.OBSTRUCTED
         return None
-
-    def _within_drilled_extent(
-        self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre
-    ) -> bool:
-        """Does the grown circle still land on the drilled face itself?
-
-        The floor's own inset boundary already ruled this hole out; this
-        tells apart a hole that meets a boss on the plate (still within the
-        panel's own outer edge) from one that has run off the panel entirely.
-        """
-        x0, y0, x1, y1 = self.drilled_extent_nm
-        clearance = Nanometre(radius_nm + self.margin_nm)
-        return (
-            x0 + clearance <= x_nm <= x1 - clearance
-            and y0 + clearance <= y_nm <= y1 - clearance
-        )
 
 
 def load_case_model(
@@ -107,7 +89,6 @@ def load_case_model(
     faces = find_faces(solid, axis)
     own_region = build_region(faces.inner, axis, margin_nm)
     own_frame = build_frame(faces, axis)
-    drilled_extent_nm = region_bbox_nm(faces.drilled, own_frame, axis)
 
     box_region = box_frame = None
     if face == "lid":
@@ -129,7 +110,6 @@ def load_case_model(
         box_region=box_region,
         box_frame=box_frame,
         drilled_face=faces.drilled,
-        drilled_extent_nm=drilled_extent_nm,
         drilled_position_mm=faces.drilled_position_mm,
         inner_position_mm=faces.inner_position_mm,
         document=document.document,
