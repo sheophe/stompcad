@@ -14,6 +14,7 @@ _DEFAULT_MATCH = object()
 
 
 def run(model, *holes, reference=None, enclosure=_DEFAULT_MATCH, margin_nm=1 * MM):
+    model.margin_nm = Nanometre(margin_nm)
     data = make_data(*holes, reference=reference)
     if enclosure is _DEFAULT_MATCH:
         length_nm, width_nm = model.footprint_nm
@@ -26,7 +27,7 @@ def run(model, *holes, reference=None, enclosure=_DEFAULT_MATCH, margin_nm=1 * M
         )
     if enclosure is not None:
         data = data.with_enclosure(enclosure)
-    return CheckCaseClearance(model, Nanometre(margin_nm)).apply(data)
+    return CheckCaseClearance(model).apply(data)
 
 
 def test_a_hole_well_inside_the_play_area_raises_nothing():
@@ -133,7 +134,7 @@ def test_an_unidentified_panel_skips_the_cross_check_with_an_info():
 
 
 def test_describe_records_the_model_face_margin_and_frame():
-    stage = CheckCaseClearance(FakeCase(), Nanometre(1 * MM))
+    stage = CheckCaseClearance(FakeCase())
 
     run_record = stage.describe()
 
@@ -145,12 +146,19 @@ def test_describe_records_the_model_face_margin_and_frame():
     assert run_record.get("play_area_nm") == (-50 * MM, -40 * MM, 50 * MM, 40 * MM)
 
 
+def test_the_recorded_margin_is_the_model_s_own():
+    """The stage has no margin of its own; it only reports the model's."""
+    stage = CheckCaseClearance(FakeCase(margin_nm=3 * MM))
+
+    assert stage.describe().get("margin_nm") == 3 * MM
+
+
 def test_the_stage_is_independent_of_pipeline_position():
     """It reads only holes and the enclosure, so it composes anywhere."""
     from aidrill.protocols import Pipeline
 
     model = FakeCase()
     data = make_data(at(0, 0, 7 * MM, index=1))
-    alone = Pipeline([CheckCaseClearance(model, Nanometre(1 * MM))]).run(data)
+    alone = Pipeline([CheckCaseClearance(model)]).run(data)
 
     assert alone.processing[-1].name == "check-case-clearance"

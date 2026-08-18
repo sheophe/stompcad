@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from ..errors import AidrillError
+from ..model import ParameterValue
 from ..units import Nanometre
 
 __all__ = ["Rejection", "Frame", "CaseModel", "KernelUnavailable"]
@@ -43,7 +44,7 @@ class Frame:
     v: tuple[float, float, float]
     w: tuple[float, float, float]
 
-    def as_parameters(self) -> tuple[tuple[str, object], ...]:
+    def as_parameters(self) -> tuple[tuple[str, ParameterValue], ...]:
         """Flatten to ``StageRun``-safe scalars and float tuples."""
         return (
             ("frame_origin_nm", tuple(self.origin_nm)),
@@ -62,6 +63,8 @@ class CaseModel(Protocol):
     footprint_nm: tuple[Nanometre, Nanometre]
     plate_nm: Nanometre
     play_area_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre]
+    #: Clearance the play area was already eroded by, at construction.
+    margin_nm: Nanometre
     frame: Frame
 
     def classify(

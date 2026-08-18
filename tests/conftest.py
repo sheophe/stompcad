@@ -193,12 +193,15 @@ class FakeCase:
         u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
     )
 
-    def __init__(self, half_x=50 * _MM, half_y=40 * _MM, bosses=(), behind=()):
+    def __init__(
+        self, half_x=50 * _MM, half_y=40 * _MM, bosses=(), behind=(), margin_nm=1_000_000
+    ):
         self.play_area_nm = (
             Nanometre(-half_x), Nanometre(-half_y), Nanometre(half_x), Nanometre(half_y)
         )
         self.bosses = bosses
         self.behind = behind
+        self.margin_nm = Nanometre(margin_nm)
 
     def classify(self, x_nm, y_nm, radius_nm):
         x0, y0, x1, y1 = self.play_area_nm

@@ -18,6 +18,7 @@ class Stub:
         Nanometre(-50_000_000), Nanometre(-40_000_000),
         Nanometre(50_000_000), Nanometre(40_000_000),
     )
+    margin_nm = Nanometre(1_000_000)
     frame = Frame(
         origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
         u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
@@ -51,6 +52,7 @@ def test_an_object_missing_classify_does_not_satisfy_the_protocol():
             Nanometre(-50_000_000), Nanometre(-40_000_000),
             Nanometre(50_000_000), Nanometre(40_000_000),
         )
+        margin_nm = Nanometre(1_000_000)
         frame = Frame(
             origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
             u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),

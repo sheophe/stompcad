@@ -6,10 +6,10 @@ rejection into a diagnostic, so it is testable against a fake model.
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from ..cad import CaseModel, Rejection
-from ..model import Diagnostic, DrillData, Hole, ParameterValue, StageRun
+from ..model import Diagnostic, DrillData, Hole, StageRun
 from ..units import Nanometre, format_nm
 
 __all__ = ["CheckCaseClearance"]
@@ -26,29 +26,24 @@ class CheckCaseClearance:
 
     name: ClassVar[str] = "check-case-clearance"
 
-    def __init__(self, model: CaseModel, margin_nm: Nanometre) -> None:
+    def __init__(self, model: CaseModel) -> None:
         self.model = model
-        self.margin_nm = margin_nm
 
     def describe(self) -> StageRun:
         """Record the model, the face, the margin and the frame it registered.
 
-        ``Frame.as_parameters()`` is typed against ``object`` because ``cad``
-        knows nothing of ``ParameterValue``; the cast asserts what its own
-        docstring already promises, that every element is StageRun-safe.
+        The margin is the model's own: it already eroded the play area by it
+        at construction, so this stage only reports what ``classify()`` used.
         """
-        frame_parameters = cast(
-            "tuple[tuple[str, ParameterValue], ...]", self.model.frame.as_parameters()
-        )
         return StageRun(
             self.name,
             (
                 ("part", self.model.part),
                 ("face", self.model.face),
-                ("margin_nm", int(self.margin_nm)),
+                ("margin_nm", int(self.model.margin_nm)),
                 ("plate_nm", int(self.model.plate_nm)),
                 ("play_area_nm", tuple(int(v) for v in self.model.play_area_nm)),
-                *frame_parameters,
+                *self.model.frame.as_parameters(),
             ),
         )
 
