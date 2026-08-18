@@ -248,7 +248,7 @@ def _drilled_level(
     ]
     if not candidates:
         raise AidrillError(f"{name} has no planar face along this axis that faces outward")
-    if len(candidates) > 1:
+    if len(candidates) > 1:  # pragma: no cover - a valid shell has one plate per extreme
         raise AidrillError(
             f"{name} has {len(candidates)} planar levels at its own bounding-box extreme "
             f"along this axis, at positions "
@@ -343,6 +343,6 @@ def _cross(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, float, fl
 
 def _normalise(a: tuple[float, float, float]) -> tuple[float, float, float]:
     length = sum(c * c for c in a) ** 0.5
-    if length == 0:
+    if length == 0:  # pragma: no cover - reference is always perpendicular to w
         raise AidrillError("degenerate face frame")
     return (a[0] / length, a[1] / length, a[2] / length)

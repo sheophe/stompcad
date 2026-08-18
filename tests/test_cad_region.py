@@ -219,3 +219,42 @@ def test_classify_bounds_ignores_a_companion_too_far_from_the_hole():
 
     assert len(structure) == 1
     assert relief == []
+
+
+def test_classify_bounds_accepts_a_bare_face_not_only_a_compound():
+    """``_floor_face``/``_companions`` explicitly support a bare face too.
+
+    ``find_faces`` always hands ``region.py`` a compound in practice, so
+    this path is otherwise reachable only in principle; a plain, holeless
+    face proves the documented flexibility is real rather than unexercised.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+
+    axis = 1
+    polygon = BRepBuilderAPI_MakePolygon()
+    for x, z in ((-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)):
+        polygon.Add(gp_Pnt(x, 0.0, z))
+    polygon.Close()
+    face = BRepBuilderAPI_MakeFace(polygon.Wire()).Face()
+
+    structure, relief = classify_bounds(face, axis, Nanometre(1 * MM))
+
+    assert structure == []
+    assert relief == []
+
+
+def test_floor_face_rejects_a_compound_with_no_planar_face():
+    """An empty compound must raise, not silently return nothing at all."""
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    from aidrill.cad.region import _floor_face
+    from aidrill.errors import AidrillError
+
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+
+    with pytest.raises(AidrillError, match="no planar face"):
+        _floor_face(compound)
