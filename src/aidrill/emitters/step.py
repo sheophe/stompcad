@@ -2,10 +2,11 @@
 
 Presentation only in the sense that matters: every hole, its position and its
 diameter were decided before this module ran. The kernel is imported inside
-the methods, so importing the emitter registry stays free of it. Two OCC
-process-global counters (a translator product-name suffix and the assembly
-usage occurrence ids) are not resettable through any exposed API, so
-``_write`` normalises them out of the written bytes afterwards instead.
+the methods, so importing the emitter registry stays free of it. Three OCC
+process-global effects — a translator product-name suffix, the assembly
+usage occurrence ids, and which numeric slot each colour is written into —
+are not controllable through any exposed API, so ``_write`` normalises the
+written bytes afterwards instead.
 """
 
 from __future__ import annotations
@@ -44,6 +45,25 @@ _VOLATILE_ENTITY = re.compile(
 #: id-based alternative available through this kernel's bindings.
 _VOLATILE_VERSION = re.compile(rb"'aidrill \d+\.\d+'")
 _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
+
+#: One colour presentation, the fixed nine-entity chain STEPCAFControl_Writer
+#: emits per coloured shape: a styled-item wrapper down to the RGB literal.
+#: Each entity but the first refers only to the next; group 1 is the chain's
+#: own starting id, group 2 the ``STYLED_ITEM``'s id, group 3 the id of the
+#: *shape* it colours (an external, stable reference — never renumbered
+#: here), group 4 the closing ``COLOUR_RGB``'s own id, group 5 its literal.
+_COLOUR_CHAIN = re.compile(
+    rb"#(\d+) = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION\(.*?\);\s*"
+    rb"#(\d+) = STYLED_ITEM\('color',\(#\d+\),#(\d+)\);\s*"
+    rb"#\d+ = PRESENTATION_STYLE_ASSIGNMENT\(.*?\);\s*"
+    rb"#\d+ = SURFACE_STYLE_USAGE\(.*?\);\s*"
+    rb"#\d+ = SURFACE_SIDE_STYLE\(.*?\);\s*"
+    rb"#\d+ = SURFACE_STYLE_FILL_AREA\(.*?\);\s*"
+    rb"#\d+ = FILL_AREA_STYLE\(.*?\);\s*"
+    rb"#\d+ = FILL_AREA_STYLE_COLOUR\(.*?\);\s*"
+    rb"#(\d+) = COLOUR_RGB\('',([^)]*)\);",
+    re.DOTALL,
+)
 
 
 def require_kernel() -> None:
@@ -303,7 +323,46 @@ def _normalise(payload: bytes) -> bytes:
     def renumber(match: re.Match[bytes]) -> bytes:
         return match.group(1) + str(next(counter)).encode("ascii") + match.group(3)
 
-    return _VOLATILE_NAUO_ID.sub(renumber, payload)
+    payload = _VOLATILE_NAUO_ID.sub(renumber, payload)
+    return _reslot_colours(payload)
+
+
+def _reslot_colours(payload: bytes) -> bytes:
+    """Re-seat each colour chain into the numeric slot content order picks.
+
+    ``STEPCAFControl_Writer::WriteColors`` hashes on the ``TShape`` pointer
+    to decide *which* chain goes in *which* fixed nine-id slot at the file's
+    tail — the pointer, not the file, so two writes of the same document
+    permute the slots. The chains themselves, and the ids they occupy, are
+    unaffected: this sorts the chains by the shape id they colour (already
+    a stable, external reference) and writes each into the slot the file's
+    own encounter order assigned, renumbering only that chain's own nine ids.
+    """
+    chains = list(_COLOUR_CHAIN.finditer(payload))
+    if len(chains) < 2:
+        return payload
+
+    # ``chains`` is already in slot order (ascending file position == ascending
+    # id); pairing it against the content-sorted list below re-seats chain i's
+    # *content* into slot i's *ids*, whatever order the writer produced them in.
+    ordered = sorted(chains, key=lambda match: (int(match.group(3)), match.group(5)))
+
+    pieces: list[bytes] = []
+    cursor = 0
+    for slot, content in zip(chains, ordered):
+        pieces.append(payload[cursor:slot.start()])
+        cursor = slot.end()
+        own_start = int(content.group(1))
+        delta = int(slot.group(1)) - own_start
+        local = set(range(own_start, own_start + 9))
+
+        def shift(match: re.Match[bytes], delta: int = delta, local: set[int] = local) -> bytes:
+            old = int(match.group(1))
+            return b"#" + str(old + delta if old in local else old).encode("ascii")
+
+        pieces.append(re.sub(rb"#(\d+)", shift, content.group(0)))
+    pieces.append(payload[cursor:])
+    return b"".join(pieces)
 
 
 def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
@@ -321,15 +380,6 @@ def _write(document: Any, path: Any, title: str, timestamp: str) -> None:
     Interface_Static.SetCVal_s("write.step.product.name", "aidrill")
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
-    # Colour is not part of this emitter's contract, and carrying it costs
-    # determinism: STYLED_ITEM entities reference the label they colour by
-    # entity number, and two independent reads of the identical source file
-    # populate the reader's colour-to-label map in different hash order, so
-    # those references (and nothing geometric) differ between writes. Found
-    # by bisecting a byte diff between two fresh loads of one file down to a
-    # STYLED_ITEM's target reference (see task-13-report.md); no regex over
-    # the written bytes can restore a correspondence the reader never fixed.
-    writer.SetColorMode(False)
     with _silence_stdout():
         writer.Transfer(document)
 

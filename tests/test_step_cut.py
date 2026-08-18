@@ -346,10 +346,11 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
     import textwrap
 
     model_path = _model_path()
+    src_path = Path(__file__).resolve().parents[1] / "src"
     script = textwrap.dedent(
         f"""
         import sys
-        sys.path.insert(0, "src")
+        sys.path.insert(0, {str(src_path)!r})
         from pathlib import Path
         from aidrill.cad import load_case_model
         from aidrill.emitters.step import StepEmitter, StepOptions
@@ -407,3 +408,42 @@ def test_hole_numbering_and_not_position_orders_the_cut():
     swapped = _emit(at(0, 0, 6 * MM, index=2), at(8 * MM, 0, 6 * MM, index=1))
 
     assert forward == swapped
+
+
+def _cylinder_centres(compound) -> list[tuple[float, float, float]]:
+    """Each child's centre of mass, in the compound's own iteration order."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.TopoDS import TopoDS_Iterator
+
+    centres = []
+    child = TopoDS_Iterator(compound)
+    while child.More():
+        props = GProp_GProps()
+        BRepGProp.VolumeProperties_s(child.Value(), props)
+        point = props.CentreOfMass()
+        centres.append((round(point.X(), 3), round(point.Y(), 3), round(point.Z(), 3)))
+        child.Next()
+    return centres
+
+
+def test_drill_compound_builds_children_in_index_order_not_tuple_order():
+    """Directly on ``_drill_compound``, not the byte-level emit.
+
+    Colour re-slotting makes the emitted bytes insensitive to compound
+    child order, so a byte comparison alone cannot prove this sort does
+    anything; only a probe on the compound itself can. Without the sort,
+    the second assertion's child order reverses.
+    """
+    from aidrill.emitters import step as step_module
+    from tests.conftest import at, make_data
+
+    model = _model()
+    a = at(0, 0, 6 * MM, index=1)
+    b = at(8 * MM, 0, 6 * MM, index=2)
+
+    forward = _cylinder_centres(step_module._drill_compound(model, make_data(a, b)))
+    backward = _cylinder_centres(step_module._drill_compound(model, make_data(b, a)))
+
+    assert forward == [(0.0, -28.875, -0.0), (8.0, -28.875, -0.0)]
+    assert forward == backward

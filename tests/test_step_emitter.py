@@ -60,3 +60,17 @@ def test_the_emitter_module_imports_without_the_kernel():
     )
 
     assert result.stdout.strip() == "False"
+
+
+def test_reslot_colours_leaves_a_payload_with_no_colour_chains_untouched():
+    """Pure bytes-in bytes-out below the two-chain floor: no kernel needed.
+
+    The real, hammond-gated cases (``test_step_cut.py``) always carry at
+    least two coloured shapes, so this is the only path to the ``< 2``
+    guard — a payload with zero ``STYLED_ITEM`` chains must round trip.
+    """
+    from aidrill.emitters.step import _reslot_colours
+
+    payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SOMETHING();\nENDSEC;\n"
+
+    assert _reslot_colours(payload) == payload
