@@ -53,6 +53,15 @@ The primitives shared by the others — lengths, rigid transforms, and the
 geometry operations more than one package needs.
 _Avoid_: core, common, utils
 
+## Geometry
+
+**Coordinate frame**:
+An origin and a right-handed basis. Carries no meaning about what it registers —
+that is the point. `CoordinateFrame` in `aigeom`.
+_Avoid_: frame (this repo has used the word for three unrelated things), axes,
+basis
+_See also_: Face frame, which adds the meaning.
+
 ## Panel and drilling
 
 **Answer set**:
@@ -99,6 +108,12 @@ The face of the case that holes are cut through. Told to a tool, never guessed
 when a caller already knows it.
 _Avoid_: panel face, front face, working face
 
+**Face frame**:
+The drilled face's registration: a coordinate frame whose third axis is that
+face's outward normal. `FaceFrame` in `aidrill`.
+_Avoid_: frame, drill frame, case frame
+_See also_: Coordinate frame, Drilled face.
+
 **Footprint**:
 An enclosure's published two-dimensional outline. Identifies a shape, not
 necessarily a single part number.
@@ -123,12 +138,6 @@ to the drilled face.
 _Avoid_: board plane, substrate, PCB surface
 _See also_: Drilled face.
 
-**Charge**:
-The attraction term between a hole and a protruding element. Holes carry
-negative charge, protruding elements positive; each carries its own direction.
-_Avoid_: attractor, affinity, weight
-_See also_: Protruding element.
-
 **Clash**:
 Two solids occupying the same space in a completed placement. A finding to be
 reported and shown, never a reason to compromise a placement.
@@ -136,8 +145,8 @@ _Avoid_: interference, overlap
 _See also_: the engine *collides*; what it finds is a clash.
 
 **Docking**:
-Determining where each board sits inside a drilled case, by minimising the
-energy of the charge system.
+Determining where each board sits inside a drilled case. Two phases, Match then
+Seat.
 _Avoid_: mounting, fitting, assembly, placement solving
 _See also_: Placement is the result; docking is the act.
 
@@ -152,6 +161,21 @@ The record beside a project's artwork of how that pedal is built, making a run
 reproducible and a re-run quiet.
 _Avoid_: config, project file, settings
 
+**Match**:
+The first docking phase, and a question: can this board dock into this case at
+all, judging by the hole pattern? Someone holding two parts up and deciding
+whether they are the same pattern.
+_Avoid_: stage A, alignment, registration
+_See also_: Seat. Match is deliberately more permissive than Seat — a board that
+nearly fits must still be recognised, so that Seat can report by how much it
+misses.
+
+**Panel-reference group**:
+The components whose reference designators mark them as user-facing hardware,
+`RV*` and `SW*` by default. Declares which face of a board points at the panel.
+_Avoid_: panel parts, through-hole group, controls
+_See also_: Protruding element, which is geometric; this is declared.
+
 **Placement**:
 One rigid transform seating a board in the case — x, y, z and rotation about
 the carrier plane's normal. A docking run may yield several.
@@ -163,3 +187,11 @@ A solid standing proud of the carrier plane — a potentiometer, jack,
 footswitch, LED. Recognised by geometry, never by component identity.
 _Avoid_: component, part, through-panel hardware
 _See also_: Charge.
+
+**Seat**:
+The second docking phase, and a question: how exactly do these boards sit, and
+does anything collide? Someone assembling the pedal, already expecting each
+individual board to fit.
+_Avoid_: stage B, settling, placement solving
+_See also_: Match. Because Seat runs only after a pattern matched, its value is
+mostly in clashes between boards and against the lid, not single-board fit.
