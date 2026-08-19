@@ -264,5 +264,6 @@ See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context: `CLAUDE.md` and `docs/adr/` at the root, no `CONTEXT.md` yet.
+One glossary at `docs/GLOSSARY.md`, with `CLAUDE.md` and `docs/adr/` holding the
+rules and the reasons.
 See `docs/agents/domain.md`.

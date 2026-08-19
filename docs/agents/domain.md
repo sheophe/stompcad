@@ -3,9 +3,10 @@
 How the engineering skills should consume this repo's domain documentation when
 exploring the codebase.
 
-`aidrill` is single-context: one `CONTEXT.md` at the repo root and one
-`docs/adr/` beside it. There is no `CONTEXT-MAP.md` and no per-package ADR
-directory.
+One glossary serves the whole repository: `docs/GLOSSARY.md`, with `docs/adr/`
+beside it. There is no root `CONTEXT.md` and no `CONTEXT-MAP.md` — this repo
+keeps a single sectioned glossary rather than one per context, so do not go
+looking for either.
 
 ## Before exploring, read these
 
@@ -14,7 +15,8 @@ directory.
   sections define the vocabulary (canonical frame, answer set, quantisation
   boundary, branded length units, reference outline, tool block) that the code
   and its tests already speak.
-- **`CONTEXT.md`** at the repo root — the glossary.
+- **`docs/GLOSSARY.md`** — the glossary. Its Scope section states what belongs
+  in it and what does not.
 - **`docs/adr/`** — read the ADRs that touch the area you are about to work in.
   There are seven, `0001`–`0007`; `CLAUDE.md`'s *Architecture* section lists
   what each one decides, so read that list first and open only what is
@@ -30,7 +32,7 @@ terms actually get resolved.
 ```
 /
 ├── CLAUDE.md                          ← the rules that govern the vocabulary
-├── CONTEXT.md                         ← the glossary itself
+├── docs/GLOSSARY.md                   ← the glossary itself
 ├── docs/adr/
 │   ├── 0001-pipeline-and-emitter-adapters.md
 │   ├── …

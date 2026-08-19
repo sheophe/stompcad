@@ -77,11 +77,12 @@ without the base tool growing a geometry kernel.
 The repository is renamed, and the directory no longer shares a name with the
 package it contains.
 
-Documentation becomes multi-context. `CONTEXT-MAP.md` replaces the single root
-`CONTEXT.md`, per-package ADR directories become possible alongside the
-system-wide one, and `docs/agents/domain.md` — which currently describes a
-single-context repository — needs editing. `docs/adr/` keeps its existing
-numbering for decisions that span the workspace.
+Documentation stays single-rooted. One sectioned `docs/GLOSSARY.md` serves every
+package, rather than a `CONTEXT-MAP.md` pointing at one glossary per context:
+these packages share most of their vocabulary, and splitting it would duplicate
+the shared half and invite the copies to drift. Per-package ADR directories
+become possible alongside the system-wide one, and `docs/adr/` keeps its
+existing numbering for decisions that span the workspace.
 
 `aidrill` gains a dependency on `aigeom`, and its own modules lose the
 primitives that move. Every artefact `aidrill` emits must be byte-identical
