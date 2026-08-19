@@ -45,7 +45,7 @@ its "Order of work". Governed by
 - **Docstrings are at most ten physical lines** and explain why the code is
   shaped this way, never how it got that way.
 - Exact test count before this plan: **1342 passing** under
-  `pytest --hammond`, **1249 passing / 93 skipped** without it.
+  `pytest --hammond`, **1248 passing / 94 skipped** without it.
 
 ---
 

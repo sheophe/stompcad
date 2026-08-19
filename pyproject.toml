@@ -31,8 +31,11 @@ target-version = "py310"
 # Import classification follows these roots. Ruff's default is the project root
 # and `src` beneath it, which named this tree's packages while they sat there;
 # from the workspace root a member's sources are two directories down, and left
-# unsaid every first-party import would sort as a third-party one.
-src = [".", "packages/stompdrill/src", "packages/stompdrill"]
+# unsaid every first-party import would sort as a third-party one. The glob
+# covers a member that does not exist yet: named one by one, a new package
+# arrives with every import misfiled and a hundred fixable I001s inviting the
+# `--fix` that would reformat the import blocks this migration must not touch.
+src = [".", "packages/*/src", "packages/*"]
 # E501 is not selected — no line-length convention is declared in prose and 206
 # existing lines exceed ruff's default 88. But I001 wraps an import block at
 # whatever line-length is in force, so leaving it unset let the undeclared 88
@@ -96,7 +99,9 @@ extend-immutable-calls = [
 
 [tool.mypy]
 python_version = "3.10"
-mypy_path = "packages/stompdrill/src"
+# Globbed for the same reason as ruff's `src` above: a member's modules are
+# named from its own src root, and one added later should not have to remember.
+mypy_path = "packages/*/src"
 files = ["packages"]
 # Naming the directory rather than its members keeps a new package covered on
 # arrival, but it also sweeps up what building one leaves behind: setuptools
@@ -121,14 +126,14 @@ ignore_missing_imports = true
 
 # `mutmut run` copies the tree into mutants/ and rewrites the sources there, so
 # anything the suite opens by relative path has to be copied alongside them.
-# tests/ and pyproject.toml come across by default; these two do not, and
-# test_enclosures.py re-derives the catalogue from docs/parts/dimensions.tsv
-# through tools/build_catalogue.py on every run. A file whose parent directory
-# does not exist under mutants/ fails the copy outright, which is why these name
-# directories.
+# pyproject.toml comes across by default; packages/stompdrill/tests/ no longer
+# does, and neither do these others, and test_enclosures.py re-derives the
+# catalogue from docs/parts/dimensions.tsv through tools/build_catalogue.py on
+# every run. A file whose parent directory does not exist under mutants/ fails
+# the copy outright, which is why these name directories.
 [tool.mutmut]
 source_paths = ["packages/stompdrill/src/stompdrill"]
-also_copy = ["docs/", "tools/", "packages/stompdrill/tests/fixtures/"]
+also_copy = ["docs/", "tools/", "packages/stompdrill/tests/"]
 # enclosures.py is generated, and test_enclosures.py asserts that its *text on
 # disk* is what tools/build_catalogue.py renders. Instrumenting it therefore fails
 # that test for every mutant, which aborts the whole run before any result is
@@ -143,6 +148,6 @@ do_not_mutate = ["packages/stompdrill/src/stompdrill/enclosures.py"]
 # its bundled stub uses PEP 695 `type` statements unconditionally, which mypy
 # rejects against this project's python_version = "3.10" target — a tooling
 # mismatch, not a real incompatibility, since stompdrill never imports numpy itself.
-# Capping below that keeps `mypy packages` clean on any interpreter this
-# project supports without touching python_version or the step extra's contents.
+# Capping below that keeps `mypy packages` clean on any interpreter this project
+# supports without touching python_version or the step extra's contents.
 constraint-dependencies = ["numpy<2.3"]

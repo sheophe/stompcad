@@ -18,6 +18,14 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# What this package's own suite needs, so that ADR-0008's sentence -- change
+# into the member, sync, test -- runs a real suite rather than an import check.
+# `pytest` is the whole list: the tests import nothing else the distribution
+# does not already depend on, and every module that reaches OCP guards itself
+# with ``importorskip``, so the heavy `step` extra stays opt-in.
+[dependency-groups]
+dev = ["pytest"]
+
 # Its own testpaths, so `cd packages/stompdrill && pytest` is correct and does
 # not inherit a root testpaths pointing at a sibling package. `pythonpath`
 # reaches the repo root, because test_enclosures.py re-derives the catalogue
