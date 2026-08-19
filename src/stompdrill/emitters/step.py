@@ -30,8 +30,9 @@ __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
 #: Recorded in the header so a reader can tell which release cut the holes.
 _VERSION = "0.1.0"
 
-#: The prefix the translator gives its auto-generated wrapper product. Set at
-#: write time and erased from the payload afterwards, so both uses read it here.
+#: The translator's auto-generated wrapper product. Set at write time, and the
+#: volatile counter it appends is erased afterwards. All three uses -- the
+#: setter, the pattern, the replacement -- read it here rather than spelling it.
 _PRODUCT_NAME = "stompcad"
 
 #: One physical-file entity, wrapped or not, that may carry a volatile
@@ -393,7 +394,7 @@ def _normalise(payload: bytes) -> bytes:
     that call, which would otherwise leak process history back in.
     """
     payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
-    payload = _VOLATILE_VERSION.sub(b"'stompdrill'", payload)
+    payload = _VOLATILE_VERSION.sub(b"'" + _PRODUCT_NAME.encode() + b"'", payload)
     counter = itertools.count(1)
 
     def renumber(match: re.Match[bytes]) -> bytes:
