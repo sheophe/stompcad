@@ -219,6 +219,14 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   in each Python module. Value objects are frozen, slotted dataclasses whose transforms
   return replacements.
 
+## Design rules
+
+- Keep SOLID and DRY in mind, as guidance rather than ceremony. Use them to remove
+  duplication and to sharpen a boundary; do not use them to justify an interface
+  nobody needs, a layer with one implementation, or a class where a function reads
+  better. Review for both: a second copy of a rule, or a module that would have to
+  change for two unrelated reasons, is the signal worth acting on.
+
 ## Testing rules
 
 - Use TDD. Keep stages pure where possible and test emitters with hand-built `DrillData`.
