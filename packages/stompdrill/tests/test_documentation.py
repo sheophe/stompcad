@@ -7,8 +7,12 @@ from pathlib import Path
 
 from tools.check_docstrings import find_long_docstrings
 
-REPO = Path(__file__).resolve().parent.parent
-PYTHON_ROOTS = (REPO / "src", REPO / "tests", REPO / "tools")
+PACKAGE = Path(__file__).resolve().parent.parent
+REPO = PACKAGE.parent.parent
+# The scripts stayed at the repository root when the package moved beneath it,
+# and a root that does not exist scans as empty rather than failing, so the two
+# levels are named apart to keep the audit's reach honest.
+PYTHON_ROOTS = (PACKAGE / "src", PACKAGE / "tests", REPO / "tools")
 
 
 def test_the_scanner_reports_the_owner_and_physical_line_count(tmp_path: Path):

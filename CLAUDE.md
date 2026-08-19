@@ -21,48 +21,48 @@ Python 3.10 or later is required. Create the development environment with:
 
 ```bash
 uv venv
-uv pip install -e ".[dev]"
+uv sync --all-packages --all-extras
 source .venv/bin/activate
 ```
 
 The STEP features (`--case-model`, `--emit step=…`) are behind an optional
-`stompdrill[step]` extra, not part of `.[dev]`: it pins the `cadquery-ocp` geometry
-kernel, which pulls in vtk and matplotlib transitively and is far larger than the
-base install. Add it only when you need those features:
+`stompdrill[step]` extra, which `--all-extras` above installs: it pins the `cadquery-ocp`
+geometry kernel, which pulls in vtk and matplotlib transitively and is far larger than the
+base install. Leave it out when you do not need those features:
 
 ```bash
-uv pip install -e ".[dev,step]"
+uv sync --all-packages
 ```
 
 Run the project checks and tools from the repository root:
 
 ```bash
 # Full suite
-PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --tb=short
+.venv/bin/python -m pytest -p no:cacheprovider -o addopts= --tb=short
 
 # One test
-PYTHONPATH=src pytest -o addopts= tests/test_pipeline.py::test_name -v
+.venv/bin/python -m pytest -o addopts= packages/stompdrill/tests/test_pipeline.py::test_name -v
 
 # Coverage
-PYTHONPATH=src pytest -o addopts= --cov=stompdrill --cov-report=term-missing
+.venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov=stompmodel --cov-report=term-missing
 
 # Lint and types
-ruff check src tests tools
-mypy src/stompdrill tests
+ruff check packages tools
+mypy packages
 
 # Kernel tests against real Hammond models (downloads and caches them)
-PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --hammond --tb=short
+.venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
 # Mutation survey
 PYTHONDONTWRITEBYTECODE=1 mutmut run
 mutmut results
 
 # Run the tool
-PYTHONPATH=src python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
+python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 
 # Cut a supplied Hammond enclosure and check clearance (needs stompdrill[step])
 python tools/fetch_case_model.py 1590BB   # downloads and prints the cached .stp path
-PYTHONPATH=src python -m stompdrill.cli PANEL.ai --case 1590BB \
+python -m stompdrill.cli PANEL.ai --case 1590BB \
   --case-model ~/.cache/stompcad/cases/1590BB.stp \
   --emit step=out.stp
 ```

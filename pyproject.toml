@@ -1,28 +1,24 @@
-[project]
-name = "stompdrill"
-version = "0.1.0"
-description = "Extract drill data from Adobe Illustrator artwork and emit it in fabrication formats"
-requires-python = ">=3.10"
-dependencies = ["pikepdf>=9"]
+# A virtual workspace root: it declares no distribution of its own, so
+# `uv sync` here installs every member and `pip install` of any one member
+# still works in a clean environment. That second property is ADR-0008's
+# governing test, which is why the packages are distributions and not
+# directories.
+[tool.uv.workspace]
+members = ["packages/*"]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest", "pytest-cov", "hypothesis", "ruff", "mypy", "mutmut"]
-step = ["cadquery-ocp==7.9.3.1.1"]
 
-[project.scripts]
-stompdrill = "stompdrill.cli:main"
-
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
+# Whole-workspace run. Each member also declares its own testpaths, so the
+# per-package run stays honest; these two are separate processes on purpose,
+# because two `tests` packages cannot share one interpreter. `pythonpath` puts
+# the root back on the path for the suites that import `tools`; it stopped
+# arriving for free when the tests moved two directories down.
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["packages/stompdrill/tests"]
 addopts = "-q"
 markers = ["hammond: needs a real Hammond STEP model; run with --hammond"]
+pythonpath = ["."]
 
 # A gate that has never been green is not a gate, it is where a real finding
 # hides. Both tools below are configured to be clean, so a new error means a
@@ -32,6 +28,11 @@ markers = ["hammond: needs a real Hammond STEP model; run with --hammond"]
 # it rather than from requires-python.
 [tool.ruff]
 target-version = "py310"
+# Import classification follows these roots. Ruff's default is the project root
+# and `src` beneath it, which named this tree's packages while they sat there;
+# from the workspace root a member's sources are two directories down, and left
+# unsaid every first-party import would sort as a third-party one.
+src = [".", "packages/stompdrill/src", "packages/stompdrill"]
 # E501 is not selected — no line-length convention is declared in prose and 206
 # existing lines exceed ruff's default 88. But I001 wraps an import block at
 # whatever line-length is in force, so leaving it unset let the undeclared 88
@@ -69,7 +70,7 @@ select = [
 # block and the `__all__` beneath it read as one list. Its docstring says so.
 # I001 would sort it alphabetically and decouple the two, which is the same
 # objection that keeps RUF022 unselected; only here it is one file, not a rule.
-"src/stompdrill/__init__.py" = ["I001"]
+"packages/stompdrill/src/stompdrill/__init__.py" = ["I001"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Both are frozen(slots=True) value objects, so the mutable-default hazard B008
@@ -95,8 +96,13 @@ extend-immutable-calls = [
 
 [tool.mypy]
 python_version = "3.10"
-mypy_path = "src"
-files = ["src/stompdrill", "tests"]
+mypy_path = "packages/stompdrill/src"
+files = ["packages"]
+# Naming the directory rather than its members keeps a new package covered on
+# arrival, but it also sweeps up what building one leaves behind: setuptools
+# writes a second copy of every module into the member's build/lib, and two
+# copies of one module name stop mypy before it checks anything.
+exclude = ["^packages/[^/]+/build/"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
@@ -121,14 +127,14 @@ ignore_missing_imports = true
 # does not exist under mutants/ fails the copy outright, which is why these name
 # directories.
 [tool.mutmut]
-source_paths = ["src/stompdrill"]
-also_copy = ["docs/", "tools/", "tests/fixtures/"]
+source_paths = ["packages/stompdrill/src/stompdrill"]
+also_copy = ["docs/", "tools/", "packages/stompdrill/tests/fixtures/"]
 # enclosures.py is generated, and test_enclosures.py asserts that its *text on
 # disk* is what tools/build_catalogue.py renders. Instrumenting it therefore fails
 # that test for every mutant, which aborts the whole run before any result is
 # collected. Excluding it costs nothing: it is a literal catalogue table, so a
 # mutant of it is either caught by the first assertion or meaningless.
-do_not_mutate = ["src/stompdrill/enclosures.py"]
+do_not_mutate = ["packages/stompdrill/src/stompdrill/enclosures.py"]
 
 [tool.uv]
 # cadquery-ocp pulls numpy in transitively (via vtk/matplotlib) with no version
@@ -137,6 +143,6 @@ do_not_mutate = ["src/stompdrill/enclosures.py"]
 # its bundled stub uses PEP 695 `type` statements unconditionally, which mypy
 # rejects against this project's python_version = "3.10" target — a tooling
 # mismatch, not a real incompatibility, since stompdrill never imports numpy itself.
-# Capping below that keeps `mypy src/stompdrill tests` clean on any interpreter this
+# Capping below that keeps `mypy packages` clean on any interpreter this
 # project supports without touching python_version or the step extra's contents.
 constraint-dependencies = ["numpy<2.3"]
