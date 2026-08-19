@@ -34,8 +34,9 @@ defect, because it reintroduces the ambiguity the entry exists to remove.
 ## Packages
 
 **aicad**:
-The user-facing command-line tool. Composes the other three, manages the case
-model cache, and turns a diagnostic into an interactive question.
+The user-facing command-line tool. Drives `aidrill` and `aicollider` as
+libraries, manages the case model cache, and turns a diagnostic into an
+interactive question.
 _Avoid_: the CLI, the frontend, the driver
 
 **aicollider**:
@@ -44,16 +45,28 @@ reports where they clash. Knows geometry and nothing about pedals.
 _Avoid_: the solver, the physics engine
 
 **aidrill**:
-Artwork in, fabrication artefacts out. Owns the drill data and everything
-derived from it.
+Artwork in, fabrication artefacts out. Owns every decision about where a hole
+goes, though not the type the answer is carried in.
 _Avoid_: the parser, the extractor
 
 **aigeom**:
-The primitives shared by the others — lengths, rigid transforms, and the
-geometry operations more than one package needs.
+The kernel layer shared by the others — the STEP reader and writer, coordinate
+frames, and the geometry operations more than one package needs.
 _Avoid_: core, common, utils
 
+**aimodel**:
+The values every package exchanges — lengths, the drill data and its JSON,
+diagnostics, and the pipeline contracts. Pure Python; no kernel, no parser.
+_Avoid_: types, schema, dto
+
 ## Geometry
+
+**Canonicalisation**:
+Converting measured floats to integer nanometres, changing representation and
+nothing else.
+_Avoid_: normalisation, conversion
+_See also_: Quantisation, which also snaps to an answer set. Where there is no
+answer set there is no quantisation, only this.
 
 **Coordinate frame**:
 An origin and a right-handed basis. Carries no meaning about what it registers —
@@ -70,6 +83,11 @@ standard, a grid pitch, or the enclosure catalogue.
 _Avoid_: lookup table, allowed values
 _See also_: Quantisation. The sets are not interchangeable with one another.
 
+**Drill document**:
+The serialised form of one drill run: the holes, the frame they were cut in, and
+the enclosure they were cut for. What passes from `aidrill` to `aicollider`.
+_Avoid_: drill data (that is the type), hole pattern, drill file
+
 **Drill layer**:
 The Illustrator layer whose circles are holes to be drilled.
 _Avoid_: hole layer, cut layer
@@ -79,7 +97,7 @@ Replacing measured floats with members of an answer set, producing canonical
 integer-nanometre data.
 _Avoid_: rounding
 _See also_: Answer set. Snapping is one step within quantisation, not a synonym
-for it.
+for it; canonicalisation is what remains when no answer set exists.
 
 **Reference outline**:
 The largest non-circular path on the reference layer, whose centre is the
@@ -100,7 +118,8 @@ _Avoid_: pillar, post
 _See also_: a standoff is a separate physical part, not a boss.
 
 **Case model**:
-A supplied STEP model of a real enclosure. Never synthesised — only ever read.
+A STEP model of a real enclosure. Never synthesised: one is supplied undrilled,
+and `aidrill` emits the drilled one that `aicollider` docks into.
 _Avoid_: enclosure model, case file, box model
 
 **Drilled face**:
@@ -110,7 +129,7 @@ _Avoid_: panel face, front face, working face
 
 **Face frame**:
 The drilled face's registration: a coordinate frame whose third axis is that
-face's outward normal. `FaceFrame` in `aidrill`.
+face's outward normal. `FaceFrame` in `aigeom`.
 _Avoid_: frame, drill frame, case frame
 _See also_: Coordinate frame, Drilled face.
 
@@ -132,17 +151,29 @@ _See also_: Boss, Drilled face.
 
 ## Boards and docking
 
+**Board**:
+One substrate and the components mounted to it, treated as a single rigid body.
+Several may arrive in one file, and each docks independently.
+_Avoid_: PCB, card, module
+_See also_: Substrate, which is the bare body alone.
+
 **Carrier plane**:
-The flat face of a board that defines its plane. A placement keeps it parallel
-to the drilled face.
-_Avoid_: board plane, substrate, PCB surface
-_See also_: Drilled face.
+The plane of a board's substrate. A placement keeps it parallel to the drilled
+face.
+_Avoid_: board plane, PCB surface
+_See also_: Substrate, whose plane this is; Drilled face.
 
 **Clash**:
 Two solids occupying the same space in a completed placement. A finding to be
 reported and shown, never a reason to compromise a placement.
 _Avoid_: interference, overlap
 _See also_: the engine *collides*; what it finds is a clash.
+
+**Correspondence**:
+One protruding element paired with one hole. Match's primary output, and what
+lets the report name a part rather than a proximity.
+_Avoid_: pairing, mapping, assignment
+_See also_: Placement, which a set of correspondences implies.
 
 **Docking**:
 Determining where each board sits inside a drilled case. Two phases, Match then
@@ -171,22 +202,31 @@ nearly fits must still be recognised, so that Seat can report by how much it
 misses.
 
 **Panel-reference group**:
-The components whose reference designators mark them as user-facing hardware,
-`RV*` and `SW*` by default. Declares which face of a board points at the panel.
+The components whose reference designators mark them as user-facing hardware.
+Declares which face of a board points at the panel. Enumerated per project;
+`aicad` owns the `RV*,SW*` default, and `aicollider` holds none.
 _Avoid_: panel parts, through-hole group, controls
 _See also_: Protruding element, which is geometric; this is declared.
 
 **Placement**:
-One rigid transform seating a board in the case — x, y, z and rotation about
-the carrier plane's normal. A docking run may yield several.
+One rigid transform seating a board in the case: which face it presents to the
+panel, then x, y, z and rotation about the carrier plane's normal. A docking run
+may yield several.
 _Avoid_: position, pose, solution
 _See also_: Docking.
+
+**Profile**:
+A protruding element's radius against depth from its tip. Not a diameter: the
+depth at which the profile first exceeds a hole's radius is how far it inserts.
+_Avoid_: diameter, shaft size, envelope
+_See also_: Protruding element.
 
 **Protruding element**:
 A solid standing proud of the carrier plane — a potentiometer, jack,
 footswitch, LED. Recognised by geometry, never by component identity.
 _Avoid_: component, part, through-panel hardware
-_See also_: Charge.
+_See also_: Panel-reference group, which is declared where this is geometric;
+Profile, which is what a protruding element measures as.
 
 **Seat**:
 The second docking phase, and a question: how exactly do these boards sit, and
@@ -194,4 +234,12 @@ does anything collide? Someone assembling the pedal, already expecting each
 individual board to fit.
 _Avoid_: stage B, settling, placement solving
 _See also_: Match. Because Seat runs only after a pattern matched, its value is
-mostly in clashes between boards and against the lid, not single-board fit.
+mostly in everything a board can foul once it is in the case, not single-board
+fit.
+
+**Substrate**:
+A board's bare body, the solid its components are mounted to. Recognised by
+carrying no component identity, never by name.
+_Avoid_: PCB, panel
+_See also_: Board, which is this plus everything mounted to it; Carrier plane,
+which is this one's plane.
