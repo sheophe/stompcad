@@ -1965,13 +1965,17 @@ source = { editable = "packages/stompmodel" }
 
 [package.dev-dependencies]
 dev = [
+    { name = "mypy" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest" }]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+]
 
 [[package]]
 name = "textual"

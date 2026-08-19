@@ -15,8 +15,8 @@ from stompmodel.units import Millimetre, Nanometre
 __all__ = [
     "Micron",
     "NM_PER_MICRON",
-    "nm_from_micron",
     "mm_from_pt",
+    "nm_from_micron",
 ]
 
 #: The grid pitch, which is a whole number of microns and never finer.

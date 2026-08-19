@@ -32,7 +32,7 @@ Millimetre = NewType("Millimetre", float) # an unquantised measurement
 ```
 
 A brand is applied only where a value genuinely becomes that unit: at a source's
-measurement, at a conversion in `stompdrill.units`, at a quantiser's selected answer, and at a
+measurement, at a conversion in `stompmodel.units`, at a quantiser's selected answer, and at a
 re-wrap after arithmetic. Conversions run one way, from measurement toward the canonical
 unit, as ADR-0004, Figure 1 shows.
 

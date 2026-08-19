@@ -107,7 +107,9 @@ files = ["packages"]
 # member's ``tests`` package is the same hazard by another name: two packages
 # named ``tests`` cannot share this scan any more than they can share one
 # pytest interpreter (see the root testpaths comment above), so stompmodel's
-# is excluded here and verified instead by its own suite, per ADR-0008.
+# is excluded here -- its own [tool.mypy] in packages/stompmodel/pyproject.toml
+# is what actually type-checks it, not this gate and not ADR-0008 (which
+# governs testing, not type-checking).
 exclude = ["^packages/[^/]+/build/", "^packages/stompmodel/tests/"]
 warn_unused_ignores = true
 warn_redundant_casts = true

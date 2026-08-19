@@ -1,4 +1,4 @@
-"""The unit boundary: points and millimetres in, integer nanometres out."""
+"""The unit boundary: millimetres in, integer nanometres out."""
 
 from __future__ import annotations
 

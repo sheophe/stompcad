@@ -17,10 +17,21 @@ where = ["src"]
 # What this package's own suite needs, so that ADR-0008's sentence -- change
 # into the member, sync, test -- runs a real suite rather than an import check.
 # `pytest` is the whole list: the tests import nothing else the distribution
-# does not already depend on.
+# does not already depend on. `mypy` is here too: the root gate excludes this
+# member's tests (they collide with a sibling member's own "tests" package
+# under one scan), so this member's own [tool.mypy] below is the only thing
+# that type-checks them.
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+# Runs where the root gate cannot: `mypy packages` excludes this member's
+# `tests/` to avoid a duplicate-module collision with a sibling member's own
+# `tests` package, so this config is what actually checks those files.
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+files = ["src", "tests"]
