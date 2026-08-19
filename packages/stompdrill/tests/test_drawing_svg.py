@@ -40,7 +40,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.protocols import Emitter
 from stompdrill.quantise import quantise
-from stompdrill.units import Millimetre, Nanometre, format_nm, mm_from_nm
+from stompmodel.units import Millimetre, Nanometre, format_nm, mm_from_nm
 from tests.conftest import at, holes, make_data
 
 SVG_NS = "http://www.w3.org/2000/svg"

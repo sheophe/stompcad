@@ -30,7 +30,7 @@ def _model_path():
 
 def _model(face: str = "box"):
     from stompdrill.cad import load_case_model
-    from stompdrill.units import Nanometre
+    from stompmodel.units import Nanometre
 
     return load_case_model(_model_path(), face=face, margin_nm=Nanometre(1 * MM))
 
@@ -356,7 +356,7 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
         from stompdrill.model import DrillData, Hole
-        from stompdrill.units import Nanometre
+        from stompmodel.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face="box",
                                  margin_nm=Nanometre(1_000_000))
@@ -593,7 +593,7 @@ def test_two_emissions_describe_the_same_model(tmp_path):
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
         from stompdrill.model import DrillData, Hole
-        from stompdrill.units import Nanometre
+        from stompmodel.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face="box",
                                  margin_nm=Nanometre(1_000_000))

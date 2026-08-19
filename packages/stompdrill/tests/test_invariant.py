@@ -30,7 +30,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.quantise import quantise
 from stompdrill.sources import AiPdfSource
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 
 __all__: list[str] = []
 

@@ -24,7 +24,7 @@ from stompdrill.model import (
     SourceInfo,
     StageRun,
 )
-from stompdrill.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
+from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 # --------------------------------------------------------------------------
 # every length is a whole number of nanometres

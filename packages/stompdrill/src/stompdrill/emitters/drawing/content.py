@@ -12,9 +12,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from stompmodel.units import Nanometre, format_nm
+
 from ...model import Diagnostic, DrillData, EnclosureMatch, Hole, Severity
 from ...pipeline import DRILL_STANDARDS
-from ...units import Nanometre, format_nm
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the checker
     from .layout import Layout

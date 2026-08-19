@@ -8,7 +8,7 @@ from stompdrill.enclosures import footprints
 from stompdrill.model import Diagnostic, RawOutline, Severity
 from stompdrill.pipeline import IdentifyHammondFootprint, normalize_part_name
 from stompdrill.pipeline import enclosure as enclosure_stage
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 
 #: Nanometres in a millimetre, spelled out rather than imported from ``units``:
 #: a test that took the factor from the module under test could not tell a

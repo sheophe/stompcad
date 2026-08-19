@@ -29,7 +29,7 @@ from stompdrill.model import (
     StageRun,
 )
 from stompdrill.pipeline import DRILL_STANDARDS
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 from tests.hammond import BB_PROBES, require_model
 

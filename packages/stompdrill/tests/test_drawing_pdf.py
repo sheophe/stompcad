@@ -12,7 +12,7 @@ import pytest
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions, encode_text
 from stompdrill.errors import EmitterError
 from stompdrill.model import Diagnostic, DrillData, ReferenceOutline, SourceInfo
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 
 PT_PER_MM = 72.0 / 25.4

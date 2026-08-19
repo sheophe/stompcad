@@ -14,7 +14,7 @@ from stompdrill.emitters.drawing.sheet import (
     FrameStyle,
 )
 from stompdrill.model import ReferenceOutline
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 
 

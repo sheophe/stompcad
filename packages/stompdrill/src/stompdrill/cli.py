@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, get_args, get_type_hints
 
+from stompmodel.units import Nanometre, format_nm, nm_from_mm
+
 from .cad import CaseModel
 from .emitters import (
     DrawingOptions,
@@ -47,7 +49,6 @@ from .pipeline import (
 from .protocols import Emitter, Payload, Pipeline, Stage
 from .quantise import quantise
 from .sources import AiPdfSource
-from .units import Nanometre, format_nm, nm_from_mm
 
 __all__ = [
     "main",

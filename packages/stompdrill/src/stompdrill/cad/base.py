@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
+from stompmodel.units import Nanometre
+
 from ..errors import StompdrillError
 from ..model import ParameterValue
-from ..units import Nanometre
 
 __all__ = ["Rejection", "Frame", "CaseModel", "KernelUnavailable"]
 

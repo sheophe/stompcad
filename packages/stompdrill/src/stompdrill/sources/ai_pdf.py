@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pikepdf
 
+from stompmodel.units import Millimetre
+
 from ..errors import EmptyLayerError, LayerNotFoundError, SourceError
 from ..geometry import (
     ClosePath,
@@ -27,7 +29,7 @@ from ..geometry import (
     transform,
 )
 from ..model import Diagnostic, RawDrillData, RawHole, RawOutline, SourceInfo
-from ..units import Millimetre, mm_from_pt
+from ..units import mm_from_pt
 
 __all__ = ["AiPdfSource"]
 

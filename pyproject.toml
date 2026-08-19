@@ -89,9 +89,9 @@ select = [
 extend-immutable-calls = [
     "stompdrill.model.ReferenceOutline",
     "stompdrill.model.RawOutline",
-    "stompdrill.units.Nanometre",
     "stompdrill.units.Micron",
-    "stompdrill.units.Millimetre",
+    "stompmodel.units.Nanometre",
+    "stompmodel.units.Millimetre",
     "Nanometre",
     "Micron",
     "Millimetre",
@@ -99,15 +99,16 @@ extend-immutable-calls = [
 
 [tool.mypy]
 python_version = "3.10"
-# Globbed for the same reason as ruff's `src` above: a member's modules are
-# named from its own src root, and one added later should not have to remember.
-mypy_path = "packages/*/src"
 files = ["packages"]
 # Naming the directory rather than its members keeps a new package covered on
 # arrival, but it also sweeps up what building one leaves behind: setuptools
 # writes a second copy of every module into the member's build/lib, and two
-# copies of one module name stop mypy before it checks anything.
-exclude = ["^packages/[^/]+/build/"]
+# copies of one module name stop mypy before it checks anything. A second
+# member's ``tests`` package is the same hazard by another name: two packages
+# named ``tests`` cannot share this scan any more than they can share one
+# pytest interpreter (see the root testpaths comment above), so stompmodel's
+# is excluded here and verified instead by its own suite, per ADR-0008.
+exclude = ["^packages/[^/]+/build/", "^packages/stompmodel/tests/"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true

@@ -19,7 +19,7 @@ from stompdrill.cad import Rejection  # noqa: E402
 from stompdrill.cad.base import Frame  # noqa: E402
 from stompdrill.cad.loader import OcpCaseModel  # noqa: E402
 from stompdrill.cad.region import build_region, classify_bounds, contains  # noqa: E402
-from stompdrill.units import Nanometre  # noqa: E402
+from stompmodel.units import Nanometre  # noqa: E402
 
 AXIS = 1
 MM = 1_000_000

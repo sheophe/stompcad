@@ -11,8 +11,9 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from stompmodel.units import mm_from_nm
+
 from ...model import DrillData
-from ...units import mm_from_nm
 from .content import Note, fit_font, note_lines, row_chains
 from .sheet import TITLE_BLOCK_WIDTH, Box, FrameStyle, Sheet
 

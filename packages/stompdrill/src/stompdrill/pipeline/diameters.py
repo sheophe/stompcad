@@ -14,9 +14,10 @@ from fractions import Fraction
 from types import MappingProxyType
 from typing import ClassVar
 
+from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
+
 from ..formatting import format_mm
 from ..model import Diagnostic, ParameterValue, RawHole, StageRun
-from ..units import Nanometre, format_nm, nm_from_mm, scaled_nm
 
 __all__ = [
     "METRIC_BANDS",

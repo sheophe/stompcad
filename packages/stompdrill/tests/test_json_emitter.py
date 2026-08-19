@@ -31,7 +31,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.protocols import Emitter, Pipeline
 from stompdrill.quantise import quantise
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------

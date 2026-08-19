@@ -3,7 +3,7 @@ name = "stompdrill"
 version = "0.1.0"
 description = "Extract drill data from Adobe Illustrator artwork and emit it in fabrication formats"
 requires-python = ">=3.10"
-dependencies = ["pikepdf>=9"]
+dependencies = ["stompmodel", "pikepdf>=9"]
 
 [project.optional-dependencies]
 step = ["cadquery-ocp==7.9.3.1.1"]
@@ -17,6 +17,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv.sources]
+stompmodel = { workspace = true }
 
 # What this package's own suite needs, so that ADR-0008's sentence -- change
 # into the member, sync, test -- runs a real suite rather than an import check.

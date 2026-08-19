@@ -30,7 +30,7 @@ from stompdrill.emitters.drawing_pdf import _num as pdf_num
 from stompdrill.emitters.drawing_pdf import _serialise as pdf_serialise
 from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter, _render_item
 from stompdrill.model import Diagnostic, DrillData, EnclosureMatch
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 from tests.test_drawing_pdf import outline, panel, stream_of, strings_in
 

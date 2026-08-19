@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from stompdrill.enclosures import HAMMOND_1590, Enclosure, footprints
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 
 # Two roots, because the authority and its rendering live at different levels:
 # the drawings TSV is repository documentation, the module it generates ships

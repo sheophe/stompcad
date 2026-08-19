@@ -9,7 +9,7 @@ import pytest
 
 from stompdrill.model import Diagnostic, DrillData, Hole, RawHole, Severity, StageRun
 from stompdrill.pipeline import ReviewGridTies, SnapPositions
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 
 
 def raw(x: float, y: float, *, diameter: float = 7.0) -> RawHole:

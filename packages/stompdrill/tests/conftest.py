@@ -12,7 +12,7 @@ from stompdrill.cad import Frame, Rejection
 from stompdrill.emitters import base
 from stompdrill.geometry import KAPPA
 from stompdrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
 __all__ = [

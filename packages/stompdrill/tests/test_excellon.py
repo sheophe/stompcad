@@ -19,7 +19,7 @@ from stompdrill.model import (
     SourceInfo,
 )
 from stompdrill.protocols import Emitter
-from stompdrill.units import Millimetre, Nanometre, format_nm
+from stompmodel.units import Millimetre, Nanometre, format_nm
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------

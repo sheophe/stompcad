@@ -10,6 +10,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import ClassVar
 
+from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
+
 from ..enclosures import footprints
 from ..model import (
     Diagnostic,
@@ -19,7 +21,6 @@ from ..model import (
     ReferenceOutline,
     StageRun,
 )
-from ..units import Nanometre, format_nm, nm_from_mm, scaled_nm
 
 __all__ = [
     "CATALOGUE",

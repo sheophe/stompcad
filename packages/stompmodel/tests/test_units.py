@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_EVEN, Decimal
 
-from stompdrill.units import NM_PER_MM, Nanometre, format_nm, mm_from_nm, mm_from_pt, nm_from_mm, scaled_nm
+from stompmodel.units import NM_PER_MM, Nanometre, format_nm, mm_from_nm, nm_from_mm, scaled_nm
 
 
 class TestTheReturnIsAnInteger:
@@ -22,18 +22,6 @@ class TestExactness:
     def test_the_metric_step_and_the_kicad_grid_are_exact(self) -> None:
         assert nm_from_mm(0.05) == 50_000
         assert nm_from_mm(0.25) == 250_000
-
-
-class TestPointsBecomeMillimetres:
-    """A change of unit, and deliberately not a change of representation."""
-
-    def test_seventy_two_points_are_an_inch(self) -> None:
-        assert mm_from_pt(72.0) == 25.4
-
-    def test_nothing_is_rounded_on_the_way_in_from_the_artwork(self) -> None:
-        """One point is 25.4/72 mm and stays every digit of it."""
-        assert mm_from_pt(1.0) == 25.4 / 72.0
-        assert type(mm_from_pt(1.0)) is float
 
 
 class TestRounding:

@@ -10,7 +10,7 @@ from stompdrill.cad.base import Frame  # noqa: E402
 from stompdrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
 from stompdrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm  # noqa: E402
 from stompdrill.cad.step import read_step  # noqa: E402
-from stompdrill.units import Nanometre  # noqa: E402
+from stompmodel.units import Nanometre  # noqa: E402
 
 pytestmark = pytest.mark.hammond
 

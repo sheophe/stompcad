@@ -11,19 +11,12 @@ import math
 from decimal import ROUND_HALF_EVEN
 from typing import ClassVar
 
+from stompmodel.units import Millimetre, Nanometre, format_nm, nm_from_mm, scaled_nm
+
 from ..formatting import format_mm
 from ..model import Diagnostic, DrillData, Hole, RawHole, StageRun
 from ..tolerance import within
-from ..units import (
-    NM_PER_MICRON,
-    Micron,
-    Millimetre,
-    Nanometre,
-    format_nm,
-    nm_from_micron,
-    nm_from_mm,
-    scaled_nm,
-)
+from ..units import NM_PER_MICRON, Micron, nm_from_micron
 
 __all__ = ["SnapPositions", "ReviewGridTies"]
 

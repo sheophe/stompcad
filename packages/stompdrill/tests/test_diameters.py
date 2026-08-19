@@ -16,7 +16,7 @@ from stompdrill.pipeline import (
     DrillStandard,
     SnapDiametersToDrillTable,
 )
-from stompdrill.units import Millimetre, Nanometre, format_nm, nm_from_mm
+from stompmodel.units import Millimetre, Nanometre, format_nm, nm_from_mm
 
 
 def measured(diameter: float, *, x: float = 0.0, y: float = 0.0) -> RawHole:

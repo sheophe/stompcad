@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from stompdrill.model import EnclosureMatch, Severity
 from stompdrill.pipeline import CheckCaseClearance
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 from tests.conftest import FakeCase, at, codes, make_data
 
 MM = 1_000_000

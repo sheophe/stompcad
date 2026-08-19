@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from stompmodel.units import format_nm
+
 from ..model import Diagnostic, DrillData, Hole, StageRun
-from ..units import format_nm
 
 __all__ = ["Deduplicate"]
 

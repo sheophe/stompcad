@@ -8,7 +8,7 @@ import pytest
 
 from stompdrill.model import DrillData, Hole, RawHole, ReferenceOutline
 from stompdrill.pipeline import RouteHoles
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at
 
 __all__: list[str] = []

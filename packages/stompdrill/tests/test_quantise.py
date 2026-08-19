@@ -25,7 +25,7 @@ from stompdrill.pipeline import (
 from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from stompdrill.quantise import quantise
 from stompdrill.sources import AiPdfSource
-from stompdrill.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 
 #: The fixture panel's own measurement: 113.000 × 60.000, which is within

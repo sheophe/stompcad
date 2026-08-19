@@ -8,7 +8,7 @@ pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
 from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid  # noqa: E402
 from stompdrill.cad.step import read_step  # noqa: E402
-from stompdrill.units import Nanometre  # noqa: E402
+from stompmodel.units import Nanometre  # noqa: E402
 from tests.hammond import MODELS  # noqa: E402
 
 pytestmark = pytest.mark.hammond

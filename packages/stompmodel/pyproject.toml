@@ -1,0 +1,26 @@
+[project]
+name = "stompmodel"
+version = "0.1.0"
+description = "The values every stomp package exchanges: lengths, drill data, diagnostics, contracts"
+requires-python = ">=3.10"
+# Deliberately none. This package is the workspace's pure-Python leaf; a
+# dependency here would be inherited by everything.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# What this package's own suite needs, so that ADR-0008's sentence -- change
+# into the member, sync, test -- runs a real suite rather than an import check.
+# `pytest` is the whole list: the tests import nothing else the distribution
+# does not already depend on.
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

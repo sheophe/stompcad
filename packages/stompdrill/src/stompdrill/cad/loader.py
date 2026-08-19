@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..units import Nanometre, nm_from_mm
+from stompmodel.units import Nanometre, nm_from_mm
+
 from .base import CaseModel, Frame, Rejection
 
 __all__ = ["OcpCaseModel", "load_case_model"]

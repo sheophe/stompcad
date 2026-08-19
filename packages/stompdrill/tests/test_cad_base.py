@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from stompdrill.cad import CaseModel, Frame, KernelUnavailable, Rejection
 from stompdrill.errors import StompdrillError
-from stompdrill.units import Nanometre
+from stompmodel.units import Nanometre
 
 
 class Stub:

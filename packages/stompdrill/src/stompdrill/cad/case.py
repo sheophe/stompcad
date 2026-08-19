@@ -10,8 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
+
 from ..errors import StompdrillError
-from ..units import Nanometre, mm_from_nm, nm_from_mm
 from .base import Frame
 from .step import StepDocument, StepSolid, bounding_box_mm
 
