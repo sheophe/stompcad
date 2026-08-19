@@ -551,14 +551,41 @@ TDD throughout, following the repository's existing rules.
 
 ## Order of work
 
-1. **`stompmodel`**, verified by `stompdrill`'s existing suite. Complete only when
-   every `stompdrill` artefact is byte-identical across the move.
-2. **`stompgeom`**, on the same test.
-3. **`stompcollider`**.
+**Three implementation plans, not one**, written and executed in order. This is
+a deliberate departure from the usual one-spec-one-plan shape, so the reasoning
+is recorded rather than left to be rediscovered.
 
-`stompdrill`'s suite is the instrument for the first two steps: a move that breaks
-something says so immediately, which is the whole reason ADR-0008 extracts before
-the new tools rather than after.
+| Plan | Contents | Done when |
+| --- | --- | --- |
+| 1 — `stompmodel` | lengths, `DrillData` and its members, diagnostics, the JSON codec plus the reader it never had, and the generic `Stage[T]` / `Pipeline[T]` / `Emitter[T]` contracts | `stompdrill`'s suite is green and every artefact is byte-identical |
+| 2 — `stompgeom` | the STEP reader, the deterministic writer with its OCC normalisation, and the `CoordinateFrame` / `FaceFrame` split | the same test |
+| 3 — `stompcollider` | everything this document specifies, built test-first | its own suite, and the cross-artefact agreement test |
+
+**Why three.** Plans 1 and 2 succeed when *nothing observable changes*; plan 3
+succeeds when new behaviour appears. One plan would interleave "prove nothing
+moved" tasks with "build a thing" tasks, and a reviewer applies a different
+rubric to each. They are also verified by different instruments — the
+extractions borrow a suite that already exists, the build brings its own — and
+each extraction leaves the repository better on its own, which is the test for
+whether work deserves its own plan.
+
+**Write each plan after executing the one before it.** The extractions will
+teach us something about the boundary, and a plan written before that lesson is
+one we would revise.
+
+**`levels()` moves last, inside plan 3.** ADR-0009 places it in `stompgeom` and
+that is where it ends up, but it is deliberately not part of the upfront
+extraction. Grouping coplanar faces is the strongest sharing candidate and the
+one whose interface is least obvious: `find_faces` currently returns a
+case-shaped plate with an inner level, a position and a thickness, where
+carrier-plane detection wants levels and holedness. Cutting that seam in plan 2
+would mean designing it with no second consumer in the room. So plan 3 extracts
+it as a task placed immediately after the carrier-plane code that consumes it —
+which is what ADR-0008 means by an interface discovered rather than invented.
+
+`stompdrill`'s suite is the instrument for the first two plans: a move that
+breaks something says so immediately, which is the whole reason ADR-0008
+extracts before the new tools rather than after.
 
 ## Not decided here
 

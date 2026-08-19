@@ -68,6 +68,10 @@ The kernel layer: the STEP reader, the deterministic STEP writer with its OCC
 normalisation, `CoordinateFrame` and `FaceFrame`, `levels()` for grouping coplanar
 faces and measuring holedness, bounding boxes, `KernelUnavailable`.
 
+`levels()` arrives last, once `stompcollider`'s carrier-plane code exists to
+shape its interface. It belongs here; it is not part of the upfront extraction.
+The technical specification's order of work says why.
+
 No enclosure vocabulary crosses this boundary. `select_solid`'s box/lid keywords,
 `CaseModel`, `Rejection` and the play-area reasoning in `region.py` stay in
 `stompdrill`.
