@@ -1,6 +1,9 @@
 # ADR-0008: A workspace and a shared geometry core
 
-**Status:** Accepted
+**Status:** Accepted, amended by
+[ADR-0009](0009-shared-model-package-and-dependency-order.md), which adds a fifth
+package, `aimodel`, and fixes the workspace's dependency order. The reasoning here
+for one repository and for extracting before the new tools is unchanged.
 
 ## Context
 

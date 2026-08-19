@@ -112,6 +112,10 @@ The accepted architecture is defined by:
   hole numbering.
 - [ADR-0007](docs/adr/0007-case-model-and-clearance.md): supplied case models,
   clearance, and the optional kernel.
+- [ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md): the workspace and
+  the shared geometry core.
+- [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md): the shared
+  model package and the workspace's dependency order.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those

@@ -1,6 +1,9 @@
 # ADR-0007: Case models and clearance
 
-**Status:** Accepted
+**Status:** Accepted. The optional `aidrill[step]` extra is retired by
+[ADR-0009](0009-shared-model-package-and-dependency-order.md): `aigeom` takes the
+kernel unconditionally, and this ADR's argument for the extra assumed `aidrill`
+stood alone. Everything else here stands.
 
 ## Context
 
