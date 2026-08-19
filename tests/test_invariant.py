@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from aidrill.emitters import get_emitter
-from aidrill.emitters.json_out import JsonEmitter
-from aidrill.model import (
+from stompdrill.emitters import get_emitter
+from stompdrill.emitters.json_out import JsonEmitter
+from stompdrill.model import (
     DrillData,
     Hole,
     RawDrillData,
@@ -20,7 +20,7 @@ from aidrill.model import (
     ReferenceOutline,
     SourceInfo,
 )
-from aidrill.pipeline import (
+from stompdrill.pipeline import (
     Deduplicate,
     IdentifyHammondFootprint,
     ReviewGridTies,
@@ -28,9 +28,9 @@ from aidrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from aidrill.quantise import quantise
-from aidrill.sources import AiPdfSource
-from aidrill.units import Millimetre, Nanometre
+from stompdrill.quantise import quantise
+from stompdrill.sources import AiPdfSource
+from stompdrill.units import Millimetre, Nanometre
 
 __all__: list[str] = []
 

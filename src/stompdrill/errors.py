@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 __all__ = [
-    "AidrillError",
+    "StompdrillError",
     "SourceError",
     "LayerNotFoundError",
     "EmptyLayerError",
@@ -13,11 +13,11 @@ __all__ = [
 ]
 
 
-class AidrillError(Exception):
-    """Base for every error raised by aidrill."""
+class StompdrillError(Exception):
+    """Base for every error raised by stompdrill."""
 
 
-class SourceError(AidrillError):
+class SourceError(StompdrillError):
     """Something went wrong reading the input artwork."""
 
 
@@ -45,7 +45,7 @@ class EmptyLayerError(SourceError):
         super().__init__(_empty_layer_message(layer, path_count))
 
 
-class EmitterError(AidrillError):
+class EmitterError(StompdrillError):
     """An emitter could not produce output from the data it was given."""
 
 

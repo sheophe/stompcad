@@ -4,7 +4,7 @@
 
 ## Context
 
-`aidrill` reads measured drill geometry and can emit several representations of the
+`stompdrill` reads measured drill geometry and can emit several representations of the
 same panel. Every artifact from one invocation must describe the same accepted holes,
 tool set, ordering, diagnostics, and processing provenance. Computing any of those
 facts independently in an emitter would create multiple authorities for one panel.

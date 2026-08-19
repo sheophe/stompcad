@@ -6,10 +6,10 @@ import re
 
 import pytest
 
-from aidrill.emitters.base import REGISTRY, get_emitter
-from aidrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
-from aidrill.errors import EmitterError
-from aidrill.model import (
+from stompdrill.emitters.base import REGISTRY, get_emitter
+from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
+from stompdrill.errors import EmitterError
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     Hole,
@@ -18,8 +18,8 @@ from aidrill.model import (
     ReferenceOutline,
     SourceInfo,
 )
-from aidrill.protocols import Emitter
-from aidrill.units import Millimetre, Nanometre, format_nm
+from stompdrill.protocols import Emitter
+from stompdrill.units import Millimetre, Nanometre, format_nm
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def emit(data: DrillData, **kwargs) -> str:
 
 
 def test_emitter_self_registers_as_excellon():
-    import aidrill.emitters  # noqa: F401  (importing the package must register)
+    import stompdrill.emitters  # noqa: F401  (importing the package must register)
 
     assert REGISTRY["excellon"] is ExcellonEmitter
     assert get_emitter("excellon") is ExcellonEmitter

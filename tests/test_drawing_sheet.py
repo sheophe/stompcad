@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aidrill.emitters.drawing.sheet import (
+from stompdrill.emitters.drawing.sheet import (
     A0_LANDSCAPE,
     A3_LANDSCAPE,
     A4_LANDSCAPE,

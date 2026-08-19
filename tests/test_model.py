@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from aidrill.errors import EmitterError
-from aidrill.formatting import format_mm
-from aidrill.model import (
+from stompdrill.errors import EmitterError
+from stompdrill.formatting import format_mm
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     EnclosureMatch,
@@ -24,7 +24,7 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
+from stompdrill.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 # --------------------------------------------------------------------------
 # every length is a whole number of nanometres
@@ -761,11 +761,11 @@ def test_the_enclosure_survives_the_other_transforms():
 
 
 def test_the_enclosure_is_re_exported_from_the_package_root():
-    """The wider toolchain imports from ``aidrill``, not ``aidrill.model``."""
-    import aidrill
+    """The wider toolchain imports from ``stompdrill``, not ``stompdrill.model``."""
+    import stompdrill
 
-    assert aidrill.EnclosureMatch is EnclosureMatch
-    assert "EnclosureMatch" in aidrill.__all__
+    assert stompdrill.EnclosureMatch is EnclosureMatch
+    assert "EnclosureMatch" in stompdrill.__all__
 
 
 # --------------------------------------------------------------------------

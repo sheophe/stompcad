@@ -5,10 +5,10 @@ this repository.
 
 ## Purpose and scope
 
-`aidrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
+`stompdrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
 artefacts. `DrillData` is the library integration contract and the JSON emitter is its
 serialised form. KiCad data and component semantics are outside the package's scope.
-Enclosure geometry enters only as a supplied model: `aidrill` never synthesises an
+Enclosure geometry enters only as a supplied model: `stompdrill` never synthesises an
 enclosure, and reads one only to verify clearance and to cut the holes it has already
 decided on. Acquiring that model is not the package's job — see
 `tools/fetch_case_model.py`.
@@ -26,7 +26,7 @@ source .venv/bin/activate
 ```
 
 The STEP features (`--case-model`, `--emit step=…`) are behind an optional
-`aidrill[step]` extra, not part of `.[dev]`: it pins the `cadquery-ocp` geometry
+`stompdrill[step]` extra, not part of `.[dev]`: it pins the `cadquery-ocp` geometry
 kernel, which pulls in vtk and matplotlib transitively and is far larger than the
 base install. Add it only when you need those features:
 
@@ -44,11 +44,11 @@ PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --tb=short
 PYTHONPATH=src pytest -o addopts= tests/test_pipeline.py::test_name -v
 
 # Coverage
-PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
+PYTHONPATH=src pytest -o addopts= --cov=stompdrill --cov-report=term-missing
 
 # Lint and types
 ruff check src tests tools
-mypy src/aidrill tests
+mypy src/stompdrill tests
 
 # Kernel tests against real Hammond models (downloads and caches them)
 PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --hammond --tb=short
@@ -58,12 +58,12 @@ PYTHONDONTWRITEBYTECODE=1 mutmut run
 mutmut results
 
 # Run the tool
-PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
+PYTHONPATH=src python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 
-# Cut a supplied Hammond enclosure and check clearance (needs aidrill[step])
+# Cut a supplied Hammond enclosure and check clearance (needs stompdrill[step])
 python tools/fetch_case_model.py 1590BB   # downloads and prints the cached .stp path
-PYTHONPATH=src python -m aidrill.cli PANEL.ai --case 1590BB \
-  --case-model ~/.cache/aidrill/cases/1590BB.stp \
+PYTHONPATH=src python -m stompdrill.cli PANEL.ai --case 1590BB \
+  --case-model ~/.cache/stompcad/cases/1590BB.stp \
   --emit step=out.stp
 ```
 
@@ -197,12 +197,12 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `build_pipeline` is the integration point by design.
 - **New source:** implement `Source`, returning `RawDrillData`. There is no source
   registry.
-- **A new stage or source also gets one line in `src/aidrill/__init__.py`.** A new
+- **A new stage or source also gets one line in `src/stompdrill/__init__.py`.** A new
   emitter does not — it has a registry, and is resolved through
-  `aidrill.emitters.get_emitter`. The root exports what no registry can find: without
+  `stompdrill.emitters.get_emitter`. The root exports what no registry can find: without
   that line a consumer reproducing the `Source -> quantise -> Pipeline -> Emitter` flow
   finds protocols with nothing at hand that satisfies them. `METRIC_BANDS` and
-  `FRACTIONAL_SIXTY_FOURTHS` stay in `aidrill.pipeline`: they generate the standards
+  `FRACTIONAL_SIXTY_FOURTHS` stay in `stompdrill.pipeline`: they generate the standards
   rather than read a result.
 
 ## Documentation rules
@@ -240,14 +240,14 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   shared facts rather than placement.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
-- Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.
-- `mypy` covers `tests` as well as `src/aidrill`, because most hand-built lengths are
+- Coverage targets are 90% for `src/stompdrill` and 100% for quantisers, stages, and emitters.
+- `mypy` covers `tests` as well as `src/stompdrill`, because most hand-built lengths are
   fixtures. Test helpers accept plain literals and brand them internally; direct model
   construction wraps explicitly.
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.
 - Clearance-rule tests use a fake `CaseModel`; kernel-backed tests skip when
-  `aidrill[step]` is absent.
+  `stompdrill[step]` is absent.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
   claimed rule is not evidence.
 - Kernel tests run against real Hammond models fetched at run time, never committed.

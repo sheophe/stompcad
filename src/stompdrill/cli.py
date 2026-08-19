@@ -1,6 +1,6 @@
 """Command-line composition and reporting.
 
-Quantiser order belongs to :func:`aidrill.quantise`; post-quantisation stages
+Quantiser order belongs to :func:`stompdrill.quantise`; post-quantisation stages
 run deduplicate → review-grid-ties → route. Emitters are registry-resolved.
 Exit codes are 0 clean, 1 warnings, 2 errors and 3 usage or I/O failure.
 """
@@ -27,7 +27,7 @@ from .emitters import (
     get_emitter,
 )
 from .enclosures import HAMMOND_1590
-from .errors import AidrillError
+from .errors import StompdrillError
 from .formatting import format_mm
 from .model import Diagnostic, DrillData, RawDrillData, Severity
 from .pipeline import (
@@ -93,7 +93,7 @@ class UsageError(Exception):
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
     parser = argparse.ArgumentParser(
-        prog="aidrill",
+        prog="stompdrill",
         description="Extract drill data from Adobe Illustrator artwork and emit it.",
     )
     parser.add_argument("panel", metavar="PANEL.ai", help="Illustrator file to read")
@@ -309,7 +309,7 @@ def build_case_model(args: argparse.Namespace) -> CaseModel | None:
             margin_nm=margin_nm,
             part=None if args.case is None else parse_case(args.case),
         )
-    except AidrillError as failure:
+    except StompdrillError as failure:
         raise UsageError(f"--case-model: {failure}") from failure
 
 
@@ -766,7 +766,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # their tracebacks rather than being classified as invalid input.
     try:
         return _run(args, sys.stdout)
-    except (UsageError, AidrillError, OSError) as failure:
+    except (UsageError, StompdrillError, OSError) as failure:
         print(f"{parser.prog}: error: {failure}", file=sys.stderr)
         return EXIT_USAGE
 

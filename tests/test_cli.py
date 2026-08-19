@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from aidrill import cli
-from aidrill.emitters.base import available, register_emitter
-from aidrill.errors import EmptyLayerError, LayerNotFoundError
-from aidrill.model import (
+from stompdrill import cli
+from stompdrill.emitters.base import available, register_emitter
+from stompdrill.errors import EmptyLayerError, LayerNotFoundError
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     EnclosureMatch,
@@ -28,8 +28,8 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.pipeline import DRILL_STANDARDS
-from aidrill.units import Millimetre, Nanometre
+from stompdrill.pipeline import DRILL_STANDARDS
+from stompdrill.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 from tests.hammond import BB_PROBES, require_model
 
@@ -359,12 +359,12 @@ class TestAGridThatIsNotANumberIsAUsageError:
     def test_a_non_finite_grid_exits_three(self, fake_source, capsys, argv):
         fake_source(read())
         assert cli.main([str(FIXTURE), *argv]) == 3
-        assert capsys.readouterr().err.startswith("aidrill: error:")
+        assert capsys.readouterr().err.startswith("stompdrill: error:")
 
     def test_a_non_finite_warning_threshold_exits_three(self, fake_source, capsys):
         fake_source(read())
         assert cli.main([str(FIXTURE), "--grid-warn", "nan"]) == 3
-        assert capsys.readouterr().err.startswith("aidrill: error:")
+        assert capsys.readouterr().err.startswith("stompdrill: error:")
 
     def test_nothing_is_written(self, fake_source, tmp_path, capsys):
         """The failure this is really about: a file that looks well-formed.
@@ -423,7 +423,7 @@ class TestAGridFinerThanAnArtifactCanPrint:
         assert cli.main([str(FIXTURE), "--grid", grid]) == 3
 
         err = capsys.readouterr().err
-        assert err.startswith("aidrill: error:"), err
+        assert err.startswith("stompdrill: error:"), err
         assert "--grid" in err
 
 
@@ -466,7 +466,7 @@ def test_an_unknown_standard_is_a_usage_error_that_names_the_ones_there_are(
     assert cli.main([str(FIXTURE), "--drill-standard", "whitworth"]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
+    assert err.startswith("stompdrill: error:"), err
     assert "whitworth" in err
     for name in DRILL_STANDARDS:
         assert name in err
@@ -515,7 +515,7 @@ def test_a_size_the_standard_does_not_have_is_a_usage_error(fake_source, capsys)
     assert cli.main([str(FIXTURE), "--drill-sizes", "3.2,3.33"]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
+    assert err.startswith("stompdrill: error:"), err
     assert "3.33" in err
 
 
@@ -534,7 +534,7 @@ def test_a_malformed_size_list_is_a_usage_error(fake_source, capsys, flag, bad):
     assert cli.main([str(FIXTURE), flag, bad]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
+    assert err.startswith("stompdrill: error:"), err
     assert flag in err
 
 
@@ -572,7 +572,7 @@ def test_an_order_code_is_not_told_it_drew_the_wrong_case(fake_source, capsys):
     assert cli.main([str(FIXTURE), "--case", "1590BBBK"]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
+    assert err.startswith("stompdrill: error:"), err
     assert "1590BBBK" in err
     # The whole phrase, not the substring: ``"1590BB" in err`` is satisfied by
     # the echoed order code itself, so it passes just as happily when the
@@ -587,7 +587,7 @@ def test_a_part_number_from_nowhere_is_a_usage_error(fake_source, capsys):
     assert cli.main([str(FIXTURE), "--case", "1590ZZ"]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
+    assert err.startswith("stompdrill: error:"), err
     assert "1590ZZ" in err
 
 
@@ -613,7 +613,7 @@ def test_an_empty_case_is_told_it_is_empty(fake_source, capsys):
     assert cli.main([str(FIXTURE), "--case", "  "]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("aidrill: error:"), err
+    assert err.startswith("stompdrill: error:"), err
     assert "needs a part number" in err
 
 
@@ -682,12 +682,12 @@ def test_argparse_rejection_is_not_mistaken_for_our_validation(fake_source, caps
     argparse_err = capsys.readouterr().err
     assert argparse_err.startswith("usage:")  # argparse's, never ours
     # Why ``startswith`` and not ``in`` — argparse says this too:
-    assert "aidrill: error:" in argparse_err
+    assert "stompdrill: error:" in argparse_err
     assert "--drill-sizes" in argparse_err
 
     assert cli.main([str(FIXTURE), "--drill-sizes", "3.33"]) == 3
     ours = capsys.readouterr().err
-    assert ours.startswith("aidrill: error:")
+    assert ours.startswith("stompdrill: error:")
     assert "usage:" not in ours
 
 
@@ -1484,7 +1484,7 @@ def test_the_pdf_format_is_offered_and_writes_a_pdf(tmp_path, capsys):
 
 
 def test_the_pdf_emitter_receives_the_title_from_the_command_line():
-    from aidrill.emitters.drawing_pdf import DrawingPdfEmitter
+    from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
 
     emitter = cli.make_emitter("drawing-pdf", cli.OutputSettings(title="TAR PANEL"))
 
@@ -1558,7 +1558,7 @@ def test_the_two_empty_layer_causes_do_not_read_alike():
 
 
 def test_case_face_accepts_only_box_or_lid():
-    from aidrill.cli import UsageError, parse_face
+    from stompdrill.cli import UsageError, parse_face
 
     assert parse_face("box") == "box"
     assert parse_face("LID") == "lid"
@@ -1567,7 +1567,7 @@ def test_case_face_accepts_only_box_or_lid():
 
 
 def test_emitting_step_without_a_case_model_is_a_usage_error(tmp_path, capsys):
-    from aidrill.cli import main
+    from stompdrill.cli import main
 
     code = main(["panel.ai", "--emit", f"step={tmp_path / 'o.stp'}"])
 
@@ -1576,7 +1576,7 @@ def test_emitting_step_without_a_case_model_is_a_usage_error(tmp_path, capsys):
 
 
 def test_an_unreadable_case_model_is_a_usage_error(tmp_path, capsys):
-    from aidrill.cli import main
+    from stompdrill.cli import main
 
     code = main(["panel.ai", "--case-model", str(tmp_path / "absent.stp")])
 
@@ -1584,7 +1584,7 @@ def test_an_unreadable_case_model_is_a_usage_error(tmp_path, capsys):
 
 
 def test_a_negative_case_margin_is_a_usage_error(tmp_path, capsys):
-    from aidrill.cli import main
+    from stompdrill.cli import main
 
     code = main(["panel.ai", "--case-model", "x.stp", "--case-margin", "-1"])
 
@@ -1593,7 +1593,7 @@ def test_a_negative_case_margin_is_a_usage_error(tmp_path, capsys):
 
 
 def test_the_case_margin_default_is_one_millimetre():
-    from aidrill.cli import build_parser
+    from stompdrill.cli import build_parser
 
     args = build_parser().parse_args(["panel.ai"])
 
@@ -1601,7 +1601,7 @@ def test_the_case_margin_default_is_one_millimetre():
 
 
 def test_the_case_face_default_is_box():
-    from aidrill.cli import build_parser
+    from stompdrill.cli import build_parser
 
     args = build_parser().parse_args(["panel.ai"])
 
@@ -1609,7 +1609,7 @@ def test_the_case_face_default_is_box():
 
 
 def test_no_case_model_leaves_the_pipeline_unchanged():
-    from aidrill.cli import build_parser, build_pipeline
+    from stompdrill.cli import build_parser, build_pipeline
 
     args = build_parser().parse_args(["panel.ai"])
 
@@ -1619,7 +1619,7 @@ def test_no_case_model_leaves_the_pipeline_unchanged():
 
 
 def test_a_case_model_appends_the_clearance_stage_last():
-    from aidrill.cli import build_parser, build_pipeline
+    from stompdrill.cli import build_parser, build_pipeline
     from tests.test_clearance import FakeCase
 
     args = build_parser().parse_args(["panel.ai"])
@@ -1629,7 +1629,7 @@ def test_a_case_model_appends_the_clearance_stage_last():
 
 
 def test_the_report_names_the_model_face_and_play_area():
-    from aidrill.cli import format_case
+    from stompdrill.cli import format_case
     from tests.test_clearance import FakeCase
 
     lines = "\n".join(format_case(FakeCase()))
@@ -1696,9 +1696,9 @@ def test_emitting_step_without_a_model_is_caught_before_the_file_is_even_opened(
 @pytest.mark.hammond
 def test_a_clearance_error_withholds_every_artefact(tmp_path, capsys):
     """Any error withholds every requested artefact, including the drill file."""
-    pytest.importorskip("OCP", reason="needs aidrill[step]")
+    pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
-    from aidrill.cli import main
+    from stompdrill.cli import main
 
     panel = _panel_with_a_hole_in_a_boss(tmp_path)
     drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
@@ -1715,9 +1715,9 @@ def test_a_clearance_error_withholds_every_artefact(tmp_path, capsys):
 
 @pytest.mark.hammond
 def test_a_clean_run_writes_both_artefacts(tmp_path):
-    pytest.importorskip("OCP", reason="needs aidrill[step]")
+    pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
-    from aidrill.cli import main
+    from stompdrill.cli import main
 
     panel = _panel_with_a_central_hole(tmp_path)
     drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
@@ -1732,9 +1732,9 @@ def test_a_clean_run_writes_both_artefacts(tmp_path):
 
 @pytest.mark.hammond
 def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, capsys):
-    pytest.importorskip("OCP", reason="needs aidrill[step]")
+    pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
-    from aidrill.cli import main
+    from stompdrill.cli import main
 
     panel = _panel_with_a_hole_in_a_boss(tmp_path)
     code = main([str(panel), "--case", "1590BB", "--case-model", str(_model_path())])

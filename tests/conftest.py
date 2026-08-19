@@ -8,11 +8,11 @@ import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
 
-from aidrill.cad import Frame, Rejection
-from aidrill.emitters import base
-from aidrill.geometry import KAPPA
-from aidrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
-from aidrill.units import Nanometre
+from stompdrill.cad import Frame, Rejection
+from stompdrill.emitters import base
+from stompdrill.geometry import KAPPA
+from stompdrill.model import DrillData, Hole, ReferenceOutline, SourceInfo
+from stompdrill.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
 __all__ = [

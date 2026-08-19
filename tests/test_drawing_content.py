@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from aidrill.emitters.drawing import content
-from aidrill.model import Diagnostic, DrillData, EnclosureMatch, Severity, StageRun
+from stompdrill.emitters.drawing import content
+from stompdrill.model import Diagnostic, DrillData, EnclosureMatch, Severity, StageRun
 from tests.conftest import at, make_data
 
 

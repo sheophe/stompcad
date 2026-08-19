@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import pytest
 
-from aidrill.emitters.drawing.build import (
+from stompdrill.emitters.drawing.build import (
     CENTRELINE_DASHES,
     SheetText,
     balloon_overhang,
     build_scene,
     pens_for,
 )
-from aidrill.emitters.drawing.layout import (
+from stompdrill.emitters.drawing.layout import (
     CHAIN_STANDOFF,
     LEVEL_CHAIN_LABEL,
     MAX_BALLOON_OVERHANG,
     RIGHT_ALLOWANCE,
     Layout,
 )
-from aidrill.emitters.drawing.scene import (
+from stompdrill.emitters.drawing.scene import (
     FEINT,
     INK,
     Circle,
@@ -29,9 +29,9 @@ from aidrill.emitters.drawing.scene import (
     Stroke,
     Text,
 )
-from aidrill.emitters.drawing.sheet import A3_LANDSCAPE, GROUP_0_7, FrameStyle, LineGroup
-from aidrill.model import DrillData, Hole, ReferenceOutline
-from aidrill.units import Nanometre
+from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE, GROUP_0_7, FrameStyle, LineGroup
+from stompdrill.model import DrillData, Hole, ReferenceOutline
+from stompdrill.units import Nanometre
 from tests.conftest import at
 
 

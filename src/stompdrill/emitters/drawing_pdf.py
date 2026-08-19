@@ -66,7 +66,7 @@ def _encode_char(ch: str) -> bytes:
 class PdfDrawingOptions:
     """Presentation values for the PDF sheet.
 
-    The three empty defaults are ISO 7200 mandatory fields ``aidrill`` has no
+    The three empty defaults are ISO 7200 mandatory fields ``stompdrill`` has no
     source for; a caller that supplies them gets a conforming sheet.
     """
 
@@ -171,7 +171,7 @@ def _serialise(scene: Scene, title: str) -> bytes:
         )
     )
     pdf.docinfo["/Title"] = title
-    pdf.docinfo["/Creator"] = "aidrill"
+    pdf.docinfo["/Creator"] = "stompdrill"
     out = io.BytesIO()
     # deterministic_id and no XMP: open_metadata() stamps xmp:ModifyDate, which
     # cascades into the trailer /ID and makes two runs disagree.

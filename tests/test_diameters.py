@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import pytest
 
-from aidrill.model import RawHole, Severity
-from aidrill.pipeline import (
+from stompdrill.model import RawHole, Severity
+from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
     FRACTIONAL_SIXTY_FOURTHS,
@@ -16,7 +16,7 @@ from aidrill.pipeline import (
     DrillStandard,
     SnapDiametersToDrillTable,
 )
-from aidrill.units import Millimetre, Nanometre, format_nm, nm_from_mm
+from stompdrill.units import Millimetre, Nanometre, format_nm, nm_from_mm
 
 
 def measured(diameter: float, *, x: float = 0.0, y: float = 0.0) -> RawHole:

@@ -1,19 +1,20 @@
-# aicollider — product-level specification
+# stompcollider — product-level specification
 
-**Status:** pre-spec. Describes what `aicollider` is and is responsible for.
+**Status:** pre-spec. Describes what `stompcollider` is and is responsible for.
 Libraries, interfaces and internal architecture are decided from this document,
 not in it.
 
 ## Purpose
 
-`aicollider` seats printed circuit boards inside a drilled enclosure and reports
+`stompcollider` seats printed circuit boards inside a drilled enclosure and reports
 where they clash. Its job is to answer, before aluminium is cut and boards are
 ordered, whether a pedal actually assembles.
 
-It knows geometry. It does not know pedals: no component taxonomy, no part
-library, no notion of what a potentiometer is for. Where domain knowledge is
-unavoidable it arrives as a caller-supplied parameter, never as a fact compiled
-in.
+It is domain-specific only where it must be. Pairing protruding control
+elements against holes in a flat drilled face is the problem it was built for,
+and that shape is compiled in. What is *not* compiled in is component identity:
+no taxonomy, no part library, no notion of what a potentiometer is for. Domain
+knowledge of that kind arrives as a caller-supplied parameter.
 
 ## Two phases, two questions
 
@@ -59,7 +60,7 @@ unsatisfiable on any board with a footswitch.
 The recognition tolerance is **half the drill grid pitch**, and it is derived
 rather than chosen: holes are quantised to that grid, so two distinct holes are
 at least one pitch apart, and any offset below half a pitch identifies exactly
-one hole. `aicollider` receives it as a length and never learns a lattice
+one hole. `stompcollider` receives it as a length and never learns a lattice
 exists.
 
 **Rotation is proposed, not swept.** Each correspondence implies one angle;
@@ -104,7 +105,7 @@ The filter is an expression, not a prefix list. It must support globs, explicit
 names, inclusive ranges, and exclusions — a designer's convention is a
 convention, not a law.
 
-`aicollider` never learns what the letters mean. It receives "these designators
+`stompcollider` never learns what the letters mean. It receives "these designators
 are the panel-reference group" and nothing more.
 
 Two rules are built in and not configurable:
@@ -123,7 +124,7 @@ profile belongs to Seat.
 
 ## Boards
 
-`aicollider` accepts several files; each may hold one board or many, and it
+`stompcollider` accepts several files; each may hold one board or many, and it
 groups solids into boards itself. The caller cannot pre-split, because a
 multi-board layout is a single KiCad project and KiCad exports per board file.
 
@@ -222,7 +223,7 @@ pairings is the rank of a rigid planar transform. Neither was chosen.
 compensates for, or works around a defective input. A STEP export missing a
 component's 3D model is fixed by assigning the model and re-exporting.
 
-**Installs and tests alone**, without `aidrill`, `aicad`, or any pedal-specific
+**Installs and tests alone**, without `stompdrill`, `stompcad`, or any pedal-specific
 package.
 
 ## Out of scope
@@ -232,11 +233,11 @@ package.
   hole its plane, so pairing generalises without rework. Assuming a single plane
   would not.
 - **Recovering the hole pattern from a case's own geometry.** Deferred, not
-  forbidden. `aicollider` takes a hole pattern; where it came from is the
+  forbidden. `stompcollider` takes a hole pattern; where it came from is the
   caller's problem, and a future extractor is simply another producer of that
   input.
 - **Anything flexible.** Harnesses, ribbon cables, wires.
-- **Deciding what to drill.** That is `aidrill`'s.
+- **Deciding what to drill.** That is `stompdrill`'s.
 
 ## Left to the technical specification
 

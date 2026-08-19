@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("OCP", reason="needs aidrill[step]")
+pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
-from aidrill.cad.base import Frame  # noqa: E402
-from aidrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
-from aidrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm  # noqa: E402
-from aidrill.cad.step import read_step  # noqa: E402
-from aidrill.units import Nanometre  # noqa: E402
+from stompdrill.cad.base import Frame  # noqa: E402
+from stompdrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
+from stompdrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm  # noqa: E402
+from stompdrill.cad.step import read_step  # noqa: E402
+from stompdrill.units import Nanometre  # noqa: E402
 
 pytestmark = pytest.mark.hammond
 
@@ -224,33 +224,33 @@ def test_floor_face_rejects_a_compound_with_no_planar_face():
     from OCP.BRep import BRep_Builder
     from OCP.TopoDS import TopoDS_Compound
 
-    from aidrill.cad.region import _floor_face
-    from aidrill.errors import AidrillError
+    from stompdrill.cad.region import _floor_face
+    from stompdrill.errors import StompdrillError
 
     compound = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(compound)
 
-    with pytest.raises(AidrillError, match="no planar face"):
+    with pytest.raises(StompdrillError, match="no planar face"):
         _floor_face(compound)
 
 
 @pytest.fixture(scope="module")
 def bb_box(hammond_bb):
-    from aidrill.cad import load_case_model
+    from stompdrill.cad import load_case_model
 
     return load_case_model(hammond_bb, face="box", margin_nm=Nanometre(1 * MM))
 
 
 @pytest.fixture(scope="module")
 def bb_lid(hammond_bb):
-    from aidrill.cad import load_case_model
+    from stompdrill.cad import load_case_model
 
     return load_case_model(hammond_bb, face="lid", margin_nm=Nanometre(1 * MM))
 
 
 def test_the_loaded_model_satisfies_the_protocol(bb_box):
-    from aidrill.cad import CaseModel
+    from stompdrill.cad import CaseModel
 
     assert isinstance(bb_box, CaseModel)
 
@@ -266,7 +266,7 @@ def test_the_loaded_lid_reports_its_own_thinner_plate(bb_lid):
 
 
 def test_the_loaded_box_classifies_a_corner_as_through_boss(bb_box):
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     x, y = BB_PROBES["boss"]
@@ -275,7 +275,7 @@ def test_the_loaded_box_classifies_a_corner_as_through_boss(bb_box):
 
 
 def test_the_loaded_box_classifies_an_overhanging_hole_as_off_face(bb_box):
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     x, y = BB_PROBES["off_face"]
@@ -285,7 +285,7 @@ def test_the_loaded_box_classifies_an_overhanging_hole_as_off_face(bb_box):
 
 def test_the_two_rejections_are_told_apart_by_where_the_hole_is(bb_box):
     """Both refuse the hole; a rule collapsing them would still pass each alone."""
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     boss = bb_box.classify(*(nm(v) for v in BB_PROBES["boss"]), Nanometre(2 * MM))
@@ -321,7 +321,7 @@ def test_the_lid_corner_relief_is_refused_by_its_own_face_not_the_box(bb_lid):
     enough to contain it entirely, at any margin. ``"boss"`` is always
     refused by the lid's own boundary before the box is ever consulted.
     """
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     x, y = BB_PROBES["boss"]
@@ -339,7 +339,7 @@ def test_the_lid_accepts_a_hole_in_clear_space(bb_lid):
 
 def test_the_lid_rejects_a_hole_off_its_own_face(bb_lid):
     """The lid's own boundary, not the box's, decides ``OFF_FACE`` for it."""
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     x, y = BB_PROBES["off_face"]
@@ -366,7 +366,7 @@ def test_obstructed_is_unreachable_on_the_cached_1590bb(bb_lid):
     genuinely does not occur on this model. It is demonstrated synthetically
     in ``tests/test_cad_region_synthetic.py`` instead.
     """
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     for name in ("clear", "boss", "off_face", "relief"):
@@ -380,7 +380,7 @@ def test_the_rejection_code_does_not_change_with_drill_size(bb_box):
     A bbox-inset check flips code with radius at the same point (the bug
     this guards against); naming the boundary element responsible cannot.
     """
-    from aidrill.cad import Rejection
+    from stompdrill.cad import Rejection
     from tests.hammond import BB_PROBES
 
     radii_mm = (0.1, 0.3, 0.5, 1.0, 1.5, 2.0, 3.0)

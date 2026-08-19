@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
-from ..errors import AidrillError
+from ..errors import StompdrillError
 from ..model import ParameterValue
 from ..units import Nanometre
 
 __all__ = ["Rejection", "Frame", "CaseModel", "KernelUnavailable"]
 
 
-class KernelUnavailable(AidrillError):
+class KernelUnavailable(StompdrillError):
     """The geometry kernel is needed and not installed."""
 
 

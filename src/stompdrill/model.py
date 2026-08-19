@@ -386,7 +386,7 @@ class SourceInfo:
     drill_layer: str = ""
     reference_layer: str = ""
     layers_found: tuple[str, ...] = ()
-    producer: str = "aidrill"
+    producer: str = "stompdrill"
 
 
 @dataclass(frozen=True, slots=True)

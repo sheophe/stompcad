@@ -6,9 +6,9 @@ import itertools
 
 import pytest
 
-from aidrill.model import DrillData, Hole, RawHole, ReferenceOutline
-from aidrill.pipeline import RouteHoles
-from aidrill.units import Millimetre, Nanometre
+from stompdrill.model import DrillData, Hole, RawHole, ReferenceOutline
+from stompdrill.pipeline import RouteHoles
+from stompdrill.units import Millimetre, Nanometre
 from tests.conftest import at
 
 __all__: list[str] = []

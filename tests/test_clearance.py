@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from aidrill.model import EnclosureMatch, Severity
-from aidrill.pipeline import CheckCaseClearance
-from aidrill.units import Nanometre
+from stompdrill.model import EnclosureMatch, Severity
+from stompdrill.pipeline import CheckCaseClearance
+from stompdrill.units import Nanometre
 from tests.conftest import FakeCase, at, codes, make_data
 
 MM = 1_000_000
@@ -172,7 +172,7 @@ def test_the_recorded_margin_is_the_model_s_own():
 
 def test_the_stage_is_independent_of_pipeline_position():
     """It reads only holes and the enclosure, so it composes anywhere."""
-    from aidrill.protocols import Pipeline
+    from stompdrill.protocols import Pipeline
 
     model = FakeCase()
     data = make_data(at(0, 0, 7 * MM, index=1))

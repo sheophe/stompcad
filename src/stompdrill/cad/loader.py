@@ -1,6 +1,6 @@
 """Load a supplied STEP file into a queryable case model.
 
-The kernel is imported here and nowhere above, so ``import aidrill`` stays
+The kernel is imported here and nowhere above, so ``import stompdrill`` stays
 free of it. A lid hole is checked against the box's own region too, because
 it would be obstructed by what sits behind it once the enclosure is
 assembled; ``play_area_nm`` still reports only the drilled part's own play

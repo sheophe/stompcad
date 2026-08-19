@@ -44,7 +44,7 @@
 ### Modify
 
 - `tools/build_catalogue.py` — TSV-only catalogue generation.
-- `src/aidrill/enclosures.py` — regenerated catalogue with concise generated documentation.
+- `src/stompdrill/enclosures.py` — regenerated catalogue with concise generated documentation.
 - `tests/test_enclosures.py` — TSV generation and catalogue invariant tests only.
 - `docs/parts/dimensions.tsv` — concise upstream/provenance header.
 - `pyproject.toml` — remove `pdfplumber` and stale PDF comments.
@@ -351,7 +351,7 @@ Expected: both Markdown files render when `mmdc` is installed; otherwise record 
 
 ```bash
 git add docs/adr/0001-pipeline-and-emitter-adapters.md docs/adr/0002-domain-quantisers.md docs/adr/0003-quantisation-boundary-and-ordering.md
-git commit -m "docs: define the current aidrill architecture"
+git commit -m "docs: define the current stompdrill architecture"
 ```
 
 ---
@@ -364,7 +364,7 @@ git commit -m "docs: define the current aidrill architecture"
 - Modify: `tools/build_catalogue.py`
 - Modify: `tests/test_enclosures.py`
 - Modify: `pyproject.toml`
-- Regenerate: `src/aidrill/enclosures.py`
+- Regenerate: `src/stompdrill/enclosures.py`
 
 **Interfaces:**
 - `read_drawings(tsv_path) -> set[tuple[str, int, int, int]]` remains the sole input path.
@@ -436,7 +436,7 @@ git rm docs/parts/*.pdf
 .venv/bin/python tools/build_catalogue.py
 ```
 
-Expected: `37 base parts`, `37 distinct sizes`, and `26 distinct footprints`; only documentation in `src/aidrill/enclosures.py` changes, not catalogue rows.
+Expected: `37 base parts`, `37 distinct sizes`, and `26 distinct footprints`; only documentation in `src/stompdrill/enclosures.py` changes, not catalogue rows.
 
 - [ ] **Step 6: Verify the TSV-only maintenance path**
 
@@ -444,9 +444,9 @@ Run:
 
 ```bash
 .venv/bin/python -m pytest -o addopts= tests/test_enclosures.py -v
-.venv/bin/ruff check tools/build_catalogue.py tests/test_enclosures.py src/aidrill/enclosures.py
+.venv/bin/ruff check tools/build_catalogue.py tests/test_enclosures.py src/stompdrill/enclosures.py
 git ls-files 'docs/1590.pdf' 'docs/parts/*.pdf'
-rg -n 'pdfplumber|docs/1590\.pdf|extract_series' tools/build_catalogue.py tests/test_enclosures.py src/aidrill/enclosures.py pyproject.toml
+rg -n 'pdfplumber|docs/1590\.pdf|extract_series' tools/build_catalogue.py tests/test_enclosures.py src/stompdrill/enclosures.py pyproject.toml
 ```
 
 Expected: tests and Ruff pass; both searches produce no output.
@@ -454,7 +454,7 @@ Expected: tests and Ruff pass; both searches produce no output.
 - [ ] **Step 7: Commit the catalogue maintenance change and PDF deletions**
 
 ```bash
-git add docs/1590.pdf docs/parts pyproject.toml tools/build_catalogue.py tests/test_enclosures.py src/aidrill/enclosures.py
+git add docs/1590.pdf docs/parts pyproject.toml tools/build_catalogue.py tests/test_enclosures.py src/stompdrill/enclosures.py
 git commit -m "chore: remove manufacturer PDF dependencies"
 ```
 
@@ -530,17 +530,17 @@ git commit -m "docs: align repository guidance with ADRs"
 ### Task 5: Shorten core and boundary docstrings
 
 **Files:**
-- Modify: `src/aidrill/__init__.py`
-- Modify: `src/aidrill/errors.py`
-- Modify: `src/aidrill/formatting.py`
-- Modify: `src/aidrill/geometry.py`
-- Modify: `src/aidrill/model.py`
-- Modify: `src/aidrill/protocols.py`
-- Modify: `src/aidrill/quantise.py`
-- Modify: `src/aidrill/sources/__init__.py`
-- Modify: `src/aidrill/sources/ai_pdf.py`
-- Modify: `src/aidrill/tolerance.py`
-- Modify: `src/aidrill/units.py`
+- Modify: `src/stompdrill/__init__.py`
+- Modify: `src/stompdrill/errors.py`
+- Modify: `src/stompdrill/formatting.py`
+- Modify: `src/stompdrill/geometry.py`
+- Modify: `src/stompdrill/model.py`
+- Modify: `src/stompdrill/protocols.py`
+- Modify: `src/stompdrill/quantise.py`
+- Modify: `src/stompdrill/sources/__init__.py`
+- Modify: `src/stompdrill/sources/ai_pdf.py`
+- Modify: `src/stompdrill/tolerance.py`
+- Modify: `src/stompdrill/units.py`
 
 **Interfaces:**
 - No signature, value, diagnostic, control-flow, or import behavior changes.
@@ -576,8 +576,8 @@ Run:
 
 ```bash
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= tests/test_model.py tests/test_geometry.py tests/test_ai_pdf.py tests/test_units.py tests/test_tolerance.py tests/test_quantise.py --tb=short
-.venv/bin/ruff check src/aidrill/__init__.py src/aidrill/errors.py src/aidrill/formatting.py src/aidrill/geometry.py src/aidrill/model.py src/aidrill/protocols.py src/aidrill/quantise.py src/aidrill/sources src/aidrill/tolerance.py src/aidrill/units.py
-.venv/bin/mypy src/aidrill
+.venv/bin/ruff check src/stompdrill/__init__.py src/stompdrill/errors.py src/stompdrill/formatting.py src/stompdrill/geometry.py src/stompdrill/model.py src/stompdrill/protocols.py src/stompdrill/quantise.py src/stompdrill/sources src/stompdrill/tolerance.py src/stompdrill/units.py
+.venv/bin/mypy src/stompdrill
 ```
 
 Expected: all commands pass.
@@ -592,16 +592,16 @@ from pathlib import Path
 from tools.check_docstrings import find_long_docstrings
 
 files = (
-    Path("src/aidrill/__init__.py"),
-    Path("src/aidrill/errors.py"),
-    Path("src/aidrill/formatting.py"),
-    Path("src/aidrill/geometry.py"),
-    Path("src/aidrill/model.py"),
-    Path("src/aidrill/protocols.py"),
-    Path("src/aidrill/quantise.py"),
-    Path("src/aidrill/sources"),
-    Path("src/aidrill/tolerance.py"),
-    Path("src/aidrill/units.py"),
+    Path("src/stompdrill/__init__.py"),
+    Path("src/stompdrill/errors.py"),
+    Path("src/stompdrill/formatting.py"),
+    Path("src/stompdrill/geometry.py"),
+    Path("src/stompdrill/model.py"),
+    Path("src/stompdrill/protocols.py"),
+    Path("src/stompdrill/quantise.py"),
+    Path("src/stompdrill/sources"),
+    Path("src/stompdrill/tolerance.py"),
+    Path("src/stompdrill/units.py"),
 )
 assert not find_long_docstrings(files)
 PY
@@ -612,7 +612,7 @@ Expected: no assertion failure.
 - [ ] **Step 5: Commit the core prose cleanup**
 
 ```bash
-git add src/aidrill/__init__.py src/aidrill/errors.py src/aidrill/formatting.py src/aidrill/geometry.py src/aidrill/model.py src/aidrill/protocols.py src/aidrill/quantise.py src/aidrill/sources src/aidrill/tolerance.py src/aidrill/units.py
+git add src/stompdrill/__init__.py src/stompdrill/errors.py src/stompdrill/formatting.py src/stompdrill/geometry.py src/stompdrill/model.py src/stompdrill/protocols.py src/stompdrill/quantise.py src/stompdrill/sources src/stompdrill/tolerance.py src/stompdrill/units.py
 git commit -m "docs: make core docstrings concise"
 ```
 
@@ -621,19 +621,19 @@ git commit -m "docs: make core docstrings concise"
 ### Task 6: Shorten pipeline, CLI, and emitter docstrings
 
 **Files:**
-- Modify: `src/aidrill/cli.py`
-- Modify: `src/aidrill/pipeline/__init__.py`
-- Modify: `src/aidrill/pipeline/dedupe.py`
-- Modify: `src/aidrill/pipeline/diameters.py`
-- Modify: `src/aidrill/pipeline/enclosure.py`
-- Modify: `src/aidrill/pipeline/snap.py`
-- Modify: `src/aidrill/pipeline/validate.py`
-- Modify: `src/aidrill/emitters/__init__.py`
-- Modify: `src/aidrill/emitters/base.py`
-- Modify: `src/aidrill/emitters/drawing_svg.py`
-- Modify: `src/aidrill/emitters/excellon.py`
-- Modify: `src/aidrill/emitters/json_out.py`
-- Modify: `src/aidrill/pipeline/sort.py`
+- Modify: `src/stompdrill/cli.py`
+- Modify: `src/stompdrill/pipeline/__init__.py`
+- Modify: `src/stompdrill/pipeline/dedupe.py`
+- Modify: `src/stompdrill/pipeline/diameters.py`
+- Modify: `src/stompdrill/pipeline/enclosure.py`
+- Modify: `src/stompdrill/pipeline/snap.py`
+- Modify: `src/stompdrill/pipeline/validate.py`
+- Modify: `src/stompdrill/emitters/__init__.py`
+- Modify: `src/stompdrill/emitters/base.py`
+- Modify: `src/stompdrill/emitters/drawing_svg.py`
+- Modify: `src/stompdrill/emitters/excellon.py`
+- Modify: `src/stompdrill/emitters/json_out.py`
+- Modify: `src/stompdrill/pipeline/sort.py`
 
 **Interfaces:**
 - No runtime behavior changes.
@@ -663,8 +663,8 @@ Run:
 
 ```bash
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= tests/test_cli.py tests/test_pipeline.py tests/test_snap.py tests/test_diameters.py tests/test_enclosure.py tests/test_excellon.py tests/test_drawing_svg.py tests/test_json_emitter.py tests/test_emitter_registry.py --tb=short
-.venv/bin/ruff check src/aidrill/cli.py src/aidrill/pipeline src/aidrill/emitters
-.venv/bin/mypy src/aidrill
+.venv/bin/ruff check src/stompdrill/cli.py src/stompdrill/pipeline src/stompdrill/emitters
+.venv/bin/mypy src/stompdrill
 ```
 
 Expected: all commands pass.
@@ -679,10 +679,10 @@ from pathlib import Path
 from tools.check_docstrings import find_long_docstrings
 
 assert not find_long_docstrings(
-    (Path("src/aidrill/cli.py"), Path("src/aidrill/pipeline"), Path("src/aidrill/emitters"))
+    (Path("src/stompdrill/cli.py"), Path("src/stompdrill/pipeline"), Path("src/stompdrill/emitters"))
 )
 PY
-rg -n '\(SPEC §|docs/SPEC|earlier version|driving incident|review found' src/aidrill
+rg -n '\(SPEC §|docs/SPEC|earlier version|driving incident|review found' src/stompdrill
 ```
 
 Expected: both checks produce no findings.
@@ -690,7 +690,7 @@ Expected: both checks produce no findings.
 - [ ] **Step 5: Commit the processing prose cleanup**
 
 ```bash
-git add src/aidrill/cli.py src/aidrill/pipeline src/aidrill/emitters
+git add src/stompdrill/cli.py src/stompdrill/pipeline src/stompdrill/emitters
 git commit -m "docs: make processing docstrings concise"
 ```
 
@@ -767,7 +767,7 @@ Run:
 ```bash
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --tb=short
 .venv/bin/ruff check src tests tools
-.venv/bin/mypy src/aidrill
+.venv/bin/mypy src/stompdrill
 ```
 
 Expected: all commands pass.
@@ -812,8 +812,8 @@ from tools.check_docstrings import find_long_docstrings
 violations = find_long_docstrings((Path("src"), Path("tests"), Path("tools")))
 assert not violations, violations
 PY
-.venv/bin/python tools/build_catalogue.py docs/parts/dimensions.tsv /tmp/aidrill-enclosures.py
-cmp /tmp/aidrill-enclosures.py src/aidrill/enclosures.py
+.venv/bin/python tools/build_catalogue.py docs/parts/dimensions.tsv /tmp/stompdrill-enclosures.py
+cmp /tmp/stompdrill-enclosures.py src/stompdrill/enclosures.py
 ```
 
 Expected: no docstring violations and byte-identical generated catalogue output.
@@ -825,7 +825,7 @@ Run:
 ```bash
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --tb=short
 .venv/bin/ruff check src tests tools
-.venv/bin/mypy src/aidrill
+.venv/bin/mypy src/stompdrill
 git diff --check
 ```
 

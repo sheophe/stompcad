@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from aidrill.enclosures import HAMMOND_1590, Enclosure, footprints
-from aidrill.units import Nanometre
+from stompdrill.enclosures import HAMMOND_1590, Enclosure, footprints
+from stompdrill.units import Nanometre
 
 REPO = Path(__file__).resolve().parent.parent
 DRAWINGS = REPO / "docs" / "parts" / "dimensions.tsv"
@@ -195,7 +195,7 @@ class TestTheGeneratedModule:
         """Rendering the TSV catalogue reproduces the checked-in module."""
         from tools.build_catalogue import read_drawings, render_module
 
-        shipped = (REPO / "src" / "aidrill" / "enclosures.py").read_text(encoding="utf-8")
+        shipped = (REPO / "src" / "stompdrill" / "enclosures.py").read_text(encoding="utf-8")
         assert render_module(read_drawings(DRAWINGS)) == shipped
 
     def test_the_rendered_table_is_ordered_by_footprint_then_height(self):

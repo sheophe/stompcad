@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from aidrill.geometry import (
+from stompdrill.geometry import (
     IDENTITY,
     KAPPA,
     Circle,

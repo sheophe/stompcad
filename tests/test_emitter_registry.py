@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from aidrill import cli
-from aidrill.emitters import base
-from aidrill.emitters.base import available, get_emitter, register_emitter
-from aidrill.errors import EmitterError
+from stompdrill import cli
+from stompdrill.emitters import base
+from stompdrill.emitters.base import available, get_emitter, register_emitter
+from stompdrill.errors import EmitterError
 
 
 def test_the_fixture_really_restores_the_registry(clean_registry):
@@ -152,8 +152,8 @@ def test_available_is_sorted_and_complete(clean_registry):
 
 
 def test_the_pdf_emitter_is_registered_under_its_own_name():
-    from aidrill.emitters import available, get_emitter
-    from aidrill.emitters.drawing_pdf import DrawingPdfEmitter
+    from stompdrill.emitters import available, get_emitter
+    from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
 
     assert "drawing-pdf" in available()
     assert get_emitter("drawing-pdf") is DrawingPdfEmitter

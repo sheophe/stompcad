@@ -30,6 +30,10 @@ __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
 #: Recorded in the header so a reader can tell which release cut the holes.
 _VERSION = "0.1.0"
 
+#: The prefix the translator gives its auto-generated wrapper product. Set at
+#: write time and erased from the payload afterwards, so both uses read it here.
+_PRODUCT_NAME = "stompcad"
+
 #: One physical-file entity, wrapped or not, that may carry a volatile
 #: counter (see the module docstring). ``DOTALL`` so a line-wrapped entity
 #: matches as a whole; entity bodies here never contain a literal ``);``.
@@ -40,10 +44,12 @@ _VOLATILE_ENTITY = re.compile(
 #: never a real part name, which always keeps the name it was read with.
 #: Matches by *content*, not by entity id, because the wrapper's own id is
 #: itself one of the unstable counters this module exists to erase: a real
-#: source part literally named "aidrill 1.2" would be silently rewritten by
+#: source part literally named "stompcad 1.2" would be silently rewritten by
 #: this pattern too. No fixture exercises that collision and there is no
 #: id-based alternative available through this kernel's bindings.
-_VOLATILE_VERSION = re.compile(rb"'aidrill \d+\.\d+'")
+#: Built from ``_PRODUCT_NAME``, never spelled out: written twice, a rename
+#: would silence this pattern and leave a volatile id in a plausible artefact.
+_VOLATILE_VERSION = re.compile(rb"'" + _PRODUCT_NAME.encode() + rb" \d+\.\d+'")
 _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 
 #: One colour presentation, the fixed nine-entity chain STEPCAFControl_Writer
@@ -355,7 +361,7 @@ def _silence_stdout() -> Iterator[None]:
 
     OCC writes its transfer statistics through the C runtime, bypassing
     ``sys.stdout`` entirely, so only redirecting the OS file descriptor
-    itself keeps a clean report from an ``aidrill`` invocation.
+    itself keeps a clean report from an ``stompdrill`` invocation.
     """
     saved = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
@@ -387,7 +393,7 @@ def _normalise(payload: bytes) -> bytes:
     that call, which would otherwise leak process history back in.
     """
     payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
-    payload = _VOLATILE_VERSION.sub(b"'aidrill'", payload)
+    payload = _VOLATILE_VERSION.sub(b"'stompdrill'", payload)
     counter = itertools.count(1)
 
     def renumber(match: re.Match[bytes]) -> bytes:
@@ -417,7 +423,7 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
         raise EmitterError(
             f"the source document assigns {expected} colour(s), but "
             f"{len(chains)} STYLED_ITEM chain(s) were found in the written "
-            "STEP; _COLOUR_CHAIN in aidrill.emitters.step likely needs "
+            "STEP; _COLOUR_CHAIN in stompdrill.emitters.step likely needs "
             "updating for this OpenCASCADE version's colour-chain shape"
         )
     if len(chains) < 2:
@@ -460,7 +466,7 @@ def _write(
     # Load-bearing for determinism, not just cosmetic: fixes the prefix the
     # translator's auto-generated wrapper product uses, which ``_normalise``
     # then strips the volatile "<counter>.1" suffix from.
-    Interface_Static.SetCVal_s("write.step.product.name", "aidrill")
+    Interface_Static.SetCVal_s("write.step.product.name", _PRODUCT_NAME)
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
     expected = _count_colour_assignments(document, touched)
@@ -468,10 +474,10 @@ def _write(
         writer.Transfer(document)
 
         header = APIHeaderSection_MakeHeader(session.Model())
-        header.SetName(TCollection_HAsciiString(title or "aidrill"))
+        header.SetName(TCollection_HAsciiString(title or "stompdrill"))
         header.SetTimeStamp(TCollection_HAsciiString(timestamp))
         header.SetAuthorValue(1, TCollection_HAsciiString(""))
-        header.SetOriginatingSystem(TCollection_HAsciiString(f"aidrill {_VERSION}"))
+        header.SetOriginatingSystem(TCollection_HAsciiString(f"stompdrill {_VERSION}"))
         writer.Write(str(path))
     payload = _normalise(path.read_bytes())
     path.write_bytes(_reslot_colours(payload, expected))

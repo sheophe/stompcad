@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-ocp = pytest.importorskip("OCP", reason="needs aidrill[step]")
+ocp = pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
 pytestmark = pytest.mark.hammond
 
@@ -28,21 +28,21 @@ def _model_path():
 
 
 def _model(face: str = "box"):
-    from aidrill.cad import load_case_model
-    from aidrill.units import Nanometre
+    from stompdrill.cad import load_case_model
+    from stompdrill.units import Nanometre
 
     return load_case_model(_model_path(), face=face, margin_nm=Nanometre(1 * MM))
 
 
 def _emit(*holes, face="box", model=None):
-    from aidrill.emitters.step import StepEmitter, StepOptions
+    from stompdrill.emitters.step import StepEmitter, StepOptions
     from tests.conftest import make_data
 
     return StepEmitter(StepOptions(model=model or _model(face))).emit(make_data(*holes))
 
 
 def _reload(payload: bytes, tmp_path: Path):
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
 
     target = tmp_path / "out.stp"
     target.write_bytes(payload)
@@ -82,7 +82,7 @@ def test_the_output_reloads_as_a_valid_solid(tmp_path):
 
 
 def test_the_assembly_and_its_product_names_survive_the_round_trip(tmp_path):
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
 
     document = _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path)
@@ -96,7 +96,7 @@ def test_the_assembly_and_its_product_names_survive_the_round_trip(tmp_path):
 
 def test_the_volume_removed_matches_the_holes_drilled(tmp_path):
     """pi r^2 t is an authority no self-consistent bad topology can fake."""
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
@@ -113,7 +113,7 @@ def test_the_volume_removed_matches_the_holes_drilled(tmp_path):
 
 def test_only_the_drilled_side_loses_material(tmp_path):
     """An unbounded cylinder would punch the lid as well."""
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
@@ -133,7 +133,7 @@ def test_only_the_drilled_side_loses_material(tmp_path):
 
 
 def test_two_holes_remove_twice_as_much_as_one(tmp_path):
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
 
     base = sum(_volume(s.shape) for s in read_step(_model_path()).solids)
@@ -153,7 +153,7 @@ def test_the_hole_is_cut_where_the_frame_puts_it(tmp_path):
     mirror image. See ``test_the_hole_lands_at_the_canonical_position_not_its_mirror``
     for the assertion that actually pins down *where* the bore is.
     """
-    from aidrill.cad.step import bounding_box_mm, read_step
+    from stompdrill.cad.step import bounding_box_mm, read_step
     from tests.conftest import at
 
     document = _reload(_emit(at(10 * MM, 0, 6 * MM, index=1)), tmp_path)
@@ -202,7 +202,7 @@ def test_the_hole_lands_at_the_canonical_position_not_its_mirror(tmp_path):
 
 
 def test_emitting_with_no_holes_leaves_the_model_unchanged(tmp_path):
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
 
     before = sum(_volume(s.shape) for s in read_step(_model_path()).solids)
     after = sum(_volume(s.shape) for s in _reload(_emit(), tmp_path).solids)
@@ -220,7 +220,7 @@ def test_a_hole_over_cast_lettering_cuts_cleanly(tmp_path):
     """
     from OCP.BRepCheck import BRepCheck_Analyzer
 
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
     from tests.hammond import BB_PROBES
 
@@ -243,7 +243,7 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
     so cutting ``face="lid"`` is also the only test that walks past a
     keyword mismatch before finding its match.
     """
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
@@ -261,8 +261,8 @@ def test_no_matching_component_is_an_emitter_error():
     """``_label_name`` never matching anything is the same failure a
     renamed or mis-supplied model would produce — worth a named diagnostic,
     not a silent no-op."""
-    from aidrill.emitters import step as step_module
-    from aidrill.errors import EmitterError
+    from stompdrill.emitters import step as step_module
+    from stompdrill.errors import EmitterError
     from tests.conftest import at, make_data
 
     def never_named(label: object) -> str:
@@ -282,8 +282,8 @@ def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
     """``IsDone() is False`` is not observed on any cached model; forced here."""
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
 
-    from aidrill.emitters import step as step_module
-    from aidrill.errors import EmitterError
+    from stompdrill.emitters import step as step_module
+    from stompdrill.errors import EmitterError
     from tests.conftest import at, make_data
 
     monkeypatch.setattr(BRepAlgoAPI_Cut, "IsDone", lambda self: False)
@@ -352,10 +352,10 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
         import sys
         sys.path.insert(0, {str(src_path)!r})
         from pathlib import Path
-        from aidrill.cad import load_case_model
-        from aidrill.emitters.step import StepEmitter, StepOptions
-        from aidrill.model import DrillData, Hole
-        from aidrill.units import Nanometre
+        from stompdrill.cad import load_case_model
+        from stompdrill.emitters.step import StepEmitter, StepOptions
+        from stompdrill.model import DrillData, Hole
+        from stompdrill.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face="box",
                                  margin_nm=Nanometre(1_000_000))
@@ -381,7 +381,7 @@ def test_the_emitted_timestamp_is_copied_from_the_source_model():
     output), not to what this emitter writes — so the stamp is read out by
     position, the second quoted string in ``FILE_NAME(...)``, not by name.
     """
-    from aidrill.cad.step import source_timestamp
+    from stompdrill.cad.step import source_timestamp
     from tests.conftest import at
 
     payload = _emit(at(0, 0, 6 * MM, index=1)).decode("latin-1")
@@ -435,7 +435,7 @@ def test_drill_compound_builds_children_in_index_order_not_tuple_order():
     anything; only a probe on the compound itself can. Without the sort,
     the second assertion's child order reverses.
     """
-    from aidrill.emitters import step as step_module
+    from stompdrill.emitters import step as step_module
     from tests.conftest import at, make_data
 
     model = _model()
@@ -460,8 +460,8 @@ def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_sile
     """
     import re
 
-    from aidrill.emitters import step as step_module
-    from aidrill.errors import EmitterError
+    from stompdrill.emitters import step as step_module
+    from stompdrill.errors import EmitterError
     from tests.conftest import at
 
     broken = re.compile(
@@ -531,7 +531,7 @@ def test_the_drilled_solids_own_colour_does_not_survive_a_cut(tmp_path):
     not survive, which is why ``_count_colour_assignments`` excludes the
     label ``cut_shape`` touched rather than expecting the full source count.
     """
-    from aidrill.cad.step import read_step
+    from stompdrill.cad.step import read_step
     from tests.conftest import at
 
     source = _colours_by_product(read_step(_model_path()).document)
@@ -558,7 +558,7 @@ def test_two_emissions_describe_the_same_model(tmp_path):
     import sys
     import textwrap
 
-    from aidrill.cad.step import bounding_box_mm, read_step
+    from stompdrill.cad.step import bounding_box_mm, read_step
 
     model_path = _model_path()
     src_path = Path(__file__).resolve().parents[1] / "src"
@@ -567,10 +567,10 @@ def test_two_emissions_describe_the_same_model(tmp_path):
         import sys
         sys.path.insert(0, {str(src_path)!r})
         from pathlib import Path
-        from aidrill.cad import load_case_model
-        from aidrill.emitters.step import StepEmitter, StepOptions
-        from aidrill.model import DrillData, Hole
-        from aidrill.units import Nanometre
+        from stompdrill.cad import load_case_model
+        from stompdrill.emitters.step import StepEmitter, StepOptions
+        from stompdrill.model import DrillData, Hole
+        from stompdrill.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face="box",
                                  margin_nm=Nanometre(1_000_000))

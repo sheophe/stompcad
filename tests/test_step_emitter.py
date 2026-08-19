@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from aidrill.emitters import available, get_emitter
-from aidrill.errors import EmitterError
+from stompdrill.emitters import available, get_emitter
+from stompdrill.errors import EmitterError
 
 
 def test_step_is_always_in_the_registry():
@@ -26,25 +26,25 @@ def test_the_emitter_declares_its_media_type_and_extension():
 
 
 def test_constructing_without_a_model_is_an_emitter_error():
-    from aidrill.emitters.step import StepEmitter, StepOptions
+    from stompdrill.emitters.step import StepEmitter, StepOptions
 
     with pytest.raises(EmitterError, match="--case-model"):
         StepEmitter(StepOptions(model=None))
 
 
 def test_constructing_without_the_kernel_names_the_extra(monkeypatch):
-    from aidrill.cad import KernelUnavailable
-    from aidrill.emitters import step as step_module
-    from aidrill.emitters.step import StepEmitter, StepOptions
+    from stompdrill.cad import KernelUnavailable
+    from stompdrill.emitters import step as step_module
+    from stompdrill.emitters.step import StepEmitter, StepOptions
     from tests.test_clearance import FakeCase
 
     def absent() -> None:
         raise KernelUnavailable("the STEP features need the geometry kernel: "
-                                "pip install 'aidrill[step]'")
+                                "pip install 'stompdrill[step]'")
 
     monkeypatch.setattr(step_module, "require_kernel", absent)
 
-    with pytest.raises(EmitterError, match=r"aidrill\[step\]"):
+    with pytest.raises(EmitterError, match=r"stompdrill\[step\]"):
         StepEmitter(StepOptions(model=FakeCase()))
 
 
@@ -55,7 +55,7 @@ def test_the_emitter_module_imports_without_the_kernel():
 
     result = subprocess.run(
         [sys.executable, "-c",
-         "import aidrill.emitters, sys; print('OCP' in sys.modules)"],
+         "import stompdrill.emitters, sys; print('OCP' in sys.modules)"],
         capture_output=True, text=True, check=True,
     )
 
@@ -71,7 +71,7 @@ def test_reslot_colours_leaves_a_colourless_payload_untouched():
     ``expected`` of zero is exactly what a colourless document would count
     to, and must round trip rather than raise.
     """
-    from aidrill.emitters.step import _reslot_colours
+    from stompdrill.emitters.step import _reslot_colours
 
     payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SOMETHING();\nENDSEC;\n"
 
@@ -87,8 +87,8 @@ def test_reslot_colours_raises_when_the_chain_count_does_not_match():
     chain, compared against a document that (per the source) assigns one
     colour, must raise rather than silently pass the mismatch through.
     """
-    from aidrill.emitters.step import _reslot_colours
-    from aidrill.errors import EmitterError
+    from stompdrill.emitters.step import _reslot_colours
+    from stompdrill.errors import EmitterError
 
     payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SOMETHING();\nENDSEC;\n"
 

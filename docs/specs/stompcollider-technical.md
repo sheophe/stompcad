@@ -1,10 +1,10 @@
-# aicollider — technical specification
+# stompcollider — technical specification
 
 **Status:** accepted, unimplemented.
 
 Decides the libraries, interfaces and internal architecture that
-[`docs/specs/aicollider.md`](aicollider.md) deliberately left open. That document
-remains the authority on *what* `aicollider` is responsible for; where the two
+[`docs/specs/stompcollider.md`](stompcollider.md) deliberately left open. That document
+remains the authority on *what* `stompcollider` is responsible for; where the two
 disagree, it wins and this one is wrong.
 
 Governed by [ADR-0009](../adr/0009-shared-model-package-and-dependency-order.md)
@@ -15,8 +15,8 @@ emitter shape.
 
 ## Inputs and outputs
 
-`aicollider` takes a **drilled** case model. It never drills one, and it never
-synthesises one. This mirrors `aidrill`, which takes an **undrilled** case model
+`stompcollider` takes a **drilled** case model. It never drills one, and it never
+synthesises one. This mirrors `stompdrill`, which takes an **undrilled** case model
 and produces the drilled one (Figure 1).
 
 ```
@@ -24,7 +24,7 @@ and produces the drilled one (Figure 1).
             │                                │
             ▼                                ▼
    ┌─────────────────────────────────────────────────────┐
-   │                       aidrill                       │
+   │                       stompdrill                       │
    └─────────────────────────────────────────────────────┘
             │                                │
             ▼                                ▼
@@ -34,7 +34,7 @@ and produces the drilled one (Figure 1).
             │                │               │
             ▼                ▼               ▼
    ┌─────────────────────────────────────────────────────┐
-   │                     aicollider                      │
+   │                     stompcollider                      │
    └─────────────────────────────────────────────────────┘
             │                                │
             ▼                                ▼
@@ -42,7 +42,7 @@ and produces the drilled one (Figure 1).
 ```
 
 *Figure 1: the two tools' inputs and outputs. The drilled case model is an
-input to `aicollider` on equal footing with the boards and the drill document;
+input to `stompcollider` on equal footing with the boards and the drill document;
 all three are required.*
 
 Three required inputs, and the reason each is an input rather than something
@@ -50,8 +50,8 @@ derived:
 
 | Input | Why it is given, not recovered |
 | --- | --- |
-| Drill document (`aidrill-drill-data` v6) | Those holes were cut *from* exact nanometre values. Reading them back out of the drilled geometry could only lose precision or fail. It also carries the face frame `aidrill` cut in — see ADR-0009. |
-| Drilled case model | `aicollider` verifies clearance against real geometry; it has no catalogue from which to invent a casting, and the pre-spec forbids synthesising one. |
+| Drill document (`stomp-drill-data` v6) | Those holes were cut *from* exact nanometre values. Reading them back out of the drilled geometry could only lose precision or fail. It also carries the face frame `stompdrill` cut in — see ADR-0009. |
+| Drilled case model | `stompcollider` verifies clearance against real geometry; it has no catalogue from which to invent a casting, and the pre-spec forbids synthesising one. |
 | Board models | KiCad emits solids. Nothing upstream knows a board's protrusion axes, so this side must be measured. |
 
 Two outputs, and the split matters: **the report is the contract, the assembly
@@ -60,7 +60,7 @@ computed once before the fan-out.
 
 ## Internal architecture
 
-Deliberately `aidrill`'s shape (Figure 2), with one honest difference named
+Deliberately `stompdrill`'s shape (Figure 2), with one honest difference named
 below.
 
 ```
@@ -85,20 +85,20 @@ below.
 ```
 
 *Figure 2: `Source → Raw → canonicalise() → Pipeline → Emitter`, the flow
-ADR-0001 fixes for `aidrill`, instantiated for docking.*
+ADR-0001 fixes for `stompdrill`, instantiated for docking.*
 
 **The boundary is `canonicalise()`, not `quantise()`.** It converts measured
 millimetre floats to integer nanometres by exact decimal scaling before
 representation rounding, exactly as ADR-0003 requires — and it **selects
 nothing**, because a board's geometry has no answer set to snap to. Naming it
 `quantise` would assert a catalogue that does not exist. The distinction is
-worth a word: `aidrill` compares measurements against enclosure, drill-size and
-grid answer sets; `aicollider` only changes representation.
+worth a word: `stompdrill` compares measurements against enclosure, drill-size and
+grid answer sets; `stompcollider` only changes representation.
 
 ### Module layout
 
 ```
-src/aicollider/
+src/stompcollider/
   __init__.py       exports Source, canonicalise, Match, Seat, and the emitters
   model.py          DockData, Board, Component, Protrusion, Profile,
                     Correspondence, Candidate, Placement, Clash
@@ -151,8 +151,8 @@ it can identify one; `--place` and `--pin` address boards by ordinal.
 
 ### Carrier planes
 
-A board's **carrier plane** is its substrate's plane, found by `aigeom.levels()`
-— the same coplanar-face grouping `aidrill` uses on a casting. A substrate is a
+A board's **carrier plane** is its substrate's plane, found by `stompgeom.levels()`
+— the same coplanar-face grouping `stompdrill` uses on a casting. A substrate is a
 slab, so the two largest opposed levels are its faces and neither needs a
 holedness judgement. The carrier normal is their shared axis.
 
@@ -181,8 +181,8 @@ term adds every present designator it matches, a negated term removes them.
 
 There is no grouping, no boolean operator and no precedence rule — a designator
 either survives the last term that mentions it or it does not. The expression is
-**required**; `aicollider` holds no default, because a default would be a
-pedal-specific fact compiled into a geometry engine. `aicad` owns `RV*,SW*`.
+**required**; `stompcollider` holds no default, because a default would be a
+pedal-specific fact compiled into a geometry engine. `stompcad` owns `RV*,SW*`.
 
 An unparseable expression is exit 3, resolved before any file is opened. An
 expression that parses but admits nothing is `empty-group`, exit 2, at run time —
@@ -235,7 +235,7 @@ For each board, and for each of its two faces:
    tolerance**. That tolerance is half the drill grid pitch — derived, not
    chosen: holes are quantised to that grid, so two distinct holes are at least
    one pitch apart, and any offset below half a pitch identifies exactly one
-   hole. `aicollider` receives it as a length and never learns a lattice exists.
+   hole. `stompcollider` receives it as a length and never learns a lattice exists.
 3. Two protrusions within tolerance of the same hole is `ambiguous-pairing`,
    exit 2. Two parts cannot occupy one hole, and choosing between them would be
    the weighting the pre-spec refuses.
@@ -377,7 +377,7 @@ Board-level ranking is therefore independent and order-free — determinism does
 rest on a traversal order, and the Cartesian product of every board's candidates
 never appears. This keeps the pre-spec's meaning of "sequential": one board at a
 time, never jointly optimised. A board with more than one placement is reported as
-`ambiguous-placement` so `aicad` can offer a picker, and a caller pins one with
+`ambiguous-placement` so `stompcad` can offer a picker, and a caller pins one with
 `--pin N=RANK` on re-run.
 
 Inter-board clashes are **reported, never compromised away**. A hole pattern is a
@@ -386,18 +386,18 @@ output says where and by how much.
 
 ## Emitters
 
-Two fixed outputs, no registry. `aidrill`'s registry earns its keep across six
+Two fixed outputs, no registry. `stompdrill`'s registry earns its keep across six
 formats where a seventh is expected; here it would be ceremony around a
 two-element set, and it would flatten a distinction the pre-spec draws
 deliberately.
 
 ### The report
 
-`aicollider-dock-report` v1. Integer nanometres, a `format`/`version` header, and
+`stompcollider-dock-report` v1. Integer nanometres, a `format`/`version` header, and
 diagnostics matched by `code` — the same conventions as the drill document.
 
 ```json
-{"format": "aicollider-dock-report", "version": 1, "units": "nm",
+{"format": "stompcollider-dock-report", "version": 1, "units": "nm",
  "case": {"part": "1590BB", "face": "box", "model": "1590BB.stp"},
  "boards": [
    {"ordinal": 1,
@@ -442,7 +442,7 @@ missing from the run.
 ### The assembly model
 
 The case model's solids plus each board's solids, transformed by the placement
-chosen for that board, written through `aigeom`'s deterministic STEP writer so
+chosen for that board, written through `stompgeom`'s deterministic STEP writer so
 names and colours survive and volatile OCC identifiers do not reach the file.
 **Collisions are left in place.** Docking rules are respected, interference is
 not resolved away, and seeing the clash is the point.
@@ -450,8 +450,8 @@ not resolved away, and seeing the clash is the point.
 ## Diagnostics and exit codes
 
 The workspace contract from ADR-0009: `0` clean, `1` findings, `2` error, `3`
-usage or IO. Severity maps as `aidrill`'s does — INFO to 0, WARNING to 1, ERROR
-to 2 — through `aimodel`'s shared reduction.
+usage or IO. Severity maps as `stompdrill`'s does — INFO to 0, WARNING to 1, ERROR
+to 2 — through `stompmodel`'s shared reduction.
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
@@ -480,12 +480,12 @@ defeat the tool, because that is a main reason to run it.
 caller expecting one board learn it passed two, and an exit code of 0 would not
 tell them.
 
-Any error withholds every requested artefact, as `aidrill` does.
+Any error withholds every requested artefact, as `stompdrill` does.
 
 ## Command line
 
 ```
-aicollider DRILL.json BOARD.stp [BOARD.stp …]
+stompcollider DRILL.json BOARD.stp [BOARD.stp …]
     --case-model PATH          the drilled case model
     --panel-reference EXPR     required; no default
     --match-tolerance MM       required; half the drill grid pitch
@@ -500,12 +500,12 @@ Every flag resolves before any file is opened, so an unparseable filter
 expression, a malformed `--place`, or a `--pin` naming a board ordinal that
 cannot exist is exit 3 rather than a diagnostic.
 
-There is no `--case-face`: the drill document carries the face frame `aidrill`
-cut in, so `aicollider` reads the registration instead of choosing a face. It
+There is no `--case-face`: the drill document carries the face frame `stompdrill`
+cut in, so `stompcollider` reads the registration instead of choosing a face. It
 checks against every solid of the case model and never selects one.
 
 `wrong-case-model` compares the drill document's declared enclosure part against
-the model's own product name — the same check `aidrill` already makes.
+the model's own product name — the same check `stompdrill` already makes.
 
 ## Determinism
 
@@ -522,9 +522,9 @@ algorithm choice, not merely output.
   designator, clashes by `(kind, with, depth_nm)`.
 - **No dependence on input order.** Two files listing the same solids in a
   different order produce byte-identical artefacts, as ADR-0006 requires of
-  `aidrill`.
-- Volatile OCC identifiers are normalised by `aigeom`'s writer, which already
-  solved this for `aidrill`.
+  `stompdrill`.
+- Volatile OCC identifiers are normalised by `stompgeom`'s writer, which already
+  solved this for `stompdrill`.
 
 ## Testing
 
@@ -551,12 +551,12 @@ TDD throughout, following the repository's existing rules.
 
 ## Order of work
 
-1. **`aimodel`**, verified by `aidrill`'s existing suite. Complete only when
-   every `aidrill` artefact is byte-identical across the move.
-2. **`aigeom`**, on the same test.
-3. **`aicollider`**.
+1. **`stompmodel`**, verified by `stompdrill`'s existing suite. Complete only when
+   every `stompdrill` artefact is byte-identical across the move.
+2. **`stompgeom`**, on the same test.
+3. **`stompcollider`**.
 
-`aidrill`'s suite is the instrument for the first two steps: a move that breaks
+`stompdrill`'s suite is the instrument for the first two steps: a move that breaks
 something says so immediately, which is the whole reason ADR-0008 extracts before
 the new tools rather than after.
 
@@ -566,7 +566,7 @@ the new tools rather than after.
   forbidden. A future extractor is simply another producer of the drill document.
 - **Side-mounted jacks and multi-face drilling.** A protrusion carries its axis
   and a hole its plane, so pairing generalises without rework. That is a change
-  to `aidrill`'s contract before it is one to `aicollider`'s.
+  to `stompdrill`'s contract before it is one to `stompcollider`'s.
 - **Anything flexible.** Harnesses and ribbon cables are excluded from the model
   entirely; nothing represents a flexible part and no rule may assume one
   connects anything.

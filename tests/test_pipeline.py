@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from aidrill.model import (
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     RawDrillData,
@@ -18,7 +18,7 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.pipeline import (
+from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
     CheckReferenceSize,
@@ -30,9 +30,9 @@ from aidrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from aidrill.protocols import Pipeline, Stage
-from aidrill.quantise import quantise
-from aidrill.units import Millimetre, Nanometre
+from stompdrill.protocols import Pipeline, Stage
+from stompdrill.quantise import quantise
+from stompdrill.units import Millimetre, Nanometre
 from tests.conftest import at, codes, diameters, holes, make_data, positions
 
 # --------------------------------------------------------------------------
@@ -841,7 +841,7 @@ class TestPipelineRecordsProvenance:
 
 def test_the_flow_is_reachable_from_the_package_root():
     """Nothing enumerates the stages or the quantisers, so the root names them."""
-    import aidrill
+    import stompdrill
 
     for name in (
         SnapPositions,
@@ -852,22 +852,22 @@ def test_the_flow_is_reachable_from_the_package_root():
         RouteHoles,
         CheckReferenceSize,
     ):
-        assert getattr(aidrill, name.__name__, None) is name
-        assert name.__name__ in aidrill.__all__
+        assert getattr(stompdrill, name.__name__, None) is name
+        assert name.__name__ in stompdrill.__all__
 
-    assert aidrill.quantise is quantise
-    assert "quantise" in aidrill.__all__
+    assert stompdrill.quantise is quantise
+    assert "quantise" in stompdrill.__all__
 
-    assert aidrill.DRILL_STANDARDS is DRILL_STANDARDS
-    assert aidrill.DEFAULT_STANDARD == DEFAULT_STANDARD
-    assert aidrill.DrillStandard is DrillStandard
+    assert stompdrill.DRILL_STANDARDS is DRILL_STANDARDS
+    assert stompdrill.DEFAULT_STANDARD == DEFAULT_STANDARD
+    assert stompdrill.DrillStandard is DrillStandard
     for name in ("DRILL_STANDARDS", "DEFAULT_STANDARD", "DrillStandard"):
-        assert name in aidrill.__all__
+        assert name in stompdrill.__all__
 
 
 def test_the_generative_bands_stay_in_the_subpackage():
     """The rule the root's docstring states, made falsifiable."""
-    import aidrill
+    import stompdrill
 
-    assert not hasattr(aidrill, "METRIC_BANDS")
-    assert not hasattr(aidrill, "FRACTIONAL_SIXTY_FOURTHS")
+    assert not hasattr(stompdrill, "METRIC_BANDS")
+    assert not hasattr(stompdrill, "FRACTIONAL_SIXTY_FOURTHS")

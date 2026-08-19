@@ -1,25 +1,25 @@
-# aicad — product-level specification
+# stompcad — product-level specification
 
-**Status:** pre-spec. Describes what `aicad` is and is responsible for.
+**Status:** pre-spec. Describes what `stompcad` is and is responsible for.
 Libraries, interfaces and internal architecture are decided from this document,
 not in it.
 
 ## Purpose
 
-`aicad` is the user-facing tool. It turns one Illustrator file into everything
+`stompcad` is the user-facing tool. It turns one Illustrator file into everything
 needed to build a pedal: a drill programme for the CNC, a drawing to work from,
 a model of the drilled enclosure, an assembled model with the boards seated, and
 a machine-readable record of the run.
 
-`aidrill` and `aicollider` are deliberately not user-facing. They are precise,
+`stompdrill` and `stompcollider` are deliberately not user-facing. They are precise,
 they refuse ambiguous input, and they expect their arguments to be correct.
-`aicad` is the layer that makes that pleasant — it resolves what it can, asks
+`stompcad` is the layer that makes that pleasant — it resolves what it can, asks
 about what it cannot, and remembers the answers.
 
 The target is a single argument:
 
 ```
-aicad tar.ai
+stompcad tar.ai
 ```
 
 Everything else is optional, and anything missing is either taken from the
@@ -27,24 +27,24 @@ project's manifest or asked for.
 
 ## Scope
 
-`aicad` orchestrates, configures and reports. It computes nothing about
-geometry. Every geometric decision belongs to `aidrill` or `aicollider`, and
-`aicad` must not develop opinions about drill sizes, hole positions, clearances
+`stompcad` orchestrates, configures and reports. It computes nothing about
+geometry. Every geometric decision belongs to `stompdrill` or `stompcollider`, and
+`stompcad` must not develop opinions about drill sizes, hole positions, clearances
 or placements.
 
 ## Command surface
 
 | | |
 | --- | --- |
-| `aicad PANEL.ai` | The whole pipeline. The happy path. |
-| `aicad drill` | Drilling only. |
-| `aicad dock` | Docking only, against an existing drilled case. |
-| `aicad cache` | Manage the enclosure model cache. |
-| `aicad doctor` | Check and repair the environment. |
-| `aicad help`, `--help` | Commands and arguments. |
+| `stompcad PANEL.ai` | The whole pipeline. The happy path. |
+| `stompcad drill` | Drilling only. |
+| `stompcad dock` | Docking only, against an existing drilled case. |
+| `stompcad cache` | Manage the enclosure model cache. |
+| `stompcad doctor` | Check and repair the environment. |
+| `stompcad help`, `--help` | Commands and arguments. |
 
 `drill` and `dock` exist because only part of the input usually moves — a board
-gets re-exported, artwork does not. They are not optimisations `aicad` applies
+gets re-exported, artwork does not. They are not optimisations `stompcad` applies
 on its own: **an assertion by the caller is a decision, an inference by the tool
 would be state.**
 
@@ -80,12 +80,12 @@ the same directory, named from the source stem.
 | --- | --- |
 | `tar.ai` | input — artwork |
 | `tar-pcb.stp` | input — board, one or more |
-| `tar.aicad.json` | the manifest |
+| `tar.stompcad.json` | the manifest |
 | `tar-case.drl` | Excellon, for the CNC |
 | `tar-case.pdf` | drawing sheet, ISO 5457 at 1:1 |
 | `tar-case.stp` | the drilled enclosure |
 | `tar-assembly.stp` | boards seated in the enclosure |
-| `tar.aid` | the run record |
+| `tar.stompcad` | the run record |
 
 Two rules generate this, and both matter because these names share a directory
 with files other tools produce:
@@ -95,13 +95,13 @@ with files other tools produce:
   mixing subject and operation leaves the next artefact with no rule to follow.
 - **Suffix only where the extension would be ambiguous.** `.stp` appears three
   times, and `.pdf` and `.drl` collide with KiCad's own exports —
-  `tar-schematic.pdf`, `tar.drl` from a Gerber bundle. `.aid` and `.aicad.json`
+  `tar-schematic.pdf`, `tar.drl` from a Gerber bundle. `.stompcad` and `.stompcad.json`
   are ours alone and stay bare.
 
 All of these are defaults. Any path may be given by argument or prompt, and the
 answer goes into the manifest.
 
-`tar.aid` is one file for the whole run, internally sectioned, with every
+`tar.stompcad` is one file for the whole run, internally sectioned, with every
 section optional so any kind of run can be recorded in it. The protocol is a
 technical-spec question. **No consumer is built for it yet** — it is written
 because a run should leave a machine-readable trace, not because something reads
@@ -109,20 +109,20 @@ it today.
 
 ## Orchestration
 
-`aicad` imports `aidrill` and `aicollider` as **libraries**. It never shells out
+`stompcad` imports `stompdrill` and `stompcollider` as **libraries**. It never shells out
 and never parses their output.
 
-This is not a preference. `aidrill` reports ambiguity as structured data — an
+This is not a preference. `stompdrill` reports ambiguity as structured data — an
 `ambiguous-enclosure` diagnostic carrying its candidate footprints — and that
 structure is precisely what makes an interactive picker possible. Through a
-subprocess it would be flattened to a string and a number, and `aicad` would be
+subprocess it would be flattened to a string and a number, and `stompcad` would be
 reconstructing by regex the answer it had been handed.
 
-The hole pattern passes from `aidrill` to `aicollider` in memory. It remains
-available as an explicit artefact for anyone running `aicollider` standalone, but
-`aicad` has no reason to write a file it immediately reads back.
+The hole pattern passes from `stompdrill` to `stompcollider` in memory. It remains
+available as an explicit artefact for anyone running `stompcollider` standalone, but
+`stompcad` has no reason to write a file it immediately reads back.
 
-`aicad` depends on `aigeom` only for lengths it reports. It does no geometry.
+`stompcad` depends on `stompgeom` only for lengths it reports. It does no geometry.
 
 ## Interaction
 
@@ -133,13 +133,13 @@ cannot choose:
 
 - an ambiguous enclosure footprint — the case that motivated the whole layer;
 - which face is drilled;
-- several valid placements from `aicollider`;
+- several valid placements from `stompcollider`;
 - an empty or both-faced panel-reference group.
 
 No picker appears where a tool has *rejected* something — `unknown-diameter`,
 `hole-off-face`, `hole-through-boss`. Those are faults in the design, and a
 prompt offering "no drill matches ⌀6.9 mm; use ⌀7.0?" would let the friendly
-layer quietly undo a refusal `aidrill` made deliberately, at the exact moment
+layer quietly undo a refusal `stompdrill` made deliberately, at the exact moment
 that refusal is protecting a piece of aluminium. The distinction is that a
 picker chooses between answers the tool computed; an override invents one the
 tool declined to give.
@@ -155,9 +155,9 @@ and what it produced.
 
 ## The cache
 
-`aicad` owns the enclosure model cache outright. `tools/fetch_case_model.py`
-moves here from `aidrill`, and no copy is left behind — acquiring a model was
-never `aidrill`'s job.
+`stompcad` owns the enclosure model cache outright. `tools/fetch_case_model.py`
+moves here from `stompdrill`, and no copy is left behind — acquiring a model was
+never `stompdrill`'s job.
 
 Models are cached in an XDG-aware location, keyed by part designator, and
 **never evicted automatically**. They are large and cheap to keep; deleting
@@ -168,23 +168,23 @@ the model can be fetched by hand on a machine that has one.
 
 ## doctor
 
-`aicad doctor` checks the environment and repairs it. Run inside a virtual
+`stompcad doctor` checks the environment and repairs it. Run inside a virtual
 environment it verifies and installs dependencies there; run outside one it
 creates a virtual environment first.
 
-This exists because `aigeom` depends on OpenCASCADE unconditionally, which
+This exists because `stompgeom` depends on OpenCASCADE unconditionally, which
 pulls vtk and matplotlib transitively. "Just install it" stopped being a
 one-liner a user could be expected to get right, so environment setup became
 part of the tool's job.
 
-It is the only part of `aicad` that reaches outside the project directory and
+It is the only part of `stompcad` that reaches outside the project directory and
 modifies the machine. That authority is deliberately confined to one subcommand
 that must be asked for by name.
 
 ## Constraints
 
-**State is project configuration, never historic recall.** `aidrill` and
-`aicollider` are stateless input-to-output pipelines. `aicad` is a stateful
+**State is project configuration, never historic recall.** `stompdrill` and
+`stompcollider` are stateless input-to-output pipelines. `stompcad` is a stateful
 orchestrator, and its only state is the manifest. This rules out build caches,
 artefact provenance chains, undo, and "what changed since last time".
 
@@ -193,24 +193,24 @@ comparison would be derived state. If docking proves slow, the answer is faster
 docking or an explicit `drill`/`dock` invocation — not a cache.
 
 **Artefacts are overwritten freely.** No refusal, no versioning, no run record
-beyond `tar.aid`. The user has version control and decides what belongs in it.
+beyond `tar.stompcad`. The user has version control and decides what belongs in it.
 
 **The exit-code contract is shared:** `0` clean, `1` findings, `2` error, `3`
-usage or IO. `aicad` reports the most severe outcome of the stages it ran.
+usage or IO. `stompcad` reports the most severe outcome of the stages it ran.
 
 **Installs and tests alone.**
 
 ## Out of scope
 
-- **KiCad project stubs from Illustrator artwork.** A real `aicad`
+- **KiCad project stubs from Illustrator artwork.** A real `stompcad`
   responsibility, but it shares no machinery with the drill-and-dock route and
   belongs to a separate effort.
-- **Any geometric decision.** Those belong to `aidrill` and `aicollider`.
+- **Any geometric decision.** Those belong to `stompdrill` and `stompcollider`.
 - **Overriding a refusal**, by any route, including a flag.
 
 ## Left to the technical specification
 
 - The manifest's schema.
-- The `tar.aid` section protocol.
+- The `tar.stompcad` section protocol.
 - The prompt and picker presentation.
 - What `doctor` checks, and how it reports a repair it cannot make.

@@ -24,7 +24,7 @@ from .base import register_emitter
 
 __all__ = ["JsonOptions", "JsonEmitter", "FORMAT", "VERSION"]
 
-FORMAT = "aidrill-drill-data"
+FORMAT = "stompcad-drill-data"
 VERSION = 5
 
 

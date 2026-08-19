@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("OCP", reason="needs aidrill[step]")
+pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
-from aidrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid  # noqa: E402
-from aidrill.cad.step import read_step  # noqa: E402
-from aidrill.units import Nanometre  # noqa: E402
+from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid  # noqa: E402
+from stompdrill.cad.step import read_step  # noqa: E402
+from stompdrill.units import Nanometre  # noqa: E402
 from tests.hammond import MODELS  # noqa: E402
 
 pytestmark = pytest.mark.hammond
@@ -39,9 +39,9 @@ def test_the_axis_is_derived_from_the_footprint_and_not_hard_coded(hammond_b):
 
 
 def test_a_footprint_matching_nothing_is_rejected(document):
-    from aidrill.errors import AidrillError
+    from stompdrill.errors import StompdrillError
 
-    with pytest.raises(AidrillError, match="footprint"):
+    with pytest.raises(StompdrillError, match="footprint"):
         drill_axis(document, (Nanometre(999_000_000), Nanometre(1_000_000)))
 
 
@@ -51,7 +51,7 @@ def test_the_box_and_lid_are_selected_by_name(document):
 
 
 def test_the_selected_lid_is_the_thinner_solid(document):
-    from aidrill.cad.step import bounding_box_mm
+    from stompdrill.cad.step import bounding_box_mm
 
     axis = drill_axis(document, FOOTPRINT)
     box = bounding_box_mm(select_solid(document, "box").shape)
@@ -61,9 +61,9 @@ def test_the_selected_lid_is_the_thinner_solid(document):
 
 
 def test_an_unknown_face_name_is_rejected(document):
-    from aidrill.errors import AidrillError
+    from stompdrill.errors import StompdrillError
 
-    with pytest.raises(AidrillError):
+    with pytest.raises(StompdrillError):
         select_solid(document, "flange")
 
 
@@ -89,7 +89,7 @@ def test_the_outward_normal_points_away_from_the_solid(document):
     box = select_solid(document, "box")
     faces = find_faces(box, axis)
 
-    from aidrill.cad.step import bounding_box_mm
+    from stompdrill.cad.step import bounding_box_mm
     lo, hi = bounding_box_mm(box.shape)[axis], bounding_box_mm(box.shape)[axis + 3]
     centre = (lo + hi) / 2
     drilled_at = faces.drilled_position_mm

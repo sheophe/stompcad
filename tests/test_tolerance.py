@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aidrill.tolerance import within
+from stompdrill.tolerance import within
 
 # One micron, in nanometres. Named here rather than reused from the module so
 # that a test of the boundary cannot be satisfied by whatever the module happens

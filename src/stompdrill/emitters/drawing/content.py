@@ -107,7 +107,7 @@ TITLE_LABEL_FONT = 1.8
 TITLE_VALUE_FONT = 2.6
 TITLE_CELL_PADDING = 1.5
 
-#: Shown for a field ``aidrill`` has no source for. An em dash says the field
+#: Shown for a field ``stompdrill`` has no source for. An em dash says the field
 #: exists and is empty; a blank cell reads as one that failed to render.
 ABSENT = "—"
 
@@ -315,7 +315,7 @@ def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[Titl
 
     Every mandatory field appears whether or not a value is known, because a
     missing mandatory field and an empty one are different claims. Date of
-    issue, approval person and creator are the three ``aidrill`` has no source
+    issue, approval person and creator are the three ``stompdrill`` has no source
     for: it reads artwork, not an organisation, and reading a clock would make
     two runs over one panel disagree.
     """

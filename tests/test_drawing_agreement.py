@@ -14,23 +14,23 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from aidrill.emitters.drawing.build import SheetText, build_scene
-from aidrill.emitters.drawing.content import (
+from stompdrill.emitters.drawing.build import SheetText, build_scene
+from stompdrill.emitters.drawing.content import (
     enclosure_note,
     grid_note,
     note_lines,
     schedule_rows,
     tool_summary,
 )
-from aidrill.emitters.drawing.layout import choose_sheet
-from aidrill.emitters.drawing.scene import Circle, Group, Item, Scene
-from aidrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
-from aidrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions
-from aidrill.emitters.drawing_pdf import _num as pdf_num
-from aidrill.emitters.drawing_pdf import _serialise as pdf_serialise
-from aidrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter, _render_item
-from aidrill.model import Diagnostic, DrillData, EnclosureMatch
-from aidrill.units import Nanometre
+from stompdrill.emitters.drawing.layout import choose_sheet
+from stompdrill.emitters.drawing.scene import Circle, Group, Item, Scene
+from stompdrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
+from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions
+from stompdrill.emitters.drawing_pdf import _num as pdf_num
+from stompdrill.emitters.drawing_pdf import _serialise as pdf_serialise
+from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter, _render_item
+from stompdrill.model import Diagnostic, DrillData, EnclosureMatch
+from stompdrill.units import Nanometre
 from tests.conftest import at, make_data
 from tests.test_drawing_pdf import outline, panel, stream_of, strings_in
 

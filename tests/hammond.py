@@ -2,7 +2,7 @@
 
 Models are opt-in: a standard suite run skips every test marked ``hammond``.
 Run them with ``pytest --hammond``. Measurements here are the values kernel
-tests assert against, cross-checked against aidrill's own catalogue.
+tests assert against, cross-checked against stompdrill's own catalogue.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class HammondModel:
 
 #: Measured from the distributed models, not guessed. Each part's box plate is
 #: the gap between its outer drilled face and its inner floor; the lid's is its
-#: own two faces. Footprint and height are cross-checked against aidrill's own
+#: own two faces. Footprint and height are cross-checked against stompdrill's own
 #: catalogue by ``test_every_model_matches_the_shipped_catalogue``.
 MODELS: Mapping[str, HammondModel] = MappingProxyType(
     {

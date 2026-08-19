@@ -9,16 +9,16 @@ from dataclasses import fields
 
 import pytest
 
-from aidrill.emitters import base as emitter_base
-from aidrill.emitters.drawing_svg import (
+from stompdrill.emitters import base as emitter_base
+from stompdrill.emitters.drawing_svg import (
     A3_LANDSCAPE,
     A4_LANDSCAPE,
     DrawingOptions,
     DrawingSvgEmitter,
     Sheet,
 )
-from aidrill.errors import EmitterError
-from aidrill.model import (
+from stompdrill.errors import EmitterError
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     EnclosureMatch,
@@ -31,16 +31,16 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.pipeline import (
+from stompdrill.pipeline import (
     DRILL_STANDARDS,
     Deduplicate,
     IdentifyHammondFootprint,
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from aidrill.protocols import Emitter
-from aidrill.quantise import quantise
-from aidrill.units import Millimetre, Nanometre, format_nm, mm_from_nm
+from stompdrill.protocols import Emitter
+from stompdrill.quantise import quantise
+from stompdrill.units import Millimetre, Nanometre, format_nm, mm_from_nm
 from tests.conftest import at, holes, make_data
 
 SVG_NS = "http://www.w3.org/2000/svg"

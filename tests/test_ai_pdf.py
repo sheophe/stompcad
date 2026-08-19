@@ -7,12 +7,12 @@ from pathlib import Path
 import pikepdf
 import pytest
 
-from aidrill.errors import EmptyLayerError, LayerNotFoundError, SourceError
-from aidrill.geometry import CurveTo, MoveTo, fit_circle
-from aidrill.model import RawDrillData, RawHole, RawOutline, Severity
-from aidrill.protocols import Source
-from aidrill.sources import AiPdfSource
-from aidrill.units import mm_from_pt
+from stompdrill.errors import EmptyLayerError, LayerNotFoundError, SourceError
+from stompdrill.geometry import CurveTo, MoveTo, fit_circle
+from stompdrill.model import RawDrillData, RawHole, RawOutline, Severity
+from stompdrill.protocols import Source
+from stompdrill.sources import AiPdfSource
+from stompdrill.units import mm_from_pt
 from tests.conftest import build_pdf, circle_ops
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
@@ -548,10 +548,10 @@ def test_form_xobjects_are_walked_with_their_matrix(tmp_path):
 
 def test_the_source_is_re_exported_from_the_package_root():
     """There is no source registry, so the root is the only place to find one."""
-    import aidrill
+    import stompdrill
 
-    assert aidrill.AiPdfSource is AiPdfSource
-    assert "AiPdfSource" in aidrill.__all__
+    assert stompdrill.AiPdfSource is AiPdfSource
+    assert "AiPdfSource" in stompdrill.__all__
 
 
 @pytest.mark.parametrize("paint", ["s", "b", "b*"])

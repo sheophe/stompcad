@@ -15,7 +15,7 @@ features.
 **Acceptance:** The source is about 15% smaller with no loss of function. The full suite
 passes, and targeted mutation checks demonstrate that each refactor preserved behaviour.
 
-## Adopt mypy `strict` on `src/aidrill`
+## Adopt mypy `strict` on `src/stompdrill`
 
 **Status:** Agreed, not started.
 
@@ -23,14 +23,14 @@ passes, and targeted mutation checks demonstrate that each refactor preserved be
 `Pipeline.__getitem__` needs overloads for `int` and `slice`; enable `strict` only after
 the implementation is clean. Keep each module's typing change in its own commit.
 
-**Acceptance:** `strict = true` is enabled for `src/aidrill`, `mypy src/aidrill` reports no
+**Acceptance:** `strict = true` is enabled for `src/stompdrill`, `mypy src/stompdrill` reports no
 errors, and the test suite passes.
 
 ## Measure and, if necessary, reduce package import cost
 
 **Status:** Noted; no implementation agreed.
 
-**Constraint:** `import aidrill` currently imports `pikepdf` because the package root
+**Constraint:** `import stompdrill` currently imports `pikepdf` because the package root
 exports `AiPdfSource`. Do not introduce lazy loading without evidence that this cost is
 material. If measurement justifies a change, preserve the root import contract and keep
 `__all__`, `dir()`, and attribute access consistent.

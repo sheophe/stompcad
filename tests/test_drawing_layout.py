@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from aidrill.emitters.drawing.layout import Layout, choose_sheet, content_half_extents
-from aidrill.emitters.drawing.sheet import (
+from stompdrill.emitters.drawing.layout import Layout, choose_sheet, content_half_extents
+from stompdrill.emitters.drawing.sheet import (
     A0_LANDSCAPE,
     A3_LANDSCAPE,
     A4_LANDSCAPE,
@@ -13,8 +13,8 @@ from aidrill.emitters.drawing.sheet import (
     ISO_5457_CANDIDATES,
     FrameStyle,
 )
-from aidrill.model import ReferenceOutline
-from aidrill.units import Nanometre
+from stompdrill.model import ReferenceOutline
+from stompdrill.units import Nanometre
 from tests.conftest import at, make_data
 
 
@@ -104,7 +104,7 @@ def test_a_sheet_without_a_scale_fits_the_content_to_it():
 
 def test_a_fitted_scale_is_rounded_down_to_a_readable_one():
     """A title block says 1:2, never 1:2.37, and rounding down cannot overflow."""
-    from aidrill.emitters.drawing.layout import PREFERRED_SCALES, preferred_scale
+    from stompdrill.emitters.drawing.layout import PREFERRED_SCALES, preferred_scale
 
     assert preferred_scale(2.4) == 2.0
     assert preferred_scale(0.9) == 0.5
@@ -117,7 +117,7 @@ def test_a_fitted_scale_is_rounded_down_to_a_readable_one():
 
 
 def test_a_degenerate_scale_request_falls_back_to_one_to_one():
-    from aidrill.emitters.drawing.layout import preferred_scale
+    from stompdrill.emitters.drawing.layout import preferred_scale
 
     assert preferred_scale(0.0) == 1.0
     assert preferred_scale(float("inf")) == 20.0
@@ -129,7 +129,7 @@ def test_a_degenerate_scale_request_falls_back_to_one_to_one():
 
 def test_an_empty_panel_still_has_a_drawable_extent():
     """A 5 mm floor, so a panel with nothing on it does not divide by zero."""
-    from aidrill.model import DrillData
+    from stompdrill.model import DrillData
 
     assert content_half_extents(DrillData()) == (5.0, 5.0)
 
@@ -208,7 +208,7 @@ def test_a_panel_of_many_rows_is_not_judged_to_fit_a_sheet_its_chain_stack_overr
     against one box and tested against a wider one, a stack that wants 390 mm
     of chains reports fitting 277 mm of paper.
     """
-    from aidrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE
+    from stompdrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE
 
     rows = 24
     data = rows_panel(rows)
@@ -232,7 +232,7 @@ def test_rows_drilled_to_one_pattern_reserve_one_chain_between_them():
     eleven further bands would have taken from it — and a panel is no longer
     driven onto larger paper by rows whose dimensions it never draws.
     """
-    from aidrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE
+    from stompdrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE
 
     count = 12
     alike = make_data(
@@ -270,7 +270,7 @@ def test_the_sheet_a_panel_takes_does_not_depend_on_how_many_diagnostics_it_has(
     cannot show, exactly as the schedule and the chain stack do, so the paper a
     panel needs is a fact about the panel rather than about its findings.
     """
-    from aidrill.model import Diagnostic
+    from stompdrill.model import Diagnostic
 
     data = panel(112_400_000, 60_500_000)
     noisy = data.with_diagnostics(

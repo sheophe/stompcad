@@ -19,7 +19,7 @@ from .pipeline import (
 from .enclosures import Enclosure, HAMMOND_1590, footprints
 from .cad import CaseModel, Frame, Rejection, load_case_model
 from .errors import (
-    AidrillError, EmitterError, EmptyLayerError, LayerNotFoundError, SourceError,
+    StompdrillError, EmitterError, EmptyLayerError, LayerNotFoundError, SourceError,
 )
 
 __all__ = [
@@ -33,5 +33,5 @@ __all__ = [
     "DEFAULT_STANDARD", "CheckCaseClearance",
     "Enclosure", "HAMMOND_1590", "footprints",
     "CaseModel", "Frame", "Rejection", "load_case_model",
-    "AidrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
+    "StompdrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]

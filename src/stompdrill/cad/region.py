@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..errors import AidrillError
+from ..errors import StompdrillError
 from ..units import Nanometre, mm_from_nm, nm_from_mm
 from .base import Frame
 
@@ -88,7 +88,7 @@ def build_region(face: Any, axis: int, outward: float) -> Any:
     surface = BRep_Tool.Surface_s(floor)
     builder = BRepBuilderAPI_MakeFace(surface, ShapeAnalysis.OuterWire_s(floor), True)
     if not builder.IsDone():
-        raise AidrillError("could not rebuild the flat face's drillable area")
+        raise StompdrillError("could not rebuild the flat face's drillable area")
     region = builder.Face()
 
     structure, _ = classify_bounds(face, axis, outward)
@@ -169,7 +169,7 @@ def contains(
     vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(*point)).Vertex()
     distance = BRepExtrema_DistShapeShape(vertex, _boundary(region))
     if not distance.IsDone():
-        raise AidrillError("could not measure clearance to the region boundary")
+        raise StompdrillError("could not measure clearance to the region boundary")
     return distance.Value() >= clearance
 
 
@@ -233,7 +233,7 @@ def clearance_reason(region: Any, frame: Frame, axis: int, x_nm: Nanometre, y_nm
             builder.Add(compound, edge)
         distance = BRepExtrema_DistShapeShape(vertex, compound)
         if not distance.IsDone():
-            raise AidrillError("could not measure clearance to a boundary edge group")
+            raise StompdrillError("could not measure clearance to a boundary edge group")
         return distance.Value()
 
     point = list(_to_model(frame, x_nm, y_nm))
@@ -284,7 +284,7 @@ def _floor_face(face: Any) -> Any:
             best_area, best = props.Mass(), candidate
         explorer.Next()
     if best is None:
-        raise AidrillError("the play area's compound has no planar face")
+        raise StompdrillError("the play area's compound has no planar face")
     return best
 
 

@@ -67,20 +67,20 @@ def test_the_download_request_identifies_itself(monkeypatch):
 
     assert fetch_case_model.download("https://example.invalid/x.zip") == b"payload"
     assert seen["agent"], "the request must carry a User-Agent"
-    assert "aidrill" in seen["agent"]
+    assert "stompcad" in seen["agent"]
     assert seen["url"] == "https://example.invalid/x.zip"
 
 
-def test_cache_dir_is_home_cache_aidrill_cases_by_default(monkeypatch):
+def test_cache_dir_is_home_cache_stompcad_cases_by_default(monkeypatch):
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
-    assert cache_dir() == Path.home() / ".cache" / "aidrill" / "cases"
+    assert cache_dir() == Path.home() / ".cache" / "stompcad" / "cases"
 
 
 def test_cache_dir_honours_xdg_cache_home(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
 
-    assert cache_dir() == tmp_path / "aidrill" / "cases"
+    assert cache_dir() == tmp_path / "stompcad" / "cases"
 
 
 def test_extract_writes_the_stp_into_the_cache_and_returns_its_path(tmp_path: Path):

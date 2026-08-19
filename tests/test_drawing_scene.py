@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from aidrill.emitters.drawing.scene import (
+from stompdrill.emitters.drawing.scene import (
     FEINT,
     INK,
     RED,
@@ -19,7 +19,7 @@ from aidrill.emitters.drawing.scene import (
     Stroke,
     Text,
 )
-from aidrill.emitters.drawing.sheet import A4_PORTRAIT
+from stompdrill.emitters.drawing.sheet import A4_PORTRAIT
 
 THIN = Stroke(0.35, INK)
 

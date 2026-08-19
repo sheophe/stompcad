@@ -49,8 +49,8 @@ def test_the_two_models_have_different_footprints():
 
 
 def test_every_model_matches_the_shipped_catalogue():
-    """The harness must not drift from aidrill's own enclosure dimensions."""
-    from aidrill.enclosures import HAMMOND_1590
+    """The harness must not drift from stompdrill's own enclosure dimensions."""
+    from stompdrill.enclosures import HAMMOND_1590
 
     catalogue = {e.part: e for e in HAMMOND_1590}
     for part, model in MODELS.items():
@@ -95,13 +95,13 @@ def test_the_cache_directory_is_the_one_the_fetch_script_writes(monkeypatch):
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
     assert cache_dir is fetch_case_model.cache_dir
-    assert cache_dir() == fetch_case_model.cache_dir() == Path.home() / ".cache" / "aidrill" / "cases"
+    assert cache_dir() == fetch_case_model.cache_dir() == Path.home() / ".cache" / "stompcad" / "cases"
 
 
 def test_the_cache_directory_honours_xdg_cache_home(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
 
-    assert cache_dir() == tmp_path / "aidrill" / "cases"
+    assert cache_dir() == tmp_path / "stompcad" / "cases"
 
 
 @pytest.mark.hammond

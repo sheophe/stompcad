@@ -131,7 +131,7 @@ _FOOTPRINTS = _build_footprints()
 
 
 def render_module(catalogue: set[tuple[str, int, int, int]]) -> str:
-    """Render ``src/aidrill/enclosures.py`` for the given TSV catalogue."""
+    """Render ``src/stompdrill/enclosures.py`` for the given TSV catalogue."""
     ordered = sorted(catalogue, key=lambda e: (e[1], e[2], e[3], e[0]))
     rows = "".join(
         f'    Enclosure("{part}", Nanometre({length:_}), Nanometre({width:_}), '
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     root = Path(__file__).resolve().parent.parent
     tsv_path = Path(args[0]) if args else root / "docs" / "parts" / "dimensions.tsv"
-    destination = Path(args[1]) if len(args) > 1 else root / "src" / "aidrill" / "enclosures.py"
+    destination = Path(args[1]) if len(args) > 1 else root / "src" / "stompdrill" / "enclosures.py"
 
     catalogue = read_drawings(tsv_path)
     destination.write_text(render_module(catalogue), encoding="utf-8")

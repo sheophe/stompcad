@@ -7,10 +7,10 @@ from dataclasses import replace
 
 import pytest
 
-from aidrill.emitters.base import REGISTRY, get_emitter
-from aidrill.emitters.json_out import JsonEmitter, JsonOptions
-from aidrill.errors import EmitterError
-from aidrill.model import (
+from stompdrill.emitters.base import REGISTRY, get_emitter
+from stompdrill.emitters.json_out import JsonEmitter, JsonOptions
+from stompdrill.errors import EmitterError
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     EnclosureMatch,
@@ -23,15 +23,15 @@ from aidrill.model import (
     SourceInfo,
     StageRun,
 )
-from aidrill.pipeline import (
+from stompdrill.pipeline import (
     Deduplicate,
     IdentifyHammondFootprint,
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from aidrill.protocols import Emitter, Pipeline
-from aidrill.quantise import quantise
-from aidrill.units import Millimetre, Nanometre
+from stompdrill.protocols import Emitter, Pipeline
+from stompdrill.quantise import quantise
+from stompdrill.units import Millimetre, Nanometre
 from tests.conftest import at, holes, make_data
 
 # --------------------------------------------------------------------------
@@ -89,7 +89,7 @@ def fixture_data() -> DrillData:
             drill_layer="Drill",
             reference_layer="Background",
             layers_found=("Background", "Drill", "Graphics", "Hardware"),
-            producer="aidrill 1.0.0",
+            producer="stompdrill 1.0.0",
         ),
         processing=(
             StageRun(
@@ -214,7 +214,7 @@ def nominal_lengths(node, path: str = "") -> list[tuple[str, object]]:
 
 
 def test_emitter_self_registers_as_json():
-    import aidrill.emitters  # noqa: F401  (importing the package must register)
+    import stompdrill.emitters  # noqa: F401  (importing the package must register)
 
     assert REGISTRY["json"] is JsonEmitter
     assert get_emitter("json") is JsonEmitter
@@ -265,7 +265,7 @@ def test_document_declares_its_format_and_canonical_frame():
     """``units`` is the frame's unit, and the frame is nanometres."""
     document = parse(fixture_data())
 
-    assert document["format"] == "aidrill-drill-data"
+    assert document["format"] == "stompcad-drill-data"
     assert document["version"] == 5
     assert document["units"] == "nm"
     assert document["origin"] == "centre"
@@ -283,7 +283,7 @@ def test_source_info_round_trips():
     ]
     assert source["path"] == "tests/fixtures/tar.ai"
     assert source["layers_found"] == ["Background", "Drill", "Graphics", "Hardware"]
-    assert source["producer"] == "aidrill 1.0.0"
+    assert source["producer"] == "stompdrill 1.0.0"
 
 
 def test_reference_outline_round_trips():

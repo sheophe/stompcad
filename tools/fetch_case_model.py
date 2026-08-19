@@ -1,8 +1,8 @@
 """Download, unzip and cache a Hammond STEP model, printing its path.
 
-A stopgap: `aicad` will own downloading and caching, so the file is written to
+A stopgap: `stompcad` will own downloading and caching, so the file is written to
 be ported verbatim. The safety check is a self-contained pattern with no
-`aidrill` import; the catalogue is consulted only to improve the error.
+`stompdrill` import; the catalogue is consulted only to improve the error.
 """
 
 from __future__ import annotations
@@ -31,18 +31,18 @@ _BASE = "https://www.hammfg.com/files/parts/stp"
 #: hammfg.com refuses urllib's default User-Agent with a 403, so the request
 #: names the tool. Not evasion: it is a truthful identifier, and a courtesy to
 #: whoever reads the server log.
-_USER_AGENT = "aidrill/0.1 (+https://www.hammfg.com/ case-model fetcher)"
+_USER_AGENT = "stompcad/0.1 (+https://www.hammfg.com/ case-model fetcher)"
 
 
 def cache_dir() -> Path:
-    """Where models are cached: ``$XDG_CACHE_HOME/aidrill/cases``, or ``~/.cache`` under it.
+    """Where models are cached: ``$XDG_CACHE_HOME/stompcad/cases``, or ``~/.cache`` under it.
 
     The sole owner of this location; ``tests.hammond.cache_dir`` re-exports it so
     the two can never disagree about where a downloaded model lands.
     """
     root = os.environ.get("XDG_CACHE_HOME")
     base = Path(root) if root else Path.home() / ".cache"
-    return base / "aidrill" / "cases"
+    return base / "stompcad" / "cases"
 
 
 def check_part(text: str) -> str:
@@ -51,7 +51,7 @@ def check_part(text: str) -> str:
     if not PART_PATTERN.fullmatch(part):
         raise ValueError(f"{text!r} is not a part designator")
     try:
-        from aidrill.enclosures import HAMMOND_1590
+        from stompdrill.enclosures import HAMMOND_1590
     except ImportError:  # pragma: no cover - only when lifted out of this repo
         return part
     if part not in {enclosure.part for enclosure in HAMMOND_1590}:

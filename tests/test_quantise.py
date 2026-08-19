@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from aidrill.model import (
+from stompdrill.model import (
     Diagnostic,
     DrillData,
     RawDrillData,
@@ -15,17 +15,17 @@ from aidrill.model import (
     Severity,
     SourceInfo,
 )
-from aidrill.pipeline import (
+from stompdrill.pipeline import (
     DRILL_STANDARDS,
     IdentifyHammondFootprint,
     ReviewGridTies,
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from aidrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
-from aidrill.quantise import quantise
-from aidrill.sources import AiPdfSource
-from aidrill.units import Millimetre, Nanometre
+from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
+from stompdrill.quantise import quantise
+from stompdrill.sources import AiPdfSource
+from stompdrill.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 
 #: The fixture panel's own measurement: 113.000 × 60.000, which is within

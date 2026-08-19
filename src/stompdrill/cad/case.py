@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..errors import AidrillError
+from ..errors import StompdrillError
 from ..units import Nanometre, mm_from_nm, nm_from_mm
 from .base import Frame
 from .step import StepDocument, StepSolid, bounding_box_mm
@@ -79,7 +79,7 @@ def drill_axis(document: StepDocument, footprint_nm: tuple[Nanometre, Nanometre]
         plane = sorted(spans[other] for other in range(3) if other != axis)
         if all(abs(a - b) <= _MATCH_TOLERANCE_MM for a, b in zip(plane, wanted)):
             return axis
-    raise AidrillError(
+    raise StompdrillError(
         f"no face of the model has the catalogue footprint "
         f"{wanted[1]:.2f} x {wanted[0]:.2f} mm; measured spans are "
         f"{spans[0]:.2f}, {spans[1]:.2f}, {spans[2]:.2f} mm"
@@ -98,10 +98,10 @@ def select_solid(document: StepDocument, face: str) -> StepSolid:
     """Pick the box or lid solid, by name and then verified by thickness."""
     keyword = _FACE_KEYWORDS.get(face)
     if keyword is None:
-        raise AidrillError(f"unknown case face {face!r}; expected 'box' or 'lid'")
+        raise StompdrillError(f"unknown case face {face!r}; expected 'box' or 'lid'")
     found = document.named(keyword)
     if len(found) != 1:
-        raise AidrillError(
+        raise StompdrillError(
             f"the model names {len(found)} products containing {keyword!r}; "
             f"exactly one is needed to drill the {face}"
         )
@@ -145,7 +145,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
 
     levels = _plates(_levels(planes))
     if len(levels) < 2:
-        raise AidrillError(
+        raise StompdrillError(
             f"{solid.name} has fewer than two planar faces normal to the drill axis"
         )
 
@@ -230,7 +230,7 @@ def _plates(levels: list[_Level]) -> list[_Level]:
             surface = BRep_Tool.Surface_s(face)
             capped = BRepBuilderAPI_MakeFace(surface, ShapeAnalysis.OuterWire_s(face), True)
             if not capped.IsDone():
-                raise AidrillError("could not rebuild a level member's outer boundary")
+                raise StompdrillError("could not rebuild a level member's outer boundary")
             props = GProp_GProps()
             BRepGProp.SurfaceProperties_s(capped.Face(), props)
             outer_area += props.Mass()
@@ -260,9 +260,9 @@ def _drilled_level(
         or (level.outward > 0 and nm_from_mm(level.position) == nm_from_mm(high))
     ]
     if not candidates:
-        raise AidrillError(f"{name} has no planar face along this axis that faces outward")
+        raise StompdrillError(f"{name} has no planar face along this axis that faces outward")
     if len(candidates) > 1:
-        raise AidrillError(
+        raise StompdrillError(
             f"{name} has {len(candidates)} planar levels at its own bounding-box extreme "
             f"along this axis, at positions "
             f"{', '.join(f'{level.position:.4f}' for level in candidates)}"
@@ -286,7 +286,7 @@ def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
         if level.outward == inward and nm_from_mm(level.position) != nm_from_mm(drilled.position)
     ]
     if not candidates:
-        raise AidrillError("no flat face backs the drilled face")
+        raise StompdrillError("no flat face backs the drilled face")
     return max(candidates, key=lambda level: level.area)
 
 
@@ -357,5 +357,5 @@ def _cross(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, float, fl
 def _normalise(a: tuple[float, float, float]) -> tuple[float, float, float]:
     length = sum(c * c for c in a) ** 0.5
     if length == 0:  # pragma: no cover - reference is always perpendicular to w
-        raise AidrillError("degenerate face frame")
+        raise StompdrillError("degenerate face frame")
     return (a[0] / length, a[1] / length, a[2] / length)

@@ -33,28 +33,29 @@ defect, because it reintroduces the ambiguity the entry exists to remove.
 
 ## Packages
 
-**aicad**:
-The user-facing command-line tool. Drives `aidrill` and `aicollider` as
+**stompcad**:
+The user-facing command-line tool. Drives `stompdrill` and `stompcollider` as
 libraries, manages the case model cache, and turns a diagnostic into an
 interactive question.
 _Avoid_: the CLI, the frontend, the driver
 
-**aicollider**:
+**stompcollider**:
 The docking and collision engine. Seats boards inside a drilled case and
-reports where they clash. Knows geometry and nothing about pedals.
+reports where they clash. Domain-specific about how a board meets a panel;
+carries no component identity.
 _Avoid_: the solver, the physics engine
 
-**aidrill**:
+**stompdrill**:
 Artwork in, fabrication artefacts out. Owns every decision about where a hole
 goes, though not the type the answer is carried in.
 _Avoid_: the parser, the extractor
 
-**aigeom**:
+**stompgeom**:
 The kernel layer shared by the others — the STEP reader and writer, coordinate
 frames, and the geometry operations more than one package needs.
 _Avoid_: core, common, utils
 
-**aimodel**:
+**stompmodel**:
 The values every package exchanges — lengths, the drill data and its JSON,
 diagnostics, and the pipeline contracts. Pure Python; no kernel, no parser.
 _Avoid_: types, schema, dto
@@ -70,7 +71,7 @@ answer set there is no quantisation, only this.
 
 **Coordinate frame**:
 An origin and a right-handed basis. Carries no meaning about what it registers —
-that is the point. `CoordinateFrame` in `aigeom`.
+that is the point. `CoordinateFrame` in `stompgeom`.
 _Avoid_: frame (this repo has used the word for three unrelated things), axes,
 basis
 _See also_: Face frame, which adds the meaning.
@@ -85,7 +86,7 @@ _See also_: Quantisation. The sets are not interchangeable with one another.
 
 **Drill document**:
 The serialised form of one drill run: the holes, the frame they were cut in, and
-the enclosure they were cut for. What passes from `aidrill` to `aicollider`.
+the enclosure they were cut for. What passes from `stompdrill` to `stompcollider`.
 _Avoid_: drill data (that is the type), hole pattern, drill file
 
 **Drill layer**:
@@ -119,7 +120,7 @@ _See also_: a standoff is a separate physical part, not a boss.
 
 **Case model**:
 A STEP model of a real enclosure. Never synthesised: one is supplied undrilled,
-and `aidrill` emits the drilled one that `aicollider` docks into.
+and `stompdrill` emits the drilled one that `stompcollider` docks into.
 _Avoid_: enclosure model, case file, box model
 
 **Drilled face**:
@@ -129,7 +130,7 @@ _Avoid_: panel face, front face, working face
 
 **Face frame**:
 The drilled face's registration: a coordinate frame whose third axis is that
-face's outward normal. `FaceFrame` in `aigeom`.
+face's outward normal. `FaceFrame` in `stompgeom`.
 _Avoid_: frame, drill frame, case frame
 _See also_: Coordinate frame, Drilled face.
 
@@ -204,7 +205,7 @@ misses.
 **Panel-reference group**:
 The components whose reference designators mark them as user-facing hardware.
 Declares which face of a board points at the panel. Enumerated per project;
-`aicad` owns the `RV*,SW*` default, and `aicollider` holds none.
+`stompcad` owns the `RV*,SW*` default, and `stompcollider` holds none.
 _Avoid_: panel parts, through-hole group, controls
 _See also_: Protruding element, which is geometric; this is declared.
 

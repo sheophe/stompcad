@@ -9,10 +9,10 @@ import re
 import pikepdf
 import pytest
 
-from aidrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions, encode_text
-from aidrill.errors import EmitterError
-from aidrill.model import Diagnostic, DrillData, ReferenceOutline, SourceInfo
-from aidrill.units import Nanometre
+from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions, encode_text
+from stompdrill.errors import EmitterError
+from stompdrill.model import Diagnostic, DrillData, ReferenceOutline, SourceInfo
+from stompdrill.units import Nanometre
 from tests.conftest import at, make_data
 
 PT_PER_MM = 72.0 / 25.4
@@ -264,7 +264,7 @@ def test_a_warning_reaches_the_notes():
 
 def test_the_pdf_sheet_carries_the_iso_frame_and_the_svg_sheet_does_not():
     """The furniture is about paper, so it is the PDF sheet that gets it."""
-    from aidrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
+    from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
 
     assert "A4" in strings_in(render(panel()))
     assert "centring-mark" not in DrawingSvgEmitter(DrawingOptions()).emit(panel())
@@ -311,10 +311,10 @@ def test_the_mandatory_fields_a_caller_supplies_reach_the_printed_sheet():
     """A title block states them; nothing else on the sheet does."""
     options = PdfDrawingOptions(title="TAR PANEL", drawing_no="AI-0001",
                                 issue_date="2026-08-16", approved_by="P VAKHNIVSKYI",
-                                creator="AIDRILL")
+                                creator="STOMPDRILL")
     shown = strings_in(render(panel(), options))
 
-    for value in ("TAR PANEL", "AI-0001", "2026-08-16", "P VAKHNIVSKYI", "AIDRILL"):
+    for value in ("TAR PANEL", "AI-0001", "2026-08-16", "P VAKHNIVSKYI", "STOMPDRILL"):
         assert value in shown
     for label in ("LEGAL OWNER", "IDENT NO", "DATE OF ISSUE", "SHEET", "TITLE",
                   "APPROVED", "CREATOR", "DOC TYPE"):
@@ -322,7 +322,7 @@ def test_the_mandatory_fields_a_caller_supplies_reach_the_printed_sheet():
 
 
 def test_a_mandatory_field_with_no_source_prints_an_em_dash_rather_than_a_gap():
-    """Unset by default: aidrill reads artwork, not an organisation.
+    """Unset by default: stompdrill reads artwork, not an organisation.
 
     Each field is asserted with its own value, because four of them print an
     em dash and any one of the four would satisfy a bare search for one.

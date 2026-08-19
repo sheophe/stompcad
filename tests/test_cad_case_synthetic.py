@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("OCP", reason="needs aidrill[step]")
+pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
-from aidrill.cad.case import find_faces  # noqa: E402
-from aidrill.cad.step import StepSolid  # noqa: E402
-from aidrill.errors import AidrillError  # noqa: E402
+from stompdrill.cad.case import find_faces  # noqa: E402
+from stompdrill.cad.step import StepSolid  # noqa: E402
+from stompdrill.errors import StompdrillError  # noqa: E402
 
 
 def test_a_closed_solid_has_no_unambiguous_drilled_face():
@@ -31,5 +31,5 @@ def test_a_closed_solid_has_no_unambiguous_drilled_face():
     cube = BRepPrimAPI_MakeBox(100.0, 50.0, 20.0).Shape()
     solid = StepSolid(name="test-cube", shape=cube, unit_mm=1.0)
 
-    with pytest.raises(AidrillError, match=r"test-cube has 2 planar levels.*0\.0000, 50\.0000"):
+    with pytest.raises(StompdrillError, match=r"test-cube has 2 planar levels.*0\.0000, 50\.0000"):
         find_faces(solid, axis=1)

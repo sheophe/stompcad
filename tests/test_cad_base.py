@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from aidrill.cad import CaseModel, Frame, KernelUnavailable, Rejection
-from aidrill.errors import AidrillError
-from aidrill.units import Nanometre
+from stompdrill.cad import CaseModel, Frame, KernelUnavailable, Rejection
+from stompdrill.errors import StompdrillError
+from stompdrill.units import Nanometre
 
 
 class Stub:
@@ -71,23 +71,23 @@ def test_the_frame_flattens_to_stagerun_safe_parameters():
     assert keys["frame_w"] == (0.0, 0.0, -1.0)
 
 
-def test_kernel_unavailable_is_an_aidrill_error():
-    assert issubclass(KernelUnavailable, AidrillError)
+def test_kernel_unavailable_is_an_stompdrill_error():
+    assert issubclass(KernelUnavailable, StompdrillError)
 
 
-def test_importing_aidrill_does_not_import_the_kernel():
+def test_importing_stompdrill_does_not_import_the_kernel():
     import subprocess
     import sys
 
     result = subprocess.run(
-        [sys.executable, "-c", "import aidrill, sys; print('OCP' in sys.modules)"],
+        [sys.executable, "-c", "import stompdrill, sys; print('OCP' in sys.modules)"],
         capture_output=True, text=True, check=True,
     )
     assert result.stdout.strip() == "False"
 
 
-def test_importing_aidrill_cli_does_not_import_the_kernel():
-    """``import aidrill`` is covered above; the CLI module has its own import
+def test_importing_stompdrill_cli_does_not_import_the_kernel():
+    """``import stompdrill`` is covered above; the CLI module has its own import
     graph (``.cad``, ``.emitters``, ``.pipeline``) and a module-level OCP
     import placed directly in ``cli.py`` would not be caught by that test
     alone."""
@@ -95,7 +95,7 @@ def test_importing_aidrill_cli_does_not_import_the_kernel():
     import sys
 
     result = subprocess.run(
-        [sys.executable, "-c", "import aidrill.cli, sys; print('OCP' in sys.modules)"],
+        [sys.executable, "-c", "import stompdrill.cli, sys; print('OCP' in sys.modules)"],
         capture_output=True, text=True, check=True,
     )
     assert result.stdout.strip() == "False"

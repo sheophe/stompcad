@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from aidrill.emitters.drawing.build import iso_frame_items, pens_for
-from aidrill.emitters.drawing.layout import Layout
-from aidrill.emitters.drawing.scene import Line, Polygon, Rect, Text
-from aidrill.emitters.drawing.sheet import (
+from stompdrill.emitters.drawing.build import iso_frame_items, pens_for
+from stompdrill.emitters.drawing.layout import Layout
+from stompdrill.emitters.drawing.scene import Line, Polygon, Rect, Text
+from stompdrill.emitters.drawing.sheet import (
     A4_PORTRAIT,
     CENTRING_MARK_OVERSHOOT,
     CENTRING_MARK_WIDTH,
@@ -33,7 +33,7 @@ from aidrill.emitters.drawing.sheet import (
     Sheet,
     grid_divisions,
 )
-from aidrill.model import DrillData
+from stompdrill.model import DrillData
 
 
 def test_borders_are_twenty_on_the_filing_edge_and_ten_elsewhere():
@@ -294,7 +294,7 @@ def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
 
 def test_the_size_designation_sits_in_the_bottom_border_at_the_right_corner():
     """3.1: 'placed in the bottom border at the right corner'."""
-    from aidrill.emitters.drawing.scene import Text
+    from stompdrill.emitters.drawing.scene import Text
 
     layout = iso_layout()
     label = next(
@@ -312,14 +312,14 @@ def test_the_size_designation_sits_in_the_bottom_border_at_the_right_corner():
 
 
 def grid_text(sheet: Sheet) -> list[Text]:
-    from aidrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.build import grid_reference_items
 
     return [item for item in grid_reference_items(sheet) if isinstance(item, Text)]
 
 
 def test_letters_run_down_the_side_and_numerals_across_the_top():
     """4.4: letters from the top downwards, numerals from left to right."""
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     labels = grid_text(A3_LANDSCAPE)
     letters = [t for t in labels if t.content.isalpha()]
@@ -336,7 +336,7 @@ def test_letters_run_down_the_side_and_numerals_across_the_top():
 
 def test_the_first_letter_is_at_the_top_and_the_last_at_the_bottom():
     """Y runs down the sheet, so A has the smallest Y."""
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     letters = [t for t in grid_text(A3_LANDSCAPE) if t.content.isalpha()]
     a_positions = [t.y for t in letters if t.content == "A"]
@@ -347,7 +347,7 @@ def test_the_first_letter_is_at_the_top_and_the_last_at_the_bottom():
 
 def test_the_first_numeral_is_at_the_left_and_the_last_at_the_right():
     """4.4: 'from left to right', so 1 has the smallest X and 8 the largest."""
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     numerals = [t for t in grid_text(A3_LANDSCAPE) if t.content.isdigit()]
     first_positions = [t.x for t in numerals if t.content == "1"]
@@ -358,7 +358,7 @@ def test_the_first_numeral_is_at_the_left_and_the_last_at_the_right():
 
 def test_a4_carries_its_references_only_at_the_top_and_the_right():
     """4.4: 'For the size A4, they are located only at the top and the right side'."""
-    from aidrill.emitters.drawing.sheet import A4_PORTRAIT
+    from stompdrill.emitters.drawing.sheet import A4_PORTRAIT
 
     labels = grid_text(A4_PORTRAIT)
     numerals = [t for t in labels if t.content.isdigit()]
@@ -373,16 +373,16 @@ def test_a4_carries_its_references_only_at_the_top_and_the_right():
 
 def test_grid_characters_are_three_and_a_half_millimetres():
     """4.4: 'The size of letters and characters is 3,5 mm'."""
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     assert all(t.size == GRID_CHARACTER_SIZE for t in grid_text(A3_LANDSCAPE))
 
 
 def test_grid_lines_are_drawn_narrow():
     """4.4: 'shall be executed with continuous lines of 0,35 mm width'."""
-    from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.scene import Line
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.scene import Line
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     lines = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Line)]
 
@@ -398,9 +398,9 @@ def test_every_grid_reference_band_is_the_same_depth():
     from the trimmed edge instead would draw the left one at twice the depth of
     the other three, which is visible on the page.
     """
-    from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.scene import Line
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.scene import Line
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     # Field divisions only. The band's own outer edge runs the other way, along
     # the band rather than across it, so measuring it here would report the
@@ -433,9 +433,9 @@ def test_every_grid_reference_band_is_the_same_depth():
 
 def test_a_grid_letter_sits_at_the_centre_of_its_own_band():
     """A label centred on the trimmed edge instead would sit in the filing margin."""
-    from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.scene import Text
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.scene import Text
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     labels = [i for i in grid_reference_items(A3_LANDSCAPE) if isinstance(i, Text)]
     letters = [t for t in labels if t.content.isalpha()]
@@ -452,7 +452,7 @@ def test_a_grid_letter_sits_at_the_centre_of_its_own_band():
 )
 def test_a_sheet_with_no_tabulated_fields_carries_no_reference_system(across, down):
     """Table 2 tabulates the counts, and the SVG sheets are not in Table 2."""
-    from aidrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.build import grid_reference_items
 
     plain = Sheet("A3", 420.0, 297.0, fields_across=across, fields_down=down)
 
@@ -460,8 +460,8 @@ def test_a_sheet_with_no_tabulated_fields_carries_no_reference_system(across, do
 
 
 def test_the_svg_sheets_are_not_lettered_because_they_are_not_iso_sheets():
-    from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE_PLAIN, A4_LANDSCAPE
+    from stompdrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE_PLAIN, A4_LANDSCAPE
 
     for sheet in (A4_LANDSCAPE, A3_LANDSCAPE_PLAIN):
         assert sheet.grid_fields == (0, 0)
@@ -470,7 +470,7 @@ def test_the_svg_sheets_are_not_lettered_because_they_are_not_iso_sheets():
 
 def test_letters_never_use_i_or_o_even_on_the_largest_sheet():
     """A0 needs 16 letters, which is where a naive alphabet would reach I."""
-    from aidrill.emitters.drawing.sheet import A0_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A0_LANDSCAPE
 
     used = {t.content for t in grid_text(A0_LANDSCAPE) if t.content.isalpha()}
 
@@ -484,8 +484,8 @@ def test_letters_never_use_i_or_o_even_on_the_largest_sheet():
 
 def test_every_mandatory_iso_7200_field_is_present_even_when_empty():
     """Tables 1-3. A blank mandatory field is a stated gap, not an omission."""
-    from aidrill.emitters.drawing.build import SheetText
-    from aidrill.emitters.drawing.content import title_fields
+    from stompdrill.emitters.drawing.build import SheetText
+    from stompdrill.emitters.drawing.content import title_fields
 
     layout = iso_layout()
     fields = title_fields(DrillData(), SheetText(), layout)
@@ -503,10 +503,10 @@ def test_every_mandatory_iso_7200_field_is_present_even_when_empty():
     }
 
 
-def test_a_field_aidrill_cannot_derive_renders_as_an_em_dash():
+def test_a_field_stompdrill_cannot_derive_renders_as_an_em_dash():
     """Date of issue, approver and creator have no source in artwork."""
-    from aidrill.emitters.drawing.build import SheetText
-    from aidrill.emitters.drawing.content import title_fields
+    from stompdrill.emitters.drawing.build import SheetText
+    from stompdrill.emitters.drawing.content import title_fields
 
     fields = {f.name: f.value for f in title_fields(DrillData(), SheetText(), iso_layout())}
 
@@ -516,11 +516,11 @@ def test_a_field_aidrill_cannot_derive_renders_as_an_em_dash():
 
 
 def test_supplied_values_reach_their_fields():
-    from aidrill.emitters.drawing.build import SheetText
-    from aidrill.emitters.drawing.content import title_fields
+    from stompdrill.emitters.drawing.build import SheetText
+    from stompdrill.emitters.drawing.content import title_fields
 
     text = SheetText(title="TAR PANEL", drawing_no="AI-0001", company="ARTIFACT",
-                     issue_date="2026-08-16", approved_by="P VAKHNIVSKYI", creator="AIDRILL")
+                     issue_date="2026-08-16", approved_by="P VAKHNIVSKYI", creator="STOMPDRILL")
     fields = {f.name: f.value for f in title_fields(DrillData(), text, iso_layout())}
 
     assert fields["TITLE"] == "TAR PANEL"
@@ -528,15 +528,15 @@ def test_supplied_values_reach_their_fields():
     assert fields["LEGAL OWNER"] == "ARTIFACT"
     assert fields["DATE OF ISSUE"] == "2026-08-16"
     assert fields["APPROVED"] == "P VAKHNIVSKYI"
-    assert fields["CREATOR"] == "AIDRILL"
+    assert fields["CREATOR"] == "STOMPDRILL"
     assert fields["DOC TYPE"] == "DRILL DRAWING"
     assert fields["SHEET"] == "1 / 1"
 
 
 def test_a_value_longer_than_its_recommended_length_is_truncated():
     """Tables 1-3 give character counts; the field limit binds before the box does."""
-    from aidrill.emitters.drawing.build import SheetText
-    from aidrill.emitters.drawing.content import title_fields
+    from stompdrill.emitters.drawing.build import SheetText
+    from stompdrill.emitters.drawing.content import title_fields
 
     text = SheetText(drawing_no="X" * 40, title="Y" * 40, approved_by="Z" * 40)  # 5.1.3 recommends 16
     fields = {f.name: f for f in title_fields(DrillData(), text, iso_layout())}
@@ -550,7 +550,7 @@ def test_a_value_longer_than_its_recommended_length_is_truncated():
 
 def test_the_block_is_one_hundred_and_eighty_wide_whatever_the_sheet():
     """ISO 7200 6: the same title block on every paper size."""
-    from aidrill.emitters.drawing.sheet import A0_LANDSCAPE, A3_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A0_LANDSCAPE, A3_LANDSCAPE
 
     for sheet in (A4_PORTRAIT, A3_LANDSCAPE, A0_LANDSCAPE):
         layout = iso_layout(sheet)
@@ -560,7 +560,7 @@ def test_the_block_is_one_hundred_and_eighty_wide_whatever_the_sheet():
 
 def test_the_block_sits_in_the_bottom_right_of_the_drawing_space():
     """5457 4.1: bottom right for A0-A3; the lower part for A4."""
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE
 
     for sheet in (A4_PORTRAIT, A3_LANDSCAPE):
         layout = iso_layout(sheet)
@@ -575,9 +575,9 @@ def test_the_block_sits_in_the_bottom_right_of_the_drawing_space():
 
 def test_the_block_is_ruled_into_cells_that_each_carry_a_label_and_a_value():
     """A field is a labelled box: the label says which claim the value makes."""
-    from aidrill.emitters.drawing.build import SheetText, build_scene
-    from aidrill.emitters.drawing.content import title_fields
-    from aidrill.emitters.drawing.scene import Group, Text
+    from stompdrill.emitters.drawing.build import SheetText, build_scene
+    from stompdrill.emitters.drawing.content import title_fields
+    from stompdrill.emitters.drawing.scene import Group, Text
 
     layout = iso_layout()
     items = build_scene(layout, DrillData(), SheetText()).items
@@ -591,8 +591,8 @@ def test_the_block_is_ruled_into_cells_that_each_carry_a_label_and_a_value():
 
 def test_no_rule_in_the_block_is_a_line_of_no_length():
     """A rule that starts where it ends is ink that draws nothing."""
-    from aidrill.emitters.drawing.build import SheetText, build_scene
-    from aidrill.emitters.drawing.scene import Group, Line
+    from stompdrill.emitters.drawing.build import SheetText, build_scene
+    from stompdrill.emitters.drawing.scene import Group, Line
 
     items = build_scene(iso_layout(), DrillData(), SheetText()).items
     block = next(i for i in items if isinstance(i, Group) and i.cls == "title-block-group")
@@ -606,8 +606,8 @@ def test_no_rule_in_the_block_is_a_line_of_no_length():
 
 def test_a_value_of_exactly_its_recommended_length_is_left_alone():
     """The count is a length the field admits, so the boundary is inclusive."""
-    from aidrill.emitters.drawing.build import SheetText
-    from aidrill.emitters.drawing.content import title_fields
+    from stompdrill.emitters.drawing.build import SheetText
+    from stompdrill.emitters.drawing.content import title_fields
 
     def ident(text: SheetText) -> str:
         return next(f for f in title_fields(DrillData(), text, iso_layout())
@@ -626,9 +626,9 @@ def test_the_reference_ticks_and_letters_land_on_the_same_edges():
     one edge being ruled while the letters naming its fields sit on another —
     a sheet whose zone references cannot be read at all.
     """
-    from aidrill.emitters.drawing.build import grid_reference_items
-    from aidrill.emitters.drawing.scene import Line, Text
-    from aidrill.emitters.drawing.sheet import A3_LANDSCAPE, A4_PORTRAIT
+    from stompdrill.emitters.drawing.build import grid_reference_items
+    from stompdrill.emitters.drawing.scene import Line, Text
+    from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE, A4_PORTRAIT
 
     for sheet in (A4_PORTRAIT, A3_LANDSCAPE):
         items = grid_reference_items(sheet)
