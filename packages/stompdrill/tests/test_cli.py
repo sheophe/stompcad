@@ -288,6 +288,7 @@ def test_the_cli_fixes_the_stage_order():
         "deduplicate",
         "review-grid-ties",
         "route",
+        "check-outline-containment",
     ]
 
 
@@ -1613,7 +1614,7 @@ def test_no_case_model_leaves_the_pipeline_unchanged():
     args = build_parser().parse_args(["panel.ai"])
 
     assert [stage.name for stage in build_pipeline(args)] == [
-        "deduplicate", "review-grid-ties", "route"
+        "deduplicate", "review-grid-ties", "route", "check-outline-containment"
     ]
 
 
@@ -1625,6 +1626,40 @@ def test_a_case_model_appends_the_clearance_stage_last():
     args.case_model_object = FakeCase()
 
     assert [stage.name for stage in build_pipeline(args)][-1] == "check-case-clearance"
+
+
+def test_containment_runs_after_deduplication_so_a_repeat_is_reported_once():
+    """Ordering is the one thing a stage cannot self-declare; assert it here."""
+    names = [stage.name for stage in pipeline_for()]
+
+    assert names.index("deduplicate") < names.index("check-outline-containment")
+
+
+def test_a_panel_whose_holes_are_all_inside_still_exits_clean(fake_source, capsys):
+    """The other half of the pair: the stage must not warn about every panel."""
+    fake_source(read())
+
+    assert cli.main(["panel.ai"]) == 0
+
+    assert "hole-outside-outline" not in capsys.readouterr().out
+
+
+def test_a_hole_outside_the_outline_exits_one_and_still_writes_the_artefact(
+    fake_source, tmp_path, capsys
+):
+    """A warning, so the drill file is written.
+
+    ``read()``'s default 99.6 x 50.4 outline quantises to the catalogue's
+    100 x 50 mm and raises nothing at all, so the containment finding is the
+    only thing between this run and exit 0. The hole overshoots x by 1.5 mm.
+    """
+    fake_source(read(holes=(RawHole(Millimetre(48.0), Millimetre(0.0), Millimetre(7.0)),)))
+    target = tmp_path / "out.drl"
+
+    assert cli.main(["panel.ai", "--emit", f"excellon={target}"]) == 1
+
+    assert "hole-outside-outline" in capsys.readouterr().out
+    assert target.exists()
 
 
 def test_the_report_names_the_model_face_and_play_area():

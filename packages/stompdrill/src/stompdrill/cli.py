@@ -1,7 +1,8 @@
 """Command-line composition and reporting.
 
 Quantiser order belongs to :func:`stompdrill.quantise`; post-quantisation stages
-run deduplicate → review-grid-ties → route. Emitters are registry-resolved.
+run deduplicate → review-grid-ties → route → check-outline-containment, with
+clearance appended when a case model is supplied. Emitters are registry-resolved.
 Exit codes are 0 clean, 1 warnings, 2 errors and 3 usage or I/O failure.
 """
 
@@ -46,6 +47,7 @@ from .pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
     CheckCaseClearance,
+    CheckOutlineContainment,
     Deduplicate,
     DrillStandard,
     IdentifyHammondFootprint,
@@ -341,13 +343,20 @@ def _snap_positions(args: argparse.Namespace) -> SnapPositions:
 
 
 def build_pipeline(args: argparse.Namespace) -> Pipeline[DrillData]:
-    """Build deduplicate → review-grid-ties → route, then clearance if asked.
+    """Build deduplicate → review-grid-ties → route → containment, then clearance.
 
     Review follows deduplication so it describes surviving holes; ordering is
-    last among the geometry stages. Clearance only diagnoses, so it runs after
-    numbering and every stage remains independently valid.
+    last among the geometry stages. The two checks only diagnose, so they run
+    after numbering and every stage remains independently valid. Containment
+    precedes clearance: the outline is the weaker boundary and the model's face
+    is the stronger one.
     """
-    stages: list[Stage[DrillData]] = [Deduplicate(), ReviewGridTies(), RouteHoles()]
+    stages: list[Stage[DrillData]] = [
+        Deduplicate(),
+        ReviewGridTies(),
+        RouteHoles(),
+        CheckOutlineContainment(),
+    ]
     model = getattr(args, "case_model_object", None)
     if model is not None:
         stages.append(CheckCaseClearance(model))
