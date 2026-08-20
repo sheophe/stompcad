@@ -13,7 +13,7 @@ from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData, Hole, Origin, RawHole, ReferenceOutline, SourceInfo
 from stompmodel.protocols import Emitter
 from stompmodel.units import Millimetre, Nanometre, format_nm
-from tests.conftest import at, holes, make_data
+from tests.conftest import at, make_data
 
 # --------------------------------------------------------------------------
 # helpers
@@ -25,14 +25,14 @@ TOOL_DEF = re.compile(r"^T(\d+)C([0-9.]+)$")
 def fixture_data() -> DrillData:
     """Return the expected quantised data for ``tests/fixtures/tar.ai``."""
     return DrillData(
-        holes=holes(
-            (-40_000_000, 18_000_000),
-            (-20_000_000, 18_000_000),
-            (0, 18_000_000),
-            (20_000_000, 18_000_000),
-            (40_000_000, 18_000_000),
-            (-19_000_000, -18_750_000, 5_000_000),
-            (19_000_000, -18_750_000, 5_000_000),
+        holes=(
+            at(-40_000_000, 18_000_000, index=4),
+            at(-20_000_000, 18_000_000, index=7),
+            at(0, 18_000_000, index=1),
+            at(20_000_000, 18_000_000, index=6),
+            at(40_000_000, 18_000_000, index=2),
+            at(-19_000_000, -18_750_000, 5_000_000, index=5),
+            at(19_000_000, -18_750_000, 5_000_000, index=3),
         ),
         reference=ReferenceOutline(width_nm=Nanometre(113_000_000), height_nm=Nanometre(60_000_000)),
         diagnostics=(
@@ -572,3 +572,26 @@ def test_emit_is_deterministic():
     data = fixture_data()
 
     assert emit(data) == emit(data)
+
+
+# --------------------------------------------------------------------------
+# the fixture itself
+# --------------------------------------------------------------------------
+
+
+def test_the_fixtures_numbers_are_a_permutation_out_of_tuple_order() -> None:
+    """Guard the fixture's shape: a permutation of 1..n, not already ascending.
+
+    ``numbered()`` pairs each hole with its index in tuple order rather than
+    sorting, so nothing here can fail on a production change -- only on someone
+    renumbering the fixture. It discriminates nothing today: ``ExcellonEmitter``
+    emits in arrival order by design, and the file's one number-reading path is
+    the refusal message, already pinned with scrambled indices above. The
+    numbers are scrambled so that an assertion reading list position is caught
+    the day someone writes one.
+    """
+    data = fixture_data()
+    numbers = [n for n, _ in data.numbered()]
+
+    assert sorted(numbers) == list(range(1, len(data.holes) + 1))
+    assert numbers != sorted(numbers)

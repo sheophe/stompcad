@@ -202,7 +202,8 @@ def test_there_are_exactly_four_centring_marks_on_the_axes_of_symmetry():
     # this only needs the two groups, not a particular order within them.
     vertical = [m for m in marks if m.x1 == m.x2]
     horizontal = [m for m in marks if m.y1 == m.y2]
-    assert len(vertical) == 2 and len(horizontal) == 2
+    assert len(vertical) == 2, "vertical marks"
+    assert len(horizontal) == 2, "horizontal marks"
     assert all(mark.x1 == half_width for mark in vertical)
     assert all(mark.y1 == half_height for mark in horizontal)
 
@@ -418,7 +419,10 @@ def test_every_grid_reference_band_is_the_same_depth():
     right = [line for line in horizontal if min(line.x1, line.x2) > width / 2.0]
     top = [line for line in vertical if min(line.y1, line.y2) < height / 2.0]
     bottom = [line for line in vertical if min(line.y1, line.y2) > height / 2.0]
-    assert left and right and top and bottom
+    assert left, "left margin"
+    assert right, "right margin"
+    assert top, "top margin"
+    assert bottom, "bottom margin"
 
     for band in (left, right):
         assert all(abs(line.x2 - line.x1) == GRID_BAND_WIDTH for line in band)

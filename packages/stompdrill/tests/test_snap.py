@@ -69,8 +69,10 @@ class TestSnapPositions:
             for index in range(1, 61):
                 hole = raw(rng.uniform(-60, 60), rng.uniform(-30, 30))
                 (x_nm, y_nm), _ = stage.quantise(hole)
-                assert type(x_nm) is int and type(y_nm) is int
-                assert x_nm % grid_nm == 0 and y_nm % grid_nm == 0
+                assert type(x_nm) is int, "x is a plain int"
+                assert type(y_nm) is int, "y is a plain int"
+                assert x_nm % grid_nm == 0, "x lands on the grid"
+                assert y_nm % grid_nm == 0, "y lands on the grid"
 
     def test_the_measurement_is_never_rounded_before_it_is_compared(self):
         """0.1250004 mm is nearer 0.25 mm than zero.

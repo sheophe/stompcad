@@ -337,13 +337,17 @@ class TestFitCircle:
         assert (found.cx, found.cy) == pytest.approx(transform(ctm, -40.0, 18.0), abs=PT_SLACK)
         assert found.diameter == pytest.approx(7.0 * PT_PER_MM, abs=PT_SLACK)
 
-    def test_recovers_a_circle_under_rotation(self) -> None:
-        """A rotated circle is still a circle.
+    @pytest.mark.parametrize("degrees", [37.0, 60.0, 90.0, 105.0, 300.0])
+    def test_recovers_a_circle_under_rotation(self, degrees: float) -> None:
+        """A rotated circle is still a circle, at every angle.
 
         Fitting from the *axis-aligned* bounding box would report a diameter of
         2r*cos(45 deg) here. Anchor radii are rotation invariant, so they don't.
+        One angle is not a test of rotation: 37 deg keeps every sign in the
+        anchor arithmetic positive, and 90 deg is where a sign-dependent
+        derivation divides by zero.
         """
-        ctm = rotation(37.0)
+        ctm = rotation(degrees)
         found = fit_circle(mapped(circle_path(10.0, -5.0, 2.5), ctm))
         assert found is not None
         assert (found.cx, found.cy) == pytest.approx(transform(ctm, 10.0, -5.0), abs=PT_SLACK)

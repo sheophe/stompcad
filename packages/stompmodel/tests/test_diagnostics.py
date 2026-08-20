@@ -126,6 +126,17 @@ def test_a_diagnostic_location_must_hold_whole_nanometres(value: object) -> None
             ),
             id="Diagnostic.data-as-json-shaped-lists",
         ),
+        pytest.param(
+            lambda v: Diagnostic.warning(
+                "off-grid",
+                "hole 4 moved",
+                # The length key is second on purpose: with only one key the
+                # loop cannot distinguish skipping a non-length key from
+                # stopping at it, and `continue -> break` goes unnoticed.
+                data=(("stage", "ReviewGridTies"), ("moved_nm", v)),
+            ),
+            id="Diagnostic.data-with-a-non-length-key-first",
+        ),
     ],
 )
 def test_a_payload_key_ending_nm_must_hold_whole_nanometres(build, value: object) -> None:

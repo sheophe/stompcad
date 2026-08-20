@@ -632,7 +632,9 @@ def test_a_document_of_another_format_is_refused() -> None:
     document = to_document(_data())
     document["format"] = "some-other-tool"
 
-    with pytest.raises(DocumentError, match="not a stompcad-drill-data document"):
+    with pytest.raises(
+        DocumentError, match="not a stompcad-drill-data document: 'some-other-tool'"
+    ):
         from_document(document)
 
 
@@ -641,7 +643,7 @@ def test_a_document_of_an_unknown_version_is_refused() -> None:
     document = to_document(_data())
     document["version"] = VERSION + 1
 
-    with pytest.raises(DocumentError, match=f"expected {VERSION}"):
+    with pytest.raises(DocumentError, match=f"version {VERSION + 1}, expected {VERSION}"):
         from_document(document)
 
 

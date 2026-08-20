@@ -30,7 +30,7 @@ the resulting document and may perform presentation-only transformations such as
 coordinate-frame, or textual formatting. They do not quantise, deduplicate, classify,
 sort, or otherwise re-derive shared facts.
 
-An invocation selects one to four emitters through repeatable
+An invocation selects one to five emitters through repeatable
 `--emit FORMAT=PATH` arguments. Emitter payloads may be text or bytes; see ADR-0005.
 The processing blocks, aggregate boundaries, and typed transfers are shown in ADR-0001,
 Figure 1.
@@ -57,23 +57,28 @@ flowchart LR
         dedupe["Deduplicate"]
         ties["ReviewGridTies"]
         route["RouteHoles"]
+        clearance["CheckCaseClearance<br/>(conditional)"]
         dedupe -->|DrillData| ties
         ties -->|DrillData| route
+        route -.->|DrillData, if --case-model| clearance
     end
 
     excellon["ExcellonEmitter"]
     drawing["DrawingSvgEmitter"]
     drawing_pdf["DrawingPdfEmitter"]
     json["JsonEmitter"]
-    selected{"--emit FORMAT=PATH<br/>argument (one to four)"}
+    step["StepEmitter"]
+    selected{"--emit FORMAT=PATH<br/>argument (one to five)"}
 
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
     route -->|DrillData| selected
+    clearance -.->|DrillData| selected
     selected -->|DrillData| excellon
     selected -->|DrillData| drawing
     selected -->|DrillData| drawing_pdf
     selected -->|DrillData| json
+    selected -->|DrillData| step
 ```
 
 Figure 1 — Processing blocks, aggregate boundaries, and transferred document types.
@@ -82,7 +87,7 @@ Figure 1 — Processing blocks, aggregate boundaries, and transferred document t
 
 The typed transition from `RawDrillData` to `DrillData` makes the processing boundary
 visible. Keeping shared calculations before the emitter fan-out gives every artifact
-one authority and makes disagreement structurally difficult. Keeping the three pipeline
+one authority and makes disagreement structurally difficult. Keeping the pipeline
 stages independent preserves their single responsibilities while allowing their fixed
 composition to be read at the invocation boundary.
 

@@ -59,9 +59,11 @@ cd packages/stompmodel && uv run --no-sync mypy
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
-# Mutation survey
-PYTHONDONTWRITEBYTECODE=1 mutmut run
-mutmut results
+# Mutation survey, per package -- there is no workspace-wide run
+(cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
+  && ../../.venv/bin/mutmut results)
+(cd packages/stompdrill && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
+  && ../../.venv/bin/mutmut results)
 
 # Run the tool
 python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
@@ -126,12 +128,15 @@ The accepted architecture is defined by:
   the shared geometry core.
 - [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md): the shared
   model package and the workspace's dependency order.
+- [ADR-0010](docs/adr/0010-the-stomp-prefix.md): the `stomp` prefix every package
+  carries.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
 measurements with the enclosure, drill-size, and grid answer sets, then produces canonical
-integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies`, and
-`RouteHoles`. Emitters only translate frames, convert units, format, and serialise; shared
+integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies` and
+`RouteHoles`, and `CheckCaseClearance` too when a case model is supplied.
+Emitters only translate frames, convert units, format, and serialise; shared
 facts are computed once before the emitter fan-out.
 
 Both drawing emitters share `emitters/drawing/`: `content` holds the facts a sheet
@@ -258,13 +263,12 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `emitters.drawing.sheet`
   or `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
   shared facts rather than placement.
-- The root `mutmut run` above only reaches `stompdrill`: it resolves tests through the
-  root `pyproject.toml`, which names `stompdrill`'s testpaths, the same reason the root
-  `mypy` gate excludes `stompmodel`'s tests. `stompmodel.units` is exactly the kind of
-  module worth chasing too, but only `cd packages/stompmodel && mutmut run` — its own
-  `[tool.mutmut]`, resolving against its own tests — is a real survey of it; a
-  `stompmodel` mutant run through the root config would find no test importing it and
-  record a false survivor.
+- `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
+  `quantise` and `stompdrill.units` above, and `cd packages/stompmodel && mutmut run` —
+  its own `[tool.mutmut]`, resolving against its own tests — is what reaches
+  `stompmodel.units`, exactly the kind of module worth chasing too; there is no
+  workspace-wide command, the same reason the root `mypy` gate excludes `stompmodel`'s
+  tests.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for each package and 100% for quantisers, stages,
@@ -278,10 +282,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
   ```bash
   .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
-  # 238 passed
+  # 240 passed
 
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
-  # 1154 passed
+  # 1161 passed
   ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.

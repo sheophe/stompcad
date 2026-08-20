@@ -202,7 +202,8 @@ class TestInventoryFiltering:
         assert 3_200_000 not in thinned.sizes_nm
         assert 7_000_000 not in thinned.sizes_nm
         assert 12_000_000 not in thinned.sizes_nm
-        assert 3_300_000 in thinned.sizes_nm and 6_900_000 in thinned.sizes_nm
+        assert 3_300_000 in thinned.sizes_nm, "a neighbour of the excluded 3.2 mm survives"
+        assert 6_900_000 in thinned.sizes_nm, "a neighbour of the excluded 7.0 mm survives"
 
     def test_a_blacklist_applies_on_top_of_a_whitelist(self):
         both = self.METRIC.select(
