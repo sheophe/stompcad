@@ -157,11 +157,20 @@ def fake_source(monkeypatch):
     """Install a stand-in for ``AiPdfSource``. Returns an ``install`` callable."""
 
     def install(result):
+        from stompdrill.sources import DEFAULT_FORM_DEPTH
+
         class FakeSource:
-            def __init__(self, path, drill_layer="Drill", reference_layer="Background"):
+            def __init__(
+                self,
+                path,
+                drill_layer="Drill",
+                reference_layer="Background",
+                form_depth=DEFAULT_FORM_DEPTH,
+            ):
                 self.path = path
                 self.drill_layer = drill_layer
                 self.reference_layer = reference_layer
+                self.form_depth = form_depth
 
             def read(self):
                 if isinstance(result, Exception):
@@ -621,6 +630,84 @@ def test_the_case_is_checked_before_the_file_is_even_opened(capsys):
     """A typo costs no PDF parse, and — the point — it is reported *as* a typo."""
     assert cli.main(["/no/such/panel.ai", "--case", "1590ZZ"]) == 3
     assert "1590ZZ" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --form-depth
+# ---------------------------------------------------------------------------
+
+
+def test_form_depth_defaults_to_the_sources_own_default():
+    from stompdrill.sources import DEFAULT_FORM_DEPTH
+
+    args = cli.build_parser().parse_args(["panel.ai"])
+
+    assert args.form_depth == DEFAULT_FORM_DEPTH
+
+
+def test_the_help_states_the_default_depth_it_will_apply():
+    """One number, one authority: the help must not carry a second literal."""
+    from stompdrill.sources import DEFAULT_FORM_DEPTH
+
+    assert str(DEFAULT_FORM_DEPTH) in cli.build_parser().format_help()
+
+
+def test_form_depth_reaches_the_source(monkeypatch):
+    """Its own spy rather than ``fake_source``: the shared fixture stays a stub.
+
+    A class attribute recording the last instance would be an ``attr-defined``
+    error the moment anyone annotated that fixture's ``__init__``.
+    """
+    seen: dict[str, int] = {}
+
+    class Spy:
+        def __init__(self, path, drill_layer="Drill", reference_layer="Background", form_depth=0):
+            seen["form_depth"] = form_depth
+
+        def read(self):
+            return read()
+
+    monkeypatch.setattr(cli, "AiPdfSource", Spy)
+
+    cli.main(["panel.ai", "--form-depth", "3"])
+
+    assert seen["form_depth"] == 3
+
+
+@pytest.mark.parametrize("bad", ["0", "-1"])
+def test_a_depth_below_one_level_is_a_usage_error(bad, capsys):
+    assert cli.main([str(FIXTURE), "--form-depth", bad]) == 3
+
+    assert "--form-depth" in capsys.readouterr().err
+
+
+def test_a_depth_that_is_not_a_whole_number_is_a_usage_error():
+    """argparse's own ``type=int`` rejects it; the exit code is still the contract."""
+    assert cli.main([str(FIXTURE), "--form-depth", "1.5"]) == 3
+
+
+def test_a_bad_depth_is_refused_before_the_panel_is_opened(tmp_path, capsys):
+    """A file that would fail to parse must not be reached; the flag loses first."""
+    unreadable = tmp_path / "not-a-pdf.ai"
+    unreadable.write_text("this is not a PDF", encoding="utf-8")
+
+    assert cli.main([str(unreadable), "--form-depth", "0"]) == 3
+
+    assert "--form-depth" in capsys.readouterr().err
+
+
+def test_truncated_nesting_exits_one_from_the_command_line(tmp_path, capsys):
+    from tests.conftest import build_pdf, self_nesting_form
+
+    panel = build_pdf(
+        tmp_path / "deep.ai",
+        {"Background": "0 0 m 300 0 l 300 200 l 0 200 l h S", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 10, 0], self_nesting_form()),
+    )
+
+    assert cli.main([str(panel), "--form-depth", "1"]) == 1
+
+    assert "nesting-truncated" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

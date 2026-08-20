@@ -58,7 +58,7 @@ from .pipeline import (
     normalize_part_name,
 )
 from .quantise import RawDrillData, quantise
-from .sources import AiPdfSource
+from .sources import DEFAULT_FORM_DEPTH, AiPdfSource
 
 __all__ = [
     "main",
@@ -166,6 +166,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="clearance between the bit and the nearest non-flat feature, in "
         "millimetres (default: 1.0)",
+    )
+    parser.add_argument(
+        "--form-depth",
+        metavar="N",
+        type=int,
+        default=DEFAULT_FORM_DEPTH,
+        help="how many levels of nested Form XObject to follow in the artwork; "
+        f"stopping with more below reports nesting-truncated (default: {DEFAULT_FORM_DEPTH})",
     )
     parser.add_argument(
         "--emit",
@@ -364,11 +372,15 @@ def build_pipeline(args: argparse.Namespace) -> Pipeline[DrillData]:
 
 
 def read_source(args: argparse.Namespace) -> RawDrillData:
-    source = AiPdfSource(
-        args.panel,
-        drill_layer=args.drill_layer,
-        reference_layer=args.reference_layer,
-    )
+    try:
+        source = AiPdfSource(
+            args.panel,
+            drill_layer=args.drill_layer,
+            reference_layer=args.reference_layer,
+            form_depth=args.form_depth,
+        )
+    except ValueError as failure:
+        raise UsageError(f"--form-depth: {failure}") from failure
     return source.read()
 
 
