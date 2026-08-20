@@ -133,6 +133,18 @@ def test_the_emitted_text_is_the_codecs_mapping_and_nothing_else():
     assert parse(data) == to_document(data)
 
 
+def test_the_emitted_text_states_the_keys_in_the_documents_order():
+    """Serialising must not re-order: the key order is the document's, not json.dumps'.
+
+    Parsed dicts compare equal whatever their order, so the text is the only
+    place this can be checked.
+    """
+    data = a_real_panel()
+
+    assert list(json.loads(emit(data))) == list(to_document(data))
+    assert list(json.loads(emit(data)))[:4] == ["format", "version", "units", "origin"]
+
+
 def test_emit_is_deterministic_and_does_not_mutate_its_input():
     data = a_real_panel()
     before = tuple(data.holes)

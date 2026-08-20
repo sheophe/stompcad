@@ -39,7 +39,7 @@ _ORIGIN = "centre"
 
 
 def to_document(data: DrillData) -> dict[str, Any]:
-    """The JSON-ready mapping, exposed so callers can embed it elsewhere."""
+    """The document itself, as a JSON-ready mapping: key order is part of it."""
     tools = data.tools()
     counts = data.tool_counts()
 
@@ -168,14 +168,21 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
         raise DocumentError(f"{FORMAT} units {document.get('units')!r}, expected {_UNITS!r}")
     if document.get("origin") != _ORIGIN:
         raise DocumentError(f"{FORMAT} origin {document.get('origin')!r}, expected {_ORIGIN!r}")
-    return DrillData(
-        holes=tuple(_read_hole(h) for h in document["holes"]),
-        reference=_read_reference(document["reference"]),
-        diagnostics=tuple(_read_diagnostic(d) for d in document["diagnostics"]),
-        source=_read_source(document["source"]),
-        processing=tuple(_read_stage_run(r) for r in document["processing"]),
-        enclosure=_read_enclosure(document["enclosure"]),
-    )
+    # One wrap rather than a guarded read per key: every reader below indexes
+    # the document, so a truncated one must fail the same way at any depth. A
+    # KeyError raised in here is always an absent document key -- no value the
+    # readers build is a mapping they look something up in.
+    try:
+        return DrillData(
+            holes=tuple(_read_hole(h) for h in document["holes"]),
+            reference=_read_reference(document["reference"]),
+            diagnostics=tuple(_read_diagnostic(d) for d in document["diagnostics"]),
+            source=_read_source(document["source"]),
+            processing=tuple(_read_stage_run(r) for r in document["processing"]),
+            enclosure=_read_enclosure(document["enclosure"]),
+        )
+    except KeyError as missing:
+        raise DocumentError(f"{FORMAT} document has no {missing.args[0]!r}") from missing
 
 
 def _read_source(payload: Mapping[str, Any]) -> SourceInfo:

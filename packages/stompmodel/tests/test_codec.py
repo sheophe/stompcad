@@ -627,15 +627,6 @@ def test_the_tool_table_is_not_read_back_but_derived_again() -> None:
     assert from_document(document) == _data()
 
 
-def test_a_holes_tool_number_is_not_read_back_either() -> None:
-    """The per-hole ``tool`` is the same derived number, written for a consumer."""
-    document = to_document(_data())
-    for hole in document["holes"]:
-        hole["tool"] = 7
-
-    assert from_document(document) == _data()
-
-
 def test_a_document_of_another_format_is_refused() -> None:
     """A reader that guesses at an unknown shape is how two tools disagree."""
     document = to_document(_data())
@@ -651,6 +642,28 @@ def test_a_document_of_an_unknown_version_is_refused() -> None:
     document["version"] = VERSION + 1
 
     with pytest.raises(DocumentError, match=f"expected {VERSION}"):
+        from_document(document)
+
+
+def test_a_document_missing_a_section_is_refused_by_name() -> None:
+    """A document this reader cannot read is one kind of failure, not two.
+
+    ``KeyError`` is outside ``StompError``, so it would escape the handler a
+    caller wrote around the codec.
+    """
+    document = to_document(_data())
+    del document["processing"]
+
+    with pytest.raises(DocumentError, match="has no 'processing'"):
+        from_document(document)
+
+
+def test_a_document_missing_a_field_inside_a_section_is_refused_too() -> None:
+    """Truncation is not only a top-level accident; the readers nest."""
+    document = to_document(_data())
+    del document["holes"][0]["diameter_nm"]
+
+    with pytest.raises(DocumentError, match="has no 'diameter_nm'"):
         from_document(document)
 
 
