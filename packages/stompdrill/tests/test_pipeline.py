@@ -10,6 +10,7 @@ import pytest
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
+    CheckOutlineContainment,
     CheckReferenceSize,
     Deduplicate,
     DrillStandard,
@@ -863,6 +864,7 @@ def test_the_flow_is_reachable_from_the_package_root():
         ReviewGridTies,
         RouteHoles,
         CheckReferenceSize,
+        CheckOutlineContainment,
     ):
         assert getattr(stompdrill, name.__name__, None) is name
         assert name.__name__ in stompdrill.__all__

@@ -17,7 +17,7 @@ from .diameters import (
 from .enclosure import CATALOGUE, IdentifyHammondFootprint, normalize_part_name
 from .route import RouteHoles
 from .snap import ReviewGridTies, SnapPositions
-from .validate import CheckReferenceSize
+from .validate import CheckOutlineContainment, CheckReferenceSize
 
 __all__ = [
     "SnapPositions",
@@ -30,6 +30,7 @@ __all__ = [
     "Deduplicate",
     "ReviewGridTies",
     "CheckReferenceSize",
+    "CheckOutlineContainment",
     "CheckCaseClearance",
     "RouteHoles",
     "IdentifyHammondFootprint",
