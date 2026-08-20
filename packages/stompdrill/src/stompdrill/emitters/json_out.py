@@ -12,8 +12,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompmodel.diagnostics import Diagnostic
-
-from ..model import (
+from stompmodel.model import (
     DrillData,
     EnclosureMatch,
     Hole,
@@ -21,6 +20,7 @@ from ..model import (
     SourceInfo,
     StageRun,
 )
+
 from .base import register_emitter
 
 __all__ = ["JsonOptions", "JsonEmitter", "FORMAT", "VERSION"]

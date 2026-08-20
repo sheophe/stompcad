@@ -24,6 +24,7 @@ from stompmodel.diagnostics import (
     exit_for_severity,
 )
 from stompmodel.errors import StompError
+from stompmodel.model import DrillData
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import CaseModel
@@ -39,7 +40,6 @@ from .emitters import (
 from .enclosures import HAMMOND_1590
 from .errors import StompdrillError
 from .formatting import format_mm
-from .model import DrillData, RawDrillData
 from .pipeline import (
     CATALOGUE,
     DEFAULT_STANDARD,
@@ -55,7 +55,7 @@ from .pipeline import (
     normalize_part_name,
 )
 from .protocols import Emitter, Payload, Pipeline, Stage
-from .quantise import quantise
+from .quantise import RawDrillData, quantise
 from .sources import AiPdfSource
 
 __all__ = [

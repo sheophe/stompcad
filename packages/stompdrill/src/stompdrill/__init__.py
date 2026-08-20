@@ -1,18 +1,13 @@
 """Extract, quantise, process, and emit drill data from Illustrator artwork.
 
-The package root exposes the public data model, protocols, concrete source,
-quantisation entry point, standard stages, and enclosure reference data.
+The package root exposes the protocols, the concrete source, the quantisation
+entry point and what it reads, the standard stages, and enclosure reference
+data. The values themselves are ``stompmodel``'s; see ADR-0009.
 """
 
-from stompmodel.errors import EmitterError
-
-from .model import (
-    DrillData, EnclosureMatch, Hole, Origin, RawDrillData, RawHole,
-    RawOutline, ReferenceOutline, SourceInfo, StageRun,
-)
 from .protocols import Emitter, Pipeline, Source, Stage
 from .sources import AiPdfSource
-from .quantise import quantise
+from .quantise import RawDrillData, quantise
 from .pipeline import (
     SnapPositions, SnapDiametersToDrillTable, Deduplicate, IdentifyHammondFootprint,
     CheckReferenceSize, ReviewGridTies, RouteHoles, DrillStandard, DRILL_STANDARDS,
@@ -23,15 +18,13 @@ from .cad import CaseModel, Frame, Rejection, load_case_model
 from .errors import StompdrillError, EmptyLayerError, LayerNotFoundError, SourceError
 
 __all__ = [
-    "DrillData", "EnclosureMatch", "Hole", "Origin", "RawDrillData",
-    "RawHole", "RawOutline", "ReferenceOutline", "SourceInfo", "StageRun",
     "Emitter", "Pipeline", "Source", "Stage",
     "AiPdfSource",
-    "quantise",
+    "RawDrillData", "quantise",
     "SnapPositions", "SnapDiametersToDrillTable", "Deduplicate", "IdentifyHammondFootprint",
     "CheckReferenceSize", "ReviewGridTies", "RouteHoles", "DrillStandard", "DRILL_STANDARDS",
     "DEFAULT_STANDARD", "CheckCaseClearance",
     "Enclosure", "HAMMOND_1590", "footprints",
     "CaseModel", "Frame", "Rejection", "load_case_model",
-    "StompdrillError", "EmitterError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
+    "StompdrillError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]

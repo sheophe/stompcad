@@ -6,8 +6,8 @@ import itertools
 
 import pytest
 
-from stompdrill.model import DrillData, Hole, RawHole, ReferenceOutline
 from stompdrill.pipeline import RouteHoles
+from stompmodel.model import DrillData, Hole, RawHole, ReferenceOutline
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at
 

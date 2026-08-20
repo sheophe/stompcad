@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Sequence
 from typing import ClassVar, Protocol, runtime_checkable
 
-from .model import DrillData, RawDrillData, StageRun
+from stompmodel.model import DrillData, StageRun
+
+from .quantise import RawDrillData
 
 __all__ = ["Source", "Stage", "Emitter", "Payload", "Pipeline"]
 

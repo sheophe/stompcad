@@ -15,7 +15,8 @@ from typing import ClassVar
 
 import pikepdf
 
-from ..model import DrillData
+from stompmodel.model import DrillData
+
 from .base import register_emitter
 from .drawing.build import SheetText, build_scene
 from .drawing.layout import Layout, choose_sheet

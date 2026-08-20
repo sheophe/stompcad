@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import total_ordering
 
-from stompmodel.units import Nanometre, _check_nanometres
+from .units import Nanometre, _check_nanometres
 
 __all__ = [
     "Severity",

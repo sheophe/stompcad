@@ -11,15 +11,6 @@ import pytest
 
 from stompdrill.emitters import get_emitter
 from stompdrill.emitters.json_out import JsonEmitter
-from stompdrill.model import (
-    DrillData,
-    Hole,
-    RawDrillData,
-    RawHole,
-    RawOutline,
-    ReferenceOutline,
-    SourceInfo,
-)
 from stompdrill.pipeline import (
     Deduplicate,
     IdentifyHammondFootprint,
@@ -28,8 +19,9 @@ from stompdrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from stompdrill.quantise import quantise
+from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
+from stompmodel.model import DrillData, Hole, RawHole, RawOutline, ReferenceOutline, SourceInfo
 from stompmodel.units import Millimetre, Nanometre
 
 __all__: list[str] = []

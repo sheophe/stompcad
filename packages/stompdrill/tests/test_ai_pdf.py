@@ -9,11 +9,12 @@ import pytest
 
 from stompdrill.errors import EmptyLayerError, LayerNotFoundError, SourceError
 from stompdrill.geometry import CurveTo, MoveTo, fit_circle
-from stompdrill.model import RawDrillData, RawHole, RawOutline
 from stompdrill.protocols import Source
+from stompdrill.quantise import RawDrillData
 from stompdrill.sources import AiPdfSource
 from stompdrill.units import mm_from_pt
 from stompmodel.diagnostics import Severity
+from stompmodel.model import RawHole, RawOutline
 from tests.conftest import build_pdf, circle_ops
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
@@ -118,6 +119,15 @@ def test_source_info_records_every_layer_found(data):
     assert data.source.drill_layer == "Drill"
     assert data.source.reference_layer == "Background"
     assert data.source.path == str(FIXTURE)
+
+
+def test_the_source_names_the_tool_that_read_the_artwork(data):
+    """The producer reaches the JSON header, and the reader is what names it.
+
+    ``stompmodel`` holds ``SourceInfo`` for both tools, so it cannot default
+    the field to either one of them.
+    """
+    assert data.source.producer == "stompdrill"
 
 
 def test_reading_twice_gives_the_same_answer():

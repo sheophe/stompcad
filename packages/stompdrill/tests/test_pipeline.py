@@ -7,15 +7,6 @@ import random
 
 import pytest
 
-from stompdrill.model import (
-    DrillData,
-    RawDrillData,
-    RawHole,
-    RawOutline,
-    ReferenceOutline,
-    SourceInfo,
-    StageRun,
-)
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -29,8 +20,9 @@ from stompdrill.pipeline import (
     SnapPositions,
 )
 from stompdrill.protocols import Pipeline, Stage
-from stompdrill.quantise import quantise
+from stompdrill.quantise import RawDrillData, quantise
 from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at, codes, diameters, holes, make_data, positions
 

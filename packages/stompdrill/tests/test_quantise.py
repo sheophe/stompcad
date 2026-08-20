@@ -6,13 +6,6 @@ from typing import Any
 
 import pytest
 
-from stompdrill.model import (
-    DrillData,
-    RawDrillData,
-    RawHole,
-    RawOutline,
-    SourceInfo,
-)
 from stompdrill.pipeline import (
     DRILL_STANDARDS,
     IdentifyHammondFootprint,
@@ -21,9 +14,10 @@ from stompdrill.pipeline import (
     SnapPositions,
 )
 from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
-from stompdrill.quantise import quantise
+from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.model import DrillData, RawHole, RawOutline, SourceInfo
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 

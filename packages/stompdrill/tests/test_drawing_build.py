@@ -30,7 +30,7 @@ from stompdrill.emitters.drawing.scene import (
     Text,
 )
 from stompdrill.emitters.drawing.sheet import A3_LANDSCAPE, GROUP_0_7, FrameStyle, LineGroup
-from stompdrill.model import DrillData, Hole, ReferenceOutline
+from stompmodel.model import DrillData, Hole, ReferenceOutline
 from stompmodel.units import Nanometre
 from tests.conftest import at
 

@@ -20,10 +20,10 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompmodel.errors import EmitterError
+from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
 
 from ..cad.base import KernelUnavailable
-from ..model import DrillData
 from .base import register_emitter
 
 __all__ = ["StepOptions", "StepEmitter", "cut_shape"]

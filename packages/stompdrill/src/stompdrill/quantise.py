@@ -6,12 +6,37 @@ diameters before grid positions. Holes leave this stage unnumbered.
 
 from __future__ import annotations
 
-from stompmodel.diagnostics import Diagnostic, Severity
+from dataclasses import dataclass
 
-from .model import DrillData, Hole, RawDrillData, StageRun
+from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.model import DrillData, Hole, RawHole, RawOutline, SourceInfo, StageRun
+from stompmodel.units import Millimetre, _check_millimetres
+
 from .pipeline import IdentifyHammondFootprint, SnapDiametersToDrillTable, SnapPositions
 
-__all__ = ["quantise"]
+__all__ = ["RawDrillData", "quantise"]
+
+
+@dataclass(frozen=True, slots=True)
+class RawDrillData:
+    """A source result in unquantised millimetres.
+
+    ``centre`` is the outline's page-space centre. Without one, coordinates
+    stay page-relative, ``centre`` is ``(0.0, 0.0)``, and the frame is
+    diagnosed. It lives beside the quantiser because the quantiser is its
+    only consumer -- it never crosses a package boundary.
+    """
+
+    source: SourceInfo
+    reference: RawOutline | None
+    centre: tuple[Millimetre, Millimetre]
+    holes: tuple[RawHole, ...]
+    diagnostics: tuple[Diagnostic, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Require both centre coordinates to be finite float millimetres."""
+        x, y = self.centre
+        _check_millimetres("RawDrillData", centre_x=x, centre_y=y)
 
 
 def quantise(

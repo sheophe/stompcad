@@ -355,7 +355,7 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompdrill.model import DrillData, Hole
+        from stompmodel.model import DrillData, Hole
         from stompmodel.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face="box",
@@ -592,7 +592,7 @@ def test_two_emissions_describe_the_same_model(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompdrill.model import DrillData, Hole
+        from stompmodel.model import DrillData, Hole
         from stompmodel.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face="box",

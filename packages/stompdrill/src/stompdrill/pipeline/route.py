@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from itertools import pairwise
 from typing import TYPE_CHECKING, ClassVar
 
-from ..model import DrillData, Hole, StageRun
+from stompmodel.model import DrillData, Hole, StageRun
 
 if TYPE_CHECKING:
     # ``sorted`` needs a key whose result can be compared with ``<``. Spelling

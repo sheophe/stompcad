@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from stompmodel.diagnostics import Severity
+from stompmodel.model import DrillData, Hole
 from stompmodel.units import Nanometre, format_nm, mm_from_nm
 
-from ...model import DrillData, Hole
 from .content import (
     POSITION_DECIMALS,
     TITLE_BLOCK_COLUMNS,

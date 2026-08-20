@@ -33,7 +33,7 @@ from stompdrill.emitters.drawing.sheet import (
     Sheet,
     grid_divisions,
 )
-from stompdrill.model import DrillData
+from stompmodel.model import DrillData
 
 
 def test_borders_are_twenty_on_the_filing_edge_and_ten_elsewhere():

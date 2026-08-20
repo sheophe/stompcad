@@ -9,9 +9,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
+from stompmodel.model import DrillData, StageRun
 from stompmodel.units import Nanometre, format_nm
 
-from ..model import DrillData, StageRun
 from ..tolerance import within
 
 __all__ = ["CheckReferenceSize"]

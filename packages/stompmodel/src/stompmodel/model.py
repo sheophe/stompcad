@@ -1,19 +1,28 @@
 """Immutable drill-data values with unit and frame invariants.
 
 Nominal lengths are whole nanometres in a Y-up, outline-centred frame; raw
-measurements are finite float millimetres. ``_nm`` payloads contain integers.
+measurements are finite float millimetres. ``_nm`` payloads contain
+integers. Here rather than beside the tool that fills them: a sibling
+member produces this and stompcollider consumes it, and neither owns it.
+See ADR-0009.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
-from stompmodel.diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths
-from stompmodel.errors import EmitterError
-from stompmodel.units import Millimetre, Nanometre, _check_nanometres, mm_from_nm, nm_from_mm
+from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths
+from .errors import EmitterError
+from .units import (
+    Millimetre,
+    Nanometre,
+    _check_millimetres,
+    _check_nanometres,
+    mm_from_nm,
+    nm_from_mm,
+)
 
 __all__ = [
     "Origin",
@@ -24,7 +33,6 @@ __all__ = [
     "EnclosureMatch",
     "SourceInfo",
     "StageRun",
-    "RawDrillData",
     "DrillData",
 ]
 
@@ -38,19 +46,6 @@ class Origin(Enum):
 
     CENTRE = "centre"
     LOWER_LEFT = "lower-left"
-
-
-def _check_millimetres(owner: str, **lengths: object) -> None:
-    """Refuse anything but a finite ``float`` for a measurement.
-
-    Exact type checks reject integers and booleans; ``math.isfinite`` rejects
-    infinities and NaNs before they can invalidate comparisons.
-    """
-    for name, value in lengths.items():
-        if type(value) is not float or not math.isfinite(value):
-            raise TypeError(
-                f"{owner}.{name} must be a finite number of millimetres, not {value!r}"
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,7 +258,8 @@ class SourceInfo:
     drill_layer: str = ""
     reference_layer: str = ""
     layers_found: tuple[str, ...] = ()
-    producer: str = "stompdrill"
+    #: Named by whoever read the artwork; the shared model is no tool's name.
+    producer: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,26 +292,6 @@ class StageRun:
             if k == key:
                 return v
         return default
-
-
-@dataclass(frozen=True, slots=True)
-class RawDrillData:
-    """A source result in unquantised millimetres.
-
-    ``centre`` is the outline's page-space centre. Without one, coordinates stay
-    page-relative, ``centre`` is ``(0.0, 0.0)``, and the frame is diagnosed.
-    """
-
-    source: SourceInfo
-    reference: RawOutline | None
-    centre: tuple[Millimetre, Millimetre]
-    holes: tuple[RawHole, ...]
-    diagnostics: tuple[Diagnostic, ...] = ()
-
-    def __post_init__(self) -> None:
-        """Require both centre coordinates to be finite float millimetres."""
-        x, y = self.centre
-        _check_millimetres("RawDrillData", centre_x=x, centre_y=y)
 
 
 @dataclass(frozen=True, slots=True)

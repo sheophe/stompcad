@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.model import DrillData, EnclosureMatch, Hole
 from stompmodel.units import Nanometre, format_nm
 
-from ...model import DrillData, EnclosureMatch, Hole
 from ...pipeline import DRILL_STANDARDS
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the checker

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from stompdrill.emitters.drawing import content
-from stompdrill.model import DrillData, EnclosureMatch, StageRun
 from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.model import DrillData, EnclosureMatch, StageRun
 from tests.conftest import at, make_data
 
 

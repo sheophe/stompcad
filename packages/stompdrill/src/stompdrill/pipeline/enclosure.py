@@ -11,15 +11,15 @@ from decimal import Decimal
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic, ParameterValue
-from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
-
-from ..enclosures import footprints
-from ..model import (
+from stompmodel.model import (
     EnclosureMatch,
     RawOutline,
     ReferenceOutline,
     StageRun,
 )
+from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
+
+from ..enclosures import footprints
 
 __all__ = [
     "CATALOGUE",

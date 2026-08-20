@@ -1,13 +1,16 @@
-"""Branded length units and the conversions between them.
+"""Branded length units, the conversions between them, and the guards that keep a length whole.
 
 ``Millimetre`` is what a measurement is; ``Nanometre`` is what a model holds.
 Arithmetic drops the brand, so a scaled value is re-wrapped at the point it
 becomes a length again. Millimetre conversions use ``Decimal(str(value))``
-and half-up rounding. See ADR-0004.
+and half-up rounding. The guards refuse the other unit outright, because a
+length that crossed no boundary is the defect they exist to catch. See
+ADR-0004.
 """
 
 from __future__ import annotations
 
+import math
 from decimal import ROUND_HALF_UP, Decimal
 from typing import NewType
 
@@ -19,7 +22,6 @@ __all__ = [
     "scaled_nm",
     "mm_from_nm",
     "format_nm",
-    "_check_nanometres",
 ]
 
 #: The canonical model unit. Every nominal length is one of these.
@@ -76,4 +78,17 @@ def _check_nanometres(owner: str, **lengths: object) -> None:
         if type(value) is not int:
             raise TypeError(
                 f"{owner}.{name} must be a whole number of nanometres, not {value!r}"
+            )
+
+
+def _check_millimetres(owner: str, **lengths: object) -> None:
+    """Refuse anything but a finite ``float`` for a measurement.
+
+    Exact type checks reject integers and booleans; ``math.isfinite`` rejects
+    infinities and NaNs before they can invalidate comparisons.
+    """
+    for name, value in lengths.items():
+        if type(value) is not float or not math.isfinite(value):
+            raise TypeError(
+                f"{owner}.{name} must be a finite number of millimetres, not {value!r}"
             )

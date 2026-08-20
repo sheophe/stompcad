@@ -9,6 +9,7 @@ import pytest
 from stompmodel.diagnostics import (
     EXIT_CLEAN,
     EXIT_ERRORS,
+    EXIT_USAGE,
     EXIT_WARNINGS,
     Diagnostic,
     Severity,
@@ -22,11 +23,6 @@ _A_FLOAT = 40_000_000.0
 # --------------------------------------------------------------------------
 # Severity orders total, and refuses to compare with anything else
 # --------------------------------------------------------------------------
-
-
-def test_severity_orders_info_below_warning_below_error() -> None:
-    assert Severity.INFO < Severity.WARNING < Severity.ERROR
-    assert max((Severity.INFO, Severity.ERROR, Severity.WARNING)) is Severity.ERROR
 
 
 def test_severities_order_by_how_much_they_matter() -> None:
@@ -72,6 +68,14 @@ def test_a_warning_exits_one_and_an_error_exits_two() -> None:
 def test_every_severity_has_an_exit_code() -> None:
     for severity in Severity:
         assert exit_for_severity(severity) in (EXIT_CLEAN, EXIT_WARNINGS, EXIT_ERRORS)
+
+
+def test_a_usage_failure_exits_three_and_no_finding_can_reach_it() -> None:
+    """A run that never started has no worst severity, so the reduction above
+    cannot state this code and something has to. Every caller of the table
+    shares it, which is why the number is fixed here and not per tool."""
+    assert EXIT_USAGE == 3
+    assert EXIT_USAGE not in {exit_for_severity(worst) for worst in (None, *Severity)}
 
 
 # --------------------------------------------------------------------------

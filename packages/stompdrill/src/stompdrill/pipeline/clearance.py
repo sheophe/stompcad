@@ -9,10 +9,10 @@ from __future__ import annotations
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
+from stompmodel.model import DrillData, Hole, StageRun
 from stompmodel.units import Nanometre, format_nm
 
 from ..cad import CaseModel, Rejection
-from ..model import DrillData, Hole, StageRun
 
 __all__ = ["CheckCaseClearance"]
 

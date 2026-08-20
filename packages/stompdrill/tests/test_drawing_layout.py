@@ -13,7 +13,7 @@ from stompdrill.emitters.drawing.sheet import (
     ISO_5457_CANDIDATES,
     FrameStyle,
 )
-from stompdrill.model import ReferenceOutline
+from stompmodel.model import ReferenceOutline
 from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 
@@ -129,7 +129,7 @@ def test_a_degenerate_scale_request_falls_back_to_one_to_one():
 
 def test_an_empty_panel_still_has_a_drawable_extent():
     """A 5 mm floor, so a panel with nothing on it does not divide by zero."""
-    from stompdrill.model import DrillData
+    from stompmodel.model import DrillData
 
     assert content_half_extents(DrillData()) == (5.0, 5.0)
 

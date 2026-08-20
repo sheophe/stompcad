@@ -15,10 +15,10 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic, ParameterValue
+from stompmodel.model import RawHole, StageRun
 from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
 
 from ..formatting import format_mm
-from ..model import RawHole, StageRun
 
 __all__ = [
     "METRIC_BANDS",

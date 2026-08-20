@@ -87,8 +87,8 @@ select = [
 # literal it wraps and has no state to share. Both the bare and qualified
 # spellings appear because the brands are imported by name.
 extend-immutable-calls = [
-    "stompdrill.model.ReferenceOutline",
-    "stompdrill.model.RawOutline",
+    "stompmodel.model.ReferenceOutline",
+    "stompmodel.model.RawOutline",
     "stompdrill.units.Micron",
     "stompmodel.units.Nanometre",
     "stompmodel.units.Millimetre",

@@ -13,6 +13,7 @@ from pathlib import Path
 import pikepdf
 
 from stompmodel.diagnostics import Diagnostic
+from stompmodel.model import RawHole, RawOutline, SourceInfo
 from stompmodel.units import Millimetre
 
 from ..errors import EmptyLayerError, LayerNotFoundError, SourceError
@@ -29,7 +30,7 @@ from ..geometry import (
     multiply,
     transform,
 )
-from ..model import RawDrillData, RawHole, RawOutline, SourceInfo
+from ..quantise import RawDrillData
 from ..units import mm_from_pt
 
 __all__ = ["AiPdfSource"]
@@ -158,6 +159,7 @@ class AiPdfSource:
                 drill_layer=self.drill_layer,
                 reference_layer=self.reference_layer,
                 layers_found=names,
+                producer="stompdrill",
             ),
         )
 
