@@ -707,7 +707,9 @@ def test_truncated_nesting_exits_one_from_the_command_line(tmp_path, capsys):
 
     assert cli.main([str(panel), "--form-depth", "1"]) == 1
 
-    assert "nesting-truncated" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "nesting-truncated" in out
+    assert "stopped 1 Form XObjects deep" in out
 
 
 # ---------------------------------------------------------------------------
