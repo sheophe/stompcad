@@ -1,0 +1,46 @@
+[project]
+name = "stompdrill"
+version = "0.1.0"
+description = "Extract drill data from Adobe Illustrator artwork and emit it in fabrication formats"
+requires-python = ">=3.10"
+dependencies = ["stompmodel", "pikepdf>=9"]
+
+[project.optional-dependencies]
+step = ["cadquery-ocp==7.9.3.1.1"]
+
+[project.scripts]
+stompdrill = "stompdrill.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: without this marker a downstream type checker treats the whole
+# distribution as untyped and discards every annotation.
+[tool.setuptools.package-data]
+stompdrill = ["py.typed"]
+
+[tool.uv.sources]
+stompmodel = { workspace = true }
+
+# What this package's own suite needs, so that ADR-0008's sentence -- change
+# into the member, sync, test -- runs a real suite rather than an import check.
+# `pytest` is the whole list: the tests import nothing else the distribution
+# does not already depend on, and every module that reaches OCP guards itself
+# with ``importorskip``, so the heavy `step` extra stays opt-in.
+[dependency-groups]
+dev = ["pytest"]
+
+# Its own testpaths, so `cd packages/stompdrill && pytest` is correct and does
+# not inherit a root testpaths pointing at a sibling package. `pythonpath`
+# reaches the repo root, because test_enclosures.py re-derives the catalogue
+# through tools/build_catalogue.py and tools/ stays at the root; pytest
+# resolves it against this file's directory, so it holds from either cwd.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["hammond: needs a real Hammond STEP model; run with --hammond"]
+pythonpath = ["../.."]

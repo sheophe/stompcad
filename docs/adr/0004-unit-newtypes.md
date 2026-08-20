@@ -1,6 +1,10 @@
 # ADR-0004: Branded length units
 
-**Status:** Accepted
+**Status:** Accepted, amended by
+[ADR-0009](0009-shared-model-package-and-dependency-order.md), which moves
+`Nanometre` and `Millimetre` into `stompmodel` and leaves `Micron` in
+`stompdrill`. The reasoning here for branding at a real conversion, and for
+losing the brand under arithmetic, is unchanged.
 
 ## Context
 
@@ -23,18 +27,23 @@ are deliberate and few, and the danger is that their result lands in the wrong s
 
 ## Decision
 
-Each unit is a distinct `typing.NewType` over its representation:
+Each unit is a distinct `typing.NewType` over its representation. Two of the three
+are shared and live in `stompmodel.units`; the third is `stompdrill`'s alone, because
+the grid pitch is a statement about that tool's policy rather than about length:
 
 ```python
+# stompmodel.units
 Nanometre  = NewType("Nanometre", int)    # every canonical model length
-Micron     = NewType("Micron", int)       # the effective grid pitch
 Millimetre = NewType("Millimetre", float) # an unquantised measurement
+
+# stompdrill.units
+Micron     = NewType("Micron", int)       # the effective grid pitch
 ```
 
 A brand is applied only where a value genuinely becomes that unit: at a source's
-measurement, at a conversion in `aidrill.units`, at a quantiser's selected answer, and at a
-re-wrap after arithmetic. Conversions run one way, from measurement toward the canonical
-unit, as ADR-0004, Figure 1 shows.
+measurement, at a conversion in either `units` module, at a quantiser's selected
+answer, and at a re-wrap after arithmetic. Conversions run one way, from measurement
+toward the canonical unit, as ADR-0004, Figure 1 shows.
 
 ```mermaid
 flowchart LR
@@ -53,7 +62,10 @@ flowchart LR
     nm -->|format_nm| text
 ```
 
-Figure 1 — Unit boundaries and the direction each conversion runs.
+Figure 1 — Unit boundaries and the direction each conversion runs. `nm_from_mm` and
+`format_nm` are `stompmodel.units`'; `mm_from_pt` and `nm_from_micron` stay in
+`stompdrill.units`, the first because only a PDF source measures in points and the
+second because it converts the pitch `Micron` types.
 
 Arithmetic on a branded value yields the underlying unbranded type. A scaled result must
 therefore be re-wrapped explicitly before it can be stored as a length again, and that

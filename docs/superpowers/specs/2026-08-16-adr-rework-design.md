@@ -183,7 +183,7 @@ line references are not.
 
 - Simplify `tools/build_catalogue.py` to generate from `docs/parts/dimensions.tsv` only.
 - Remove the series-PDF parser and the `pdfplumber` development dependency.
-- Regenerate `src/aidrill/enclosures.py` with an accurate concise header.
+- Regenerate `src/stompdrill/enclosures.py` with an accurate concise header.
 - Remove stale PDF-related configuration comments.
 
 ### Tests

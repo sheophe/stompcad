@@ -1,10 +1,14 @@
 # ADR-0001: Processing architecture and artifact consistency
 
-**Status:** Accepted
+**Status:** Accepted, amended by
+[ADR-0009](0009-shared-model-package-and-dependency-order.md), which moves
+`Stage`, `Pipeline` and `Emitter` into `stompmodel` and makes them generic in
+the value they fold over. The reasoning here for one authority per fact and for
+computing shared facts once is unchanged.
 
 ## Context
 
-`aidrill` reads measured drill geometry and can emit several representations of the
+`stompdrill` reads measured drill geometry and can emit several representations of the
 same panel. Every artifact from one invocation must describe the same accepted holes,
 tool set, ordering, diagnostics, and processing provenance. Computing any of those
 facts independently in an emitter would create multiple authorities for one panel.

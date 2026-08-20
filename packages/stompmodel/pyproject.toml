@@ -1,0 +1,55 @@
+[project]
+name = "stompmodel"
+version = "0.1.0"
+description = "The values every stomp package exchanges: lengths, drill data, diagnostics, contracts"
+requires-python = ">=3.10"
+# Deliberately none. This package is the workspace's pure-Python leaf; a
+# dependency here would be inherited by everything.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: without this marker a downstream type checker treats the whole
+# distribution as untyped and discards every annotation, every consumer's
+# included.
+[tool.setuptools.package-data]
+stompmodel = ["py.typed"]
+
+# What this package's own suite needs, so that ADR-0008's sentence -- change
+# into the member, sync, test -- runs a real suite rather than an import check.
+# `hypothesis` is here because the codec's round trip is a property and not an
+# example: the claim is that *any* position survives, which one hand-picked
+# coordinate cannot make. `mypy` is here too: the root gate excludes this
+# member's tests (they collide with stompdrill's own "tests" package under one
+# scan), so this member's own [tool.mypy] below is the only thing that
+# type-checks them. None of the three is a runtime dependency; the distribution
+# itself still has none.
+[dependency-groups]
+dev = ["pytest", "hypothesis", "mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# Runs where the root gate cannot: `mypy packages` excludes this member's
+# `tests/` to avoid a duplicate-module collision with stompdrill's own
+# `tests` package, so this config is what actually checks those files.
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+files = ["src", "tests"]
+
+# Runs where the root survey cannot, for the identical reason as the [tool.mypy]
+# above: mutmut resolves tests through the pyproject.toml in the current working
+# directory, and the root one names only stompdrill's testpaths, so a mutant of
+# this member run through the root config would find no test importing it and
+# record a false survivor rather than a real one. `cd packages/stompmodel &&
+# mutmut run` is the real survey; mutmut copies this directory's own `tests/`
+# and `pyproject.toml` by default, so no `also_copy` is needed here.
+[tool.mutmut]
+source_paths = ["src/stompmodel"]

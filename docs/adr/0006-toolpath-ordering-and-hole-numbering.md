@@ -77,9 +77,10 @@ establishes it. With no provisional value there is nothing to leak, and refusing
 is louder than emitting the wrong sequence onto a sheet that reaches a shop floor.
 
 Exact TSP is not attempted. Nearest-neighbour alone was measured leaving an avoidable
-81 mm crossing on `tests/fixtures/pax.ai`; adding 2-opt reached that block's brute-force
-optimum of 144.6 mm. The heuristic is retained rather than exact search because block
-sizes are unbounded, and no artifact claims the path is shortest.
+81 mm crossing on `packages/stompdrill/tests/fixtures/pax.ai`; adding 2-opt reached
+that block's brute-force optimum of 144.6 mm. The heuristic is retained rather than
+exact search because block sizes are unbounded, and no artifact claims the path is
+shortest.
 
 Each block's start is fixed geometrically rather than chosen to minimise the path. That
 costs 3.2 mm of 141.4 mm on the same block, and buys a start a machinist can anticipate

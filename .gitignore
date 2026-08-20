@@ -42,6 +42,9 @@ mutants.sqlite
 # SDD scratch
 .superpowers/
 
+# Wayfinder maps and issue tracker: live working state, not history
+.scratch/
+
 # Session docs that might go stale
 docs/superpowers/
 

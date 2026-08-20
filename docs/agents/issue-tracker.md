@@ -3,8 +3,10 @@
 Issues and specs for this repo live as markdown files in `.scratch/`.
 
 This repo has no git remote, so there is no GitHub or GitLab to talk to and no
-external pull requests to triage. `.scratch/` is tracked in git rather than
-ignored: with no remote, a commit is the only history these files get.
+external pull requests to triage. `.scratch/` is **git-ignored**: it holds live
+working state — what is being decided right now — not a record to keep. A
+decision worth keeping graduates out of it, into a spec, an ADR, or
+`docs/GLOSSARY.md`.
 
 ## Conventions
 
@@ -18,10 +20,12 @@ ignored: with no remote, a commit is the only history these files get.
 - Comments and conversation history append to the bottom of the file under a
   `## Comments` heading
 
-`.scratch/` is for issues and specs. It is not the Superpowers SDD workspace —
-that lives at `.superpowers/sdd/` and is git-ignored scratch. Nor is it
-`docs/superpowers/`, which holds committed specs and plans from that workflow.
-Three different directories, three different lifetimes.
+`.scratch/` is for issues, specs and wayfinder maps. It is not the Superpowers
+SDD workspace, which lives at `.superpowers/sdd/`. Nor is it
+`docs/superpowers/`, which holds that workflow's specs and plans. All three are
+git-ignored (a couple of files under `docs/superpowers/` predate its rule and
+remain tracked). Three directories, three purposes, none of them a durable
+record — that is what `docs/adr/` and `docs/GLOSSARY.md` are for.
 
 ## When a skill says "publish to the issue tracker"
 

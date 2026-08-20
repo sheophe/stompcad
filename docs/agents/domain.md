@@ -3,9 +3,10 @@
 How the engineering skills should consume this repo's domain documentation when
 exploring the codebase.
 
-`aidrill` is single-context: one `CONTEXT.md` at the repo root and one
-`docs/adr/` beside it. There is no `CONTEXT-MAP.md` and no per-package ADR
-directory.
+One glossary serves the whole repository: `docs/GLOSSARY.md`, with `docs/adr/`
+beside it. There is no root `CONTEXT.md` and no `CONTEXT-MAP.md` — this repo
+keeps a single sectioned glossary rather than one per context, so do not go
+looking for either.
 
 ## Before exploring, read these
 
@@ -14,13 +15,14 @@ directory.
   sections define the vocabulary (canonical frame, answer set, quantisation
   boundary, branded length units, reference outline, tool block) that the code
   and its tests already speak.
-- **`CONTEXT.md`** at the repo root, once one exists.
+- **`docs/GLOSSARY.md`** — the glossary. Its Scope section states what belongs
+  in it and what does not.
 - **`docs/adr/`** — read the ADRs that touch the area you are about to work in.
   There are seven, `0001`–`0007`; `CLAUDE.md`'s *Architecture* section lists
   what each one decides, so read that list first and open only what is
   relevant.
 
-If `CONTEXT.md` does not exist, **proceed silently**. Don't flag its absence;
+If a document listed here does not exist, **proceed silently**. Don't flag its absence;
 don't suggest creating it upfront. The `/domain-modeling` skill (reached via
 `/grill-with-docs` and `/improve-codebase-architecture`) creates it lazily when
 terms actually get resolved.
@@ -29,13 +31,15 @@ terms actually get resolved.
 
 ```
 /
-├── CLAUDE.md                          ← working glossary until CONTEXT.md exists
-├── CONTEXT.md                         ← not yet created
+├── CLAUDE.md                          ← the rules that govern the vocabulary
+├── docs/GLOSSARY.md                   ← the glossary itself
 ├── docs/adr/
 │   ├── 0001-pipeline-and-emitter-adapters.md
 │   ├── …
-│   └── 0007-case-model-and-clearance.md
-└── src/aidrill/
+│   └── 0009-shared-model-package-and-dependency-order.md
+└── packages/
+    ├── stompmodel/src/stompmodel/   ← the values both tools exchange
+    └── stompdrill/src/stompdrill/
 ```
 
 ## Use the glossary's vocabulary

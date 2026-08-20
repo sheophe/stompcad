@@ -5,10 +5,10 @@ this repository.
 
 ## Purpose and scope
 
-`aidrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
+`stompdrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
 artefacts. `DrillData` is the library integration contract and the JSON emitter is its
 serialised form. KiCad data and component semantics are outside the package's scope.
-Enclosure geometry enters only as a supplied model: `aidrill` never synthesises an
+Enclosure geometry enters only as a supplied model: `stompdrill` never synthesises an
 enclosure, and reads one only to verify clearance and to cut the holes it has already
 decided on. Acquiring that model is not the package's job — see
 `tools/fetch_case_model.py`.
@@ -21,49 +21,55 @@ Python 3.10 or later is required. Create the development environment with:
 
 ```bash
 uv venv
-uv pip install -e ".[dev]"
+uv sync --all-packages --all-extras
 source .venv/bin/activate
 ```
 
 The STEP features (`--case-model`, `--emit step=…`) are behind an optional
-`aidrill[step]` extra, not part of `.[dev]`: it pins the `cadquery-ocp` geometry
-kernel, which pulls in vtk and matplotlib transitively and is far larger than the
-base install. Add it only when you need those features:
+`stompdrill[step]` extra, which `--all-extras` above installs: it pins the `cadquery-ocp`
+geometry kernel, which pulls in vtk and matplotlib transitively and is far larger than the
+base install. Leave it out when you do not need those features:
 
 ```bash
-uv pip install -e ".[dev,step]"
+uv sync --all-packages
 ```
 
 Run the project checks and tools from the repository root:
 
 ```bash
-# Full suite
-PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --tb=short
+# stompdrill's suite (root testpaths cover only this package; see
+# "Testing rules" below for both packages' commands and expected counts)
+.venv/bin/python -m pytest -p no:cacheprovider -o addopts= --tb=short
 
 # One test
-PYTHONPATH=src pytest -o addopts= tests/test_pipeline.py::test_name -v
+.venv/bin/python -m pytest -o addopts= packages/stompdrill/tests/test_pipeline.py::test_name -v
 
-# Coverage
-PYTHONPATH=src pytest -o addopts= --cov=aidrill --cov-report=term-missing
+# Coverage, per package. The root testpaths cover only stompdrill, so measuring
+# stompmodel through it reports a package no test in scope imports end to end and
+# grades its codec far below the 100% target below.
+.venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov-report=term-missing
+cd packages/stompmodel && uv run --no-sync pytest -o addopts= --cov=stompmodel --cov-report=term-missing
 
-# Lint and types
-ruff check src tests tools
-mypy src/aidrill tests
+# Lint and types. `mypy packages` excludes stompmodel's tests -- two `tests`
+# packages cannot share one scan -- so the member's own config is a second gate.
+ruff check packages tools
+mypy packages
+cd packages/stompmodel && uv run --no-sync mypy
 
 # Kernel tests against real Hammond models (downloads and caches them)
-PYTHONPATH=src pytest -p no:cacheprovider -o addopts= --hammond --tb=short
+.venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
 # Mutation survey
 PYTHONDONTWRITEBYTECODE=1 mutmut run
 mutmut results
 
 # Run the tool
-PYTHONPATH=src python -m aidrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
+python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 
-# Cut a supplied Hammond enclosure and check clearance (needs aidrill[step])
+# Cut a supplied Hammond enclosure and check clearance (needs stompdrill[step])
 python tools/fetch_case_model.py 1590BB   # downloads and prints the cached .stp path
-PYTHONPATH=src python -m aidrill.cli PANEL.ai --case 1590BB \
-  --case-model ~/.cache/aidrill/cases/1590BB.stp \
+python -m stompdrill.cli PANEL.ai --case 1590BB \
+  --case-model ~/.cache/stompcad/cases/1590BB.stp \
   --emit step=out.stp
 ```
 
@@ -90,13 +96,17 @@ failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine` and
 `grid-ambiguous` are warnings and reach exit 1.
 
-`tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2` (112.40 × 60.50)
-and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it is
+`packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both
+`1590B`/`1590B2` (112.40 × 60.50) and `1590BS` (112.00 × 60.50), so it needs
+`--case 1590B`. Undeclared it is
 `ambiguous-enclosure`, an error. This is the correct answer, not a regression: do not
 widen the tolerance, special-case the fixture, or round the footprint key back to whole
 millimetres.
 
 ## Architecture
+
+The workspace is `packages/stompmodel` and `packages/stompdrill`; each installs
+and passes its own tests alone, which is ADR-0008's governing test.
 
 The accepted architecture is defined by:
 
@@ -112,6 +122,10 @@ The accepted architecture is defined by:
   hole numbering.
 - [ADR-0007](docs/adr/0007-case-model-and-clearance.md): supplied case models,
   clearance, and the optional kernel.
+- [ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md): the workspace and
+  the shared geometry core.
+- [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md): the shared
+  model package and the workspace's dependency order.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
@@ -124,8 +138,9 @@ Both drawing emitters share `emitters/drawing/`: `content` holds the facts a she
 states, `layout` resolves a sheet's geometry, and `build` turns the two into a `Scene`
 of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene. They differ in
 which unknown they solve for — SVG fixes the sheet and fits the scale, PDF fixes the
-scale at 1:1 and walks the ISO 5457 candidates. `tests/test_drawing_agreement.py` parses
-both artefacts and compares what they say about one panel; the sheets may list different
+scale at 1:1 and walks the ISO 5457 candidates.
+`packages/stompdrill/tests/test_drawing_agreement.py` parses both artefacts and
+compares what they say about one panel; the sheets may list different
 numbers of rows, but never differ about a row they both show. A `DrawingOptions(scale=…)`
 that overflows the chosen sheet draws the shared `CONTENT EXCEEDS` marker rather than
 clipping silently; there is no `--scale` flag, so only a library caller supplying an
@@ -184,21 +199,22 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
 ## Extending
 
-- **New emitter:** implement the `Emitter` protocol, decorate with `@register_emitter`,
-  add one import in `emitters/__init__.py`. The CLI resolves `--emit FORMAT=PATH`
-  through the registry and never names a format. An emitter needing its own CLI flags
-  still requires a `cli.py` edit.
-- **New stage:** implement `Stage` including `describe()`, then insert it in
-  `cli.build_pipeline`. Order is the one thing a stage cannot self-declare, so
-  `build_pipeline` is the integration point by design.
-- **New source:** implement `Source`, returning `RawDrillData`. There is no source
-  registry.
-- **A new stage or source also gets one line in `src/aidrill/__init__.py`.** A new
-  emitter does not — it has a registry, and is resolved through
-  `aidrill.emitters.get_emitter`. The root exports what no registry can find: without
-  that line a consumer reproducing the `Source -> quantise -> Pipeline -> Emitter` flow
-  finds protocols with nothing at hand that satisfies them. `METRIC_BANDS` and
-  `FRACTIONAL_SIXTY_FOURTHS` stay in `aidrill.pipeline`: they generate the standards
+- **New emitter:** implement `stompmodel`'s `Emitter` protocol, decorate with
+  `@register_emitter`, add one import in `emitters/__init__.py`. The CLI resolves
+  `--emit FORMAT=PATH` through the registry and never names a format. An emitter
+  needing its own CLI flags still requires a `cli.py` edit.
+- **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`,
+  then insert it in `cli.build_pipeline`. Order is the one thing a stage cannot
+  self-declare, so `build_pipeline` is the integration point by design.
+- **New source:** implement `stompdrill`'s own `Source` protocol, returning
+  `RawDrillData`. There is no source registry.
+- **A new stage or source also gets one line in
+  `packages/stompdrill/src/stompdrill/__init__.py`.** A new emitter does not — it
+  has a registry, and is resolved through `stompdrill.emitters.get_emitter`. The
+  root exports what no registry can find: without that line a consumer
+  reproducing the `Source -> quantise -> Pipeline -> Emitter` flow finds protocols
+  with nothing at hand that satisfies them. `METRIC_BANDS` and
+  `FRACTIONAL_SIXTY_FOURTHS` stay in `stompdrill.pipeline`: they generate the standards
   rather than read a result.
 
 ## Documentation rules
@@ -214,6 +230,14 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Keep `from __future__ import annotations` and an explicit, logically ordered `__all__`
   in each Python module. Value objects are frozen, slotted dataclasses whose transforms
   return replacements.
+
+## Design rules
+
+- Keep SOLID and DRY in mind, as guidance rather than ceremony. Use them to remove
+  duplication and to sharpen a boundary; do not use them to justify an interface
+  nobody needs, a layer with one implementation, or a class where a function reads
+  better. Review for both: a second copy of a rule, or a module that would have to
+  change for two unrelated reasons, is the signal worth acting on.
 
 ## Testing rules
 
@@ -231,19 +255,38 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `emitters.drawing.content` and `emitters.drawing_svg` account for most survivors, where
   a mutant rewrites a help string, a cell offset or a font size and nothing observable
   changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
-  `geometry`, `pipeline.dedupe`, `quantise`, `units`, `emitters.drawing.sheet` or
-  `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
+  `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `emitters.drawing.sheet`
+  or `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
   shared facts rather than placement.
+- The root `mutmut run` above only reaches `stompdrill`: it resolves tests through the
+  root `pyproject.toml`, which names `stompdrill`'s testpaths, the same reason the root
+  `mypy` gate excludes `stompmodel`'s tests. `stompmodel.units` is exactly the kind of
+  module worth chasing too, but only `cd packages/stompmodel && mutmut run` — its own
+  `[tool.mutmut]`, resolving against its own tests — is a real survey of it; a
+  `stompmodel` mutant run through the root config would find no test importing it and
+  record a false survivor.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
-- Coverage targets are 90% for `src/aidrill` and 100% for quantisers, stages, and emitters.
-- `mypy` covers `tests` as well as `src/aidrill`, because most hand-built lengths are
-  fixtures. Test helpers accept plain literals and brand them internally; direct model
-  construction wraps explicitly.
+- Coverage targets are 90% for each package and 100% for quantisers, stages,
+  emitters, and `stompmodel`'s codec.
+- `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most
+  hand-built lengths are fixtures. Test helpers accept plain literals and brand them
+  internally; direct model construction wraps explicitly.
+- No single command proves both suites at once: the root `testpaths` covers only
+  `stompdrill`, and two `tests` packages cannot share one interpreter. Run both,
+  and expect both counts:
+
+  ```bash
+  .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
+  # 238 passed
+
+  .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
+  # 1154 passed
+  ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.
 - Clearance-rule tests use a fake `CaseModel`; kernel-backed tests skip when
-  `aidrill[step]` is absent.
+  `stompdrill[step]` is absent.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
   claimed rule is not evidence.
 - Kernel tests run against real Hammond models fetched at run time, never committed.
@@ -264,5 +307,6 @@ See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context: `CLAUDE.md` and `docs/adr/` at the root, no `CONTEXT.md` yet.
+One glossary at `docs/GLOSSARY.md`, with `CLAUDE.md` and `docs/adr/` holding the
+rules and the reasons.
 See `docs/agents/domain.md`.

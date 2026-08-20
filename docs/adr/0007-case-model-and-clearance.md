@@ -1,10 +1,13 @@
 # ADR-0007: Case models and clearance
 
-**Status:** Accepted
+**Status:** Accepted. The optional `stompdrill[step]` extra is retired by
+[ADR-0009](0009-shared-model-package-and-dependency-order.md): `stompgeom` takes the
+kernel unconditionally, and this ADR's argument for the extra assumed `stompdrill`
+stood alone. Everything else here stands.
 
 ## Context
 
-`aidrill` decides where holes go. Nothing downstream shows what the enclosure looks
+`stompdrill` decides where holes go. Nothing downstream shows what the enclosure looks
 like once they are drilled, and nothing checks that the holes can be drilled at all.
 
 Hammond distributes a STEP model of every 1590-series enclosure. Given one, both gaps
@@ -19,22 +22,22 @@ third-party kernel. This ADR settles all three before either lands in code.
 
 ## Decision
 
-**Enclosure geometry enters only as a supplied model.** `aidrill` never synthesises an
+**Enclosure geometry enters only as a supplied model.** `stompdrill` never synthesises an
 enclosure. `--case-model PATH` names a Hammond STEP file the operator already has; the
 package reads it to verify clearance and to cut the holes it has already decided on,
 and never to invent geometry of its own. Acquiring that file is not the package's job —
 `tools/fetch_case_model.py` is a stopgap downloader outside the distributed package,
-with a named successor in `aicad`.
+with a named successor in `stompcad`.
 
 **The kernel is an optional runtime extra, pinned exactly.** `cadquery-ocp==7.9.3.1.1`
-lives under a new `aidrill[step]` extra; the base install stays `pikepdf>=9` and
+lives under a new `stompdrill[step]` extra; the base install stays `pikepdf>=9` and
 nothing else. This holds even though clearance checking has no emitter output of its
-own: **`aidrill[step]` is required to run `CheckCaseClearance` even when no STEP
+own: **`stompdrill[step]` is required to run `CheckCaseClearance` even when no STEP
 artefact is emitted.** The emitter is what makes the kernel non-negotiable — cutting a
 valid solid and round-tripping an XCAF assembly is kernel work under any algorithm —
 and once that dependency is paid for, a second hand-rolled geometry implementation for
 clearance would be a second authority on one question. `cad/base.py` defines the
-`CaseModel` protocol in pure Python so that `import aidrill` never imports the kernel;
+`CaseModel` protocol in pure Python so that `import stompdrill` never imports the kernel;
 `cad/step.py`, `cad/case.py`, `cad/region.py` and `cad/loader.py` are the OCP-backed
 implementation, imported lazily.
 
@@ -48,7 +51,7 @@ about a hole the same invocation rejected.
 **The guarantee is that identical inputs produce a geometrically and visually identical
 model. Byte identity is how that is enforced, not what is promised.** A third-party
 kernel now writes the STEP bytes, so the existing "geometry alone determines output"
-guarantee is restated precisely rather than left to imply one `aidrill` does not make.
+guarantee is restated precisely rather than left to imply one `stompdrill` does not make.
 
 Byte identity is the preferred enforcement because it is cheap, total, and cannot be
 argued with: pin `cadquery-ocp` exactly, copy `FILE_NAME.time_stamp` from the source
@@ -105,7 +108,7 @@ flowchart LR
 
 ## Rationale
 
-Precomputing an obstruction map in the helper script was rejected: it keeps `aidrill`
+Precomputing an obstruction map in the helper script was rejected: it keeps `stompdrill`
 dependency-free but introduces a second input that can desync from the model it was
 computed against, samples where an exact answer is available from the B-rep, and still
 leaves the geometry surgery hand-written somewhere.
@@ -122,7 +125,7 @@ area reads two planar faces bounded by lines and circles, which pure Python coul
 and clip. It is kept on the kernel anyway: `BRepClass_FaceClassifier` and
 `BRepExtrema_DistShapeShape` answer containment and clearance exactly against the real
 trimmed face, where hand-rolled code would tessellate the arcs and inherit a resolution
-parameter. If the `aidrill[step]` requirement proves annoying, a pure-Python `cad`
+parameter. If the `stompdrill[step]` requirement proves annoying, a pure-Python `cad`
 backend can be added behind the `CaseModel` protocol later without touching the stage —
 which is most of why the protocol exists rather than a concrete OCP type.
 
@@ -134,12 +137,12 @@ by `--emit`": a panel run with `--case-model` but no STEP output must still repo
 
 ## Consequences
 
-A base `pip install aidrill` is unchanged. Running `CheckCaseClearance` or
-`StepEmitter` without `aidrill[step]` raises an error naming the remedy; `make_emitter`
+A base `pip install stompdrill` is unchanged. Running `CheckCaseClearance` or
+`StepEmitter` without `stompdrill[step]` raises an error naming the remedy; `make_emitter`
 runs before the panel is opened, so a missing extra is caught early rather than after
 processing.
 
-`aidrill[step]` costs more than its own 62 MB wheel: `cadquery-ocp` pulls in `vtk`
+`stompdrill[step]` costs more than its own 62 MB wheel: `cadquery-ocp` pulls in `vtk`
 transitively, and `vtk` in turn pulls in `matplotlib`, neither of which the emitter or
 the clearance stage uses. Paid only by an install that opts in, never by the base
 package.
@@ -156,14 +159,14 @@ drilled faces lose theirs, and that loss is what the semantic-equivalence test r
 rather than hides.
 
 `CheckCaseClearance` and `load_case_model` each gain one line in
-`src/aidrill/__init__.py`, matching how a new stage or source is exported. `StepEmitter`
-does not: `emitters/step.py` registers itself, and `import aidrill` must not pull in
+`packages/stompdrill/src/stompdrill/__init__.py`, matching how a new stage or source is exported. `StepEmitter`
+does not: `emitters/step.py` registers itself, and `import stompdrill` must not pull in
 400 MB of kernel through the package root.
 
 `CheckCaseClearance` depends only on the `CaseModel` protocol, never on the OCP
 implementation, so the clearance rule is testable against a hand-built fake
 `CaseModel` — the same move the repository already makes when it tests emitters with
-hand-built `DrillData`. Kernel-backed integration tests skip when `aidrill[step]` is
+hand-built `DrillData`. Kernel-backed integration tests skip when `stompdrill[step]` is
 absent.
 
 A future enclosure whose drilled face is not flat is out of reach of this rule and
