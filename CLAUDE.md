@@ -59,9 +59,9 @@ cd packages/stompmodel && uv run --no-sync mypy
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
-# Mutation survey
-PYTHONDONTWRITEBYTECODE=1 mutmut run
-mutmut results
+# Mutation survey, per package -- there is no workspace-wide run
+cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 mutmut run && mutmut results
+cd packages/stompdrill && PYTHONDONTWRITEBYTECODE=1 mutmut run && mutmut results
 
 # Run the tool
 python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
@@ -258,13 +258,12 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `emitters.drawing.sheet`
   or `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
   shared facts rather than placement.
-- The root `mutmut run` above only reaches `stompdrill`: it resolves tests through the
-  root `pyproject.toml`, which names `stompdrill`'s testpaths, the same reason the root
-  `mypy` gate excludes `stompmodel`'s tests. `stompmodel.units` is exactly the kind of
-  module worth chasing too, but only `cd packages/stompmodel && mutmut run` — its own
-  `[tool.mutmut]`, resolving against its own tests — is a real survey of it; a
-  `stompmodel` mutant run through the root config would find no test importing it and
-  record a false survivor.
+- `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
+  `quantise` and `stompdrill.units` above, and `cd packages/stompmodel && mutmut run` —
+  its own `[tool.mutmut]`, resolving against its own tests — is what reaches
+  `stompmodel.units`, exactly the kind of module worth chasing too; there is no
+  workspace-wide command, the same reason the root `mypy` gate excludes `stompmodel`'s
+  tests.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for each package and 100% for quantisers, stages,

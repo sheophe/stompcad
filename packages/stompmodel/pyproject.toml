@@ -53,3 +53,10 @@ files = ["src", "tests"]
 # and `pyproject.toml` by default, so no `also_copy` is needed here.
 [tool.mutmut]
 source_paths = ["src/stompmodel"]
+# mutmut injects `import mutmut` into every module it instruments, which the
+# boundary gate rejects by design. Deselecting keeps the gate's assertion exact
+# -- stdlib or this package, no third name -- and puts the exception where the
+# anomaly is, next to do_not_mutate, rather than weakening the rule itself.
+pytest_add_cli_args_test_selection = [
+    "--deselect=tests/test_package_boundary.py::test_every_module_imports_only_the_standard_library_and_itself",
+]

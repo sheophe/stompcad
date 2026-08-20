@@ -109,8 +109,11 @@ files = ["packages"]
 # pytest interpreter (see the root testpaths comment above), so stompmodel's
 # is excluded here -- its own [tool.mypy] in packages/stompmodel/pyproject.toml
 # is what actually type-checks it, not this gate and not ADR-0008 (which
-# governs testing, not type-checking).
-exclude = ["^packages/[^/]+/build/", "^packages/stompmodel/tests/"]
+# governs testing, not type-checking). A member's mutants/ is excluded for the
+# same reason as its build/: `mutmut run` copies both the source package and a
+# second `tests` package underneath it, so mypy hits a duplicate module the
+# moment either copy is scanned. A survey must not break an unrelated gate.
+exclude = ["^packages/[^/]+/build/", "^packages/[^/]+/mutants/", "^packages/stompmodel/tests/"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
@@ -127,22 +130,11 @@ warn_unreachable = true
 module = ["OCP.*"]
 ignore_missing_imports = true
 
-# `mutmut run` copies the tree into mutants/ and rewrites the sources there, so
-# anything the suite opens by relative path has to be copied alongside them.
-# pyproject.toml comes across by default; packages/stompdrill/tests/ no longer
-# does, and neither do these others, and test_enclosures.py re-derives the
-# catalogue from docs/parts/dimensions.tsv through tools/build_catalogue.py on
-# every run. A file whose parent directory does not exist under mutants/ fails
-# the copy outright, which is why these name directories.
-[tool.mutmut]
-source_paths = ["packages/stompdrill/src/stompdrill"]
-also_copy = ["docs/", "tools/", "packages/stompdrill/tests/"]
-# enclosures.py is generated, and test_enclosures.py asserts that its *text on
-# disk* is what tools/build_catalogue.py renders. Instrumenting it therefore fails
-# that test for every mutant, which aborts the whole run before any result is
-# collected. Excluding it costs nothing: it is a literal catalogue table, so a
-# mutant of it is either caught by the first assertion or meaningless.
-do_not_mutate = ["packages/stompdrill/src/stompdrill/enclosures.py"]
+# No [tool.mutmut] here. mutmut puts only mutants/., mutants/src and
+# mutants/source on sys.path (setup_source_paths in its __main__), so from a
+# workspace root the mutated sources at mutants/packages/<member>/src are never
+# imported and the run scores nothing. The survey is per-member, run from inside
+# the package, the same shape as pytest and mypy for the same kind of reason.
 
 [tool.uv]
 # cadquery-ocp pulls numpy in transitively (via vtk/matplotlib) with no version

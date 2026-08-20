@@ -44,3 +44,31 @@ testpaths = ["tests"]
 addopts = "-q"
 markers = ["hammond: needs a real Hammond STEP model; run with --hammond"]
 pythonpath = ["../.."]
+
+# Run from this directory: `cd packages/stompdrill && mutmut run`. src/stompdrill
+# then maps to mutants/src, which is one of the three paths mutmut imports from.
+[tool.mutmut]
+source_paths = ["src/stompdrill"]
+also_copy = ["tests/fixtures/"]
+# enclosures.py is generated, and test_enclosures.py asserts that its *text on
+# disk* is what tools/build_catalogue.py renders. Instrumenting it fails that
+# test for every mutant, which aborts the whole run before any result is
+# collected. Excluding it costs nothing: it is a literal catalogue table, so a
+# mutant of it is either caught by the first assertion or meaningless.
+do_not_mutate = ["src/stompdrill/enclosures.py"]
+# Two tests read source text rather than behaviour, so mutmut's rewritten files
+# fail them for every mutant and abort the survey. test_enclosures.py re-reads
+# docs/parts/dimensions.tsv, which is outside the copied tree; the CLI test
+# ast.parses cli.py, whose mutated form contains every mutant literal.
+pytest_add_cli_args_test_selection = [
+    "--deselect=tests/test_enclosures.py",
+    "--deselect=tests/test_cli.py::test_cli_source_never_names_a_registered_format",
+]
+# mutmut runs the test command from inside mutants/, one directory deeper than
+# this file's own location, so the "../.." above (correct for a plain `pytest`
+# invocation, which runs from this directory) resolves one level short of the
+# repository root and tests/conftest.py's `from tools.fetch_case_model import
+# ...` -- needed only to register the hammond fixtures, not to run them --
+# fails for every test, not only the ones marked hammond. `-o` overrides the
+# ini value for this run alone, so the plain-pytest path above is untouched.
+pytest_add_cli_args = ["-o", "pythonpath=../../.."]
