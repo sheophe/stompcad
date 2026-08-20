@@ -13,7 +13,7 @@ from enum import Enum
 
 from stompmodel.diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths
 from stompmodel.errors import EmitterError
-from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
+from stompmodel.units import Millimetre, Nanometre, _check_nanometres, mm_from_nm, nm_from_mm
 
 __all__ = [
     "Origin",
@@ -38,19 +38,6 @@ class Origin(Enum):
 
     CENTRE = "centre"
     LOWER_LEFT = "lower-left"
-
-
-def _check_nanometres(owner: str, **lengths: object) -> None:
-    """Refuse anything but a plain ``int`` for a length.
-
-    Exact type checks reject booleans as well as floats; conversion and rounding
-    belong at the unit boundary.
-    """
-    for name, value in lengths.items():
-        if type(value) is not int:
-            raise TypeError(
-                f"{owner}.{name} must be a whole number of nanometres, not {value!r}"
-            )
 
 
 def _check_millimetres(owner: str, **lengths: object) -> None:

@@ -18,9 +18,7 @@ from typing import Any, TextIO, get_args, get_type_hints
 
 from stompmodel.diagnostics import (
     EXIT_CLEAN,
-    EXIT_ERRORS,
     EXIT_USAGE,
-    EXIT_WARNINGS,
     Diagnostic,
     Severity,
     exit_for_severity,
@@ -72,10 +70,6 @@ __all__ = [
     "parse_face",
     "parse_sizes",
     "parse_length",
-    "EXIT_CLEAN",
-    "EXIT_WARNINGS",
-    "EXIT_ERRORS",
-    "EXIT_USAGE",
 ]
 
 #: Severities in the order the report groups them: worst first.

@@ -19,6 +19,7 @@ __all__ = [
     "scaled_nm",
     "mm_from_nm",
     "format_nm",
+    "_check_nanometres",
 ]
 
 #: The canonical model unit. Every nominal length is one of these.
@@ -63,3 +64,16 @@ def format_nm(nm: Nanometre, decimals: int = 3) -> str:
     if value == 0:
         value = abs(value)
     return str(value)
+
+
+def _check_nanometres(owner: str, **lengths: object) -> None:
+    """Refuse anything but a plain ``int`` for a length.
+
+    Exact type checks reject booleans as well as floats; conversion and rounding
+    belong at the unit boundary.
+    """
+    for name, value in lengths.items():
+        if type(value) is not int:
+            raise TypeError(
+                f"{owner}.{name} must be a whole number of nanometres, not {value!r}"
+            )

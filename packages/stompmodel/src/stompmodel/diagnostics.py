@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import total_ordering
 
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, _check_nanometres
 
 __all__ = [
     "Severity",
@@ -46,20 +46,6 @@ class Severity(Enum):
             return NotImplemented
         order = (Severity.INFO, Severity.WARNING, Severity.ERROR)
         return order.index(self) < order.index(other)
-
-
-def _check_nanometres(owner: str, **lengths: object) -> None:
-    """Refuse anything but a plain ``int`` for a length.
-
-    Exact type checks reject booleans as well as floats; conversion and rounding
-    belong at the unit boundary. A sibling member's model guards the same shape
-    for its own owners; this is the copy ``Diagnostic`` needs on its own side.
-    """
-    for name, value in lengths.items():
-        if type(value) is not int:
-            raise TypeError(
-                f"{owner}.{name} must be a whole number of nanometres, not {value!r}"
-            )
 
 
 def _tupled(value: object) -> object:
