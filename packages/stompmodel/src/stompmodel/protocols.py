@@ -1,7 +1,7 @@
 """The contracts a stomp pipeline is built from, generic in what it folds.
 
-A sibling member folds stages over DrillData and stompcollider folds Match
-and Seat over DockData; stompcad reads both tools' StageRun provenance and
+stompdrill folds stages over DrillData and stompcollider folds Match and
+Seat over DockData; stompcad reads both tools' StageRun provenance and
 reduces it uniformly. Two hand-copied folds would drift exactly where
 ADR-0001's consistency argument bites. See ADR-0009.
 """

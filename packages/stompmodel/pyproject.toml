@@ -25,10 +25,10 @@ stompmodel = ["py.typed"]
 # `hypothesis` is here because the codec's round trip is a property and not an
 # example: the claim is that *any* position survives, which one hand-picked
 # coordinate cannot make. `mypy` is here too: the root gate excludes this
-# member's tests (they collide with a sibling member's own "tests" package
-# under one scan), so this member's own [tool.mypy] below is the only thing
-# that type-checks them. None of the three is a runtime dependency; the
-# distribution itself still has none.
+# member's tests (they collide with stompdrill's own "tests" package under one
+# scan), so this member's own [tool.mypy] below is the only thing that
+# type-checks them. None of the three is a runtime dependency; the distribution
+# itself still has none.
 [dependency-groups]
 dev = ["pytest", "hypothesis", "mypy"]
 
@@ -37,7 +37,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 # Runs where the root gate cannot: `mypy packages` excludes this member's
-# `tests/` to avoid a duplicate-module collision with a sibling member's own
+# `tests/` to avoid a duplicate-module collision with stompdrill's own
 # `tests` package, so this config is what actually checks those files.
 [tool.mypy]
 python_version = "3.10"
@@ -46,10 +46,10 @@ files = ["src", "tests"]
 
 # Runs where the root survey cannot, for the identical reason as the [tool.mypy]
 # above: mutmut resolves tests through the pyproject.toml in the current working
-# directory, and the root one names only a sibling member's testpaths, so a
-# mutant of this member run through the root config would find no test importing
-# it and record a false survivor rather than a real one. `cd packages/stompmodel
-# && mutmut run` is the real survey; mutmut copies this directory's own `tests/`
+# directory, and the root one names only stompdrill's testpaths, so a mutant of
+# this member run through the root config would find no test importing it and
+# record a false survivor rather than a real one. `cd packages/stompmodel &&
+# mutmut run` is the real survey; mutmut copies this directory's own `tests/`
 # and `pyproject.toml` by default, so no `also_copy` is needed here.
 [tool.mutmut]
 source_paths = ["src/stompmodel"]

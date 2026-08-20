@@ -2,8 +2,8 @@
 
 Nominal lengths are whole nanometres in a Y-up, outline-centred frame; raw
 measurements are finite float millimetres. ``_nm`` payloads contain
-integers. Here rather than beside the tool that fills them: a sibling
-member produces this and stompcollider consumes it, and neither owns it.
+integers. Here rather than beside the tool that fills them: stompdrill
+produces this and stompcollider consumes it, and neither owns it.
 See ADR-0009.
 """
 
