@@ -13,7 +13,7 @@ from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData, Hole, Origin, RawHole, ReferenceOutline, SourceInfo
 from stompmodel.protocols import Emitter
 from stompmodel.units import Millimetre, Nanometre, format_nm
-from tests.conftest import at, holes, make_data
+from tests.conftest import at, make_data
 
 # --------------------------------------------------------------------------
 # helpers
@@ -25,14 +25,14 @@ TOOL_DEF = re.compile(r"^T(\d+)C([0-9.]+)$")
 def fixture_data() -> DrillData:
     """Return the expected quantised data for ``tests/fixtures/tar.ai``."""
     return DrillData(
-        holes=holes(
-            (-40_000_000, 18_000_000),
-            (-20_000_000, 18_000_000),
-            (0, 18_000_000),
-            (20_000_000, 18_000_000),
-            (40_000_000, 18_000_000),
-            (-19_000_000, -18_750_000, 5_000_000),
-            (19_000_000, -18_750_000, 5_000_000),
+        holes=(
+            at(-40_000_000, 18_000_000, index=4),
+            at(-20_000_000, 18_000_000, index=7),
+            at(0, 18_000_000, index=1),
+            at(20_000_000, 18_000_000, index=6),
+            at(40_000_000, 18_000_000, index=2),
+            at(-19_000_000, -18_750_000, 5_000_000, index=5),
+            at(19_000_000, -18_750_000, 5_000_000, index=3),
         ),
         reference=ReferenceOutline(width_nm=Nanometre(113_000_000), height_nm=Nanometre(60_000_000)),
         diagnostics=(
@@ -572,3 +572,25 @@ def test_emit_is_deterministic():
     data = fixture_data()
 
     assert emit(data) == emit(data)
+
+
+# --------------------------------------------------------------------------
+# the fixture itself
+# --------------------------------------------------------------------------
+
+
+def test_the_drill_order_is_the_routed_order_not_the_tuple_order() -> None:
+    """The fixture is only worth having if these two differ.
+
+    ``numbered()`` pairs each hole with its number in tuple order, so the
+    numbers it yields *are* the tuple order; the routed order is what you get
+    by sorting them. Without the second assertion, a fixture whose tuple
+    happened to sit in ascending order would let an emitter that enumerated
+    the tuple pass every test in this file, which is what it did before the
+    fixture carried explicit numbers.
+    """
+    data = fixture_data()
+    numbers = [n for n, _ in data.numbered()]
+
+    assert sorted(numbers) == list(range(1, len(data.holes) + 1))
+    assert numbers != sorted(numbers)
