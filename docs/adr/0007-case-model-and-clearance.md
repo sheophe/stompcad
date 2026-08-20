@@ -1,9 +1,10 @@
 # ADR-0007: Case models and clearance
 
-**Status:** Accepted. The optional `stompdrill[step]` extra is retired by
-[ADR-0009](0009-shared-model-package-and-dependency-order.md): `stompgeom` takes the
-kernel unconditionally, and this ADR's argument for the extra assumed `stompdrill`
-stood alone. Everything else here stands.
+**Status:** Accepted. The optional `stompdrill[step]` extra's retirement is pending on
+[ADR-0009](0009-shared-model-package-and-dependency-order.md): it is retired when
+`stompgeom` lands, since `stompgeom` takes the kernel unconditionally and this ADR's
+argument for the extra assumed `stompdrill` stood alone. Until then the extra is still
+declared and still documented. Everything else here stands.
 
 ## Context
 
