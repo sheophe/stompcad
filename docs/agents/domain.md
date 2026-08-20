@@ -37,7 +37,7 @@ terms actually get resolved.
 │   ├── 0001-pipeline-and-emitter-adapters.md
 │   ├── …
 │   └── 0008-workspace-and-shared-geometry-core.md
-└── src/stompdrill/
+└── packages/stompdrill/src/stompdrill/
 ```
 
 ## Use the glossary's vocabulary

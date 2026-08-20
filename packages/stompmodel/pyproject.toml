@@ -43,3 +43,13 @@ addopts = "-q"
 python_version = "3.10"
 mypy_path = "src"
 files = ["src", "tests"]
+
+# Runs where the root survey cannot, for the identical reason as the [tool.mypy]
+# above: mutmut resolves tests through the pyproject.toml in the current working
+# directory, and the root one names only a sibling member's testpaths, so a
+# mutant of this member run through the root config would find no test importing
+# it and record a false survivor rather than a real one. `cd packages/stompmodel
+# && mutmut run` is the real survey; mutmut copies this directory's own `tests/`
+# and `pyproject.toml` by default, so no `also_copy` is needed here.
+[tool.mutmut]
+source_paths = ["src/stompmodel"]

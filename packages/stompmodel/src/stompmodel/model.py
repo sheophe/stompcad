@@ -100,7 +100,7 @@ class Hole:
         """Build an unrouted hole whose nominal values are still its measured values.
 
         Convert nominal nanometres into the raw millimetre provenance. The
-        hole carries no number until a stage assigns one.
+        hole carries no number until a routing stage assigns one.
         """
         return cls(
             x_nm=x_nm,

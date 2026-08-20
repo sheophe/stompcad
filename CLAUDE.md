@@ -248,9 +248,16 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `emitters.drawing.content` and `emitters.drawing_svg` account for most survivors, where
   a mutant rewrites a help string, a cell offset or a font size and nothing observable
   changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
-  `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `stompmodel.units`,
-  `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth chasing:
-  those hold cited constants and shared facts rather than placement.
+  `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `emitters.drawing.sheet`
+  or `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
+  shared facts rather than placement.
+- The root `mutmut run` above only reaches `stompdrill`: it resolves tests through the
+  root `pyproject.toml`, which names `stompdrill`'s testpaths, the same reason the root
+  `mypy` gate excludes `stompmodel`'s tests. `stompmodel.units` is exactly the kind of
+  module worth chasing too, but only `cd packages/stompmodel && mutmut run` — its own
+  `[tool.mutmut]`, resolving against its own tests — is a real survey of it; a
+  `stompmodel` mutant run through the root config would find no test importing it and
+  record a false survivor.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
 - Coverage targets are 90% for each package and 100% for quantisers, stages,

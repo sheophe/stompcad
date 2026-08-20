@@ -159,7 +159,7 @@ drilled faces lose theirs, and that loss is what the semantic-equivalence test r
 rather than hides.
 
 `CheckCaseClearance` and `load_case_model` each gain one line in
-`src/stompdrill/__init__.py`, matching how a new stage or source is exported. `StepEmitter`
+`packages/stompdrill/src/stompdrill/__init__.py`, matching how a new stage or source is exported. `StepEmitter`
 does not: `emitters/step.py` registers itself, and `import stompdrill` must not pull in
 400 MB of kernel through the package root.
 
