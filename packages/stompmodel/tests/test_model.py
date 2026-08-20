@@ -254,6 +254,16 @@ def test_numbered_refuses_data_that_was_never_routed() -> None:
         data.numbered()
 
 
+def test_the_refusal_names_the_remedy_without_naming_a_class() -> None:
+    """A library caller reaches this, and a diagnosis it cannot act on is half
+    a message. ``stompmodel`` cannot name ``RouteHoles``, so it names the role."""
+    data = DrillData(holes=(
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
+    ))
+    with pytest.raises(EmitterError, match="compose a routing stage before emitting"):
+        data.numbered()
+
+
 def test_the_residual_is_the_nominal_position_less_the_measured_one() -> None:
     """Positive means the nominal value is the larger, in nanometres. Named
     ``residual_nm`` because it is three lengths, and a caller printing it as

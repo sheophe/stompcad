@@ -6,10 +6,12 @@ from decimal import ROUND_HALF_EVEN, Decimal
 
 import pytest
 
+from stompmodel import units
 from stompmodel.units import (
     NM_PER_MM,
     Nanometre,
     _check_nanometres,
+    check_millimetres,
     format_nm,
     mm_from_nm,
     nm_from_mm,
@@ -141,3 +143,26 @@ class TestTheNanometreGuard:
 
     def test_whole_nanometres_pass_including_zero_and_negatives(self) -> None:
         _check_nanometres("Owner", x_nm=7_000_000, y_nm=0, z_nm=-40_000_000)
+
+
+class TestTheMillimetreGuardIsPartOfTheSharedSurface:
+    """``stompdrill``'s ``RawDrillData`` applies this guard from outside.
+
+    A cross-package caller of a private name is a contract nothing records,
+    so the export is the contract.
+    """
+
+    def test_the_millimetre_guard_is_exported(self) -> None:
+        assert "check_millimetres" in units.__all__
+
+    def test_an_int_is_not_a_measurement(self) -> None:
+        """A source reports floats; an int here is a value that skipped one."""
+        with pytest.raises(TypeError, match="finite number of millimetres"):
+            check_millimetres("Owner", x=7)
+
+    def test_an_infinity_is_not_a_measurement(self) -> None:
+        with pytest.raises(TypeError, match="finite number of millimetres"):
+            check_millimetres("Owner", x=float("inf"))
+
+    def test_finite_floats_pass(self) -> None:
+        check_millimetres("Owner", x=7.0, y=0.0, z=-40.5)

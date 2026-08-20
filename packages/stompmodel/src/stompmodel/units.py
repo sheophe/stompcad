@@ -22,6 +22,7 @@ __all__ = [
     "scaled_nm",
     "mm_from_nm",
     "format_nm",
+    "check_millimetres",
 ]
 
 #: The canonical model unit. Every nominal length is one of these.
@@ -81,11 +82,14 @@ def _check_nanometres(owner: str, **lengths: object) -> None:
             )
 
 
-def _check_millimetres(owner: str, **lengths: object) -> None:
+def check_millimetres(owner: str, **lengths: object) -> None:
     """Refuse anything but a finite ``float`` for a measurement.
 
     Exact type checks reject integers and booleans; ``math.isfinite`` rejects
-    infinities and NaNs before they can invalidate comparisons.
+    infinities and NaNs before they can invalidate comparisons. Public because
+    ``stompdrill``'s pre-canonical ``RawDrillData`` is this guard applied
+    outside the model, and a shared guard renamed under a private name would
+    break that caller with no ``__all__``, ruff or mypy saying so.
     """
     for name, value in lengths.items():
         if type(value) is not float or not math.isfinite(value):

@@ -18,8 +18,8 @@ from .errors import EmitterError
 from .units import (
     Millimetre,
     Nanometre,
-    _check_millimetres,
     _check_nanometres,
+    check_millimetres,
     mm_from_nm,
     nm_from_mm,
 )
@@ -62,7 +62,7 @@ class RawHole:
     diameter: Millimetre
 
     def __post_init__(self) -> None:
-        _check_millimetres("RawHole", x=self.x, y=self.y, diameter=self.diameter)
+        check_millimetres("RawHole", x=self.x, y=self.y, diameter=self.diameter)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +154,7 @@ class RawOutline:
     height: Millimetre
 
     def __post_init__(self) -> None:
-        _check_millimetres("RawOutline", width=self.width, height=self.height)
+        check_millimetres("RawOutline", width=self.width, height=self.height)
 
 
 #: Sentinel replaced with nominal dimensions when no raw measurement is supplied.
@@ -348,7 +348,8 @@ class DrillData:
             if hole.index is None:
                 raise EmitterError(
                     "no artifact can state a sequence: a hole carries no drill "
-                    "number until a stage assigns one"
+                    "number until a stage assigns one — compose a routing stage "
+                    "before emitting"
                 )
             pairs.append((hole.index, hole))
         return tuple(pairs)

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, Hole, RawHole, RawOutline, SourceInfo, StageRun
-from stompmodel.units import Millimetre, _check_millimetres
+from stompmodel.units import Millimetre, check_millimetres
 
 from .pipeline import IdentifyHammondFootprint, SnapDiametersToDrillTable, SnapPositions
 
@@ -36,7 +36,7 @@ class RawDrillData:
     def __post_init__(self) -> None:
         """Require both centre coordinates to be finite float millimetres."""
         x, y = self.centre
-        _check_millimetres("RawDrillData", centre_x=x, centre_y=y)
+        check_millimetres("RawDrillData", centre_x=x, centre_y=y)
 
 
 def quantise(
