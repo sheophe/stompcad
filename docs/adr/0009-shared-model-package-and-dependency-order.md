@@ -169,10 +169,12 @@ not plan 1's.
 one name, one home — and the workspace is pre-release with one consumer.
 
 The migration's test is byte identity: every artefact `stompdrill` emits must be
-unchanged across the move, and its suite is the instrument — with one intended
-exception. The drill document gains the face frame, so it goes to version 6. A
-version exists to signal a change of shape, and a reader that validates against
-v5 should be told rather than handed an unexpected member.
+unchanged across the move, and its suite is the instrument. The drill document
+gains the face frame when `stompcollider` needs to read it, and goes to version 6
+with it: a version exists to signal a change of shape, and a reader that
+validates against v5 should be told rather than handed an unexpected member.
+Until then the document is version 5 and carries no frame, and adding both is
+plan 3's change, not plan 1's.
 
 The risk is that `stompmodel` accumulates types on rule 2's authority. The check is
 that a type admitted under rule 2 must name the `stompcad` behaviour that depends on
