@@ -8,10 +8,10 @@ import pytest
 
 from stompdrill.emitters.base import REGISTRY, get_emitter
 from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
-from stompdrill.protocols import Emitter
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData, Hole, Origin, RawHole, ReferenceOutline, SourceInfo
+from stompmodel.protocols import Emitter
 from stompmodel.units import Millimetre, Nanometre, format_nm
 from tests.conftest import at, holes, make_data
 
@@ -138,7 +138,7 @@ def test_the_emitter_refuses_data_that_was_never_routed(origin):
     """
     data = make_data(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
                      reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)))
-    with pytest.raises(EmitterError, match="RouteHoles"):
+    with pytest.raises(EmitterError, match="no drill number"):
         emit(data, origin=origin)
 
 

@@ -19,10 +19,10 @@ from stompdrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from stompdrill.protocols import Pipeline, Stage
 from stompdrill.quantise import RawDrillData, quantise
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
+from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at, codes, diameters, holes, make_data, positions
 

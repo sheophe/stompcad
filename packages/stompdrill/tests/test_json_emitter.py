@@ -19,7 +19,6 @@ from stompdrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
-from stompdrill.protocols import Emitter, Pipeline
 from stompdrill.quantise import RawDrillData, quantise
 from stompmodel.codec import to_document
 from stompmodel.errors import EmitterError
@@ -31,6 +30,7 @@ from stompmodel.model import (
     ReferenceOutline,
     SourceInfo,
 )
+from stompmodel.protocols import Emitter, Pipeline
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at, holes, make_data
 
@@ -113,7 +113,7 @@ def test_emitter_declares_name_media_type_and_extension():
 def test_the_emitter_refuses_data_that_was_never_routed():
     data = make_data(Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
                      reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)))
-    with pytest.raises(EmitterError, match="RouteHoles"):
+    with pytest.raises(EmitterError, match="no drill number"):
         emit(data)
 
 

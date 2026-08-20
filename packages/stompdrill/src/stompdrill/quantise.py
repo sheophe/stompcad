@@ -24,7 +24,7 @@ class RawDrillData:
     ``centre`` is the outline's page-space centre. Without one, coordinates
     stay page-relative, ``centre`` is ``(0.0, 0.0)``, and the frame is
     diagnosed. It lives beside the quantiser because the quantiser is its
-    only consumer -- it never crosses a package boundary.
+    only consumer — it never crosses a package boundary.
     """
 
     source: SourceInfo

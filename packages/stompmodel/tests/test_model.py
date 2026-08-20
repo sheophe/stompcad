@@ -250,7 +250,7 @@ def test_numbered_refuses_data_that_was_never_routed() -> None:
     data = DrillData(holes=(
         Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)),
     ))
-    with pytest.raises(EmitterError, match="RouteHoles"):
+    with pytest.raises(EmitterError, match="no drill number"):
         data.numbered()
 
 

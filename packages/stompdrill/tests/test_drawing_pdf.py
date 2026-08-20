@@ -88,7 +88,7 @@ def strings_in(payload: bytes) -> list[str]:
 
 def test_the_emitter_refuses_data_that_was_never_routed():
     data = make_data(at(0, 0, 7_000_000), reference=outline(100_000_000, 100_000_000))
-    with pytest.raises(EmitterError, match="RouteHoles"):
+    with pytest.raises(EmitterError, match="no drill number"):
         render(data)
 
 

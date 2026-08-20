@@ -348,8 +348,7 @@ class DrillData:
             if hole.index is None:
                 raise EmitterError(
                     "these holes carry no drill number, so no artifact can state "
-                    "a sequence — compose RouteHoles into the pipeline before "
-                    "emitting"
+                    "a sequence — a hole carries none until a stage assigns one"
                 )
             pairs.append((hole.index, hole))
         return tuple(pairs)

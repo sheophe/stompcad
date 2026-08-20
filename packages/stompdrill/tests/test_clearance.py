@@ -173,7 +173,7 @@ def test_the_recorded_margin_is_the_model_s_own():
 
 def test_the_stage_is_independent_of_pipeline_position():
     """It reads only holes and the enclosure, so it composes anywhere."""
-    from stompdrill.protocols import Pipeline
+    from stompmodel.protocols import Pipeline
 
     model = FakeCase()
     data = make_data(at(0, 0, 7 * MM, index=1))

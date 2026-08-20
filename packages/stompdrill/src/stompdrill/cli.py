@@ -25,6 +25,7 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import DrillData
+from stompmodel.protocols import Emitter, Payload, Pipeline, Stage
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import CaseModel
@@ -54,7 +55,6 @@ from .pipeline import (
     SnapPositions,
     normalize_part_name,
 )
-from .protocols import Emitter, Payload, Pipeline, Stage
 from .quantise import RawDrillData, quantise
 from .sources import AiPdfSource
 
@@ -340,14 +340,14 @@ def _snap_positions(args: argparse.Namespace) -> SnapPositions:
         raise UsageError(f"--grid/--grid-warn: {failure}") from failure
 
 
-def build_pipeline(args: argparse.Namespace) -> Pipeline:
+def build_pipeline(args: argparse.Namespace) -> Pipeline[DrillData]:
     """Build deduplicate → review-grid-ties → route, then clearance if asked.
 
     Review follows deduplication so it describes surviving holes; ordering is
     last among the geometry stages. Clearance only diagnoses, so it runs after
     numbering and every stage remains independently valid.
     """
-    stages: list[Stage] = [Deduplicate(), ReviewGridTies(), RouteHoles()]
+    stages: list[Stage[DrillData]] = [Deduplicate(), ReviewGridTies(), RouteHoles()]
     model = getattr(args, "case_model_object", None)
     if model is not None:
         stages.append(CheckCaseClearance(model))
@@ -414,7 +414,7 @@ def _options_for(emitter_cls: type, settings: OutputSettings) -> Any | None:
     return None
 
 
-def make_emitter(name: str, settings: OutputSettings) -> Emitter:
+def make_emitter(name: str, settings: OutputSettings) -> Emitter[DrillData]:
     """Resolve ``name`` through the registry and give it its options."""
     emitter_cls = get_emitter(name)  # raises EmitterError for an unknown format
     options = _options_for(emitter_cls, settings)
@@ -426,9 +426,9 @@ def settings_from(args: argparse.Namespace) -> OutputSettings:
 
 
 def run_pipeline(
-    pipeline: Pipeline,
+    pipeline: Pipeline[DrillData],
     data: DrillData,
-    trace: Callable[[Stage, DrillData, DrillData], None] | None = None,
+    trace: Callable[[Stage[DrillData], DrillData, DrillData], None] | None = None,
 ) -> DrillData:
     """Run every stage through :meth:`Pipeline.run`, optionally tracing each."""
     if trace is None:
@@ -639,7 +639,7 @@ def format_report(data: DrillData, model: CaseModel | None = None) -> str:
     return "\n".join(lines)
 
 
-def format_stage(stage: Stage, before: DrillData, after: DrillData) -> str:
+def format_stage(stage: Stage[DrillData], before: DrillData, after: DrillData) -> str:
     """One line of ``--verbose`` per-stage detail."""
     return _format_trace(stage.name, len(before.holes), before.diagnostics, after)
 
@@ -672,13 +672,13 @@ def _format_trace(
 
 
 def _render(
-    emitters: Iterable[tuple[Emitter, Path]], data: DrillData
-) -> list[tuple[Emitter, Path, Payload]]:
+    emitters: Iterable[tuple[Emitter[DrillData], Path]], data: DrillData
+) -> list[tuple[Emitter[DrillData], Path, Payload]]:
     """Render every artefact before any output path is written."""
     return [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
 
 
-def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
+def _write(emitter: Emitter[DrillData], path: Path, payload: Payload) -> str:
     """Write one artefact, letting the payload's own type choose the mode."""
     if isinstance(payload, bytes):
         path.write_bytes(payload)
@@ -689,7 +689,7 @@ def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
     return f"wrote {path}  ({emitter.name}, {size} bytes)"
 
 
-def _withheld(targets: Iterable[tuple[Emitter, Path]]) -> list[str]:
+def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
     """Name every target withheld because ERROR diagnostics make output unsafe."""
     return ["wrote nothing: this run has errors, so these were not written:"] + [
         f"  {path}  ({emitter.name})" for emitter, path in targets
@@ -724,11 +724,11 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         positions=quantisers.positions,
     )
 
-    trace: Callable[[Stage, DrillData, DrillData], None] | None = None
+    trace: Callable[[Stage[DrillData], DrillData, DrillData], None] | None = None
     if args.verbose:
         print(format_phase(raw, data), file=out)
 
-        def trace(stage: Stage, before: DrillData, after: DrillData) -> None:
+        def trace(stage: Stage[DrillData], before: DrillData, after: DrillData) -> None:
             print(format_stage(stage, before, after), file=out)
 
     data = run_pipeline(pipeline, data, trace)
