@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 
 from stompmodel.codec import FORMAT, VERSION, from_document, to_document
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.errors import EmitterError
+from stompmodel.errors import DocumentError
 from stompmodel.model import (
     DrillData,
     EnclosureMatch,
@@ -641,7 +641,7 @@ def test_a_document_of_another_format_is_refused() -> None:
     document = to_document(_data())
     document["format"] = "some-other-tool"
 
-    with pytest.raises(EmitterError, match="not a stompcad-drill-data document"):
+    with pytest.raises(DocumentError, match="not a stompcad-drill-data document"):
         from_document(document)
 
 
@@ -650,7 +650,29 @@ def test_a_document_of_an_unknown_version_is_refused() -> None:
     document = to_document(_data())
     document["version"] = VERSION + 1
 
-    with pytest.raises(EmitterError, match=f"expected {VERSION}"):
+    with pytest.raises(DocumentError, match=f"expected {VERSION}"):
+        from_document(document)
+
+
+def test_a_document_measured_in_another_unit_is_refused() -> None:
+    """This format at this version in inches clears both guards above.
+
+    Every length would then be read as nanometres, which is a wrong hole
+    rather than a failed read, so the unit is checked and not assumed.
+    """
+    document = to_document(_data())
+    document["units"] = "inch"
+
+    with pytest.raises(DocumentError, match="units 'inch'"):
+        from_document(document)
+
+
+def test_a_document_in_another_frame_is_refused() -> None:
+    """A lower-left document read as centred puts every hole half a panel out."""
+    document = to_document(_data())
+    document["origin"] = "lower-left"
+
+    with pytest.raises(DocumentError, match="origin 'lower-left'"):
         from_document(document)
 
 

@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .diagnostics import Diagnostic, Severity
-from .errors import EmitterError
+from .errors import DocumentError
 from .model import (
     DrillData,
     EnclosureMatch,
@@ -31,6 +31,12 @@ __all__ = ["FORMAT", "VERSION", "to_document", "from_document"]
 FORMAT = "stompcad-drill-data"
 VERSION = 5
 
+#: The frame every document is written in, stated by the writer and checked by
+#: the reader. Named once, because a reader checking a second copy of these
+#: could pass a document the writer would never have produced.
+_UNITS = "nm"
+_ORIGIN = "centre"
+
 
 def to_document(data: DrillData) -> dict[str, Any]:
     """The JSON-ready mapping, exposed so callers can embed it elsewhere."""
@@ -40,8 +46,8 @@ def to_document(data: DrillData) -> dict[str, Any]:
     return {
         "format": FORMAT,
         "version": VERSION,
-        "units": "nm",
-        "origin": "centre",
+        "units": _UNITS,
+        "origin": _ORIGIN,
         "source": _source(data.source),
         "reference": _reference(data.reference),
         "tools": [
@@ -148,15 +154,20 @@ def _enclosure(match: EnclosureMatch | None) -> dict[str, Any] | None:
 def from_document(document: Mapping[str, Any]) -> DrillData:
     """Rebuild ``DrillData`` from a document ``to_document`` produced.
 
-    Mirrors the writers above one for one. A document whose ``format`` is not
-    this one, or whose ``version`` is unknown, is refused rather than parsed
-    on a guess: a reader that silently accepts a shape it does not know is
-    how two packages come to disagree about the same file.
+    Mirrors the writers above one for one. A document whose format, version,
+    unit or frame is not the one written here is refused rather than parsed
+    on a guess. The frame labels are guarded too: another tool writing this
+    format at this version in inches would clear the version check and then
+    be read as nanometres.
     """
     if document.get("format") != FORMAT:
-        raise EmitterError(f"not a {FORMAT} document: {document.get('format')!r}")
+        raise DocumentError(f"not a {FORMAT} document: {document.get('format')!r}")
     if document.get("version") != VERSION:
-        raise EmitterError(f"{FORMAT} version {document.get('version')!r}, expected {VERSION}")
+        raise DocumentError(f"{FORMAT} version {document.get('version')!r}, expected {VERSION}")
+    if document.get("units") != _UNITS:
+        raise DocumentError(f"{FORMAT} units {document.get('units')!r}, expected {_UNITS!r}")
+    if document.get("origin") != _ORIGIN:
+        raise DocumentError(f"{FORMAT} origin {document.get('origin')!r}, expected {_ORIGIN!r}")
     return DrillData(
         holes=tuple(_read_hole(h) for h in document["holes"]),
         reference=_read_reference(document["reference"]),
