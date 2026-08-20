@@ -300,6 +300,27 @@ class TestDeduplicate:
             assert codes(twice) == codes(once), "second pass found new duplicates"
 
 
+def test_a_collapsed_pair_reports_one_hole_dropped() -> None:
+    """Singular and plural are separate assertions because one mutation of the
+    plural condition satisfies whichever form the other case does not."""
+    data = make_data(at(0, 0, 5_000_000), at(0, 0, 5_000_000))
+
+    finding = Deduplicate().apply(data).diagnostics[0]
+
+    assert finding.code == "duplicate-hole"
+    assert "1 hole dropped" in finding.message
+
+
+def test_a_collapsed_triple_reports_two_holes_dropped() -> None:
+    """The plural side of the same message."""
+    data = make_data(at(0, 0, 5_000_000), at(0, 0, 5_000_000), at(0, 0, 5_000_000))
+
+    finding = Deduplicate().apply(data).diagnostics[0]
+
+    assert finding.code == "duplicate-hole"
+    assert "2 holes dropped" in finding.message
+
+
 def test_duplicate_diagnostic_identifies_the_survivor_by_location_not_by_number():
     """The referent must survive numbering that only happens after this stage runs."""
     data = make_data(

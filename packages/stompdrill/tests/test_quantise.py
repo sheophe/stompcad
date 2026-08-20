@@ -17,7 +17,7 @@ from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import DrillData, RawHole, RawOutline, SourceInfo
+from stompmodel.model import DrillData, EnclosureMatch, RawHole, RawOutline, SourceInfo
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 
@@ -172,27 +172,44 @@ def test_a_run_that_stopped_records_only_what_ran():
 
 
 @pytest.mark.parametrize(
-    "declared, tolerance_nm, reference, code",
+    "declared, tolerance_nm, reference, code, expected_enclosure",
     [
         # 1590Y's own 92 × 92, not the fixture's outline: ``wrong-enclosure``
         # needs the panel to be *identified* and the declaration to disagree, so
-        # it is reachable only from a footprint nothing else is near.
-        ("1590BB", DEFAULT_TOLERANCE_NM, RawOutline(Millimetre(92.4), Millimetre(91.8)), "wrong-enclosure"),
-        ("1590B", DEFAULT_TOLERANCE_NM, None, "unverifiable-enclosure"),
-        ("1590B", DEFAULT_TOLERANCE_NM, RawOutline(Millimetre(200.0), Millimetre(100.0)), "unmatched-enclosure"),
-        (None, 2_000_000, RawOutline(Millimetre(118.0), Millimetre(78.5)), "ambiguous-enclosure"),
+        # it is reachable only from a footprint nothing else is near. Unlike the
+        # other three paths, this one *does* identify a footprint before finding
+        # the declaration disagrees with it, so ``enclosure`` is populated.
+        (
+            "1590BB",
+            DEFAULT_TOLERANCE_NM,
+            RawOutline(Millimetre(92.4), Millimetre(91.8)),
+            "wrong-enclosure",
+            EnclosureMatch(
+                family="Hammond 1590",
+                length_nm=Nanometre(92_000_000),
+                width_nm=Nanometre(92_000_000),
+                candidates=("1590Y",),
+                rotated=False,
+                selected_part="1590BB",
+            ),
+        ),
+        ("1590B", DEFAULT_TOLERANCE_NM, None, "unverifiable-enclosure", None),
+        ("1590B", DEFAULT_TOLERANCE_NM, RawOutline(Millimetre(200.0), Millimetre(100.0)), "unmatched-enclosure", None),
+        (None, 2_000_000, RawOutline(Millimetre(118.0), Millimetre(78.5)), "ambiguous-enclosure", None),
     ],
 )
-def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, code):
+def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, code, expected_enclosure):
     """All four of them, because they arrive by four different paths."""
     watched = Watched()
 
+    raw = read(
+        RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
+        RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
+        reference=reference,
+    )
+
     out = phase(
-        read(
-            RawHole(Millimetre(-20.0), Millimetre(18.0), Millimetre(7.0)),
-            RawHole(Millimetre(20.0), Millimetre(18.0), Millimetre(5.0)),
-            reference=reference,
-        ),
+        raw,
         enclosure=watched.enclosure(declared, tolerance_nm),
         diameters=watched.diameters(),
         positions=watched.positions(),
@@ -202,6 +219,12 @@ def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, 
     assert codes(out) == [code]
     assert out.holes == ()
     assert out.worst_severity is Severity.ERROR
+    # The name promises the run stops; these say what it stops *with*. Without
+    # them the keyword arguments on the error return are unpinned, and a run
+    # that halted while discarding its provenance would pass.
+    assert out.source == raw.source
+    assert out.enclosure == expected_enclosure
+    assert (out.reference is None) == (reference is None)
 
 
 def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():

@@ -1093,7 +1093,8 @@ def test_schedule_has_a_per_tool_summary_with_quantities(root: ET.Element):
     joined = " | ".join(summary)
     assert "T1" in joined and "T2" in joined
     assert "5.00" in joined and "7.00" in joined
-    assert "2" in summary[0] and "5" in summary[1]  # quantities, ascending by size
+    assert "QTY 2" in summary[0], "first tool's quantity, ascending by size"
+    assert "QTY 5" in summary[1], "second tool's quantity"
 
 
 def test_the_summary_quantities_are_the_models_tool_counts(panel: DrillData, root: ET.Element):
