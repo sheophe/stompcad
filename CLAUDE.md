@@ -60,8 +60,10 @@ cd packages/stompmodel && uv run --no-sync mypy
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
 # Mutation survey, per package -- there is no workspace-wide run
-cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 mutmut run && mutmut results
-cd packages/stompdrill && PYTHONDONTWRITEBYTECODE=1 mutmut run && mutmut results
+(cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
+  && ../../.venv/bin/mutmut results)
+(cd packages/stompdrill && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
+  && ../../.venv/bin/mutmut results)
 
 # Run the tool
 python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
@@ -132,8 +134,8 @@ The accepted architecture is defined by:
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
 measurements with the enclosure, drill-size, and grid answer sets, then produces canonical
-integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies`, and
-`RouteHoles`. Emitters only translate frames, convert units, format, and serialise; shared
+integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies` and
+`RouteHoles`, and `CheckCaseClearance` too when a case model is supplied. Emitters only translate frames, convert units, format, and serialise; shared
 facts are computed once before the emitter fan-out.
 
 Both drawing emitters share `emitters/drawing/`: `content` holds the facts a sheet

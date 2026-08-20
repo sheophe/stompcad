@@ -580,14 +580,15 @@ def test_emit_is_deterministic():
 
 
 def test_the_fixtures_numbers_are_a_permutation_out_of_tuple_order() -> None:
-    """The fixture is only worth having if these two differ.
+    """Guard the fixture's shape: a permutation of 1..n, not already ascending.
 
-    ``numbered()`` pairs each hole with its number in tuple order, so the
-    numbers it yields *are* the tuple order; the routed order is what you get
-    by sorting them. Without the second assertion, a fixture whose tuple
-    happened to sit in ascending order would let an emitter that enumerated
-    the tuple pass every test in this file, which is what it did before the
-    fixture carried explicit numbers.
+    ``numbered()`` pairs each hole with its index in tuple order rather than
+    sorting, so nothing here can fail on a production change -- only on someone
+    renumbering the fixture. It discriminates nothing today: ``ExcellonEmitter``
+    emits in arrival order by design, and the file's one number-reading path is
+    the refusal message, already pinned with scrambled indices above. The
+    numbers are scrambled so that an assertion reading list position is caught
+    the day someone writes one.
     """
     data = fixture_data()
     numbers = [n for n, _ in data.numbered()]

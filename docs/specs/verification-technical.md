@@ -250,9 +250,12 @@ a limit invites arguing about its value.
 **The mutation survey must actually run.** Today the root config produces no
 scored mutants and the member survey aborts, because the package-boundary gate
 rejects the `import mutmut` that instrumentation injects — the same interaction
-the root config already documents for `enclosures.py`. The gate gains an
-exemption for that injected name, and `[tool.mypy] exclude` gains `mutants/` so
-that running a survey does not then break the type gate.
+the root config already documents for `enclosures.py`. The gate is deselected
+from the mutation run rather than given an exemption -- the shipped assertion
+then stays exactly "stdlib or this package, no third name", and the anomaly
+sits beside `do_not_mutate` where the other one already does. `[tool.mypy]
+exclude` gains `mutants/` so that running a survey does not then break the
+type gate.
 
 **Every symbolic property carries a canary.** CrossHair degrades to concrete
 execution on constructs it cannot handle, with no timeout, no warning, and

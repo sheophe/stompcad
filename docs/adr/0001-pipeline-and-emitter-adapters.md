@@ -73,6 +73,7 @@ flowchart LR
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
     route -->|DrillData| selected
+    clearance -.->|DrillData| selected
     selected -->|DrillData| excellon
     selected -->|DrillData| drawing
     selected -->|DrillData| drawing_pdf
