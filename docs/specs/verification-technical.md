@@ -19,12 +19,24 @@ convenient for comparing geometry.
 ## Scope
 
 One project, three plans. It covers the verification framework, the concrete
-gaps three audits found, the instruments those audits found broken, and two
-domain changes the audits exposed. The audit reports are at
+gaps three audits found, the instruments those audits found broken, two domain
+changes the audits exposed, and one performance repair. The audit reports are at
 `.scratch/test-audit/`.
 
-Out of scope, and recorded as such in the last section: `RouteHoles`'
-complexity, typing the emitter registry, and moving `RawDrillData`.
+**The suite is a deliverable, not only a safeguard.** `stompgeom`,
+`stompcollider` and `stompcad` follow, and whoever writes their tests will read
+these for the house style — that is how the present gaps would propagate, not by
+anyone deciding to skip a check. So this project is run before layer 2 begins,
+and the pattern it sets is as much the point as the coverage it adds.
+
+**T5 and T6 are out of reach here and belong to `stompcad`.** Composability needs
+two instances to compose and uniform reduction needs several to reduce over;
+with one tool they are theorems about a system that does not exist yet. They are
+`stompcad`'s done-criteria, recorded here so they are inherited rather than
+rediscovered.
+
+Out of scope, and recorded as such in the last section: typing the emitter
+registry, and moving `RawDrillData`.
 
 ---
 
@@ -187,6 +199,39 @@ observed at all — absent from the model, the artefacts and the report — so
 silence there is indistinguishable from correctness. Both are warnings, but only
 the second is invisible without one.
 
+### The routing repair
+
+`_two_opt` (`route.py:71-74`) scores each candidate reversal by rebuilding the
+route and rescoring it end to end, when a 2-opt reversal changes exactly two
+edges and is scorable in O(1). Line 74 is 97% of per-candidate cost and 99.96%
+of candidates are rejected after paying it. Measured growth is Θ(n³) per
+improvement sweep, with the sweep count data-dependent at 1–5 rather than
+scaling with n; cost is cubic **per tool block**, and blocks partition n.
+
+Not live — a 30-hole panel routes in 0.3 ms — but the repair is roughly ten
+lines and takes Θ(P·n³) to Θ(P·n²). A prototype produced 96/96 identical routes
+and byte-identical artefacts.
+
+Three things constrain it:
+
+- **ADR-0006 pins the algorithm**, not only the output: first improving
+  reversal, fixed start, sweeping i&lt;j. An O(1) edge delta preserves all three
+  and needs no amendment. Best-improvement or neighbour-list pruning would
+  change the algorithm and must amend the ADR first.
+- **Bit-exact reproduction has a weak float dependency.** Summing four terms is
+  not guaranteed to compare identically to summing n square roots at a tie.
+  Determinism itself does not depend on this — it comes from `_total_order` —
+  but today's exact routes might. Unanimous across the prototype's testing, not
+  provable by inspection, which is why the repair lands after the golden and the
+  invariance tests exist.
+- **No existing test routes more than six holes.** The repair adds one at a
+  realistic panel size.
+
+The comment at `route.py:67-69` is corrected with it. Commit `ba44744` hoisted a
+loop-invariant length, halved the constant, left the exponent, and left a comment
+that reads as though the recomputation was dealt with — the artefact most likely
+to stop the next reader from looking.
+
 **Domain-edge preconditions.** `nm_from_mm` raises `decimal.InvalidOperation`
 around 1e22, and `route.py`'s `_path_length` raises `OverflowError` on absurd
 nanometres. Neither is reachable from real artwork. Both are **documented as
@@ -230,7 +275,7 @@ assertion going from 0.20 s solvable to unsolvable-but-reported-passing.
 | `pdfminer.six` as a dev dependency | four packages buys the only independent view of the one owned transform nothing else reaches |
 | Dedupe idempotence deleted | no plausible bug in `Deduplicate` breaks it; `diffbehavior` independently confirmed it survives both mutants |
 | Containment warns rather than errors | the outline is the published top-view dimension, not the drilled face; the strong check needs a model |
-| `RouteHoles` deferred | not live at real panel sizes; the question is how n⁴ is reachable, which is a review, not a fix |
+| `_two_opt` repaired in Phase C, not earlier | its one risk is a float-summation tie changing a route, and the instruments that would catch that are what Phase B builds |
 
 ## 7. Order of work
 
@@ -240,7 +285,7 @@ Three plans, written and executed in order.
 | --- | --- | --- |
 | 1 — instruments and repairs | both mutmut configs, the mypy exclusion, the boundary-gate exemption, the three hollow tests, the fixture lapse, the ADR corrections | both surveys run and are read by module; the repaired tests fail when their named behaviour is removed |
 | 2 — domain changes | containment, `_DEFAULT_FORM_DEPTH` and its flag, the documented preconditions, contract and ADR amendments | both warnings reach exit 1 with tests that fail when either is removed |
-| 3 — the framework | Phase A's split, the three recoveries, the independence gate, layers 1–3, the golden, e2e, the generative conversions, Phase C's cleanup | every emitter's owned representation checked against the model; the golden committed; one e2e drives the console script |
+| 3 — the framework | Phase A's split, the three recoveries, the independence gate, layers 1–3, the golden, e2e, the generative conversions, Phase C's cleanup and the routing repair | every emitter's owned representation checked against the model; the golden committed; one e2e drives the console script; `_two_opt` is Θ(P·n²) with routes unchanged |
 
 **Why three.** Plan 1 is a prerequisite in fact: a survey that cannot run cannot
 adjudicate whether Plan 3's tests are better, which is Plan 3's whole claim. Plan
@@ -250,8 +295,6 @@ split that made the three plans of the `stompcollider` specification work.
 
 ## 8. Out of scope
 
-- **`RouteHoles`' complexity.** Its own performance review, in progress; the
-  question is diagnostic rather than an optimisation request.
 - **Typing the emitter registry**, and with it `make_emitter`'s return
   annotation. One change, when someone wants it.
 - **Moving `RawDrillData` to `stompdrill/raw.py`.** ADR-0009 explicitly placed it
