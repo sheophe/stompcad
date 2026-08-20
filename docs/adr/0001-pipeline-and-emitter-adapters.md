@@ -67,6 +67,7 @@ flowchart LR
     drawing["DrawingSvgEmitter"]
     drawing_pdf["DrawingPdfEmitter"]
     json["JsonEmitter"]
+    step["StepEmitter"]
     selected{"--emit FORMAT=PATH<br/>argument (one to five)"}
 
     source -->|RawDrillData| quantise
@@ -76,6 +77,7 @@ flowchart LR
     selected -->|DrillData| drawing
     selected -->|DrillData| drawing_pdf
     selected -->|DrillData| json
+    selected -->|DrillData| step
 ```
 
 Figure 1 — Processing blocks, aggregate boundaries, and transferred document types.
@@ -84,7 +86,7 @@ Figure 1 — Processing blocks, aggregate boundaries, and transferred document t
 
 The typed transition from `RawDrillData` to `DrillData` makes the processing boundary
 visible. Keeping shared calculations before the emitter fan-out gives every artifact
-one authority and makes disagreement structurally difficult. Keeping the three pipeline
+one authority and makes disagreement structurally difficult. Keeping the pipeline
 stages independent preserves their single responsibilities while allowing their fixed
 composition to be read at the invocation boundary.
 

@@ -126,6 +126,8 @@ The accepted architecture is defined by:
   the shared geometry core.
 - [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md): the shared
   model package and the workspace's dependency order.
+- [ADR-0010](docs/adr/0010-the-stomp-prefix.md): the `stomp` prefix every package
+  carries.
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
