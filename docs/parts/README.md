@@ -10,6 +10,6 @@
 - Length and width are the published top-view/backplate dimensions, not the smaller
   drilled-face dimensions.
 - `tools/build_catalogue.py` validates that every dimension is an exact number of
-  nanometres and regenerates `src/stompdrill/enclosures.py`.
+  nanometres and regenerates `packages/stompdrill/src/stompdrill/enclosures.py`.
 - The fine dimensions produce 26 distinct footprints. Some neighbouring footprints are
   geometrically ambiguous, so an operator must use `--case` to disambiguate them.

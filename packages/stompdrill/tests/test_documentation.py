@@ -9,10 +9,19 @@ from tools.check_docstrings import find_long_docstrings
 
 PACKAGE = Path(__file__).resolve().parent.parent
 REPO = PACKAGE.parent.parent
+STOMPMODEL = REPO / "packages" / "stompmodel"
 # The scripts stayed at the repository root when the package moved beneath it,
 # and a root that does not exist scans as empty rather than failing, so the two
-# levels are named apart to keep the audit's reach honest.
-PYTHON_ROOTS = (PACKAGE / "src", PACKAGE / "tests", REPO / "tools")
+# levels are named apart to keep the audit's reach honest. stompmodel is a
+# sibling workspace member, not a subtree of this package, so its src and
+# tests are named apart again.
+PYTHON_ROOTS = (
+    PACKAGE / "src",
+    PACKAGE / "tests",
+    REPO / "tools",
+    STOMPMODEL / "src",
+    STOMPMODEL / "tests",
+)
 
 
 def test_the_scanner_reports_the_owner_and_physical_line_count(tmp_path: Path):

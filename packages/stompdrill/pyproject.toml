@@ -18,6 +18,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# PEP 561: without this marker a downstream type checker treats the whole
+# distribution as untyped and discards every annotation.
+[tool.setuptools.package-data]
+stompdrill = ["py.typed"]
+
 [tool.uv.sources]
 stompmodel = { workspace = true }
 

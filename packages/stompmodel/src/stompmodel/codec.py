@@ -170,7 +170,7 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
         raise DocumentError(f"{FORMAT} origin {document.get('origin')!r}, expected {_ORIGIN!r}")
     # One wrap rather than a guarded read per key: every reader below indexes
     # the document, so a truncated one must fail the same way at any depth. A
-    # KeyError raised in here is always an absent document key -- no value the
+    # KeyError raised in here is always an absent document key — no value the
     # readers build is a mapping they look something up in.
     try:
         return DrillData(

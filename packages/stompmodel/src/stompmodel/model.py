@@ -70,7 +70,7 @@ class Hole:
     """One drilled hole in the canonical frame.
 
     Nominal coordinates and diameter are whole nanometres. ``index`` is the
-    drill sequence ``RouteHoles`` assigns; it is ``None`` until routed and
+    drill sequence a routing stage assigns; it is ``None`` until routed and
     numbered from 1 thereafter.
     """
 
@@ -100,7 +100,7 @@ class Hole:
         """Build an unrouted hole whose nominal values are still its measured values.
 
         Convert nominal nanometres into the raw millimetre provenance. The
-        hole carries no number until ``RouteHoles`` assigns one.
+        hole carries no number until a stage assigns one.
         """
         return cls(
             x_nm=x_nm,
@@ -110,7 +110,7 @@ class Hole:
         )
 
     def with_number(self, number: int) -> Hole:
-        """Take the drill sequence RouteHoles assigned."""
+        """Take the drill sequence a routing stage assigned."""
         return replace(self, index=number)
 
     def moved_to(self, x_nm: Nanometre, y_nm: Nanometre) -> Hole:
@@ -347,8 +347,8 @@ class DrillData:
         for hole in self.holes:
             if hole.index is None:
                 raise EmitterError(
-                    "these holes carry no drill number, so no artifact can state "
-                    "a sequence — a hole carries none until a stage assigns one"
+                    "no artifact can state a sequence: a hole carries no drill "
+                    "number until a stage assigns one"
                 )
             pairs.append((hole.index, hole))
         return tuple(pairs)

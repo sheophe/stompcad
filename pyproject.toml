@@ -135,7 +135,7 @@ ignore_missing_imports = true
 # every run. A file whose parent directory does not exist under mutants/ fails
 # the copy outright, which is why these name directories.
 [tool.mutmut]
-source_paths = ["packages/stompdrill/src/stompdrill"]
+source_paths = ["packages/stompdrill/src/stompdrill", "packages/stompmodel/src/stompmodel"]
 also_copy = ["docs/", "tools/", "packages/stompdrill/tests/"]
 # enclosures.py is generated, and test_enclosures.py asserts that its *text on
 # disk* is what tools/build_catalogue.py renders. Instrumenting it therefore fails

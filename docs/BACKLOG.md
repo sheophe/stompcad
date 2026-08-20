@@ -15,16 +15,16 @@ features.
 **Acceptance:** The source is about 15% smaller with no loss of function. The full suite
 passes, and targeted mutation checks demonstrate that each refactor preserved behaviour.
 
-## Adopt mypy `strict` on `src/stompdrill`
+## Adopt mypy `strict` on `packages/stompdrill/src/stompdrill`
 
 **Status:** Agreed, not started.
 
 **Constraint:** Annotate one module at a time and keep the type gate green throughout.
-`Pipeline.__getitem__` needs overloads for `int` and `slice`; enable `strict` only after
-the implementation is clean. Keep each module's typing change in its own commit.
+Enable `strict` only after the implementation is clean. Keep each module's typing
+change in its own commit.
 
-**Acceptance:** `strict = true` is enabled for `src/stompdrill`, `mypy src/stompdrill` reports no
-errors, and the test suite passes.
+**Acceptance:** `strict = true` is enabled for `packages/stompdrill/src/stompdrill`,
+`mypy packages/stompdrill/src/stompdrill` reports no errors, and the test suite passes.
 
 ## Measure and, if necessary, reduce package import cost
 

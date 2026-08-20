@@ -9,7 +9,7 @@ ADR-0001's consistency argument bites. See ADR-0009.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
-from typing import ClassVar, Protocol, TypeVar, runtime_checkable
+from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
 
 from .model import StageRun
 
@@ -79,7 +79,11 @@ class Pipeline(Sequence[Stage[T]]):
     def __init__(self, stages: Iterable[Stage[T]] = ()) -> None:
         self._stages: tuple[Stage[T], ...] = tuple(stages)
 
-    def __getitem__(self, index):
+    @overload
+    def __getitem__(self, index: int) -> Stage[T]: ...
+    @overload
+    def __getitem__(self, index: slice) -> tuple[Stage[T], ...]: ...
+    def __getitem__(self, index: int | slice) -> Stage[T] | tuple[Stage[T], ...]:
         return self._stages[index]
 
     def __len__(self) -> int:

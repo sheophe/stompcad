@@ -14,6 +14,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# PEP 561: without this marker a downstream type checker treats the whole
+# distribution as untyped and discards every annotation, every consumer's
+# included.
+[tool.setuptools.package-data]
+stompmodel = ["py.typed"]
+
 # What this package's own suite needs, so that ADR-0008's sentence -- change
 # into the member, sync, test -- runs a real suite rather than an import check.
 # `hypothesis` is here because the codec's round trip is a property and not an

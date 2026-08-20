@@ -37,7 +37,8 @@ uv sync --all-packages
 Run the project checks and tools from the repository root:
 
 ```bash
-# Full suite
+# stompdrill's suite (root testpaths cover only this package; see
+# "Testing rules" below for both packages' commands and expected counts)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --tb=short
 
 # One test
@@ -90,13 +91,16 @@ failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine` and
 `grid-ambiguous` are warnings and reach exit 1.
 
-`tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2` (112.40 × 60.50)
+`packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2` (112.40 × 60.50)
 and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it is
 `ambiguous-enclosure`, an error. This is the correct answer, not a regression: do not
 widen the tolerance, special-case the fixture, or round the footprint key back to whole
 millimetres.
 
 ## Architecture
+
+The workspace is `packages/stompmodel` and `packages/stompdrill`; each installs
+and passes its own tests alone, which is ADR-0008's governing test.
 
 The accepted architecture is defined by:
 
@@ -128,7 +132,7 @@ Both drawing emitters share `emitters/drawing/`: `content` holds the facts a she
 states, `layout` resolves a sheet's geometry, and `build` turns the two into a `Scene`
 of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene. They differ in
 which unknown they solve for — SVG fixes the sheet and fits the scale, PDF fixes the
-scale at 1:1 and walks the ISO 5457 candidates. `tests/test_drawing_agreement.py` parses
+scale at 1:1 and walks the ISO 5457 candidates. `packages/stompdrill/tests/test_drawing_agreement.py` parses
 both artefacts and compares what they say about one panel; the sheets may list different
 numbers of rows, but never differ about a row they both show. A `DrawingOptions(scale=…)`
 that overflows the chosen sheet draws the shared `CONTENT EXCEEDS` marker rather than
@@ -188,20 +192,21 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
 ## Extending
 
-- **New emitter:** implement the `Emitter` protocol, decorate with `@register_emitter`,
-  add one import in `emitters/__init__.py`. The CLI resolves `--emit FORMAT=PATH`
-  through the registry and never names a format. An emitter needing its own CLI flags
-  still requires a `cli.py` edit.
-- **New stage:** implement `Stage` including `describe()`, then insert it in
-  `cli.build_pipeline`. Order is the one thing a stage cannot self-declare, so
-  `build_pipeline` is the integration point by design.
-- **New source:** implement `Source`, returning `RawDrillData`. There is no source
-  registry.
-- **A new stage or source also gets one line in `src/stompdrill/__init__.py`.** A new
-  emitter does not — it has a registry, and is resolved through
-  `stompdrill.emitters.get_emitter`. The root exports what no registry can find: without
-  that line a consumer reproducing the `Source -> quantise -> Pipeline -> Emitter` flow
-  finds protocols with nothing at hand that satisfies them. `METRIC_BANDS` and
+- **New emitter:** implement `stompmodel`'s `Emitter` protocol, decorate with
+  `@register_emitter`, add one import in `emitters/__init__.py`. The CLI resolves
+  `--emit FORMAT=PATH` through the registry and never names a format. An emitter
+  needing its own CLI flags still requires a `cli.py` edit.
+- **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`,
+  then insert it in `cli.build_pipeline`. Order is the one thing a stage cannot
+  self-declare, so `build_pipeline` is the integration point by design.
+- **New source:** implement `stompdrill`'s own `Source` protocol, returning
+  `RawDrillData`. There is no source registry.
+- **A new stage or source also gets one line in
+  `packages/stompdrill/src/stompdrill/__init__.py`.** A new emitter does not — it
+  has a registry, and is resolved through `stompdrill.emitters.get_emitter`. The
+  root exports what no registry can find: without that line a consumer
+  reproducing the `Source -> quantise -> Pipeline -> Emitter` flow finds protocols
+  with nothing at hand that satisfies them. `METRIC_BANDS` and
   `FRACTIONAL_SIXTY_FOURTHS` stay in `stompdrill.pipeline`: they generate the standards
   rather than read a result.
 
@@ -243,15 +248,27 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `emitters.drawing.content` and `emitters.drawing_svg` account for most survivors, where
   a mutant rewrites a help string, a cell offset or a font size and nothing observable
   changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
-  `geometry`, `pipeline.dedupe`, `quantise`, `units`, `emitters.drawing.sheet` or
-  `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
-  shared facts rather than placement.
+  `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `stompmodel.units`,
+  `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth chasing:
+  those hold cited constants and shared facts rather than placement.
 - Preserve property tests for snapping idempotence, deduplication idempotence, and tool
   stability under hole reordering.
-- Coverage targets are 90% for `src/stompdrill` and 100% for quantisers, stages, and emitters.
-- `mypy` covers `tests` as well as `src/stompdrill`, because most hand-built lengths are
-  fixtures. Test helpers accept plain literals and brand them internally; direct model
-  construction wraps explicitly.
+- Coverage targets are 90% for each package and 100% for quantisers, stages,
+  emitters, and `stompmodel`'s codec.
+- `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most
+  hand-built lengths are fixtures. Test helpers accept plain literals and brand them
+  internally; direct model construction wraps explicitly.
+- No single command proves both suites at once: the root `testpaths` covers only
+  `stompdrill`, and two `tests` packages cannot share one interpreter. Run both,
+  and expect both counts:
+
+  ```bash
+  .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
+  # 217 passed
+
+  .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
+  # 1154 passed
+  ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.
 - Clearance-rule tests use a fake `CaseModel`; kernel-backed tests skip when

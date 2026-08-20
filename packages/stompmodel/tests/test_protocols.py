@@ -8,7 +8,7 @@ from typing import ClassVar
 import pytest
 
 from stompmodel.model import StageRun
-from stompmodel.protocols import Pipeline, Stage
+from stompmodel.protocols import Pipeline, Processable, Stage
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +33,11 @@ class Add:
 
     def describe(self) -> StageRun:
         return StageRun(name=self.name, parameters=(("by", self.by),))
+
+
+def test_a_value_implementing_with_processing_is_processable_at_runtime() -> None:
+    assert isinstance(Counter(), Processable)
+    assert not isinstance(object(), Processable)
 
 
 def test_a_pipeline_folds_its_stages_in_order() -> None:

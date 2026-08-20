@@ -88,7 +88,10 @@ recovering it.
 and the quantiser — moves to `quantise.py`. `Micron` stays: its definition is a
 statement about `stompdrill`'s grid policy, not about length. `JsonEmitter` remains a
 registered emitter but becomes a wrapper over `stompmodel`'s codec, owning only
-`indent`.
+`indent`. `SourceInfo.producer` stops defaulting to `"stompdrill"`: a default tool
+name in a shared model would let a `stompcollider` document that never set the
+field claim provenance from a tool that never touched it, so naming the producer
+becomes the job of whoever read the artwork.
 
 ## Rationale
 
