@@ -557,7 +557,7 @@ is recorded rather than left to be rediscovered.
 
 | Plan | Contents | Done when |
 | --- | --- | --- |
-| 1 — `stompmodel` | lengths, `DrillData` and its members, diagnostics, the JSON codec plus the reader it never had, and the generic `Stage[T]` / `Pipeline[T]` / `Emitter[T]` contracts | `stompdrill`'s suite is green and every artefact is byte-identical |
+| 1 — `stompmodel` | lengths, `DrillData` and its members, diagnostics, the JSON codec plus the reader it never had, and the generic `Stage[T]` / `Pipeline[T]` / `Emitter[T]` contracts | done — 3af2bd9 |
 | 2 — `stompgeom` | the STEP reader, the deterministic writer with its OCC normalisation, and the `CoordinateFrame` / `FaceFrame` split | the same test |
 | 3 — `stompcollider` | everything this document specifies, built test-first | its own suite, and the cross-artefact agreement test |
 
