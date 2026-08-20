@@ -1,11 +1,7 @@
-"""The error base every stomp package raises through.
+"""The error base every stomp package raises through, and the shared members.
 
-One base, so a caller composing two tools catches one type rather than one
-per tool. ``EmitterError`` lives here because ``DrillData.numbered()``
-raises it and every package that emits an artefact can fail the same way.
-``DocumentError`` for the same reason in the other direction: the shared
-document has one codec, so refusing a foreign one is one failure, not one
-per reader. See ADR-0009.
+Each tool's own base descends from ``StompError``. ADR-0009 holds the
+argument for one base and for what is admitted beside it.
 """
 
 from __future__ import annotations

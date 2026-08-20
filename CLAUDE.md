@@ -44,12 +44,17 @@ Run the project checks and tools from the repository root:
 # One test
 .venv/bin/python -m pytest -o addopts= packages/stompdrill/tests/test_pipeline.py::test_name -v
 
-# Coverage
-.venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov=stompmodel --cov-report=term-missing
+# Coverage, per package. The root testpaths cover only stompdrill, so measuring
+# stompmodel through it reports a package no test in scope imports end to end and
+# grades its codec far below the 100% target below.
+.venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov-report=term-missing
+cd packages/stompmodel && uv run --no-sync pytest -o addopts= --cov=stompmodel --cov-report=term-missing
 
-# Lint and types
+# Lint and types. `mypy packages` excludes stompmodel's tests -- two `tests`
+# packages cannot share one scan -- so the member's own config is a second gate.
 ruff check packages tools
 mypy packages
+cd packages/stompmodel && uv run --no-sync mypy
 
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
@@ -91,8 +96,9 @@ failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine` and
 `grid-ambiguous` are warnings and reach exit 1.
 
-`packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2` (112.40 × 60.50)
-and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it is
+`packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both
+`1590B`/`1590B2` (112.40 × 60.50) and `1590BS` (112.00 × 60.50), so it needs
+`--case 1590B`. Undeclared it is
 `ambiguous-enclosure`, an error. This is the correct answer, not a regression: do not
 widen the tolerance, special-case the fixture, or round the footprint key back to whole
 millimetres.
@@ -132,8 +138,9 @@ Both drawing emitters share `emitters/drawing/`: `content` holds the facts a she
 states, `layout` resolves a sheet's geometry, and `build` turns the two into a `Scene`
 of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene. They differ in
 which unknown they solve for — SVG fixes the sheet and fits the scale, PDF fixes the
-scale at 1:1 and walks the ISO 5457 candidates. `packages/stompdrill/tests/test_drawing_agreement.py` parses
-both artefacts and compares what they say about one panel; the sheets may list different
+scale at 1:1 and walks the ISO 5457 candidates.
+`packages/stompdrill/tests/test_drawing_agreement.py` parses both artefacts and
+compares what they say about one panel; the sheets may list different
 numbers of rows, but never differ about a row they both show. A `DrawingOptions(scale=…)`
 that overflows the chosen sheet draws the shared `CONTENT EXCEEDS` marker rather than
 clipping silently; there is no `--scale` flag, so only a library caller supplying an
@@ -271,7 +278,7 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
   ```bash
   .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
-  # 217 passed
+  # 238 passed
 
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
   # 1154 passed

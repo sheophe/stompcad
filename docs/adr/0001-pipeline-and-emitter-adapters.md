@@ -1,6 +1,10 @@
 # ADR-0001: Processing architecture and artifact consistency
 
-**Status:** Accepted
+**Status:** Accepted, amended by
+[ADR-0009](0009-shared-model-package-and-dependency-order.md), which moves
+`Stage`, `Pipeline` and `Emitter` into `stompmodel` and makes them generic in
+the value they fold over. The reasoning here for one authority per fact and for
+computing shared facts once is unchanged.
 
 ## Context
 

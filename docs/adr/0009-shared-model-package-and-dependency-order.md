@@ -48,8 +48,13 @@ Pure Python. No kernel, no parser, no I/O beyond serialisation. It holds:
 - `DrillData` and its members: `Hole`, `RawHole`, `ReferenceOutline`, `RawOutline`,
   `EnclosureMatch`, `SourceInfo`, `Origin`.
 - The `DrillData` JSON codec, **both directions**.
-- `Diagnostic`, `Severity`, and the severity-to-exit-code reduction.
-- `Stage[T]`, `Pipeline[T]`, `Emitter[T]`, `Payload`, `StageRun`.
+- `Diagnostic`, `Severity`, `ParameterValue`, and the severity-to-exit-code
+  reduction.
+- `Processable`, `Stage[T]`, `Pipeline[T]`, `Emitter[T]`, `Payload`, `StageRun`.
+- The workspace's error base: `StompError`, with `EmitterError` and
+  `DocumentError` beneath it. Each tool's own base descends from it —
+  `StompdrillError` does — so a package's errors stay identifiable while every
+  one of them is catchable at once.
 
 Two admission rules, and nothing else gets in:
 
@@ -132,6 +137,15 @@ bounded by its own wording — the uniformity must be something `stompcad` depen
 reduces both tools' diagnostics; `Source` does not, because `RawDrillData` is
 artwork and `stompcollider`'s board reader returns something else entirely.
 
+**Why one error base rather than one per tool.** `stompcad` runs both tools
+behind a single command and reduces their failures to one report and one exit
+code, so it needs `except StompError` to be a complete catch — two independent
+bases would make it two clauses that a third tool silently falsifies. That is
+the `stompcad` behaviour rule 2 demands a candidate name, and it is why
+`EmitterError` and `DocumentError` sit beside the base rather than in the
+package that happens to raise them first: producing an artefact and refusing a
+foreign document are failures any member can have.
+
 **Why the face frame is published rather than re-derived.** It is the same argument
 the hole positions make. Those holes were cut *from* exact values, so reading them
 back out of geometry could only lose precision or fail; the frame they were cut in
@@ -142,11 +156,14 @@ about where a panel is while both being self-consistent.
 
 ## Consequences
 
-ADR-0004's newtypes are `stompmodel`'s. ADR-0001's pipeline and emitter protocols
-become generic in the value they fold over, and both tools instantiate them.
-ADR-0007's optional `stompdrill[step]` extra is retired: `stompgeom` takes the kernel
-unconditionally, so `stompdrill` does too, and ADR-0007's argument for the extra
-assumed `stompdrill` stood alone.
+ADR-0004's `Nanometre` and `Millimetre` are `stompmodel`'s; its `Micron` is not, for
+the reason "What leaves `stompdrill`" gives above. ADR-0001's pipeline and emitter
+protocols become generic in the value they fold over, and both tools instantiate them.
+ADR-0007's optional `stompdrill[step]` extra is retired when `stompgeom` lands:
+`stompgeom` takes the kernel unconditionally, so `stompdrill` will too, and
+ADR-0007's argument for the extra assumed `stompdrill` stood alone. Until then the
+extra is still declared and still documented, and removing it is plan 2's change,
+not plan 1's.
 
 `stompdrill`'s public import paths change. Nothing is re-exported for compatibility —
 one name, one home — and the workspace is pre-release with one consumer.

@@ -36,8 +36,10 @@ terms actually get resolved.
 ├── docs/adr/
 │   ├── 0001-pipeline-and-emitter-adapters.md
 │   ├── …
-│   └── 0008-workspace-and-shared-geometry-core.md
-└── packages/stompdrill/src/stompdrill/
+│   └── 0009-shared-model-package-and-dependency-order.md
+└── packages/
+    ├── stompmodel/src/stompmodel/   ← the values both tools exchange
+    └── stompdrill/src/stompdrill/
 ```
 
 ## Use the glossary's vocabulary
