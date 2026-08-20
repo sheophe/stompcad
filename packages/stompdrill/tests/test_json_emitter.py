@@ -10,7 +10,6 @@ import pytest
 from stompdrill.emitters.base import REGISTRY, get_emitter
 from stompdrill.emitters.json_out import JsonEmitter, JsonOptions
 from stompdrill.model import (
-    Diagnostic,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -18,7 +17,6 @@ from stompdrill.model import (
     RawHole,
     RawOutline,
     ReferenceOutline,
-    Severity,
     SourceInfo,
     StageRun,
 )
@@ -30,6 +28,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.protocols import Emitter, Pipeline
 from stompdrill.quantise import quantise
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import EmitterError
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import at, holes, make_data

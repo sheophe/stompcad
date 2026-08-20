@@ -5,9 +5,10 @@ from __future__ import annotations
 import pytest
 
 from stompdrill.enclosures import footprints
-from stompdrill.model import Diagnostic, RawOutline, Severity
+from stompdrill.model import RawOutline
 from stompdrill.pipeline import IdentifyHammondFootprint, normalize_part_name
 from stompdrill.pipeline import enclosure as enclosure_stage
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.units import Millimetre, Nanometre
 
 #: Nanometres in a millimetre, spelled out rather than imported from ``units``:

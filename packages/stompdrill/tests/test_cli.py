@@ -16,7 +16,6 @@ from stompdrill import cli
 from stompdrill.emitters.base import available, register_emitter
 from stompdrill.errors import EmptyLayerError, LayerNotFoundError
 from stompdrill.model import (
-    Diagnostic,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -24,11 +23,11 @@ from stompdrill.model import (
     RawHole,
     RawOutline,
     ReferenceOutline,
-    Severity,
     SourceInfo,
     StageRun,
 )
 from stompdrill.pipeline import DRILL_STANDARDS
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 from tests.hammond import BB_PROBES, require_model

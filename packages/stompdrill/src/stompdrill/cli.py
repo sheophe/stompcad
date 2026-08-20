@@ -16,6 +16,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, get_args, get_type_hints
 
+from stompmodel.diagnostics import (
+    EXIT_CLEAN,
+    EXIT_ERRORS,
+    EXIT_USAGE,
+    EXIT_WARNINGS,
+    Diagnostic,
+    Severity,
+    exit_for_severity,
+)
 from stompmodel.errors import StompError
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
@@ -32,7 +41,7 @@ from .emitters import (
 from .enclosures import HAMMOND_1590
 from .errors import StompdrillError
 from .formatting import format_mm
-from .model import Diagnostic, DrillData, RawDrillData, Severity
+from .model import DrillData, RawDrillData
 from .pipeline import (
     CATALOGUE,
     DEFAULT_STANDARD,
@@ -63,21 +72,11 @@ __all__ = [
     "parse_face",
     "parse_sizes",
     "parse_length",
+    "EXIT_CLEAN",
+    "EXIT_WARNINGS",
+    "EXIT_ERRORS",
+    "EXIT_USAGE",
 ]
-
-EXIT_CLEAN = 0
-EXIT_WARNINGS = 1
-EXIT_ERRORS = 2
-EXIT_USAGE = 3
-
-#: The whole of the exit-code policy. Derived from ``DrillData.worst_severity``
-#: rather than recounted, so the report and the exit code cannot disagree.
-_EXIT_FOR_SEVERITY: dict[Severity | None, int] = {
-    None: EXIT_CLEAN,
-    Severity.INFO: EXIT_CLEAN,
-    Severity.WARNING: EXIT_WARNINGS,
-    Severity.ERROR: EXIT_ERRORS,
-}
 
 #: Severities in the order the report groups them: worst first.
 _SEVERITY_ORDER = (Severity.ERROR, Severity.WARNING, Severity.INFO)
@@ -753,7 +752,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
                 print(_write(emitter, path, payload), file=out)
 
     print("\n".join(format_summary(data)), file=out)
-    return _EXIT_FOR_SEVERITY[data.worst_severity]
+    return exit_for_severity(data.worst_severity)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

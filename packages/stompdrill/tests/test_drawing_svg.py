@@ -18,7 +18,6 @@ from stompdrill.emitters.drawing_svg import (
     Sheet,
 )
 from stompdrill.model import (
-    Diagnostic,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -26,7 +25,6 @@ from stompdrill.model import (
     RawHole,
     RawOutline,
     ReferenceOutline,
-    Severity,
     SourceInfo,
     StageRun,
 )
@@ -39,6 +37,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.protocols import Emitter
 from stompdrill.quantise import quantise
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import EmitterError
 from stompmodel.units import Millimetre, Nanometre, format_nm, mm_from_nm
 from tests.conftest import at, holes, make_data

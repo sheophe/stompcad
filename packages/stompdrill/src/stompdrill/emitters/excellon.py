@@ -11,10 +11,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
+from stompmodel.diagnostics import Severity
 from stompmodel.errors import EmitterError
 from stompmodel.units import Nanometre, format_nm
 
-from ..model import DrillData, Hole, Origin, Severity
+from ..model import DrillData, Hole, Origin
 from .base import register_emitter
 
 __all__ = ["ExcellonOptions", "ExcellonEmitter"]

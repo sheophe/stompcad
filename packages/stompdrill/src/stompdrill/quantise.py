@@ -6,7 +6,9 @@ diameters before grid positions. Holes leave this stage unnumbered.
 
 from __future__ import annotations
 
-from .model import Diagnostic, DrillData, Hole, RawDrillData, Severity, StageRun
+from stompmodel.diagnostics import Diagnostic, Severity
+
+from .model import DrillData, Hole, RawDrillData, StageRun
 from .pipeline import IdentifyHammondFootprint, SnapDiametersToDrillTable, SnapPositions
 
 __all__ = ["quantise"]

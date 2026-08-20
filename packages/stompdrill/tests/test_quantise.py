@@ -7,12 +7,10 @@ from typing import Any
 import pytest
 
 from stompdrill.model import (
-    Diagnostic,
     DrillData,
     RawDrillData,
     RawHole,
     RawOutline,
-    Severity,
     SourceInfo,
 )
 from stompdrill.pipeline import (
@@ -25,6 +23,7 @@ from stompdrill.pipeline import (
 from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from stompdrill.quantise import quantise
 from stompdrill.sources import AiPdfSource
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import build_pdf, circle_ops
 

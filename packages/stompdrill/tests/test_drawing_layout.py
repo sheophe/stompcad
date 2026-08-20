@@ -270,7 +270,7 @@ def test_the_sheet_a_panel_takes_does_not_depend_on_how_many_diagnostics_it_has(
     cannot show, exactly as the schedule and the chain stack do, so the paper a
     panel needs is a fact about the panel rather than about its findings.
     """
-    from stompdrill.model import Diagnostic
+    from stompmodel.diagnostics import Diagnostic
 
     data = panel(112_400_000, 60_500_000)
     noisy = data.with_diagnostics(

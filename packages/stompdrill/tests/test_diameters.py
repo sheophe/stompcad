@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from stompdrill.model import RawHole, Severity
+from stompdrill.model import RawHole
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -16,6 +16,7 @@ from stompdrill.pipeline import (
     DrillStandard,
     SnapDiametersToDrillTable,
 )
+from stompmodel.diagnostics import Severity
 from stompmodel.units import Millimetre, Nanometre, format_nm, nm_from_mm
 
 

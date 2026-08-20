@@ -7,8 +7,8 @@ quantisation entry point, standard stages, and enclosure reference data.
 from stompmodel.errors import EmitterError
 
 from .model import (
-    Diagnostic, DrillData, EnclosureMatch, Hole, Origin, ParameterValue, RawDrillData, RawHole,
-    RawOutline, ReferenceOutline, Severity, SourceInfo, StageRun,
+    DrillData, EnclosureMatch, Hole, Origin, RawDrillData, RawHole,
+    RawOutline, ReferenceOutline, SourceInfo, StageRun,
 )
 from .protocols import Emitter, Pipeline, Source, Stage
 from .sources import AiPdfSource
@@ -23,8 +23,8 @@ from .cad import CaseModel, Frame, Rejection, load_case_model
 from .errors import StompdrillError, EmptyLayerError, LayerNotFoundError, SourceError
 
 __all__ = [
-    "Diagnostic", "DrillData", "EnclosureMatch", "Hole", "Origin", "ParameterValue", "RawDrillData",
-    "RawHole", "RawOutline", "ReferenceOutline", "Severity", "SourceInfo", "StageRun",
+    "DrillData", "EnclosureMatch", "Hole", "Origin", "RawDrillData",
+    "RawHole", "RawOutline", "ReferenceOutline", "SourceInfo", "StageRun",
     "Emitter", "Pipeline", "Source", "Stage",
     "AiPdfSource",
     "quantise",

@@ -9,10 +9,11 @@ import pytest
 
 from stompdrill.errors import EmptyLayerError, LayerNotFoundError, SourceError
 from stompdrill.geometry import CurveTo, MoveTo, fit_circle
-from stompdrill.model import RawDrillData, RawHole, RawOutline, Severity
+from stompdrill.model import RawDrillData, RawHole, RawOutline
 from stompdrill.protocols import Source
 from stompdrill.sources import AiPdfSource
 from stompdrill.units import mm_from_pt
+from stompmodel.diagnostics import Severity
 from tests.conftest import build_pdf, circle_ops
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"

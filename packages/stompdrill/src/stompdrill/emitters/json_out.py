@@ -11,8 +11,9 @@ import json
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from stompmodel.diagnostics import Diagnostic
+
 from ..model import (
-    Diagnostic,
     DrillData,
     EnclosureMatch,
     Hole,

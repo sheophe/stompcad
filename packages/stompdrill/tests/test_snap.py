@@ -7,8 +7,9 @@ import random
 
 import pytest
 
-from stompdrill.model import Diagnostic, DrillData, Hole, RawHole, Severity, StageRun
+from stompdrill.model import DrillData, Hole, RawHole, StageRun
 from stompdrill.pipeline import ReviewGridTies, SnapPositions
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.units import Millimetre, Nanometre
 
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from stompdrill.model import EnclosureMatch, Severity
+from stompdrill.model import EnclosureMatch
 from stompdrill.pipeline import CheckCaseClearance
+from stompmodel.diagnostics import Severity
 from stompmodel.units import Nanometre
 from tests.conftest import FakeCase, at, codes, make_data
 
