@@ -1100,7 +1100,6 @@ def fake_source(monkeypatch):
                 self.drill_layer = drill_layer
                 self.reference_layer = reference_layer
                 self.form_depth = form_depth
-                FakeSource.last = self
 
             def read(self):
                 if isinstance(result, Exception):
@@ -1131,12 +1130,26 @@ def test_the_help_states_the_default_depth_it_will_apply():
     assert str(DEFAULT_FORM_DEPTH) in cli.build_parser().format_help()
 
 
-def test_form_depth_reaches_the_source(fake_source):
-    made = fake_source(read())
+def test_form_depth_reaches_the_source(monkeypatch):
+    """Its own spy rather than ``fake_source``: the shared fixture stays a stub.
+
+    A class attribute recording the last instance would be an ``attr-defined``
+    error the moment anyone annotated that fixture's ``__init__``.
+    """
+    seen: dict[str, int] = {}
+
+    class Spy:
+        def __init__(self, path, drill_layer="Drill", reference_layer="Background", form_depth=0):
+            seen["form_depth"] = form_depth
+
+        def read(self):
+            return read()
+
+    monkeypatch.setattr(cli, "AiPdfSource", Spy)
 
     cli.main(["panel.ai", "--form-depth", "3"])
 
-    assert made.last.form_depth == 3
+    assert seen["form_depth"] == 3
 
 
 @pytest.mark.parametrize("bad", ["0", "-1"])
@@ -1254,7 +1267,7 @@ now fail, the fixture change is wrong, not the flag.
 | Mutation in `cli.py` | Must fail |
 | --- | --- |
 | `default=DEFAULT_FORM_DEPTH` → `default=12` | nothing — and that is the point; instead delete `DEFAULT_FORM_DEPTH` from the help f-string and confirm `test_the_help_states_the_default_depth_it_will_apply` fails |
-| `form_depth=args.form_depth` dropped from the `AiPdfSource(...)` call | `test_form_depth_reaches_the_source` and `test_truncated_nesting_exits_one_from_the_command_line` |
+| `form_depth=args.form_depth` dropped from the `AiPdfSource(...)` call | `test_form_depth_reaches_the_source` (the spy sees `0`) and `test_truncated_nesting_exits_one_from_the_command_line` |
 | the `try/except ValueError` removed from `read_source` | `test_a_depth_below_one_level_is_a_usage_error[0]` (the run raises rather than exiting 3) |
 | `read_source` moved above `build_case_model` in `_run` | nothing should change; if a test fails, say which in your report |
 
