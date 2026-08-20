@@ -725,6 +725,17 @@ explained, stop and report it — that is a real finding about the emitter.
 
 - [ ] **Step 4: Prove the fixture now discriminates**
 
+> **Correction, made during execution.** The test below is unsatisfiable as
+> written. `DrillData.numbered()` (`stompmodel/model.py:344`) pairs each hole
+> with its own index **in tuple order** — it does not sort — so
+> `[n for n, _ in data.numbered()]` is identically `[h.index for h in data.holes]`
+> and the second assertion can never hold; the first is false for any
+> deliberately scrambled fixture. `emitters/step.py:318` documents the same fact
+> and sorts around it. What was committed instead asserts that the numbers are a
+> permutation of 1..n and are not already ascending, under the name
+> `test_the_fixtures_numbers_are_a_permutation_out_of_tuple_order` — it guards
+> the fixture's shape, which is all a fixture guard can do.
+
 Add one test to `test_excellon.py`, modelled on the gold standard at
 `test_drawing_svg.py:423`:
 

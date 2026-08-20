@@ -579,7 +579,7 @@ def test_emit_is_deterministic():
 # --------------------------------------------------------------------------
 
 
-def test_the_drill_order_is_the_routed_order_not_the_tuple_order() -> None:
+def test_the_fixtures_numbers_are_a_permutation_out_of_tuple_order() -> None:
     """The fixture is only worth having if these two differ.
 
     ``numbered()`` pairs each hole with its number in tuple order, so the
