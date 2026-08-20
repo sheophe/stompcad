@@ -15,7 +15,7 @@ from stompdrill.sources import AiPdfSource
 from stompdrill.units import mm_from_pt
 from stompmodel.diagnostics import Severity
 from stompmodel.model import RawHole, RawOutline
-from tests.conftest import build_pdf, circle_ops
+from tests.conftest import build_pdf, circle_ops, image_ending_form, self_nesting_form
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
 
@@ -821,3 +821,114 @@ def test_fixture_reference_matches_its_measured_outline(data):
     assert len(row) == 6
     assert abs(min(h.x for h in row) - (-39.9906)) <= TOL_MM
     assert abs(max(h.x for h in row) - 40.0000) <= TOL_MM
+
+
+# ---------------------------------------------------------------------------
+# nested Form XObjects
+# ---------------------------------------------------------------------------
+
+#: A rectangle big enough to be the reference outline in the synthetic files below.
+FRAME_OPS = "0 0 m 300 0 l 300 200 l 0 200 l h S"
+
+
+def nested(tmp_path, name, body, *, depth=None, image=False):
+    """Read a one-page file whose Drill layer invokes a form, at ``depth``."""
+    path = build_pdf(
+        tmp_path / name,
+        {"Background": FRAME_OPS, "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 10, 0], body),
+        image=image,
+    )
+    source = AiPdfSource(path) if depth is None else AiPdfSource(path, form_depth=depth)
+    return source.read()
+
+
+def test_the_default_nesting_depth_is_twelve_levels():
+    """A named constant, because the CLI states it in a help string too."""
+    from stompdrill.sources import DEFAULT_FORM_DEPTH
+
+    assert DEFAULT_FORM_DEPTH == 12
+    assert AiPdfSource(FIXTURE).form_depth == DEFAULT_FORM_DEPTH
+
+
+def test_nesting_stops_at_the_default_depth(tmp_path):
+    data = nested(tmp_path, "deep.pdf", self_nesting_form())
+
+    assert len(data.holes) == 12
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3])
+def test_the_requested_depth_is_how_many_levels_are_read(tmp_path, depth):
+    data = nested(tmp_path, f"d{depth}.pdf", self_nesting_form(), depth=depth)
+
+    assert len(data.holes) == depth
+
+
+def test_reaching_the_limit_with_more_below_it_is_reported(tmp_path):
+    data = nested(tmp_path, "cut.pdf", self_nesting_form(), depth=1)
+
+    assert [d.code for d in warnings(data)] == ["nesting-truncated"]
+
+
+def test_the_report_names_the_depth_that_was_reached(tmp_path):
+    data = nested(tmp_path, "cut2.pdf", self_nesting_form(), depth=2)
+    (finding,) = warnings(data)
+
+    assert finding.get("form_depth") == 2
+    assert "2" in finding.message
+
+
+def test_stopping_short_of_the_limit_reports_nothing(tmp_path):
+    """A limit nobody reached is not news. This is the whole point of the code."""
+    data = nested(tmp_path, "shallow.pdf", circle_ops(20, 20, 5), depth=1)
+
+    assert warnings(data) == []
+    assert len(data.holes) == 1
+
+
+def test_a_do_naming_an_image_at_the_limit_reports_nothing(tmp_path):
+    """Nothing was refused: an image is not a deeper layer of artwork."""
+    data = nested(tmp_path, "img.pdf", image_ending_form(), depth=1, image=True)
+
+    assert warnings(data) == []
+    assert len(data.holes) == 1
+
+
+def test_truncation_below_the_top_level_still_reports(tmp_path):
+    """The flag comes back up the recursion; it is not only the outermost frame."""
+    data = nested(tmp_path, "deep3.pdf", self_nesting_form(), depth=3)
+
+    assert [d.code for d in warnings(data)] == ["nesting-truncated"]
+
+
+def test_the_fixture_reads_without_a_truncation_report(data):
+    """Real artwork nests nowhere near twelve. A report on it would be a false alarm."""
+    assert "nesting-truncated" not in [d.code for d in data.diagnostics]
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, True])
+def test_a_depth_below_one_level_is_refused(bad):
+    """``True`` is an ``int`` to Python and is not a depth anybody typed."""
+    with pytest.raises(ValueError, match="form depth"):
+        AiPdfSource(FIXTURE, form_depth=bad)
+
+
+def test_listing_layers_still_works_when_nesting_is_truncated(tmp_path):
+    """``layers()`` reads the same walk; the extra return value must not reach it."""
+    path = build_pdf(
+        tmp_path / "layers.pdf",
+        {"Background": FRAME_OPS, "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 10, 0], self_nesting_form()),
+    )
+
+    assert AiPdfSource(path, form_depth=1).layers() == ("Background", "Drill")
+
+
+def test_layer_subpaths_still_works_when_nesting_is_truncated(tmp_path):
+    path = build_pdf(
+        tmp_path / "subpaths.pdf",
+        {"Background": FRAME_OPS, "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 10, 0], self_nesting_form()),
+    )
+
+    assert len(AiPdfSource(path, form_depth=2).layer_subpaths("Drill")) == 2
