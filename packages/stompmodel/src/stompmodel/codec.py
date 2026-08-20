@@ -2,9 +2,9 @@
 
 Nominal ``*_nm`` values are integer nanometres; unsuffixed ``raw`` values
 remain measured millimetres. Model order and identities are preserved, and
-model tuples become JSON lists. Both directions live together because more
-than one package exchanges this file, and a second parser written elsewhere
-is how two of them come to disagree about it. See ADR-0009.
+model tuples become JSON lists. Both directions live together because
+stompdrill writes this file and stompcollider reads it, and a second parser
+written elsewhere is how the two come to disagree about it. See ADR-0009.
 """
 
 from __future__ import annotations
@@ -36,6 +36,9 @@ VERSION = 5
 #: could pass a document the writer would never have produced.
 _UNITS = "nm"
 _ORIGIN = "centre"
+
+#: A finding's location is a point, so it is exactly two values.
+_LOCATION_VALUES = 2
 
 
 def to_document(data: DrillData) -> dict[str, Any]:
@@ -168,10 +171,14 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
         raise DocumentError(f"{FORMAT} units {document.get('units')!r}, expected {_UNITS!r}")
     if document.get("origin") != _ORIGIN:
         raise DocumentError(f"{FORMAT} origin {document.get('origin')!r}, expected {_ORIGIN!r}")
-    # One wrap rather than a guarded read per key: every reader below indexes
-    # the document, so a truncated one must fail the same way at any depth. A
-    # KeyError raised in here is always an absent document key — no value the
-    # readers build is a mapping they look something up in.
+    # One wrap rather than a guarded read per key or per value: every reader
+    # below reads the document and hands what it finds to a model constructor,
+    # so a document that is wrong anywhere must fail the same way at any depth.
+    # Each class caught here is raised by an operation whose operand came out
+    # of the document — an absent key, an unknown enum member, a mapping read
+    # that found a list, a scalar read as a sequence, or a model guard refusing
+    # a value. The cause is chained, so a reader defect that ever raised one of
+    # these for its own reasons is re-attributed but not erased.
     try:
         return DrillData(
             holes=tuple(_read_hole(h) for h in document["holes"]),
@@ -183,6 +190,8 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
         )
     except KeyError as missing:
         raise DocumentError(f"{FORMAT} document has no {missing.args[0]!r}") from missing
+    except (IndexError, TypeError, ValueError, AttributeError) as malformed:
+        raise DocumentError(f"{FORMAT} document is malformed: {malformed}") from malformed
 
 
 def _read_source(payload: Mapping[str, Any]) -> SourceInfo:
@@ -230,8 +239,17 @@ def _read_hole(payload: Mapping[str, Any]) -> Hole:
 
 
 def _read_diagnostic(payload: Mapping[str, Any]) -> Diagnostic:
-    """Restore a finding; ``Diagnostic`` re-tuples what ``_listed`` flattened."""
+    """Restore a finding; ``Diagnostic`` re-tuples what ``_listed`` flattened.
+
+    The location's length is checked rather than indexed: a short one would
+    raise past this reader, and a long one would be truncated into a position
+    the writer never stated.
+    """
     location = payload["location_nm"]
+    if location is not None and len(location) != _LOCATION_VALUES:
+        raise DocumentError(
+            f"{FORMAT} location_nm has {len(location)} values, expected {_LOCATION_VALUES}"
+        )
     return Diagnostic(
         severity=Severity(payload["severity"]),
         code=payload["code"],

@@ -667,6 +667,102 @@ def test_a_document_missing_a_field_inside_a_section_is_refused_too() -> None:
         from_document(document)
 
 
+def test_a_document_whose_location_is_short_is_refused_rather_than_indexed() -> None:
+    """A one-value location would raise ``IndexError`` past the handler.
+
+    The pair is the finding's position, so half of one is not a position at
+    all and must fail where the document is read.
+    """
+    document = to_document(_data())
+    document["diagnostics"][0]["location_nm"] = [1_000_000]
+
+    with pytest.raises(DocumentError, match="location_nm has 1 value"):
+        from_document(document)
+
+
+def test_a_document_whose_location_is_long_is_refused_rather_than_truncated() -> None:
+    """Reading the first two of three would accept a frame this codec never wrote."""
+    document = to_document(_data())
+    document["diagnostics"][0]["location_nm"] = [1_000_000, 2_000_000, 3_000_000]
+
+    with pytest.raises(DocumentError, match="location_nm has 3 value"):
+        from_document(document)
+
+
+def test_a_document_naming_an_unknown_severity_is_refused() -> None:
+    """``Severity`` raises ``ValueError``, which is outside ``StompError``."""
+    document = to_document(_data())
+    document["diagnostics"][0]["severity"] = "catastrophe"
+
+    with pytest.raises(DocumentError, match="catastrophe"):
+        from_document(document)
+
+
+def test_a_document_whose_payload_is_not_a_mapping_is_refused() -> None:
+    """``data`` is read with ``.items()``; a list has none, so ``AttributeError``."""
+    document = to_document(_data())
+    document["diagnostics"][0]["data"] = ["dropped", 1]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_document_whose_stage_parameters_are_not_a_mapping_is_refused() -> None:
+    """The same read, in the other reader: one failure, not two."""
+    document = to_document(_data())
+    document["processing"] = [{"name": "Deduplicate", "parameters": ["tolerance_nm", 0]}]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_document_whose_candidates_are_a_scalar_is_refused() -> None:
+    """``tuple()`` of a scalar raises ``TypeError``, not a one-element tuple."""
+    document = to_document(_fixture_data())
+    assert document["enclosure"] is not None
+    document["enclosure"]["candidates"] = 1590
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_document_whose_length_is_not_whole_is_refused() -> None:
+    """``Nanometre`` is a no-op brand, so only the model's guard catches a float.
+
+    That guard raises ``TypeError``, which would escape the codec's handler
+    from inside a constructor rather than from a read.
+    """
+    document = to_document(_data())
+    document["holes"][0]["x_nm"] = 19_000_000.5
+
+    with pytest.raises(DocumentError, match="whole number of nanometres"):
+        from_document(document)
+
+
+def test_a_document_numbering_a_hole_from_zero_is_refused() -> None:
+    """``Hole`` raises ``ValueError`` for an index below 1; same escape, same base."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = 0
+
+    with pytest.raises(DocumentError, match="numbered from 1"):
+        from_document(document)
+
+
+def test_a_refused_document_keeps_the_failure_it_was_refused_for() -> None:
+    """The handler re-attributes a failure, so it must not also erase it.
+
+    Chaining is what keeps a defect inside a reader diagnosable if one ever
+    raises one of the widened classes for a reason the document did not cause.
+    """
+    document = to_document(_data())
+    document["diagnostics"][0]["severity"] = "catastrophe"
+
+    with pytest.raises(DocumentError) as refused:
+        from_document(document)
+
+    assert isinstance(refused.value.__cause__, ValueError)
+
+
 def test_a_document_measured_in_another_unit_is_refused() -> None:
     """This format at this version in inches clears both guards above.
 
