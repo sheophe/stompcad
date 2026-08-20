@@ -169,7 +169,7 @@ underlying complaint instead.
 | Group | Items | Lands as |
 | --- | --- | --- |
 | Contract coverage | layer flags never driven through the CLI; `hole-obstructed` and `wrong-case-model` never proved to exit 2; `unverifiable-enclosure` reaching no exit code; `drawing-svg` never asserted withheld on an error run; STEP's unrouted-data refusal; A1 sheet selection; `W*` clips; flag resolution before file open; the case model parsed once | acceptance tests |
-| Hollow tests | `test_quantise.py:185`; `test_geometry.py:340`; `test_diagnostics.py:131`; `test_excellon.py:25`'s tuple-ordered fixture | repairs |
+| Hollow tests | `test_quantise.py:185`; `test_geometry.py:340`; `test_diagnostics.py:131`; the untested `duplicate-hole` message at `dedupe.py:47`; two half-matched refusals at `test_codec.py:630,639`; the redundant compound at `test_drawing_svg.py:1096`; four further compounds CLAUDE.md asks to be split; and `test_excellon.py:25`'s tuple-ordered fixture | repairs |
 | Broken instruments | both mutmut configs; `[tool.mypy] exclude` missing `mutants/`; the boundary gate aborting the member survey | fixes |
 | Generative | snap restated in nanometres; permutation invariant made generative; codec round trip widened; dedupe idempotence deleted for a distinct-keys property | conversions |
 | End-to-end | console script, entry point, both `py.typed` markers | one `subprocess` test |
