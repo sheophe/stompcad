@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, get_args, get_type_hints
 
+from stompmodel.errors import StompError
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import CaseModel
@@ -767,7 +768,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # their tracebacks rather than being classified as invalid input.
     try:
         return _run(args, sys.stdout)
-    except (UsageError, StompdrillError, OSError) as failure:
+    except (UsageError, StompError, OSError) as failure:
         print(f"{parser.prog}: error: {failure}", file=sys.stderr)
         return EXIT_USAGE
 

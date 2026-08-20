@@ -4,6 +4,8 @@ The package root exposes the public data model, protocols, concrete source,
 quantisation entry point, standard stages, and enclosure reference data.
 """
 
+from stompmodel.errors import EmitterError
+
 from .model import (
     Diagnostic, DrillData, EnclosureMatch, Hole, Origin, ParameterValue, RawDrillData, RawHole,
     RawOutline, ReferenceOutline, Severity, SourceInfo, StageRun,
@@ -18,9 +20,7 @@ from .pipeline import (
 )
 from .enclosures import Enclosure, HAMMOND_1590, footprints
 from .cad import CaseModel, Frame, Rejection, load_case_model
-from .errors import (
-    StompdrillError, EmitterError, EmptyLayerError, LayerNotFoundError, SourceError,
-)
+from .errors import StompdrillError, EmptyLayerError, LayerNotFoundError, SourceError
 
 __all__ = [
     "Diagnostic", "DrillData", "EnclosureMatch", "Hole", "Origin", "ParameterValue", "RawDrillData",

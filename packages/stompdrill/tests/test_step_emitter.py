@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from stompdrill.emitters import available, get_emitter
-from stompdrill.errors import EmitterError
+from stompmodel.errors import EmitterError
 
 
 def test_step_is_always_in_the_registry():
@@ -88,7 +88,7 @@ def test_reslot_colours_raises_when_the_chain_count_does_not_match():
     colour, must raise rather than silently pass the mismatch through.
     """
     from stompdrill.emitters.step import _reslot_colours
-    from stompdrill.errors import EmitterError
+    from stompmodel.errors import EmitterError
 
     payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SOMETHING();\nENDSEC;\n"
 

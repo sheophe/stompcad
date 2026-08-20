@@ -263,7 +263,7 @@ def test_no_matching_component_is_an_emitter_error():
     renamed or mis-supplied model would produce — worth a named diagnostic,
     not a silent no-op."""
     from stompdrill.emitters import step as step_module
-    from stompdrill.errors import EmitterError
+    from stompmodel.errors import EmitterError
     from tests.conftest import at, make_data
 
     def never_named(label: object) -> str:
@@ -284,7 +284,7 @@ def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
 
     from stompdrill.emitters import step as step_module
-    from stompdrill.errors import EmitterError
+    from stompmodel.errors import EmitterError
     from tests.conftest import at, make_data
 
     monkeypatch.setattr(BRepAlgoAPI_Cut, "IsDone", lambda self: False)
@@ -462,7 +462,7 @@ def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_sile
     import re
 
     from stompdrill.emitters import step as step_module
-    from stompdrill.errors import EmitterError
+    from stompmodel.errors import EmitterError
     from tests.conftest import at
 
     broken = re.compile(

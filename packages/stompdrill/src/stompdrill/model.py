@@ -12,9 +12,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import total_ordering
 
+from stompmodel.errors import EmitterError
 from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
-
-from .errors import EmitterError
 
 __all__ = [
     "Severity",

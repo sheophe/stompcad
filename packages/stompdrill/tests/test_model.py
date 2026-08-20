@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from stompdrill.errors import EmitterError
 from stompdrill.formatting import format_mm
 from stompdrill.model import (
     Diagnostic,
@@ -24,6 +23,7 @@ from stompdrill.model import (
     SourceInfo,
     StageRun,
 )
+from stompmodel.errors import EmitterError
 from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 # --------------------------------------------------------------------------

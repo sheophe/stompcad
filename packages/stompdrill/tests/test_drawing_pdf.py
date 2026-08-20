@@ -10,8 +10,8 @@ import pikepdf
 import pytest
 
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions, encode_text
-from stompdrill.errors import EmitterError
 from stompdrill.model import Diagnostic, DrillData, ReferenceOutline, SourceInfo
+from stompmodel.errors import EmitterError
 from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 

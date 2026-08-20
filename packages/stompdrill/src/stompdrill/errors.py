@@ -1,20 +1,25 @@
-"""Library exception hierarchy with source- and emitter-specific failures."""
+"""Library exception hierarchy with source-specific failures.
+
+``EmitterError`` moved to ``stompmodel.errors``: ``DrillData.numbered()``
+raises it and ``DrillData`` lives there too. See ADR-0009.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+
+from stompmodel.errors import StompError
 
 __all__ = [
     "StompdrillError",
     "SourceError",
     "LayerNotFoundError",
     "EmptyLayerError",
-    "EmitterError",
 ]
 
 
-class StompdrillError(Exception):
-    """Base for every error raised by stompdrill."""
+class StompdrillError(StompError):
+    """Base for every error raised by stompdrill alone."""
 
 
 class SourceError(StompdrillError):
@@ -43,10 +48,6 @@ class EmptyLayerError(SourceError):
         self.layer = layer
         self.path_count = path_count
         super().__init__(_empty_layer_message(layer, path_count))
-
-
-class EmitterError(StompdrillError):
-    """An emitter could not produce output from the data it was given."""
 
 
 def _empty_layer_message(layer: str, path_count: int) -> str:

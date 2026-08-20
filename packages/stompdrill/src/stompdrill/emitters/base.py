@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from ..errors import EmitterError
+from stompmodel.errors import EmitterError
 
 __all__ = ["register_emitter", "get_emitter", "available", "REGISTRY"]
 

@@ -7,7 +7,7 @@ import pytest
 from stompdrill import cli
 from stompdrill.emitters import base
 from stompdrill.emitters.base import available, get_emitter, register_emitter
-from stompdrill.errors import EmitterError
+from stompmodel.errors import EmitterError
 
 
 def test_the_fixture_really_restores_the_registry(clean_registry):

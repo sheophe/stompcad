@@ -19,10 +19,10 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from stompmodel.errors import EmitterError
 from stompmodel.units import mm_from_nm
 
 from ..cad.base import KernelUnavailable
-from ..errors import EmitterError
 from ..model import DrillData
 from .base import register_emitter
 

@@ -8,7 +8,6 @@ import pytest
 
 from stompdrill.emitters.base import REGISTRY, get_emitter
 from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
-from stompdrill.errors import EmitterError
 from stompdrill.model import (
     Diagnostic,
     DrillData,
@@ -19,6 +18,7 @@ from stompdrill.model import (
     SourceInfo,
 )
 from stompdrill.protocols import Emitter
+from stompmodel.errors import EmitterError
 from stompmodel.units import Millimetre, Nanometre, format_nm
 from tests.conftest import at, holes, make_data
 
