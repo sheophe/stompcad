@@ -19,10 +19,40 @@ import pytest
 from stompdrill import cli
 from stompmodel.units import Nanometre
 from tests.conftest import FakeCase, at, build_pdf, circle_ops, make_data
+from tests.hammond import BB_PROBES, require_model
 
 __all__: list[str] = []
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
+
+#: The 1590BB's published top-view footprint (ADR-0007), matching the panel
+#: builder in ``test_cli.py`` -- reproduced locally rather than imported
+#: across test modules, which this plan has treated as coupling to avoid.
+_BB_FOOTPRINT_MM = (119.5, 94.0)
+
+
+def _pt_from_mm(mm: float) -> float:
+    """Millimetres to PDF user-space points."""
+    return mm * 72 / 25.4
+
+
+def _panel_with_a_central_hole(tmp_path: Path) -> Path:
+    """A hole in the clear middle of a 1590BB-sized floor: nothing rejects it."""
+    x_mm, y_mm = BB_PROBES["clear"]
+    width, height = (_pt_from_mm(size) for size in _BB_FOOTPRINT_MM)
+    centre_x, centre_y = 10 + width / 2, 10 + height / 2
+    return build_pdf(
+        tmp_path / "clear.ai",
+        {
+            "Background": f"10 10 {width} {height} re f",
+            "Drill": circle_ops(
+                centre_x + _pt_from_mm(x_mm),
+                centre_y + _pt_from_mm(y_mm),
+                _pt_from_mm(3.0),
+            ),
+        },
+    )
+
 
 # ---------------------------------------------------------------------------
 # rows 1 and 8: the source reads what the command line tells it to
@@ -172,10 +202,10 @@ def test_the_case_model_is_parsed_once_however_many_consumers_want_it(tmp_path, 
     is not only slow: two parses are two chances to disagree, and every
     artefact of one invocation must describe one geometry.
 
-    The run below ends in ``wrong-case-model``, so the STEP emitter is
-    resolved (and reads the shared model into its options) but never
-    actually asked to cut -- which is enough to prove both consumers reach
-    one object, without needing OCP to cut a fake model's absent geometry.
+    Ends in ``wrong-case-model``, so the STEP emitter is resolved (and reads
+    the one object ``build_case_model`` produced into its options) but never
+    asked to cut -- proving resolution alone, cheaply. The next test below
+    completes a real run and checks the same claim past that point.
     """
     calls: list[Path] = []
 
@@ -192,6 +222,37 @@ def test_the_case_model_is_parsed_once_however_many_consumers_want_it(tmp_path, 
     ])
 
     assert code == 2
+    assert len(calls) == 1
+
+
+@pytest.mark.hammond
+def test_the_case_model_is_parsed_once_across_a_completed_run(tmp_path, monkeypatch):
+    """The fast test above ends at an error, so it never reaches an emitter.
+    This one completes: clearance and the STEP emitter both consume the
+    model, and it must still have been read from disk exactly once.
+    """
+    pytest.importorskip("OCP", reason="needs stompdrill[step]")
+
+    from stompdrill import cad
+
+    real_load = cad.load_case_model
+    calls: list[Path] = []
+
+    def counting_load(path, *, face, margin_nm, part):
+        calls.append(path)
+        return real_load(path, face=face, margin_nm=margin_nm, part=part)
+
+    monkeypatch.setattr("stompdrill.cad.load_case_model", counting_load)
+
+    panel = _panel_with_a_central_hole(tmp_path)
+    drl, stp = tmp_path / "o.drl", tmp_path / "o.stp"
+    code = cli.main([
+        str(panel), "--case", "1590BB", "--case-model", str(require_model("1590BB")),
+        "--emit", f"excellon={drl}", "--emit", f"step={stp}",
+    ])
+
+    assert code == 0, "the run must complete for the emitter path to be reached at all"
+    assert drl.exists() and stp.exists(), "both consumers must have actually run"
     assert len(calls) == 1
 
 
