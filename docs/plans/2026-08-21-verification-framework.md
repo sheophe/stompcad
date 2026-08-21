@@ -94,6 +94,11 @@ reporting the discrepancy. Report the discrepancy.
 this plan adds under `tests/` is type-checked. It excludes `packages/stompmodel/tests`, which
 is why the member's own config is a second gate.
 
+**Ruff enforces E402.** `E4` is selected, so a module-level import placed after any code is an
+error. Where a task below shows a new import block beneath a section comment, that is
+presentation: **every import goes in the module's top import block.** Imports inside a function
+are unaffected and are the established pattern for OCP, which several kernel tests already use.
+
 ### Project law (`CLAUDE.md`, binding)
 
 - A test must fail when the behaviour it names is removed.
@@ -1026,18 +1031,25 @@ two lines; commit it with the task.
 Append to `packages/stompdrill/tests/test_recovery.py`. These drive the real emitters, because
 a recovery that only ever reads a hand-written sample is not reading this project's output.
 
+**The imports go in the module's existing top block, not here** — ruff enforces E402. Add these
+seven names to what Task 2 already put there, keeping the block sorted:
+
+```python
+from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
+from stompdrill.emitters.drawing_svg import DrawingSvgEmitter
+from stompmodel.model import ReferenceOutline
+from stompmodel.units import Nanometre
+from tests.conftest import at, make_data
+from tests.recovery.pdf import read_pdf
+from tests.recovery.svg import read_svg
+```
+
+The tests themselves append to the end of the file, under a section comment:
+
 ```python
 # ---------------------------------------------------------------------------
 # the drawing recoveries
 # ---------------------------------------------------------------------------
-
-from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
-from stompdrill.emitters.drawing_svg import DrawingSvgEmitter
-from tests.conftest import at, make_data
-from tests.recovery.pdf import read_pdf
-from tests.recovery.svg import read_svg
-from stompmodel.model import ReferenceOutline
-from stompmodel.units import Nanometre
 
 
 def sheet_panel():
@@ -1356,10 +1368,12 @@ it has no owned intermediate, so its check runs all the way to the model and car
 
 **Files:**
 - Create: `packages/stompdrill/tests/test_layer3_codecs.py`
+- Modify: `packages/stompdrill/tests/hammond.py` — add `cylinders()`
 
 **Interfaces:**
 - Consumes: `read_excellon`, `read_svg`, `read_pdf` (Tasks 2–3); `render` (Task 1).
-- Produces: nothing later tasks import.
+- Produces: `cylinders(shape) -> set[tuple[int, int, int, int]]` in `tests/hammond.py`,
+  imported by Task 5's STEP arm.
 
 - [ ] **Step 1: Write the Excellon check — the one that carries full weight**
 
@@ -1672,6 +1686,10 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
 Write the body against the existing patterns in `packages/stompdrill/tests/test_step_cut.py`,
 which already does before-and-after comparison over `read_step(...).solids` for volume and for
 bounding box; `_model_path()` and `require_model` are its helpers. The face walk is:
+
+Put `cylinders()` in **`packages/stompdrill/tests/hammond.py`**, which already holds the kernel
+test support — not in `test_layer3_codecs.py`. Task 5 needs it too, and a test module importing
+another test module is the coupling the recovery subpackage exists to remove.
 
 ```python
 def cylinders(shape) -> set[tuple[int, int, int, int]]:
@@ -2000,14 +2018,10 @@ and a chained `a == b == c` reports only the first pair that fails.
 
 `cut_shape(model, data)` is already public and already exercised by `test_step_cut.py` for
 volume and bounding box. Add one test asserting that the cut shape's new cylinders sit at the
-model's hole positions in canonical nanometres, reusing the `cylinders()` walk Task 4 wrote.
-Mark it `@pytest.mark.hammond` and guard it with `pytest.importorskip("OCP")`, as every other
-kernel test does. Coverage for `cad/` and `emitters/step.py` is measured under `--hammond`, not
-under the default run.
-
-If Task 4's `cylinders()` helper is wanted in two modules, move it to
-`packages/stompdrill/tests/hammond.py`, which already holds the kernel test support, rather
-than importing one test module from another.
+model's hole positions in canonical nanometres, importing the `cylinders()` walk from
+`packages/stompdrill/tests/hammond.py`, where Task 4 put it. Mark it `@pytest.mark.hammond` and
+guard it with `pytest.importorskip("OCP")`, as every other kernel test does. Coverage for `cad/`
+and `emitters/step.py` is measured under `--hammond`, not under the default run.
 
 - [ ] **Step 5: Prove the checks fail when the layout is wrong**
 
