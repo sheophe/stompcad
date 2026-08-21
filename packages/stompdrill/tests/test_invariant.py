@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 import random
 from dataclasses import replace
 from pathlib import Path
@@ -69,14 +70,21 @@ def artifacts(
 
 def assert_permutation_stable(
     raw: RawDrillData, case: str, pipeline: Pipeline[DrillData], seed: int
-) -> None:
-    """Emit the panel, then 25 shuffles of it, and demand the same bytes."""
+) -> dict[str, object]:
+    """Emit the panel, then 25 shuffles of it, and demand the same bytes.
+
+    Returns the panel's own artifacts so a caller can additionally assert
+    that the stage under test did something observable: stability alone
+    cannot tell a stage's finding apart from a pipeline missing the stage
+    entirely, since both hold just as still under a shuffle.
+    """
     expected = artifacts(raw, case, pipeline)
     rng = random.Random(seed)
     for _ in range(25):
         shuffled = list(raw.holes)
         rng.shuffle(shuffled)
         assert artifacts(replace(raw, holes=tuple(shuffled)), case, pipeline) == expected
+    return expected
 
 
 @pytest.mark.parametrize("panel", ["tar.ai", "pax.ai"])
@@ -96,7 +104,10 @@ def test_element_order_cannot_reach_any_artifact_with_a_case_model_either():
     """
     raw = AiPdfSource(FIXTURES / "pax.ai").read()
 
-    assert_permutation_stable(raw, "1590BB", shipped_pipeline(FakeCase()), seed=5)
+    expected = assert_permutation_stable(raw, "1590BB", shipped_pipeline(FakeCase()), seed=5)
+
+    stages_run = [record["name"] for record in json.loads(expected["json"])["processing"]]
+    assert "check-case-clearance" in stages_run, "the fifth stage never ran"
 
 
 def _synthetic_raw() -> RawDrillData:
@@ -151,7 +162,10 @@ def test_a_panel_whose_hole_breaks_out_of_the_outline_is_permutation_stable():
     hole order, and the drawings render each one: a second route by which
     arrival order could reach the bytes, and it must not.
     """
-    assert_permutation_stable(_breakout_raw(), "1590B", shipped_pipeline(), seed=13)
+    expected = assert_permutation_stable(_breakout_raw(), "1590B", shipped_pipeline(), seed=13)
+
+    codes = [d["code"] for d in json.loads(expected["json"])["diagnostics"]]
+    assert "hole-outside-outline" in codes, "the finding this stage exists to raise never fired"
 
 
 def holes_at_one_point() -> tuple[Hole, Hole]:
