@@ -7,8 +7,15 @@ from pathlib import Path
 
 import pytest
 
+from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
+from stompdrill.emitters.drawing_svg import DrawingSvgEmitter
+from stompmodel.model import ReferenceOutline
+from stompmodel.units import Nanometre
+from tests.conftest import at, make_data
 from tests.recovery.excellon import read_excellon
 from tests.recovery.facts import nm_from_decimal
+from tests.recovery.pdf import read_pdf
+from tests.recovery.svg import read_svg
 
 __all__: list[str] = []
 
@@ -182,4 +189,120 @@ def test_the_scan_reaches_every_recovery_module():
     """An empty or narrowed walk would pass the gate above by finding nothing."""
     scanned = {str(module.relative_to(RECOVERY)) for module in recovery_modules()}
 
-    assert scanned >= {"__init__.py", "facts.py", "excellon.py"}
+    assert scanned >= {"__init__.py", "facts.py", "excellon.py", "svg.py", "pdf.py"}
+
+
+# ---------------------------------------------------------------------------
+# the drawing recoveries
+# ---------------------------------------------------------------------------
+
+
+def sheet_panel():
+    """Four holes of two diameters on a declared outline, routed out of tuple
+    order so nothing can pass by recomputing a number from a list position."""
+    return make_data(
+        at(-20_000_000, 18_000_000, 7_000_000, index=3),
+        at(20_000_000, 18_000_000, 7_000_000, index=4),
+        at(-19_000_000, -18_750_000, 5_000_000, index=1),
+        at(19_000_000, -18_750_000, 5_000_000, index=2),
+        reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000)),
+    )
+
+
+def test_the_svg_recovery_finds_every_circle_the_sheet_draws():
+    svg = DrawingSvgEmitter().emit(sheet_panel())
+
+    recovered = read_svg(svg)
+
+    assert len(recovered.circles) == svg.count("<circle")
+
+
+def test_the_svg_recovery_keeps_each_circles_class():
+    """The class is what selects a hole downstream; a geometry-only recovery
+    could not tell a hole from a balloon."""
+    classes = {c.cls for c in read_svg(DrawingSvgEmitter().emit(sheet_panel())).circles}
+
+    assert "hole" in classes
+
+
+def test_the_svg_recovery_reports_the_outline_extent():
+    recovered = read_svg(DrawingSvgEmitter().emit(sheet_panel()))
+
+    assert recovered.outline_nm == (112_400_000, 60_500_000)
+
+
+def test_the_svg_recovery_is_exact_with_no_epsilon():
+    """``_fmt`` states six decimals of a millimetre, which is one nanometre,
+    so a ``Decimal`` parse loses nothing and the comparison can demand
+    equality."""
+    holes = [c for c in read_svg(DrawingSvgEmitter().emit(sheet_panel())).circles
+             if "hole" in c.cls.split()]
+
+    assert all(c.diameter_nm in (5_000_000, 7_000_000) for c in holes)
+
+
+def test_the_pdf_recovery_finds_the_same_circles_as_the_svg_one():
+    """Two independent readers over two codecs of one panel. Neither can be
+    right by inverting the other's transform: they share no code below
+    ``RecoveredPanel``."""
+    data = sheet_panel()
+
+    from_svg = read_svg(DrawingSvgEmitter().emit(data))
+    from_pdf = read_pdf(DrawingPdfEmitter().emit(data))
+
+    assert len(from_pdf.circles) == len(from_svg.circles)
+
+
+def test_the_pdf_recovery_reports_the_outline_extent():
+    """The outline is drawn with rounded corners; its recovered extent must be
+    the rectangle, not the rectangle plus the arcs' control points."""
+    recovered = read_pdf(DrawingPdfEmitter().emit(sheet_panel()))
+
+    assert recovered.outline_nm == (112_400_000, 60_500_000)
+
+
+def test_the_pdf_recovery_undoes_the_frame_flip_the_emitter_owns():
+    """``_y(sheet, value) = sheet.height - value`` is an owned transform that
+    nothing else in the project reaches. A recovery reading Y-up points
+    straight through would mirror every mark about the sheet's centre.
+
+    Checked within the one format rather than across two: the sheet frame
+    runs Y down, so the holes higher in the model must recover to the
+    *smaller* sheet y, and the gap between the two rows must be the gap the
+    model states. Sense and magnitude, neither alone sufficient.
+    """
+    data = sheet_panel()
+
+    recovered = read_pdf(DrawingPdfEmitter().emit(data))
+    above = [c.y_nm for c in recovered.circles if c.diameter_nm == 7_000_000]
+    below = [c.y_nm for c in recovered.circles if c.diameter_nm == 5_000_000]
+
+    assert max(above) < min(below), "the flip was read straight through"
+    assert min(below) - max(above) == 36_750_000  # 18.000 mm + 18.750 mm
+
+
+def test_the_pdf_recovery_recovers_a_radius_from_four_beziers():
+    """A PDF circle is four curves, so a radius cannot be read from a field.
+    This is the reason this recovery is load-bearing rather than a smoke check.
+    """
+    diameters = {c.diameter_nm for c in read_pdf(DrawingPdfEmitter().emit(sheet_panel())).circles}
+
+    assert {5_000_000, 7_000_000} <= diameters
+
+
+def test_the_pdf_recovery_refuses_a_four_curve_path_that_is_not_a_circle():
+    """The signature alone does not prove a circle; the endpoints must be
+    equidistant from their own centroid."""
+    from tests.recovery.pdf import circle_from_path
+
+    squashed = [
+        ("m", (10.0, 0.0)),
+        ("c", (0.0, 0.0), (0.0, 0.0), (0.0, 5.0)),
+        ("c", (0.0, 0.0), (0.0, 0.0), (-10.0, 0.0)),
+        ("c", (0.0, 0.0), (0.0, 0.0), (0.0, -5.0)),
+        ("c", (0.0, 0.0), (0.0, 0.0), (10.0, 0.0)),
+        ("h",),
+    ]
+
+    with pytest.raises(ValueError, match="not a circle"):
+        circle_from_path(squashed)

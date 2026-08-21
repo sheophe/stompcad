@@ -944,8 +944,8 @@ load-bearing rather than belt-and-braces** — and why it is worth a dependency.
 transitive packages (`cryptography`, `cffi`, `pycparser`, `charset-normalizer`). It applies the
 CTM and exposes `LTCurve.original_path` with the Bézier operators intact.
 
-**Everything below was verified against a real emitted sheet** (`tar.ai --case 1590B`, A3
-landscape) while this plan was written. Do not re-derive it; do check it still holds.
+**Everything below was verified against a real emitted sheet** (`tar.ai --case 1590B`, which
+the PDF backend places on A4 portrait) while this plan was written. Do not re-derive it; do check it still holds.
 
 | Fact | Measured |
 | --- | --- |
@@ -1119,13 +1119,21 @@ def test_the_pdf_recovery_reports_the_outline_extent():
 def test_the_pdf_recovery_undoes_the_frame_flip_the_emitter_owns():
     """``_y(sheet, value) = sheet.height - value`` is an owned transform that
     nothing else in the project reaches. A recovery reading Y-up points
-    straight through would put every mark on the wrong half of the sheet."""
+    straight through would mirror every mark about the sheet's centre.
+
+    Checked within the one format rather than across two: the sheet frame
+    runs Y down, so the holes higher in the model must recover to the
+    *smaller* sheet y, and the gap between the two rows must be the gap the
+    model states. Sense and magnitude, neither alone sufficient.
+    """
     data = sheet_panel()
 
-    svg_ys = sorted(c.y_nm for c in read_svg(DrawingSvgEmitter().emit(data)).circles)
-    pdf_ys = sorted(c.y_nm for c in read_pdf(DrawingPdfEmitter().emit(data)).circles)
+    recovered = read_pdf(DrawingPdfEmitter().emit(data))
+    above = [c.y_nm for c in recovered.circles if c.diameter_nm == 7_000_000]
+    below = [c.y_nm for c in recovered.circles if c.diameter_nm == 5_000_000]
 
-    assert pdf_ys == svg_ys
+    assert max(above) < min(below), "the flip was read straight through"
+    assert min(below) - max(above) == 36_750_000  # 18.000 mm + 18.750 mm
 
 
 def test_the_pdf_recovery_recovers_a_radius_from_four_beziers():

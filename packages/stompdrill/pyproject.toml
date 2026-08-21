@@ -28,11 +28,12 @@ stompmodel = { workspace = true }
 
 # What this package's own suite needs, so that ADR-0008's sentence -- change
 # into the member, sync, test -- runs a real suite rather than an import check.
-# `pytest` is the whole list: the tests import nothing else the distribution
-# does not already depend on, and every module that reaches OCP guards itself
-# with ``importorskip``, so the heavy `step` extra stays opt-in.
+# `pdfminer.six` joins `pytest` for one reason: tests/recovery/pdf.py reads a
+# drawing back independently of the writer, and the writer's own transforms
+# are the thing it exists to check. Every module that reaches OCP still guards
+# itself with ``importorskip``, so the heavy `step` extra stays opt-in.
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "pdfminer.six"]
 
 # Its own testpaths, so `cd packages/stompdrill && pytest` is correct and does
 # not inherit a root testpaths pointing at a sibling package. `pythonpath`
