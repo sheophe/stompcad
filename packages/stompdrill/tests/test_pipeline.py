@@ -10,6 +10,7 @@ import pytest
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
+    CheckCaseClearance,
     CheckOutlineContainment,
     CheckReferenceSize,
     Deduplicate,
@@ -26,7 +27,7 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
 from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
-from tests.conftest import at, codes, diameters, holes, make_data, positions
+from tests.conftest import FakeCase, at, codes, diameters, holes, make_data, positions
 
 # --------------------------------------------------------------------------
 # helpers
@@ -41,6 +42,8 @@ ALL_STAGES = [
     ReviewGridTies(),
     RouteHoles(),
     CheckReferenceSize((Nanometre(113_000_000), Nanometre(60_000_000))),
+    CheckOutlineContainment(),
+    CheckCaseClearance(FakeCase()),
 ]
 
 

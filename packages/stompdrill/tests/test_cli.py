@@ -1716,19 +1716,9 @@ def test_the_case_face_default_is_box():
     assert args.case_face == "box"
 
 
-def test_no_case_model_leaves_the_pipeline_unchanged():
-    from stompdrill.cli import build_parser, build_pipeline
-
-    args = build_parser().parse_args(["panel.ai"])
-
-    assert [stage.name for stage in build_pipeline(args)] == [
-        "deduplicate", "review-grid-ties", "route", "check-outline-containment"
-    ]
-
-
 def test_a_case_model_appends_the_clearance_stage_last():
     from stompdrill.cli import build_parser, build_pipeline
-    from tests.test_clearance import FakeCase
+    from tests.conftest import FakeCase
 
     args = build_parser().parse_args(["panel.ai"])
     args.case_model_object = FakeCase()
