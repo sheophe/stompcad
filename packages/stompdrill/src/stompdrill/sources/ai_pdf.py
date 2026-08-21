@@ -33,7 +33,7 @@ from ..geometry import (
 from ..quantise import RawDrillData
 from ..units import mm_from_pt
 
-__all__ = ["AiPdfSource"]
+__all__ = ["AiPdfSource", "DEFAULT_FORM_DEPTH"]
 
 #: Operators that end the current path; ``n`` discharges it without painting.
 _PAINT_OPS = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"})
@@ -41,8 +41,9 @@ _PAINT_OPS = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"})
 #: Path-ending operators that mark no ink, whether or not clipping preceded them.
 _NO_PAINT_OPS = frozenset({"n"})
 
-#: How deep Form XObjects may nest before we assume a malicious or broken file.
-_MAX_FORM_DEPTH = 12
+#: How deep Form XObjects are followed before the reader stops recursing.
+#: Overridable with ``--form-depth``; reaching it is reported, never fatal.
+DEFAULT_FORM_DEPTH = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +66,16 @@ class AiPdfSource:
         path: str | Path,
         drill_layer: str = "Drill",
         reference_layer: str = "Background",
+        form_depth: int = DEFAULT_FORM_DEPTH,
     ) -> None:
+        # ``type(...) is not int`` rather than ``isinstance``: a bool is an int
+        # to Python, and ``form_depth=True`` is not a depth anybody typed.
+        if type(form_depth) is not int or form_depth < 1:
+            raise ValueError(f"form depth must be a whole number of levels from 1, not {form_depth!r}")
         self.path = Path(path)
         self.drill_layer = drill_layer
         self.reference_layer = reference_layer
+        self.form_depth = form_depth
 
     def __repr__(self) -> str:
         return (
@@ -84,7 +91,7 @@ class AiPdfSource:
 
     def layer_subpaths(self, layer: str) -> tuple[SubPath, ...]:
         """Return painted page-space subpaths on ``layer``, excluding clips."""
-        names, paths = self._extract()
+        names, paths, _ = self._extract()
         self._require_layer(layer, names)
         return tuple(p.path for p in paths if layer in p.layers)
 
@@ -94,16 +101,30 @@ class AiPdfSource:
         Positions are outline-centred when possible, else page-relative with a
         diagnostic naming the fallback frame.
         """
-        names, paths = self._extract()
+        names, paths, truncated = self._extract()
         self._require_layer(self.drill_layer, names)
         self._require_layer(self.reference_layer, names)
 
         diagnostics: list[Diagnostic] = []
+        if truncated:
+            diagnostics.append(
+                Diagnostic.warning(
+                    "nesting-truncated",
+                    f"stopped at Form XObject nesting depth {self.form_depth}; artwork "
+                    f"nested below that was not read and is in no artefact. Raise "
+                    f"--form-depth to reach it",
+                    data=(("form_depth", self.form_depth),),
+                )
+            )
 
         drill_paths = [p.path for p in paths if self.drill_layer in p.layers]
         circles = [c for c in (fit_circle(p) for p in drill_paths) if c is not None]
         if not circles:
-            raise _empty_layer(self.drill_layer, len(drill_paths))
+            raise _empty_layer(
+                self.drill_layer,
+                len(drill_paths),
+                truncated_at=self.form_depth if truncated else None,
+            )
 
         ignored = len(drill_paths) - len(circles)
         if ignored:
@@ -165,17 +186,27 @@ class AiPdfSource:
 
     # -- reading ---------------------------------------------------------
 
-    def _extract(self) -> tuple[tuple[str, ...], list[_LayerPath]]:
-        """Open the file once and return (layer names, painted subpaths)."""
+    def _extract(self) -> tuple[tuple[str, ...], list[_LayerPath], bool]:
+        """Open the file once: layer names, painted subpaths, and truncation."""
         try:
             with pikepdf.open(self.path) as pdf:
                 names = _layer_names(pdf)
                 if len(pdf.pages) == 0:
                     raise SourceError(f"{self.path} has no pages")
                 page = pdf.pages[0]
-                return names, _walk_page(page)
+                paths, truncated = _walk_page(page, self.form_depth)
+                return names, paths, truncated
         except (OSError, pikepdf.PdfError) as exc:
             raise SourceError(f"cannot read {self.path}: {exc}") from exc
+        except RecursionError as exc:
+            # Reaching it is reported, never fatal: the operator's own
+            # --form-depth chose to walk this deep, and this is that choice
+            # meeting the interpreter's own limit, not one this reader invents.
+            raise SourceError(
+                f"{self.path}: form nesting exceeded the interpreter's own "
+                f"recursion limit at --form-depth {self.form_depth}; lower "
+                f"--form-depth"
+            ) from exc
 
     def _require_layer(self, layer: str, names: Sequence[str]) -> None:
         if layer not in names:
@@ -232,8 +263,8 @@ def _oc_layers(operands, resources) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-def _walk_page(page: pikepdf.Page) -> list[_LayerPath]:
-    """Every painted, non-clipping subpath on the page, in page space.
+def _walk_page(page: pikepdf.Page, max_depth: int) -> tuple[list[_LayerPath], bool]:
+    """Painted, non-clipping subpaths in page space, and whether nesting was cut.
 
     Page space is PDF points from the ``/MediaBox`` lower-left corner; the base
     CTM removes a non-zero box offset.
@@ -241,8 +272,8 @@ def _walk_page(page: pikepdf.Page) -> list[_LayerPath]:
     box = [float(v) for v in page.MediaBox]
     base: Matrix = (1.0, 0.0, 0.0, 1.0, -box[0], -box[1])
     out: list[_LayerPath] = []
-    _walk(page, page.get("/Resources"), base, (), out, 0)
-    return out
+    truncated = _walk(page, page.get("/Resources"), base, (), out, 0, max_depth)
+    return out, truncated
 
 
 def _walk(
@@ -252,12 +283,15 @@ def _walk(
     marks: tuple[frozenset[str], ...],
     out: list[_LayerPath],
     depth: int,
-) -> None:
+    max_depth: int,
+) -> bool:
     """Interpret one content stream, appending to ``out``.
 
     ``marks`` is inherited by nested forms, but each stream may close only the
-    marked-content entries it opened.
+    marked-content entries it opened. Returns whether a form went unread for
+    want of depth, here or anywhere below.
     """
+    truncated = False
     stack: list[Matrix] = []
     floor = len(marks)
     builder = _PathBuilder(ctm)
@@ -305,14 +339,31 @@ def _walk(
                 out.append(_LayerPath(layers=layers, path=path))
 
         # -- forms
-        elif op == "Do" and depth < _MAX_FORM_DEPTH:
+        elif op == "Do":
             form = _form_xobject(operands, resources)
-            if form is not None:
-                matrix = _numbers(form.get("/Matrix"), 6)
-                inner = builder.ctm
-                if matrix is not None:
-                    inner = multiply(_as_matrix(matrix), inner)
-                _walk(form, form.get("/Resources", resources), inner, marks, out, depth + 1)
+            if form is None:
+                continue
+            if depth >= max_depth:
+                # Resolve first, then refuse: the condition worth reporting is
+                # that a form went unread, not that a limit exists. A ``Do``
+                # naming an image has lost nothing and must stay silent.
+                truncated = True
+                continue
+            matrix = _numbers(form.get("/Matrix"), 6)
+            inner = builder.ctm
+            if matrix is not None:
+                inner = multiply(_as_matrix(matrix), inner)
+            truncated |= _walk(
+                form,
+                form.get("/Resources", resources),
+                inner,
+                marks,
+                out,
+                depth + 1,
+                max_depth,
+            )
+
+    return truncated
 
 
 class _PathBuilder:
@@ -452,11 +503,14 @@ def _numbers(operands, count: int) -> list[float] | None:
         return None
 
 
-def _empty_layer(layer: str, path_count: int) -> EmptyLayerError:
+def _empty_layer(
+    layer: str, path_count: int, *, truncated_at: int | None = None
+) -> EmptyLayerError:
     """The right ``EmptyLayerError`` for why ``layer`` yielded no circle.
 
-    Zero paths means no painted artwork reached the stream; a positive count
-    means every path failed the circle predicate.
+    A positive count means every path failed the circle predicate. Zero paths
+    means no painted artwork reached the stream -- unless nesting was cut
+    first, in which case that, not a missing stroke, is named as the cause.
     """
     error = EmptyLayerError(layer)
     if path_count:
@@ -466,6 +520,15 @@ def _empty_layer(layer: str, path_count: int) -> EmptyLayerError:
                 "Only true circles are drillable: four cubic Beziers, equal radii, "
                 "kappa-consistent controls. Rounded rectangles, ellipses, compound "
                 "shapes and stray marks all read as non-circular here."
+            ),
+        )
+    elif truncated_at is not None:
+        error.args = (
+            (
+                f"layer {layer!r} contained no drillable geometry, but reading "
+                f"stopped at Form XObject nesting depth {truncated_at} before the "
+                f"whole file was walked: any artwork nested deeper than that was "
+                f"not read. Raise --form-depth to reach it"
             ),
         )
     return error

@@ -184,7 +184,7 @@ containment remains the stronger model-based check. The code is
 `hole-outside-outline`, joining the warnings that reach exit 1 in CLAUDE.md's
 command-line contract, with an ADR amendment.
 
-**Form nesting.** `_MAX_FORM_DEPTH` becomes `_DEFAULT_FORM_DEPTH`, overridable
+**Form nesting.** `_MAX_FORM_DEPTH` becomes `DEFAULT_FORM_DEPTH`, overridable
 with `--form-depth`, which joins the flags resolved before the input file is
 opened. The code is `nesting-truncated`, named for the condition that fires it
 rather than for the limit. On
@@ -287,7 +287,7 @@ Three plans, written and executed in order.
 | Plan | Contents | Done when |
 | --- | --- | --- |
 | 1 — instruments and repairs | both mutmut configs, the mypy exclusion, the boundary-gate exemption, the three hollow tests, the fixture lapse, the ADR corrections | both surveys run and are read by module; the repaired tests fail when their named behaviour is removed |
-| 2 — domain changes | containment, `_DEFAULT_FORM_DEPTH` and its flag, the documented preconditions, contract and ADR amendments | both warnings reach exit 1 with tests that fail when either is removed |
+| 2 — domain changes | containment, `DEFAULT_FORM_DEPTH` and its flag, the documented preconditions, contract and ADR amendments | both warnings reach exit 1 with tests that fail when either is removed |
 | 3 — the framework | Phase A's split, the three recoveries, the independence gate, layers 1–3, the golden, e2e, the generative conversions, Phase C's cleanup and the routing repair | every emitter's owned representation checked against the model; the golden committed; one e2e drives the console script; `_two_opt` is Θ(P·n²) with routes unchanged |
 
 **Why three.** Plan 1 is a prerequisite in fact: a survey that cannot run cannot

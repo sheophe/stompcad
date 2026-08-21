@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import decimal
 from decimal import ROUND_HALF_EVEN, Decimal
 
 import pytest
@@ -166,3 +167,16 @@ class TestTheMillimetreGuardIsPartOfTheSharedSurface:
 
     def test_finite_floats_pass(self) -> None:
         check_millimetres("Owner", x=7.0, y=0.0, z=-40.5)
+
+
+def test_a_length_no_panel_could_have_raises_rather_than_rounding():
+    """The documented precondition, made falsifiable.
+
+    Guarding this is declined on purpose: a panel is physically bounded, and a
+    limit invented here would be a number to argue about. The test fails if
+    someone adds one, or turns the refusal into a silent answer.
+    """
+    assert nm_from_mm(1e21) == 10**27
+
+    with pytest.raises(decimal.InvalidOperation):
+        nm_from_mm(1e22)

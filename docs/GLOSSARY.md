@@ -84,6 +84,12 @@ standard, a grid pitch, or the enclosure catalogue.
 _Avoid_: lookup table, allowed values
 _See also_: Quantisation. The sets are not interchangeable with one another.
 
+**Containment**:
+Whether a hole's whole extent lies inside a boundary. Two boundaries answer it:
+the reference outline, which warns, and the drilled face, which errors.
+_Avoid_: bounds check, inside test
+_See also_: Drilled face, Reference outline — the two boundaries.
+
 **Drill document**:
 The serialised form of one drill run: the holes, the frame they were cut in, and
 the enclosure they were cut for. What passes from `stompdrill` to `stompcollider`.

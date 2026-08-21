@@ -43,7 +43,13 @@ def _round_half_up(value: Decimal, exponent: Decimal = _WHOLE) -> Decimal:
 
 
 def nm_from_mm(mm: float) -> Nanometre:
-    """Convert millimetres to whole nanometres, with ties away from zero."""
+    """Convert millimetres to whole nanometres, with ties away from zero.
+
+    Precondition: a physically bounded panel length. Around 1e22 mm the exact
+    decimal scaling exceeds the context's precision and raises
+    ``decimal.InvalidOperation``. Unguarded on purpose: a bound invented here
+    would be one more number to argue about than the physics already fixes.
+    """
     return Nanometre(int(_round_half_up(Decimal(str(mm)) * NM_PER_MM)))
 
 

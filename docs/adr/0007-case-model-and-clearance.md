@@ -43,11 +43,12 @@ clearance would be a second authority on one question. `cad/base.py` defines the
 implementation, imported lazily.
 
 **Clearance is a stage, not emitter-local.** `CheckCaseClearance` runs in the
-`Pipeline` alongside `Deduplicate`, `ReviewGridTies`, and `RouteHoles`, because its
-diagnostics are shared facts under ADR-0001: every artefact from one invocation must
-agree about which holes are drillable, not just the one artefact that happens to read
-the case model. An emitter-local check would let a STEP file and a drawing disagree
-about a hole the same invocation rejected.
+`Pipeline` alongside `Deduplicate`, `ReviewGridTies`, `RouteHoles` and
+`CheckOutlineContainment`, because its diagnostics are shared facts under ADR-0001:
+every artefact from one invocation must agree about which holes are drillable, not
+just the one artefact that happens to read the case model. An emitter-local check
+would let a STEP file and a drawing disagree about a hole the same invocation
+rejected.
 
 **The guarantee is that identical inputs produce a geometrically and visually identical
 model. Byte identity is how that is enforced, not what is promised.** A third-party
@@ -173,3 +174,8 @@ absent.
 A future enclosure whose drilled face is not flat is out of reach of this rule and
 would need a new decision, not an extension of this one — the flat-face
 specialisation is deliberate, not provisional.
+
+Without a case model a panel is still checked against its own reference outline:
+`hole-outside-outline`, a warning under
+[ADR-0002](0002-domain-quantisers.md). The face check is what a model buys — an
+error, against the real drilled face rather than the published top view.

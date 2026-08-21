@@ -1,7 +1,8 @@
-"""Library-facing validation stages that report without changing data.
+"""Validation stages that report findings without changing any data.
 
-``CheckReferenceSize`` is not in the CLI pipeline: ``--case`` owns catalogue
-identity there. A library caller may compose this independent size assertion.
+``CheckOutlineContainment`` is in the CLI pipeline. ``CheckReferenceSize`` is
+not: ``--case`` owns catalogue identity there, and a library caller may compose
+that independent size assertion.
 """
 
 from __future__ import annotations
@@ -9,12 +10,12 @@ from __future__ import annotations
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import DrillData, StageRun
+from stompmodel.model import DrillData, Hole, ReferenceOutline, StageRun
 from stompmodel.units import Nanometre, format_nm
 
 from ..tolerance import within
 
-__all__ = ["CheckReferenceSize"]
+__all__ = ["CheckOutlineContainment", "CheckReferenceSize"]
 
 
 class CheckReferenceSize:
@@ -105,6 +106,38 @@ class CheckReferenceSize:
         )
 
 
+class CheckOutlineContainment:
+    """Warn about a hole whose extent leaves the reference outline.
+
+    The extent, not the centre, so an edge breakout is caught. A warning rather
+    than an error because the outline is a published top view and not the
+    drilled face: see ADR-0002. A panel with no outline has no boundary to
+    leave and is skipped.
+    """
+
+    name: ClassVar[str] = "check-outline-containment"
+
+    def describe(self) -> StageRun:
+        """Record that parameter-free containment ran."""
+        return StageRun(self.name, ())
+
+    def apply(self, data: DrillData) -> DrillData:
+        outline = data.reference
+        if outline is None:
+            return data
+        findings = []
+        for hole in data.holes:
+            # Doubled, so the decision needs no halving. A hole centred at ``x``
+            # spans ``2|x| + d`` across that axis, and comparing that with the
+            # full dimension keeps the boundary exact -- rounding a half-nanometre
+            # radius here would settle a boundary case by arithmetic nobody wrote.
+            over_x = 2 * abs(hole.x_nm) + hole.diameter_nm - outline.width_nm
+            over_y = 2 * abs(hole.y_nm) + hole.diameter_nm - outline.height_nm
+            if over_x > 0 or over_y > 0:
+                findings.append(_outside(hole, outline, over_x, over_y))
+        return data.with_diagnostics(*findings)
+
+
 def _whole_nanometres(name: str, value: Nanometre) -> Nanometre:
     """Require a plain ``int`` nanometre length, excluding floats and booleans."""
     if type(value) is not int:
@@ -116,3 +149,39 @@ def _signed_mm(nm: Nanometre) -> str:
     """Format a nanometre difference in millimetres with an explicit sign."""
     text = format_nm(nm)
     return text if text.startswith("-") else f"+{text}"
+
+
+def _outside(
+    hole: Hole, outline: ReferenceOutline, over_x: int, over_y: int
+) -> Diagnostic:
+    """Report a breakout, with each axis's own overshoot on the finding.
+
+    The sentence states the worst overshoot and the payload states both, so a
+    consumer never has to subtract the two sizes back out of the prose.
+    """
+    x_nm = _overshoot(over_x)
+    y_nm = _overshoot(over_y)
+    return Diagnostic.warning(
+        "hole-outside-outline",
+        f"⌀{format_nm(hole.diameter_nm)} mm hole at "
+        f"({format_nm(hole.x_nm)}, {format_nm(hole.y_nm)}) reaches "
+        f"{format_nm(Nanometre(max(x_nm, y_nm)))} mm past the "
+        f"{format_nm(outline.width_nm)} × {format_nm(outline.height_nm)} mm outline",
+        location_nm=(hole.x_nm, hole.y_nm),
+        data=(
+            ("diameter_nm", hole.diameter_nm),
+            ("overshoot_x_nm", x_nm),
+            ("overshoot_y_nm", y_nm),
+            ("width_nm", outline.width_nm),
+            ("height_nm", outline.height_nm),
+        ),
+    )
+
+
+def _overshoot(doubled_nm: int) -> Nanometre:
+    """Halve a doubled overshoot, rounding up; a contained axis reports nought.
+
+    Ceiling for the reason ``CheckCaseClearance`` ceilings its radius: the
+    breakout reported must never read smaller than the metal actually lost.
+    """
+    return Nanometre(0 if doubled_nm <= 0 else -(-doubled_nm // 2))

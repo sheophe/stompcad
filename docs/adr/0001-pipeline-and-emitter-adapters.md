@@ -21,8 +21,8 @@ changes how those facts are represented.
 
 `AiPdfSource` produces unquantised `RawDrillData`. The `quantise()` processing phase
 turns that measured input into canonical `DrillData`. A `Pipeline` then groups
-`Deduplicate`, `ReviewGridTies`, and `RouteHoles` as independent stages, each accepting
-and returning `DrillData`.
+`Deduplicate`, `ReviewGridTies`, `RouteHoles` and `CheckOutlineContainment` as
+independent stages, each accepting and returning `DrillData`.
 
 All facts shared by more than one artifact are computed once before emission and travel
 on `DrillData`. This includes diagnostics and processing provenance. Emitters serialise
@@ -57,10 +57,12 @@ flowchart LR
         dedupe["Deduplicate"]
         ties["ReviewGridTies"]
         route["RouteHoles"]
+        contain["CheckOutlineContainment"]
         clearance["CheckCaseClearance<br/>(conditional)"]
         dedupe -->|DrillData| ties
         ties -->|DrillData| route
-        route -.->|DrillData, if --case-model| clearance
+        route -->|DrillData| contain
+        contain -.->|DrillData, if --case-model| clearance
     end
 
     excellon["ExcellonEmitter"]
@@ -72,7 +74,7 @@ flowchart LR
 
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
-    route -->|DrillData| selected
+    contain -->|DrillData| selected
     clearance -.->|DrillData| selected
     selected -->|DrillData| excellon
     selected -->|DrillData| drawing

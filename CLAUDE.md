@@ -83,7 +83,8 @@ is clamped to one with `grid-too-fine`), `--drill-standard`
 (`metric` | `fractional`), `--drill-sizes` / `--no-drill-sizes` (narrow the standard to
 the sizes in the drawer), `--case` (the Hammond base designator the panel is drawn for),
 `--case-model`, `--case-face` and `--case-margin` (a supplied enclosure model, which
-face it is drilled against, and the clearance margin), `--emit FORMAT=PATH`
+face it is drilled against, and the clearance margin), `--form-depth` (how many
+levels of nested Form XObject the reader follows), `--emit FORMAT=PATH`
 (repeatable), `--title`, `-v`. All are resolved before the input file is opened, so a
 bad standard, an unstocked size, or a part number in no catalogue is a usage error
 rather than a diagnostic.
@@ -95,8 +96,9 @@ of each size, so there is no orientation to choose.
 Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usage or IO
 failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `unverifiable-enclosure`, `unmatched-enclosure`, `wrong-enclosure`, `hole-off-face`,
-`hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine` and
-`grid-ambiguous` are warnings and reach exit 1.
+`hole-through-boss`, `hole-obstructed` and `wrong-case-model`.
+`grid-too-fine`, `grid-ambiguous`, `hole-outside-outline` and `nesting-truncated`
+are warnings and reach exit 1.
 
 `packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both
 `1590B`/`1590B2` (112.40 × 60.50) and `1590BS` (112.00 × 60.50), so it needs
@@ -134,8 +136,9 @@ The accepted architecture is defined by:
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
 measurements with the enclosure, drill-size, and grid answer sets, then produces canonical
-integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies` and
-`RouteHoles`, and `CheckCaseClearance` too when a case model is supplied.
+integer-nanometre data. The pipeline applies `Deduplicate`, `ReviewGridTies`,
+`RouteHoles` and `CheckOutlineContainment`, and `CheckCaseClearance` too when a
+case model is supplied.
 Emitters only translate frames, convert units, format, and serialise; shared
 facts are computed once before the emitter fan-out.
 
@@ -175,6 +178,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Enclosure artwork uses published top-view/backplate dimensions, not the smaller drilled
   face. A two-dimensional outline identifies a footprint, not necessarily one part;
   ambiguous footprints require `--case`, and a declared case is always verified.
+- A hole whose extent leaves the reference outline is a warning, not an error: the
+  outline bounds the panel as identified — the catalogue footprint once an enclosure
+  matched, the drawn outline otherwise — not the drilled face the bit meets. The
+  face check needs a supplied model and errors — see
+  [ADR-0002](docs/adr/0002-domain-quantisers.md).
 - Geometry alone determines output: two inputs representing the same geometry produce
   byte-identical artefacts, whatever their element order. No rule may consult input
   order — see [ADR-0006](docs/adr/0006-toolpath-ordering-and-hole-numbering.md).
@@ -198,6 +206,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Circle recognition validates four cubic Beziers by equal anchor radii and kappa
   consistency around their centroid, so it remains rotation-invariant.
 - Apply every `cm` current transformation matrix, including a Form XObject's `/Matrix`.
+- Form XObjects nest. The reader follows `--form-depth` levels and reports
+  `nesting-truncated` only when it refused a form that was really there: a limit
+  nobody reached is not news, and artwork below one is in no artefact and no
+  report, so silence there is indistinguishable from correctness.
 - Object names are not recoverable because Illustrator files provide no structure tree.
 - The reference outline is the largest non-circular path on the reference layer, not the
   document MediaBox.
@@ -256,15 +268,16 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
   relevant mutation. Mutation testing is a survey, not a numeric gate, and no count is
   recorded here: run it and read the current one. Read it by module, not in total.
-  `emitters.drawing.build`, `cli`, `emitters.drawing_pdf`, `sources.ai_pdf`,
+  `emitters.drawing.build`, `cli`, `emitters.drawing_pdf`,
   `emitters.drawing.content` and `emitters.drawing_svg` account for most survivors, where
   a mutant rewrites a help string, a cell offset or a font size and nothing observable
   changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
-  `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `emitters.drawing.sheet`
-  or `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
-  shared facts rather than placement.
+  `geometry`, `pipeline.dedupe`, `pipeline.validate`, `quantise`, `stompdrill.units`,
+  `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth chasing: those
+  hold cited constants and shared facts rather than placement.
 - `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
-  `quantise` and `stompdrill.units` above, and `cd packages/stompmodel && mutmut run` —
+  `pipeline.validate`, `quantise` and `stompdrill.units` above, and
+  `cd packages/stompmodel && mutmut run` —
   its own `[tool.mutmut]`, resolving against its own tests — is what reaches
   `stompmodel.units`, exactly the kind of module worth chasing too; there is no
   workspace-wide command, the same reason the root `mypy` gate excludes `stompmodel`'s
@@ -282,10 +295,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
   ```bash
   .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
-  # 240 passed
+  # 241 passed
 
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
-  # 1161 passed
+  # 1209 passed
   ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.

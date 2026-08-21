@@ -160,3 +160,25 @@ def test_a_custom_key_orders_and_numbers_without_grouping():
     )
     assert [h.diameter_nm for h in out.holes] == [7_000_000, 3_000_000]
     assert [h.index for h in out.holes] == [1, 2]
+
+
+def test_a_separation_no_panel_could_have_raises_rather_than_saturating():
+    """The documented precondition, made falsifiable. See ``nm_from_mm``'s twin.
+
+    Constructed directly rather than through ``from_measurement``, whose
+    millimetre provenance would overflow first and prove the wrong thing.
+    """
+    from stompdrill.pipeline.route import _path_length
+    from stompmodel.model import Hole, RawHole
+    from stompmodel.units import Millimetre
+
+    raw = RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(7.0))
+    origin = Hole(Nanometre(0), Nanometre(0), Nanometre(7_000_000), raw)
+
+    def far(exponent: int) -> Hole:
+        return Hole(Nanometre(10**exponent), Nanometre(0), Nanometre(7_000_000), raw)
+
+    assert _path_length([origin, far(150)]) == 1e150
+
+    with pytest.raises(OverflowError):
+        _path_length([origin, far(160)])

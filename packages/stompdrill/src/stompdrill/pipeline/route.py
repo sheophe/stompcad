@@ -55,7 +55,12 @@ def _nearest_neighbour(block: list[Hole]) -> list[Hole]:
 
 def _path_length(route: list[Hole]) -> float:
     """Sum of leg lengths. Real distance, because a reversal changes legs
-    unequally and squared lengths would not compare correctly."""
+    unequally and squared lengths would not compare correctly.
+
+    Precondition: panel-sized nanometres. A squared separation past ``float``'s
+    range raises ``OverflowError``; unguarded for the same reason
+    ``nm_from_mm`` is.
+    """
     return sum(_distance_sq(a, b) ** 0.5 for a, b in pairwise(route))
 
 

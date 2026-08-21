@@ -24,6 +24,8 @@ __all__ = [
     "make_data",
     "positions",
     "circle_ops",
+    "self_nesting_form",
+    "image_ending_form",
     "build_pdf",
     "FakeCase",
 ]
@@ -106,6 +108,21 @@ def circle_ops(cx: float, cy: float, r: float, paint: str = "S") -> str:
         f"{cx - r} {cy - k} {cx - k} {cy - r} {cx} {cy - r} c "
         f"{cx + k} {cy - r} {cx + r} {cy - k} {cx + r} {cy} c h {paint}"
     )
+
+
+def self_nesting_form(cx: float = 20.0, cy: float = 20.0, r: float = 5.0) -> str:
+    """A form body that draws a circle and then invokes itself.
+
+    ``build_pdf`` gives the form no ``/Resources``, so ``/Fm0`` resolves against
+    the page's and the form re-enters itself. Recursion ends only at the reader's
+    depth limit, which is what makes this the vehicle for testing that limit.
+    """
+    return f"{circle_ops(cx, cy, r)} /Fm0 Do"
+
+
+def image_ending_form(cx: float = 20.0, cy: float = 20.0, r: float = 5.0) -> str:
+    """A form body ending in a ``Do`` that names an image, not another form."""
+    return f"{circle_ops(cx, cy, r)} /Im0 Do"
 
 
 def build_pdf(
