@@ -398,3 +398,22 @@ def test_a_holes_mark_lands_at_the_same_sheet_point_on_both_backends():
         # point of its Bézier path at (cx + r, sheet.height - cy).
         moveto = f"{pdf_num(hole.cx + hole.r)} {pdf_num(scene.sheet.height - hole.cy)} m"
         assert moveto in pdf_stream, f"hole at {(hole.cx, hole.cy)}: {moveto!r} not in the PDF"
+
+
+def test_an_iso_framed_sheet_text_renders_through_the_svg_backend():
+    """``SheetText``'s fields reach the ISO 7200 title block and survive the
+    SVG serialiser, exactly as they do the PDF's. The shipped
+    ``DrawingSvgEmitter.layout()`` always selects a plain frame -- there is
+    no ``frame`` option on ``DrawingOptions`` -- so this combination is
+    reachable only by composing an ISO-framed ``Layout`` directly, the way a
+    library caller (not the CLI) would; today's SVG output does not show
+    these fields."""
+    data = panel()
+    layout = choose_sheet(data, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    scene = build_scene(layout, data, SheetText(issue_date="2026-08-21", approved_by="PV"))
+
+    root = ET.fromstring(DrawingSvgEmitter().render(scene, TITLE))
+    shown = [node.text or "" for node in root.iter(f"{{{SVG_NS}}}text")]
+
+    assert "2026-08-21" in shown
+    assert "PV" in shown

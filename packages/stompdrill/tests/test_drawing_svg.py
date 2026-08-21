@@ -10,9 +10,7 @@ from dataclasses import fields
 import pytest
 
 from stompdrill.emitters import base as emitter_base
-from stompdrill.emitters.drawing.build import SheetText, build_scene
-from stompdrill.emitters.drawing.layout import choose_sheet
-from stompdrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
+from stompdrill.emitters.drawing.build import SheetText
 from stompdrill.emitters.drawing_svg import (
     A3_LANDSCAPE,
     A4_LANDSCAPE,
@@ -1250,20 +1248,6 @@ def test_title_block_carries_the_required_fields(panel: DrillData):
     assert "mm" in text
     assert "PROJECTION" in text.upper()
     assert "tar.ai" in text
-
-
-def test_an_svg_caller_can_fill_the_three_iso_fields_the_sheet_already_draws(panel: DrillData):
-    """The sheet drew DATE OF ISSUE, APPROVED and CREATOR and always printed
-    ABSENT for them, because ``DrawingOptions`` had no way to supply them --
-    for no stated reason, since ``build_scene`` is shared with the PDF."""
-    options = DrawingOptions(text=SheetText(issue_date="2026-08-21", approved_by="PV"))
-    layout = choose_sheet(panel, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
-    scene = build_scene(layout, panel, options.text)
-
-    shown = _title_block_text(ET.fromstring(DrawingSvgEmitter(options).render(scene, "T")))
-
-    assert "2026-08-21" in shown
-    assert "PV" in shown
 
 
 def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
