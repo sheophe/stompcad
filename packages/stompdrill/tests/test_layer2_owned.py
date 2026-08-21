@@ -116,6 +116,8 @@ def test_the_scene_draws_every_hole_at_the_models_diameter(backend):
     scene, scale = scenes(data)[backend]
 
     drawn = sorted(2 * c.r for c in circles(scene, "hole"))
+    # Assumes no hole here is clamped by build.py's HOLE_MIN_RADIUS (0.4 mm)
+    # floor; the fixture's scale is 1.0 so nothing is clamped today.
     expected = sorted(hole.diameter_nm / 1_000_000 * scale for hole in data.holes)
 
     assert drawn == pytest.approx(expected, abs=SHEET_TOLERANCE_MM)
@@ -181,40 +183,30 @@ def test_every_owned_representation_agrees_about_the_same_holes():
 
 
 def _cut_component_shape(document: Any, keyword: str) -> Any:
-    """The placed shape ``cut_shape`` wrote back, found by the walk it uses.
+    """The cut leaf's shape, found with ``cad.step``'s own traversal.
 
-    No public accessor hands back the drilled solid alone: ``cut_shape``
-    only returns the whole document, an ``undo`` and the touched entries.
-    This retraces ``step_module._cut_component``'s own recursion to read the
-    shape rather than mutate it -- the private helper it reuses is the name
-    lookup only, matched to the emitter's own ``keyword`` rule.
+    ``cut_shape`` hands back the XCAF document rather than the shape it
+    touched, so the leaf has to be found again. ``_collect`` is the walk
+    that already does it and ``named`` the keyword rule, so neither is
+    re-typed here -- a second copy of the recursion would keep working
+    while diverging from the one the emitter actually uses.
     """
+    from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_LabelSequence
-    from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
-    from stompdrill.emitters import step as step_module
-
-    def walk(label: Any) -> Any | None:
-        if XCAFDoc_ShapeTool.IsAssembly_s(label):
-            children = TDF_LabelSequence()
-            XCAFDoc_ShapeTool.GetComponents_s(label, children)
-            for index in range(1, children.Length() + 1):
-                found = walk(children.Value(index))
-                if found is not None:
-                    return found
-            return None
-        if keyword not in step_module._label_name(label).upper():
-            return None
-        return XCAFDoc_ShapeTool.GetShape_s(label)
+    from stompdrill.cad.step import StepDocument, StepSolid, _collect
 
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
-    free = TDF_LabelSequence()
-    tool.GetFreeShapes(free)
-    for index in range(1, free.Length() + 1):
-        found = walk(free.Value(index))
-        if found is not None:
-            return found
-    raise AssertionError(f"no component named {keyword!r} was found")
+    labels = TDF_LabelSequence()
+    tool.GetFreeShapes(labels)
+    solids: list[StepSolid] = []
+    for index in range(1, labels.Length() + 1):
+        _collect(labels.Value(index), solids, TDataStd_Name)
+
+    found = StepDocument(tuple(solids), document).named(keyword)
+    assert found, f"the cut document holds no solid named like {keyword!r}"
+    return found[0].shape
 
 
 @pytest.mark.hammond
@@ -228,8 +220,9 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     from OCP.Precision import Precision
 
     from stompdrill.cad import load_case_model
+    from stompdrill.cad.region import _to_canonical
     from stompdrill.emitters.step import cut_shape
-    from stompmodel.units import mm_from_nm, nm_from_mm
+    from stompmodel.units import nm_from_mm
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
@@ -249,13 +242,10 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
 
     tolerance_mm = Precision.Confusion_s()
     frame = model.frame
-    origin_mm = tuple(float(mm_from_nm(value)) for value in frame.origin_nm)
 
     def canonical_xy(ax: int, ay: int, az: int) -> tuple[Nanometre, Nanometre]:
         point_mm = (ax * tolerance_mm, ay * tolerance_mm, az * tolerance_mm)
-        relative = tuple(p - o for p, o in zip(point_mm, origin_mm))
-        x_mm = sum(r * c for r, c in zip(relative, frame.u))
-        y_mm = sum(r * c for r, c in zip(relative, frame.v))
+        x_mm, y_mm = _to_canonical(frame, point_mm)
         return nm_from_mm(x_mm), nm_from_mm(y_mm)
 
     found = {canonical_xy(ax, ay, az) for ax, ay, az, _radius in added}
