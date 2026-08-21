@@ -353,6 +353,21 @@ class TestFitCircle:
         assert (found.cx, found.cy) == pytest.approx(transform(ctm, 10.0, -5.0), abs=PT_SLACK)
         assert found.diameter == pytest.approx(5.0, abs=PT_SLACK)
 
+    def test_recovers_a_circle_rotated_far_from_the_origin(self) -> None:
+        """The travel direction is read from the centroid, not the raw anchors.
+
+        A CTM that rotates artwork drawn far from the origin leaves anchors
+        whose coordinates dwarf the radius. Take the first spoke without
+        subtracting the centre and the winding reads backwards here, so a
+        genuine hole is refused. Neither existing rotation case sits far
+        enough out for the omission to change the sign.
+        """
+        ctm = rotation(-45.0)
+        found = fit_circle(mapped(circle_path(0.0, 100.0, 5.0), ctm))
+        assert found is not None
+        assert (found.cx, found.cy) == pytest.approx(transform(ctm, 0.0, 100.0), abs=PT_SLACK)
+        assert found.diameter == pytest.approx(10.0, abs=PT_SLACK)
+
     def test_recovers_a_circle_drawn_the_other_way_round(self) -> None:
         """A mirroring CTM reverses the direction of travel; a circle survives it."""
         mirror: Matrix = (-1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
@@ -611,6 +626,46 @@ class TestFitCircle:
 
         assert fit_circle(blob) is None
 
+    def test_colinear_first_spokes_travel_anticlockwise(self) -> None:
+        """Isolates the tie-break in the travel test.
+
+        Opposite first anchors make the cross product exactly zero, so its
+        sign cannot say which way the path runs. The tie resolves
+        anticlockwise, matching the controls a positively wound path carries.
+        ``fit_circle`` never reaches this: the quarter-turn guard refuses
+        colinear spokes first, which is why the call is direct.
+        """
+        pairs = _cubics(kappa_correct_path(((5.0, 0.0), (-5.0, 0.0), (0.0, 5.0), (0.0, -5.0))))
+        assert pairs is not None and len(pairs) == 4
+        a, b = pairs[0][0], pairs[1][0]
+        assert a[0] * b[1] - a[1] * b[0] == 0.0
+        assert not _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.0, 0.05)
+
+        assert _kappa_consistent(pairs, (0.0, 0.0), 5.0, 0.05)
+
+    @pytest.mark.parametrize("outward", [True, False])
+    def test_radial_controls_are_refused_at_a_tolerance_that_admits_them(
+        self, outward: bool
+    ) -> None:
+        """The direction test is the last guard, and it is strict about zero.
+
+        A cusp's controls are exactly perpendicular to the tangent, so the dot
+        product is exactly zero, not merely small. Loosen the tolerance until
+        the radial guard shrugs and only the sign is left to refuse them;
+        counting zero as travel would drill a four-cusped star as a hole.
+        """
+        path = cusp_path(0.0, 0.0, 5.0, outward=outward)
+        pairs = _cubics(path)
+        assert pairs is not None and len(pairs) == 4
+        anchors = [start for start, _ in pairs]
+        assert _quarter_turns(anchors, (0.0, 0.0), 5.0, 3.0)
+        for anchor, offset in zip(anchors, _offset_vectors(path)[::2]):
+            # every guard before the direction test passes at this slack
+            assert abs(offset[0] * anchor[0] + offset[1] * anchor[1]) / 5.0 <= 3.0
+            assert offset[0] * -anchor[1] + offset[1] * anchor[0] == 0.0
+
+        assert fit_circle(path, tolerance=0.6) is None
+
     # -- tolerance ---------------------------------------------------------
 
     def test_tolerance_is_relative_and_admits_measurement_noise(self) -> None:
@@ -643,6 +698,88 @@ class TestFitCircle:
         """The slack scales with the radius, and no absolute slack can do this."""
         assert fit_circle(circle_path(0.0, 0.0, radius, ry=radius * (24.92 / 25.00))) is not None
         assert fit_circle(circle_path(0.0, 0.0, radius, ry=radius * 0.97)) is None
+
+    def test_a_control_exactly_one_slack_too_long_is_still_a_circle(self) -> None:
+        """The control-length band is closed, as every band above it is.
+
+        Closure, anchor radii and quarter turns all admit a deviation equal
+        to the slack and reject only what exceeds it. A control offset
+        exactly one slack long is inside the band; one hair more is not.
+        """
+        path = circle_path(0.0, 0.0, 1.0, kappa=KAPPA + 0.25)
+        start, curve = path.segments[0], path.segments[1]
+        assert isinstance(start, MoveTo) and isinstance(curve, CurveTo)
+        ox, oy = curve.c1[0] - start.point[0], curve.c1[1] - start.point[1]
+        assert abs(math.hypot(ox, oy) - KAPPA * 1.0) == 0.25  # exactly the slack, not near it
+
+        assert fit_circle(path, tolerance=0.25) is not None
+        assert fit_circle(path, tolerance=0.2499) is None
+
+    def test_a_radial_component_exactly_one_slack_wide_is_still_a_circle(self) -> None:
+        """The radial band is closed too, and closed on the same side.
+
+        These controls lean a quarter of the radius out of the tangent, which
+        is exactly the slack a tolerance of 0.25 allows. Admitting them keeps
+        this guard's arithmetic consistent with the length guard above it.
+        """
+        anchors: tuple[Point, ...] = ((1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0))
+        radial, tangential = 0.25, 0.5
+
+        def control(anchor: Point, sense: float) -> Point:
+            rx, ry = anchor  # a unit radius: the centre is the origin
+            tx, ty = -ry * sense, rx * sense  # unit tangent, anticlockwise
+            return (
+                anchor[0] + rx * radial + tx * tangential,
+                anchor[1] + ry * radial + ty * tangential,
+            )
+
+        segments: list[object] = [MoveTo(anchors[0])]
+        for i, start in enumerate(anchors):
+            end = anchors[(i + 1) % 4]
+            segments.append(CurveTo(control(start, 1.0), control(end, -1.0), end))
+        path = SubPath(tuple(segments))  # type: ignore[arg-type]
+
+        assert control(anchors[0], 1.0) == (1.25, 0.5)  # radial component exactly 0.25
+        assert fit_circle(path, tolerance=0.25) is not None
+        assert fit_circle(path, tolerance=0.2499) is None
+
+    @pytest.mark.parametrize("radius", [0.1, 5.0])
+    def test_a_tilted_control_is_refused_at_any_radius(self, radius: float) -> None:
+        """The radial guard divides by the radius, so it scales with the drawing.
+
+        The same panel measured in inches states every number a twenty-fifth
+        of its millimetre size. Multiplying by the radius instead of dividing
+        inverts how the threshold moves with scale, and the small drawing is
+        then admitted while the large one is not.
+        """
+        anchors = ((radius, 0.0), (0.0, radius), (-radius, 0.0), (0.0, -radius))
+        assert fit_circle(kappa_correct_path(anchors)) is not None
+        assert fit_circle(kappa_correct_path(anchors, tilt=20.0)) is None
+
+    @pytest.mark.parametrize("radius", [0.1, 5.0])
+    def test_anchors_short_of_a_quarter_turn_are_refused_at_any_radius(
+        self, radius: float
+    ) -> None:
+        """The quarter-turn guard divides by the radius for the same reason.
+
+        Two spokes dotted together have units of length squared, so only the
+        division brings the result back to a length the slack can bound.
+        Multiplying instead loosens a small drawing until a shape a degree
+        short of square is drilled as a hole. A true quarter turn cannot show
+        this: its dot product is exactly zero, and zero scales to zero.
+        """
+        phi = math.radians(89.0)
+        angles = (0.0, phi, math.pi, math.pi + phi)
+        skewed = tuple((radius * math.cos(t), radius * math.sin(t)) for t in angles)
+        square = tuple(
+            (radius * math.cos(t), radius * math.sin(t))
+            for t in (0.0, math.pi / 2.0, math.pi, 3.0 * math.pi / 2.0)
+        )
+        # a degree of skew, and the guard's own quantity is well inside its band
+        assert abs(skewed[0][0] * skewed[1][0] + skewed[0][1] * skewed[1][1]) < radius**2
+
+        assert fit_circle(kappa_correct_path(square)) is not None
+        assert fit_circle(kappa_correct_path(skewed)) is None
 
     def test_default_tolerance_is_one_percent(self) -> None:
         import inspect
