@@ -1023,8 +1023,18 @@ uv sync --all-packages --all-extras 2>&1 | tail -5
 ```
 
 Expected: a version string, with `pikepdf` and `OCP` still importing. If either stopped, the
-sync was run from inside a member — re-run it from the repository root. `uv.lock` changes by
-two lines; commit it with the task.
+sync was run from inside a member — re-run it from the repository root.
+
+Commit `uv.lock` with the task. It grows by roughly **360 lines**, which looks alarming and is
+not: five packages arrive (`pdfminer-six`, `cryptography`, `cffi`, `pycparser`,
+`charset-normalizer`) and `cryptography` alone carries a per-platform wheel-hash table. Confirm
+what matters instead of the line count — **no pre-existing package changes version**:
+
+```bash
+git diff -- uv.lock | grep -E '^[+-]name = ' | sort | uniq -c
+```
+
+Expected: five `+name` lines and no `-name` lines.
 
 - [ ] **Step 2: Write the failing tests**
 
