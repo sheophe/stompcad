@@ -150,3 +150,29 @@ and record any equivalence with its proof rather than reporting a clean sweep.
 fails against that mutant and no other; equivalent ones have a written argument for why no
 input distinguishes them. The residual count for `geometry` is recorded as a number, not
 implied to be zero.
+
+## Give the shared stage contracts even depth per stage
+
+**Status:** Confirmed gap, not scheduled. Raised by the test-repair review of 2026-08-21.
+
+**Constraint:** `test_pipeline.ALL_STAGES` drives five parametrised cross-cutting contracts over
+six stages, and the fixtures are generic, so which branch of a stage each contract reaches is
+uneven by construction rather than by design. Instrumentation found one thin cell:
+`test_stages_preserve_existing_diagnostics` builds data with no reference outline, so
+`CheckOutlineContainment` takes its bare `return data` early exit and the contract holds
+trivially — a "drop prior diagnostics" mutation of that stage is not caught by the contract
+named for it, though it *is* caught by `test_stages_survive_empty_input`, so the property is
+guarded. `CheckCaseClearance` is clean on the same measure, and `CheckReferenceSize` has ridden
+these fixtures since before the grid was scrutinised.
+
+A second, related gap: neither `test_containment.py` nor `test_clearance.py` can attach a prior
+diagnostic, because both build data only through `make_data(...)`, which always sets
+`diagnostics=()`. So no test anywhere exercises "a real finding-producing call still preserves
+what came before" for those stages.
+
+Widening the shared fixture is not a one-line change: it alters the branch every other stage
+takes, so it needs evidence that coverage does not regress for the other four.
+
+**Acceptance:** Either each (stage, contract) cell is shown to reach a meaningful branch, with
+the mutation that proves it; or the redundancy argument is accepted in writing and the thin
+cells are recorded so the grid is not mistaken for uniform depth.
