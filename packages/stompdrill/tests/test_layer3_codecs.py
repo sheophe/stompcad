@@ -118,12 +118,24 @@ def test_the_excellon_file_assigns_each_hole_the_tool_the_model_assigned():
 
 def test_the_excellon_file_drills_in_the_order_the_model_numbered():
     """File position is the format's only statement of sequence, so this is
-    where ``RouteHoles``' numbering reaches the machine."""
+    where ``RouteHoles``' numbering reaches the machine.
+
+    The recovered ``number`` is file position by construction and cannot
+    disagree with itself, so the order is recovered the long way: match each
+    hit back to its hole by position, and read off the indices it visits.
+    """
     data = panel()
+    framed = data.with_origin(Origin.LOWER_LEFT)
+    index_at = {
+        (quantised(hole.x_nm, EXCELLON_QUANTUM_NM),
+         quantised(hole.y_nm, EXCELLON_QUANTUM_NM)): index
+        for index, hole in framed.numbered()
+    }
 
-    recovered = read_excellon(ExcellonEmitter().emit(data))
+    drilled = [index_at[(c.x_nm, c.y_nm)] for c in read_excellon(ExcellonEmitter().emit(data)).circles]
 
-    assert [c.number for c in recovered.circles] == [n for n, _, _, _ in expected_hits(data)]
+    assert sorted(drilled) == list(range(1, len(data.holes) + 1)), "a numbered hole is missing"
+    assert drilled == sorted(drilled), "the file drills out of the model's numbered order"
 
 
 def test_the_excellon_file_states_each_tools_diameter():
