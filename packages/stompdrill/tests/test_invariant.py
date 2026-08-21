@@ -9,12 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from stompdrill.cli import build_parser, build_pipeline
 from stompdrill.emitters import get_emitter
 from stompdrill.emitters.json_out import JsonEmitter
 from stompdrill.pipeline import (
-    Deduplicate,
     IdentifyHammondFootprint,
-    ReviewGridTies,
     RouteHoles,
     SnapDiametersToDrillTable,
     SnapPositions,
@@ -22,7 +21,9 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.model import DrillData, Hole, RawHole, RawOutline, ReferenceOutline, SourceInfo
+from stompmodel.protocols import Pipeline
 from stompmodel.units import Millimetre, Nanometre
+from tests.conftest import FakeCase
 
 __all__: list[str] = []
 
@@ -35,30 +36,67 @@ FORMATS = ("excellon", "json", "drawing-svg", "drawing-pdf")
 CASES = {"tar.ai": "1590B", "pax.ai": "1590BB"}
 
 
-def artifacts(raw, case: str) -> dict[str, object]:
-    data = quantise(
-        raw,
-        enclosure=IdentifyHammondFootprint(case),
-        diameters=SnapDiametersToDrillTable(),
-        positions=SnapPositions(Nanometre(250_000)),
+def shipped_pipeline(model: object | None = None) -> Pipeline[DrillData]:
+    """The composition the CLI builds, read from it rather than copied here.
+
+    A copy of the stage list drifts the moment a stage is inserted, and the
+    invariant is only worth what the pipeline under it is. ``build_pipeline``
+    reads one attribute off the namespace and touches nothing else, so the
+    shipped composition costs a test no argv and no I/O. ``test_cli`` owns the
+    order itself; this module only consumes it.
+    """
+    args = build_parser().parse_args(["panel.ai"])
+    args.case_model_object = model
+    return build_pipeline(args)
+
+
+def artifacts(
+    raw: RawDrillData, case: str, pipeline: Pipeline[DrillData]
+) -> dict[str, object]:
+    """Quantise, fold, and emit -- through ``Pipeline.run`` as the CLI does, so
+    the provenance records it appends are certified alongside the geometry.
+    """
+    data = pipeline.run(
+        quantise(
+            raw,
+            enclosure=IdentifyHammondFootprint(case),
+            diameters=SnapDiametersToDrillTable(),
+            positions=SnapPositions(Nanometre(250_000)),
+        )
     )
-    for stage in (Deduplicate(), ReviewGridTies(), RouteHoles()):
-        data = stage.apply(data)
     return {name: get_emitter(name)().emit(data) for name in FORMATS}
+
+
+def assert_permutation_stable(
+    raw: RawDrillData, case: str, pipeline: Pipeline[DrillData], seed: int
+) -> None:
+    """Emit the panel, then 25 shuffles of it, and demand the same bytes."""
+    expected = artifacts(raw, case, pipeline)
+    rng = random.Random(seed)
+    for _ in range(25):
+        shuffled = list(raw.holes)
+        rng.shuffle(shuffled)
+        assert artifacts(replace(raw, holes=tuple(shuffled)), case, pipeline) == expected
 
 
 @pytest.mark.parametrize("panel", ["tar.ai", "pax.ai"])
 def test_element_order_cannot_reach_any_artifact(panel):
     """Permuting the artwork's holes must not move a single byte."""
-    case = CASES[panel]
     raw = AiPdfSource(FIXTURES / panel).read()
-    expected = artifacts(raw, case)
 
-    rng = random.Random(7)
-    for _ in range(25):
-        shuffled = list(raw.holes)
-        rng.shuffle(shuffled)
-        assert artifacts(replace(raw, holes=tuple(shuffled)), case) == expected
+    assert_permutation_stable(raw, CASES[panel], shipped_pipeline(), seed=7)
+
+
+def test_element_order_cannot_reach_any_artifact_with_a_case_model_either():
+    """``--case-model`` appends a fifth stage, so there are two compositions to
+    certify and the conditional one is not the certified one by default.
+
+    ``FakeCase`` is a 1590BB, which is what ``pax.ai`` is drawn for: pairing it
+    with the other fixture would be ``wrong-case-model`` and no artefact at all.
+    """
+    raw = AiPdfSource(FIXTURES / "pax.ai").read()
+
+    assert_permutation_stable(raw, "1590BB", shipped_pipeline(FakeCase()), seed=5)
 
 
 def _synthetic_raw() -> RawDrillData:
@@ -87,19 +125,33 @@ def _synthetic_raw() -> RawDrillData:
 
 def test_a_panel_with_diagnostics_and_a_duplicate_is_permutation_stable():
     """The regression test for finding 1: geometry alone determines output
-    even when the panel gives arrival order something to leak through — a
+    even when the panel gives arrival order something to leak through -- a
     per-hole diagnostic and a coincident pair. Must fail if the sort
     ``quantise()`` applies to ``raw.holes`` on entry is removed.
     """
-    case = "1590B"
-    raw = _synthetic_raw()
-    expected = artifacts(raw, case)
+    assert_permutation_stable(_synthetic_raw(), "1590B", shipped_pipeline(), seed=11)
 
-    rng = random.Random(11)
-    for _ in range(25):
-        shuffled = list(raw.holes)
-        rng.shuffle(shuffled)
-        assert artifacts(replace(raw, holes=tuple(shuffled)), case) == expected
+
+def _breakout_raw() -> RawDrillData:
+    """``_synthetic_raw`` with one hole hung over the edge of the panel.
+
+    Neither shipped fixture leaves its outline, so without this the fourth
+    stage is only ever certified silent. A 7 mm hole centred at x = 55 spans
+    to 58.5, past 1590B's 56.2 mm half-width.
+    """
+    base = _synthetic_raw()
+    return replace(
+        base,
+        holes=base.holes + (RawHole(Millimetre(55.0), Millimetre(0.0), Millimetre(7.0)),),
+    )
+
+
+def test_a_panel_whose_hole_breaks_out_of_the_outline_is_permutation_stable():
+    """``CheckOutlineContainment`` appends one finding per offending hole, in
+    hole order, and the drawings render each one: a second route by which
+    arrival order could reach the bytes, and it must not.
+    """
+    assert_permutation_stable(_breakout_raw(), "1590B", shipped_pipeline(), seed=13)
 
 
 def holes_at_one_point() -> tuple[Hole, Hole]:
@@ -132,7 +184,7 @@ def test_a_concentric_pair_is_ordered_by_geometry_not_by_arrival():
 def test_a_tie_inside_one_block_cannot_reach_the_emitted_bytes():
     """Two holes of one size at one nominal point, told apart only by what they
     measured. ``Deduplicate`` collapses such a pair, so this is what a caller
-    composing ``RouteHoles`` alone gets — and ``raw`` is serialised, so which
+    composing ``RouteHoles`` alone gets -- and ``raw`` is serialised, so which
     one is numbered first is observable. Regression: this ordering was decided
     by arrival until the routing tie-break fell through to the measurement.
 
