@@ -93,9 +93,16 @@ class DrawingPdfEmitter:
         self.options = options if options is not None else PdfDrawingOptions()
 
     def emit(self, data: DrillData) -> bytes:
-        layout = self.layout(data)
-        scene = build_scene(layout, data, self._sheet_text())
-        return _serialise(scene, self._title(data))
+        scene = build_scene(self.layout(data), data, self._sheet_text())
+        return self.render(scene, self._title(data))
+
+    def render(self, scene: Scene, title: str) -> bytes:
+        """Serialise a resolved scene. The seam a two-backend comparison needs.
+
+        The SVG side carries the same method for the same reason; keeping the
+        pair symmetrical is what lets one test drive both over one scene.
+        """
+        return _serialise(scene, title)
 
     def layout(self, data: DrillData) -> Layout:
         """Choose the smallest candidate that holds ``data`` at 1:1."""

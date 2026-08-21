@@ -17,7 +17,7 @@ from stompmodel.model import DrillData
 from .base import register_emitter
 from .drawing.build import SheetText, build_scene
 from .drawing.layout import Layout
-from .drawing.scene import INK, Circle, Group, Item, Line, Polygon, Rect, Stroke, Text
+from .drawing.scene import INK, Circle, Group, Item, Line, Polygon, Rect, Scene, Stroke, Text
 from .drawing.sheet import A3_LANDSCAPE_PLAIN as A3_LANDSCAPE
 from .drawing.sheet import A4_LANDSCAPE, Sheet
 
@@ -72,8 +72,16 @@ class DrawingSvgEmitter:
 
     # -- public ----------------------------------------------------------
     def emit(self, data: DrillData) -> str:
-        layout = self.layout(data)
-        scene = build_scene(layout, data, self._sheet_text())
+        scene = build_scene(self.layout(data), data, self._sheet_text())
+        return self.render(scene, self._sheet_title(data))
+
+    def render(self, scene: Scene, title: str) -> str:
+        """Serialise a resolved scene. The seam a two-backend comparison needs.
+
+        ``emit`` fuses layout, build and serialise; only here is one scene
+        drawn by one backend, which is the only way a divergence localises to
+        a serialiser rather than to a layout.
+        """
         # The namespace is declared as a plain attribute rather than through
         # ElementTree's ``default_namespace``: that option rejects unqualified
         # attribute names, and every SVG attribute here is unqualified.
@@ -87,7 +95,7 @@ class DrawingSvgEmitter:
                 "version": "1.1",
             },
         )
-        _sub(root, "title").text = self._sheet_title(data)
+        _sub(root, "title").text = title
         _sub(root, "style", type="text/css").text = _STYLESHEET
 
         for item in scene.items:

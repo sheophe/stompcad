@@ -27,8 +27,7 @@ from stompdrill.emitters.drawing.scene import Circle, Group, Item, Scene
 from stompdrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions
 from stompdrill.emitters.drawing_pdf import _num as pdf_num
-from stompdrill.emitters.drawing_pdf import _serialise as pdf_serialise
-from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter, _render_item
+from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, EnclosureMatch
 from stompmodel.units import Nanometre
@@ -358,19 +357,13 @@ def _scene_hole_circles(scene: Scene) -> list[Circle]:
 
 
 def _svg_circles(scene: Scene, cls_token: str) -> list[tuple[float, float, float]]:
-    """Render ``scene`` exactly as the SVG backend does, and read its circles.
+    """Render ``scene`` through the SVG backend and read its circles back.
 
-    ``DrawingSvgEmitter.emit`` resolves its own layout before calling
-    ``_render_item``; this drives the same serialiser over a scene the test
-    already built, so the PDF and SVG halves of the comparison read one scene.
+    ``render`` is the seam ``emit`` fuses: it takes the scene the test built
+    rather than resolving one of its own, so the PDF and SVG halves of the
+    comparison are reading a single scene.
     """
-    root = ET.Element("svg", {"xmlns": SVG_NS})
-    for item in scene.items:
-        _render_item(root, item)
-    # Namespace inheritance from ``xmlns`` only resolves on parsing text, not
-    # on the in-memory tree ``_render_item`` just populated — the same reason
-    # every other SVG helper in this file round-trips through a string.
-    root = ET.fromstring(ET.tostring(root, encoding="unicode"))
+    root = ET.fromstring(DrawingSvgEmitter(DrawingOptions(title=TITLE)).render(scene, TITLE))
     return [
         (float(e.attrib["cx"]), float(e.attrib["cy"]), float(e.attrib["r"]))
         for e in root.iter(f"{{{SVG_NS}}}circle")
@@ -394,7 +387,7 @@ def test_a_holes_mark_lands_at_the_same_sheet_point_on_both_backends():
     svg_holes = _svg_circles(scene, "hole")
     assert len(svg_holes) == len(scene_holes)
 
-    pdf_stream = stream_of(pdf_serialise(scene, TITLE))
+    pdf_stream = stream_of(DrawingPdfEmitter(PdfDrawingOptions(title=TITLE)).render(scene, TITLE))
 
     by_position = sorted(scene_holes, key=lambda c: (c.cx, c.cy))
     for hole, svg_circle in zip(by_position, sorted(svg_holes)):
