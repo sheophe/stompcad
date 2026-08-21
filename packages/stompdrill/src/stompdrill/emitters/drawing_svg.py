@@ -42,9 +42,7 @@ class DrawingOptions:
 
     sheet: Sheet = A4_LANDSCAPE
     scale: float | None = None
-    title: str = ""
-    drawing_no: str = ""
-    company: str = "ARTIFACT INSTRUMENTS"
+    text: SheetText = SheetText()
 
 
 def _fmt(value: float | str) -> str:
@@ -72,7 +70,7 @@ class DrawingSvgEmitter:
 
     # -- public ----------------------------------------------------------
     def emit(self, data: DrillData) -> str:
-        scene = build_scene(self.layout(data), data, self._sheet_text())
+        scene = build_scene(self.layout(data), data, self.options.text)
         return self.render(scene, self._sheet_title(data))
 
     def render(self, scene: Scene, title: str) -> str:
@@ -110,14 +108,7 @@ class DrawingSvgEmitter:
         return Layout.for_sheet(self.options.sheet, data, scale=self.options.scale)
 
     def _sheet_title(self, data: DrillData) -> str:
-        return self.options.title or data.source.path or "DRILL DRAWING"
-
-    def _sheet_text(self) -> SheetText:
-        return SheetText(
-            title=self.options.title,
-            drawing_no=self.options.drawing_no,
-            company=self.options.company,
-        )
+        return self.options.text.title or data.source.path or "DRILL DRAWING"
 
 
 # ---------------------------------------------------------------------------

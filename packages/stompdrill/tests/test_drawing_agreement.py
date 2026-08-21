@@ -43,7 +43,7 @@ DIAMETER_SIGNS = "⌀Ø"
 
 
 def svg_bytes(data: DrillData, scale: float | None = None) -> str:
-    return DrawingSvgEmitter(DrawingOptions(title=TITLE, scale=scale)).emit(data)
+    return DrawingSvgEmitter(DrawingOptions(text=SheetText(title=TITLE), scale=scale)).emit(data)
 
 
 def svg_strings(data: DrillData, scale: float | None = None) -> list[str]:
@@ -52,7 +52,7 @@ def svg_strings(data: DrillData, scale: float | None = None) -> list[str]:
 
 
 def pdf_bytes(data: DrillData) -> bytes:
-    return DrawingPdfEmitter(PdfDrawingOptions(title=TITLE)).emit(data)
+    return DrawingPdfEmitter(PdfDrawingOptions(text=SheetText(title=TITLE))).emit(data)
 
 
 def pdf_strings(data: DrillData) -> list[str]:
@@ -363,7 +363,7 @@ def _svg_circles(scene: Scene, cls_token: str) -> list[tuple[float, float, float
     rather than resolving one of its own, so the PDF and SVG halves of the
     comparison are reading a single scene.
     """
-    root = ET.fromstring(DrawingSvgEmitter(DrawingOptions(title=TITLE)).render(scene, TITLE))
+    root = ET.fromstring(DrawingSvgEmitter(DrawingOptions(text=SheetText(title=TITLE))).render(scene, TITLE))
     return [
         (float(e.attrib["cx"]), float(e.attrib["cy"]), float(e.attrib["r"]))
         for e in root.iter(f"{{{SVG_NS}}}circle")
@@ -387,7 +387,7 @@ def test_a_holes_mark_lands_at_the_same_sheet_point_on_both_backends():
     svg_holes = _svg_circles(scene, "hole")
     assert len(svg_holes) == len(scene_holes)
 
-    pdf_stream = stream_of(DrawingPdfEmitter(PdfDrawingOptions(title=TITLE)).render(scene, TITLE))
+    pdf_stream = stream_of(DrawingPdfEmitter(PdfDrawingOptions(text=SheetText(title=TITLE))).render(scene, TITLE))
 
     by_position = sorted(scene_holes, key=lambda c: (c.cx, c.cy))
     for hole, svg_circle in zip(by_position, sorted(svg_holes)):

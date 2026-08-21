@@ -10,6 +10,9 @@ from dataclasses import fields
 import pytest
 
 from stompdrill.emitters import base as emitter_base
+from stompdrill.emitters.drawing.build import SheetText, build_scene
+from stompdrill.emitters.drawing.layout import choose_sheet
+from stompdrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
 from stompdrill.emitters.drawing_svg import (
     A3_LANDSCAPE,
     A4_LANDSCAPE,
@@ -98,7 +101,7 @@ def panel() -> DrillData:
 
 @pytest.fixture
 def svg(panel: DrillData) -> str:
-    return DrawingSvgEmitter(DrawingOptions(title="TAR PANEL", drawing_no="AI-0001")).emit(panel)
+    return DrawingSvgEmitter(DrawingOptions(text=SheetText(title="TAR PANEL", drawing_no="AI-0001"))).emit(panel)
 
 
 @pytest.fixture
@@ -300,8 +303,7 @@ def test_default_options_match_the_spec_signature():
     options = DrawingOptions()
     assert options.sheet == A4_LANDSCAPE
     assert options.scale is None
-    assert options.title == ""
-    assert options.drawing_no == ""
+    assert options.text == SheetText()
 
 
 def test_the_options_carry_no_grid_of_their_own():
@@ -1237,7 +1239,7 @@ def _title_block_text(root: ET.Element) -> str:
 
 
 def test_title_block_carries_the_required_fields(panel: DrillData):
-    emitter = DrawingSvgEmitter(DrawingOptions(title="TAR PANEL", drawing_no="AI-0001"))
+    emitter = DrawingSvgEmitter(DrawingOptions(text=SheetText(title="TAR PANEL", drawing_no="AI-0001")))
     root = ET.fromstring(emitter.emit(panel))
     text = _title_block_text(root)
     assert by_class(root, "title-block", "rect")
@@ -1248,6 +1250,20 @@ def test_title_block_carries_the_required_fields(panel: DrillData):
     assert "mm" in text
     assert "PROJECTION" in text.upper()
     assert "tar.ai" in text
+
+
+def test_an_svg_caller_can_fill_the_three_iso_fields_the_sheet_already_draws(panel: DrillData):
+    """The sheet drew DATE OF ISSUE, APPROVED and CREATOR and always printed
+    ABSENT for them, because ``DrawingOptions`` had no way to supply them --
+    for no stated reason, since ``build_scene`` is shared with the PDF."""
+    options = DrawingOptions(text=SheetText(issue_date="2026-08-21", approved_by="PV"))
+    layout = choose_sheet(panel, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    scene = build_scene(layout, panel, options.text)
+
+    shown = _title_block_text(ET.fromstring(DrawingSvgEmitter(options).render(scene, "T")))
+
+    assert "2026-08-21" in shown
+    assert "PV" in shown
 
 
 def test_the_title_block_states_the_grid_the_holes_were_actually_snapped_to():
@@ -1455,7 +1471,7 @@ def test_a_panel_that_matches_nothing_still_says_so_after_a_real_run():
 
 def test_a_line_too_long_even_at_the_smallest_font_is_still_truncated():
     """Shrinking buys width; it does not buy an unlimited amount of it."""
-    emitter = DrawingSvgEmitter(DrawingOptions(title="PANEL " * 40))
+    emitter = DrawingSvgEmitter(DrawingOptions(text=SheetText(title="PANEL " * 40)))
     root = ET.fromstring(emitter.emit(_identified()))
 
     line = next(line for line in _title_block_lines(root) if line.startswith("TITLE"))
@@ -1739,8 +1755,10 @@ def test_scale_none_fits_a_panel_far_bigger_than_the_sheet(panel: DrillData):
 def test_no_text_overflows_the_sheet_border(panel: DrillData):
     emitter = DrawingSvgEmitter(
         DrawingOptions(
-            title="A DELIBERATELY VERY LONG DRAWING TITLE THAT WOULD OVERFLOW",
-            drawing_no="AI-0001-REV-C-SUPERSEDES-EVERYTHING",
+            text=SheetText(
+                title="A DELIBERATELY VERY LONG DRAWING TITLE THAT WOULD OVERFLOW",
+                drawing_no="AI-0001-REV-C-SUPERSEDES-EVERYTHING",
+            )
         )
     )
     root = ET.fromstring(emitter.emit(panel))
@@ -1853,7 +1871,7 @@ def test_text_is_xml_escaped():
 
 
 def test_emit_is_deterministic(panel: DrillData):
-    emitter = DrawingSvgEmitter(DrawingOptions(title="T"))
+    emitter = DrawingSvgEmitter(DrawingOptions(text=SheetText(title="T")))
     assert emitter.emit(panel) == emitter.emit(panel)
 
 

@@ -182,7 +182,7 @@ def test_a_finer_precision_reaches_the_file_rather_than_being_rounded_away():
 
 def scene_of(data: DrillData) -> Scene:
     """The scene the SVG backend would build, resolved once and shared."""
-    emitter = DrawingSvgEmitter(DrawingOptions(title="LAYER 3"))
+    emitter = DrawingSvgEmitter(DrawingOptions(text=SheetText(title="LAYER 3")))
     return build_scene(emitter.layout(data), data, SheetText(title="LAYER 3"))
 
 
@@ -223,7 +223,7 @@ def test_the_svg_states_every_circle_the_scene_holds():
     data = panel()
     scene = scene_of(data)
 
-    recovered = read_svg(DrawingSvgEmitter(DrawingOptions(title="LAYER 3")).render(scene, "L3"))
+    recovered = read_svg(DrawingSvgEmitter(DrawingOptions(text=SheetText(title="LAYER 3"))).render(scene, "L3"))
 
     assert len(recovered.circles) == len(scene_circles(scene))
 
@@ -234,7 +234,7 @@ def test_the_svg_places_each_circle_where_the_scene_put_it():
     data = panel()
     scene = scene_of(data)
 
-    recovered = read_svg(DrawingSvgEmitter(DrawingOptions(title="LAYER 3")).render(scene, "L3"))
+    recovered = read_svg(DrawingSvgEmitter(DrawingOptions(text=SheetText(title="LAYER 3"))).render(scene, "L3"))
 
     assert sorted((c.x_nm, c.y_nm, c.diameter_nm) for c in recovered.circles) == scene_circles(scene)
 
@@ -246,7 +246,7 @@ def test_the_pdf_places_each_circle_where_the_scene_put_it():
     data = panel()
     scene = scene_of(data)
 
-    recovered = read_pdf(DrawingPdfEmitter(PdfDrawingOptions(title="LAYER 3")).render(scene, "L3"))
+    recovered = read_pdf(DrawingPdfEmitter(PdfDrawingOptions(text=SheetText(title="LAYER 3"))).render(scene, "L3"))
 
     assert sorted(
         (c.x_nm, c.y_nm, c.diameter_nm) for c in recovered.circles

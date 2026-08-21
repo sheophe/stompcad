@@ -65,18 +65,9 @@ def _encode_char(ch: str) -> bytes:
 
 @dataclass(frozen=True, slots=True)
 class PdfDrawingOptions:
-    """Presentation values for the PDF sheet.
+    """Presentation values for the PDF sheet."""
 
-    The three empty defaults are ISO 7200 mandatory fields ``stompdrill`` has no
-    source for; a caller that supplies them gets a conforming sheet.
-    """
-
-    title: str = ""
-    drawing_no: str = ""
-    company: str = "ARTIFACT INSTRUMENTS"
-    issue_date: str = ""
-    approved_by: str = ""
-    creator: str = ""
+    text: SheetText = SheetText()
     candidates: tuple[Sheet, ...] = ISO_5457_CANDIDATES
     frame: FrameStyle = FrameStyle.ISO_5457
 
@@ -93,7 +84,7 @@ class DrawingPdfEmitter:
         self.options = options if options is not None else PdfDrawingOptions()
 
     def emit(self, data: DrillData) -> bytes:
-        scene = build_scene(self.layout(data), data, self._sheet_text())
+        scene = build_scene(self.layout(data), data, self.options.text)
         return self.render(scene, self._title(data))
 
     def render(self, scene: Scene, title: str) -> bytes:
@@ -108,19 +99,8 @@ class DrawingPdfEmitter:
         """Choose the smallest candidate that holds ``data`` at 1:1."""
         return choose_sheet(data, self.options.candidates, frame=self.options.frame)
 
-    def _sheet_text(self) -> SheetText:
-        options = self.options
-        return SheetText(
-            title=options.title,
-            drawing_no=options.drawing_no,
-            company=options.company,
-            issue_date=options.issue_date,
-            approved_by=options.approved_by,
-            creator=options.creator,
-        )
-
     def _title(self, data: DrillData) -> str:
-        return self.options.title or data.source.path or "DRILL DRAWING"
+        return self.options.text.title or data.source.path or "DRILL DRAWING"
 
 
 # --- serialisation --------------------------------------------------------

@@ -24,13 +24,12 @@ from .content import (
     SheetText,
     allot,
     capacity,
-    enclosure_note,
     fit_font,
     fits,
     flagged_holes,
-    grid_note,
     is_flagged,
     note_lines,
+    plain_title_lines,
     row_chains,
     schedule_rows,
     title_cell_width,
@@ -933,20 +932,7 @@ def _plain_title_block(
     )
     drawn.append(Line(x0, y0 + 7.4, x1, y0 + 7.4, FURNITURE, cls="tb-rule"))
 
-    lines = [
-        f"TITLE  {options.title or 'PANEL DRILL DRAWING'}",
-        f"DRG No  {options.drawing_no or '—'}",
-        enclosure_note(data, capacity(inner, TITLE_MIN_FONT)),
-        f"SHEET 1 OF 1   SIZE {layout.sheet.name}",
-        f"UNITS mm   SCALE {layout.scale_label}",
-        f"{grid_note(data)}   HOLES {len(data.holes)}",
-        "THIRD ANGLE PROJECTION — DO NOT SCALE FROM DRAWING",
-        f"SOURCE  {data.source.path or '—'}",
-        (
-            f"LAYERS  drill={data.source.drill_layer or '—'} "
-            f"ref={data.source.reference_layer or '—'}"
-        ),
-    ]
+    lines = plain_title_lines(data, options, layout, capacity(inner, TITLE_MIN_FONT))
     step = min(4.2, max(2.4, (y1 - (y0 + 9.0) - 1.5) / len(lines)))
     font = max(TITLE_MIN_FONT, min(2.8, step * 0.62))
     y = y0 + 8.0

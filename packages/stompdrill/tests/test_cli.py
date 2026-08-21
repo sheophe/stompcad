@@ -1610,7 +1610,7 @@ def test_the_pdf_emitter_receives_the_title_from_the_command_line():
     emitter = cli.make_emitter("drawing-pdf", cli.OutputSettings(title="TAR PANEL"))
 
     assert isinstance(emitter, DrawingPdfEmitter)
-    assert emitter.options.title == "TAR PANEL"
+    assert emitter.options.text.title == "TAR PANEL"
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
