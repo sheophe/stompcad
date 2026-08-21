@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ from tools.fetch_case_model import cache_dir
 
 __all__ = [
     "HammondModel", "MODELS", "BB_PROBES", "BB_RELIEF_MM",
-    "cache_dir", "model_path", "require_model",
+    "cache_dir", "model_path", "require_model", "cylinders",
 ]
 
 
@@ -153,3 +154,36 @@ def hammond_a() -> Path:
 def hammond_y() -> Path:
     """The 1590Y model, fetched once per session."""
     return require_model("1590Y")
+
+
+def cylinders(shape: Any) -> set[tuple[int, int, int, int]]:
+    """Every cylindrical face's axis point and radius, in nanometres.
+
+    Rounded to the kernel's own confusion so two runs of one geometry agree;
+    this is the single epsilon the whole verification design admits.
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    from OCP.Precision import Precision
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    tolerance_mm = Precision.Confusion_s()
+    found: set[tuple[int, int, int, int]] = set()
+    explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_FACE)
+    while explorer.More():
+        # A bare TopoDS_Shape has no surface; ``cad/case.py`` and
+        # ``cad/region.py`` downcast the same way before adapting one.
+        surface = BRepAdaptor_Surface(TopoDS.Face_s(explorer.Current()))
+        if surface.GetType() == GeomAbs_SurfaceType.GeomAbs_Cylinder:
+            cylinder = surface.Cylinder()
+            axis = cylinder.Axis().Location()
+            found.add(
+                tuple(
+                    round(v / tolerance_mm)
+                    for v in (axis.X(), axis.Y(), axis.Z(), cylinder.Radius())
+                )
+            )
+        explorer.Next()
+    return found
