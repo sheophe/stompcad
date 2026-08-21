@@ -10,6 +10,7 @@ import pytest
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
+    CheckCaseClearance,
     CheckOutlineContainment,
     CheckReferenceSize,
     Deduplicate,
@@ -26,7 +27,7 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
 from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
-from tests.conftest import at, codes, diameters, holes, make_data, positions
+from tests.conftest import FakeCase, at, codes, diameters, holes, make_data, positions
 
 # --------------------------------------------------------------------------
 # helpers
@@ -41,6 +42,8 @@ ALL_STAGES = [
     ReviewGridTies(),
     RouteHoles(),
     CheckReferenceSize((Nanometre(113_000_000), Nanometre(60_000_000))),
+    CheckOutlineContainment(),
+    CheckCaseClearance(FakeCase()),
 ]
 
 
@@ -52,7 +55,8 @@ ALL_STAGES = [
 @pytest.mark.parametrize("stage", ALL_STAGES, ids=lambda s: type(s).__name__)
 def test_every_stage_satisfies_the_stage_protocol(stage):
     assert isinstance(stage, Stage)
-    assert isinstance(type(stage).name, str) and type(stage).name
+    assert isinstance(type(stage).name, str), "Stage.name is not a str"
+    assert type(stage).name, "Stage.name is empty"
 
 
 @pytest.mark.parametrize(
@@ -246,7 +250,8 @@ class TestDeduplicate:
         assert diag.get("dropped_indices") is None
         assert diag.get("dropped") == 1
         assert diag.location_nm == (10_000_000, 5_000_000)
-        assert "hole 7" not in diag.message and "hole 1" not in diag.message
+        assert "hole 7" not in diag.message, "the first duplicate's input index leaked in"
+        assert "hole 1" not in diag.message, "the second duplicate's input index leaked in"
 
     def test_the_payloads_diameter_is_whole_nanometres_under_a_key_that_says_so(self):
         """A payload key ending ``_nm`` is held to a whole ``int`` by the model,

@@ -285,7 +285,8 @@ def test_a_panel_past_a0_is_still_drawn_1_to_1_and_says_it_overflowed():
     assert "SCALE 1:1" in shown
     assert "CONTENT EXCEEDS A0" in shown
     # The overflow names the size actually required, so it is actionable.
-    assert "2000.000" in shown and "1500.000" in shown
+    assert "2000.000" in shown, "the overflow marker omitted the required width"
+    assert "1500.000" in shown, "the overflow marker omitted the required height"
 
 
 def test_a_panel_that_fits_carries_no_overflow_marker():

@@ -101,7 +101,8 @@ class TestIdentifyHammondFootprint:
         """The catalogue is a table of integers and the outline is a measurement."""
         _, match, _ = IdentifyHammondFootprint("1590B").quantise(FIXTURE, ORIGIN)
 
-        assert type(match.length_nm) is int and type(match.width_nm) is int
+        assert type(match.length_nm) is int, "match.length_nm is not a plain int"
+        assert type(match.width_nm) is int, "match.width_nm is not a plain int"
         assert (match.length_nm, match.width_nm) == (112_400_000, 60_500_000)
         assert type(match.rotated) is bool
 

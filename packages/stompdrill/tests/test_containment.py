@@ -112,9 +112,11 @@ def test_the_finding_carries_the_hole_and_the_outline_it_left():
 def test_the_message_states_the_hole_the_breakout_and_the_outline():
     message = only(run(at(48 * MM, 0, 7 * MM, index=1))).message
 
-    assert "7" in message and "48" in message
+    assert "7" in message, "the message omitted the hole diameter"
+    assert "48" in message, "the message omitted the hole's coordinate"
     assert "1.5" in message
-    assert "100" in message and "60" in message
+    assert "100" in message, "the message omitted the outline width"
+    assert "60" in message, "the message omitted the outline height"
 
 
 def test_a_panel_with_no_outline_is_not_checked():

@@ -479,7 +479,8 @@ def test_letters_never_use_i_or_o_even_on_the_largest_sheet():
     used = {t.content for t in grid_text(A0_LANDSCAPE) if t.content.isalpha()}
 
     assert len(used) == 16
-    assert "I" not in used and "O" not in used
+    assert "I" not in used, "the alphabet used I despite the letter-skip rule"
+    assert "O" not in used, "the alphabet used O despite the letter-skip rule"
     assert "J" in used  # the letter that takes I's place
 
 

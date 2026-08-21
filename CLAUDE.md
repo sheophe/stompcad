@@ -274,7 +274,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
   `geometry`, `pipeline.dedupe`, `pipeline.validate`, `quantise`, `stompdrill.units`,
   `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth chasing: those
-  hold cited constants and shared facts rather than placement.
+  hold cited constants and shared facts rather than placement. Eight of `_kappa_consistent`'s
+  seventy mutants are proved equivalent and not worth re-chasing — see
+  `docs/plans/2026-08-21-test-repairs.md` for the proof. That proof covers nothing else:
+  `geometry`'s residual beyond it is four unclassified survivors, two in `fit_circle` and
+  two in `_quarter_turns`, named individually in their own `docs/BACKLOG.md` entry.
 - `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
   `pipeline.validate`, `quantise` and `stompdrill.units` above, and
   `cd packages/stompmodel && mutmut run` —
@@ -298,7 +302,7 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   # 241 passed
 
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
-  # 1209 passed
+  # 1234 passed
   ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.

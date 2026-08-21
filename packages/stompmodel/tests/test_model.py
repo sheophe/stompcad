@@ -680,7 +680,8 @@ def test_a_lower_left_origin_shifts_every_hole_by_half_the_outline() -> None:
         (16_000_000, 48_500_000),
         (56_000_000, 30_500_000),
     ]
-    assert all(type(h.x_nm) is int and type(h.y_nm) is int for h in shifted.holes)
+    assert all(type(h.x_nm) is int for h in shifted.holes), "a shifted x is not a plain int"
+    assert all(type(h.y_nm) is int for h in shifted.holes), "a shifted y is not a plain int"
 
 
 def test_an_odd_outline_still_yields_whole_nanometres() -> None:

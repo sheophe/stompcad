@@ -23,7 +23,13 @@ TOOL_DEF = re.compile(r"^T(\d+)C([0-9.]+)$")
 
 
 def fixture_data() -> DrillData:
-    """Return the expected quantised data for ``tests/fixtures/tar.ai``."""
+    """Return the expected quantised data for ``tests/fixtures/tar.ai``.
+
+    The drill numbers are a permutation of 1..7 that is deliberately not the
+    tuple order, so an assertion that recomputed a number from list position
+    could not pass by coincidence. Renumber them ascending and this fixture
+    stops discriminating — keep them scrambled.
+    """
     return DrillData(
         holes=(
             at(-40_000_000, 18_000_000, index=4),
@@ -400,10 +406,13 @@ def test_lower_left_matches_the_fixture_ground_truth():
 
 
 def test_lower_left_keeps_every_coordinate_non_negative():
+    """Checks the emitted bytes behind ``_reject_negative_coordinates``,
+    which raises first — not the discriminating test of that rule."""
     for line in lines(emit(fixture_data())):
         if line.startswith("X"):
             x, y = re.match(r"^X(-?[0-9.]+)Y(-?[0-9.]+)$", line).groups()
-            assert float(x) >= 0.0 and float(y) >= 0.0, line
+            assert float(x) >= 0.0, line
+            assert float(y) >= 0.0, line
 
 
 def test_a_coordinate_that_rounds_to_zero_never_prints_a_negative_zero():
@@ -458,7 +467,8 @@ def test_the_header_says_which_frame_the_coordinates_are_in():
 
     assert len(stated) == 1
     assert "lower-left" in stated[0]
-    assert "56.500" in stated[0] and "30.000" in stated[0]
+    assert "56.500" in stated[0]  # half the outline's width
+    assert "30.000" in stated[0]  # half its height
     assert "X16.500Y48.000" in out  # the frame it actually wrote
 
 
@@ -572,26 +582,3 @@ def test_emit_is_deterministic():
     data = fixture_data()
 
     assert emit(data) == emit(data)
-
-
-# --------------------------------------------------------------------------
-# the fixture itself
-# --------------------------------------------------------------------------
-
-
-def test_the_fixtures_numbers_are_a_permutation_out_of_tuple_order() -> None:
-    """Guard the fixture's shape: a permutation of 1..n, not already ascending.
-
-    ``numbered()`` pairs each hole with its index in tuple order rather than
-    sorting, so nothing here can fail on a production change -- only on someone
-    renumbering the fixture. It discriminates nothing today: ``ExcellonEmitter``
-    emits in arrival order by design, and the file's one number-reading path is
-    the refusal message, already pinned with scrambled indices above. The
-    numbers are scrambled so that an assertion reading list position is caught
-    the day someone writes one.
-    """
-    data = fixture_data()
-    numbers = [n for n, _ in data.numbered()]
-
-    assert sorted(numbers) == list(range(1, len(data.holes) + 1))
-    assert numbers != sorted(numbers)

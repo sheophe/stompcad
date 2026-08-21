@@ -216,7 +216,8 @@ def _chain_x(items: tuple[Item, ...]) -> float:
     chain = _level_chain(items)
     assert chain is not None, "the panel was expected to carry a chain of levels"
     lines = [i for i in chain.items if isinstance(i, Line) and i.cls == "dim-line"]
-    assert lines and all(line.x1 == line.x2 == lines[0].x1 for line in lines)
+    assert lines, "no dim-line items found in the level chain"
+    assert all(line.x1 == line.x2 == lines[0].x1 for line in lines), "dim-lines are not vertical and aligned"
     return lines[0].x1
 
 

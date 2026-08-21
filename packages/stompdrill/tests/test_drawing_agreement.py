@@ -130,7 +130,8 @@ def test_the_diameter_sign_differs_only_in_glyph_never_in_value():
     svg_dia = [t for t in svg_strings(data) if "⌀" in t]
     pdf_dia = [t for t in pdf_strings(data) if "Ø" in t]
 
-    assert svg_dia and pdf_dia
+    assert svg_dia, "the SVG has no diameter strings to compare"
+    assert pdf_dia, "the PDF has no diameter strings to compare"
     assert "Ø" not in " ".join(svg_strings(data))
     assert "⌀" not in " ".join(pdf_strings(data))
     assert {unsigned(t) for t in svg_dia} == {unsigned(t) for t in pdf_dia}
@@ -309,7 +310,8 @@ def test_a_row_shown_on_both_crowded_sheets_says_the_same_thing():
 
     for row in schedule_rows(data):
         if row.x in svg and row.x in pdf:
-            assert row.y in svg and row.y in pdf, f"hole {row.number}: only one Y shown"
+            assert row.y in svg, f"hole {row.number}: Y missing from the SVG despite a shared X"
+            assert row.y in pdf, f"hole {row.number}: Y missing from the PDF despite a shared X"
 
 
 # --- the overflow marker, which speaks for the sheet it is drawn on ---------

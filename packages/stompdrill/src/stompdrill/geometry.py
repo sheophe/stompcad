@@ -181,6 +181,8 @@ def fit_circle(path: SubPath, tolerance: float = 0.01) -> Circle | None:
 
     Relative ``tolerance`` checks closure, equidistant centroid radii, quarter
     turns, and kappa-consistent controls. The centroid test is rotation invariant.
+    Every tolerance band here and below is closed: each guard rejects on
+    ``> slack``, so a deviation exactly one slack out is still a circle.
     """
     pairs = _cubics(path)
     if pairs is None or len(pairs) != 4:
