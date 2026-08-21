@@ -88,7 +88,7 @@ _See also_: Quantisation. The sets are not interchangeable with one another.
 Whether a hole's whole extent lies inside a boundary. Two boundaries answer it:
 the reference outline, which warns, and the drilled face, which errors.
 _Avoid_: bounds check, inside test
-_See also_: Play area, Reference outline — the two boundaries.
+_See also_: Drilled face, Reference outline — the two boundaries.
 
 **Drill document**:
 The serialised form of one drill run: the holes, the frame they were cut in, and
