@@ -176,3 +176,40 @@ takes, so it needs evidence that coverage does not regress for the other four.
 **Acceptance:** Either each (stage, contract) cell is shown to reach a meaningful branch, with
 the mutation that proves it; or the redundancy argument is accepted in writing and the thin
 cells are recorded so the grid is not mistaken for uniform depth.
+
+## Retire `_kappa_consistent`'s eight equivalent mutants, if the file opens anyway
+
+**Status:** Analysed and deliberately declined as standalone work, 2026-08-21. Do it only as a
+rider on other work in `geometry.py`.
+
+**Constraint:** Eight of the seventy mutants in `_kappa_consistent` are provably equivalent and
+are recorded as the module's honest floor. Four double `travel` or `sense`; four turn `* ±1.0`
+into `/ ±1.0`. Both families reach exactly one sign test, and both are unkillable without
+asserting something with no observable manifestation. They can only be removed by making the
+magnitude unrepresentable — carrying `travel` and `sense` as booleans and negating the tangent
+conditionally, rather than multiplying by a unit float. That form has been checked equivalent
+across all four sign combinations, signed zero included, and signed zero is immaterial anyway
+because the guard is `dot <= 0.0`.
+
+Declined standalone for three reasons. It buys no behavioural or readability gain — the
+multiplication arguably reads better than a conditional negation. It trades eight *documented*
+equivalent mutants for an unknown number of new ones, because the boolean literals, the
+inequality and the negations are all fresh mutation sites whose survivor count cannot be known
+until the survey is re-run. And the risk is asymmetric: the tangent direction is what makes
+mirrored circles recognisable, so an inverted condition would make mirrored artwork stop
+registering as circles and holes would vanish from a drill file. That failure is guarded — a
+mirror test exists — but the reward is only a rounder survey number, and mutation testing is a
+survey rather than a gate.
+
+The containment is good and is what makes it cheap as a rider: the function is private, has one
+production caller, changes no signature, and needs no ADR. The cost is entirely in re-proving
+the verification surface — rotation invariance, mirrored recognition, and byte-identical
+artefacts — which any other change to this file must re-prove regardless.
+
+**Trigger:** take it when `geometry.py` is already open for another reason, such as the
+generative conversion or the routing performance repair.
+
+**Acceptance:** `_kappa_consistent` carries no unit-magnitude literal. The mirrored-circle and
+rotation-invariance tests pass unchanged, the drawing-agreement and invariance harnesses show
+byte-identical artefacts, and the scoped survey is re-run with every new survivor classified as
+killable or equivalent — the residual stated as a number, never implied to be zero.
