@@ -43,6 +43,13 @@ is approximately 1.9 mm from both its own backplate and the nearby 1590BS footpr
 Below that tolerance neither footprint is accepted; at that tolerance both are accepted.
 Widening the tolerance therefore cannot identify the enclosure uniquely.
 
+A hole whose **extent** leaves that outline is a warning, `hole-outside-outline`,
+checked whenever an outline exists. The extent and not the centre, so a hole
+that straddles the boundary is caught. Face containment is the stronger check,
+against the real drilled face rather than the published top view; it needs a
+supplied model and it is an error. See
+[ADR-0007](0007-case-model-and-clearance.md).
+
 `docs/parts/dimensions.tsv` is the distributed catalogue authority. Hammond's website is
 the upstream source from which maintainers obtain published dimensions. Manufacturer
 PDFs are neither repository data nor a build-time or run-time dependency.
@@ -63,6 +70,14 @@ declaration is useful only when it is verified on every path. Treating a footpri
 unique part, or widening the tolerance past genuine neighbours, would replace evidence
 with a guess.
 
+Containment warns because its evidence is weak in a known direction. The outline
+is the backplate footprint and a die-cast face is smaller than it, so a hole
+inside the outline may still miss the face and a hole a fraction outside it may
+still be drillable. Withholding every artifact on that evidence would stop a
+legitimate panel; saying nothing would let an edge breakout through unremarked.
+A warning reports what was observed without claiming more than the outline can
+support.
+
 Keeping the distributed authority in a compact text table makes catalogue construction
 reproducible without distributing manufacturer documents. The upstream website supplies
 the published facts; the repository consumes the reviewed table.
@@ -80,3 +95,7 @@ and every declared case requires positive geometric verification.
 Catalogue maintenance updates `docs/parts/dimensions.tsv` from Hammond's website and
 regenerates downstream catalogue data. No repository workflow may require a manufacturer
 PDF.
+
+A panel whose holes reach past its own outline still produces every requested
+artifact and exits 1. An operator who wants that refused rather than reported
+supplies a case model, whose face check is an error.
