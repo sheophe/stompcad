@@ -709,7 +709,26 @@ def test_truncated_nesting_exits_one_from_the_command_line(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "nesting-truncated" in out
-    assert "stopped 1 Form XObjects deep" in out
+    assert "stopped at Form XObject nesting depth 1" in out
+
+
+def test_a_form_depth_beyond_the_interpreters_own_limit_exits_three(tmp_path, capsys):
+    """A RecursionError from a pathological --form-depth is exit 3, not a traceback.
+
+    CLAUDE.md's exit-code contract is 0/1/2/3; an uncaught RecursionError would
+    fall outside it and outside main's own ``(UsageError, StompError, OSError)``.
+    """
+    from tests.conftest import build_pdf, self_nesting_form
+
+    panel = build_pdf(
+        tmp_path / "far-too-deep.ai",
+        {"Background": "0 0 m 300 0 l 300 200 l 0 200 l h S", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 10, 0], self_nesting_form()),
+    )
+
+    assert cli.main([str(panel), "--form-depth", "100000"]) == 3
+
+    assert "error" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

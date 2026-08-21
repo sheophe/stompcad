@@ -178,8 +178,9 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Enclosure artwork uses published top-view/backplate dimensions, not the smaller drilled
   face. A two-dimensional outline identifies a footprint, not necessarily one part;
   ambiguous footprints require `--case`, and a declared case is always verified.
-- A hole whose extent leaves the reference outline is a warning, not an error:
-  the outline bounds the panel as drawn, not the drilled face the bit meets. The
+- A hole whose extent leaves the reference outline is a warning, not an error: the
+  outline bounds the panel as identified — the catalogue footprint once an enclosure
+  matched, the drawn outline otherwise — not the drilled face the bit meets. The
   face check needs a supplied model and errors — see
   [ADR-0002](docs/adr/0002-domain-quantisers.md).
 - Geometry alone determines output: two inputs representing the same geometry produce
@@ -267,15 +268,16 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Run mutation tests with bytecode generation disabled and inspect which test killed each
   relevant mutation. Mutation testing is a survey, not a numeric gate, and no count is
   recorded here: run it and read the current one. Read it by module, not in total.
-  `emitters.drawing.build`, `cli`, `emitters.drawing_pdf`, `sources.ai_pdf`,
+  `emitters.drawing.build`, `cli`, `emitters.drawing_pdf`,
   `emitters.drawing.content` and `emitters.drawing_svg` account for most survivors, where
   a mutant rewrites a help string, a cell offset or a font size and nothing observable
   changes. The drawing modules are layout-heavy and survive in proportion. A survivor in
-  `geometry`, `pipeline.dedupe`, `quantise`, `stompdrill.units`, `emitters.drawing.sheet`
-  or `emitters.drawing.layout` is the kind worth chasing: those hold cited constants and
-  shared facts rather than placement.
+  `geometry`, `pipeline.dedupe`, `pipeline.validate`, `quantise`, `stompdrill.units`,
+  `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind worth chasing: those
+  hold cited constants and shared facts rather than placement.
 - `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
-  `quantise` and `stompdrill.units` above, and `cd packages/stompmodel && mutmut run` —
+  `pipeline.validate`, `quantise` and `stompdrill.units` above, and
+  `cd packages/stompmodel && mutmut run` —
   its own `[tool.mutmut]`, resolving against its own tests — is what reaches
   `stompmodel.units`, exactly the kind of module worth chasing too; there is no
   workspace-wide command, the same reason the root `mypy` gate excludes `stompmodel`'s

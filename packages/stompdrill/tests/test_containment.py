@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from stompdrill.pipeline import CheckOutlineContainment
+from stompdrill.pipeline import CheckOutlineContainment, Deduplicate
 from stompmodel.diagnostics import Severity
 from stompmodel.model import ReferenceOutline, StageRun
 from stompmodel.protocols import Stage
@@ -138,3 +138,14 @@ def test_the_stage_changes_no_hole():
     given = (at(48 * MM, 0, 7 * MM, index=1), at(0, 0, 7 * MM, index=2))
 
     assert run(*given).holes == given
+
+
+def test_a_duplicated_outside_hole_is_reported_once_through_both_stages():
+    """Deduplication first, so the survivor -- not each copy -- is what containment sees."""
+    duplicated = make_data(
+        at(48 * MM, 0, 7 * MM, index=1), at(48 * MM, 0, 7 * MM, index=2), reference=PANEL
+    )
+
+    after = CheckOutlineContainment().apply(Deduplicate().apply(duplicated))
+
+    assert codes(after).count("hole-outside-outline") == 1

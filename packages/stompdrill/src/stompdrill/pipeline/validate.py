@@ -156,7 +156,7 @@ def _outside(
 ) -> Diagnostic:
     """Report a breakout, with each axis's own overshoot on the finding.
 
-    The sentence states the worst axis and the payload states both, so a
+    The sentence states the worst overshoot and the payload states both, so a
     consumer never has to subtract the two sizes back out of the prose.
     """
     x_nm = _overshoot(over_x)

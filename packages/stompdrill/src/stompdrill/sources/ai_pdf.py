@@ -110,8 +110,8 @@ class AiPdfSource:
             diagnostics.append(
                 Diagnostic.warning(
                     "nesting-truncated",
-                    f"stopped {self.form_depth} Form XObjects deep; artwork nested "
-                    f"below that was not read and is in no artefact. Raise "
+                    f"stopped at Form XObject nesting depth {self.form_depth}; artwork "
+                    f"nested below that was not read and is in no artefact. Raise "
                     f"--form-depth to reach it",
                     data=(("form_depth", self.form_depth),),
                 )
@@ -120,7 +120,11 @@ class AiPdfSource:
         drill_paths = [p.path for p in paths if self.drill_layer in p.layers]
         circles = [c for c in (fit_circle(p) for p in drill_paths) if c is not None]
         if not circles:
-            raise _empty_layer(self.drill_layer, len(drill_paths))
+            raise _empty_layer(
+                self.drill_layer,
+                len(drill_paths),
+                truncated_at=self.form_depth if truncated else None,
+            )
 
         ignored = len(drill_paths) - len(circles)
         if ignored:
@@ -194,6 +198,15 @@ class AiPdfSource:
                 return names, paths, truncated
         except (OSError, pikepdf.PdfError) as exc:
             raise SourceError(f"cannot read {self.path}: {exc}") from exc
+        except RecursionError as exc:
+            # Reaching it is reported, never fatal: the operator's own
+            # --form-depth chose to walk this deep, and this is that choice
+            # meeting the interpreter's own limit, not one this reader invents.
+            raise SourceError(
+                f"{self.path}: form nesting exceeded the interpreter's own "
+                f"recursion limit at --form-depth {self.form_depth}; lower "
+                f"--form-depth"
+            ) from exc
 
     def _require_layer(self, layer: str, names: Sequence[str]) -> None:
         if layer not in names:
@@ -490,11 +503,14 @@ def _numbers(operands, count: int) -> list[float] | None:
         return None
 
 
-def _empty_layer(layer: str, path_count: int) -> EmptyLayerError:
+def _empty_layer(
+    layer: str, path_count: int, *, truncated_at: int | None = None
+) -> EmptyLayerError:
     """The right ``EmptyLayerError`` for why ``layer`` yielded no circle.
 
-    Zero paths means no painted artwork reached the stream; a positive count
-    means every path failed the circle predicate.
+    A positive count means every path failed the circle predicate. Zero paths
+    means no painted artwork reached the stream -- unless nesting was cut
+    first, in which case that, not a missing stroke, is named as the cause.
     """
     error = EmptyLayerError(layer)
     if path_count:
@@ -504,6 +520,15 @@ def _empty_layer(layer: str, path_count: int) -> EmptyLayerError:
                 "Only true circles are drillable: four cubic Beziers, equal radii, "
                 "kappa-consistent controls. Rounded rectangles, ellipses, compound "
                 "shapes and stray marks all read as non-circular here."
+            ),
+        )
+    elif truncated_at is not None:
+        error.args = (
+            (
+                f"layer {layer!r} contained no drillable geometry, but reading "
+                f"stopped at Form XObject nesting depth {truncated_at} before the "
+                f"whole file was walked: any artwork nested deeper than that was "
+                f"not read. Raise --form-depth to reach it"
             ),
         )
     return error

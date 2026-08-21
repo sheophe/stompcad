@@ -906,6 +906,77 @@ def test_the_fixture_reads_without_a_truncation_report(data):
     assert "nesting-truncated" not in [d.code for d in data.diagnostics]
 
 
+def test_a_form_depth_beyond_the_interpreters_own_limit_is_a_source_error(tmp_path):
+    """``--form-depth`` invents no ceiling of its own; the interpreter's does.
+
+    Reaching it must be reported through ``SourceError``, not an uncaught
+    ``RecursionError`` -- CLAUDE.md's exit-code contract has no arm for that.
+    """
+    with pytest.raises(SourceError):
+        nested(tmp_path, "far-too-deep.pdf", self_nesting_form(), depth=100_000)
+
+
+def test_no_circles_because_of_truncation_names_the_depth(tmp_path):
+    """Circles one level below a ``--form-depth 1`` cut: name the cut, not the stroke.
+
+    Two distinct forms, not the self-nesting one: Fm0 only forwards to Fm1,
+    which alone draws a circle, so nothing paints until the reader is one
+    level past what ``--form-depth 1`` allows.
+    """
+    pdf = pikepdf.new()
+    ocg_bg = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String("Background")))
+    ocg_drill = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String("Drill")))
+    pdf.Root.OCProperties = pdf.make_indirect(
+        pikepdf.Dictionary(
+            OCGs=pikepdf.Array([ocg_bg, ocg_drill]),
+            D=pikepdf.Dictionary(
+                Order=pikepdf.Array([ocg_bg, ocg_drill]), ON=pikepdf.Array([ocg_bg, ocg_drill])
+            ),
+        )
+    )
+    properties = pikepdf.Dictionary(MC0=ocg_bg, MC1=ocg_drill)
+
+    fm1 = pdf.make_stream(circle_ops(20, 20, 5).encode())
+    fm1.Type = pikepdf.Name.XObject
+    fm1.Subtype = pikepdf.Name.Form
+    fm1.BBox = pikepdf.Array([0, 0, 10000, 10000])
+
+    fm0 = pdf.make_stream(b"/Fm1 Do")
+    fm0.Type = pikepdf.Name.XObject
+    fm0.Subtype = pikepdf.Name.Form
+    fm0.BBox = pikepdf.Array([0, 0, 10000, 10000])
+    fm0.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm1=pdf.make_indirect(fm1)))
+
+    resources = pikepdf.Dictionary(
+        Properties=properties, XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(fm0))
+    )
+    body = (
+        "/OC /MC0 BDC 0 0 m 300 0 l 300 200 l 0 200 l h S EMC "
+        "/OC /MC1 BDC /Fm0 Do EMC"
+    )
+    page = pikepdf.Page(
+        pdf.make_indirect(
+            pikepdf.Dictionary(
+                Type=pikepdf.Name.Page,
+                MediaBox=pikepdf.Array([0, 0, 400, 400]),
+                Resources=resources,
+                Contents=pdf.make_indirect(pdf.make_stream(body.encode())),
+            )
+        )
+    )
+    pdf.pages.append(page)
+    path = tmp_path / "one-below.pdf"
+    pdf.save(path)
+
+    with pytest.raises(EmptyLayerError) as excinfo:
+        AiPdfSource(path, form_depth=1).read()
+
+    message = str(excinfo.value)
+    assert "1" in message
+    assert "Form XObject" in message and "depth" in message
+    assert "give the drill circles a stroke" not in message
+
+
 @pytest.mark.parametrize("bad", [0, -1, 1.5, True])
 def test_a_depth_below_one_level_is_refused(bad):
     """``True`` is an ``int`` to Python and is not a depth anybody typed."""

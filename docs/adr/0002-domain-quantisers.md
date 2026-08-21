@@ -99,3 +99,9 @@ PDF.
 A panel whose holes reach past its own outline still produces every requested
 artifact and exits 1. An operator who wants that refused rather than reported
 supplies a case model, whose face check is an error.
+
+Containment is checked against the identified footprint, so it inherits the enclosure
+quantiser's inclusive 1.5 mm per-axis tolerance: a hole within half that distance of
+the drawn edge may be reported or not, depending on which catalogue footprint the
+outline snapped to. Checking the measured outline instead would report against a
+boundary no artifact states.

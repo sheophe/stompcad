@@ -21,6 +21,7 @@ from stompdrill.pipeline import (
     SnapPositions,
 )
 from stompdrill.quantise import RawDrillData, quantise
+from stompdrill.sources import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
 from stompmodel.protocols import Pipeline, Stage
@@ -877,6 +878,9 @@ def test_the_flow_is_reachable_from_the_package_root():
     assert stompdrill.DrillStandard is DrillStandard
     for name in ("DRILL_STANDARDS", "DEFAULT_STANDARD", "DrillStandard"):
         assert name in stompdrill.__all__
+
+    assert stompdrill.DEFAULT_FORM_DEPTH == DEFAULT_FORM_DEPTH
+    assert "DEFAULT_FORM_DEPTH" in stompdrill.__all__
 
 
 def test_the_generative_bands_stay_in_the_subpackage():

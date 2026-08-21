@@ -722,8 +722,9 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
-    # part number in no catalogue and an unloadable case model are all usage
-    # errors, not diagnostics.
+    # part number in no catalogue, an unloadable case model and a form depth
+    # below one level are all usage errors, not diagnostics. The last of these
+    # is validated inside read_source, which builds the source before reading it.
     args.case_model_object = build_case_model(args)
     settings = settings_from(args)
     # Resolve every format before touching the input file: an unknown format is
