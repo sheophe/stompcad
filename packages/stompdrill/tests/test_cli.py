@@ -818,7 +818,8 @@ def test_library_errors_are_reported_cleanly(fake_source, capsys):
     fake_source(LayerNotFoundError("Drill", ["Background", "Graphics"]))
     assert cli.main([str(FIXTURE)]) == 3
     err = capsys.readouterr().err
-    assert "Drill" in err and "Background" in err
+    assert "Drill" in err, "the error omitted the missing layer name"
+    assert "Background" in err, "the error omitted an available layer name"
     assert "Traceback" not in err
 
 
@@ -886,7 +887,8 @@ def test_a_warning_still_gets_its_artifacts(fake_source, tmp_path, capsys):
     doc = tmp_path / "panel.txt"
 
     assert cli.main([str(FIXTURE), "--emit", f"json={doc}"]) == 1
-    assert doc.exists() and doc.read_text().strip()
+    assert doc.exists(), "the json artefact was not written despite a warnings-only exit"
+    assert doc.read_text().strip(), "the json artefact was written but is empty"
 
 
 def test_every_target_is_written_on_the_happy_path(fake_source, tmp_path, capsys):
@@ -934,14 +936,19 @@ def test_report_shows_source_holes_tools_and_diagnostics(fake_source, capsys):
     out = capsys.readouterr().out
 
     assert "fake.ai" in out
-    assert "Drill" in out and "Background" in out
+    assert "Drill" in out, "the report omitted the drill layer name"
+    assert "Background" in out, "the report omitted the reference layer name"
     # 100 × 50, not the 99.6 × 50.4 the artwork measured: the enclosure is
     # identified on every panel, and the report states the catalogue's own
     # figures because those are what the holes are positioned against.
-    assert "100.000" in out and "50.000" in out
-    assert "7.000" in out and "5.000" in out  # hole diameters
-    assert "T1" in out and "T2" in out  # tool summary
-    assert "something" in out and "watch out" in out
+    assert "100.000" in out, "the report omitted the catalogue width"
+    assert "50.000" in out, "the report omitted the catalogue height"
+    assert "7.000" in out, "the report omitted the first hole diameter"  # hole diameters
+    assert "5.000" in out, "the report omitted the second hole diameter"  # hole diameters
+    assert "T1" in out, "the report omitted the first tool"  # tool summary
+    assert "T2" in out, "the report omitted the second tool"  # tool summary
+    assert "something" in out, "the report omitted the diagnostic code"
+    assert "watch out" in out, "the report omitted the diagnostic message"
 
 
 def report_diagnostic_groups(out: str) -> dict[str, list[str]]:
@@ -978,7 +985,9 @@ def test_each_finding_is_printed_once_under_its_own_severity(fake_source, capsys
 
     out = capsys.readouterr().out
     assert "DIAGNOSTICS (3)" in out
-    assert "  error (1)" in out and "  warning (1)" in out and "  info (1)" in out
+    assert "  error (1)" in out, "the diagnostics header omitted the error count"
+    assert "  warning (1)" in out, "the diagnostics header omitted the warning count"
+    assert "  info (1)" in out, "the diagnostics header omitted the info count"
     assert report_diagnostic_groups(out) == {
         "error": ["unknown-diameter"],
         "warning": ["off-grid"],
@@ -1503,7 +1512,9 @@ def test_end_to_end_on_the_fixture(tmp_path, capsys):
     # one duplicate-hole warning, nothing worse
     assert code == 1
 
-    assert drl.exists() and svg.exists() and doc.exists()
+    assert drl.exists(), "the excellon artefact was not written"
+    assert svg.exists(), "the drawing-svg artefact was not written"
+    assert doc.exists(), "the json artefact was not written"
     assert drl.read_text().startswith("M48")
     ET.fromstring(svg.read_text())  # parses as XML
 
@@ -1524,7 +1535,8 @@ def test_end_to_end_on_the_fixture(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "duplicate-hole" in out
-    assert str(drl) in out and str(svg) in out
+    assert str(drl) in out, "the report omitted the excellon path"
+    assert str(svg) in out, "the report omitted the drawing-svg path"
 
 
 @pytest.mark.skipif(not FIXTURE.exists(), reason="fixture missing")
@@ -1565,7 +1577,8 @@ def test_the_fixture_panel_undeclared_is_refused_and_writes_nothing(tmp_path, ca
 
     out = capsys.readouterr().out
     assert "[ambiguous-enclosure]" in out
-    assert "1590BS" in out and "1590B2" in out
+    assert "1590BS" in out, "the ambiguous-enclosure report omitted the 1590BS candidate"
+    assert "1590B2" in out, "the ambiguous-enclosure report omitted the 1590B2 candidate"
     assert not doc.exists(), "a document naming one of two enclosures reached the disk"
 
 
@@ -1859,7 +1872,8 @@ def test_a_clean_run_writes_both_artefacts(tmp_path):
     ])
 
     assert code == 0
-    assert drl.exists() and stp.exists()
+    assert drl.exists(), "the excellon artefact was not written"
+    assert stp.exists(), "the step artefact was not written"
 
 
 @pytest.mark.hammond

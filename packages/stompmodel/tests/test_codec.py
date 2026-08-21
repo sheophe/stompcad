@@ -598,7 +598,8 @@ def test_document_rebuilds_an_identical_drilldata(build) -> None:
 
     assert rebuilt == data
     assert rebuilt.diagnostics[1].location_nm == (-40_000_000, 18_000_000)
-    assert run is not None and run.get("sizes_nm") == (5_000_000, 7_000_000)
+    assert run is not None, "the snap-diameters run did not survive the round trip"
+    assert run.get("sizes_nm") == (5_000_000, 7_000_000)
 
 
 def test_the_locations_in_a_rebuilt_payload_are_tuples_again() -> None:

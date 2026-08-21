@@ -111,7 +111,8 @@ def test_layers_can_be_listed_without_reading_geometry():
 
 def test_repr_states_both_layer_choices():
     text = repr(AiPdfSource(FIXTURE, drill_layer="D", reference_layer="B"))
-    assert "drill_layer='D'" in text and "reference_layer='B'" in text
+    assert "drill_layer='D'" in text, "repr omitted the drill layer choice"
+    assert "reference_layer='B'" in text, "repr omitted the reference layer choice"
 
 
 def test_source_info_records_every_layer_found(data):
@@ -973,7 +974,8 @@ def test_no_circles_because_of_truncation_names_the_depth(tmp_path):
 
     message = str(excinfo.value)
     assert "1" in message
-    assert "Form XObject" in message and "depth" in message
+    assert "Form XObject" in message, "the message did not name the refused construct"
+    assert "depth" in message, "the message did not name the limit that was hit"
     assert "give the drill circles a stroke" not in message
 
 

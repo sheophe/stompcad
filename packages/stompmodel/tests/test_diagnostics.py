@@ -30,7 +30,8 @@ def test_severities_order_by_how_much_they_matter() -> None:
     off that — so the order is a contract, not an implementation detail."""
     assert Severity.INFO < Severity.WARNING < Severity.ERROR
     assert Severity.ERROR > Severity.WARNING > Severity.INFO
-    assert Severity.WARNING >= Severity.WARNING and Severity.WARNING <= Severity.WARNING
+    assert Severity.WARNING >= Severity.WARNING
+    assert Severity.WARNING <= Severity.WARNING
     assert max((Severity.INFO, Severity.ERROR, Severity.WARNING)) is Severity.ERROR
 
 

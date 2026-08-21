@@ -159,7 +159,8 @@ class TestSnapPositions:
         message = diagnostics[0].message
 
         assert "hole 6" not in message
-        assert "-39.9000" in message and "-40.0000" in message
+        assert "-39.9000" in message, "the message omitted the measured x"
+        assert "-40.0000" in message, "the message omitted the snapped x"
 
     def test_an_off_grid_finding_names_a_place_not_a_number(self):
         """The number is assigned by a later stage, so it cannot be cited."""
@@ -168,7 +169,8 @@ class TestSnapPositions:
 
         assert diag.get("hole_index") is None
         assert "hole 1" not in diag.message
-        assert "-40.000" in diag.message and "18.000" in diag.message
+        assert "-40.000" in diag.message, "the message omitted the snapped x"
+        assert "18.000" in diag.message, "the message omitted the snapped y"
 
     def test_regression_grid_half_moves_the_five_mm_row_a_quarter_millimetre(self):
         """At ``--grid 0.5``, the two ⌀5 holes go off-grid."""
@@ -238,7 +240,8 @@ class TestTheGridIsAWholeNumberOfMicrons:
         assert diag.severity is Severity.WARNING
         assert diag.get("requested_grid_nm") == 500
         assert diag.get("grid_nm") == 1_000
-        assert "0.000500" in diag.message and "0.001" in diag.message
+        assert "0.000500" in diag.message, "the message omitted the requested pitch"
+        assert "0.001" in diag.message, "the message omitted the pitch actually used"
 
     def test_a_grid_at_or_above_a_micron_raises_nothing(self):
         assert SnapPositions(Nanometre(1_000)).diagnostics == ()

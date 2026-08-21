@@ -241,8 +241,10 @@ def extents(root: ET.Element) -> list[tuple[str, float, float, float, float]]:
 def assert_within(box: tuple[float, float, float, float], group: ET.Element, what: str) -> None:
     x0, y0, x1, y1 = box
     for label, bx0, by0, bx1, by1 in extents(group):
-        assert x0 - 0.6 <= bx0 and bx1 <= x1 + 0.6, f"{label!r} escapes {what} sideways"
-        assert y0 - 0.6 <= by0 and by1 <= y1 + 0.6, f"{label!r} escapes {what} vertically"
+        assert x0 - 0.6 <= bx0, f"{label!r} escapes {what} on the left"
+        assert bx1 <= x1 + 0.6, f"{label!r} escapes {what} on the right"
+        assert y0 - 0.6 <= by0, f"{label!r} escapes {what} on the bottom"
+        assert by1 <= y1 + 0.6, f"{label!r} escapes {what} on the top"
 
 
 def drawn_points(root: ET.Element) -> list[tuple[str, float, float]]:
@@ -756,7 +758,8 @@ def test_centrelines_are_chain_dashed_and_cross_the_origin(panel: DrillData):
     assert len(lines) == 2
     horizontal = [ln for ln in lines if num(ln, "y1") == num(ln, "y2")]
     vertical = [ln for ln in lines if num(ln, "x1") == num(ln, "x2")]
-    assert len(horizontal) == 1 and len(vertical) == 1
+    assert len(horizontal) == 1, "expected exactly one horizontal dimension line"
+    assert len(vertical) == 1, "expected exactly one vertical dimension line"
     assert num(horizontal[0], "y1") == pytest.approx(oy)
     assert num(vertical[0], "x1") == pytest.approx(ox)
     for line in lines:
@@ -1091,8 +1094,10 @@ def test_schedule_has_a_per_tool_summary_with_quantities(root: ET.Element):
     summary = [text_of(e) for e in by_class(root, "sched-summary", "text")]
     assert len(summary) == 2
     joined = " | ".join(summary)
-    assert "T1" in joined and "T2" in joined
-    assert "5.00" in joined and "7.00" in joined
+    assert "T1" in joined, "the tool summary omitted T1"
+    assert "T2" in joined, "the tool summary omitted T2"
+    assert "5.00" in joined, "the tool summary omitted the 5.00 mm diameter"
+    assert "7.00" in joined, "the tool summary omitted the 7.00 mm diameter"
     assert "QTY 2" in summary[0], "first tool's quantity, ascending by size"
     assert "QTY 5" in summary[1], "second tool's quantity"
 
@@ -1165,7 +1170,8 @@ def test_schedule_diameters_are_spelled_the_way_the_drill_standard_spells_them()
 
     assert _sched_diameters(root) == ['⌀1/8"', '⌀9/32"']
     summary = " | ".join(e.text or "" for e in by_class(root, "sched-summary", "text"))
-    assert '⌀1/8"' in summary and '⌀9/32"' in summary
+    assert '⌀1/8"' in summary, "the schedule summary omitted the first diameter"
+    assert '⌀9/32"' in summary, "the schedule summary omitted the second diameter"
 
 
 def test_schedule_diameters_use_the_standard_that_actually_ran():
@@ -1258,7 +1264,8 @@ def test_the_title_block_states_a_grid_of_0_1_when_that_is_what_ran():
     assert "GRID 0.100 mm" in text
     # Scoped to the grid line: the title block also carries SCALE, so a bare
     # substring check would be pinned to layout fitting rather than to the grid.
-    assert "GRID 0.500 mm" not in text and "GRID 0.250 mm" not in text
+    assert "GRID 0.500 mm" not in text, "a 0.500 mm grid pitch leaked into the title block"
+    assert "GRID 0.250 mm" not in text, "a 0.250 mm grid pitch leaked into the title block"
 
 
 def test_the_title_block_states_the_effective_pitch_not_the_one_that_was_asked_for():
@@ -1296,7 +1303,8 @@ def test_a_recorded_grid_that_is_not_a_single_positive_pitch_is_not_a_grid(recor
     )
     text = _title_block_text(ET.fromstring(DrawingSvgEmitter().emit(data)))
     assert "GRID NOT RECORDED" in text
-    assert "0.250" not in text and "0.000" not in text
+    assert "0.250" not in text, "the grid pitch appeared despite grid-not-recorded"
+    assert "0.000" not in text, "a zero grid pitch appeared despite grid-not-recorded"
 
 
 # -- the enclosure the panel was identified as ------------------------------
@@ -1589,8 +1597,10 @@ def test_the_notes_overflow_marker_stays_inside_the_notes_box():
 
     marker = by_class(root, "note-overflow", "text")[0]
     tx0, ty0, tx1, ty1 = text_box(marker)
-    assert nx0 - 0.6 <= tx0 and tx1 <= nx1 + 0.6
-    assert ny0 - 0.6 <= ty0 and ty1 <= ny1 + 0.6
+    assert nx0 - 0.6 <= tx0, "the overflow marker escapes the notes box on the left"
+    assert tx1 <= nx1 + 0.6, "the overflow marker escapes the notes box on the right"
+    assert ny0 - 0.6 <= ty0, "the overflow marker escapes the notes box on the bottom"
+    assert ty1 <= ny1 + 0.6, "the overflow marker escapes the notes box on the top"
 
 
 def test_the_schedule_says_how_many_holes_it_could_not_list():
@@ -1687,8 +1697,10 @@ def test_layout_content_extent_stays_inside_the_drawing_area(panel: DrillData):
     ax0, ay0, ax1, ay1 = layout.area
     assert cx1 - cx0 == pytest.approx(2 * layout.half_width * layout.scale)
     assert cy1 - cy0 == pytest.approx(2 * layout.half_height * layout.scale)
-    assert ax0 < cx0 and cx1 < ax1
-    assert ay0 < cy0 and cy1 < ay1
+    assert ax0 < cx0, "content reaches the drawing area's left edge"
+    assert cx1 < ax1, "content reaches the drawing area's right edge"
+    assert ay0 < cy0, "content reaches the drawing area's bottom edge"
+    assert cy1 < ay1, "content reaches the drawing area's top edge"
 
     # The outline is the widest thing on this panel, so it is what the fitted
     # scale has to be fitted around. Leave it out of the extents and the sheet
@@ -1857,8 +1869,10 @@ def test_many_holes_still_fit_the_schedule_and_the_sheet():
     x0, y0, x1, y1 = emitter.layout(data).border
     for element in walk(root, "text"):
         tx0, ty0, tx1, ty1 = text_box(element)
-        assert x0 - 0.6 <= tx0 and tx1 <= x1 + 0.6
-        assert y0 - 0.6 <= ty0 and ty1 <= y1 + 0.6
+        assert x0 - 0.6 <= tx0, "text escapes the border on the left"
+        assert tx1 <= x1 + 0.6, "text escapes the border on the right"
+        assert y0 - 0.6 <= ty0, "text escapes the border on the bottom"
+        assert ty1 <= y1 + 0.6, "text escapes the border on the top"
     for name, px, py in drawn_points(root):
         assert x0 - 0.6 <= px <= x1 + 0.6
         assert y0 - 0.6 <= py <= y1 + 0.6

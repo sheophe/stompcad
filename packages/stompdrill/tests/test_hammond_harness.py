@@ -33,7 +33,8 @@ def test_the_boss_probe_lies_inside_the_play_area_rectangle():
     from tests.hammond import BB_PROBES
 
     x, y = BB_PROBES["boss"]
-    assert abs(x) < 55.33 and abs(y) < 42.58
+    assert abs(x) < 55.33, "the boss probe's x lies outside the play area rectangle"
+    assert abs(y) < 42.58, "the boss probe's y lies outside the play area rectangle"
 
 
 def test_the_boss_probe_lies_within_a_boss_disc():

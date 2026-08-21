@@ -557,7 +557,8 @@ class TestFitCircle:
         """Isolates the equidistant-anchor guard."""
         oval = kappa_correct_path(((6.0, 0.0), (0.0, 5.0), (-6.0, 0.0), (0.0, -5.0)))
         pairs = _cubics(oval)
-        assert pairs is not None and len(pairs) == 4
+        assert pairs is not None, "_cubics found no cubic pairs at all"
+        assert len(pairs) == 4, "_cubics did not find exactly four cubic pairs"
 
         # everything except the anchor radii sees a circle of radius 5.5
         assert math.dist(pairs[0][0], pairs[-1][1].end) == pytest.approx(0.0, abs=1e-9)
@@ -576,7 +577,8 @@ class TestFitCircle:
             + (CurveTo(last.c1, (last.c2[0] + 1.2, last.c2[1]), (last.end[0] + 1.2, last.end[1])),)
         )
         pairs = _cubics(spiral)
-        assert pairs is not None and len(pairs) == 4
+        assert pairs is not None, "_cubics found no cubic pairs at all"
+        assert len(pairs) == 4, "_cubics did not find exactly four cubic pairs"
 
         # the anchors are still a circle's, and the controls are still a circle's
         assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([5.0] * 4)
@@ -592,7 +594,8 @@ class TestFitCircle:
             ((5.0, 0.0), (0.0, 5.0), (-5.0, 0.0), (0.0, -5.0)), tilt=20.0
         )
         pairs = _cubics(tilted)
-        assert pairs is not None and len(pairs) == 4
+        assert pairs is not None, "_cubics found no cubic pairs at all"
+        assert len(pairs) == 4, "_cubics did not find exactly four cubic pairs"
 
         # anchors untouched, so the guards before the kappa check see a circle
         assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([5.0] * 4)
@@ -617,7 +620,8 @@ class TestFitCircle:
         d = 10.0 / math.sqrt(2.0)
         blob = kappa_correct_path(((10.0, 0.0), (d, d), (-10.0, 0.0), (-d, -d)))
         pairs = _cubics(blob)
-        assert pairs is not None and len(pairs) == 4
+        assert pairs is not None, "_cubics found no cubic pairs at all"
+        assert len(pairs) == 4, "_cubics did not find exactly four cubic pairs"
 
         # every guard except the quarter turn sees a circle of radius 10
         assert [math.dist((0.0, 0.0), start) for start, _ in pairs] == pytest.approx([10.0] * 4)
@@ -636,7 +640,8 @@ class TestFitCircle:
         colinear spokes first, which is why the call is direct.
         """
         pairs = _cubics(kappa_correct_path(((5.0, 0.0), (-5.0, 0.0), (0.0, 5.0), (0.0, -5.0))))
-        assert pairs is not None and len(pairs) == 4
+        assert pairs is not None, "_cubics found no cubic pairs at all"
+        assert len(pairs) == 4, "_cubics did not find exactly four cubic pairs"
         a, b = pairs[0][0], pairs[1][0]
         assert a[0] * b[1] - a[1] * b[0] == 0.0
         assert not _quarter_turns([start for start, _ in pairs], (0.0, 0.0), 5.0, 0.05)
@@ -656,7 +661,8 @@ class TestFitCircle:
         """
         path = cusp_path(0.0, 0.0, 5.0, outward=outward)
         pairs = _cubics(path)
-        assert pairs is not None and len(pairs) == 4
+        assert pairs is not None, "_cubics found no cubic pairs at all"
+        assert len(pairs) == 4, "_cubics did not find exactly four cubic pairs"
         anchors = [start for start, _ in pairs]
         assert _quarter_turns(anchors, (0.0, 0.0), 5.0, 3.0)
         for anchor, offset in zip(anchors, _offset_vectors(path)[::2]):
@@ -708,7 +714,8 @@ class TestFitCircle:
         """
         path = circle_path(0.0, 0.0, 1.0, kappa=KAPPA + 0.25)
         start, curve = path.segments[0], path.segments[1]
-        assert isinstance(start, MoveTo) and isinstance(curve, CurveTo)
+        assert isinstance(start, MoveTo), "the path's first segment is not a MoveTo"
+        assert isinstance(curve, CurveTo), "the path's second segment is not a CurveTo"
         ox, oy = curve.c1[0] - start.point[0], curve.c1[1] - start.point[1]
         assert abs(math.hypot(ox, oy) - KAPPA * 1.0) == 0.25  # exactly the slack, not near it
 
