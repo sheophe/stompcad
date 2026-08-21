@@ -1,0 +1,157 @@
+{
+  "outline_nm": [
+    112400000,
+    60500000
+  ],
+  "enclosure": {
+    "family": "Hammond 1590",
+    "candidates": [
+      "1590B",
+      "1590B2"
+    ],
+    "rotated": false,
+    "selected_part": "1590B"
+  },
+  "layers": {
+    "drill": "Drill",
+    "reference": "Background",
+    "found": [
+      "Background",
+      "Drill"
+    ]
+  },
+  "tools": [
+    [
+      5000000,
+      1
+    ],
+    [
+      7000000,
+      2
+    ]
+  ],
+  "holes": [
+    {
+      "index": 1,
+      "x_nm": -19000000,
+      "y_nm": -18750000,
+      "diameter_nm": 5000000
+    },
+    {
+      "index": 2,
+      "x_nm": 19000000,
+      "y_nm": -18750000,
+      "diameter_nm": 5000000
+    },
+    {
+      "index": 3,
+      "x_nm": -40000000,
+      "y_nm": 18000000,
+      "diameter_nm": 7000000
+    },
+    {
+      "index": 4,
+      "x_nm": -20000000,
+      "y_nm": 18000000,
+      "diameter_nm": 7000000
+    },
+    {
+      "index": 5,
+      "x_nm": 0,
+      "y_nm": 18000000,
+      "diameter_nm": 7000000
+    },
+    {
+      "index": 6,
+      "x_nm": 20000000,
+      "y_nm": 18000000,
+      "diameter_nm": 7000000
+    },
+    {
+      "index": 7,
+      "x_nm": 40000000,
+      "y_nm": 18000000,
+      "diameter_nm": 7000000
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "duplicate-hole",
+      "severity": "WARNING",
+      "location_nm": [
+        -40000000,
+        18000000
+      ]
+    }
+  ],
+  "processing": [
+    {
+      "name": "identify-enclosure",
+      "parameters": [
+        [
+          "tolerance_nm",
+          1500000
+        ],
+        [
+          "catalogue",
+          "Hammond 1590"
+        ],
+        [
+          "expected_part",
+          "1590B"
+        ]
+      ]
+    },
+    {
+      "name": "snap-diameters",
+      "parameters": [
+        [
+          "standard",
+          "metric"
+        ],
+        [
+          "tolerance_nm",
+          250000
+        ],
+        [
+          "size_count",
+          183
+        ]
+      ]
+    },
+    {
+      "name": "snap",
+      "parameters": [
+        [
+          "grid_nm",
+          250000
+        ],
+        [
+          "warn_over_nm",
+          62500
+        ]
+      ]
+    },
+    {
+      "name": "deduplicate",
+      "parameters": []
+    },
+    {
+      "name": "review-grid-ties",
+      "parameters": []
+    },
+    {
+      "name": "route",
+      "parameters": [
+        [
+          "key",
+          "default"
+        ]
+      ]
+    },
+    {
+      "name": "check-outline-containment",
+      "parameters": []
+    }
+  ]
+}
