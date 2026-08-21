@@ -22,7 +22,7 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.model import DrillData, Hole, RawHole, RawOutline, ReferenceOutline, SourceInfo
-from stompmodel.protocols import Pipeline
+from stompmodel.protocols import Payload, Pipeline
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import FakeCase
 
@@ -41,10 +41,10 @@ def shipped_pipeline(model: object | None = None) -> Pipeline[DrillData]:
     """The composition the CLI builds, read from it rather than copied here.
 
     A copy of the stage list drifts the moment a stage is inserted, and the
-    invariant is only worth what the pipeline under it is. ``build_pipeline``
-    reads one attribute off the namespace and touches nothing else, so the
-    shipped composition costs a test no argv and no I/O. ``test_cli`` owns the
-    order itself; this module only consumes it.
+    invariant is only worth what the pipeline under it is. Parsing the real
+    defaults, rather than hand-building a namespace carrying the one attribute
+    ``build_pipeline`` happens to read today, survives it growing a dependency
+    on another flag. ``test_cli`` owns the order; this module consumes it.
     """
     args = build_parser().parse_args(["panel.ai"])
     args.case_model_object = model
@@ -53,7 +53,7 @@ def shipped_pipeline(model: object | None = None) -> Pipeline[DrillData]:
 
 def artifacts(
     raw: RawDrillData, case: str, pipeline: Pipeline[DrillData]
-) -> dict[str, object]:
+) -> dict[str, Payload]:
     """Quantise, fold, and emit -- through ``Pipeline.run`` as the CLI does, so
     the provenance records it appends are certified alongside the geometry.
     """
@@ -68,15 +68,21 @@ def artifacts(
     return {name: get_emitter(name)().emit(data) for name in FORMATS}
 
 
+def codes(emitted: dict[str, Payload]) -> list[str]:
+    """The diagnostic codes the emitted document carries."""
+    return [d["code"] for d in json.loads(emitted["json"])["diagnostics"]]
+
+
 def assert_permutation_stable(
     raw: RawDrillData, case: str, pipeline: Pipeline[DrillData], seed: int
-) -> dict[str, object]:
+) -> dict[str, Payload]:
     """Emit the panel, then 25 shuffles of it, and demand the same bytes.
 
-    Returns the panel's own artifacts so a caller can additionally assert
-    that the stage under test did something observable: stability alone
-    cannot tell a stage's finding apart from a pipeline missing the stage
-    entirely, since both hold just as still under a shuffle.
+    Returns the panel's own artifacts because stability is not enough on its
+    own: it cannot tell a stage's finding apart from a composition missing
+    that stage, since both hold just as still under a shuffle. Each stage
+    therefore has a caller here naming, as a literal, something only it
+    produces -- read off the pipeline that would be the same list twice.
     """
     expected = artifacts(raw, case, pipeline)
     rng = random.Random(seed)
@@ -84,6 +90,7 @@ def assert_permutation_stable(
         shuffled = list(raw.holes)
         rng.shuffle(shuffled)
         assert artifacts(replace(raw, holes=tuple(shuffled)), case, pipeline) == expected
+
     return expected
 
 
@@ -140,7 +147,9 @@ def test_a_panel_with_diagnostics_and_a_duplicate_is_permutation_stable():
     per-hole diagnostic and a coincident pair. Must fail if the sort
     ``quantise()`` applies to ``raw.holes`` on entry is removed.
     """
-    assert_permutation_stable(_synthetic_raw(), "1590B", shipped_pipeline(), seed=11)
+    expected = assert_permutation_stable(_synthetic_raw(), "1590B", shipped_pipeline(), seed=11)
+
+    assert "duplicate-hole" in codes(expected), "the coincident pair was never collapsed"
 
 
 def _breakout_raw() -> RawDrillData:
@@ -164,8 +173,32 @@ def test_a_panel_whose_hole_breaks_out_of_the_outline_is_permutation_stable():
     """
     expected = assert_permutation_stable(_breakout_raw(), "1590B", shipped_pipeline(), seed=13)
 
-    codes = [d["code"] for d in json.loads(expected["json"])["diagnostics"]]
-    assert "hole-outside-outline" in codes, "the finding this stage exists to raise never fired"
+    assert "hole-outside-outline" in codes(expected), "the stage's finding never fired"
+
+
+def _tied_raw() -> RawDrillData:
+    """``_synthetic_raw`` with two holes sat exactly halfway between grid points.
+
+    Nothing else here ties, so without this the third stage is only ever
+    certified silent. At 0.25 mm pitch, x = ±20.125 is exactly half a pitch
+    out, and two of them make the order of ``tied_locations`` observable.
+    """
+    base = _synthetic_raw()
+    tied = (
+        RawHole(Millimetre(20.125), Millimetre(18.0), Millimetre(5.0)),
+        RawHole(Millimetre(-20.125), Millimetre(18.0), Millimetre(5.0)),
+    )
+    return replace(base, holes=base.holes + tied)
+
+
+def test_a_panel_whose_holes_sit_on_a_grid_tie_is_permutation_stable():
+    """``ReviewGridTies`` reports every tied place in one finding, in hole
+    order, so the list it carries is a third route by which arrival order
+    could reach the bytes, and it must not.
+    """
+    expected = assert_permutation_stable(_tied_raw(), "1590B", shipped_pipeline(), seed=17)
+
+    assert "grid-ambiguous" in codes(expected), "the stage's finding never fired"
 
 
 def holes_at_one_point() -> tuple[Hole, Hole]:
