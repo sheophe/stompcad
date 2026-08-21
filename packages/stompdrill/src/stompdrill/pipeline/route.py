@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from itertools import pairwise
 from typing import TYPE_CHECKING, ClassVar
 
 from stompmodel.model import DrillData, Hole, StageRun
@@ -53,33 +52,39 @@ def _nearest_neighbour(block: list[Hole]) -> list[Hole]:
     return route
 
 
-def _path_length(route: list[Hole]) -> float:
-    """Sum of leg lengths. Real distance, because a reversal changes legs
-    unequally and squared lengths would not compare correctly.
+def _leg(a: Hole, b: Hole) -> float:
+    """One leg's real length. Squared lengths would not compare correctly,
+    because a reversal changes legs unequally.
 
-    Precondition: panel-sized nanometres. A squared separation past ``float``'s
-    range raises ``OverflowError``; unguarded for the same reason
+    Precondition: panel-sized nanometres. A squared separation past
+    ``float``'s range raises ``OverflowError``; unguarded for the same reason
     ``nm_from_mm`` is.
     """
-    return sum(_distance_sq(a, b) ** 0.5 for a, b in pairwise(route))
+    return _distance_sq(a, b) ** 0.5
 
 
 def _two_opt(route: list[Hole]) -> list[Hole]:
-    """Reverse the first segment that shortens the path, keeping the start fixed."""
+    """Reverse the first segment that shortens the path, keeping the start fixed.
+
+    A reversal changes exactly two edges, so its effect is a four-term
+    difference rather than a rescored route: the traversal, the
+    first-improving rule, the fixed start and the tie-break are all
+    unchanged, and the cost per block goes cubic to quadratic. See ADR-0006,
+    which pins the algorithm and not only its output.
+
+    Mutates its argument in place; ``_routed``'s fresh list is the only caller.
+    """
     improved = True
     while improved:
         improved = False
-        # The route's own length is loop-invariant except when an accepted
-        # candidate replaces it, so it is recomputed there and nowhere else —
-        # not on every candidate the inner loop merely rejects.
-        current_length = _path_length(route)
         for i in range(1, len(route)):
             for j in range(i + 1, len(route)):
-                candidate = route[:i] + route[i : j + 1][::-1] + route[j + 1 :]
-                candidate_length = _path_length(candidate)
-                if candidate_length < current_length - 1e-9:
-                    route, improved = candidate, True
-                    current_length = candidate_length
+                delta = _leg(route[i - 1], route[j]) - _leg(route[i - 1], route[i])
+                if j + 1 < len(route):
+                    delta += _leg(route[i], route[j + 1]) - _leg(route[j], route[j + 1])
+                if delta < -1e-9:
+                    route[i : j + 1] = route[i : j + 1][::-1]
+                    improved = True
     return route
 
 

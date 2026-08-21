@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import itertools
+import random
+import time
 
 import pytest
 
@@ -168,7 +170,7 @@ def test_a_separation_no_panel_could_have_raises_rather_than_saturating():
     Constructed directly rather than through ``from_measurement``, whose
     millimetre provenance would overflow first and prove the wrong thing.
     """
-    from stompdrill.pipeline.route import _path_length
+    from stompdrill.pipeline.route import _leg
     from stompmodel.model import Hole, RawHole
     from stompmodel.units import Millimetre
 
@@ -178,7 +180,34 @@ def test_a_separation_no_panel_could_have_raises_rather_than_saturating():
     def far(exponent: int) -> Hole:
         return Hole(Nanometre(10**exponent), Nanometre(0), Nanometre(7_000_000), raw)
 
-    assert _path_length([origin, far(150)]) == 1e150
+    assert _leg(origin, far(150)) == 1e150
 
     with pytest.raises(OverflowError):
-        _path_length([origin, far(160)])
+        _leg(origin, far(160))
+
+
+def test_a_realistic_panel_routes_without_the_cubic_term() -> None:
+    """Three hundred holes in one tool block, the size the cubic was visible at.
+
+    Measured on this machine: the rebuild-and-rescore form took 11.95 s here
+    and 4.27 s at n=200; the four-term delta takes 0.17 s. The bound sits an
+    order of magnitude above the delta and well under the cubic, so it
+    catches a regression rather than machine noise.
+    """
+    rng = random.Random(20260821)
+    holes = tuple(
+        at(
+            rng.randrange(-50_000_000, 50_000_000, 10_000),
+            rng.randrange(-25_000_000, 25_000_000, 10_000),
+            5_000_000,
+        )
+        for _ in range(300)
+    )
+
+    started = time.perf_counter()
+    routed = RouteHoles().apply(panel(*holes))
+    elapsed = time.perf_counter() - started
+
+    assert len(routed.holes) == 300
+    assert [index for index, _ in routed.numbered()] == list(range(1, 301))
+    assert elapsed < 2.0, f"routing 300 holes took {elapsed:.2f}s; the cubic form took 11.95 s"
