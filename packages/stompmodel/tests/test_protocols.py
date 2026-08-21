@@ -8,7 +8,7 @@ from typing import ClassVar
 import pytest
 
 from stompmodel.model import StageRun
-from stompmodel.protocols import Pipeline, Processable, Stage
+from stompmodel.protocols import Pipeline, Processable, Stage, write_payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,3 +87,30 @@ def test_then_returns_a_new_pipeline_and_leaves_the_original_alone() -> None:
     assert len(first) == 1
     assert len(second) == 2
     assert second.run(Counter()).count == 2
+
+
+def test_a_text_payload_is_written_as_utf_eight(tmp_path) -> None:
+    path = tmp_path / "out.txt"
+
+    write_payload(path, "⌀7.000")
+
+    assert path.read_text(encoding="utf-8") == "⌀7.000"
+
+
+def test_a_text_payload_counts_encoded_bytes_not_characters(tmp_path) -> None:
+    """``⌀`` is three bytes in UTF-8 and one character. The count is the whole
+    reason this lives here: ``stompcad`` reduces over both tools' numbers and
+    they have to mean one thing."""
+    assert write_payload(tmp_path / "out.txt", "⌀7.000") == 8
+
+
+def test_a_binary_payload_is_written_unchanged(tmp_path) -> None:
+    path = tmp_path / "out.bin"
+
+    write_payload(path, b"%PDF-1.7\n\x00\xff")
+
+    assert path.read_bytes() == b"%PDF-1.7\n\x00\xff"
+
+
+def test_a_binary_payload_counts_its_own_length(tmp_path) -> None:
+    assert write_payload(tmp_path / "out.bin", b"%PDF-1.7\n\x00\xff") == 11

@@ -26,7 +26,7 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import DrillData
-from stompmodel.protocols import Emitter, Payload, Pipeline, Stage
+from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, write_payload
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import CaseModel
@@ -700,13 +700,8 @@ def _render(
 
 
 def _write(emitter: Emitter[DrillData], path: Path, payload: Payload) -> str:
-    """Write one artefact, letting the payload's own type choose the mode."""
-    if isinstance(payload, bytes):
-        path.write_bytes(payload)
-        size = len(payload)
-    else:
-        path.write_text(payload, encoding="utf-8")
-        size = len(payload.encode("utf-8"))
+    """Report one artefact. The dispatch is ``stompmodel``'s; the sentence is ours."""
+    size = write_payload(path, payload)
     return f"wrote {path}  ({emitter.name}, {size} bytes)"
 
 
