@@ -286,8 +286,9 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `stompmodel.units`, exactly the kind of module worth chasing too; there is no
   workspace-wide command, the same reason the root `mypy` gate excludes `stompmodel`'s
   tests.
-- Preserve property tests for snapping idempotence, deduplication idempotence, and tool
-  stability under hole reordering.
+- Preserve property tests for snapping (onto the grid, within half a pitch, and
+  idempotent) and tool stability under hole reordering — not deduplication idempotence,
+  which exact integer equality makes structurally unfalsifiable.
 - Coverage targets are 90% for each package and 100% for quantisers, stages,
   emitters, and `stompmodel`'s codec.
 - `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most

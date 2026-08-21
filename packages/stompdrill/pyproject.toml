@@ -30,10 +30,13 @@ stompmodel = { workspace = true }
 # into the member, sync, test -- runs a real suite rather than an import check.
 # `pdfminer.six` joins `pytest` for one reason: tests/recovery/pdf.py reads a
 # drawing back independently of the writer, and the writer's own transforms
-# are the thing it exists to check. Every module that reaches OCP still guards
-# itself with ``importorskip``, so the heavy `step` extra stays opt-in.
+# are the thing it exists to check. `hypothesis` joins them for the generative
+# properties in test_invariant.py, test_snap.py and test_pipeline.py, whose
+# answer sets have boundaries an author would not think to write down by hand.
+# Every module that reaches OCP still guards itself with ``importorskip``, so
+# the heavy `step` extra stays opt-in.
 [dependency-groups]
-dev = ["pytest", "pdfminer.six"]
+dev = ["pytest", "pdfminer.six", "hypothesis"]
 
 # Its own testpaths, so `cd packages/stompdrill && pytest` is correct and does
 # not inherit a root testpaths pointing at a sibling package. `pythonpath`

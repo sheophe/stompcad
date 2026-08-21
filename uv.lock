@@ -2296,6 +2296,7 @@ step = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "hypothesis" },
     { name = "pdfminer-six" },
     { name = "pytest" },
 ]
@@ -2310,6 +2311,7 @@ provides-extras = ["step"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "hypothesis" },
     { name = "pdfminer-six" },
     { name = "pytest" },
 ]
