@@ -40,7 +40,7 @@ _ROUNDED_RECT = "mlclclclch"
 #: be called a circle. A classifier, not a comparison tolerance: it decides
 #: whether a shape can be measured, never what its measurement is. Measured
 #: spread on real circles is 1.14e-13 pt, so this sits 8.8e6 times above the
-#: noise; it is also 1/285th of the 100 nm the recovery reports to, so the
+#: noise; it is also 0.35% of the 100 nm the recovery reports to, so the
 #: worst shape it can wrongly admit is off by 0.16 nm and cannot move a value.
 _MAX_RADIUS_SPREAD_PT = 1e-6
 

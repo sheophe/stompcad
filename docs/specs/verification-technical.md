@@ -129,7 +129,7 @@ That rule governs **comparisons**, and one threshold in the recoveries is not
 one. `_MAX_RADIUS_SPREAD_PT` in `tests/recovery/pdf.py` decides whether four
 on-curve endpoints describe a circle at all — a classifier, applied before
 there is a measurement to compare, and the only threshold in the subpackage.
-It cannot move a reported value: at 1/285th of the 100 nm the PDF recovery
+It cannot move a reported value: at 0.35% of the 100 nm the PDF recovery
 reports to, the worst shape it can wrongly admit is off by 0.16 nm. A tolerance
 that relaxed a comparison would be a violation however small it was; this one
 decides what is measurable, not what a measurement is.
