@@ -51,13 +51,15 @@ goes, though not the type the answer is carried in.
 _Avoid_: the parser, the extractor
 
 **stompgeom**:
-The kernel layer shared by the others — the STEP reader and writer, coordinate
-frames, and the geometry operations more than one package needs.
+The kernel layer shared by the others — the STEP reader, the deterministic writer,
+and the geometry operations more than one package needs. Everything here needs
+OpenCASCADE; a value that does not lives in `stompmodel`.
 _Avoid_: core, common, utils
 
 **stompmodel**:
-The values every package exchanges — lengths, the drill data and its JSON,
-diagnostics, and the pipeline contracts. Pure Python; no kernel, no parser.
+The values every package exchanges — lengths, coordinate frames, the drill data
+and its JSON, diagnostics, and the pipeline contracts. Pure Python; no kernel, no
+parser.
 _Avoid_: types, schema, dto
 
 ## Geometry
@@ -71,7 +73,7 @@ answer set there is no quantisation, only this.
 
 **Coordinate frame**:
 An origin and a right-handed basis. Carries no meaning about what it registers —
-that is the point. `CoordinateFrame` in `stompgeom`.
+that is the point. `CoordinateFrame` in `stompmodel`.
 _Avoid_: frame (this repo has used the word for three unrelated things), axes,
 basis
 _See also_: Face frame, which adds the meaning.
@@ -136,7 +138,7 @@ _Avoid_: panel face, front face, working face
 
 **Face frame**:
 The drilled face's registration: a coordinate frame whose third axis is that
-face's outward normal. `FaceFrame` in `stompgeom`.
+face's outward normal. `FaceFrame` in `stompmodel`.
 _Avoid_: frame, drill frame, case frame
 _See also_: Coordinate frame, Drilled face.
 

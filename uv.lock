@@ -12,6 +12,7 @@ resolution-markers = [
 [manifest]
 members = [
     "stompdrill",
+    "stompgeom",
     "stompmodel",
 ]
 constraints = [{ name = "numpy", specifier = "<2.3" }]
@@ -2286,12 +2287,8 @@ version = "0.1.0"
 source = { editable = "packages/stompdrill" }
 dependencies = [
     { name = "pikepdf" },
+    { name = "stompgeom" },
     { name = "stompmodel" },
-]
-
-[package.optional-dependencies]
-step = [
-    { name = "cadquery-ocp" },
 ]
 
 [package.dev-dependencies]
@@ -2303,16 +2300,42 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cadquery-ocp", marker = "extra == 'step'", specifier = "==7.9.3.1.1" },
     { name = "pikepdf", specifier = ">=9" },
+    { name = "stompgeom", editable = "packages/stompgeom" },
     { name = "stompmodel", editable = "packages/stompmodel" },
 ]
-provides-extras = ["step"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "hypothesis" },
     { name = "pdfminer-six" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "stompgeom"
+version = "0.1.0"
+source = { editable = "packages/stompgeom" }
+dependencies = [
+    { name = "cadquery-ocp" },
+    { name = "stompmodel" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cadquery-ocp", specifier = "==7.9.3.1.1" },
+    { name = "stompmodel", editable = "packages/stompmodel" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy" },
     { name = "pytest" },
 ]
 

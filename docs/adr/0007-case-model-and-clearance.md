@@ -1,10 +1,17 @@
 # ADR-0007: Case models and clearance
 
-**Status:** Accepted. The optional `stompdrill[step]` extra's retirement is pending on
-[ADR-0009](0009-shared-model-package-and-dependency-order.md): it is retired when
-`stompgeom` lands, since `stompgeom` takes the kernel unconditionally and this ADR's
-argument for the extra assumed `stompdrill` stood alone. Until then the extra is still
-declared and still documented. Everything else here stands.
+**Status:** Accepted, with one part superseded: the optional `stompdrill[step]` extra is
+**retired**. [ADR-0009](0009-shared-model-package-and-dependency-order.md) made the kernel
+`stompgeom`'s unconditional dependency, and
+`docs/plans/2026-08-22-stompgeom-extraction.md` carried that out — `stompdrill` depends on
+`stompgeom`, so it takes the kernel too, and this ADR's argument for the extra assumed
+`stompdrill` stood alone.
+
+The paragraphs below are left as the decision was taken, present tense and all; four of
+them argue from the extra and carry an **Amended** note saying where they no longer
+describe the install, and one sentence about test skips is rewritten because it had
+become simply false. A decision that was superseded is a fact about this ADR, not an
+erasure of it. Everything else here stands.
 
 ## Context
 
@@ -41,6 +48,15 @@ clearance would be a second authority on one question. `cad/base.py` defines the
 `CaseModel` protocol in pure Python so that `import stompdrill` never imports the kernel;
 `cad/step.py`, `cad/case.py`, `cad/region.py` and `cad/loader.py` are the OCP-backed
 implementation, imported lazily.
+
+**Amended: the extra is retired.** `cadquery-ocp==7.9.3.1.1` is now `stompgeom`'s
+unconditional dependency and reaches `stompdrill` through it, so a plain install has the
+kernel and neither `--case-model` nor `--emit step=…` is an opt-in. What the paragraph
+above decided otherwise still holds: one kernel, pinned exactly, and no second
+hand-rolled geometry authority for clearance. `cad/base.py` still defines `CaseModel` in
+pure Python and `import stompdrill` still does not import the kernel — the protocol earns
+its place on the testing argument below, not on the extra. `cad/step.py` is gone; the
+reader is `stompgeom.step`.
 
 **Clearance is a stage, not emitter-local.** `CheckCaseClearance` runs in the
 `Pipeline` alongside `Deduplicate`, `ReviewGridTies`, `RouteHoles` and
@@ -131,6 +147,11 @@ parameter. If the `stompdrill[step]` requirement proves annoying, a pure-Python 
 backend can be added behind the `CaseModel` protocol later without touching the stage —
 which is most of why the protocol exists rather than a concrete OCP type.
 
+**Amended: there is no extra to find annoying.** The kernel arrives with `stompgeom`,
+so the motive above is gone. The escape hatch is not: a pure-Python backend behind the
+`CaseModel` protocol remains available, and would now be a way to run the clearance
+stage without `stompgeom` at all rather than a way to skip an extra.
+
 Treating the clearance check as emitter-local — folding it into `StepEmitter` — was
 rejected because a caller who never requests `--emit step=…` would then get no
 clearance diagnostics at all, contradicting "the check is driven by `--case-model`, not
@@ -144,10 +165,19 @@ A base `pip install stompdrill` is unchanged. Running `CheckCaseClearance` or
 runs before the panel is opened, so a missing extra is caught early rather than after
 processing.
 
+**Amended: there is no longer a base install without the kernel.** `require_kernel` and
+`KernelUnavailable` survive in `stompgeom.kernel`, with the hint rewritten to name the
+missing package rather than any tool, because a broken environment is still a state a
+user can reach — it is simply no longer one an install can choose.
+
 `stompdrill[step]` costs more than its own 62 MB wheel: `cadquery-ocp` pulls in `vtk`
 transitively, and `vtk` in turn pulls in `matplotlib`, neither of which the emitter or
 the clearance stage uses. Paid only by an install that opts in, never by the base
 package.
+
+**Amended: every install pays it now.** That is the cost of the workspace's dependency
+order rather than a change of mind about the wheel — ADR-0009 judged a kernel-free
+configuration to be one nobody runs.
 
 The colour promise above has one exemption, found while implementing it rather than
 predicted: the *drilled* solid's own colour cannot survive the cut. Re-establishing
@@ -168,8 +198,9 @@ does not: `emitters/step.py` registers itself, and `import stompdrill` must not 
 `CheckCaseClearance` depends only on the `CaseModel` protocol, never on the OCP
 implementation, so the clearance rule is testable against a hand-built fake
 `CaseModel` — the same move the repository already makes when it tests emitters with
-hand-built `DrillData`. Kernel-backed integration tests skip when `stompdrill[step]` is
-absent.
+hand-built `DrillData`. Kernel-backed integration tests once skipped when the extra was
+absent; with the kernel unconditional they no longer can, and the skips are deleted — a
+gate that suppresses the rule it claims to check is not evidence.
 
 A future enclosure whose drilled face is not flat is out of reach of this rule and
 would need a new decision, not an extension of this one — the flat-face

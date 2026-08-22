@@ -237,8 +237,6 @@ def test_the_case_model_is_parsed_once_across_a_completed_run(tmp_path, monkeypa
     This one completes: clearance and the STEP emitter both consume the
     model, and it must still have been read from disk exactly once.
     """
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
     from stompdrill import cad
 
     real_load = cad.load_case_model
@@ -287,11 +285,9 @@ def test_the_step_emitter_refuses_data_that_was_never_routed():
 
     Needs the kernel to construct a real (if empty) XCAF document -- without
     one, ``cut_shape`` fails on the document access that precedes the
-    routing check, before the refusal under test is even reached -- but not
-    a downloaded Hammond model, so this is ``importorskip`` only, matching
-    how the kernel-only tests in ``test_cad_step.py`` are guarded.
+    routing check -- but not a downloaded Hammond model, so it carries no
+    ``--hammond`` marker: the kernel is unconditional, needing no guard.
     """
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document
     from OCP.XCAFApp import XCAFApp_Application

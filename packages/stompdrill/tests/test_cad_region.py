@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
-from stompdrill.cad.base import Frame  # noqa: E402
-from stompdrill.cad.case import build_frame, drill_axis, find_faces, select_solid  # noqa: E402
-from stompdrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm  # noqa: E402
-from stompdrill.cad.step import read_step  # noqa: E402
-from stompmodel.units import Nanometre  # noqa: E402
+from stompdrill.cad.case import build_frame, drill_axis, find_faces, select_solid
+from stompdrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm
+from stompgeom.step import read_step
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.units import Nanometre
 
 pytestmark = pytest.mark.hammond
 
@@ -142,9 +140,11 @@ def test_region_bbox_nm_transforms_through_the_frame_not_kernel_axes():
 
     # Origin sits at kernel x = 50, so a bug reading kernel bounds straight
     # through would report (90, 40, 110, 60) instead of the shifted extent.
-    frame = Frame(
-        origin_nm=(nm(50.0), Nanometre(0), Nanometre(0)),
-        u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(nm(50.0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+        )
     )
 
     assert region_bbox_nm(face, frame, axis) == (nm(40.0), nm(40.0), nm(60.0), nm(60.0))

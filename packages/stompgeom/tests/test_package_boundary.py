@@ -1,4 +1,4 @@
-"""The leaf's one structural invariant: it imports no sibling.
+"""This package's one structural invariant: it takes the leaf and the kernel, nothing above.
 
 An import gate rather than a text one. A name in prose is not a dependency,
 and a dependency written under ``TYPE_CHECKING`` is not one ruff or mypy
@@ -13,12 +13,11 @@ from pathlib import Path
 
 __all__: list[str] = []
 
-SOURCE = Path(__file__).resolve().parent.parent / "src" / "stompmodel"
+SOURCE = Path(__file__).resolve().parent.parent / "src" / "stompgeom"
 
-#: The whole permitted world. ADR-0009 makes this package the workspace's
-#: pure-Python leaf and its distribution declares no dependencies, so a
-#: third-party root is as much a violation here as a sibling member is.
-PERMITTED = frozenset(sys.stdlib_module_names) | {"stompmodel"}
+#: The whole permitted world. This package may take the leaf and the kernel
+#: and nothing above it.
+PERMITTED = frozenset(sys.stdlib_module_names) | {"stompgeom", "stompmodel", "OCP"}
 
 
 def foreign_imports(source: str) -> set[str]:
@@ -65,14 +64,15 @@ def test_the_scanner_finds_a_sibling_hidden_behind_type_checking() -> None:
     guarded = (
         "from typing import TYPE_CHECKING\n"
         "if TYPE_CHECKING:\n"
-        "    from stompgeom.step import read_step\n"
+        "    from stompdrill.cli import main\n"
     )
 
-    assert foreign_imports(guarded) == {"stompgeom"}
+    assert foreign_imports(guarded) == {"stompdrill"}
 
 
 def test_the_scanner_finds_a_third_party_import() -> None:
-    """The leaf declares no dependencies, so a runtime one is a violation too."""
+    """This package declares exactly two dependencies, the leaf and the
+    kernel, so any other third-party import is a violation too."""
     assert foreign_imports("import pikepdf") == {"pikepdf"}
 
 
@@ -82,19 +82,27 @@ def test_the_scanner_accepts_the_package_and_the_standard_library() -> None:
         "from __future__ import annotations\n"
         "import ast\n"
         "from decimal import Decimal\n"
-        "from . import units\n"
-        "from .model import DrillData\n"
+        "from . import kernel\n"
+        "from .errors import StompgeomError\n"
         "import stompmodel.codec\n"
     )
 
     assert foreign_imports(accepted) == set()
 
 
-def test_every_module_imports_only_the_standard_library_and_itself() -> None:
-    """``stompmodel`` names no sibling. This is the whole reason it exists.
+def test_the_scanner_accepts_the_leaf_and_the_kernel() -> None:
+    """This package may take the leaf and the kernel, and nothing above."""
+    assert (
+        foreign_imports("import OCP.TDF\nfrom stompmodel.units import Nanometre\n")
+        == set()
+    )
 
-    A dependency here is inherited by every package in the workspace, which
-    is why the leaf's distribution declares none at all.
+
+def test_every_module_imports_only_the_standard_library_and_itself() -> None:
+    """``stompgeom`` names no sibling above it. This is the whole reason it exists.
+
+    A dependency here is inherited by every package above this one in the
+    workspace, which is why this package takes only the leaf and the kernel.
     """
     offenders = {
         str(module.relative_to(SOURCE)): foreign_imports(module.read_text(encoding="utf-8"))
@@ -108,13 +116,10 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
     """An empty or narrowed walk would pass the test above by finding nothing."""
     scanned = {str(module.relative_to(SOURCE)) for module in modules()}
 
-    assert scanned >= {
+    assert scanned == {
         "__init__.py",
-        "codec.py",
-        "diagnostics.py",
         "errors.py",
-        "frames.py",
-        "model.py",
-        "protocols.py",
-        "units.py",
+        "kernel.py",
+        "step.py",
+        "writer.py",
     }

@@ -10,11 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from ..errors import StompdrillError
-from .base import Frame
-from .step import StepDocument, StepSolid, bounding_box_mm
 
 __all__ = [
     "Faces", "drill_axis", "assembly_spans", "select_solid", "find_faces",
@@ -318,7 +318,7 @@ def _compound(faces: tuple[Any, ...]) -> Any:
     return compound
 
 
-def build_frame(faces: Faces, axis: int) -> Frame:
+def build_frame(faces: Faces, axis: int) -> FaceFrame:
     """Right-handed ``(u, v, w)`` with ``w`` the outward normal.
 
     Seen from outside the face — that is, looking along ``-w`` — ``u`` runs
@@ -339,11 +339,13 @@ def build_frame(faces: Faces, axis: int) -> Frame:
     v = _cross(w, u)
     origin = [0.0, 0.0, 0.0]
     origin[axis] = faces.drilled_position_mm
-    return Frame(
-        origin_nm=(nm_from_mm(origin[0]), nm_from_mm(origin[1]), nm_from_mm(origin[2])),
-        u=u,
-        v=v,
-        w=w,
+    return FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(nm_from_mm(origin[0]), nm_from_mm(origin[1]), nm_from_mm(origin[2])),
+            u=u,
+            v=v,
+            w=w,
+        )
     )
 
 

@@ -1841,8 +1841,6 @@ def test_emitting_step_without_a_model_is_caught_before_the_file_is_even_opened(
 @pytest.mark.hammond
 def test_a_clearance_error_withholds_every_artefact(tmp_path, capsys):
     """Any error withholds every requested artefact, including the drill file."""
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
     from stompdrill.cli import main
 
     panel = _panel_with_a_hole_in_a_boss(tmp_path)
@@ -1860,8 +1858,6 @@ def test_a_clearance_error_withholds_every_artefact(tmp_path, capsys):
 
 @pytest.mark.hammond
 def test_a_clean_run_writes_both_artefacts(tmp_path):
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
     from stompdrill.cli import main
 
     panel = _panel_with_a_central_hole(tmp_path)
@@ -1878,8 +1874,6 @@ def test_a_clean_run_writes_both_artefacts(tmp_path):
 
 @pytest.mark.hammond
 def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, capsys):
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
     from stompdrill.cli import main
 
     panel = _panel_with_a_hole_in_a_boss(tmp_path)

@@ -45,7 +45,7 @@ class CheckCaseClearance:
                 ("margin_nm", int(self.model.margin_nm)),
                 ("plate_nm", int(self.model.plate_nm)),
                 ("play_area_nm", tuple(int(v) for v in self.model.play_area_nm)),
-                *self.model.frame.as_parameters(),
+                *self.model.frame.basis.as_parameters(),
             ),
         )
 

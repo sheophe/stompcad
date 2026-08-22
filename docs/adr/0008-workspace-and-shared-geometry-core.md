@@ -5,6 +5,12 @@
 package, `stompmodel`, and fixes the workspace's dependency order. The reasoning here
 for one repository and for extracting before the new tools is unchanged.
 
+Two of the three primitives this ADR named as certainly shared have since settled in
+`stompmodel`: the length newtypes, and the frame values that replaced `Frame`'s rigid
+transform. What `stompgeom` holds is therefore the kernel layer — the STEP reader, the
+deterministic writer, and the operations that need OpenCASCADE — so read "shared geometry
+core" below as that layer rather than as one package holding every shared primitive.
+
 ## Context
 
 `stompdrill` reads drill geometry from Illustrator artwork and emits fabrication
@@ -73,7 +79,10 @@ erodes. A boundary that must survive `pip install stompdrill` in a clean
 environment does not: an unjustified dependency stops being a design opinion and
 becomes a failing install. ADR-0007's optional `stompdrill[step]` extra already
 demonstrates the discipline, which is what let a STEP emitter arrive later
-without the base tool growing a geometry kernel.
+without the base tool growing a geometry kernel. That extra is now retired — see
+ADR-0007's status — and the discipline it demonstrated is carried by the package
+boundary instead: the kernel is `stompgeom`'s declared dependency, and a member that
+must not take one does not depend on `stompgeom`.
 
 ## Consequences
 

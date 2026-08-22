@@ -323,13 +323,17 @@ caught; only the failure's legibility suffers.
 **Acceptance:** The lookup uses `.get()` with a dedicated "position not found" assertion, and
 the same mutant now fails with that message rather than a bare traceback.
 
-## Give `cad/step.py` a public seam for an in-memory document's solids
+## Give `stompgeom.step` a public seam for an in-memory document's solids
 
-**Status:** Confirmed gap, not scheduled.
+**Status:** Confirmed gap, not scheduled. Raised in priority by the `stompgeom`
+extraction.
 
 **Constraint:** `read_step` takes a path; there is no public way to enumerate an in-memory
 XCAF document's solids. The STEP recovery arm therefore reuses the private `_collect` plus
-five lines of shape-tool glue that mirrors `read_step`'s own.
+five lines of shape-tool glue that mirrors `read_step`'s own. That reuse was one package
+reaching into its own module; it now crosses a distribution boundary, so a `stompgeom`
+release is free to rename or reshape `_collect` and break `stompdrill`'s tests without
+touching anything either package calls public.
 
 **Acceptance:** A small public function takes an in-memory XCAF document and returns its
 solids, both `read_step` and the STEP recovery arm call it, and the duplicated glue is
@@ -464,3 +468,33 @@ so even a text recovery leaves a fixture-sharing question behind it.
 agreement test migrates onto it, and the fixtures move somewhere neither test
 module owns; or the coupling is accepted deliberately, with the reason recorded
 next to the import so the next reader does not re-open this.
+
+## Narrow `build_case_model`'s widened `except StompError`
+
+**Status:** Deliberate deferral, not scheduled.
+
+**Constraint:** `packages/stompdrill/src/stompdrill/cli.py`'s `build_case_model` catches
+`StompError` where it once caught `StompdrillError`. The widening was forced rather than
+chosen: the three error types that call can now raise share no base narrower than
+`StompError`. Exit codes are unaffected, because `main` already funnels `StompError` to
+the usage exit. The residual cost is precision — an `EmitterError` raised from that one
+call would be relabelled a usage error rather than an emitter one.
+
+**Acceptance:** The call catches `(StompdrillError, StompgeomError, DocumentError)`, each
+of the three reachable failures still exits 3, and an `EmitterError` from that call is no
+longer swallowed as a usage error.
+
+## Give a `reframe` test a target frame that is not its own inverse
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** No `reframe` test can detect its source and target arguments being
+swapped. Every pair under test is a box/lid mirror, and a mirror transform is its own
+inverse, so the swap is an identity. This holds in
+`packages/stompdrill/tests/test_cad_region_synthetic.py` and in
+`packages/stompmodel/tests/test_frames.py`, where it is cheapest to close. The argument
+order is correct today; this is about what the tests would catch if it were not.
+
+**Acceptance:** `packages/stompmodel/tests/test_frames.py` reframes through a target frame
+carrying a genuine rotation rather than a pure mirror, and exchanging the two frame
+arguments in `reframe` fails that test.

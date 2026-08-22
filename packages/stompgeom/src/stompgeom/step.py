@@ -13,15 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..errors import StompdrillError
-from .base import KernelUnavailable
+from stompmodel.errors import DocumentError
+
+from .kernel import require_kernel
 
 __all__ = [
     "StepSolid", "StepDocument", "read_step", "bounding_box_mm",
-    "source_timestamp", "require_kernel",
+    "source_timestamp",
 ]
-
-_INSTALL_HINT = "the STEP features need the geometry kernel: pip install 'stompdrill[step]'"
 
 #: Used when the source file declares no timestamp. Never a clock reading.
 _EPOCH = "1970-01-01T00:00:00+00:00"
@@ -33,23 +32,15 @@ def source_timestamp(path: Path) -> str:
     """The source file's ``/* time_stamp */`` comment marker, or the epoch when absent.
 
     This matches ST-Developer's comment above ``FILE_NAME``, not the
-    ``FILE_NAME`` field itself, so re-feeding an stompdrill-written STEP file
-    back in as ``--case-model`` drops provenance to the epoch even though
-    the file carries a real stamp -- stompdrill's own writer does not emit that
-    comment. Determinism is unaffected: every write from one source still
-    copies the same value, whatever it is.
+    ``FILE_NAME`` field itself, so reading back a STEP file this workspace
+    wrote drops provenance to the epoch even though the file carries a real
+    stamp -- this workspace's own writer does not emit that comment.
+    Determinism is unaffected: every write from one source still copies the
+    same value, whatever it is.
     """
     head = path.read_bytes()[:4096].decode("latin-1")
     found = _TIMESTAMP_PATTERN.search(head)
     return found.group(1) if found else _EPOCH
-
-
-def require_kernel() -> None:
-    """Raise a helpful error when OpenCASCADE is not installed."""
-    try:
-        import OCP  # noqa: F401
-    except ImportError as failure:
-        raise KernelUnavailable(_INSTALL_HINT) from failure
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +101,7 @@ def read_step(path: Path) -> StepDocument:
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
     if not path.is_file():
-        raise StompdrillError(f"no case model at {path}")
+        raise DocumentError(f"no model at {path}")
 
     # Ask OCC to normalise every representation to millimetres. Without this a
     # sub-assembly authored in inches arrives 25.4x too small.
@@ -124,9 +115,9 @@ def read_step(path: Path) -> StepDocument:
     reader.SetNameMode(True)
     reader.SetColorMode(True)
     if reader.ReadFile(str(path)) != IFSelect_ReturnStatus.IFSelect_RetDone:
-        raise StompdrillError(f"{path} is not a readable STEP file")
+        raise DocumentError(f"{path} is not a readable STEP file")
     if not reader.Transfer(document):
-        raise StompdrillError(f"{path} contains no transferable shape")
+        raise DocumentError(f"{path} contains no transferable shape")
 
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     labels = TDF_LabelSequence()
@@ -136,7 +127,7 @@ def read_step(path: Path) -> StepDocument:
     for index in range(1, labels.Length() + 1):
         _collect(labels.Value(index), solids, TDataStd_Name)
     if not solids:
-        raise StompdrillError(f"{path} contains no solids")
+        raise DocumentError(f"{path} contains no solids")
     return StepDocument(tuple(solids), document, source_timestamp(path))
 
 

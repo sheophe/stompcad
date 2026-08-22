@@ -88,7 +88,7 @@ testing was in view, and it is the reason to spend unevenly rather than evenly.
 ## 2. The recoveries
 
 Two exist already, written for other reasons: `stompmodel.codec.from_document`
-and `cad.step.read_step`. `read_step` returns placed solids, so hole geometry
+and `stompgeom.step.read_step`. `read_step` returns placed solids, so hole geometry
 needs face interrogation on top; that is the only new work on the STEP side.
 
 Three are built, all test-support under `packages/stompdrill/tests/recovery/` as

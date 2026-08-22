@@ -1,6 +1,10 @@
 # ADR-0009: A shared model package and the workspace's dependency order
 
-**Status:** Accepted
+**Status:** Accepted, amended in place: `CoordinateFrame` and `FaceFrame` are
+`stompmodel`'s rather than `stompgeom`'s, and ADR-0007's optional extra is now retired
+rather than pending. Both amendments were decided in `docs/specs/stompgeom-technical.md`
+and landed with `docs/plans/2026-08-22-stompgeom-extraction.md`; the reasoning for the
+first is under "Why the frame values sit in `stompmodel`" below.
 
 Amends [ADR-0008](0008-workspace-and-shared-geometry-core.md), which decided four
 packages. There are five.
@@ -45,6 +49,8 @@ own tests alone, as ADR-0008 requires.*
 Pure Python. No kernel, no parser, no I/O beyond serialisation. It holds:
 
 - `Nanometre`, `Millimetre`, and their conversions (ADR-0004's newtypes).
+- `CoordinateFrame` and `FaceFrame`, and the arithmetic that maps a point between
+  a frame's axes and model space.
 - `DrillData` and its members: `Hole`, `RawHole`, `ReferenceOutline`, `RawOutline`,
   `EnclosureMatch`, `SourceInfo`, `Origin`.
 - The `DrillData` JSON codec, **both directions**.
@@ -70,11 +76,17 @@ interchange, so that type does not move.
 ### `stompgeom`
 
 The kernel layer: the STEP reader, the deterministic STEP writer with its OCC
-normalisation, `CoordinateFrame` and `FaceFrame`, `levels()` for grouping coplanar
-faces and measuring holedness, bounding boxes, `KernelUnavailable`.
+normalisation, `levels()` for grouping coplanar faces and measuring holedness, bounding
+boxes, `KernelUnavailable`.
 
-`levels()` arrives last, once `stompcollider`'s carrier-plane code exists to
-shape its interface. It belongs here; it is not part of the upfront extraction.
+Frame *construction* is not here and is not coming. `build_frame` reads an
+enclosure-shaped `Faces` and picks its `u` axis from the footprint spans, which is
+enclosure reasoning wearing a geometric coat, so it stays in `stompdrill` under the
+rule two paragraphs below. `stompmodel` owns the frame *type* and its transforms;
+`stompgeom` owns neither. A reader looking here for a frame builder will not find one.
+
+`levels()` is the opposite case: it belongs here and has simply not arrived yet. It
+comes last, once `stompcollider`'s carrier-plane code exists to shape its interface.
 The technical specification's order of work says why.
 
 No enclosure vocabulary crosses this boundary. `select_solid`'s box/lid keywords,
@@ -124,6 +136,23 @@ lightest package in the workspace depend on the heaviest, and would put the
 admission rules above in competition with ADR-0008's "can it be described without
 naming a panel?" — two tests for one package, which is how a dumping ground starts.
 
+**Why the frame values sit in `stompmodel` rather than `stompgeom`.** As accepted, this
+ADR placed `CoordinateFrame` and `FaceFrame` in `stompgeom` while also having the drill
+document carry a `FaceFrame`, keeping `DrillData` in a leaf that declares no dependencies
+at all, and calling the graph linear and acyclic. Those four cannot all hold: a
+`stompmodel` dataclass cannot carry a member defined above it without importing it, which
+is a cycle in the graph Figure 1 draws. The frame *value* needs no kernel — it is a
+frozen, slotted dataclass of `Nanometre` and float triples, with the arithmetic that maps
+a point between its axes and model space — while the operation that reads OCC faces to
+*build* one does. That is the division made for the length newtypes below, and its
+rationale transfers verbatim: a registration is a value rather than an operation, and
+putting it in the leaf keeps the graph linear and lets a consumer take a frame without
+taking a CAD kernel. It also satisfies admission rule 1 without strain — `stompdrill`
+produces the face frame, `stompcollider` consumes it, and neither is its home. This is
+what unblocks "The drill document gains the face frame" above: `DrillData` can carry a
+`FaceFrame` and the codec can serialise it without `stompmodel` growing a dependency on
+OpenCASCADE.
+
 **Why lengths sit in `stompmodel` rather than `stompgeom`.** ADR-0008 listed lengths
 among the geometry, which was reasonable when `stompgeom` was the only shared package.
 A length is a unit, not an operation, and it is the most widely shared definition
@@ -159,11 +188,10 @@ about where a panel is while both being self-consistent.
 ADR-0004's `Nanometre` and `Millimetre` are `stompmodel`'s; its `Micron` is not, for
 the reason "What leaves `stompdrill`" gives above. ADR-0001's pipeline and emitter
 protocols become generic in the value they fold over, and both tools instantiate them.
-ADR-0007's optional `stompdrill[step]` extra is retired when `stompgeom` lands:
-`stompgeom` takes the kernel unconditionally, so `stompdrill` will too, and
-ADR-0007's argument for the extra assumed `stompdrill` stood alone. Until then the
-extra is still declared and still documented, and removing it is plan 2's change,
-not plan 1's.
+ADR-0007's optional `stompdrill[step]` extra is retired now that `stompgeom` has
+landed: `stompgeom` takes the kernel unconditionally, so `stompdrill` does too, and
+ADR-0007's argument for the extra assumed `stompdrill` stood alone. That was plan 2's
+change, as this ADR anticipated, and it is done.
 
 `stompdrill`'s public import paths change. Nothing is re-exported for compatibility —
 one name, one home — and the workspace is pre-release with one consumer.

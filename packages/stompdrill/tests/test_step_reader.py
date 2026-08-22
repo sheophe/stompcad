@@ -1,14 +1,18 @@
-"""Reading a STEP assembly: names, placement and per-representation units."""
+"""Reading a STEP assembly: names, placement and per-representation units.
+
+The reader itself now lives in ``stompgeom.step``; its own refusals (a
+missing file, a non-STEP file) are pinned in
+``packages/stompgeom/tests/test_step.py`` instead. What is left here is
+what only a real Hammond model, fetched through this package's own
+``--hammond`` machinery, can exercise: assembly expansion, placement,
+product names and stable ordering.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
-from stompdrill.cad.step import read_step  # noqa: E402
+from stompgeom.step import read_step
 
 pytestmark = pytest.mark.hammond
 
@@ -37,7 +41,7 @@ def test_each_screw_instance_is_placed_where_the_assembly_puts_it(document):
     Returning the referred shape would stack every instance at the origin
     and still yield four solids, so the count alone proves nothing.
     """
-    from stompdrill.cad.step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     centres = set()
     for screw in document.named("screw"):
@@ -80,7 +84,7 @@ def test_solids_are_returned_in_a_stable_order(document, hammond_bb):
 
 def test_the_inch_sub_part_is_reported_in_millimetres(document):
     """The screw is modelled in inches; its shape must arrive scaled."""
-    from stompdrill.cad.step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     screw = document.named("screw")[0]
     x0, y0, z0, x1, y1, z1 = bounding_box_mm(screw.shape)
@@ -93,7 +97,7 @@ def test_the_inch_sub_part_is_reported_in_millimetres(document):
 
 def test_the_box_is_placed_in_assembly_coordinates_not_local_ones(document):
     """The fixture rotates local Z onto assembly Y; the read must reflect it."""
-    from stompdrill.cad.step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     (box,) = document.named("box")
     x0, y0, z0, x1, y1, z1 = bounding_box_mm(box.shape)
@@ -103,20 +107,3 @@ def test_the_box_is_placed_in_assembly_coordinates_not_local_ones(document):
     # The parts are modelled Z-up and the assembly places them Y-up, so reading
     # local coordinates would put the 30 mm depth on Z instead.
     assert round(spans[1], 1) == 30.0, "depth should lie along assembly Y"
-
-
-def test_a_missing_file_raises_an_stompdrill_error(tmp_path: Path):
-    from stompdrill.errors import StompdrillError
-
-    with pytest.raises(StompdrillError):
-        read_step(tmp_path / "absent.stp")
-
-
-def test_a_file_that_is_not_step_raises_an_stompdrill_error(tmp_path: Path):
-    from stompdrill.errors import StompdrillError
-
-    rubbish = tmp_path / "rubbish.stp"
-    rubbish.write_text("not a step file", encoding="utf-8")
-
-    with pytest.raises(StompdrillError):
-        read_step(rubbish)

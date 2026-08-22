@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
-from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid  # noqa: E402
-from stompdrill.cad.step import read_step  # noqa: E402
-from stompmodel.units import Nanometre  # noqa: E402
-from tests.hammond import MODELS  # noqa: E402
+from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid
+from stompgeom.step import read_step
+from stompmodel.units import Nanometre
+from tests.hammond import MODELS
 
 pytestmark = pytest.mark.hammond
 
@@ -51,7 +49,7 @@ def test_the_box_and_lid_are_selected_by_name(document):
 
 
 def test_the_selected_lid_is_the_thinner_solid(document):
-    from stompdrill.cad.step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     axis = drill_axis(document, FOOTPRINT)
     box = bounding_box_mm(select_solid(document, "box").shape)
@@ -89,7 +87,7 @@ def test_the_outward_normal_points_away_from_the_solid(document):
     box = select_solid(document, "box")
     faces = find_faces(box, axis)
 
-    from stompdrill.cad.step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
     lo, hi = bounding_box_mm(box.shape)[axis], bounding_box_mm(box.shape)[axis + 3]
     centre = (lo + hi) / 2
     drilled_at = faces.drilled_position_mm
@@ -111,7 +109,7 @@ def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
     faces = find_faces(select_solid(document, "box"), axis)
 
     frame = build_frame(faces, axis)
-    u, v, w = frame.u, frame.v, frame.w
+    u, v, w = frame.basis.u, frame.basis.v, frame.basis.w
     cross = (
         u[1] * v[2] - u[2] * v[1],
         u[2] * v[0] - u[0] * v[2],
@@ -125,9 +123,9 @@ def test_the_frame_is_orthonormal(document):
     axis = drill_axis(document, FOOTPRINT)
     frame = build_frame(find_faces(select_solid(document, "box"), axis), axis)
 
-    for a in (frame.u, frame.v, frame.w):
+    for a in (frame.basis.u, frame.basis.v, frame.basis.w):
         assert pytest.approx(sum(c * c for c in a), abs=1e-9) == 1.0
-    assert pytest.approx(sum(a * b for a, b in zip(frame.u, frame.v)), abs=1e-9) == 0.0
+    assert pytest.approx(sum(a * b for a, b in zip(frame.basis.u, frame.basis.v)), abs=1e-9) == 0.0
 
 
 def _frame_for(request, part: str) -> tuple[int, Faces, Faces]:
@@ -163,7 +161,7 @@ def test_u_runs_along_the_wider_free_axis(request, part):
     else:
         expected = max(free, key=lambda index: box.footprint_mm[index])
 
-    assert abs(frame.u[expected]) == pytest.approx(1.0, abs=1e-6)
+    assert abs(frame.basis.u[expected]) == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("part", sorted(MODELS))
@@ -173,10 +171,10 @@ def test_v_lands_on_the_free_axis_u_did_not_take(request, part):
     frame = build_frame(box, axis)
 
     free = [index for index in range(3) if index != axis]
-    u_axis = next(index for index in free if abs(frame.u[index]) > 0.5)
+    u_axis = next(index for index in free if abs(frame.basis.u[index]) > 0.5)
     v_axis = next(index for index in free if index != u_axis)
 
-    assert abs(frame.v[v_axis]) == pytest.approx(1.0, abs=1e-6)
+    assert abs(frame.basis.v[v_axis]) == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("part", sorted(MODELS))
@@ -189,7 +187,7 @@ def test_box_and_lid_frames_face_opposite_ways(request, part):
     box_frame = build_frame(box, axis)
     lid_frame = build_frame(lid, axis)
 
-    assert pytest.approx(box_frame.u, abs=1e-6) == tuple(-c for c in lid_frame.u)
+    assert pytest.approx(box_frame.basis.u, abs=1e-6) == tuple(-c for c in lid_frame.basis.u)
 
 
 @pytest.mark.parametrize("part", sorted(MODELS))

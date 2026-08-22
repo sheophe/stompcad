@@ -41,7 +41,6 @@ from .emitters import (
 )
 from .emitters.drawing.build import SheetText
 from .enclosures import HAMMOND_1590
-from .errors import StompdrillError
 from .formatting import format_mm
 from .pipeline import (
     CATALOGUE,
@@ -315,7 +314,7 @@ def build_case_model(args: argparse.Namespace) -> CaseModel | None:
             margin_nm=margin_nm,
             part=None if args.case is None else parse_case(args.case),
         )
-    except StompdrillError as failure:
+    except StompError as failure:
         raise UsageError(f"--case-model: {failure}") from failure
 
 
