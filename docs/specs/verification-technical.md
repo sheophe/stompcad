@@ -100,9 +100,18 @@ uncollected helper modules:
 | SVG | stdlib `ElementTree` over `<circle>` and `<rect>` | trivial |
 | PDF | `pdfminer.six`, applying the CTM | ~11 lines of circle recognition |
 
-They live in a subpackage rather than in test modules because
-`test_drawing_agreement.py` currently imports its PDF parser from another test
-module, which is the coupling this replaces.
+They live in a subpackage rather than in test modules so that one place holds
+every reader and one gate can enforce their independence, rather than each
+reader living beside the test that first wanted it.
+
+**This does not remove the coupling in `test_drawing_agreement.py`**, which was
+the original motive and is not what was delivered. That test still imports
+`outline`, `panel`, `stream_of` and `strings_in` from `tests/test_drawing_pdf.py`,
+and no recovery here could replace them: it compares what two sheets *say* —
+schedule rows, notes, title-block fields — and every recovery reads geometry.
+`read_pdf` returns circles and an outline extent; there is no text recovery.
+Closing that coupling needs one, and would be new work rather than a caller
+migration.
 
 **Independence is a gate, not a convention.** A test asserts that nothing under
 `tests/recovery/` imports from `stompdrill.emitters`, by AST inspection — the
