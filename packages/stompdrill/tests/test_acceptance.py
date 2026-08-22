@@ -62,7 +62,12 @@ def _panel_with_a_central_hole(tmp_path: Path) -> Path:
 def test_the_layer_flags_choose_which_layers_the_source_reads(tmp_path, capsys):
     """Both flags on one command line, against artwork whose layers are named
     nothing like the defaults. A default that happened to match would make a
-    passing test say nothing."""
+    passing test say nothing.
+
+    The synthetic panel matches no Hammond footprint, which is
+    ``unknown-enclosure`` -- a warning, not a defect in the test -- so the
+    run exits 1, never 0.
+    """
     panel = build_pdf(
         tmp_path / "panel.pdf",
         {
@@ -76,7 +81,7 @@ def test_the_layer_flags_choose_which_layers_the_source_reads(tmp_path, capsys):
         "--emit", f"json={tmp_path / 'out.json'}",
     ])
 
-    assert code in (0, 1), capsys.readouterr().out
+    assert code == 1, capsys.readouterr().out
     assert len(json.loads((tmp_path / "out.json").read_text())["holes"]) == 2
 
 
@@ -95,7 +100,8 @@ def test_an_even_odd_clip_is_not_geometry_either(tmp_path, capsys):
     The clip marker is itself a circle, not a rectangle: a rectangle wrongly
     let through would still be dropped as non-circular, proving nothing about
     ``W*``. A circle wrongly let through survives that filter and counts as a
-    second hole, so the assertion below actually depends on ``W*`` clipping.
+    second hole. The panel matches no Hammond footprint either
+    (``unknown-enclosure``, a warning), so the run exits 1, never 0.
     """
     panel = build_pdf(
         tmp_path / "clip.pdf",
@@ -107,7 +113,7 @@ def test_an_even_odd_clip_is_not_geometry_either(tmp_path, capsys):
 
     code = cli.main([str(panel), "--emit", f"json={tmp_path / 'out.json'}"])
 
-    assert code in (0, 1), capsys.readouterr().out
+    assert code == 1, capsys.readouterr().out
     # the small circle is real geometry; the large one only ever marks a clip
     assert len(json.loads((tmp_path / "out.json").read_text())["holes"]) == 1
 
@@ -301,7 +307,7 @@ def test_the_step_emitter_refuses_data_that_was_never_routed():
     model.document = document
     unrouted = make_data(at(0, 0))
 
-    with pytest.raises(EmitterError):
+    with pytest.raises(EmitterError, match="no artifact can state a sequence"):
         StepEmitter(StepOptions(model=model)).emit(unrouted)
 
 

@@ -18,10 +18,10 @@ convenient for comparing geometry.
 
 ## Scope
 
-One project, three plans. It covers the verification framework, the concrete
-gaps three audits found, the instruments those audits found broken, two domain
-changes the audits exposed, and one performance repair. The audit reports are at
-`.scratch/test-audit/`.
+One project, three specced plans and one unspecced interleaving. It covers the
+verification framework, the concrete gaps three audits found, the instruments
+those audits found broken, two domain changes the audits exposed, and one
+performance repair. The audit reports are at `.scratch/test-audit/`.
 
 **The suite is a deliverable, not only a safeguard.** `stompgeom`,
 `stompcollider` and `stompcad` follow, and whoever writes their tests will read
@@ -36,7 +36,8 @@ with one tool they are theorems about a system that does not exist yet. They are
 rediscovered.
 
 Out of scope, and recorded as such in the last section: typing the emitter
-registry, and moving `RawDrillData`.
+registry, moving `RawDrillData`, and replacing the hand-rolled SVG and PDF
+serialisers with libraries.
 
 ---
 
@@ -62,7 +63,7 @@ recovery derived independently of the emitter.
 | Emitter | Layer 2 — owned | Codec | Owner | Layer 3 check |
 | --- | --- | --- | --- | --- |
 | JSON | the document mapping | `json.dumps` | stdlib — trusted | round trip through `from_document` |
-| STEP | the cut shape | `STEPControl_Writer` | OCC — trusted | `read_step` plus face interrogation |
+| STEP | the cut shape | `STEPCAFControl_Writer` | OCC — trusted | `read_step` plus face interrogation |
 | SVG | the `Scene` | our serialiser, verified arithmetic-free | ours | `ElementTree`, full geometry |
 | PDF | the `Scene` | our serialiser, owns a Y-flip, a scale and a Bézier circle | ours | `pdfminer.six`, full geometry |
 | Excellon | none — model straight to text | our writer | ours | hand-rolled reader, full geometry |
@@ -122,10 +123,14 @@ the suite and does not go in `stompmodel`.
 
 **What is deliberately not built:** a general artefact-reading capability. Each
 recovery reads what this project's emitters write and nothing else. The Excellon
-reader is short precisely because it declines implied decimals, zero suppression,
-slots and routing, none of which our writer can produce. Hardening a test helper
-against inputs its only supplier cannot generate is how a test becomes complex
-enough to need its own tests.
+reader is short precisely because it declines slots, routing, unknown statements
+and units other than `METRIC,TZ`, none of which our writer can produce. Implied
+decimals are not among the rejections: `_HIT`'s pattern matches a coordinate with
+no decimal point, and a real one would parse silently at the wrong scale — it is
+unreachable from our own writer's `_coordinates`, which always states one, rather
+than rejected by the reader. Hardening a test helper against inputs its only
+supplier cannot generate is how a test becomes complex enough to need its own
+tests.
 
 ## 3. Extractions
 
@@ -237,7 +242,7 @@ that reads as though the recomputation was dealt with — the artefact most like
 to stop the next reader from looking.
 
 **Domain-edge preconditions.** `nm_from_mm` raises `decimal.InvalidOperation`
-around 1e22, and `route.py`'s `_path_length` raises `OverflowError` on absurd
+around 1e22, and `route.py`'s `_leg` raises `OverflowError` on absurd
 nanometres. Neither is reachable from real artwork. Both are **documented as
 preconditions** rather than guarded; a panel is physically bounded and inventing
 a limit invites arguing about its value.
@@ -246,10 +251,15 @@ a limit invites arguing about its value.
 
 | Tier | Contents | Cost |
 | --- | --- | --- |
-| Default | both suites: unit, acceptance, layers 1–3, recoveries, e2e | 2.8 s + 0.2 s |
-| `--hammond` | the above plus kernel tests against real enclosure models | ~55 s |
+| Default | both suites: unit, acceptance, layers 1–3, recoveries, e2e | ~7.4 s + 0.4 s |
+| `--hammond` | the above plus kernel tests against real enclosure models | ~65 s |
 | Mutation survey | per package, run deliberately, read by module | minutes |
 | Nightly symbolic — **not adopted** | integer-domain properties under the CrossHair backend | 7–25 s per property |
+
+The default and `--hammond` costs are measurements, taken on one machine at one
+commit, not budgets; they drift as the suites this programme added grow, and a
+later reading is not a regression merely for disagreeing with the one recorded
+here.
 
 **The mutation survey must actually run.** Today the root config produces no
 scored mutants and the member survey aborts, because the package-boundary gate
@@ -278,28 +288,33 @@ assertion going from 0.20 s solvable to unsolvable-but-reported-passing.
 | --- | --- |
 | Recoveries: seams ship, the rest are test-support | no caller outside a test will parse an Excellon file or a drawing; the shipped surface stays minimal |
 | One golden, of the model | with T2 holding per format, a golden per artefact is redundant; one file, and updating it is a reviewable diff |
-| Golden is a fact-set, not bytes | the panel path is provenance in four of five artefacts and the STEP writer appends a volatile counter, so byte-golden fails on legitimate change |
+| Golden is a fact-set, not bytes | the panel path is provenance in four of five artefacts (STEP falls back to the literal `"stompdrill"` instead), so byte-golden fails on legitimate change |
 | Recoveries independent of emitters | an inverted recovery proves self-consistency; the failure it must catch is a transform wrong in both directions |
-| `pdfminer.six` as a dev dependency | four packages buys the only independent view of the one owned transform nothing else reaches |
+| `pdfminer.six` as a dev dependency | five `uv.lock` entries, four of them transitive (`cryptography`, `cffi`, `pycparser`, `charset-normalizer`), buys the only independent view of the one owned transform nothing else reaches |
 | Dedupe idempotence deleted | no plausible bug in `Deduplicate` breaks it; `diffbehavior` independently confirmed it survives both mutants |
 | Containment warns rather than errors | the outline is the published top-view dimension, not the drilled face; the strong check needs a model |
 | `_two_opt` repaired in Phase C, not earlier | its one risk is a float-summation tie changing a route, and the instruments that would catch that are what Phase B builds |
 
 ## 7. Order of work
 
-Three plans, written and executed in order.
+Three specced plans, written and executed in order, with one unspecced plan
+interleaved between the second and the third.
 
 | Plan | Contents | Done when |
 | --- | --- | --- |
 | 1 — instruments and repairs | both mutmut configs, the mypy exclusion, the boundary-gate exemption, the three hollow tests, the fixture lapse, the ADR corrections | both surveys run and are read by module; the repaired tests fail when their named behaviour is removed |
 | 2 — domain changes | containment, `DEFAULT_FORM_DEPTH` and its flag, the documented preconditions, contract and ADR amendments | both warnings reach exit 1 with tests that fail when either is removed |
+| — test repairs (`docs/plans/2026-08-21-test-repairs.md`, merged as `0311209`) | four test-quality defects carried forward from Plans 1 and 2, closed alongside the wider classes each belonged to. States plainly that it "has no spec" — recon reports and a rulings file under `.scratch/test-repairs/` stand in its place | the four carried items closed; the two not worth fixing recorded in `docs/BACKLOG.md` instead |
 | 3 — the framework | Phase A's split, the three recoveries, the independence gate, layers 1–3, the golden, the acceptance tests, e2e, the generative conversions, Phase C's cleanup and the routing repair | every emitter's owned representation checked against the model; the golden committed; every contract-coverage gap in §4 exercised by an acceptance test; one e2e drives the console script; `_two_opt` is Θ(P·n²) with routes unchanged |
 
 **Why three.** Plan 1 is a prerequisite in fact: a survey that cannot run cannot
 adjudicate whether Plan 3's tests are better, which is Plan 3's whole claim. Plan
 2 changes behaviour while Plans 1 and 3 must not, and a reviewer applies a
 different rubric to "prove nothing moved" than to "build a thing" — the same
-split that made the three plans of the `stompcollider` specification work.
+split that made the three plans of the `stompcollider` specification work. The
+interleaved test-repairs plan is orthogonal to this split: it neither adjudicates
+a survey nor changes domain behaviour, so it does not disturb the rubric that
+governs the other three.
 
 ## 8. Out of scope
 
