@@ -34,6 +34,12 @@ base install. Leave it out when you do not need those features:
 uv sync --all-packages
 ```
 
+`pdfminer.six` and `hypothesis` are ordinary dev dependencies, declared in
+`packages/stompdrill/pyproject.toml`'s own dev group rather than the root's — ADR-0008's
+governing test is that each member passes its own tests alone. Both arrive with the plain
+`uv sync --all-packages` above; neither needs `--all-extras`, which is only for the
+optional geometry kernel.
+
 Run the project checks and tools from the repository root:
 
 ```bash
@@ -144,9 +150,10 @@ facts are computed once before the emitter fan-out.
 
 Both drawing emitters share `emitters/drawing/`: `content` holds the facts a sheet
 states, `layout` resolves a sheet's geometry, and `build` turns the two into a `Scene`
-of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene. They differ in
-which unknown they solve for — SVG fixes the sheet and fits the scale, PDF fixes the
-scale at 1:1 and walks the ISO 5457 candidates.
+of primitives. `drawing_svg` and `drawing_pdf` only serialise that scene, each through its own public
+`render(scene, title)` — the seam between building a `Scene` and serialising it. They
+differ in which unknown they solve for — SVG fixes the sheet and fits the scale, PDF
+fixes the scale at 1:1 and walks the ISO 5457 candidates.
 `packages/stompdrill/tests/test_drawing_agreement.py` parses both artefacts and
 compares what they say about one panel; the sheets may list different
 numbers of rows, but never differ about a row they both show. A `DrawingOptions(scale=…)`
@@ -219,7 +226,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - **New emitter:** implement `stompmodel`'s `Emitter` protocol, decorate with
   `@register_emitter`, add one import in `emitters/__init__.py`. The CLI resolves
   `--emit FORMAT=PATH` through the registry and never names a format. An emitter
-  needing its own CLI flags still requires a `cli.py` edit.
+  needing its own CLI flags still requires a `cli.py` edit. A binary emitter writes
+  its payload through `stompmodel.protocols.write_payload(path, payload) -> int`,
+  which is where the bytes are written and counted; the CLI keeps only the sentence
+  it prints from that count. A drawing backend exposes `render(scene, title)`, the
+  same seam `drawing_svg` and `drawing_pdf` already serialise a `Scene` through.
 - **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`,
   then insert it in `cli.build_pipeline`. Order is the one thing a stage cannot
   self-declare, so `build_pipeline` is the integration point by design.
@@ -289,6 +300,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - Preserve property tests for snapping (onto the grid, within half a pitch, and
   idempotent) and tool stability under hole reordering — not deduplication idempotence,
   which exact integer equality makes structurally unfalsifiable.
+- `packages/stompdrill/tests/recovery/` holds uncollected read-back helpers
+  (`excellon.py`, `svg.py`, `pdf.py`) plus a shared vocabulary in `facts.py`; a recovery
+  that inverts its own emitter's transform proves that emitter self-consistent and
+  nothing more. An AST gate in `test_recovery.py` forbids anything under `recovery/`
+  from importing `stompdrill`.
 - Coverage targets are 90% for each package and 100% for quantisers, stages,
   emitters, and `stompmodel`'s codec.
 - `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most
@@ -300,10 +316,10 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 
   ```bash
   .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
-  # 241 passed
+  # 246 passed
 
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
-  # 1234 passed
+  # 1318 passed
   ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.

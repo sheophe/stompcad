@@ -245,7 +245,7 @@ a limit invites arguing about its value.
 | Default | both suites: unit, acceptance, layers 1–3, recoveries, e2e | 2.8 s + 0.2 s |
 | `--hammond` | the above plus kernel tests against real enclosure models | ~55 s |
 | Mutation survey | per package, run deliberately, read by module | minutes |
-| Nightly symbolic | integer-domain properties under the CrossHair backend | 7–25 s per property |
+| Nightly symbolic — **not adopted** | integer-domain properties under the CrossHair backend | 7–25 s per property |
 
 **The mutation survey must actually run.** Today the root config produces no
 scored mutants and the member survey aborts, because the package-boundary gate
@@ -261,7 +261,8 @@ type gate.
 execution on constructs it cannot handle, with no timeout, no warning, and
 `metadata.backend` reporting `null`. A canary is a property with a known
 symbolic-only counterexample; if it stops failing, the backend has disengaged and
-the tier is measuring nothing. Adoption is conditional on it.
+the tier is measuring nothing. Adoption is conditional on it, and this plan does
+not adopt it — see `docs/BACKLOG.md`, "Adopt the nightly symbolic tier".
 
 Symbolic checking applies to the integer core only. `units.py` is excluded:
 `Decimal(str(mm))` realises the symbolic float, and the spike measured the same
@@ -288,7 +289,7 @@ Three plans, written and executed in order.
 | --- | --- | --- |
 | 1 — instruments and repairs | both mutmut configs, the mypy exclusion, the boundary-gate exemption, the three hollow tests, the fixture lapse, the ADR corrections | both surveys run and are read by module; the repaired tests fail when their named behaviour is removed |
 | 2 — domain changes | containment, `DEFAULT_FORM_DEPTH` and its flag, the documented preconditions, contract and ADR amendments | both warnings reach exit 1 with tests that fail when either is removed |
-| 3 — the framework | Phase A's split, the three recoveries, the independence gate, layers 1–3, the golden, e2e, the generative conversions, Phase C's cleanup and the routing repair | every emitter's owned representation checked against the model; the golden committed; one e2e drives the console script; `_two_opt` is Θ(P·n²) with routes unchanged |
+| 3 — the framework | Phase A's split, the three recoveries, the independence gate, layers 1–3, the golden, the acceptance tests, e2e, the generative conversions, Phase C's cleanup and the routing repair | every emitter's owned representation checked against the model; the golden committed; every contract-coverage gap in §4 exercised by an acceptance test; one e2e drives the console script; `_two_opt` is Θ(P·n²) with routes unchanged |
 
 **Why three.** Plan 1 is a prerequisite in fact: a survey that cannot run cannot
 adjudicate whether Plan 3's tests are better, which is Plan 3's whole claim. Plan
