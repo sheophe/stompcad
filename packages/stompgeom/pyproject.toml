@@ -1,0 +1,69 @@
+[project]
+name = "stompgeom"
+version = "0.1.0"
+description = "The workspace's kernel layer: the STEP reader, the deterministic writer, and the kernel guard"
+requires-python = ">=3.10"
+# The kernel is unconditional here. A kernel-free configuration of this
+# package is one nobody runs, and ADR-0009 retired the optional extra that
+# pretended otherwise.
+dependencies = ["stompmodel", "cadquery-ocp==7.9.3.1.1"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: without this marker a downstream type checker discards every
+# annotation this distribution ships.
+[tool.setuptools.package-data]
+stompgeom = ["py.typed"]
+
+[tool.uv.sources]
+stompmodel = { workspace = true }
+
+# So ADR-0008's sentence -- change into the member, sync, test -- runs a real
+# suite rather than an import check. `mypy` is here because the root gate
+# excludes this member's tests: three `tests` packages cannot share one scan.
+[dependency-groups]
+dev = ["pytest", "mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# cadquery-ocp is a compiled extension with no py.typed marker, so every OCP
+# symbol is Any to mypy. Narrow to OCP alone, mirroring the identical override
+# the root pyproject.toml carries for `mypy packages`, for the same reason.
+module = ["OCP.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# test_kernel.py deliberately asserts a None-returning guard's result is None
+# (the guard's whole contract), and forwards *args/**kwargs into
+# builtins.__import__'s stricter overloaded signature to simulate an absent
+# kernel. mypy's default checks flag both even though the code is correct and
+# intentional. Scoped to this one test module so no other type error in the
+# suite is masked.
+module = ["tests.test_kernel"]
+disable_error_code = ["func-returns-value", "arg-type"]
+
+# mutmut resolves tests through the pyproject.toml in the current working
+# directory, and the root one names only stompdrill's testpaths, so a mutant of
+# this member run through the root config would record a false survivor.
+# `cd packages/stompgeom && mutmut run` is the real survey.
+[tool.mutmut]
+source_paths = ["src/stompgeom"]
+# mutmut injects `import mutmut` into every module it instruments, which the
+# boundary gate rejects by design. Deselecting keeps the gate's assertion
+# exact rather than weakening the rule itself.
+pytest_add_cli_args_test_selection = [
+    "--deselect=tests/test_package_boundary.py::test_every_module_imports_only_the_standard_library_and_itself",
+]

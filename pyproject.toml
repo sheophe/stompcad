@@ -107,13 +107,14 @@ files = ["packages"]
 # member's ``tests`` package is the same hazard by another name: two packages
 # named ``tests`` cannot share this scan any more than they can share one
 # pytest interpreter (see the root testpaths comment above), so stompmodel's
-# is excluded here -- its own [tool.mypy] in packages/stompmodel/pyproject.toml
-# is what actually type-checks it, not this gate and not ADR-0008 (which
-# governs testing, not type-checking). A member's mutants/ is excluded for the
-# same reason as its build/: `mutmut run` copies both the source package and a
-# second `tests` package underneath it, so mypy hits a duplicate module the
-# moment either copy is scanned. A survey must not break an unrelated gate.
-exclude = ["^packages/[^/]+/build/", "^packages/[^/]+/mutants/", "^packages/stompmodel/tests/"]
+# and stompgeom's are excluded here -- each member's own [tool.mypy] in its
+# own pyproject.toml is what actually type-checks it, not this gate and not
+# ADR-0008 (which governs testing, not type-checking). A member's mutants/ is
+# excluded for the same reason as its build/: `mutmut run` copies both the
+# source package and a second `tests` package underneath it, so mypy hits a
+# duplicate module the moment either copy is scanned. A survey must not break
+# an unrelated gate.
+exclude = ["^packages/[^/]+/build/", "^packages/[^/]+/mutants/", "^packages/stompmodel/tests/", "^packages/stompgeom/tests/"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
