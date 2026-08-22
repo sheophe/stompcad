@@ -253,11 +253,15 @@ fresh venv and imports `stompmodel` from it, is marked so a standard run skips i
 
 **Constraint:** `kinds.md` argues the 20-shuffle loop in `test_pipeline.py` is subsumed by the
 generative permutation property this plan added. The spec's list of four conversions did not
-include it, so it was left rather than decided. "Confirm where ADR-0006's permutation
-invariant is actually guarded" (below) bears directly on this: the permutation property
-currently passes because `quantise.py:60` sorts every hole before routing ever sees it, not
-because of tie-break machinery, so neither instrument may exercise tool-stability the way
-either looks like it does.
+include it, so it was left rather than decided. "Decide whether `_total_order`'s tie-break
+clauses are reachable at all" (below) bears directly on this and is now settled by direct
+test: `quantise.py:60`'s entry sort is confirmed, by reverting it, to be what guards the
+invariant — both the pre-existing fixtures and the new generative property fail without it.
+What remains open there is narrower, and does not change on its own whether the shuffle
+loop is redundant: whether `_total_order`'s tie-break clauses are reachable at all in the
+shipped pipeline. Either way, the sort runs before either instrument's holes reach routing,
+so this decision should be made on what the shuffle loop checks beyond permutation stability
+(if anything), not on which one "really" guards the invariant.
 
 **Acceptance:** A written decision either deletes the shuffle loop with the generative
 property named as its replacement, or keeps both with a stated reason the property does not
@@ -378,26 +382,62 @@ walks `ast.Constant` docstrings only and does not flag it.
 **Acceptance:** Closed by shortening the comment, or moving the rationale into a referenced
 note, the next time the file is open for another reason — not worth a standalone change.
 
-## Confirm where ADR-0006's permutation invariant is actually guarded
+## Decide whether `_total_order`'s tie-break clauses are reachable at all
 
 **Status:** Open question, not scheduled. Raised by ruling T9-1 during the verification
-framework plan, 2026-08-22.
+framework plan, 2026-08-22; corrected 2026-08-22 after the original finding was checked
+twice independently and found false.
 
-**Constraint:** Across five experiments, the generative permutation property added to replace
-the reordering shuffle loop caught none of: the diameter-clause mutant at its shipped budget,
-at a rebalanced budget, or with a diameter-jittered generator; three further `_total_order`
-mutants; or the outright removal of `quantise.py`'s entry sort. Neither the pre-existing
-fixtures nor the new property caught any of these five. The likely architectural reason is
-that `quantise.py:60` sorts every hole before anything downstream — including routing — ever
-sees it, so arrival order never reaches the tie-break machinery either instrument appears to
-exercise. If that is right, the invariant ADR-0006 requires is guarded by that one sort
-statement, not by `_total_order` or by either test — but no test yet isolates the sort as the
-sole guard, so this is a documented finding rather than a proven one. (Snap's own conversion
-is not in question here: a tie-step mutant demonstrably separates its old idempotence loop
-from its new property, which the permutation case does not.)
+**Constraint:** An earlier version of this entry claimed that removing `quantise.py:60`'s
+entry sort was caught by neither the pre-existing fixtures nor the new generative
+permutation property, and that five mutants went uncaught. That claim was wrong. Replacing
+the sort with `measurements = list(raw.holes)` makes five tests in `test_invariant.py` fail:
+`test_a_panel_with_diagnostics_and_a_duplicate_is_permutation_stable`,
+`test_a_panel_whose_hole_breaks_out_of_the_outline_is_permutation_stable`,
+`test_a_panel_whose_holes_sit_on_a_grid_tie_is_permutation_stable`,
+`test_no_permutation_of_any_hole_set_reaches_any_artifact` (the generative property itself),
+and `test_the_bare_dedupe_stage_is_order_sensitive_and_quantise_is_what_saves_it`. The sort's
+responsibility for the invariant is already pinned by tests that exist, and the generative
+property is not vacuous — keeping it was right.
 
-**Acceptance:** Either a test is written that pins responsibility for the invariant on
-`quantise.py:60`'s sort specifically — failing when the sort is removed and nothing downstream
-compensates, passing otherwise — or the question is answered by inspection and the reasoning
-recorded here, so the next reader does not mistake the generative permutation property for
-evidence that tie-break machinery is exercised.
+What no instrument exercises is `_total_order`'s tie-break clauses specifically. The
+diameter-clause mutant — `return (-hole.y_nm, hole.x_nm, hole.raw.x, hole.raw.y)` — survives
+both `test_invariant.py` and `test_route.py` untouched. That is because the sort normalises
+arrival order before routing ever sees it, and after `Deduplicate` no two holes in a tool
+block share a nominal position, so the raw tie-break clauses are unreachable in the shipped
+pipeline.
+
+**Acceptance:** Either a test demonstrates an input that reaches `_total_order`'s tie-break
+clauses through the shipped pipeline (two holes with equal nominal position in one tool
+block surviving to routing), proving them live code; or the question is answered by
+inspection, recorded here, and a decision made on whether unreachable tie-break clauses
+should be simplified or removed.
+
+## Consolidate the repeated four-hole fixture and the nested-`Group` circle walker
+
+**Status:** Confirmed gap, not scheduled. Raised by the final whole-branch review of the
+verification framework plan, 2026-08-22, and backlogged rather than fixed because
+consolidating across three files is more churn than that review's fix wave should carry
+without per-task review.
+
+**Constraint:** The same four-hole, two-diameter fixture — holes at `(-20_000_000,
+18_000_000, 7_000_000, index=3)`, `(20_000_000, 18_000_000, 7_000_000, index=4)`,
+`(-19_000_000, -18_750_000, 5_000_000, index=1)`, `(19_000_000, -18_750_000, 5_000_000,
+index=2)`, on the same `ReferenceOutline(112_400_000, 60_500_000)` — is defined three times
+under three names: `panel()` in `test_layer2_owned.py`, `panel()` in
+`test_layer3_codecs.py`, and `sheet_panel()` in `test_recovery.py`. Separately, the walk that
+finds every `Circle` inside a scene's nested `Group` items exists three times with similar
+names and different filter semantics: `_scene_hole_circles`'s `walk` in
+`test_drawing_agreement.py` (keeps circles carrying the `hole` class token), `circles`'s
+`walk` in `test_layer2_owned.py` (keeps circles carrying a caller-supplied token), and
+`scene_circles`'s `walk` in `test_layer3_codecs.py` (keeps every circle, converting each to a
+sheet-nanometre tuple). This suite is meant as an exemplar other packages will copy, so the
+triplication is house style debt, not a one-off. The concrete cost of leaving it: if `Scene`
+grows a second container type, all three walkers must change and a missed one under-reports
+silently, since each is a private recursive helper with no shared test of its own.
+
+**Acceptance:** One shared four-hole fixture and one shared circle walker, living in
+`tests/conftest.py` or a small helper module, replace all three copies of each. The walker's
+interface accommodates the existing filter differences (by class token, or none) without
+losing any of the three call sites' current behaviour, and the full stompdrill suite passes
+unchanged.
