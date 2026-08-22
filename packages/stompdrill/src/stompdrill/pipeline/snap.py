@@ -13,7 +13,14 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, Hole, RawHole, StageRun
-from stompmodel.units import Millimetre, Nanometre, format_nm, nm_from_mm, scaled_nm
+from stompmodel.units import (
+    Millimetre,
+    Nanometre,
+    check_nanometres,
+    format_nm,
+    nm_from_mm,
+    scaled_nm,
+)
 
 from ..formatting import format_mm
 from ..tolerance import within
@@ -47,7 +54,8 @@ class SnapPositions:
     name: ClassVar[str] = "snap"
 
     def __init__(self, grid_nm: Nanometre, warn_over_nm: Nanometre | None = None) -> None:
-        self.requested_grid_nm = _whole("grid_nm", grid_nm)
+        check_nanometres("SnapPositions", grid_nm=grid_nm)
+        self.requested_grid_nm = grid_nm
         clamped_nm = max(self.requested_grid_nm, MICRON_NM)
         # Only the pitch that is actually coarse enough to be used is held to
         # whole microns: a clamped one is not the pitch anything is snapped to,
@@ -185,16 +193,9 @@ def _ambiguous(tied: tuple[tuple[int, int], ...], grid_nm: Nanometre) -> Diagnos
     )
 
 
-def _whole(name: str, value: Nanometre) -> Nanometre:
-    """Require a plain ``int`` nanometre length, excluding floats and booleans."""
-    if type(value) is not int:
-        raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
-    return value
-
-
 def _threshold(value: Nanometre) -> Nanometre:
     """A warning distance: whole nanometres, and not one no hole can be inside of."""
-    number = _whole("warn_over_nm", value)
-    if number < 0:
+    check_nanometres("SnapPositions", warn_over_nm=value)
+    if value < 0:
         raise ValueError(f"warn_over_nm cannot be a negative distance, got {value!r}")
-    return number
+    return value

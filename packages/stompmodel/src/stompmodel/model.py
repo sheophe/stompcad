@@ -18,8 +18,8 @@ from .errors import EmitterError
 from .units import (
     Millimetre,
     Nanometre,
-    _check_nanometres,
     check_millimetres,
+    check_nanometres,
     mm_from_nm,
     nm_from_mm,
 )
@@ -81,7 +81,7 @@ class Hole:
     index: int | None = None
 
     def __post_init__(self) -> None:
-        _check_nanometres(
+        check_nanometres(
             "Hole", x_nm=self.x_nm, y_nm=self.y_nm, diameter_nm=self.diameter_nm
         )
         if self.index is not None and self.index < 1:
@@ -125,7 +125,7 @@ class Hole:
         Deltas are validated before addition so arithmetic cannot coerce a
         boolean into an apparently valid integer coordinate.
         """
-        _check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
+        check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
         return replace(
             self,
             x_nm=Nanometre(self.x_nm + dx_nm),
@@ -176,7 +176,7 @@ class ReferenceOutline:
     raw: RawOutline = _MEASUREMENT_IS_NOMINAL
 
     def __post_init__(self) -> None:
-        _check_nanometres(
+        check_nanometres(
             "ReferenceOutline",
             width_nm=self.width_nm,
             height_nm=self.height_nm,
@@ -241,7 +241,7 @@ class EnclosureMatch:
         A bare string is rejected before tuple conversion can split it into
         single-character designators.
         """
-        _check_nanometres(
+        check_nanometres(
             "EnclosureMatch", length_nm=self.length_nm, width_nm=self.width_nm
         )
         # Runtime callers may supply values outside the declared tuple type.

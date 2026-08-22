@@ -307,7 +307,7 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
         "grid", [float("nan"), float("inf"), float("-inf"), 0.25, 250_000.0, True]
     )
     def test_a_grid_that_is_not_an_int_is_refused_at_construction(self, grid):
-        with pytest.raises(TypeError, match=r"^grid_nm"):
+        with pytest.raises(TypeError, match=r"grid_nm"):
             SnapPositions(grid)
 
     @pytest.mark.parametrize(
@@ -315,7 +315,7 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
     )
     def test_a_warning_threshold_that_is_not_an_int_is_refused_too(self, warn_over):
         """``--grid-warn=nan`` warns about every hole, including the still ones."""
-        with pytest.raises(TypeError, match=r"^warn_over_nm"):
+        with pytest.raises(TypeError, match=r"warn_over_nm"):
             SnapPositions(Nanometre(250_000), warn_over_nm=warn_over)
 
     def test_a_negative_warning_threshold_is_refused(self):

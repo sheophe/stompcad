@@ -120,3 +120,11 @@ Runtime validation remains. The model still rejects a length that is not a plain
 and `SnapPositions` still validates that its effective pitch is a whole number of microns;
 a brand describes intent and does not check a value that arrives from outside the type
 checker's reach.
+
+**Amended: the nanometre guard is published too.** `stompmodel.units` exports
+`check_millimetres` and `check_nanometres` as a pair, each refusing anything but its own
+plain representation — a finite `float` and a plain `int` respectively — and naming the
+owner and the member that failed. The nanometre side is public for the same reason the
+millimetre side already was: several `stompdrill` quantisers and stages applied this exact
+rule outside `stompmodel`, each with its own copy, and a shared rule left private would
+break every one of those callers with no `__all__`, ruff or mypy saying so.

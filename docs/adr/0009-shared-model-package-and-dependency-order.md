@@ -62,12 +62,17 @@ Pure Python. No kernel, no parser, no I/O beyond serialisation. It holds:
   `StompdrillError` does — so a package's errors stay identifiable while every
   one of them is catchable at once.
 
-Two admission rules, and nothing else gets in:
+Three admission rules, and nothing else gets in:
 
 1. **Interchange** — one package produces the value and another consumes it, and
    neither is its home.
 2. **Contract** — a protocol or vocabulary both tools must implement identically
    for `stompcad` to treat them uniformly.
+3. **Behaviour** — a rule both tools must agree on belongs beside the type it
+   constrains, published there. `check_millimetres` and `check_nanometres` are
+   this rule applied: the type they guard already lives in `stompmodel`, so a
+   caller enforcing it again outside the module is one rule with two
+   implementations that can drift, not a second rule.
 
 A type a package owns and merely exposes to a library consumer **stays home**.
 `stompcad` reading `stompcollider`'s `DockReport` is ordinary library consumption, not
@@ -159,12 +164,15 @@ A length is a unit, not an operation, and it is the most widely shared definitio
 here. Putting it in the leaf keeps the graph linear and lets a consumer take
 `Nanometre` without taking a CAD kernel.
 
-**Why the two admission rules stop where they do.** Rule 2 is the dangerous one: it
+**Why the three admission rules stop where they do.** Rule 2 is the dangerous one: it
 would justify moving anything two packages happen to resemble each other in. It is
 bounded by its own wording — the uniformity must be something `stompcad` depends on.
 `Pipeline` qualifies because `stompcad` reads both tools' `StageRun` provenance and
 reduces both tools' diagnostics; `Source` does not, because `RawDrillData` is
-artwork and `stompcollider`'s board reader returns something else entirely.
+artwork and `stompcollider`'s board reader returns something else entirely. Rule 3 is
+bounded the same way it is stated: it admits a rule that constrains a type `stompmodel`
+already owns, never a rule about behaviour a package happens to share for other reasons —
+that would be rule 2 wearing a different name.
 
 **Why one error base rather than one per tool.** `stompcad` runs both tools
 behind a single command and reduces their failures to one report and one exit

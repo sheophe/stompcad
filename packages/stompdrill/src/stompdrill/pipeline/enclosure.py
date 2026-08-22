@@ -17,7 +17,7 @@ from stompmodel.model import (
     ReferenceOutline,
     StageRun,
 )
-from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
+from stompmodel.units import Nanometre, check_nanometres, format_nm, nm_from_mm, scaled_nm
 
 from ..enclosures import footprints
 
@@ -75,13 +75,10 @@ class IdentifyHammondFootprint:
         # model sets and for its reason: a float tolerance is a length that
         # never crossed ``units``, and left alone it surfaces three paths later
         # as the payload guard firing inside a diagnostic nobody was watching.
-        # ``type(...) is not int`` and not ``isinstance``, because ``bool`` is
-        # an ``int`` in Python and ``True`` is a one-nanometre tolerance that
-        # matches nothing on earth.
-        if type(tolerance_nm) is not int:
-            raise TypeError(
-                f"tolerance_nm must be a whole number of nanometres, not {tolerance_nm!r}"
-            )
+        # The published guard rejects ``bool`` too, because it is an ``int`` in
+        # Python and ``True`` is a one-nanometre tolerance that matches nothing
+        # on earth.
+        check_nanometres("IdentifyHammondFootprint", tolerance_nm=tolerance_nm)
         # A negative slack is refused for the reason a float is, one step on: no
         # measurement is inside it, so every panel on earth becomes
         # ``unknown-enclosure`` — a WARNING, so the run goes on and dimensions

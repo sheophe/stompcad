@@ -16,7 +16,7 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic, ParameterValue
 from stompmodel.model import RawHole, StageRun
-from stompmodel.units import Nanometre, format_nm, nm_from_mm, scaled_nm
+from stompmodel.units import Nanometre, check_nanometres, format_nm, nm_from_mm, scaled_nm
 
 from ..formatting import format_mm
 
@@ -65,13 +65,6 @@ def _fractional_sizes(sixty_fourths: Iterable[int]) -> tuple[Nanometre, ...]:
     return tuple(Nanometre(n * _SIXTY_FOURTH_NM) for n in sixty_fourths)
 
 
-def _whole_nanometres(name: str, value: object) -> Nanometre:
-    """Require a plain ``int`` nanometre length, excluding floats and booleans."""
-    if type(value) is not int:
-        raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
-    return Nanometre(value)
-
-
 def _metric_label(size_nm: Nanometre) -> str:
     """``⌀3.20 mm``. Unique *and* truthful at 2 dp across all 183 sizes."""
     return f"⌀{format_nm(size_nm, 2)} mm"
@@ -95,7 +88,7 @@ class DrillStandard:
         if not self.sizes_nm:
             raise ValueError(f"the {self.name} drill standard has no sizes in it")
         for position, size in enumerate(self.sizes_nm):
-            _whole_nanometres(f"the {self.name} drill standard's size[{position}]", size)
+            check_nanometres(f"the {self.name} drill standard", **{f"size[{position}]": size})
             if size <= 0:
                 raise ValueError(
                     f"the {self.name} drill standard holds {size} nm at position "
@@ -172,7 +165,8 @@ class SnapDiametersToDrillTable:
         tolerance_nm: Nanometre = Nanometre(250_000),
     ) -> None:
         self.standard = standard
-        self.tolerance_nm = _whole_nanometres("tolerance_nm", tolerance_nm)
+        check_nanometres("SnapDiametersToDrillTable", tolerance_nm=tolerance_nm)
+        self.tolerance_nm = tolerance_nm
         # Negative is refused rather than clamped, and it is the failure that
         # says nothing at all: a bound no measurement can be inside of makes
         # every hole on the panel an ``unknown-diameter`` ERROR, so the report

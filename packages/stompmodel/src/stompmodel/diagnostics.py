@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import total_ordering
 
-from .units import Nanometre, _check_nanometres
+from .units import Nanometre, check_nanometres
 
 __all__ = [
     "Severity",
@@ -71,9 +71,9 @@ def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> N
             continue
         if isinstance(value, tuple):
             for position, element in enumerate(value):
-                _check_nanometres(owner, **{f"{key}[{position}]": element})
+                check_nanometres(owner, **{f"{key}[{position}]": element})
         else:
-            _check_nanometres(owner, **{key: value})
+            check_nanometres(owner, **{key: value})
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +104,7 @@ class Diagnostic:
         if self.location_nm is not None:
             x_nm, y_nm = self.location_nm
             object.__setattr__(self, "location_nm", (x_nm, y_nm))
-            _check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
+            check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
         object.__setattr__(
             self,
             "data",
