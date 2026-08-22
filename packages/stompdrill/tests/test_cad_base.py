@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from stompdrill.cad import CaseModel, Frame, KernelUnavailable, Rejection
-from stompdrill.errors import StompdrillError
+from stompdrill.cad import CaseModel, Rejection
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.units import Nanometre
 
 
@@ -19,9 +19,11 @@ class Stub:
         Nanometre(50_000_000), Nanometre(40_000_000),
     )
     margin_nm = Nanometre(1_000_000)
-    frame = Frame(
-        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
-        u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+            u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+        )
     )
 
     def classify(self, x_nm, y_nm, radius_nm):
@@ -53,9 +55,11 @@ def test_an_object_missing_classify_does_not_satisfy_the_protocol():
             Nanometre(50_000_000), Nanometre(40_000_000),
         )
         margin_nm = Nanometre(1_000_000)
-        frame = Frame(
-            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
-            u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+        frame = FaceFrame(
+            basis=CoordinateFrame(
+                origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+                u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+            )
         )
 
     assert not isinstance(Incomplete(), CaseModel)
@@ -63,7 +67,7 @@ def test_an_object_missing_classify_does_not_satisfy_the_protocol():
 
 def test_the_frame_flattens_to_stagerun_safe_parameters():
     frame = Stub.frame
-    keys = dict(frame.as_parameters())
+    keys = dict(frame.basis.as_parameters())
 
     assert keys["frame_origin_nm"] == (0, 0, -30_000_000)
     assert keys["frame_u"] == (1.0, 0.0, 0.0)
@@ -71,8 +75,12 @@ def test_the_frame_flattens_to_stagerun_safe_parameters():
     assert keys["frame_w"] == (0.0, 0.0, -1.0)
 
 
-def test_kernel_unavailable_is_an_stompdrill_error():
-    assert issubclass(KernelUnavailable, StompdrillError)
+def test_kernel_unavailable_is_a_stompgeom_error() -> None:
+    """It moved packages with the guard; stompdrill no longer owns it."""
+    from stompgeom.errors import StompgeomError
+    from stompgeom.kernel import KernelUnavailable
+
+    assert issubclass(KernelUnavailable, StompgeomError)
 
 
 def test_importing_stompdrill_does_not_import_the_kernel():

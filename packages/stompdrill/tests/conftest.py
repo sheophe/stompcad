@@ -8,9 +8,10 @@ import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
 
-from stompdrill.cad import Frame, Rejection
+from stompdrill.cad import Rejection
 from stompdrill.emitters import base
 from stompdrill.geometry import KAPPA
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import DrillData, Hole, ReferenceOutline, SourceInfo
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
@@ -206,9 +207,11 @@ class FakeCase:
     face = "box"
     footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
     plate_nm = Nanometre(2_250_000)
-    frame = Frame(
-        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30 * _MM)),
-        u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30 * _MM)),
+            u=(1.0, 0.0, 0.0), v=(0.0, -1.0, 0.0), w=(0.0, 0.0, -1.0),
+        )
     )
 
     def __init__(

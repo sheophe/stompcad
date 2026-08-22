@@ -183,7 +183,7 @@ def test_every_owned_representation_agrees_about_the_same_holes():
 
 
 def _cut_component_shape(document: Any, keyword: str) -> Any:
-    """The cut leaf's shape, found with ``cad.step``'s own traversal.
+    """The cut leaf's shape, found with ``stompgeom.step``'s own traversal.
 
     ``cut_shape`` hands back the XCAF document rather than the shape it
     touched, so the leaf has to be found again. ``_collect`` is the walk
@@ -195,7 +195,7 @@ def _cut_component_shape(document: Any, keyword: str) -> Any:
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
-    from stompdrill.cad.step import StepDocument, StepSolid, _collect
+    from stompgeom.step import StepDocument, StepSolid, _collect
 
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     labels = TDF_LabelSequence()
@@ -220,7 +220,6 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     from OCP.Precision import Precision
 
     from stompdrill.cad import load_case_model
-    from stompdrill.cad.region import _to_canonical
     from stompdrill.emitters.step import cut_shape
     from stompmodel.units import nm_from_mm
     from tests.hammond import cylinders, require_model
@@ -245,7 +244,7 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
 
     def canonical_hole(ax: int, ay: int, az: int, radius: int) -> tuple[Nanometre, Nanometre, int]:
         point_mm = (ax * tolerance_mm, ay * tolerance_mm, az * tolerance_mm)
-        x_mm, y_mm = _to_canonical(frame, point_mm)
+        x_mm, y_mm = frame.basis.to_canonical(point_mm)
         return nm_from_mm(x_mm), nm_from_mm(y_mm), radius
 
     # Joining position and radius in one tuple, rather than checking the

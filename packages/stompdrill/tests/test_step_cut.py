@@ -43,7 +43,7 @@ def _emit(*holes, face="box", model=None):
 
 
 def _reload(payload: bytes, tmp_path: Path):
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
 
     target = tmp_path / "out.stp"
     target.write_bytes(payload)
@@ -83,7 +83,7 @@ def test_the_output_reloads_as_a_valid_solid(tmp_path):
 
 
 def test_the_assembly_and_its_product_names_survive_the_round_trip(tmp_path):
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
 
     document = _reload(_emit(at(0, 0, 6 * MM, index=1)), tmp_path)
@@ -97,7 +97,7 @@ def test_the_assembly_and_its_product_names_survive_the_round_trip(tmp_path):
 
 def test_the_volume_removed_matches_the_holes_drilled(tmp_path):
     """pi r^2 t is an authority no self-consistent bad topology can fake."""
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
@@ -114,7 +114,7 @@ def test_the_volume_removed_matches_the_holes_drilled(tmp_path):
 
 def test_only_the_drilled_side_loses_material(tmp_path):
     """An unbounded cylinder would punch the lid as well."""
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
@@ -134,7 +134,7 @@ def test_only_the_drilled_side_loses_material(tmp_path):
 
 
 def test_two_holes_remove_twice_as_much_as_one(tmp_path):
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
 
     base = sum(_volume(s.shape) for s in read_step(_model_path()).solids)
@@ -154,7 +154,7 @@ def test_the_hole_is_cut_where_the_frame_puts_it(tmp_path):
     mirror image. See ``test_the_hole_lands_at_the_canonical_position_not_its_mirror``
     for the assertion that actually pins down *where* the bore is.
     """
-    from stompdrill.cad.step import bounding_box_mm, read_step
+    from stompgeom.step import bounding_box_mm, read_step
     from tests.conftest import at
 
     document = _reload(_emit(at(10 * MM, 0, 6 * MM, index=1)), tmp_path)
@@ -187,7 +187,7 @@ def test_the_hole_lands_at_the_canonical_position_not_its_mirror(tmp_path):
     document = _reload(_emit(at(10 * MM, 0, 6 * MM, index=1), model=model), tmp_path)
     (box,) = [s for s in document.solids if "BOX" in s.name.upper()]
 
-    frame = model.frame
+    frame = model.frame.basis
     origin = tuple(value / 1_000_000 for value in frame.origin_nm)
     depth_mm = (model.plate_nm / 1_000_000) / 2  # mid-plate: solidly inside real material
 
@@ -203,7 +203,7 @@ def test_the_hole_lands_at_the_canonical_position_not_its_mirror(tmp_path):
 
 
 def test_emitting_with_no_holes_leaves_the_model_unchanged(tmp_path):
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
 
     before = sum(_volume(s.shape) for s in read_step(_model_path()).solids)
     after = sum(_volume(s.shape) for s in _reload(_emit(), tmp_path).solids)
@@ -221,7 +221,7 @@ def test_a_hole_over_cast_lettering_cuts_cleanly(tmp_path):
     """
     from OCP.BRepCheck import BRepCheck_Analyzer
 
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
     from tests.hammond import BB_PROBES
 
@@ -244,7 +244,7 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
     so cutting ``face="lid"`` is also the only test that walks past a
     keyword mismatch before finding its match.
     """
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
@@ -382,7 +382,7 @@ def test_the_emitted_timestamp_is_copied_from_the_source_model():
     output), not to what this emitter writes — so the stamp is read out by
     position, the second quoted string in ``FILE_NAME(...)``, not by name.
     """
-    from stompdrill.cad.step import source_timestamp
+    from stompgeom.step import source_timestamp
     from tests.conftest import at
 
     payload = _emit(at(0, 0, 6 * MM, index=1)).decode("latin-1")
@@ -554,7 +554,7 @@ def test_the_drilled_solids_own_colour_does_not_survive_a_cut(tmp_path):
     not survive, which is why ``_count_colour_assignments`` excludes the
     label ``cut_shape`` touched rather than expecting the full source count.
     """
-    from stompdrill.cad.step import read_step
+    from stompgeom.step import read_step
     from tests.conftest import at
 
     source = _colours_by_product(read_step(_model_path()).document)
@@ -581,7 +581,7 @@ def test_two_emissions_describe_the_same_model(tmp_path):
     import sys
     import textwrap
 
-    from stompdrill.cad.step import bounding_box_mm, read_step
+    from stompgeom.step import bounding_box_mm, read_step
 
     model_path = _model_path()
     src_path = Path(__file__).resolve().parents[1] / "src"

@@ -33,9 +33,9 @@ def test_constructing_without_a_model_is_an_emitter_error():
 
 
 def test_constructing_without_the_kernel_names_the_extra(monkeypatch):
-    from stompdrill.cad import KernelUnavailable
     from stompdrill.emitters import step as step_module
     from stompdrill.emitters.step import StepEmitter, StepOptions
+    from stompgeom.kernel import KernelUnavailable
     from tests.test_clearance import FakeCase
 
     def absent() -> None:

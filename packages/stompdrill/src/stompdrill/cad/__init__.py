@@ -5,7 +5,7 @@ implementation is reached through ``load_case_model``, which imports it
 lazily, so ``import stompdrill`` never pays for the kernel.
 """
 
-from .base import CaseModel, Frame, KernelUnavailable, Rejection
+from .base import CaseModel, Rejection
 from .loader import load_case_model
 
-__all__ = ["CaseModel", "Frame", "Rejection", "KernelUnavailable", "load_case_model"]
+__all__ = ["CaseModel", "Rejection", "load_case_model"]

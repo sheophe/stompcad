@@ -303,8 +303,8 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
     from OCP.Precision import Precision
 
     from stompdrill.cad import load_case_model
-    from stompdrill.cad.step import read_step
     from stompdrill.emitters.step import StepEmitter, StepOptions
+    from stompgeom.step import read_step
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")

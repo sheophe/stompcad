@@ -15,7 +15,7 @@ from .pipeline import (
     DEFAULT_STANDARD, CheckCaseClearance, CheckOutlineContainment,
 )
 from .enclosures import Enclosure, HAMMOND_1590, footprints
-from .cad import CaseModel, Frame, Rejection, load_case_model
+from .cad import CaseModel, Rejection, load_case_model
 from .errors import StompdrillError, EmptyLayerError, LayerNotFoundError, SourceError
 
 __all__ = [
@@ -26,6 +26,6 @@ __all__ = [
     "CheckReferenceSize", "ReviewGridTies", "RouteHoles", "DrillStandard", "DRILL_STANDARDS",
     "DEFAULT_STANDARD", "CheckCaseClearance", "CheckOutlineContainment",
     "Enclosure", "HAMMOND_1590", "footprints",
-    "CaseModel", "Frame", "Rejection", "load_case_model",
+    "CaseModel", "Rejection", "load_case_model",
     "StompdrillError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]

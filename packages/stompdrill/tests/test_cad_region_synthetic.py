@@ -16,9 +16,9 @@ import pytest
 pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
 from stompdrill.cad import Rejection  # noqa: E402
-from stompdrill.cad.base import Frame  # noqa: E402
 from stompdrill.cad.loader import OcpCaseModel  # noqa: E402
 from stompdrill.cad.region import build_region, classify_bounds, contains  # noqa: E402
+from stompmodel.frames import CoordinateFrame, FaceFrame  # noqa: E402
 from stompmodel.units import Nanometre  # noqa: E402
 
 AXIS = 1
@@ -98,9 +98,11 @@ def test_a_recessed_companion_is_never_structure_at_any_margin():
     assert structure == []
     assert len(relief) == 1
 
-    frame = Frame(
-        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
-        u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
+        )
     )
     region = build_region(face, AXIS, OUTWARD)
     for margin_mm in (0.1, 1.0, 5.0):
@@ -115,9 +117,11 @@ def test_obstructed_is_reachable_with_a_genuine_raised_boss():
     fix-round-2, never blocks a hole): model-free, because it is otherwise
     unreachable on any cached Hammond model (see the fix-round-2 report).
     """
-    own_frame = Frame(
-        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
-        u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
+    own_frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
+        )
     )
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 
@@ -152,14 +156,18 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
     reframe (``region.reframe``) still runs before the box's own region is
     consulted, rather than checking the lid's raw coordinate against it.
     """
-    own_frame = Frame(
-        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
-        u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
+    own_frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
+        )
     )
     # Mirrored in x, like a real lid viewed from the opposite side to its box.
-    box_frame = Frame(
-        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
-        u=(-1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+    box_frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(-1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+        )
     )
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 

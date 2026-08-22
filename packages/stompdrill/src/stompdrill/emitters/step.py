@@ -19,11 +19,11 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from stompgeom.kernel import KernelUnavailable
 from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
 
-from ..cad.base import KernelUnavailable
 from .base import register_emitter
 
 __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
@@ -76,7 +76,7 @@ _COLOUR_CHAIN = re.compile(
 
 def require_kernel() -> None:
     """Indirection so a test can simulate an absent kernel."""
-    from ..cad.step import require_kernel as check
+    from stompgeom.kernel import require_kernel as check
 
     check()
 
@@ -333,7 +333,7 @@ def _drill_compound(model: Any, data: DrillData) -> Any | None:
     # little either side. An unbounded cylinder would punch the far wall too.
     overshoot = 1.0
     depth = abs(model.inner_position_mm - model.drilled_position_mm) + 2 * overshoot
-    direction = tuple(-component for component in model.frame.w)
+    direction = tuple(-component for component in model.frame.basis.w)
 
     compound = TopoDS_Compound()
     builder = BRep_Builder()
@@ -348,7 +348,7 @@ def _drill_compound(model: Any, data: DrillData) -> Any | None:
 
 def _face_point(model: Any, hole: Any, overshoot: float) -> tuple[float, float, float]:
     """The cylinder's start, ``overshoot`` mm outside the drilled face."""
-    frame = model.frame
+    frame = model.frame.basis
     x, y = float(mm_from_nm(hole.x_nm)), float(mm_from_nm(hole.y_nm))
     origin = tuple(float(mm_from_nm(value)) for value in frame.origin_nm)
     return tuple(

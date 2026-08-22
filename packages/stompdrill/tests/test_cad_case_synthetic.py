@@ -12,8 +12,8 @@ import pytest
 pytest.importorskip("OCP", reason="needs stompdrill[step]")
 
 from stompdrill.cad.case import find_faces  # noqa: E402
-from stompdrill.cad.step import StepSolid  # noqa: E402
 from stompdrill.errors import StompdrillError  # noqa: E402
+from stompgeom.step import StepSolid  # noqa: E402
 
 
 def test_a_closed_solid_has_no_unambiguous_drilled_face():

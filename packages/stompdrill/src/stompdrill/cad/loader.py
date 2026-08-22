@@ -13,9 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from stompmodel.frames import FaceFrame
 from stompmodel.units import Nanometre, nm_from_mm
 
-from .base import CaseModel, Frame, Rejection
+from .base import CaseModel, Rejection
 
 __all__ = ["OcpCaseModel", "load_case_model"]
 
@@ -31,13 +32,13 @@ class OcpCaseModel:
     footprint_nm: tuple[Nanometre, Nanometre]
     plate_nm: Nanometre
     play_area_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre]
-    frame: Frame
+    frame: FaceFrame
     margin_nm: Nanometre
     axis: int
     own_region: Any
-    own_frame: Frame
+    own_frame: FaceFrame
     box_region: Any | None
-    box_frame: Frame | None
+    box_frame: FaceFrame | None
     drilled_position_mm: float
     inner_position_mm: float
     # Beyond the CaseModel protocol: what the emitter needs to cut and write.
@@ -62,7 +63,7 @@ class OcpCaseModel:
         an ``OBSTRUCTED`` verdict never overrides what the part's own
         geometry already refused for a different reason.
         """
-        from .region import clearance_reason, contains, reframe
+        from .region import clearance_reason, contains
 
         if not contains(
             self.own_region, self.own_frame, self.axis, x_nm, y_nm, radius_nm, self.margin_nm
@@ -71,7 +72,10 @@ class OcpCaseModel:
             return Rejection.THROUGH_BOSS if reason in _THROUGH else Rejection.OFF_FACE
         if self.box_region is None or self.box_frame is None:
             return None
-        box_x, box_y = reframe(x_nm, y_nm, self.own_frame, self.box_frame)
+        # A box and its lid are viewed from opposite sides, so the same
+        # canonical x is a different model x on each; restate the point in
+        # the box's own frame before testing it against the box's region.
+        box_x, box_y = self.own_frame.basis.reframe(x_nm, y_nm, self.box_frame.basis)
         if not contains(
             self.box_region, self.box_frame, self.axis, box_x, box_y, radius_nm, self.margin_nm
         ):
@@ -83,11 +87,13 @@ def load_case_model(
     path: Path, *, face: str, margin_nm: Nanometre, part: str | None = None
 ) -> CaseModel:
     """Read ``path`` and build the model for the named face."""
+    from stompgeom import kernel
+    from stompgeom.step import read_step
+
     from .case import build_frame, find_faces, select_solid
     from .region import build_region, region_bbox_nm
-    from .step import read_step, require_kernel
 
-    require_kernel()
+    kernel.require_kernel()
     document = read_step(path)
     footprint_nm, axis = _footprint_and_axis(document)
 

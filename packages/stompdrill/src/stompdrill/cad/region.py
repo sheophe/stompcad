@@ -13,13 +13,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from stompmodel.frames import FaceFrame
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from ..errors import StompdrillError
-from .base import Frame
 
 __all__ = [
-    "classify_bounds", "build_region", "region_bbox_nm", "contains", "reframe",
+    "classify_bounds", "build_region", "region_bbox_nm", "contains",
     "clearance_reason",
 ]
 
@@ -58,7 +58,7 @@ def classify_bounds(face: Any, axis: int, outward: float) -> tuple[list[Any], li
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
-    from .step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     floor = _floor_face(face)
     companions = _companions(face, floor)
@@ -102,7 +102,7 @@ def build_region(face: Any, axis: int, outward: float) -> Any:
 
 
 def region_bbox_nm(
-    region: Any, frame: Frame, axis: int
+    region: Any, frame: FaceFrame, axis: int
 ) -> tuple[Nanometre, Nanometre, Nanometre, Nanometre]:
     """The region's extent in canonical face coordinates, as nanometres.
 
@@ -111,7 +111,7 @@ def region_bbox_nm(
     kernel axes pass unnoticed; each in-plane corner is projected through
     ``frame`` instead, so an off-centre or rotated floor is handled too.
     """
-    from .step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     box = bounding_box_mm(region)
     in_plane = [index for index in range(3) if index != axis]
@@ -122,7 +122,7 @@ def region_bbox_nm(
             point[in_plane[0]] = a
             point[in_plane[1]] = b
             point[axis] = box[axis]
-            corners.append(_to_canonical(frame, (point[0], point[1], point[2])))
+            corners.append(frame.basis.to_canonical((point[0], point[1], point[2])))
     xs = [corner[0] for corner in corners]
     ys = [corner[1] for corner in corners]
     return (
@@ -135,7 +135,7 @@ def region_bbox_nm(
 
 def contains(
     region: Any,
-    frame: Frame,
+    frame: FaceFrame,
     axis: int,
     x_nm: Nanometre,
     y_nm: Nanometre,
@@ -156,9 +156,9 @@ def contains(
     from OCP.gp import gp_Pnt
     from OCP.TopAbs import TopAbs_State
 
-    from .step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
-    point = list(_to_model(frame, x_nm, y_nm))
+    point: list[float] = list(frame.basis.to_model(x_nm, y_nm))
     plane_at = bounding_box_mm(region)[axis]
     point[axis] = plane_at
 
@@ -174,22 +174,9 @@ def contains(
     return distance.Value() >= clearance
 
 
-def reframe(
-    x_nm: Nanometre, y_nm: Nanometre, source: Frame, target: Frame
-) -> tuple[Nanometre, Nanometre]:
-    """Restate a canonical point registered on ``source`` in ``target``'s frame.
-
-    A box and its lid are viewed from opposite sides, so the same canonical
-    ``x`` is a different model ``x`` on each; a point measured against one
-    face's region must be converted through model space before it means
-    anything against the other's.
-    """
-    model = _to_model(source, x_nm, y_nm)
-    x_mm, y_mm = _to_canonical(target, model)
-    return nm_from_mm(x_mm), nm_from_mm(y_mm)
-
-
-def clearance_reason(region: Any, frame: Frame, axis: int, x_nm: Nanometre, y_nm: Nanometre) -> str:
+def clearance_reason(
+    region: Any, frame: FaceFrame, axis: int, x_nm: Nanometre, y_nm: Nanometre
+) -> str:
     """Which kind of boundary is nearest a point that failed ``contains``.
 
     ``region``'s own inner wires are exactly the structure wires
@@ -211,7 +198,7 @@ def clearance_reason(region: Any, frame: Frame, axis: int, x_nm: Nanometre, y_nm
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS, TopoDS_Compound
 
-    from .step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     def edge_group(edge: Any, on_outer: bool) -> str:
         if not on_outer:
@@ -237,7 +224,7 @@ def clearance_reason(region: Any, frame: Frame, axis: int, x_nm: Nanometre, y_nm
             raise StompdrillError("could not measure clearance to a boundary edge group")
         return distance.Value()
 
-    point = list(_to_model(frame, x_nm, y_nm))
+    point: list[float] = list(frame.basis.to_model(x_nm, y_nm))
     plane_at = bounding_box_mm(region)[axis]
     point[axis] = plane_at
     vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(*point)).Vertex()
@@ -321,7 +308,7 @@ def _proud_mm(
     nearer the drilled face (towards ``outward``) is positive and proud;
     further away recedes into the material and is negative -- never structure.
     """
-    from .step import bounding_box_mm
+    from stompgeom.step import bounding_box_mm
 
     box = bounding_box_mm(wire)
     best_gap: float | None = None
@@ -352,23 +339,3 @@ def _boundary(region: Any) -> Any:
         builder.Add(compound, explorer.Current())
         explorer.Next()
     return compound
-
-
-def _to_model(frame: Frame, x_nm: Nanometre, y_nm: Nanometre) -> tuple[float, float, float]:
-    """Map canonical face coordinates into model millimetres."""
-    x, y = mm_from_nm(x_nm), mm_from_nm(y_nm)
-    origin = tuple(mm_from_nm(value) for value in frame.origin_nm)
-    return (
-        origin[0] + x * frame.u[0] + y * frame.v[0],
-        origin[1] + x * frame.u[1] + y * frame.v[1],
-        origin[2] + x * frame.u[2] + y * frame.v[2],
-    )
-
-
-def _to_canonical(frame: Frame, point_mm: tuple[float, float, float]) -> tuple[float, float]:
-    """The inverse of ``_to_model``: project a model point onto ``frame``'s own axes."""
-    origin = tuple(mm_from_nm(value) for value in frame.origin_nm)
-    relative = tuple(p - o for p, o in zip(point_mm, origin))
-    x = sum(r * c for r, c in zip(relative, frame.u))
-    y = sum(r * c for r, c in zip(relative, frame.v))
-    return (x, y)
