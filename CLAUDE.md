@@ -34,11 +34,11 @@ base install. Leave it out when you do not need those features:
 uv sync --all-packages
 ```
 
-`pdfminer.six` and `hypothesis` are ordinary dev dependencies, declared in
-`packages/stompdrill/pyproject.toml`'s own dev group rather than the root's — ADR-0008's
-governing test is that each member passes its own tests alone. Both arrive with the plain
-`uv sync --all-packages` above; neither needs `--all-extras`, which is only for the
-optional geometry kernel.
+`pdfminer.six` is declared only in `packages/stompdrill/pyproject.toml`'s dev group,
+because `tests/recovery/pdf.py` imports it and ADR-0008's governing test is that each
+member passes its own tests alone. `hypothesis` is declared there too, and in the root's
+dev group and `stompmodel`'s. Both arrive with a plain `uv sync --all-packages`; neither
+needs `--all-extras`, which is only for the optional geometry kernel.
 
 Run the project checks and tools from the repository root:
 

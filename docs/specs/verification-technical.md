@@ -223,7 +223,11 @@ Three things constrain it:
   Determinism itself does not depend on this — it comes from `_total_order` —
   but today's exact routes might. Unanimous across the prototype's testing, not
   provable by inspection, which is why the repair lands after the golden and the
-  invariance tests exist.
+  invariance tests exist. Measured, not proved: 86 synthetic blocks in total —
+  the implementer's 32 up to n=90, plus 54 more across nine sizes up to n=140
+  with six seeds each — compared hole by hole before and after, and both
+  fixture panels byte-identical across all four formats; no route moved
+  anywhere in that evidence. The risk stands unfalsified, not eliminated.
 - **No existing test routes more than six holes.** The repair adds one at a
   realistic panel size.
 
