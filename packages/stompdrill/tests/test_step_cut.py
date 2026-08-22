@@ -259,7 +259,7 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
 
 
 def test_no_matching_component_is_an_emitter_error():
-    """``_label_name`` never matching anything is the same failure a
+    """``label_name`` never matching anything is the same failure a
     renamed or mis-supplied model would produce — worth a named diagnostic,
     not a silent no-op."""
     from stompdrill.emitters import step as step_module
@@ -270,13 +270,13 @@ def test_no_matching_component_is_an_emitter_error():
         return ""
 
     model = _model()
-    original = step_module._label_name
-    step_module._label_name = never_named
+    original = step_module.label_name
+    step_module.label_name = never_named
     try:
         with pytest.raises(EmitterError, match="no component named"):
             step_module.cut_shape(model, make_data(at(0, 0, 6 * MM, index=1)))
     finally:
-        step_module._label_name = original
+        step_module.label_name = original
 
 
 def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
@@ -461,15 +461,15 @@ def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_sile
     """
     import re
 
-    from stompdrill.emitters import step as step_module
+    from stompgeom import writer as writer_module
     from stompmodel.errors import EmitterError
     from tests.conftest import at
 
     broken = re.compile(
-        re.sub(rb"STYLED_ITEM", rb"STYLED_ITEM_ZZZ", step_module._COLOUR_CHAIN.pattern),
-        step_module._COLOUR_CHAIN.flags,
+        re.sub(rb"STYLED_ITEM", rb"STYLED_ITEM_ZZZ", writer_module._COLOUR_CHAIN.pattern),
+        writer_module._COLOUR_CHAIN.flags,
     )
-    monkeypatch.setattr(step_module, "_COLOUR_CHAIN", broken)
+    monkeypatch.setattr(writer_module, "_COLOUR_CHAIN", broken)
 
     with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN.*likely needs updating"):
         _emit(at(0, 0, 6 * MM, index=1))
@@ -486,7 +486,7 @@ def test_the_wrapper_products_name_is_the_one_the_writer_set():
     asserts the name that reaches the file, which is the only place the
     disagreement is visible.
     """
-    from stompdrill.emitters.step import _PRODUCT_NAME
+    from stompgeom.writer import _PRODUCT_NAME
     from tests.conftest import at
 
     payload = _emit(at(0, 0, 6 * MM, index=1))
