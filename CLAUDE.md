@@ -48,10 +48,11 @@ Run the project checks and tools from the repository root:
 .venv/bin/python -m pytest -o addopts= packages/stompdrill/tests/test_pipeline.py::test_name -v
 
 # Coverage, per package. The root testpaths cover only stompdrill, so measuring
-# stompmodel through it reports a package no test in scope imports end to end and
-# grades its codec far below the 100% target below.
+# stompmodel or stompgeom through it reports a package no test in scope imports
+# end to end and grades its codec far below the 100% target below.
 .venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov-report=term-missing
 cd packages/stompmodel && uv run --no-sync pytest -o addopts= --cov=stompmodel --cov-report=term-missing
+cd packages/stompgeom && uv run --no-sync pytest -o addopts= --cov=stompgeom --cov-report=term-missing
 
 # Lint and types. `mypy packages` excludes stompmodel's and stompgeom's tests --
 # three `tests` packages cannot share one scan -- so each member's own config is

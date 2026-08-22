@@ -19,6 +19,11 @@ class KernelUnavailable(StompgeomError):
     """The geometry kernel is a hard dependency and did not import."""
 
 
+# ``step`` and ``writer`` bind this function by name at import, so a
+# monkeypatch of ``stompgeom.kernel.require_kernel`` never reaches them --
+# patch the name in the module under test instead. ``stompdrill``'s STEP
+# emitter imports this module and calls through it, so a patch there does
+# reach it. A test aimed at the wrong one of those two passes vacuously.
 def require_kernel() -> None:
     """Raise a helpful error when OpenCASCADE is not importable."""
     try:

@@ -11,6 +11,7 @@ import itertools
 import os
 import re
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from stompmodel.errors import EmitterError
@@ -79,7 +80,7 @@ def label_entry(label: Any) -> str:
 
     Unlike a shape's own identity, a label's entry string survives
     ``SetShape``: it is what lets ``_count_colour_assignments`` recognise
-    "the same label" before and after ``cut_shape`` replaces its geometry.
+    "the same label" before and after a caller replaces its geometry.
     """
     from OCP.TCollection import TCollection_AsciiString
     from OCP.TDF import TDF_Tool
@@ -241,7 +242,7 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
 
 def write_step(
     document: Any,
-    path: Any,
+    path: Path,
     *,
     title: str,
     timestamp: str,
@@ -254,9 +255,17 @@ def write_step(
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
     from OCP.Interface import Interface_Static
     from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.STEPControl import STEPControl_Controller
     from OCP.TCollection import TCollection_HAsciiString
     from OCP.XSControl import XSControl_WorkSession
 
+    # ``Interface_Static`` silently drops a value written to a key no
+    # controller has defined yet, and constructing the writer below defines
+    # both keys with OCC's own defaults -- discarding anything set before it.
+    # Initialising here is what makes the two settings below take effect for a
+    # caller who has not already read a STEP file in this process; a second
+    # call leaves an already-set value alone, so writes stay independent.
+    STEPControl_Controller.Init_s()
     Interface_Static.SetCVal_s("write.step.schema", "AP214IS")
     # Load-bearing for determinism, not just cosmetic: fixes the prefix the
     # translator's auto-generated wrapper product uses, which ``_normalise``

@@ -1,13 +1,18 @@
-"""The writer's identity contract and its colour-chain guard."""
+"""The writer's identity contract, its colour-chain guard, and one real write."""
 
 from __future__ import annotations
 
 import inspect
+import re
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from stompgeom import writer
 from stompmodel.errors import EmitterError
+
+from .xcaf import build_document
 
 
 def test_the_wrapper_product_name_is_the_workspace_not_a_package() -> None:
@@ -167,3 +172,131 @@ def test_reslot_colours_leaves_a_single_chain_unchanged() -> None:
 
     assert len(list(writer._COLOUR_CHAIN.finditer(payload))) == 1
     assert writer._reslot_colours(payload, expected=1) == payload
+
+
+# ---------------------------------------------------------------------------
+# The writer driven end to end, against a document built in memory
+# ---------------------------------------------------------------------------
+
+#: Deliberately unlike anything the kernel or any consumer would choose, so a
+#: default leaking into the header is a failure rather than a coincidence.
+_TITLE = "a title only this test supplies"
+_TIMESTAMP = "2020-01-02T03:04:05"
+_ORIGINATING_SYSTEM = "a supplied originating system 9.9"
+
+#: ``FILE_NAME``'s seven fields in order: name, time_stamp, author,
+#: organization, preprocessor_version, originating_system, authorisation.
+#: Pinning the whole entity is what proves each supplied string reached its
+#: own slot rather than merely appearing somewhere in the header.
+_FILE_NAME = re.compile(
+    rb"FILE_NAME\((?P<name>'[^']*'),(?P<stamp>'[^']*'),\([^)]*\),\([^)]*\),"
+    rb"'[^']*',(?P<system>'[^']*'),'[^']*'\);"
+)
+
+_NAUO_ID = re.compile(rb"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)'")
+
+
+def _write(document: Any, path: Path) -> bytes:
+    """Write ``document`` with this module's supplied identity, and read it back."""
+    writer.write_step(
+        document,
+        path,
+        title=_TITLE,
+        timestamp=_TIMESTAMP,
+        originating_system=_ORIGINATING_SYSTEM,
+    )
+    return path.read_bytes()
+
+
+def _header(payload: bytes) -> re.Match[bytes]:
+    """The ``FILE_NAME`` entity, unwrapped onto one line."""
+    found = _FILE_NAME.search(re.sub(rb"\n\s*", b"", payload[:2048]))
+    assert found is not None, "the written file has no FILE_NAME entity"
+    return found
+
+
+@pytest.fixture(scope="module")
+def written_twice(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes]:
+    """One in-memory document written twice into one process.
+
+    Both counters this module erases are process-global, so a *first* write
+    in a fresh interpreter carries a clean product name and occurrence ids of
+    one whether or not ``_normalise`` ran at all. Reading the second write is
+    what makes the assertions below fail when the normalisation is removed.
+    """
+    scratch = tmp_path_factory.mktemp("written")
+    document = build_document()
+    return _write(document, scratch / "first.stp"), _write(document, scratch / "second.stp")
+
+
+@pytest.fixture(scope="module")
+def written(written_twice: tuple[bytes, bytes]) -> bytes:
+    """The second of the two writes -- see ``written_twice``."""
+    return written_twice[1]
+
+
+def test_two_writes_of_one_document_are_byte_identical(
+    written_twice: tuple[bytes, bytes],
+) -> None:
+    """The whole reason this module exists. Nothing about the process that
+    produced a file may reach the file, so a second write of an unchanged
+    document is the first write again."""
+    first, second = written_twice
+
+    assert first == second
+    # Grounding: an empty or truncated write would satisfy equality too.
+    assert first.startswith(b"ISO-10303-21;")
+    assert first.rstrip().endswith(b"END-ISO-10303-21;")
+
+
+def test_the_header_carries_the_title_it_was_given(written: bytes) -> None:
+    """The identity-injection contract: no default, and the caller's string
+    in ``FILE_NAME``'s own name slot rather than anywhere in the header."""
+    assert _header(written).group("name") == b"'" + _TITLE.encode() + b"'"
+
+
+def test_the_header_carries_the_originating_system_it_was_given(
+    written: bytes,
+) -> None:
+    """The slot a reader consults to learn which tool cut the geometry. It
+    sits next to ``preprocessor_version``, which the kernel fills in itself,
+    so only a positional check tells the two apart."""
+    system = _header(written).group("system")
+
+    assert system == b"'" + _ORIGINATING_SYSTEM.encode() + b"'"
+    assert b"Open CASCADE" not in system
+
+
+def test_the_header_carries_the_timestamp_it_was_given(written: bytes) -> None:
+    """Copied from the source document, never read from the clock -- which is
+    what lets two runs a day apart agree byte for byte."""
+    assert _header(written).group("stamp") == b"'" + _TIMESTAMP.encode() + b"'"
+
+
+def test_the_written_file_names_no_consumer_of_this_package(written: bytes) -> None:
+    """ADR-0009's rule, asserted against the bytes rather than the source: an
+    assembly written by a second consumer must not claim stompdrill made it."""
+    assert b"stompdrill" not in written
+
+
+def test_the_wrapper_products_volatile_counter_is_erased(written: bytes) -> None:
+    """The translator names its own wrapper product for the nameless leaf and
+    appends a per-write counter to it. The prefix is ours; the counter is
+    process history and must not survive into the file."""
+    assert b"PRODUCT('stompcad','stompcad'" in written
+    assert re.search(rb"stompcad \d+\.\d+", written) is None
+
+
+def test_the_assembly_usage_occurrence_ids_are_renumbered_from_one(
+    written: bytes,
+) -> None:
+    """Three components, so ids one to three -- not the raw counter, which by
+    this second write has already moved past them."""
+    assert _NAUO_ID.findall(written) == [b"1", b"2", b"3"]
+
+
+def test_one_colour_chain_is_written_for_each_coloured_leaf(written: bytes) -> None:
+    """Grounding for the reslot pass: ``_reslot_colours`` refuses a count it
+    did not expect, so a write that produced no chains at all would have
+    raised rather than reordered. This pins the two the document assigns."""
+    assert len(writer._COLOUR_CHAIN.findall(written)) == 2

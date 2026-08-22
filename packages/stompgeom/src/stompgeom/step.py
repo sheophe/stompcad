@@ -32,11 +32,11 @@ def source_timestamp(path: Path) -> str:
     """The source file's ``/* time_stamp */`` comment marker, or the epoch when absent.
 
     This matches ST-Developer's comment above ``FILE_NAME``, not the
-    ``FILE_NAME`` field itself, so re-feeding a STEP file this workspace wrote
-    back in as ``--case-model`` drops provenance to the epoch even though
-    the file carries a real stamp -- this workspace's own writer does not emit that
-    comment. Determinism is unaffected: every write from one source still
-    copies the same value, whatever it is.
+    ``FILE_NAME`` field itself, so reading back a STEP file this workspace
+    wrote drops provenance to the epoch even though the file carries a real
+    stamp -- this workspace's own writer does not emit that comment.
+    Determinism is unaffected: every write from one source still copies the
+    same value, whatever it is.
     """
     head = path.read_bytes()[:4096].decode("latin-1")
     found = _TIMESTAMP_PATTERN.search(head)
@@ -101,7 +101,7 @@ def read_step(path: Path) -> StepDocument:
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
     if not path.is_file():
-        raise DocumentError(f"no case model at {path}")
+        raise DocumentError(f"no model at {path}")
 
     # Ask OCC to normalise every representation to millimetres. Without this a
     # sub-assembly authored in inches arrives 25.4x too small.
