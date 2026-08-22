@@ -441,3 +441,26 @@ silently, since each is a private recursive helper with no shared test of its ow
 interface accommodates the existing filter differences (by class token, or none) without
 losing any of the three call sites' current behaviour, and the full stompdrill suite passes
 unchanged.
+
+## Build a text recovery, or accept the agreement test's coupling
+
+**Status:** Open, unscheduled. Raised by the spec audit, 2026-08-22, which found
+that §2's stated motive for the recovery subpackage was never fulfilled; §2 has
+been amended to say so rather than to keep claiming it.
+
+**Constraint:** `packages/stompdrill/tests/test_drawing_agreement.py:35` imports
+`outline`, `panel`, `stream_of` and `strings_in` from `tests/test_drawing_pdf.py`.
+That is the coupling the recovery subpackage was said to replace, and it could
+not: the agreement test compares what two sheets *state* — schedule rows, notes,
+title-block fields — while every recovery reads geometry. `read_pdf` returns
+circles and an outline extent, and nothing under `tests/recovery/` extracts text
+(no `Tj`, `LTChar` or `LTText` handling anywhere in it). `strings_in` would need
+a `read_pdf_text` beside it, and `stream_of` exposes the raw content stream,
+which is a different thing again and arguably belongs to the emitter's own tests.
+Two of the four imports (`outline`, `panel`) are fixtures rather than parsers,
+so even a text recovery leaves a fixture-sharing question behind it.
+
+**Acceptance:** Either a `read_pdf_text` lands under `tests/recovery/`, the
+agreement test migrates onto it, and the fixtures move somewhere neither test
+module owns; or the coupling is accepted deliberately, with the reason recorded
+next to the import so the next reader does not re-open this.

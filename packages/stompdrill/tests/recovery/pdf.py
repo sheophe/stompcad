@@ -36,9 +36,13 @@ _CIRCLE = "mcccch"
 #: A rectangle with four corner arcs. The panel outline, and nothing else.
 _ROUNDED_RECT = "mlclclclch"
 
-#: Endpoint radii may disagree by float noise (measured: 1.14e-13 pt) and by
-#: nothing else. Well under the stated quantum, well over the noise.
-_ROUND_ENOUGH_PT = 1e-6
+#: How far the four on-curve endpoints may sit at differing radii and still
+#: be called a circle. A classifier, not a comparison tolerance: it decides
+#: whether a shape can be measured, never what its measurement is. Measured
+#: spread on real circles is 1.14e-13 pt, so this sits 8.8e6 times above the
+#: noise; it is also 1/285th of the 100 nm the recovery reports to, so the
+#: worst shape it can wrongly admit is off by 0.16 nm and cannot move a value.
+_MAX_RADIUS_SPREAD_PT = 1e-6
 
 
 def circle_from_path(path: list[Any]) -> tuple[float, float, float]:
@@ -52,7 +56,7 @@ def circle_from_path(path: list[Any]) -> tuple[float, float, float]:
     cx = sum(x for x, _ in ends) / 4.0
     cy = sum(y for _, y in ends) / 4.0
     radii = [math.hypot(x - cx, y - cy) for x, y in ends]
-    if max(radii) - min(radii) > _ROUND_ENOUGH_PT:
+    if max(radii) - min(radii) > _MAX_RADIUS_SPREAD_PT:
         raise ValueError(f"not a circle: endpoint radii disagree by {max(radii) - min(radii)}")
     return cx, cy, sum(radii) / 4.0
 
