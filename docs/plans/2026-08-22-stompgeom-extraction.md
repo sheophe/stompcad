@@ -1219,3 +1219,57 @@ amendment lands with the work rather than after it."
 **Type consistency.** `FaceFrame.basis` is the field name in Tasks 2, 6 and 7. `write_step`'s keyword names — `title`, `timestamp`, `originating_system`, `replaced_labels` — match between Task 5's definition and Task 7's call. `label_entry` and `label_name` are public in Task 5 and imported under those names in Task 7. `to_model` returns `Millimetre` in Task 1 and is unwrapped with `float()` in Task 7.
 
 **Known gap, deliberately left.** Task 7 Step 5 depends on a reference artefact captured from the base commit before the work starts. Capture `/tmp/before.stp` as the very first action of this plan, before Task 1.
+
+---
+
+## Amendments — what executing this plan corrected in it
+
+Twelve defects surfaced while the tasks above were carried out. They are recorded here
+rather than edited into each task, because the tasks are the record of what was
+intended and these are what executing them taught. A future session should read the
+task, then this list.
+
+1. **Task 3's `pyproject.toml` omits `[tool.uv.sources]`.** The new member needs
+   `stompmodel = { workspace = true }`; without it uv resolves `stompmodel` from an
+   index rather than from the workspace, and the member does not install.
+2. **Task 3's file list omits the root `pyproject.toml`.** Its `[tool.mypy] exclude`
+   must gain `^packages/stompgeom/tests/`, since three `tests` packages cannot share
+   one scan. Task 3's own embedded comment asserts that exclusion already exists; it
+   did not until the task added it.
+3. **Task 3's boundary gate cannot be copied verbatim.** The instruction says to take
+   the leaf's gate "with these differences, and no others", but the leaf's
+   `TYPE_CHECKING` example names `stompgeom` — a package the *new* gate permits — so a
+   verbatim copy asserts something false. The new gate's example must name a package
+   above `stompgeom`.
+4. **Task 4 Step 3 item 2 should not be done.** Re-exporting `require_kernel` from
+   `stompgeom.step` contradicts this plan's own Global Constraint "One name, one home.
+   Nothing is re-exported", and no consumer wanted it. The guard stays in
+   `stompgeom.kernel` alone.
+5. **Task 4 Step 3 item 3 miscounts.** `read_step` raises `StompdrillError` four times,
+   not three; all four become `DocumentError`.
+6. **Task 5's five-test list leaves the deliverable untested.** No test exercises
+   `write_step` itself, and because every payload in the list is empty or a single
+   line, neither `_COLOUR_CHAIN`'s matching nor `_VOLATILE_ENTITY`'s line-rejoin is
+   exercised. Tests for all three were added.
+7. **Task 6's file list is short by seven files.** Retyping `CaseModel.frame` also
+   changes `pipeline/clearance.py`, `cli.py` and five test modules, which the list does
+   not name.
+8. **Task 6 Step 4's clean-suite claim is unreachable as written.** The step emitter
+   reads the retyped field's axes directly, so it must be reached through `.basis` in
+   the same task; until it is, the suite cannot be green.
+9. **Task 6 Step 1 must not delete `test_cad_step.py`.** Its stated reason — that the
+   subject now lives in `packages/stompgeom/tests/test_step.py` — is false: most of the
+   old file's cases have no counterpart in the new one. It was kept, repointed at
+   `stompgeom.step`, and renamed `test_step_reader.py`.
+10. **Task 7 Step 5's byte-identity command proves nothing as written.** It pairs
+    `--case 1590B` with `1590BB.stp`, which errors with `wrong-case-model`, exits 2 and
+    writes no artefact. The matched pair is `--case 1590B` with `1590B.stp`, and
+    comparing all five artefacts rather than STEP alone is strictly better.
+11. **Task 7's header-identity test asserts a tautology.** Checking
+    `_ORIGINATING_SYSTEM == f"stompdrill {_VERSION}"` recomputes one formula from the
+    same module's own parts; it never emits and never reads a header, so a call site
+    passing the wrong variable still passes. The test must read the header out of
+    emitted bytes.
+12. **Task 8's file list of test files is short by two.** It omits `test_step_cut.py`,
+    and it could not have named `test_step_reader.py`, which exists only because of
+    correction 9.

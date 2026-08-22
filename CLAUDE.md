@@ -21,30 +21,27 @@ Python 3.10 or later is required. Create the development environment with:
 
 ```bash
 uv venv
-uv sync --all-packages --all-extras
+uv sync --all-packages
 source .venv/bin/activate
 ```
 
-The STEP features (`--case-model`, `--emit step=…`) are behind an optional
-`stompdrill[step]` extra, which `--all-extras` above installs: it pins the `cadquery-ocp`
-geometry kernel, which pulls in vtk and matplotlib transitively and is far larger than the
-base install. Leave it out when you do not need those features:
-
-```bash
-uv sync --all-packages
-```
+That is the whole install: there is no optional extra to opt into. The `cadquery-ocp`
+geometry kernel is `stompgeom`'s unconditional dependency, so the STEP features
+(`--case-model`, `--emit step=…`) arrive with the command above. The kernel is large —
+it pulls in vtk and matplotlib transitively — and every install now pays for it.
+[ADR-0007](docs/adr/0007-case-model-and-clearance.md) records the optional extra this
+replaced.
 
 `pdfminer.six` is declared only in `packages/stompdrill/pyproject.toml`'s dev group,
 because `tests/recovery/pdf.py` imports it and ADR-0008's governing test is that each
 member passes its own tests alone. `hypothesis` is declared there too, and in the root's
-dev group and `stompmodel`'s. Both arrive with a plain `uv sync --all-packages`; neither
-needs `--all-extras`, which is only for the optional geometry kernel.
+dev group and `stompmodel`'s. Both arrive with a plain `uv sync --all-packages`.
 
 Run the project checks and tools from the repository root:
 
 ```bash
 # stompdrill's suite (root testpaths cover only this package; see
-# "Testing rules" below for both packages' commands and expected counts)
+# "Testing rules" below for every member's own command)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --tb=short
 
 # One test
@@ -56,11 +53,13 @@ Run the project checks and tools from the repository root:
 .venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov-report=term-missing
 cd packages/stompmodel && uv run --no-sync pytest -o addopts= --cov=stompmodel --cov-report=term-missing
 
-# Lint and types. `mypy packages` excludes stompmodel's tests -- two `tests`
-# packages cannot share one scan -- so the member's own config is a second gate.
+# Lint and types. `mypy packages` excludes stompmodel's and stompgeom's tests --
+# three `tests` packages cannot share one scan -- so each member's own config is
+# a second gate.
 ruff check packages tools
 mypy packages
 cd packages/stompmodel && uv run --no-sync mypy
+cd packages/stompgeom && uv run --no-sync mypy
 
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
@@ -68,13 +67,15 @@ cd packages/stompmodel && uv run --no-sync mypy
 # Mutation survey, per package -- there is no workspace-wide run
 (cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
   && ../../.venv/bin/mutmut results)
+(cd packages/stompgeom && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
+  && ../../.venv/bin/mutmut results)
 (cd packages/stompdrill && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
   && ../../.venv/bin/mutmut results)
 
 # Run the tool
 python -m stompdrill.cli PANEL.ai --emit excellon=out.drl --emit drawing-svg=out.svg
 
-# Cut a supplied Hammond enclosure and check clearance (needs stompdrill[step])
+# Cut a supplied Hammond enclosure and check clearance
 python tools/fetch_case_model.py 1590BB   # downloads and prints the cached .stp path
 python -m stompdrill.cli PANEL.ai --case 1590BB \
   --case-model ~/.cache/stompcad/cases/1590BB.stp \
@@ -115,8 +116,9 @@ millimetres.
 
 ## Architecture
 
-The workspace is `packages/stompmodel` and `packages/stompdrill`; each installs
-and passes its own tests alone, which is ADR-0008's governing test.
+The workspace is `packages/stompmodel`, `packages/stompgeom` and
+`packages/stompdrill`, in that dependency order; each installs and passes its own
+tests alone, which is ADR-0008's governing test.
 
 The accepted architecture is defined by:
 
@@ -131,7 +133,7 @@ The accepted architecture is defined by:
 - [ADR-0006](docs/adr/0006-toolpath-ordering-and-hole-numbering.md): toolpath ordering and
   hole numbering.
 - [ADR-0007](docs/adr/0007-case-model-and-clearance.md): supplied case models,
-  clearance, and the optional kernel.
+  clearance, and the kernel dependency.
 - [ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md): the workspace and
   the shared geometry core.
 - [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md): the shared
@@ -294,9 +296,11 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
   `pipeline.validate`, `quantise` and `stompdrill.units` above, and
   `cd packages/stompmodel && mutmut run` —
   its own `[tool.mutmut]`, resolving against its own tests — is what reaches
-  `stompmodel.units`, exactly the kind of module worth chasing too; there is no
-  workspace-wide command, the same reason the root `mypy` gate excludes `stompmodel`'s
-  tests.
+  `stompmodel.units`, exactly the kind of module worth chasing too.
+  `cd packages/stompgeom && mutmut run` is that arrangement a third time, over the
+  kernel guard, the STEP reader and the deterministic writer. There is no
+  workspace-wide command, the same reason the root `mypy` gate excludes the other
+  members' tests.
 - Preserve property tests for snapping (onto the grid, within half a pitch, and
   idempotent) and tool stability under hole reordering — not deduplication idempotence,
   which exact integer equality makes structurally unfalsifiable.
@@ -310,21 +314,20 @@ another stage ran first; `Pipeline` depends only on the `Stage` protocol.
 - `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most
   hand-built lengths are fixtures. Test helpers accept plain literals and brand them
   internally; direct model construction wraps explicitly.
-- No single command proves both suites at once: the root `testpaths` covers only
-  `stompdrill`, and two `tests` packages cannot share one interpreter. Run both,
-  and expect both counts:
+- No single command proves every suite at once: the root `testpaths` covers only
+  `stompdrill`, and three `tests` packages cannot share one interpreter. Run each,
+  and read its count from the run rather than from here:
 
   ```bash
   .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
-  # 246 passed
-
+  .venv/bin/python -m pytest -o addopts= packages/stompgeom/tests -q
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
-  # 1318 passed
   ```
 - Catalogue tests must re-read `docs/parts/dimensions.tsv` and prove that the generated
   module is current.
-- Clearance-rule tests use a fake `CaseModel`; kernel-backed tests skip when
-  `stompdrill[step]` is absent.
+- Clearance-rule tests use a fake `CaseModel`. Kernel-backed tests do not skip on a
+  missing kernel: it is an unconditional dependency, so failing to import it is a
+  failure rather than a silent pass.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
   claimed rule is not evidence.
 - Kernel tests run against real Hammond models fetched at run time, never committed.
