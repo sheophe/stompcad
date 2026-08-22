@@ -44,5 +44,5 @@ def test_reading_a_non_step_file_is_a_document_error(tmp_path: Path) -> None:
     target = tmp_path / "rubbish.stp"
     target.write_bytes(b"this is not a STEP file at all\n")
 
-    with pytest.raises(DocumentError):
+    with pytest.raises(DocumentError, match="is not a readable STEP file"):
         read_step(target)
