@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from stompmodel.frames import CoordinateFrame
-from stompmodel.units import Millimetre, Nanometre
+from stompmodel.units import Nanometre
 
 #: A frame whose axes are deliberately not the kernel's own: ``u`` runs along
 #: -Y and ``v`` along +Z, so a test cannot pass by ignoring the basis.
