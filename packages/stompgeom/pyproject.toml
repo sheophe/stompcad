@@ -45,16 +45,6 @@ files = ["src", "tests"]
 module = ["OCP.*"]
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-# test_kernel.py deliberately asserts a None-returning guard's result is None
-# (the guard's whole contract), and forwards *args/**kwargs into
-# builtins.__import__'s stricter overloaded signature to simulate an absent
-# kernel. mypy's default checks flag both even though the code is correct and
-# intentional. Scoped to this one test module so no other type error in the
-# suite is masked.
-module = ["tests.test_kernel"]
-disable_error_code = ["func-returns-value", "arg-type"]
-
 # mutmut resolves tests through the pyproject.toml in the current working
 # directory, and the root one names only stompdrill's testpaths, so a mutant of
 # this member run through the root config would record a false survivor.

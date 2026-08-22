@@ -21,7 +21,7 @@ def test_stompgeom_error_is_a_stomp_error() -> None:
 
 def test_require_kernel_passes_when_the_kernel_imports() -> None:
     """The kernel is a hard dependency, so the guard is quiet in a real env."""
-    assert kernel.require_kernel() is None
+    assert kernel.require_kernel() is None  # type: ignore[func-returns-value]
 
 
 def test_require_kernel_raises_when_the_kernel_is_absent(
@@ -35,7 +35,7 @@ def test_require_kernel_raises_when_the_kernel_is_absent(
     def refuse(name: str, *args: object, **kwargs: object) -> object:
         if name == "OCP":
             raise ImportError("no OCP here")
-        return real_import(name, *args, **kwargs)
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(builtins, "__import__", refuse)
 
