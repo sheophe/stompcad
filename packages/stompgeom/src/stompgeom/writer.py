@@ -169,7 +169,10 @@ def _silence_stdout() -> Iterator[None]:
 # only substitutes the wrapper product's *prefix*, never the "<counter>.1"
 # suffix appended after it, and the NAUO counter has no exposed key at all.
 # Post-processing the written bytes is not a workaround pending a better
-# fix; it is the only route this kernel's bindings leave open.
+# fix; it is the only route this kernel's bindings leave open. (``write_step``
+# does call ``Init_s()`` below, but for an unrelated reason — it defines the
+# ``Interface_Static`` keys so those settings take effect at all — and it
+# still does nothing for the counters below.)
 def _normalise(payload: bytes) -> bytes:
     """Erase the two process-global OCC counters from one written file.
 

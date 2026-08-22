@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import inspect
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -247,6 +249,40 @@ def test_two_writes_of_one_document_are_byte_identical(
     # Grounding: an empty or truncated write would satisfy equality too.
     assert first.startswith(b"ISO-10303-21;")
     assert first.rstrip().endswith(b"END-ISO-10303-21;")
+
+
+def test_the_first_write_in_a_fresh_process_already_carries_the_product_name() -> None:
+    """``STEPControl_Controller.Init_s()`` at ``writer.py:268`` defines the
+    ``Interface_Static`` keys the two ``SetCVal_s`` calls below it rely on;
+    without it a *first* write in a virgin process silently keeps OCC's own
+    defaults. Every other test in this module runs after ``test_step.py``
+    has already read a (deliberately invalid) STEP file, which defines those
+    keys as a side effect and hides the bug even with ``Init_s()`` removed --
+    see the module docstring notes on ``writer.py:268`` for the full story.
+    A fresh interpreter, which has read nothing, is the only way to catch it.
+    """
+    script = (
+        "from pathlib import Path\n"
+        "import tempfile\n"
+        "from tests.xcaf import build_document\n"
+        "from stompgeom.writer import write_step\n"
+        "with tempfile.TemporaryDirectory() as d:\n"
+        "    path = Path(d) / 'out.stp'\n"
+        "    write_step(build_document(), path, title='t',\n"
+        "        timestamp='2020-01-01T00:00:00', originating_system='sys')\n"
+        "    data = path.read_bytes()\n"
+        "    assert b\"PRODUCT('stompcad','stompcad'\" in data, 'missing configured name'\n"
+        "    assert b\"PRODUCT('Open CASCADE\" not in data, 'kept OCC default name'\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True,
+        cwd=Path(__file__).resolve().parent.parent,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK"
 
 
 def test_the_header_carries_the_title_it_was_given(written: bytes) -> None:
