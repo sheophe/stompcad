@@ -48,15 +48,6 @@ def test_constructing_without_the_kernel_names_the_extra(monkeypatch):
         StepEmitter(StepOptions(model=FakeCase()))
 
 
-def test_the_emitter_names_itself_as_the_originating_system() -> None:
-    """The writer defaults nothing. A shared writer that stamped one tool's
-    name would give a stompcollider assembly provenance from a tool that
-    never touched it -- ADR-0009's rule for SourceInfo.producer."""
-    from stompdrill.emitters import step as step_module
-
-    assert step_module._ORIGINATING_SYSTEM == f"stompdrill {step_module._VERSION}"
-
-
 def test_the_emitter_module_imports_without_the_kernel():
     """emitters/__init__ imports every emitter; this one must not need OCP."""
     import subprocess

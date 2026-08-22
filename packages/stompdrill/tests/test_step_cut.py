@@ -391,6 +391,24 @@ def test_the_emitted_timestamp_is_copied_from_the_source_model():
     assert stamp == source_timestamp(_model_path())
 
 
+def test_the_written_header_carries_the_constants_originating_system():
+    """The plumbing from the constant to the file, not just the formula.
+
+    ``_ORIGINATING_SYSTEM`` reading correctly proves nothing about the call
+    site at ``emit`` actually passing it through to ``write_step`` -- a
+    stray ``self.options.title`` there would still satisfy a test that only
+    recomputes the constant. Reading it back out of the written bytes,
+    against the constant rather than a hardcoded string, is what closes
+    that gap and survives a version bump.
+    """
+    from stompdrill.emitters.step import _ORIGINATING_SYSTEM
+    from tests.conftest import at
+
+    payload = _emit(at(0, 0, 6 * MM, index=1))
+
+    assert f"'{_ORIGINATING_SYSTEM}'".encode() in payload
+
+
 def test_tuple_order_does_not_reach_the_output():
     """ADR-0006: no rule may consult input order, kernel included."""
     from tests.conftest import at

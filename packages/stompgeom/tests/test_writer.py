@@ -79,6 +79,20 @@ def test_the_mismatch_message_names_this_module() -> None:
         writer._reslot_colours(b"", expected=1)
 
 
+def test_the_mismatch_message_puts_each_count_in_its_own_place() -> None:
+    """The two counts must land where they came from, not swapped.
+
+    A mutation exchanging ``expected`` and ``len(chains)`` in the f-string
+    would read exactly backwards -- "assigns 0 colour(s), but 1 STYLED_ITEM"
+    for this input -- and send a real kernel-upgrade debugging session in
+    the wrong direction. Only pinning both numbers together catches that;
+    the two tests above each check one substring independently and pass
+    under the swap.
+    """
+    with pytest.raises(EmitterError, match=r"assigns 1 colour.*0 STYLED_ITEM"):
+        writer._reslot_colours(b"", expected=1)
+
+
 #: Two complete nine-entity chains, modelled on the genuine chains a real
 #: write of this code path produces (a screw's colour and its lid's colour,
 #: found back to back at the tail of a written STEP file). The *first* chain
