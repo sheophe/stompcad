@@ -11,15 +11,11 @@ comment and fix-round-2 report), so only synthetic geometry can.
 
 from __future__ import annotations
 
-import pytest
-
-pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
-from stompdrill.cad import Rejection  # noqa: E402
-from stompdrill.cad.loader import OcpCaseModel  # noqa: E402
-from stompdrill.cad.region import build_region, classify_bounds, contains  # noqa: E402
-from stompmodel.frames import CoordinateFrame, FaceFrame  # noqa: E402
-from stompmodel.units import Nanometre  # noqa: E402
+from stompdrill.cad import Rejection
+from stompdrill.cad.loader import OcpCaseModel
+from stompdrill.cad.region import build_region, classify_bounds, contains
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.units import Nanometre
 
 AXIS = 1
 MM = 1_000_000

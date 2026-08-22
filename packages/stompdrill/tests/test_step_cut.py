@@ -14,8 +14,6 @@ from pathlib import Path
 
 import pytest
 
-ocp = pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
 pytestmark = pytest.mark.hammond
 
 MM = 1_000_000

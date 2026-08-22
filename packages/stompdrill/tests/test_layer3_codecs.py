@@ -298,8 +298,6 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
     """``read_step`` returns placed solids, so the holes are recovered by
     interrogating faces. Taking the difference against the uncut model avoids
     having to decide which of the enclosure's own cylinders is a hole."""
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
     from OCP.Precision import Precision
 
     from stompdrill.cad import load_case_model

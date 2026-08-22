@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
-from stompgeom.step import read_step  # noqa: E402
+from stompgeom.step import read_step
 
 pytestmark = pytest.mark.hammond
 

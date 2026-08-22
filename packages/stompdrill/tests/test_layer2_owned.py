@@ -215,8 +215,6 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     written-and-reread solid: this checks the cylinder axes it left behind,
     projected through the model's own frame, against the holes it was given.
     """
-    pytest.importorskip("OCP", reason="needs stompdrill[step]")
-
     from OCP.Precision import Precision
 
     from stompdrill.cad import load_case_model

@@ -7,6 +7,8 @@ since two of its tests exist specifically to prove that.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from stompdrill.emitters import available, get_emitter
@@ -32,19 +34,23 @@ def test_constructing_without_a_model_is_an_emitter_error():
         StepEmitter(StepOptions(model=None))
 
 
-def test_constructing_without_the_kernel_names_the_extra(monkeypatch):
+def test_a_missing_kernel_surfaces_as_an_emitter_error(monkeypatch):
+    """``StepEmitter.__init__`` wraps a ``KernelUnavailable`` failure as
+    ``EmitterError(str(failure))``. Asserts against the guard's own
+    ``_INSTALL_HINT`` rather than a hand-rolled copy, so this tracks the
+    real message instead of drifting from it.
+    """
     from stompdrill.emitters.step import StepEmitter, StepOptions
     from stompgeom import kernel as kernel_module
-    from stompgeom.kernel import KernelUnavailable
+    from stompgeom.kernel import _INSTALL_HINT, KernelUnavailable
     from tests.test_clearance import FakeCase
 
     def absent() -> None:
-        raise KernelUnavailable("the STEP features need the geometry kernel: "
-                                "pip install 'stompdrill[step]'")
+        raise KernelUnavailable(_INSTALL_HINT)
 
     monkeypatch.setattr(kernel_module, "require_kernel", absent)
 
-    with pytest.raises(EmitterError, match=r"stompdrill\[step\]"):
+    with pytest.raises(EmitterError, match=re.escape(_INSTALL_HINT)):
         StepEmitter(StepOptions(model=FakeCase()))
 
 
