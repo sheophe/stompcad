@@ -18,8 +18,7 @@ what it holds.
 Four seams were left open: where the frame types live, how they divide, where
 `emitters/step.py` splits, and what survives the kernel becoming unconditional. This
 document closes all four — the first as decisions 1 to 3, since it turned out to carry
-a contradiction — and settles the package layout and the documentation work that
-follow.
+a contradiction — and settles the package layout that follows.
 
 **`levels()` is not in this plan.** ADR-0009 places it in `stompgeom` and that is where
 it ends up, but the spec's "Order of work" defers it to plan 3 deliberately:
@@ -227,36 +226,17 @@ separate concern.
 
 ### 7. Documentation
 
-**`CLAUDE.md` is audited in full**, as its own phase of plan 2 rather than mixed through
-the extraction tasks, so the two are separately reviewable: extraction tasks are judged
-by "nothing observable changed", the audit by "does this orient a fresh session".
+`CLAUDE.md` states the facts this plan changes, and nothing more: the `stompdrill[step]`
+extra and the `--all-extras` guidance are retired, `stompgeom`'s own test, type and
+mutation commands are added, and the clause about kernel-backed tests skipping when the
+extra is absent is removed. Documentation that plan 2 makes wrong is documentation plan
+2 repairs.
 
-`CLAUDE.md` holds tooling, paths, testing structure and gotchas. It is not a place for
-planning or execution state, and it records no measurement of any kind. A count of
-tests or of surviving mutants is stale on the next commit, and creates a standing
-obligation to re-verify it that buys nothing in a project with two readers.
-
-The audit applies one distinction — a **rule** is orientation, its **argument** is the
-ADR's job:
-
-| Content | Verdict |
-| --- | --- |
-| Development commands, paths, per-package test, type and mutation invocations | keep |
-| Parsing gotchas, and the ambiguous-footprint fixture warning | keep — high-value non-obvious patterns |
-| Code conventions: `__all__`, frozen slotted dataclasses, British prose | keep |
-| Domain invariants | keep as one-line statements with an ADR link; cut the restated reasoning |
-| The ADR list | keep as pointers; trim descriptions |
-| Any measurement: test counts, surviving-mutant tallies | cut |
-| Paragraphs re-arguing what an ADR already argues | cut, and link |
-
-Cutting an ADR's *argument* is safe; cutting its *rule* is not. `CLAUDE.md` is the only
-document loaded automatically, so a rule that lives only in an ADR stops being applied
-unprompted. Restating the argument, meanwhile, creates two documents that can disagree
-— the objection ADR-0009 raised against a second `HolePattern`, applied to prose.
-
-The plan-2 facts that change regardless of the audit: the `stompdrill[step]` extra and
-the `--all-extras` guidance are retired, `stompgeom`'s own commands are added, and the
-clause about kernel-backed tests skipping when the extra is absent is removed.
+**A wider `CLAUDE.md` audit is not part of this plan**, and is being done separately.
+Trimming restated ADR argument, removing recorded measurements and repairing ADR links
+are all worth doing, but they answer to what orients a fresh session rather than to what
+this extraction changes. Carrying them here would put two rubrics in one diff — the same
+reason the parent spec split three plans instead of writing one.
 
 ## What does not move
 
@@ -311,7 +291,7 @@ Written as an implementation plan next; the phases are:
 3. The writer split, with identity injected.
 4. `stompdrill` rewired onto both; `cad/step.py` deleted, `Frame` deleted.
 5. The kernel made unconditional; the extra and the skips removed.
-6. The `CLAUDE.md` audit and the ADR amendments.
+6. `CLAUDE.md`'s factual updates and the ADR amendments.
 
 Phases 1 to 5 are judged by byte identity. Phase 6 is judged by reading.
 
