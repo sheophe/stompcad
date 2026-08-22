@@ -18,6 +18,8 @@ __all__ = [
     "Severity",
     "ParameterValue",
     "Diagnostic",
+    "of_severity",
+    "worst_severity",
     "EXIT_CLEAN",
     "EXIT_WARNINGS",
     "EXIT_ERRORS",
@@ -130,6 +132,28 @@ class Diagnostic:
             if k == key:
                 return v
         return default
+
+
+def of_severity(
+    diagnostics: Iterable[Diagnostic], severity: Severity
+) -> tuple[Diagnostic, ...]:
+    """Every diagnostic in ``diagnostics`` at exactly ``severity``.
+
+    Published beside ``Diagnostic`` rather than left as a method on one
+    value type, so a second tool's diagnostics carrier gets the same
+    selection by delegating to this rather than copying it. See ADR-0009.
+    """
+    return tuple(d for d in diagnostics if d.severity is severity)
+
+
+def worst_severity(diagnostics: Iterable[Diagnostic]) -> Severity | None:
+    """The most severe entry in ``diagnostics``, or ``None`` when there are none.
+
+    ``None`` is what ``exit_for_severity`` already treats as "no finding at
+    all", so a value with no diagnostics reaches the same clean exit as one
+    that was never checked.
+    """
+    return max((d.severity for d in diagnostics), default=None)
 
 
 #: The workspace's exit-code contract. Shared, because stompcad reduces

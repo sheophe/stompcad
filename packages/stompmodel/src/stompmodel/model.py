@@ -14,6 +14,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths
+from .diagnostics import of_severity as _of_severity
+from .diagnostics import worst_severity as _worst_severity
 from .errors import EmitterError
 from .units import (
     Millimetre,
@@ -387,8 +389,10 @@ class DrillData:
         return None
 
     def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
-        return tuple(d for d in self.diagnostics if d.severity is severity)
+        """Delegate to the published reduction so there is one implementation."""
+        return _of_severity(self.diagnostics, severity)
 
     @property
     def worst_severity(self) -> Severity | None:
-        return max((d.severity for d in self.diagnostics), default=None)
+        """Delegate to the published reduction so there is one implementation."""
+        return _worst_severity(self.diagnostics)

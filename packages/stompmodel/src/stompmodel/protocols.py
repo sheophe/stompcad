@@ -12,9 +12,18 @@ from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
 
+from .diagnostics import Diagnostic, Severity
 from .model import StageRun
 
-__all__ = ["Processable", "Stage", "Emitter", "Payload", "write_payload", "Pipeline"]
+__all__ = [
+    "Processable",
+    "Diagnosable",
+    "Stage",
+    "Emitter",
+    "Payload",
+    "write_payload",
+    "Pipeline",
+]
 
 
 #: Binds ``with_processing`` to the caller's own type. A protocol naming
@@ -28,6 +37,27 @@ class Processable(Protocol):
     """A value a pipeline can fold over: it can record the stages it survived."""
 
     def with_processing(self: SelfT, *runs: StageRun) -> SelfT: ...
+
+
+@runtime_checkable
+class Diagnosable(Protocol):
+    """A value that carries findings and reduces them by severity.
+
+    Separate from ``Processable`` on purpose: most stage- and emitter-bound
+    values carry no diagnostics of their own, and folding this vocabulary
+    into ``Processable`` would make every one of them carry it. A second
+    tool's value type implements this to reach the shared exit-code
+    reduction with no tool-specific glue. See ADR-0009.
+    """
+
+    diagnostics: tuple[Diagnostic, ...]
+
+    def with_diagnostics(self: SelfT, *diagnostics: Diagnostic) -> SelfT: ...
+
+    def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]: ...
+
+    @property
+    def worst_severity(self) -> Severity | None: ...
 
 
 #: Invariant: a stage both consumes and produces the value it folds over.

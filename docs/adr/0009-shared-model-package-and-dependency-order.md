@@ -54,9 +54,10 @@ Pure Python. No kernel, no parser, no I/O beyond serialisation. It holds:
 - `DrillData` and its members: `Hole`, `RawHole`, `ReferenceOutline`, `RawOutline`,
   `EnclosureMatch`, `SourceInfo`, `Origin`.
 - The `DrillData` JSON codec, **both directions**.
-- `Diagnostic`, `Severity`, `ParameterValue`, and the severity-to-exit-code
-  reduction.
-- `Processable`, `Stage[T]`, `Pipeline[T]`, `Emitter[T]`, `Payload`, `StageRun`.
+- `Diagnostic`, `Severity`, `ParameterValue`, the plain-tuple `of_severity` and
+  `worst_severity` reductions, and the severity-to-exit-code reduction.
+- `Processable`, `Diagnosable`, `Stage[T]`, `Pipeline[T]`, `Emitter[T]`, `Payload`,
+  `StageRun`.
 - The workspace's error base: `StompError`, with `EmitterError` and
   `DocumentError` beneath it. Each tool's own base descends from it —
   `StompdrillError` does — so a package's errors stay identifiable while every
@@ -173,6 +174,14 @@ artwork and `stompcollider`'s board reader returns something else entirely. Rule
 bounded the same way it is stated: it admits a rule that constrains a type `stompmodel`
 already owns, never a rule about behaviour a package happens to share for other reasons —
 that would be rule 2 wearing a different name.
+
+**Why `Diagnosable` and its plain-tuple reduction are admitted.** Rule 3 is why:
+`of_severity` and `worst_severity` constrain `Diagnostic`, which `stompmodel` already
+owns, so a second implementation of either outside this module would be the same
+drift `check_millimetres` and `check_nanometres` were published to stop. What is
+specific here is the consequence for interoperability: the exit-code reduction's
+vocabulary is part of `stompmodel`'s published contract, so a second tool's value
+type is assured of interoperating with it.
 
 **Why one error base rather than one per tool.** `stompcad` runs both tools
 behind a single command and reduces their failures to one report and one exit

@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
-from stompmodel.model import StageRun
-from stompmodel.protocols import Pipeline, Processable, Stage, write_payload
+from stompmodel.diagnostics import (
+    EXIT_ERRORS,
+    Diagnostic,
+    Severity,
+    exit_for_severity,
+    of_severity,
+    worst_severity,
+)
+from stompmodel.model import DrillData, StageRun
+from stompmodel.protocols import Diagnosable, Pipeline, Processable, Stage, write_payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,3 +122,164 @@ def test_a_binary_payload_is_written_unchanged(tmp_path) -> None:
 
 def test_a_binary_payload_counts_its_own_length(tmp_path) -> None:
     assert write_payload(tmp_path / "out.bin", b"%PDF-1.7\n\x00\xff") == 11
+
+
+# --------------------------------------------------------------------------
+# Diagnosable: the vocabulary the exit-code reduction consumes, published so
+# a second value type reaches it with no tool-specific glue.
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MinimalDockData:
+    """The second tool's minimal value object: implements only the four
+    ``Diagnosable`` members, exactly as ``stompcollider``'s ``DockData`` will."""
+
+    diagnostics: tuple[Diagnostic, ...] = ()
+
+    def with_diagnostics(self, *diagnostics: Diagnostic) -> MinimalDockData:
+        return replace(self, diagnostics=self.diagnostics + tuple(diagnostics))
+
+    def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
+        return of_severity(self.diagnostics, severity)
+
+    @property
+    def worst_severity(self) -> Severity | None:
+        return worst_severity(self.diagnostics)
+
+
+def _read_worst_severity(value: Diagnosable) -> Severity | None:
+    """Typed against ``Diagnosable`` so a missing member is a static error too."""
+    return value.worst_severity
+
+
+if TYPE_CHECKING:
+    # Never executed: Counter has no `diagnostics`, `with_diagnostics`,
+    # `of_severity` or `worst_severity`, so passing it where `Diagnosable`
+    # is required is a static rejection. mypy flags the line below without
+    # the ignore; the ignore records that the rejection is expected, not
+    # accidental.
+    _read_worst_severity(Counter())  # type: ignore[arg-type]
+
+
+def test_a_processable_only_value_is_refused_by_diagnosable_at_runtime() -> None:
+    """``Counter`` implements the entirety of ``Processable`` and nothing more:
+    the two protocols are separate on purpose, so satisfying one must not
+    satisfy the other."""
+    assert isinstance(Counter(), Processable)
+    assert not isinstance(Counter(), Diagnosable)
+
+
+def test_a_value_implementing_the_four_members_is_diagnosable_and_reaches_the_shared_exit_reduction() -> (
+    None
+):
+    """The second tool's minimal value object, standing in for ``DockData``:
+    implementing exactly the four declared members is enough to reach
+    ``exit_for_severity`` with no ``stompdrill``-specific glue."""
+    data = MinimalDockData().with_diagnostics(Diagnostic.error("dock-fouled", "clash"))
+
+    assert isinstance(data, Diagnosable)
+    assert exit_for_severity(data.worst_severity) == EXIT_ERRORS
+
+
+def test_drill_data_satisfies_both_processable_and_diagnosable() -> None:
+    assert isinstance(DrillData(), Processable)
+    assert isinstance(DrillData(), Diagnosable)
+
+
+def _some_diagnostics() -> tuple[Diagnostic, ...]:
+    return (
+        Diagnostic.warning("off-grid", "hole 4 moved"),
+        Diagnostic.error("unknown-diameter", "no bit in the drawer"),
+        Diagnostic.info("duplicate-hole", "two circles in one place"),
+    )
+
+
+@pytest.mark.parametrize("severity", list(Severity))
+def test_drill_data_of_severity_matches_the_published_function(severity: Severity) -> None:
+    """One implementation of 'of this severity' exists in the workspace: the
+    method must return exactly what the published function returns, for the
+    identical diagnostics, at every severity — not merely one that agrees."""
+    diagnostics = _some_diagnostics()
+    data = DrillData(diagnostics=diagnostics)
+
+    assert data.of_severity(severity) == of_severity(diagnostics, severity)
+
+
+def test_drill_data_of_severity_matches_the_published_function_when_empty() -> None:
+    data = DrillData()
+
+    assert data.of_severity(Severity.ERROR) == of_severity((), Severity.ERROR) == ()
+
+
+def test_drill_data_worst_severity_matches_the_published_function() -> None:
+    """One implementation of 'worst severity' exists in the workspace."""
+    diagnostics = _some_diagnostics()
+    data = DrillData(diagnostics=diagnostics)
+
+    assert data.worst_severity == worst_severity(diagnostics)
+
+
+def test_drill_data_worst_severity_matches_the_published_function_when_empty() -> None:
+    data = DrillData()
+
+    assert data.worst_severity == worst_severity(()) is None
+
+
+# -- AC5: each of the four members is independently load-bearing -----------
+
+
+def test_missing_diagnostics_fails_the_protocol_check() -> None:
+    class NoDiagnostics:
+        def with_diagnostics(self, *diagnostics: Diagnostic) -> NoDiagnostics:
+            return self
+
+        def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
+            return ()
+
+        @property
+        def worst_severity(self) -> Severity | None:
+            return None
+
+    assert not isinstance(NoDiagnostics(), Diagnosable)
+
+
+def test_missing_with_diagnostics_fails_the_protocol_check() -> None:
+    class NoWithDiagnostics:
+        diagnostics: tuple[Diagnostic, ...] = ()
+
+        def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
+            return ()
+
+        @property
+        def worst_severity(self) -> Severity | None:
+            return None
+
+    assert not isinstance(NoWithDiagnostics(), Diagnosable)
+
+
+def test_missing_of_severity_fails_the_protocol_check() -> None:
+    class NoOfSeverity:
+        diagnostics: tuple[Diagnostic, ...] = ()
+
+        def with_diagnostics(self, *diagnostics: Diagnostic) -> NoOfSeverity:
+            return self
+
+        @property
+        def worst_severity(self) -> Severity | None:
+            return None
+
+    assert not isinstance(NoOfSeverity(), Diagnosable)
+
+
+def test_missing_worst_severity_fails_the_protocol_check() -> None:
+    class NoWorstSeverity:
+        diagnostics: tuple[Diagnostic, ...] = ()
+
+        def with_diagnostics(self, *diagnostics: Diagnostic) -> NoWorstSeverity:
+            return self
+
+        def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
+            return ()
+
+    assert not isinstance(NoWorstSeverity(), Diagnosable)
