@@ -17,8 +17,15 @@ from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import DrillData, EnclosureMatch, RawHole, RawOutline, SourceInfo
-from stompmodel.units import Millimetre, Nanometre
+from stompmodel.model import (
+    DrillData,
+    EnclosureMatch,
+    RawHole,
+    RawOutline,
+    ReferenceOutline,
+    SourceInfo,
+)
+from stompmodel.units import Millimetre, Nanometre, nm_from_mm
 from tests.conftest import build_pdf, circle_ops
 
 #: The fixture panel's own measurement: 113.000 × 60.000, which is within
@@ -172,13 +179,14 @@ def test_a_run_that_stopped_records_only_what_ran():
 
 
 @pytest.mark.parametrize(
-    "declared, tolerance_nm, reference, code, expected_enclosure",
+    "declared, tolerance_nm, reference, code, expected_enclosure, expected_reference",
     [
         # 1590Y's own 92 × 92, not the fixture's outline: ``wrong-enclosure``
         # needs the panel to be *identified* and the declaration to disagree, so
         # it is reachable only from a footprint nothing else is near. Unlike the
         # other three paths, this one *does* identify a footprint before finding
-        # the declaration disagrees with it, so ``enclosure`` is populated.
+        # the declaration disagrees with it, so ``enclosure`` is populated, and
+        # the reference is the catalogue's own square, not the measured oblong.
         (
             "1590BB",
             DEFAULT_TOLERANCE_NM,
@@ -192,13 +200,48 @@ def test_a_run_that_stopped_records_only_what_ran():
                 rotated=False,
                 selected_part="1590BB",
             ),
+            ReferenceOutline(
+                width_nm=Nanometre(92_000_000),
+                height_nm=Nanometre(92_000_000),
+                centre_x_nm=nm_from_mm(Millimetre(56.5)),
+                centre_y_nm=nm_from_mm(Millimetre(30.0)),
+                raw=RawOutline(Millimetre(92.4), Millimetre(91.8)),
+            ),
         ),
-        ("1590B", DEFAULT_TOLERANCE_NM, None, "unverifiable-enclosure", None),
-        ("1590B", DEFAULT_TOLERANCE_NM, RawOutline(Millimetre(200.0), Millimetre(100.0)), "unmatched-enclosure", None),
-        (None, 2_000_000, RawOutline(Millimetre(118.0), Millimetre(78.5)), "ambiguous-enclosure", None),
+        ("1590B", DEFAULT_TOLERANCE_NM, None, "unverifiable-enclosure", None, None),
+        (
+            "1590B",
+            DEFAULT_TOLERANCE_NM,
+            RawOutline(Millimetre(200.0), Millimetre(100.0)),
+            "unmatched-enclosure",
+            None,
+            ReferenceOutline(
+                width_nm=nm_from_mm(Millimetre(200.0)),
+                height_nm=nm_from_mm(Millimetre(100.0)),
+                centre_x_nm=nm_from_mm(Millimetre(56.5)),
+                centre_y_nm=nm_from_mm(Millimetre(30.0)),
+                raw=RawOutline(Millimetre(200.0), Millimetre(100.0)),
+            ),
+        ),
+        (
+            None,
+            2_000_000,
+            RawOutline(Millimetre(118.0), Millimetre(78.5)),
+            "ambiguous-enclosure",
+            None,
+            ReferenceOutline(
+                width_nm=nm_from_mm(Millimetre(118.0)),
+                height_nm=nm_from_mm(Millimetre(78.5)),
+                centre_x_nm=nm_from_mm(Millimetre(56.5)),
+                centre_y_nm=nm_from_mm(Millimetre(30.0)),
+                raw=RawOutline(Millimetre(118.0), Millimetre(78.5)),
+            ),
+        ),
     ],
 )
-def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, code, expected_enclosure):
+def test_every_enclosure_error_stops_the_run(
+    declared, tolerance_nm, reference, code, expected_enclosure, expected_reference
+):
     """All four of them, because they arrive by four different paths."""
     watched = Watched()
 
@@ -224,7 +267,7 @@ def test_every_enclosure_error_stops_the_run(declared, tolerance_nm, reference, 
     # that halted while discarding its provenance would pass.
     assert out.source == raw.source
     assert out.enclosure == expected_enclosure
-    assert (out.reference is None) == (reference is None)
+    assert out.reference == expected_reference
 
 
 def test_an_outline_a_hair_outside_the_tolerance_stops_the_run_too():

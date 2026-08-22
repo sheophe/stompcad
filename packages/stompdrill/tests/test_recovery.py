@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -252,23 +253,37 @@ def test_the_svg_recovery_reports_the_outline_extent():
 def test_the_svg_recovery_is_exact_with_no_epsilon():
     """``_fmt`` states six decimals of a millimetre, which is one nanometre,
     so a ``Decimal`` parse loses nothing and the comparison can demand
-    equality."""
+    equality. The multiset form -- not just membership -- means an empty
+    ``holes`` list fails too, rather than passing vacuously."""
     holes = [c for c in read_svg(DrawingSvgEmitter().emit(sheet_panel())).circles
              if "hole" in c.cls.split()]
 
-    assert all(c.diameter_nm in (5_000_000, 7_000_000) for c in holes)
+    assert Counter(c.diameter_nm for c in holes) == Counter({5_000_000: 2, 7_000_000: 2})
 
 
 def test_the_pdf_recovery_finds_the_same_circles_as_the_svg_one():
     """Two independent readers over two codecs of one panel. Neither can be
     right by inverting the other's transform: they share no code below
-    ``RecoveredPanel``."""
+    ``RecoveredPanel``.
+
+    Position is not compared: SVG fixes A4 landscape while PDF walks the ISO
+    candidates to A4 portrait, so the two readers state different sheets and
+    absolute coordinates are not comparable between them. Diameters and the
+    outline extent do not depend on which sheet was chosen, so those are
+    what this test checks.
+    """
     data = sheet_panel()
 
     from_svg = read_svg(DrawingSvgEmitter().emit(data))
     from_pdf = read_pdf(DrawingPdfEmitter().emit(data))
 
-    assert len(from_pdf.circles) == len(from_svg.circles)
+    hole_diameters = {5_000_000, 7_000_000}
+    svg_holes = Counter(c.diameter_nm for c in from_svg.circles if c.diameter_nm in hole_diameters)
+    pdf_holes = Counter(c.diameter_nm for c in from_pdf.circles if c.diameter_nm in hole_diameters)
+
+    assert svg_holes == Counter({5_000_000: 2, 7_000_000: 2})
+    assert pdf_holes == svg_holes
+    assert from_pdf.outline_nm == from_svg.outline_nm
 
 
 def test_the_pdf_recovery_reports_the_outline_extent():

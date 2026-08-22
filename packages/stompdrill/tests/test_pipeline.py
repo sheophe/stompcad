@@ -317,9 +317,11 @@ class TestDeduplicate:
 
         Idempotence was the old form and could not fail: the comparison is
         exact integer equality, so a second pass has nothing left to find.
-        This one can fail -- a key that drops a field, or a comparison that
-        gained a tolerance, both leave two survivors that should have been
-        one.
+        This one fails if two holes sharing an exact ``(x, y, diameter)``
+        both survive. A key that drops a field only over-collapses instead
+        (fewer survivors, still distinct) -- that direction is caught by
+        ``test_does_not_collapse_different_diameters_at_the_same_place``,
+        line 189.
         """
         survivors = Deduplicate().apply(make_data(*drawn)).holes
 
