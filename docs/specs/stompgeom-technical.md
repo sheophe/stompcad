@@ -115,7 +115,7 @@ into the leaf:
 
 ```python
 def to_model(self, x_nm, y_nm) -> tuple[Millimetre, Millimetre, Millimetre]
-def to_canonical(self, point_mm) -> tuple[Nanometre, Nanometre]
+def to_canonical(self, point_mm) -> tuple[Millimetre, Millimetre]
 def reframe(self, x_nm, y_nm, target: CoordinateFrame) -> tuple[Nanometre, Nanometre]
 def as_parameters(self) -> tuple[tuple[str, ParameterValue], ...]
 ```
@@ -131,6 +131,16 @@ what a suffix would repeat.
 `float(mm_from_nm(...))` — the same conversion, branded in one place and not the other.
 ADR-0004 says brand at a real conversion, and nanometres to millimetres is one. Callers
 unwrap with `float()` at the OCC boundary, as `_face_point` already does.
+
+**`to_canonical` returns millimetres, and that asymmetry is deliberate here.** In this
+code "canonical" names the frame's own axes, not the unit: `_to_model` takes canonical
+coordinates in nanometres and returns model millimetres, while `_to_canonical` returns
+canonical coordinates in *millimetres*. `region_bbox_nm` depends on it — it projects
+four corners, takes the minimum and maximum across them, and rounds once at the end.
+Returning nanometres would round each corner first instead. The results provably agree,
+since half-up rounding is monotonic, but a plan whose success criterion is byte identity
+does not reorder arithmetic on the strength of a proof. `reframe` keeps today's
+`nm_from_mm` wrap. The asymmetry is a wart to fix under its own measurement, not here.
 
 `region.py` loses `_to_model`, `_to_canonical` and `reframe`; the box-and-lid motivation
 that `reframe`'s docstring carries survives as a comment at the call site, because the
