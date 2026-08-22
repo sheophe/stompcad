@@ -9,11 +9,14 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from stompdrill.cli import build_parser, build_pipeline
 from stompdrill.emitters import get_emitter
 from stompdrill.emitters.json_out import JsonEmitter
 from stompdrill.pipeline import (
+    Deduplicate,
     IdentifyHammondFootprint,
     RouteHoles,
     SnapDiametersToDrillTable,
@@ -199,6 +202,88 @@ def test_a_panel_whose_holes_sit_on_a_grid_tie_is_permutation_stable():
     expected = assert_permutation_stable(_tied_raw(), "1590B", shipped_pipeline(), seed=17)
 
     assert "grid-ambiguous" in codes(expected), "the stage's finding never fired"
+
+
+#: A coarse lattice so ties are likely rather than impossible. Two holes
+#: sharing an X and a diameter, a coincident pair at a grid midpoint, and two
+#: holes equal in nominal but differing in ``raw`` are the tie shapes the two
+#: real fixtures cannot produce, and each one puts a different clause of
+#: ``_total_order`` under load.
+#:
+#: Kept inside 1590B's 30.25 mm half-height (checked, not assumed -- an
+#: earlier ±40 mm draft put a hole's *centre* past it, and the excellon
+#: emitter's ``LOWER_LEFT`` origin refuses a reframed negative coordinate
+#: unconditionally, which is a separate contract from the
+#: ``hole-outside-outline`` warning and not one this property is about). A
+#: 7 mm hole at either end still overhangs the outline, so that warning still
+#: fires; the centre itself just never crosses into the emitter's own error.
+LATTICE_MM = [round(-29 + 58 * i / 11, 3) for i in range(12)]
+
+CATALOGUE_MM = [3.0, 5.0, 7.0]
+
+
+@st.composite
+def raw_holes(draw):
+    """A hole on the lattice, with occasional sub-micron jitter in ``raw``."""
+    x = draw(st.sampled_from(LATTICE_MM))
+    y = draw(st.sampled_from(LATTICE_MM))
+    diameter = draw(st.sampled_from(CATALOGUE_MM))
+    jitter = draw(st.sampled_from([0.0, 4e-4, -3e-4]))
+    return RawHole(Millimetre(x + jitter), Millimetre(y), Millimetre(diameter))
+
+
+@settings(deadline=None, max_examples=40, suppress_health_check=[HealthCheck.too_slow])
+@given(st.lists(raw_holes(), min_size=1, max_size=8), st.integers(0, 2**32 - 1))
+def test_no_permutation_of_any_hole_set_reaches_any_artifact(drawn, seed):
+    """ADR-0006, over hole sets no author would think to write down.
+
+    ``deadline=None`` because the emit fan-out is four formats, one of which
+    builds a PDF; this is a slow property by construction, not a hanging one.
+    A 7 mm hole at either lattice end overhangs 1590B's outline, so some
+    generated panels raise ``hole-outside-outline`` -- a warning, which the
+    permutation must still hold under, not the error that would abort it.
+    """
+    raw = replace(_synthetic_raw(), holes=tuple(drawn))
+
+    assert_permutation_stable(raw, "1590B", shipped_pipeline(), seed=seed)
+
+
+def test_the_bare_dedupe_stage_is_order_sensitive_and_quantise_is_what_saves_it():
+    """``Deduplicate`` alone keeps whichever duplicate arrived first. That is
+    only compatible with ADR-0006 because ``quantise`` sorts before it runs,
+    so the composed path never hands it an input order to consult. Pinning
+    both halves keeps the coupling visible if either moves.
+    """
+
+    def hole(raw_x: float) -> Hole:
+        return Hole(
+            Nanometre(0),
+            Nanometre(0),
+            Nanometre(7_000_000),
+            RawHole(Millimetre(raw_x), Millimetre(0.0), Millimetre(7.0)),
+        )
+
+    first, second = hole(0.0001), hole(0.0002)
+
+    # The bare stage: order-sensitive, exactly as its own docstring says.
+    assert Deduplicate().apply(DrillData(holes=(first, second))).holes == (first,)
+    assert Deduplicate().apply(DrillData(holes=(second, first))).holes == (second,)
+
+    # The composed path: quantise() sorts raw holes on entry, so the
+    # duplicate pair in _synthetic_raw() never hands Deduplicate an arrival
+    # order to consult -- the survivor is the same whichever end it reads from.
+    raw = _synthetic_raw()
+    reversed_raw = replace(raw, holes=tuple(reversed(raw.holes)))
+
+    def quantised(data: RawDrillData) -> DrillData:
+        return quantise(
+            data,
+            enclosure=IdentifyHammondFootprint("1590B"),
+            diameters=SnapDiametersToDrillTable(),
+            positions=SnapPositions(Nanometre(250_000)),
+        )
+
+    assert quantised(raw).holes == quantised(reversed_raw).holes
 
 
 def holes_at_one_point() -> tuple[Hole, Hole]:

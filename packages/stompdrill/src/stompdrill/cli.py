@@ -26,7 +26,7 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import DrillData
-from stompmodel.protocols import Emitter, Payload, Pipeline, Stage
+from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, write_payload
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import CaseModel
@@ -39,6 +39,7 @@ from .emitters import (
     available,
     get_emitter,
 )
+from .emitters.drawing.build import SheetText
 from .enclosures import HAMMOND_1590
 from .errors import StompdrillError
 from .formatting import format_mm
@@ -398,11 +399,11 @@ class OutputSettings:
 _OPTION_BUILDERS: dict[type, Callable[[OutputSettings], Any]] = {
     ExcellonOptions: lambda s: ExcellonOptions(title=s.title),
     # Drawing options contain presentation values only; grid pitch and panel
-    # dimensions come from canonical processing results.
-    DrawingOptions: lambda s: DrawingOptions(title=s.title),
-    # The PDF sheet's ISO 7200 mandatory fields have no command-line source
-    # yet; a caller using the library supplies them directly.
-    PdfDrawingOptions: lambda s: PdfDrawingOptions(title=s.title),
+    # dimensions come from canonical processing results. Both sheets' other
+    # ISO 7200 fields have no command-line source yet; a caller using the
+    # library supplies them directly, through ``SheetText``.
+    DrawingOptions: lambda s: DrawingOptions(text=SheetText(title=s.title)),
+    PdfDrawingOptions: lambda s: PdfDrawingOptions(text=SheetText(title=s.title)),
     JsonOptions: lambda s: JsonOptions(),
     # The model is resolved before the input file is opened; the emitter only
     # cuts what quantisation and the pipeline already agreed on.
@@ -700,13 +701,8 @@ def _render(
 
 
 def _write(emitter: Emitter[DrillData], path: Path, payload: Payload) -> str:
-    """Write one artefact, letting the payload's own type choose the mode."""
-    if isinstance(payload, bytes):
-        path.write_bytes(payload)
-        size = len(payload)
-    else:
-        path.write_text(payload, encoding="utf-8")
-        size = len(payload.encode("utf-8"))
+    """Report one artefact. The dispatch is ``stompmodel``'s; the sentence is ours."""
+    size = write_payload(path, payload)
     return f"wrote {path}  ({emitter.name}, {size} bytes)"
 
 

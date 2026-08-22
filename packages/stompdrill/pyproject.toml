@@ -28,11 +28,15 @@ stompmodel = { workspace = true }
 
 # What this package's own suite needs, so that ADR-0008's sentence -- change
 # into the member, sync, test -- runs a real suite rather than an import check.
-# `pytest` is the whole list: the tests import nothing else the distribution
-# does not already depend on, and every module that reaches OCP guards itself
-# with ``importorskip``, so the heavy `step` extra stays opt-in.
+# `pdfminer.six` joins `pytest` for one reason: tests/recovery/pdf.py reads a
+# drawing back independently of the writer, and the writer's own transforms
+# are the thing it exists to check. `hypothesis` joins them for the generative
+# properties in test_invariant.py, test_snap.py and test_pipeline.py, whose
+# answer sets have boundaries an author would not think to write down by hand.
+# Every module that reaches OCP still guards itself with ``importorskip``, so
+# the heavy `step` extra stays opt-in.
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "pdfminer.six", "hypothesis"]
 
 # Its own testpaths, so `cd packages/stompdrill && pytest` is correct and does
 # not inherit a root testpaths pointing at a sibling package. `pythonpath`
@@ -59,10 +63,18 @@ do_not_mutate = ["src/stompdrill/enclosures.py"]
 # Two tests read source text rather than behaviour, so mutmut's rewritten files
 # fail them for every mutant and abort the survey. test_enclosures.py re-reads
 # docs/parts/dimensions.tsv, which is outside the copied tree; the CLI test
-# ast.parses cli.py, whose mutated form contains every mutant literal.
+# ast.parses cli.py, whose mutated form contains every mutant literal. The
+# routing performance test asserts a wall-clock bound; under mutmut (and
+# especially under --cov, which inflates pure-Python time several-fold) a
+# timeout scores as a killed mutant regardless of the mutation's actual
+# effect, which quietly inflates the survey CLAUDE.md tells readers to read
+# by module. Deselecting it here does not weaken coverage: it targets a
+# cubic-vs-linear regression that no other test in the suite checks, and
+# `--tb=short` runs still exercise it on every commit.
 pytest_add_cli_args_test_selection = [
     "--deselect=tests/test_enclosures.py",
     "--deselect=tests/test_cli.py::test_cli_source_never_names_a_registered_format",
+    "--deselect=tests/test_route.py::test_a_realistic_panel_routes_without_the_cubic_term",
 ]
 # mutmut runs the test command from inside mutants/, one directory deeper than
 # this file's own location, so the "../.." above (correct for a plain `pytest`

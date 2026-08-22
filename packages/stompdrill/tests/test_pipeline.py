@@ -6,6 +6,8 @@ import dataclasses
 import random
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
@@ -123,6 +125,25 @@ def test_stages_preserve_existing_diagnostics(stage):
 # --------------------------------------------------------------------------
 # Deduplicate
 # --------------------------------------------------------------------------
+
+
+@st.composite
+def _holes_with_duplicates_and_near_misses(draw):
+    """A handful of holes, with exact duplicates and one-nanometre near-misses
+    sprinkled in -- the two things ``Deduplicate``'s key must tell apart.
+    """
+    built = []
+    for _ in range(draw(st.integers(1, 6))):
+        x_nm = draw(st.integers(-50_000_000, 50_000_000))
+        y_nm = draw(st.integers(-25_000_000, 25_000_000))
+        diameter_nm = draw(st.sampled_from((5_000_000, 7_000_000)))
+        built.append(at(x_nm, y_nm, diameter_nm, index=len(built) + 1))
+        variant = draw(st.sampled_from(("none", "exact-duplicate", "near-miss")))
+        if variant == "exact-duplicate":
+            built.append(at(x_nm, y_nm, diameter_nm, index=len(built) + 1))
+        elif variant == "near-miss":
+            built.append(at(x_nm + 1, y_nm, diameter_nm, index=len(built) + 1))
+    return built
 
 
 class TestDeduplicate:
@@ -289,22 +310,29 @@ class TestDeduplicate:
         assert diag.get("dropped") == 1
         assert diag.get("dropped_indices") is None
 
-    def test_property_dedupe_is_idempotent(self):
-        rng = random.Random(90210)
-        for _ in range(300):
-            built = []
-            for _ in range(8):
-                x_nm = rng.randrange(-50_000_000, 50_000_000, 250_000)
-                y_nm = rng.randrange(-25_000_000, 25_000_000, 250_000)
-                dia_nm = rng.choice([5_000_000, 7_000_000])
-                built.append(at(x_nm, y_nm, dia_nm, index=len(built) + 1))
-                if rng.random() < 0.4:  # sprinkle exact duplicates
-                    built.append(at(x_nm, y_nm, dia_nm, index=len(built) + 1))
-            stage = Deduplicate()
-            once = stage.apply(make_data(*built))
-            twice = stage.apply(once)
-            assert twice.holes == once.holes
-            assert codes(twice) == codes(once), "second pass found new duplicates"
+    @given(_holes_with_duplicates_and_near_misses())
+    @settings(max_examples=200)
+    def test_no_two_holes_survive_dedupe_with_the_same_key(self, drawn):
+        """What ``Deduplicate`` is for, stated as a property of its output.
+
+        Idempotence was the old form and could not fail: the comparison is
+        exact integer equality, so a second pass has nothing left to find.
+        This one can fail -- a key that drops a field, or a comparison that
+        gained a tolerance, both leave two survivors that should have been
+        one.
+        """
+        survivors = Deduplicate().apply(make_data(*drawn)).holes
+
+        keys = [(h.x_nm, h.y_nm, h.diameter_nm) for h in survivors]
+        assert len(keys) == len(set(keys))
+
+    def test_a_one_nanometre_near_miss_is_retained_not_collapsed(self):
+        """The boundary the old 250-micron-lattice loop could never reach."""
+        data = make_data(at(0, 0, 7_000_000, index=1), at(1, 0, 7_000_000, index=2))
+
+        survivors = Deduplicate().apply(data).holes
+
+        assert len(survivors) == 2
 
 
 def test_a_collapsed_pair_reports_one_hole_dropped() -> None:

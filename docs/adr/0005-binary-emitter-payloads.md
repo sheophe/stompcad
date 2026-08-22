@@ -17,8 +17,9 @@ becoming part of the format's correctness.
 The emitter payload is `Payload = str | bytes`. An emitter returns whichever its format
 is; a text emitter continues to return `str` and is unchanged.
 
-The command line owns the encoding decision at the one site that writes a file. It
-dispatches on the value:
+The dispatch on the value is `stompmodel.protocols.write_payload`, the one function
+that writes a file; the command line owns the report it prints around the count that
+function returns. As first taken, that dispatch was the command line's own:
 
 ```python
 def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
@@ -52,3 +53,9 @@ that assumes `str` is now wrong, and `mypy` says so.
 
 The reporting line still counts encoded bytes, so its number means the same thing for
 both kinds of payload.
+
+`stompcollider` inherits this counting convention from `stompmodel.protocols.write_payload`
+rather than re-deriving it, which is what makes "means the same thing for both kinds of
+payload" hold across two tools rather than within one — the move satisfies ADR-0009's
+admission rule 2 (contract), naming `stompcad`'s dependence on one report and one
+byte-counting convention across both tools it orchestrates.

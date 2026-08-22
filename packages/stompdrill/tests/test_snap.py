@@ -6,11 +6,13 @@ import math
 import random
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from stompdrill.pipeline import ReviewGridTies, SnapPositions
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, Hole, RawHole, StageRun
-from stompmodel.units import Millimetre, Nanometre
+from stompmodel.units import Millimetre, Nanometre, nm_from_mm
 
 
 def raw(x: float, y: float, *, diameter: float = 7.0) -> RawHole:
@@ -44,6 +46,36 @@ def reviewed(stage: SnapPositions, *measurements: RawHole) -> tuple[Diagnostic, 
 def codes(diagnostics) -> list[str]:
     """The stable machine key of every finding, in order."""
     return [d.code for d in diagnostics]
+
+
+def _half_pitch_midpoints(pitch_nm: int) -> st.SearchStrategy[float]:
+    """Millimetre values landing exactly on a half-pitch grid tie.
+
+    A uniform float essentially never lands here, yet this is the exact place
+    ``ROUND_HALF_EVEN`` and ``grid-ambiguous`` are decided; ``pitch_nm`` is
+    always even (a whole number of microns times 1 000), so the midpoint is a
+    whole nanometre and the millimetre value below round-trips exactly.
+    """
+    half = pitch_nm // 2
+    return st.builds(
+        lambda k, sign: (k * pitch_nm + sign * half) / 1_000_000,
+        st.integers(-2_000, 2_000),
+        st.sampled_from((1, -1)),
+    )
+
+
+@st.composite
+def _pitch_and_positions_mm(draw):
+    """A whole-micron pitch and two axis positions, mixed between plain
+    floats and exact half-pitch midpoints -- the mixture the spike found
+    necessary, since a uniform float alone never reaches the tie boundary.
+    """
+    pitch_nm = Nanometre(draw(st.integers(1, 2_000)) * 1_000)
+    mixed = st.one_of(
+        st.floats(-1e5, 1e5, allow_nan=False, allow_infinity=False),
+        _half_pitch_midpoints(pitch_nm),
+    )
+    return pitch_nm, draw(mixed), draw(mixed)
 
 
 class TestSnapPositions:
@@ -181,21 +213,31 @@ class TestSnapPositions:
             assert diagnostics[0].get("moved_nm") == 250_000
             assert (x_nm, y_nm) == (round(x * 1_000_000), -19_000_000)
 
-    def test_property_snapping_is_idempotent(self):
-        """Feeding a snapped position back in must move nothing and say nothing."""
-        rng = random.Random(20250814)
-        for grid_nm in (50_000, 100_000, 250_000, 500_000, 1_000_000, 300_000):
-            stage = SnapPositions(grid_nm)
-            for index in range(1, 31):
-                once, first = stage.quantise(
-                    raw(rng.uniform(-60, 60), rng.uniform(-30, 30))
-                )
-                twice, second = stage.quantise(
-                    raw(once[0] / 1_000_000, once[1] / 1_000_000)
-                )
-                assert twice == once
-                assert codes(second) == [], "a snapped hole cannot still be off grid"
-                assert len(first) <= 1
+    @given(_pitch_and_positions_mm())
+    @settings(deadline=None, max_examples=300)
+    def test_snap_lands_on_grid_within_half_pitch_and_is_idempotent(self, drawn):
+        """The three properties ADR-0003 promises, stated in nanometres.
+
+        A uniform ``rng.uniform(-60, 60)`` essentially never lands on a
+        half-pitch midpoint -- the exact place ``grid-ambiguous`` is decided
+        and ``Decimal(str(mm))`` half-up rounding earns its keep -- so the
+        mixture strategy above constructs that boundary directly.
+        """
+        pitch_nm, x_mm, y_mm = drawn
+        stage = SnapPositions(pitch_nm)
+        half = pitch_nm // 2
+
+        (x_nm, y_nm), first = stage.quantise(raw(x_mm, y_mm))
+
+        assert x_nm % pitch_nm == 0
+        assert y_nm % pitch_nm == 0
+        assert abs(x_nm - nm_from_mm(Millimetre(x_mm))) <= half
+        assert abs(y_nm - nm_from_mm(Millimetre(y_mm))) <= half
+
+        (twice_x, twice_y), second = stage.quantise(raw(x_nm / 1_000_000, y_nm / 1_000_000))
+        assert (twice_x, twice_y) == (x_nm, y_nm)
+        assert codes(second) == [], "a snapped hole cannot still be off grid"
+        assert len(first) <= 1
 
 
 class TestSnapPositionsDescribesWhatItReallyDid:

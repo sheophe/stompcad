@@ -213,3 +213,231 @@ generative conversion or the routing performance repair.
 rotation-invariance tests pass unchanged, the drawing-agreement and invariance harnesses show
 byte-identical artefacts, and the scoped survey is re-run with every new survivor classified as
 killable or equivalent — the residual stated as a number, never implied to be zero.
+
+## Adopt the nightly symbolic tier
+
+**Status:** Noted; adoption is conditional, not scheduled. Ruled out for the verification
+framework plan, 2026-08-22.
+
+**Constraint:** CrossHair over the integer core only — `dedupe.py`, `route.py`, and any
+property expressible in nanometres. `units.py` and `snap.py` as written are excluded:
+`Decimal(str(mm))` realises the symbolic float, and the spike measured one assertion going
+from 0.20 s solvable to unsolvable-but-reported-passing. Evidence is in
+`.scratch/test-audit/spike-symbolic.md`. Every property must carry a canary, because the
+backend silently degrades to concrete execution on constructs it cannot handle — no timeout,
+no warning, `metadata.backend` reporting `null` — so an un-canaried property that stops
+failing would be measuring nothing rather than passing.
+
+**Trigger:** take it when a bug is found that a property test missed at a boundary, not on a
+schedule.
+
+**Acceptance:** The tier runs nightly over the named modules, every property carries a canary
+that is itself verified to fail against the CrossHair backend, and
+`docs/specs/verification-technical.md` §5 records the tier as adopted rather than not adopted.
+
+## Execute ADR-0008's governing test against a clean install
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** ADR-0008's governing test is that each workspace member installs and passes
+its own tests alone. `kinds.md` Gap 3's fourth check — `pip install packages/stompmodel` into
+a throwaway venv — has never actually been run: it needs the network and tens of seconds, so
+it belongs behind an opt-in marker beside `--hammond`, not the default run.
+
+**Acceptance:** An opt-in test (or a documented manual command) performs the install into a
+fresh venv and imports `stompmodel` from it, is marked so a standard run skips it, and passes.
+
+## Decide whether the hole-reordering shuffle loop is redundant
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** `kinds.md` argues the 20-shuffle loop in `test_pipeline.py` is subsumed by the
+generative permutation property this plan added. The spec's list of four conversions did not
+include it, so it was left rather than decided. "Decide whether `_total_order`'s tie-break
+clauses are reachable at all" (below) bears directly on this and is now settled by direct
+test: `quantise.py:60`'s entry sort is confirmed, by reverting it, to be what guards the
+invariant — both the pre-existing fixtures and the new generative property fail without it.
+What remains open there is narrower, and does not change on its own whether the shuffle
+loop is redundant: whether `_total_order`'s tie-break clauses are reachable at all in the
+shipped pipeline. Either way, the sort runs before either instrument's holes reach routing,
+so this decision should be made on what the shuffle loop checks beyond permutation stability
+(if anything), not on which one "really" guards the invariant.
+
+**Acceptance:** A written decision either deletes the shuffle loop with the generative
+property named as its replacement, or keeps both with a stated reason the property does not
+subsume it — made after, not instead of, resolving the guard-location question below.
+
+## Type the emitter registry
+
+**Status:** Noted; no implementation agreed. Spec §8, out of scope.
+
+**Constraint:** `make_emitter`'s return annotation and the registry it resolves through are
+untyped. One change, when someone wants it.
+
+**Acceptance:** The registry and `make_emitter`'s return type are annotated, `mypy packages`
+stays clean, and no call site's behaviour changes.
+
+## Move `RawDrillData` out of `quantise.py`
+
+**Status:** Noted; no implementation agreed. Spec §8, out of scope.
+
+**Constraint:** ADR-0009 explicitly placed `RawDrillData` in `quantise.py`; there is no import
+cycle today, so the move has no forcing function. It needs an ADR amendment, taken when a
+stage first needs `RawDrillData` in its own signature rather than as a hypothetical.
+
+**Acceptance:** ADR-0009 is amended to record the new location and the reason a stage needed
+it, `RawDrillData` moves to `stompdrill/raw.py`, and every import site updates in the same
+change.
+
+## Message `read_excellon`'s tool-lookup `KeyError`
+
+**Status:** Confirmed gap, not scheduled. Found while building the Excellon recovery.
+
+**Constraint:** `read_excellon` raises a bare `KeyError` when a body coordinate selects a tool
+the header never defined. `_coordinates` cannot structurally produce this input today, and the
+reader's stated scope excludes routing and slots regardless, but the surrounding reader is
+otherwise strict about refusing informatively.
+
+**Acceptance:** The lookup raises a messaged `ValueError` naming the undefined tool number,
+and a test constructs the malformed input directly — not through `_coordinates` — to prove it.
+
+## Separate layer 3's bundled `(x, y, diameter)` comparison
+
+**Status:** Confirmed gap, not scheduled. Inherited from the plan text.
+
+**Constraint:** Layer 3's SVG and PDF placement tests compare `(x, y, diameter)` as one tuple,
+so a wrong diameter and a wrong position report as the same failure. Task 5's equivalent test
+already separates the three; the SVG and PDF tests were written before that pattern settled.
+
+**Acceptance:** Each of the three fields is asserted independently, and a mutation of any one
+field alone fails only its own assertion.
+
+## Give layer 3's order test a clean failure under a uniform-offset mutant
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** Layer 3's rewritten order test currently fails via an unhandled `KeyError`
+under a uniform-offset mutant, rather than a clean assertion message. The defect is still
+caught; only the failure's legibility suffers.
+
+**Acceptance:** The lookup uses `.get()` with a dedicated "position not found" assertion, and
+the same mutant now fails with that message rather than a bare traceback.
+
+## Give `cad/step.py` a public seam for an in-memory document's solids
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** `read_step` takes a path; there is no public way to enumerate an in-memory
+XCAF document's solids. The STEP recovery arm therefore reuses the private `_collect` plus
+five lines of shape-tool glue that mirrors `read_step`'s own.
+
+**Acceptance:** A small public function takes an in-memory XCAF document and returns its
+solids, both `read_step` and the STEP recovery arm call it, and the duplicated glue is
+deleted.
+
+## Comment `fact_set`'s `"tools"` key before the golden is next regenerated
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** `fact_set`'s `"tools"` key maps diameter to tool number, not to a
+per-diameter hole count, and reads as counts on a fast skim.
+
+**Acceptance:** A one-line comment at the key's construction states what it maps, so whoever
+next regenerates `packages/stompdrill/tests/golden/tar-1590b.json` is not misled by the name.
+
+## Triage acceptance rows 1, 6, 7 and 9 for a dedicated mutant
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** The acceptance-test brief scoped a dedicated mutant to only two of its
+contract-coverage rows; rows 1, 6, 7 and 9 have none. The implementer reported the gap
+plainly rather than fabricating coverage.
+
+**Acceptance:** Each of the four rows is triaged; any that needs a mutant gets one that fails
+only against the behaviour the row names, and any row declined is recorded with the reason.
+
+## Comment the distinct-keys dedupe property's coverage boundary
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** The distinct-keys dedupe property does not, alone, catch an over-merging
+defect that drops `diameter_nm` from the comparison key — a single wrongly-merged survivor is
+trivially distinct from the rest. Coverage is sound in practice: the pre-existing
+`test_does_not_collapse_different_diameters_at_the_same_place` and the new near-miss example
+both close it, so the property complements adjacent tests rather than subsuming the
+idempotence loop it replaced.
+
+**Acceptance:** A comment beside the property states which named test carries the
+diameter-key case, so a future reader does not mistake the property for standalone proof of
+it.
+
+## Shorten the `LATTICE_MM` comment, if the file opens anyway
+
+**Status:** Informational; not a rule violation. Not scheduled.
+
+**Constraint:** The 12-line `#:` comment above `LATTICE_MM` in
+`packages/stompdrill/tests/test_invariant.py` is long, though `tools/check_docstrings.py`
+walks `ast.Constant` docstrings only and does not flag it.
+
+**Acceptance:** Closed by shortening the comment, or moving the rationale into a referenced
+note, the next time the file is open for another reason — not worth a standalone change.
+
+## Decide whether `_total_order`'s tie-break clauses are reachable at all
+
+**Status:** Open question, not scheduled. Raised by ruling T9-1 during the verification
+framework plan, 2026-08-22; corrected 2026-08-22 after the original finding was checked
+twice independently and found false.
+
+**Constraint:** An earlier version of this entry claimed that removing `quantise.py:60`'s
+entry sort was caught by neither the pre-existing fixtures nor the new generative
+permutation property, and that five mutants went uncaught. That claim was wrong. Replacing
+the sort with `measurements = list(raw.holes)` makes five tests in `test_invariant.py` fail:
+`test_a_panel_with_diagnostics_and_a_duplicate_is_permutation_stable`,
+`test_a_panel_whose_hole_breaks_out_of_the_outline_is_permutation_stable`,
+`test_a_panel_whose_holes_sit_on_a_grid_tie_is_permutation_stable`,
+`test_no_permutation_of_any_hole_set_reaches_any_artifact` (the generative property itself),
+and `test_the_bare_dedupe_stage_is_order_sensitive_and_quantise_is_what_saves_it`. The sort's
+responsibility for the invariant is already pinned by tests that exist, and the generative
+property is not vacuous — keeping it was right.
+
+What no instrument exercises is `_total_order`'s tie-break clauses specifically. The
+diameter-clause mutant — `return (-hole.y_nm, hole.x_nm, hole.raw.x, hole.raw.y)` — survives
+both `test_invariant.py` and `test_route.py` untouched. That is because the sort normalises
+arrival order before routing ever sees it, and after `Deduplicate` no two holes in a tool
+block share a nominal position, so the raw tie-break clauses are unreachable in the shipped
+pipeline.
+
+**Acceptance:** Either a test demonstrates an input that reaches `_total_order`'s tie-break
+clauses through the shipped pipeline (two holes with equal nominal position in one tool
+block surviving to routing), proving them live code; or the question is answered by
+inspection, recorded here, and a decision made on whether unreachable tie-break clauses
+should be simplified or removed.
+
+## Consolidate the repeated four-hole fixture and the nested-`Group` circle walker
+
+**Status:** Confirmed gap, not scheduled. Raised by the final whole-branch review of the
+verification framework plan, 2026-08-22, and backlogged rather than fixed because
+consolidating across three files is more churn than that review's fix wave should carry
+without per-task review.
+
+**Constraint:** The same four-hole, two-diameter fixture — holes at `(-20_000_000,
+18_000_000, 7_000_000, index=3)`, `(20_000_000, 18_000_000, 7_000_000, index=4)`,
+`(-19_000_000, -18_750_000, 5_000_000, index=1)`, `(19_000_000, -18_750_000, 5_000_000,
+index=2)`, on the same `ReferenceOutline(112_400_000, 60_500_000)` — is defined three times
+under three names: `panel()` in `test_layer2_owned.py`, `panel()` in
+`test_layer3_codecs.py`, and `sheet_panel()` in `test_recovery.py`. Separately, the walk that
+finds every `Circle` inside a scene's nested `Group` items exists three times with similar
+names and different filter semantics: `_scene_hole_circles`'s `walk` in
+`test_drawing_agreement.py` (keeps circles carrying the `hole` class token), `circles`'s
+`walk` in `test_layer2_owned.py` (keeps circles carrying a caller-supplied token), and
+`scene_circles`'s `walk` in `test_layer3_codecs.py` (keeps every circle, converting each to a
+sheet-nanometre tuple). This suite is meant as an exemplar other packages will copy, so the
+triplication is house style debt, not a one-off. The concrete cost of leaving it: if `Scene`
+grows a second container type, all three walkers must change and a missed one under-reports
+silently, since each is a private recursive helper with no shared test of its own.
+
+**Acceptance:** One shared four-hole fixture and one shared circle walker, living in
+`tests/conftest.py` or a small helper module, replace all three copies of each. The walker's
+interface accommodates the existing filter differences (by class token, or none) without
+losing any of the three call sites' current behaviour, and the full stompdrill suite passes
+unchanged.

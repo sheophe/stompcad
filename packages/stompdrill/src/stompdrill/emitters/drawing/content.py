@@ -51,6 +51,7 @@ __all__ = [
     "note_lines",
     "title_cell_width",
     "title_fields",
+    "plain_title_lines",
     "grid_value",
     "grid_note",
     "millimetre_label",
@@ -228,7 +229,13 @@ class Note:
 @dataclass(frozen=True, slots=True)
 class SheetText:
     """The words an emitter's options contribute, separated from the emitter
-    that supplied them."""
+    that supplied them.
+
+    ``issue_date``, ``approved_by`` and ``creator`` default empty: they are
+    ISO 7200 mandatory fields ``stompdrill`` has no source for, since it reads
+    artwork, not an organisation. A caller that supplies them gets a
+    conforming sheet.
+    """
 
     title: str = ""
     drawing_no: str = ""
@@ -348,6 +355,25 @@ def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[Titl
     return tuple(
         TitleField(name, _capped(value, limit), limit, mandatory)
         for name, value, limit, mandatory in stated
+    )
+
+
+def plain_title_lines(data: DrillData, text: SheetText, layout: Layout, room: int) -> tuple[str, ...]:
+    """The lines the non-ISO title block states, in the order it states them."""
+    source = data.source
+    return (
+        f"TITLE  {text.title or 'PANEL DRILL DRAWING'}",
+        f"DRG No  {text.drawing_no or ABSENT}",
+        enclosure_note(data, room),
+        f"SHEET 1 OF 1   SIZE {layout.sheet.name}",
+        f"UNITS mm   SCALE {layout.scale_label}",
+        f"{grid_note(data)}   HOLES {len(data.holes)}",
+        "THIRD ANGLE PROJECTION — DO NOT SCALE FROM DRAWING",
+        f"SOURCE  {source.path or ABSENT}",
+        (
+            f"LAYERS  drill={source.drill_layer or ABSENT} "
+            f"ref={source.reference_layer or ABSENT}"
+        ),
     )
 
 

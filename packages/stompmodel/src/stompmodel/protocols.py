@@ -9,11 +9,12 @@ ADR-0001's consistency argument bites. See ADR-0009.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
+from pathlib import Path
 from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
 
 from .model import StageRun
 
-__all__ = ["Processable", "Stage", "Emitter", "Payload", "Pipeline"]
+__all__ = ["Processable", "Stage", "Emitter", "Payload", "write_payload", "Pipeline"]
 
 
 #: Binds ``with_processing`` to the caller's own type. A protocol naming
@@ -54,6 +55,26 @@ class Stage(Protocol[T]):
 #: as PDF returns ``bytes``. The writing site chooses how to put it on disk —
 #: see ADR-0005.
 Payload = str | bytes
+
+
+def write_payload(path: Path, payload: Payload) -> int:
+    """Write ``payload``, letting its own type choose the mode.
+
+    Returns the encoded byte count, which is the number both tools report
+    and ``stompcad`` reduces over. A second copy of this branch is a second
+    counting convention, which is the drift ADR-0005's consequence forbids.
+    """
+    if isinstance(payload, bytes):
+        path.write_bytes(payload)
+        return len(payload)
+    encoded = payload.encode("utf-8")
+    # newline="\n" disables universal-newline translation, which otherwise
+    # rewrites "\n" to os.linesep and makes the returned count -- the
+    # untranslated encoding length -- wrong on a platform where the two
+    # differ. On POSIX os.linesep is already "\n", so no artefact byte
+    # changes here; this makes the contract true everywhere, not just here.
+    path.write_text(payload, encoding="utf-8", newline="\n")
+    return len(encoded)
 
 
 @runtime_checkable

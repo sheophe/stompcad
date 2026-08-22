@@ -27,8 +27,7 @@ from stompdrill.emitters.drawing.scene import Circle, Group, Item, Scene
 from stompdrill.emitters.drawing.sheet import ISO_5457_CANDIDATES, FrameStyle
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions
 from stompdrill.emitters.drawing_pdf import _num as pdf_num
-from stompdrill.emitters.drawing_pdf import _serialise as pdf_serialise
-from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter, _render_item
+from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, EnclosureMatch
 from stompmodel.units import Nanometre
@@ -44,7 +43,7 @@ DIAMETER_SIGNS = "⌀Ø"
 
 
 def svg_bytes(data: DrillData, scale: float | None = None) -> str:
-    return DrawingSvgEmitter(DrawingOptions(title=TITLE, scale=scale)).emit(data)
+    return DrawingSvgEmitter(DrawingOptions(text=SheetText(title=TITLE), scale=scale)).emit(data)
 
 
 def svg_strings(data: DrillData, scale: float | None = None) -> list[str]:
@@ -53,7 +52,7 @@ def svg_strings(data: DrillData, scale: float | None = None) -> list[str]:
 
 
 def pdf_bytes(data: DrillData) -> bytes:
-    return DrawingPdfEmitter(PdfDrawingOptions(title=TITLE)).emit(data)
+    return DrawingPdfEmitter(PdfDrawingOptions(text=SheetText(title=TITLE))).emit(data)
 
 
 def pdf_strings(data: DrillData) -> list[str]:
@@ -358,19 +357,13 @@ def _scene_hole_circles(scene: Scene) -> list[Circle]:
 
 
 def _svg_circles(scene: Scene, cls_token: str) -> list[tuple[float, float, float]]:
-    """Render ``scene`` exactly as the SVG backend does, and read its circles.
+    """Render ``scene`` through the SVG backend and read its circles back.
 
-    ``DrawingSvgEmitter.emit`` resolves its own layout before calling
-    ``_render_item``; this drives the same serialiser over a scene the test
-    already built, so the PDF and SVG halves of the comparison read one scene.
+    ``render`` is the seam ``emit`` fuses: it takes the scene the test built
+    rather than resolving one of its own, so the PDF and SVG halves of the
+    comparison are reading a single scene.
     """
-    root = ET.Element("svg", {"xmlns": SVG_NS})
-    for item in scene.items:
-        _render_item(root, item)
-    # Namespace inheritance from ``xmlns`` only resolves on parsing text, not
-    # on the in-memory tree ``_render_item`` just populated — the same reason
-    # every other SVG helper in this file round-trips through a string.
-    root = ET.fromstring(ET.tostring(root, encoding="unicode"))
+    root = ET.fromstring(DrawingSvgEmitter(DrawingOptions(text=SheetText(title=TITLE))).render(scene, TITLE))
     return [
         (float(e.attrib["cx"]), float(e.attrib["cy"]), float(e.attrib["r"]))
         for e in root.iter(f"{{{SVG_NS}}}circle")
@@ -394,7 +387,7 @@ def test_a_holes_mark_lands_at_the_same_sheet_point_on_both_backends():
     svg_holes = _svg_circles(scene, "hole")
     assert len(svg_holes) == len(scene_holes)
 
-    pdf_stream = stream_of(pdf_serialise(scene, TITLE))
+    pdf_stream = stream_of(DrawingPdfEmitter(PdfDrawingOptions(text=SheetText(title=TITLE))).render(scene, TITLE))
 
     by_position = sorted(scene_holes, key=lambda c: (c.cx, c.cy))
     for hole, svg_circle in zip(by_position, sorted(svg_holes)):
@@ -405,3 +398,22 @@ def test_a_holes_mark_lands_at_the_same_sheet_point_on_both_backends():
         # point of its Bézier path at (cx + r, sheet.height - cy).
         moveto = f"{pdf_num(hole.cx + hole.r)} {pdf_num(scene.sheet.height - hole.cy)} m"
         assert moveto in pdf_stream, f"hole at {(hole.cx, hole.cy)}: {moveto!r} not in the PDF"
+
+
+def test_an_iso_framed_sheet_text_renders_through_the_svg_backend():
+    """``SheetText``'s fields reach the ISO 7200 title block and survive the
+    SVG serialiser, exactly as they do the PDF's. The shipped
+    ``DrawingSvgEmitter.layout()`` always selects a plain frame -- there is
+    no ``frame`` option on ``DrawingOptions`` -- so this combination is
+    reachable only by composing an ISO-framed ``Layout`` directly, the way a
+    library caller (not the CLI) would; today's SVG output does not show
+    these fields."""
+    data = panel()
+    layout = choose_sheet(data, ISO_5457_CANDIDATES, frame=FrameStyle.ISO_5457)
+    scene = build_scene(layout, data, SheetText(issue_date="2026-08-21", approved_by="PV"))
+
+    root = ET.fromstring(DrawingSvgEmitter().render(scene, TITLE))
+    shown = [node.text or "" for node in root.iter(f"{{{SVG_NS}}}text")]
+
+    assert "2026-08-21" in shown
+    assert "PV" in shown

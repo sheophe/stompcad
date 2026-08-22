@@ -583,6 +583,157 @@ def test_any_hole_position_survives_the_round_trip(x_nm: int) -> None:
     assert from_document(to_document(data)).holes[0].x_nm == x_nm
 
 
+#: Scalar shapes ``StageRun.parameters`` and ``Diagnostic.data`` may hold.
+#: Keys never end ``_nm``: that suffix has its own int-only contract, already
+#: exercised elsewhere, and is not a shape this property is about.
+_SIMPLE_PARAM = st.one_of(
+    st.integers(-1_000, 1_000),
+    st.floats(-1_000.0, 1_000.0, allow_nan=False, allow_infinity=False),
+    st.text(max_size=8),
+    st.booleans(),
+)
+
+
+@st.composite
+def _holes_strategy(draw):
+    """A handful of holes, indices drawn as a permutation out of list order."""
+    count = draw(st.integers(0, 5))
+    built = []
+    for index in draw(st.permutations(range(1, count + 1))):
+        raw = RawHole(
+            Millimetre(draw(st.floats(-60.0, 60.0, allow_nan=False, allow_infinity=False))),
+            Millimetre(draw(st.floats(-60.0, 60.0, allow_nan=False, allow_infinity=False))),
+            Millimetre(draw(st.floats(0.5, 12.0, allow_nan=False, allow_infinity=False))),
+        )
+        built.append(
+            Hole(
+                x_nm=Nanometre(draw(st.integers(-50_000_000, 50_000_000))),
+                y_nm=Nanometre(draw(st.integers(-50_000_000, 50_000_000))),
+                diameter_nm=Nanometre(draw(st.integers(1_000_000, 10_000_000))),
+                raw=raw,
+                index=index,
+            )
+        )
+    return tuple(built)
+
+
+@st.composite
+def _reference_strategy(draw):
+    """``None``, a reference with an auto-derived ``raw``, or one with its own."""
+    if not draw(st.booleans()):
+        return None
+    outline = ReferenceOutline(
+        width_nm=Nanometre(draw(st.integers(1_000_000, 500_000_000))),
+        height_nm=Nanometre(draw(st.integers(1_000_000, 500_000_000))),
+        centre_x_nm=Nanometre(draw(st.integers(-500_000_000, 500_000_000))),
+        centre_y_nm=Nanometre(draw(st.integers(-500_000_000, 500_000_000))),
+    )
+    if not draw(st.booleans()):
+        return outline
+    measured = RawOutline(
+        Millimetre(draw(st.floats(0.1, 600.0, allow_nan=False, allow_infinity=False))),
+        Millimetre(draw(st.floats(0.1, 600.0, allow_nan=False, allow_infinity=False))),
+    )
+    return replace(outline, raw=measured)
+
+
+@st.composite
+def _diagnostics_strategy(draw):
+    """Every severity, a location present or absent, ``data`` empty or one entry."""
+    built = []
+    for _ in range(draw(st.integers(0, 4))):
+        location = None
+        if draw(st.booleans()):
+            location = (
+                Nanometre(draw(st.integers(-10_000_000, 10_000_000))),
+                Nanometre(draw(st.integers(-10_000_000, 10_000_000))),
+            )
+        payload = ()
+        if draw(st.booleans()):
+            key = draw(st.sampled_from(("note", "count", "reason", "flag")))
+            payload = ((key, draw(_SIMPLE_PARAM)),)
+        built.append(
+            Diagnostic(
+                severity=draw(st.sampled_from(list(Severity))),
+                code=draw(st.text(min_size=1, max_size=10)),
+                message=draw(st.text(max_size=20)),
+                location_nm=location,
+                data=payload,
+            )
+        )
+    return tuple(built)
+
+
+@st.composite
+def _processing_strategy(draw):
+    """Zero stage runs, or several, each with parameters present or absent."""
+    built = []
+    for _ in range(draw(st.integers(0, 3))):
+        params = ()
+        if draw(st.booleans()):
+            key = draw(st.sampled_from(("standard", "tolerance", "size_count")))
+            params = ((key, draw(_SIMPLE_PARAM)),)
+        name = draw(st.sampled_from(("identify-enclosure", "snap-diameters", "snap", "deduplicate")))
+        built.append(StageRun(name, params))
+    return tuple(built)
+
+
+@st.composite
+def _enclosure_strategy(draw):
+    """``None``, or a match with candidates and a declared or absent part."""
+    if not draw(st.booleans()):
+        return None
+    candidates = tuple(draw(st.lists(st.sampled_from(("1590B", "1590BB", "1590C", "1590Q")), max_size=4)))
+    return EnclosureMatch(
+        family=draw(st.sampled_from(("Hammond 1590", "Hammond 1550"))),
+        length_nm=Nanometre(draw(st.integers(1_000_000, 500_000_000))),
+        width_nm=Nanometre(draw(st.integers(1_000_000, 500_000_000))),
+        candidates=candidates,
+        rotated=draw(st.booleans()),
+        selected_part=draw(st.one_of(st.none(), st.sampled_from(("1590B", "1590BB", "1590C")))),
+    )
+
+
+@st.composite
+def _source_strategy(draw):
+    return SourceInfo(
+        path=draw(st.text(max_size=15)),
+        drill_layer=draw(st.text(max_size=8)),
+        reference_layer=draw(st.text(max_size=8)),
+        layers_found=tuple(draw(st.lists(st.text(max_size=6), max_size=3))),
+        producer=draw(st.text(max_size=8)),
+    )
+
+
+@st.composite
+def drill_data_strategy(draw):
+    """Every ``DrillData`` shape the codec must round-trip -- hole counts,
+    indices permuted out of list order, diagnostics with and without a
+    location, ``data`` empty and populated, an enclosure present and absent,
+    a reference with and without its own ``raw``, and processing with zero
+    and many stage runs. Magnitude is held fixed and simple throughout: the
+    single-integer property above already varies that axis, and shape is
+    what ``from_document``'s 100%-covered lines cannot see for themselves.
+    """
+    return DrillData(
+        holes=draw(_holes_strategy()),
+        reference=draw(_reference_strategy()),
+        diagnostics=draw(_diagnostics_strategy()),
+        source=draw(_source_strategy()),
+        processing=draw(_processing_strategy()),
+        enclosure=draw(_enclosure_strategy()),
+    )
+
+
+@given(drill_data_strategy())
+def test_the_round_trip_holds_over_every_documents_shape(data: DrillData) -> None:
+    """Complements the single-integer property above rather than subsuming
+    it: that one varies magnitude on a one-hole document, this one holds
+    magnitude fixed and varies every field's shape instead.
+    """
+    assert from_document(to_document(data)) == data
+
+
 @pytest.mark.parametrize(
     "build",
     [_fixture_data, _rotated_fixture_data, _square_fixture_data],

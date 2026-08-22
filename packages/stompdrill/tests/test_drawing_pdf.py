@@ -9,6 +9,7 @@ import re
 import pikepdf
 import pytest
 
+from stompdrill.emitters.drawing.build import SheetText
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter, PdfDrawingOptions, encode_text
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.errors import EmitterError
@@ -236,7 +237,7 @@ def test_an_unencodable_character_becomes_a_question_mark():
 
 
 def test_a_title_with_reserved_characters_survives_into_the_document():
-    options = PdfDrawingOptions(title="PANEL (REV\\A)")
+    options = PdfDrawingOptions(text=SheetText(title="PANEL (REV\\A)"))
     shown = " ".join(strings_in(render(panel(), options)))
 
     assert "PANEL (REV\\A)" in shown
@@ -311,9 +312,11 @@ def test_the_paper_size_field_names_the_sheet_that_was_chosen():
 
 def test_the_mandatory_fields_a_caller_supplies_reach_the_printed_sheet():
     """A title block states them; nothing else on the sheet does."""
-    options = PdfDrawingOptions(title="TAR PANEL", drawing_no="AI-0001",
-                                issue_date="2026-08-16", approved_by="P VAKHNIVSKYI",
-                                creator="STOMPDRILL")
+    options = PdfDrawingOptions(text=SheetText(
+        title="TAR PANEL", drawing_no="AI-0001",
+        issue_date="2026-08-16", approved_by="P VAKHNIVSKYI",
+        creator="STOMPDRILL",
+    ))
     shown = strings_in(render(panel(), options))
 
     for value in ("TAR PANEL", "AI-0001", "2026-08-16", "P VAKHNIVSKYI", "STOMPDRILL"):
