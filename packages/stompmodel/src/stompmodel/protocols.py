@@ -68,7 +68,12 @@ def write_payload(path: Path, payload: Payload) -> int:
         path.write_bytes(payload)
         return len(payload)
     encoded = payload.encode("utf-8")
-    path.write_text(payload, encoding="utf-8")
+    # newline="\n" disables universal-newline translation, which otherwise
+    # rewrites "\n" to os.linesep and makes the returned count -- the
+    # untranslated encoding length -- wrong on a platform where the two
+    # differ. On POSIX os.linesep is already "\n", so no artefact byte
+    # changes here; this makes the contract true everywhere, not just here.
+    path.write_text(payload, encoding="utf-8", newline="\n")
     return len(encoded)
 
 

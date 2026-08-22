@@ -143,13 +143,22 @@ def test_a_whole_number_of_nanometres_is_exact_at_six_decimals():
 
 
 def imported_roots(source: str) -> set[str]:
-    """Every absolute import root in ``source``. Relative imports cannot leave
-    the subpackage, so they need no check."""
+    """Every absolute import root in ``source``, plus the root of any relative
+    import that escapes the subpackage.
+
+    Every module here lives in ``tests.recovery``, so level 1 (``from .foo``)
+    stays inside it, but level 2 or deeper (``from ..conftest``) climbs out
+    to ``tests`` or above -- exactly the route by which a recovery module
+    could reach the emitters it exists to check independently while staying
+    invisible to a check that only looks at absolute imports.
+    """
     found: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             found.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        elif isinstance(node, ast.ImportFrom) and node.module and (
+            node.level == 0 or node.level >= 2
+        ):
             found.add(node.module.split(".")[0])
     return found
 
@@ -167,6 +176,15 @@ def test_the_scanner_finds_an_emitter_import():
 def test_the_scanner_finds_a_plain_package_import_too():
     """``import x`` and ``from x import y`` are the same edge, differently spelt."""
     assert "stompdrill" in imported_roots("import stompdrill.emitters.drawing_pdf")
+
+
+def test_the_scanner_finds_a_relative_import_that_escapes_the_subpackage():
+    """A level-2 relative import leaves ``tests.recovery`` for ``tests``,
+    which is where ``conftest.py`` -- and, through it, the emitters this
+    suite exists to check independently -- lives. The gate is only worth
+    its line if it fires on this route too, not only on a literal
+    ``stompdrill`` import."""
+    assert "conftest" in imported_roots("from ..conftest import at, make_data")
 
 
 def test_no_recovery_imports_the_package_whose_output_it_reads():

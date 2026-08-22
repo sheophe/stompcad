@@ -25,6 +25,8 @@ from .drawing.sheet import ISO_5457_CANDIDATES, FrameStyle, Sheet
 
 __all__ = [
     "PdfDrawingOptions",
+    "SheetText",
+    "Scene",
     "DrawingPdfEmitter",
     "encode_text",
     "PT_PER_MM",

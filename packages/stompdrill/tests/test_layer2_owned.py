@@ -243,13 +243,20 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     tolerance_mm = Precision.Confusion_s()
     frame = model.frame
 
-    def canonical_xy(ax: int, ay: int, az: int) -> tuple[Nanometre, Nanometre]:
+    def canonical_hole(ax: int, ay: int, az: int, radius: int) -> tuple[Nanometre, Nanometre, int]:
         point_mm = (ax * tolerance_mm, ay * tolerance_mm, az * tolerance_mm)
         x_mm, y_mm = _to_canonical(frame, point_mm)
-        return nm_from_mm(x_mm), nm_from_mm(y_mm)
+        return nm_from_mm(x_mm), nm_from_mm(y_mm), radius
 
-    found = {canonical_xy(ax, ay, az) for ax, ay, az, _radius in added}
-    expected = {(hole.x_nm, hole.y_nm) for hole in data.holes}
+    # Joining position and radius in one tuple, rather than checking the
+    # position set and the radius set separately, is what catches two holes
+    # with swapped diameters: each would pass a position-only and a
+    # radius-only check alike.
+    found = {canonical_hole(ax, ay, az, radius) for ax, ay, az, radius in added}
+    expected = {
+        (hole.x_nm, hole.y_nm, round((hole.diameter_nm / 2) / 1_000_000 / tolerance_mm))
+        for hole in data.holes
+    }
 
     assert len(added) == len(data.holes)
     assert found == expected

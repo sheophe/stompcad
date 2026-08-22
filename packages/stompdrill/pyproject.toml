@@ -63,10 +63,18 @@ do_not_mutate = ["src/stompdrill/enclosures.py"]
 # Two tests read source text rather than behaviour, so mutmut's rewritten files
 # fail them for every mutant and abort the survey. test_enclosures.py re-reads
 # docs/parts/dimensions.tsv, which is outside the copied tree; the CLI test
-# ast.parses cli.py, whose mutated form contains every mutant literal.
+# ast.parses cli.py, whose mutated form contains every mutant literal. The
+# routing performance test asserts a wall-clock bound; under mutmut (and
+# especially under --cov, which inflates pure-Python time several-fold) a
+# timeout scores as a killed mutant regardless of the mutation's actual
+# effect, which quietly inflates the survey CLAUDE.md tells readers to read
+# by module. Deselecting it here does not weaken coverage: it targets a
+# cubic-vs-linear regression that no other test in the suite checks, and
+# `--tb=short` runs still exercise it on every commit.
 pytest_add_cli_args_test_selection = [
     "--deselect=tests/test_enclosures.py",
     "--deselect=tests/test_cli.py::test_cli_source_never_names_a_registered_format",
+    "--deselect=tests/test_route.py::test_a_realistic_panel_routes_without_the_cubic_term",
 ]
 # mutmut runs the test command from inside mutants/, one directory deeper than
 # this file's own location, so the "../.." above (correct for a plain `pytest`

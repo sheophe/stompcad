@@ -11,12 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from stompmodel.units import Nanometre
+from stompmodel.units import NM_PER_MM, Nanometre
 
 __all__ = ["NM_PER_MM", "RecoveredCircle", "RecoveredPanel", "nm_from_decimal"]
-
-#: Nanometres in a millimetre. Stated here so a recovery never spells 1e6.
-NM_PER_MM = 1_000_000
 
 
 @dataclass(frozen=True, slots=True)

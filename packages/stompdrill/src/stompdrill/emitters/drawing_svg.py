@@ -27,7 +27,9 @@ __all__ = [
     "A3_LANDSCAPE",
     "A4_PORTRAIT",
     "DrawingOptions",
+    "SheetText",
     "Layout",
+    "Scene",
     "DrawingSvgEmitter",
 ]
 
