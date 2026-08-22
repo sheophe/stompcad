@@ -120,4 +120,5 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
         "errors.py",
         "kernel.py",
         "step.py",
+        "writer.py",
     }
