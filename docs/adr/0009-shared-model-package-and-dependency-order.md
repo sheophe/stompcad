@@ -76,11 +76,17 @@ interchange, so that type does not move.
 ### `stompgeom`
 
 The kernel layer: the STEP reader, the deterministic STEP writer with its OCC
-normalisation, the kernel-side operations that *build* a frame, `levels()` for grouping
-coplanar faces and measuring holedness, bounding boxes, `KernelUnavailable`.
+normalisation, `levels()` for grouping coplanar faces and measuring holedness, bounding
+boxes, `KernelUnavailable`.
 
-`levels()` arrives last, once `stompcollider`'s carrier-plane code exists to
-shape its interface. It belongs here; it is not part of the upfront extraction.
+Frame *construction* is not here and is not coming. `build_frame` reads an
+enclosure-shaped `Faces` and picks its `u` axis from the footprint spans, which is
+enclosure reasoning wearing a geometric coat, so it stays in `stompdrill` under the
+rule two paragraphs below. `stompmodel` owns the frame *type* and its transforms;
+`stompgeom` owns neither. A reader looking here for a frame builder will not find one.
+
+`levels()` is the opposite case: it belongs here and has simply not arrived yet. It
+comes last, once `stompcollider`'s carrier-plane code exists to shape its interface.
 The technical specification's order of work says why.
 
 No enclosure vocabulary crosses this boundary. `select_solid`'s box/lid keywords,

@@ -7,7 +7,7 @@
 `stompgeom`, so it takes the kernel too, and this ADR's argument for the extra assumed
 `stompdrill` stood alone.
 
-The paragraphs below are left as the decision was taken, present tense and all; three of
+The paragraphs below are left as the decision was taken, present tense and all; four of
 them argue from the extra and carry an **Amended** note saying where they no longer
 describe the install, and one sentence about test skips is rewritten because it had
 become simply false. A decision that was superseded is a fact about this ADR, not an
@@ -146,6 +146,11 @@ trimmed face, where hand-rolled code would tessellate the arcs and inherit a res
 parameter. If the `stompdrill[step]` requirement proves annoying, a pure-Python `cad`
 backend can be added behind the `CaseModel` protocol later without touching the stage —
 which is most of why the protocol exists rather than a concrete OCP type.
+
+**Amended: there is no extra to find annoying.** The kernel arrives with `stompgeom`,
+so the motive above is gone. The escape hatch is not: a pure-Python backend behind the
+`CaseModel` protocol remains available, and would now be a way to run the clearance
+stage without `stompgeom` at all rather than a way to skip an extra.
 
 Treating the clearance check as emitter-local — folding it into `StepEmitter` — was
 rejected because a caller who never requests `--emit step=…` would then get no

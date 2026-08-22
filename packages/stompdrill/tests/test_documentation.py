@@ -10,17 +10,20 @@ from tools.check_docstrings import find_long_docstrings
 PACKAGE = Path(__file__).resolve().parent.parent
 REPO = PACKAGE.parent.parent
 STOMPMODEL = REPO / "packages" / "stompmodel"
+STOMPGEOM = REPO / "packages" / "stompgeom"
 # The scripts stayed at the repository root when the package moved beneath it,
 # and a root that does not exist scans as empty rather than failing, so the two
-# levels are named apart to keep the audit's reach honest. stompmodel is a
-# sibling workspace member, not a subtree of this package, so its src and
-# tests are named apart again.
+# levels are named apart to keep the audit's reach honest. stompmodel and
+# stompgeom are sibling workspace members, not subtrees of this package, so
+# each one's src and tests are named apart again.
 PYTHON_ROOTS = (
     PACKAGE / "src",
     PACKAGE / "tests",
     REPO / "tools",
     STOMPMODEL / "src",
     STOMPMODEL / "tests",
+    STOMPGEOM / "src",
+    STOMPGEOM / "tests",
 )
 
 

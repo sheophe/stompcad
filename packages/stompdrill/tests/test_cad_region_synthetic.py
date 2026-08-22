@@ -149,8 +149,9 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
     orientation before testing it, by flipping structure at a low margin.
     Lettering can never do that again (fix round 2), so a mirrored frame
     pair with an off-centre boss -- not lettering -- is what proves the
-    reframe (``region.reframe``) still runs before the box's own region is
-    consulted, rather than checking the lid's raw coordinate against it.
+    reframe (``CoordinateFrame.reframe``) still runs before the box's own
+    region is consulted, rather than checking the lid's raw coordinate
+    against it.
     """
     own_frame = FaceFrame(
         basis=CoordinateFrame(

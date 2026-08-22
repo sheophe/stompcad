@@ -1224,7 +1224,7 @@ amendment lands with the work rather than after it."
 
 ## Amendments — what executing this plan corrected in it
 
-Twelve defects surfaced while the tasks above were carried out. They are recorded here
+Thirteen defects surfaced while the tasks above were carried out. They are recorded here
 rather than edited into each task, because the tasks are the record of what was
 intended and these are what executing them taught. A future session should read the
 task, then this list.
@@ -1273,3 +1273,11 @@ task, then this list.
 12. **Task 8's file list of test files is short by two.** It omits `test_step_cut.py`,
     and it could not have named `test_step_reader.py`, which exists only because of
     correction 9.
+13. **The specification disagrees with itself about `build_frame`, and ADR-0009
+    inherited it.** Decision 1 gives `stompgeom` "the kernel-side operations that build
+    a frame", while the same document's "What does not move" keeps `build_frame` in
+    `stompdrill`, because it reads an enclosure-shaped `Faces` and picks its `u` axis
+    from the footprint spans. Task 9 copied the decision's wording into ADR-0009, so
+    the ADR named an operation `stompgeom` never held — worse than a stale sentence,
+    because it reads as deferred work rather than a decision already taken elsewhere.
+    The ADR now says frame construction stays in `stompdrill` and why.

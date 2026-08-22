@@ -71,7 +71,8 @@ def test_the_scanner_finds_a_sibling_hidden_behind_type_checking() -> None:
 
 
 def test_the_scanner_finds_a_third_party_import() -> None:
-    """The leaf declares no dependencies, so a runtime one is a violation too."""
+    """This package declares exactly two dependencies, the leaf and the
+    kernel, so any other third-party import is a violation too."""
     assert foreign_imports("import pikepdf") == {"pikepdf"}
 
 
@@ -81,8 +82,8 @@ def test_the_scanner_accepts_the_package_and_the_standard_library() -> None:
         "from __future__ import annotations\n"
         "import ast\n"
         "from decimal import Decimal\n"
-        "from . import units\n"
-        "from .model import DrillData\n"
+        "from . import kernel\n"
+        "from .errors import StompgeomError\n"
         "import stompmodel.codec\n"
     )
 
