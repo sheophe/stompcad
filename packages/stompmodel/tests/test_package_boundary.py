@@ -65,7 +65,7 @@ def test_the_scanner_finds_a_sibling_hidden_behind_type_checking() -> None:
     guarded = (
         "from typing import TYPE_CHECKING\n"
         "if TYPE_CHECKING:\n"
-        "    from stompgeom.frames import FaceFrame\n"
+        "    from stompgeom.step import read_step\n"
     )
 
     assert foreign_imports(guarded) == {"stompgeom"}
@@ -113,6 +113,7 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
         "codec.py",
         "diagnostics.py",
         "errors.py",
+        "frames.py",
         "model.py",
         "protocols.py",
         "units.py",

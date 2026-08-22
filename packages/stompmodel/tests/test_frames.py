@@ -86,3 +86,18 @@ def test_the_frame_is_frozen() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         ROTATED.u = (1.0, 0.0, 0.0)  # type: ignore[misc]
+
+
+def test_a_face_frame_wraps_a_basis() -> None:
+    """The wrapping is visible at the call site, which is the point of it."""
+    from stompmodel.frames import FaceFrame
+
+    assert FaceFrame(basis=ROTATED).basis is ROTATED
+
+
+def test_a_face_frame_is_not_a_coordinate_frame() -> None:
+    """Composition, not inheritance: a face frame carries a meaning that a
+    bare transform does not, so it must not substitute for one silently."""
+    from stompmodel.frames import FaceFrame
+
+    assert not isinstance(FaceFrame(basis=ROTATED), CoordinateFrame)

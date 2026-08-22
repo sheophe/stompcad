@@ -71,3 +71,15 @@ class CoordinateFrame:
             ("frame_v", self.v),
             ("frame_w", self.w),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FaceFrame:
+    """A face's registration: a frame whose third axis is that face's normal.
+
+    Composes rather than extends. A subclass would pass wherever a bare
+    ``CoordinateFrame`` is wanted, which is exactly the universal-wrapped-in-a-
+    meaning leak ADR-0008 names as this boundary's standing risk.
+    """
+
+    basis: CoordinateFrame
