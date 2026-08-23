@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompgeom import kernel
-from stompgeom.writer import label_entry, label_name, write_step
+from stompgeom.step import label_name
+from stompgeom.writer import label_entry, write_step
 from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm

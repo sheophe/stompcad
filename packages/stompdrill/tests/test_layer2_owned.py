@@ -191,7 +191,6 @@ def _cut_component_shape(document: Any, keyword: str) -> Any:
     re-typed here -- a second copy of the recursion would keep working
     while diverging from the one the emitter actually uses.
     """
-    from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
@@ -202,7 +201,7 @@ def _cut_component_shape(document: Any, keyword: str) -> Any:
     tool.GetFreeShapes(labels)
     solids: list[StepSolid] = []
     for index in range(1, labels.Length() + 1):
-        _collect(labels.Value(index), solids, TDataStd_Name)
+        _collect(labels.Value(index), solids)
 
     found = StepDocument(tuple(solids), document).named(keyword)
     assert found, f"the cut document holds no solid named like {keyword!r}"

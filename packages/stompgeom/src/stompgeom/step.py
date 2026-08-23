@@ -18,7 +18,7 @@ from stompmodel.errors import DocumentError
 from .kernel import require_kernel
 
 __all__ = [
-    "StepSolid", "StepDocument", "read_step", "bounding_box_mm",
+    "StepSolid", "StepDocument", "read_step", "label_name", "bounding_box_mm",
     "source_timestamp",
 ]
 
@@ -26,6 +26,13 @@ __all__ = [
 _EPOCH = "1970-01-01T00:00:00+00:00"
 
 _TIMESTAMP_PATTERN = re.compile(r"time_stamp\s*\*?/?\s*'([^']*)'")
+
+#: OCC's own synthesised indirection, written on a component occurrence that
+#: carries no name of its own -- e.g. ``=>[0:1:1:34]``. Matched with
+#: ``fullmatch`` so a genuine name that merely contains brackets, digits or
+#: colons is never mistaken for it; an observed kernel behaviour with no
+#: documented guarantee, so both directions are tested (see test_step.py).
+_OCC_INDIRECTION = re.compile(r"=>\[[0-9:]+\]")
 
 
 def source_timestamp(path: Path) -> str:
@@ -45,7 +52,11 @@ def source_timestamp(path: Path) -> str:
 
 @dataclass(frozen=True, slots=True)
 class StepSolid:
-    """One product's solid, placed in assembly coordinates and scaled to mm."""
+    """One product's solid, placed in assembly coordinates and scaled to mm.
+
+    ``name`` is empty exactly when nobody named this solid -- see
+    :func:`label_name`, the one rule that decides that.
+    """
 
     name: str
     shape: Any
@@ -94,7 +105,6 @@ def read_step(path: Path) -> StepDocument:
     from OCP.Interface import Interface_Static
     from OCP.STEPCAFControl import STEPCAFControl_Reader
     from OCP.TCollection import TCollection_ExtendedString
-    from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_LabelSequence
     from OCP.TDocStd import TDocStd_Document
     from OCP.XCAFApp import XCAFApp_Application
@@ -125,13 +135,13 @@ def read_step(path: Path) -> StepDocument:
 
     solids: list[StepSolid] = []
     for index in range(1, labels.Length() + 1):
-        _collect(labels.Value(index), solids, TDataStd_Name)
+        _collect(labels.Value(index), solids)
     if not solids:
         raise DocumentError(f"{path} contains no solids")
     return StepDocument(tuple(solids), document, source_timestamp(path))
 
 
-def _collect(label: Any, out: list[StepSolid], name_attr: Any) -> None:
+def _collect(label: Any, out: list[StepSolid]) -> None:
     """Walk one XCAF label, recording leaf solids in document order.
 
     A component label refers to a shape in the product's own local
@@ -148,18 +158,31 @@ def _collect(label: Any, out: list[StepSolid], name_attr: Any) -> None:
         children = TDF_LabelSequence()
         XCAFDoc_ShapeTool.GetComponents_s(label, children)
         for index in range(1, children.Length() + 1):
-            _collect(children.Value(index), out, name_attr)
+            _collect(children.Value(index), out)
         return
 
     shape = XCAFDoc_ShapeTool.GetShape_s(label)
     if shape.IsNull():
         return
-    out.append(StepSolid(name=_name_of(label, name_attr), shape=shape, unit_mm=1.0))
+    out.append(StepSolid(name=label_name(label), shape=shape, unit_mm=1.0))
 
 
-def _name_of(label: Any, name_attr: Any) -> str:
-    """The product name on ``label``, or an empty string when unnamed."""
-    holder = name_attr()
-    if label.FindAttribute(name_attr.GetID_s(), holder):
-        return str(holder.Get().ToExtString())
-    return ""
+def label_name(label: Any) -> str:
+    """The name XCAF recorded for ``label``, or "" when nobody named it.
+
+    OCC synthesises an indirection placeholder such as ``=>[0:1:1:34]`` on a
+    component occurrence that carries no name of its own; that placeholder
+    names nothing, so it reads back as "" like a label with no name attribute
+    at all. ``IsAttribute`` is checked before ``FindAttribute``: this
+    binding's ``FindAttribute`` segfaults on a label with no
+    ``TDataStd_Name`` attribute rather than returning ``False``, so presence
+    is checked first and never inferred from the lookup's return value.
+    """
+    from OCP.TDataStd import TDataStd_Name
+
+    if not label.IsAttribute(TDataStd_Name.GetID_s()):
+        return ""
+    holder = TDataStd_Name()
+    label.FindAttribute(TDataStd_Name.GetID_s(), holder)
+    name = str(holder.Get().ToExtString())
+    return "" if _OCC_INDIRECTION.fullmatch(name) else name

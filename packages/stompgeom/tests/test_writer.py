@@ -17,6 +17,13 @@ from stompmodel.errors import EmitterError
 from .xcaf import build_document
 
 
+def test_the_writer_no_longer_defines_its_own_name_rule() -> None:
+    """One name rule lives in ``stompgeom.step``; a duplicate here would let
+    the reader and the writer disagree about what a name is."""
+    assert not hasattr(writer, "label_name")
+    assert "label_name" not in writer.__all__
+
+
 def test_the_wrapper_product_name_is_the_workspace_not_a_package() -> None:
     """It is load-bearing, not cosmetic: ``_normalise`` strips the volatile
     counter appended to exactly this prefix, so the setter, the pattern and

@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from stompgeom.step import _EPOCH, bounding_box_mm, read_step, source_timestamp
+from stompgeom.step import (
+    _EPOCH,
+    bounding_box_mm,
+    label_name,
+    read_step,
+    source_timestamp,
+)
 from stompmodel.errors import DocumentError
 
 from .xcaf import BODY_SIZE_MM, build_document
@@ -111,3 +118,157 @@ def test_a_file_this_package_wrote_reads_back_with_no_provenance(
 
     assert b"'2020-01-02T03:04:05'" in target.read_bytes()
     assert read_step(target).timestamp == _EPOCH
+
+
+# ---------------------------------------------------------------------------
+# label_name -- the one rule for what XCAF recorded as a label's name
+# ---------------------------------------------------------------------------
+
+
+def _new_shape_tool() -> tuple[object, Any]:
+    """A fresh, empty XCAF document and its shape tool.
+
+    Returns the document alongside the tool; the caller must keep the
+    document referenced for as long as it uses any label drawn from it --
+    the document owns the label's underlying data.
+    """
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    app = XCAFApp_Application.GetApplication_s()
+    document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    app.InitDocument(document)
+    return document, XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+
+
+def _a_box() -> Any:
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+
+    return BRepPrimAPI_MakeBox(1.0, 2.0, 3.0).Shape()
+
+
+def _unnamed_occurrence_document() -> tuple[object, object]:
+    """One component whose *occurrence* label carries no name of its own
+    while its *referred product* label does -- exactly what a raw board body
+    copied into an assembly looks like. ``AddComponent`` always synthesises
+    *some* name attribute, here its own indirection placeholder.
+
+    Returns ``(document, component)``; the caller must keep both alive.
+    """
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TopLoc import TopLoc_Location
+
+    document, shapes = _new_shape_tool()
+
+    product = shapes.AddShape(_a_box(), False)
+    TDataStd_Name.Set_s(product, TCollection_ExtendedString("Sluch_PCB_1"))
+
+    assembly = shapes.NewShape()
+    TDataStd_Name.Set_s(assembly, TCollection_ExtendedString("enclosure"))
+    component = shapes.AddComponent(assembly, product, TopLoc_Location())
+    # Deliberately no TDataStd_Name.Set_s(component, ...): this is the
+    # occurrence a real KiCad export leaves unnamed for a raw board body.
+    shapes.UpdateAssemblies()
+    return document, component
+
+
+def _named_occurrence_document(name: str) -> tuple[object, object]:
+    """A component whose *occurrence* label carries a genuine name, distinct
+    from its referred product's own name.
+
+    Returns ``(document, component)``; the caller must keep both alive.
+    """
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TopLoc import TopLoc_Location
+
+    document, shapes = _new_shape_tool()
+
+    product = shapes.AddShape(_a_box(), False)
+    TDataStd_Name.Set_s(product, TCollection_ExtendedString("Sluch_PCB_1"))
+
+    assembly = shapes.NewShape()
+    TDataStd_Name.Set_s(assembly, TCollection_ExtendedString("enclosure"))
+    component = shapes.AddComponent(assembly, product, TopLoc_Location())
+    TDataStd_Name.Set_s(component, TCollection_ExtendedString(name))
+    shapes.UpdateAssemblies()
+    return document, component
+
+
+def _labelled(name: str) -> tuple[object, object]:
+    """A free-standing product label carrying ``name``.
+
+    Returns ``(document, label)``; the caller must keep both alive.
+    """
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+
+    document, shapes = _new_shape_tool()
+    label = shapes.AddShape(_a_box(), False)
+    TDataStd_Name.Set_s(label, TCollection_ExtendedString(name))
+    return document, label
+
+
+def _unattributed_label() -> tuple[object, object]:
+    """A label carrying no ``TDataStd_Name`` attribute at all.
+
+    ``AddShape`` sets one of its own accord ("SOLID"); ``ForgetAttribute``
+    removes it, leaving the label exactly as a label that was never named.
+    Returns ``(document, label)``; the caller must keep both alive.
+    """
+    from OCP.TDataStd import TDataStd_Name
+
+    document, shapes = _new_shape_tool()
+    label = shapes.AddShape(_a_box(), False)
+    label.ForgetAttribute(TDataStd_Name.GetID_s())
+    return document, label
+
+
+def test_label_name_reports_the_occ_indirection_placeholder_as_unnamed() -> None:
+    """An occurrence with no name of its own must read as unnamed, not as
+    OCC's synthesised ``=>[0:1:1:N]`` indirection string."""
+    _document, component = _unnamed_occurrence_document()
+
+    assert label_name(component) == ""
+
+
+def test_label_name_reports_a_genuine_occurrence_name_exactly() -> None:
+    """The other direction of the same rule: a component whose occurrence
+    label *was* named reports that name, not the placeholder and not the
+    referred product's own name."""
+    _document, component = _named_occurrence_document("body")
+
+    assert label_name(component) == "body"
+
+
+def test_label_name_reports_a_label_with_no_name_attribute_as_unnamed() -> None:
+    """A label that was never named at all -- no placeholder, no attribute --
+    reads the same as one carrying the synthesised indirection: both are
+    "nobody named this", and the caller must not be able to tell them apart."""
+    _document, label = _unattributed_label()
+
+    assert label_name(label) == ""
+
+
+def test_label_name_leaves_a_genuine_bracketed_colonned_name_untouched() -> None:
+    """The placeholder pattern is matched with ``fullmatch``, so a genuine
+    name that merely contains its punctuation -- embedded, as a prefix, or
+    as a suffix -- must survive unchanged in every case."""
+    embedded = "weird =>[0:1:1:34] name"
+    prefixed = "prefix=>[0:1:1:34]"
+    suffixed = "=>[0:1:1:34]suffix"
+
+    for name in (embedded, prefixed, suffixed):
+        _document, label = _labelled(name)
+        assert label_name(label) == name
+
+
+def test_the_reader_keeps_no_private_twin_of_the_name_rule() -> None:
+    """``label_name`` is the one implementation; a private ``_name_of`` would
+    let the reader and the writer disagree about what a name is."""
+    import stompgeom.step as step_module
+
+    assert not hasattr(step_module, "_name_of")

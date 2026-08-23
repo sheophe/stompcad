@@ -18,7 +18,7 @@ from stompmodel.errors import EmitterError
 
 from .kernel import require_kernel
 
-__all__ = ["write_step", "label_entry", "label_name"]
+__all__ = ["write_step", "label_entry"]
 
 #: The translator's auto-generated wrapper product. Set at write time, and the
 #: volatile counter it appends is erased afterwards. All three uses -- the
@@ -61,18 +61,6 @@ _COLOUR_CHAIN = re.compile(
     rb"#(\d+) = COLOUR_RGB\('',([^)]*)\);",
     re.DOTALL,
 )
-
-
-def label_name(label: Any) -> str:
-    """The product name recorded on ``label``, or empty when unnamed."""
-    from OCP.TDataStd import TDataStd_Name
-
-    holder = TDataStd_Name()
-    if label.FindAttribute(TDataStd_Name.GetID_s(), holder):
-        return str(holder.Get().ToExtString())
-    return ""  # pragma: no cover - every label this kernel returns to us is named;
-    # a hand-built label with no attributes at all crashes this OCP binding's own
-    # FindAttribute before reaching this line, so no test can safely construct one
 
 
 def label_entry(label: Any) -> str:

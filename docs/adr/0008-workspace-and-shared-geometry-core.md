@@ -101,6 +101,15 @@ primitives that move. Every artefact `stompdrill` emits must be byte-identical
 across the move; its suite is the instrument that proves it, and the extraction
 is not complete until it does.
 
+On the reading side, `stompgeom` now owns a document it can **read and enumerate
+faithfully**: `stompgeom.step` publishes the one rule for what XCAF recorded as a
+label's name, distinguishing "nobody named this" from "the kernel synthesised an
+indirection" — OCC's own placeholder for an unnamed component occurrence, which
+names nothing and reads back as empty like any other unnamed label. That rule has
+exactly one implementation; a caller reading a label's name, in `stompdrill` or a
+future consumer, goes through it rather than keeping a private copy that could
+drift from the reader's own.
+
 The risk carried is that `stompgeom` accumulates whatever is convenient rather than
 what is universal. `Frame` is the live example: it is a rigid transform, which
 is universal, wrapped in a meaning — Y-up, originating at the reference-outline
