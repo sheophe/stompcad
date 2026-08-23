@@ -1,6 +1,7 @@
 # ADR-0006: Toolpath ordering and hole numbering
 
-**Status:** Accepted
+**Status:** Accepted, amended in place: `RouteHoles(key=…)` is deleted rather than
+retained. See Consequences.
 
 ## Context
 
@@ -93,9 +94,15 @@ Hole numbers ascend along the drilling path, not across the page. A panel whose 
 read `5, 4, 7, 3, 6, 2` left-to-right is numbered correctly; following `1…n` traces the
 route.
 
-Ordering is no longer expressible as a sort key. `RouteHoles(key=…)` is retained for a
-library caller who wants a plain ordering, and then performs no grouping and no routing;
-`describe()` records which ran. A caller passing a key can break tool contiguity.
+Ordering is no longer expressible as a sort key. **Amended: the ordering argument is
+deleted, not retained.** An ordering that determines every hole number while reducing to
+a lambda's name in provenance -- `"key": "<lambda>"`, identical for two opposite
+orderings -- is a knob a consumer can be silently out of step with: provenance that
+cannot reconstruct the decision it describes is worse than no provenance at all.
+`RouteHoles()` takes no arguments and always routes by the documented rule; constructing
+it with a `key` argument raises `TypeError`. If a named alternate ordering is ever wanted
+it returns as a closed, nameable choice whose name is its own provenance, not as a bare
+callable.
 
 The `processing` record names the stage `"route"`, so a consumer matching `"sort"` breaks.
 `Hole.index` in the JSON changes meaning from artwork identity to drill sequence, and

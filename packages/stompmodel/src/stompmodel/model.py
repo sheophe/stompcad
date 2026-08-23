@@ -17,6 +17,7 @@ from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_le
 from .diagnostics import of_severity as _of_severity
 from .diagnostics import worst_severity as _worst_severity
 from .errors import EmitterError
+from .frames import FaceFrame
 from .units import (
     Millimetre,
     Nanometre,
@@ -33,6 +34,7 @@ __all__ = [
     "RawOutline",
     "ReferenceOutline",
     "EnclosureMatch",
+    "CaseRegistration",
     "SourceInfo",
     "StageRun",
     "DrillData",
@@ -253,6 +255,30 @@ class EnclosureMatch:
 
 
 @dataclass(frozen=True, slots=True)
+class CaseRegistration:
+    """The supplied case model a document's holes were decided against.
+
+    ``part`` is *resolved*, not verified: the operator's ``--case`` when
+    typed, otherwise the model's own product name -- a different fact from
+    ``EnclosureMatch.selected_part``, the artwork's declared footprint.
+
+    ``model`` is the file's name, not its path. Nesting ``frame`` here is a
+    bet that holds only while a supplied model always has a frame.
+    """
+
+    part: str
+    face: str
+    model: str
+    frame: FaceFrame
+
+    def __post_init__(self) -> None:
+        if not self.part or not self.face or not self.model:
+            raise ValueError(
+                "a case registration names a part, a face and the model file it came from"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class SourceInfo:
     """Where the data came from, for title blocks and file headers."""
 
@@ -306,6 +332,7 @@ class DrillData:
     source: SourceInfo = field(default_factory=SourceInfo)
     processing: tuple[StageRun, ...] = ()
     enclosure: EnclosureMatch | None = None
+    case: CaseRegistration | None = None
 
     # -- transforms ------------------------------------------------------
     def with_holes(self, holes: Iterable[Hole]) -> DrillData:
@@ -325,6 +352,10 @@ class DrillData:
     def with_enclosure(self, match: EnclosureMatch) -> DrillData:
         """Replace the panel's current enclosure match."""
         return replace(self, enclosure=match)
+
+    def with_case(self, case: CaseRegistration) -> DrillData:
+        """Record the supplied case model this data was decided against."""
+        return replace(self, case=case)
 
     def with_origin(self, origin: Origin) -> DrillData:
         """Translate every hole into the requested frame.

@@ -205,6 +205,7 @@ class FakeCase:
 
     part = "1590BB"
     face = "box"
+    model_name = "1590BB.stp"
     footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
     plate_nm = Nanometre(2_250_000)
     frame = FaceFrame(

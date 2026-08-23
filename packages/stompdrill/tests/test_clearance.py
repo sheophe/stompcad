@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from stompdrill.pipeline import CheckCaseClearance
 from stompmodel.diagnostics import Severity
-from stompmodel.model import EnclosureMatch
+from stompmodel.model import CaseRegistration, EnclosureMatch
 from stompmodel.units import Nanometre
 from tests.conftest import FakeCase, at, codes, make_data
 
@@ -29,6 +29,32 @@ def run(model, *holes, reference=None, enclosure=_DEFAULT_MATCH, margin_nm=1 * M
     if enclosure is not None:
         data = data.with_enclosure(enclosure)
     return CheckCaseClearance(model).apply(data)
+
+
+def test_apply_attaches_the_registration_stating_the_model_it_checked_against():
+    result = run(FakeCase(), at(0, 0, 7 * MM, index=1))
+
+    assert result.case == CaseRegistration(
+        part=FakeCase.part, face=FakeCase.face, model=FakeCase.model_name, frame=FakeCase.frame
+    )
+
+
+def test_apply_attaches_the_registration_even_when_the_check_errors():
+    """A document must state what it was checked against even when the check
+    against it failed -- the registration and the error are not exclusive."""
+    match = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=Nanometre(112_400_000),
+        width_nm=Nanometre(60_500_000),
+        candidates=("1590B",),
+        selected_part="1590B",
+    )
+
+    result = run(FakeCase(), at(0, 0, 7 * MM, index=1), enclosure=match)
+
+    assert "wrong-case-model" in codes(result)
+    assert result.case is not None
+    assert result.case.part == FakeCase.part
 
 
 def test_a_hole_well_inside_the_play_area_raises_nothing():
@@ -151,17 +177,30 @@ def test_an_unidentified_panel_skips_the_cross_check_with_an_info():
     assert codes(result) == ["case-model-unverified"]
 
 
-def test_describe_records_the_model_face_margin_and_frame():
+def test_describe_records_the_margin_the_plate_and_the_play_area():
     stage = CheckCaseClearance(FakeCase())
 
     run_record = stage.describe()
 
     assert run_record.name == "check-case-clearance"
-    assert run_record.get("part") == "1590BB"
-    assert run_record.get("face") == "box"
     assert run_record.get("margin_nm") == 1 * MM
-    assert run_record.get("frame_w") == (0.0, 0.0, -1.0)
+    assert run_record.get("plate_nm") == FakeCase.plate_nm
     assert run_record.get("play_area_nm") == (-50 * MM, -40 * MM, 50 * MM, 40 * MM)
+
+
+def test_describe_no_longer_carries_the_part_the_face_or_the_frame():
+    """Those facts moved to ``DrillData.case``; they must not exist in both
+    places, because two shapes for one fact is how the two come to disagree.
+    """
+    run_record = CheckCaseClearance(FakeCase()).describe()
+
+    assert run_record.get("part") is None
+    assert run_record.get("face") is None
+    assert run_record.get("frame_origin_nm") is None
+    assert run_record.get("frame_u") is None
+    assert run_record.get("frame_v") is None
+    assert run_record.get("frame_w") is None
+    assert [key for key, _ in run_record.parameters] == ["margin_nm", "plate_nm", "play_area_nm"]
 
 
 def test_the_recorded_margin_is_the_model_s_own():

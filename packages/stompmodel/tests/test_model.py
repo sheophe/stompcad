@@ -8,7 +8,9 @@ import pytest
 
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import EmitterError
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    CaseRegistration,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -653,6 +655,84 @@ def test_the_enclosure_survives_the_other_transforms() -> None:
         _1590BB_FOOTPRINT
     )
     assert data.with_processing(StageRun("snap")).enclosure is _1590BB_FOOTPRINT
+
+
+# --------------------------------------------------------------------------
+# CaseRegistration: what a supplied model was decided against
+# --------------------------------------------------------------------------
+
+_FRAME = FaceFrame(
+    basis=CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+        u=(1.0, 0.0, 0.0),
+        v=(0.0, -1.0, 0.0),
+        w=(0.0, 0.0, -1.0),
+    )
+)
+
+_REGISTRATION = CaseRegistration(part="1590BB", face="box", model="1590BB.stp", frame=_FRAME)
+
+
+def test_a_registration_names_the_part_the_face_the_model_and_the_frame() -> None:
+    assert _REGISTRATION.part == "1590BB"
+    assert _REGISTRATION.face == "box"
+    assert _REGISTRATION.model == "1590BB.stp"
+    assert _REGISTRATION.frame is _FRAME
+
+
+def test_an_empty_part_is_refused() -> None:
+    with pytest.raises(ValueError):
+        CaseRegistration(part="", face="box", model="1590BB.stp", frame=_FRAME)
+
+
+def test_an_empty_face_is_refused() -> None:
+    with pytest.raises(ValueError):
+        CaseRegistration(part="1590BB", face="", model="1590BB.stp", frame=_FRAME)
+
+
+def test_an_empty_model_name_is_refused() -> None:
+    with pytest.raises(ValueError):
+        CaseRegistration(part="1590BB", face="box", model="", frame=_FRAME)
+
+
+def test_the_registration_is_frozen_and_slotted() -> None:
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        _REGISTRATION.part = "1590BBS"  # type: ignore[misc]
+    assert not hasattr(_REGISTRATION, "__dict__")
+
+
+# --------------------------------------------------------------------------
+# DrillData carries the case registration
+# --------------------------------------------------------------------------
+
+
+def test_drill_data_starts_with_no_case_registration() -> None:
+    """Absent, not guessed: no case model was supplied to this run."""
+    assert DrillData().case is None
+
+
+def test_with_case_returns_a_new_instance_and_leaves_the_original_alone() -> None:
+    data = DrillData()
+    registered = data.with_case(_REGISTRATION)
+    assert registered is not data
+    assert registered.case is _REGISTRATION
+    assert data.case is None
+
+
+def test_with_case_keeps_everything_else_the_pipeline_has_accumulated() -> None:
+    data = DrillData(
+        holes=(Hole.from_measurement(Nanometre(7_000_000), Nanometre(-3_000_000), Nanometre(12_000_000)).with_number(4),),
+        reference=ReferenceOutline.from_measurement(Nanometre(113_000_000), Nanometre(60_000_000)),
+        diagnostics=(Diagnostic.warning("off-grid", "hole 4 is off grid"),),
+        source=SourceInfo(path="tar.ai"),
+        processing=(StageRun("snap", (("grid_nm", 500_000),)),),
+    )
+    registered = data.with_case(_REGISTRATION)
+    assert registered.holes == data.holes
+    assert registered.reference == data.reference
+    assert registered.diagnostics == data.diagnostics
+    assert registered.source == data.source
+    assert registered.processing == data.processing
 
 
 # --------------------------------------------------------------------------

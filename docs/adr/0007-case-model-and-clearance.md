@@ -202,6 +202,12 @@ hand-built `DrillData`. Kernel-backed integration tests once skipped when the ex
 absent; with the kernel unconditional they no longer can, and the skips are deleted — a
 gate that suppresses the rule it claims to check is not evidence.
 
+**Amended:** the `CaseModel` protocol now also states `model_name`, the identity of the
+supplied file it was built from, resolved by `load_case_model` beside where it already
+resolves `part`. Any second backend this ADR's escape hatch admits behind the protocol
+must name its own source the same way — an identity a first-class member of the
+published drill document now depends on, not a fact only the loader happens to know.
+
 A future enclosure whose drilled face is not flat is out of reach of this rule and
 would need a new decision, not an extension of this one — the flat-face
 specialisation is deliberate, not provisional.

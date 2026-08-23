@@ -14,7 +14,9 @@ from typing import Any
 
 from .diagnostics import Diagnostic, Severity
 from .errors import DocumentError
+from .frames import CoordinateFrame, FaceFrame
 from .model import (
+    CaseRegistration,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -29,7 +31,7 @@ from .units import Millimetre, Nanometre
 __all__ = ["FORMAT", "VERSION", "to_document", "from_document"]
 
 FORMAT = "stompcad-drill-data"
-VERSION = 5
+VERSION = 6
 
 #: The frame every document is written in, stated by the writer and checked by
 #: the reader. Named once, because a reader checking a second copy of these
@@ -67,6 +69,7 @@ def to_document(data: DrillData) -> dict[str, Any]:
         "diagnostics": [_diagnostic(d) for d in data.diagnostics],
         "processing": [_stage_run(r) for r in data.processing],
         "enclosure": _enclosure(data.enclosure),
+        "case": _case(data.case),
     }
 
 
@@ -154,6 +157,29 @@ def _enclosure(match: EnclosureMatch | None) -> dict[str, Any] | None:
     }
 
 
+def _case(case: CaseRegistration | None) -> dict[str, Any] | None:
+    """Emit the registration, or ``null`` when no model was supplied."""
+    if case is None:
+        return None
+    return {
+        "part": case.part,
+        "face": case.face,
+        "model": case.model,
+        "frame": _frame(case.frame),
+    }
+
+
+def _frame(frame: FaceFrame) -> dict[str, Any]:
+    """Emit a face frame's basis as a nested object."""
+    basis = frame.basis
+    return {
+        "origin_nm": list(basis.origin_nm),
+        "u": list(basis.u),
+        "v": list(basis.v),
+        "w": list(basis.w),
+    }
+
+
 def from_document(document: Mapping[str, Any]) -> DrillData:
     """Rebuild ``DrillData`` from a document ``to_document`` produced.
 
@@ -187,6 +213,7 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
             source=_read_source(document["source"]),
             processing=tuple(_read_stage_run(r) for r in document["processing"]),
             enclosure=_read_enclosure(document["enclosure"]),
+            case=_read_case(document["case"]),
         )
     except KeyError as missing:
         raise DocumentError(f"{FORMAT} document has no {missing.args[0]!r}") from missing
@@ -277,4 +304,29 @@ def _read_enclosure(payload: Mapping[str, Any] | None) -> EnclosureMatch | None:
         candidates=tuple(payload["candidates"]),
         rotated=payload["rotated"],
         selected_part=payload["selected_part"],
+    )
+
+
+def _read_case(payload: Mapping[str, Any] | None) -> CaseRegistration | None:
+    """Restore the registration, or ``None`` when no model was supplied."""
+    if payload is None:
+        return None
+    return CaseRegistration(
+        part=payload["part"],
+        face=payload["face"],
+        model=payload["model"],
+        frame=_read_frame(payload["frame"]),
+    )
+
+
+def _read_frame(payload: Mapping[str, Any]) -> FaceFrame:
+    """Restore a face frame from its nested object."""
+    origin = payload["origin_nm"]
+    return FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(origin[0]), Nanometre(origin[1]), Nanometre(origin[2])),
+            u=tuple(payload["u"]),
+            v=tuple(payload["v"]),
+            w=tuple(payload["w"]),
+        )
     )

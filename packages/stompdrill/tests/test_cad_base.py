@@ -12,6 +12,7 @@ class Stub:
 
     part = "1590BB"
     face = "box"
+    model_name = "1590BB.stp"
     footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
     plate_nm = Nanometre(2_250_000)
     play_area_nm = (
@@ -63,16 +64,6 @@ def test_an_object_missing_classify_does_not_satisfy_the_protocol():
         )
 
     assert not isinstance(Incomplete(), CaseModel)
-
-
-def test_the_frame_flattens_to_stagerun_safe_parameters():
-    frame = Stub.frame
-    keys = dict(frame.basis.as_parameters())
-
-    assert keys["frame_origin_nm"] == (0, 0, -30_000_000)
-    assert keys["frame_u"] == (1.0, 0.0, 0.0)
-    assert keys["frame_v"] == (0.0, -1.0, 0.0)
-    assert keys["frame_w"] == (0.0, 0.0, -1.0)
 
 
 def test_importing_stompdrill_does_not_import_the_kernel():

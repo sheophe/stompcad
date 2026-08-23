@@ -12,7 +12,9 @@ from hypothesis import strategies as st
 from stompmodel.codec import FORMAT, VERSION, from_document, to_document
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import DocumentError
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    CaseRegistration,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -58,6 +60,18 @@ def _at(x_nm: int, y_nm: int, diameter_nm: int = 7 * MM, *, index: int | None = 
     """
     hole = Hole.from_measurement(Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm))
     return hole if index is None else hole.with_number(index)
+
+
+_FRAME = FaceFrame(
+    basis=CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+        u=(1.0, 0.0, 0.0),
+        v=(0.0, -1.0, 0.0),
+        w=(0.0, 0.0, -1.0),
+    )
+)
+
+_REGISTRATION = CaseRegistration(part="1590BB", face="box", model="1590BB.stp", frame=_FRAME)
 
 
 def _make_data(*given: Hole) -> DrillData:
@@ -148,6 +162,11 @@ def _fixture_data() -> DrillData:
     )
 
 
+def _case_fixture_data() -> DrillData:
+    """A run made against a supplied case model."""
+    return replace(_fixture_data(), case=_REGISTRATION)
+
+
 def _rotated_fixture_data() -> DrillData:
     """A portrait panel, no case declared, and a catalogue this build cannot emit."""
     return replace(
@@ -214,6 +233,7 @@ def test_top_level_key_order_is_stable_and_documented() -> None:
         "diagnostics",
         "processing",
         "enclosure",
+        "case",
     ]
 
 
@@ -222,7 +242,7 @@ def test_document_declares_its_format_and_canonical_frame() -> None:
     document = to_document(_fixture_data())
 
     assert document["format"] == "stompcad-drill-data"
-    assert document["version"] == 5
+    assert document["version"] == 6
     assert document["units"] == "nm"
     assert document["origin"] == "centre"
 
@@ -368,6 +388,55 @@ def test_unmatched_enclosure_is_null_not_omitted() -> None:
 
     assert "enclosure" in document
     assert document["enclosure"] is None
+
+
+# --------------------------------------------------------------------------
+# the case registration
+# --------------------------------------------------------------------------
+
+
+def test_no_case_registration_is_null_not_omitted() -> None:
+    """No supplied model is a value a consumer reads, not a key it has to test for."""
+    document = to_document(_fixture_data())
+
+    assert "case" in document
+    assert document["case"] is None
+
+
+def test_a_case_registration_names_exactly_the_four_facts() -> None:
+    """The keys are named as the member names are named -- no more, no fewer."""
+    case = to_document(_case_fixture_data())["case"]
+
+    assert list(case) == ["part", "face", "model", "frame"]
+    assert case["part"] == "1590BB"
+    assert case["face"] == "box"
+    assert case["model"] == "1590BB.stp"
+
+
+def test_a_case_registrations_frame_is_a_nested_object() -> None:
+    frame = to_document(_case_fixture_data())["case"]["frame"]
+
+    assert list(frame) == ["origin_nm", "u", "v", "w"]
+    assert frame["origin_nm"] == [0, 0, -30_000_000]
+    assert frame["u"] == [1.0, 0.0, 0.0]
+    assert frame["v"] == [0.0, -1.0, 0.0]
+    assert frame["w"] == [0.0, 0.0, -1.0]
+
+
+def test_a_case_registration_round_trips_to_an_equal_value_frame_included() -> None:
+    document = to_document(_case_fixture_data())
+
+    rebuilt = from_document(document)
+
+    assert rebuilt.case == _REGISTRATION
+
+
+def test_a_document_without_a_case_model_round_trips_with_the_member_absent() -> None:
+    document = to_document(_fixture_data())
+
+    rebuilt = from_document(document)
+
+    assert rebuilt.case is None
 
 
 # --------------------------------------------------------------------------
@@ -796,6 +865,18 @@ def test_a_document_of_an_unknown_version_is_refused() -> None:
     document["version"] = VERSION + 1
 
     with pytest.raises(DocumentError, match=f"version {VERSION + 1}, expected {VERSION}"):
+        from_document(document)
+
+
+def test_a_document_at_the_previous_version_is_refused_before_the_new_key_is_read() -> None:
+    """The previous version has no ``case`` key at all; the guard must refuse
+    the document on its version before any reader reaches for a key that was
+    never there -- the new key adds no failure path."""
+    document = to_document(_data())
+    document["version"] = VERSION - 1
+    del document["case"]
+
+    with pytest.raises(DocumentError, match=f"version {VERSION - 1}, expected {VERSION}"):
         from_document(document)
 
 

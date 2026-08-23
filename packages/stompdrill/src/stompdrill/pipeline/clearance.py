@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import DrillData, Hole, StageRun
+from stompmodel.model import CaseRegistration, DrillData, Hole, StageRun
 from stompmodel.units import Nanometre, format_nm
 
 from ..cad import CaseModel, Rejection
@@ -32,20 +32,20 @@ class CheckCaseClearance:
         self.model = model
 
     def describe(self) -> StageRun:
-        """Record the model, the face, the margin and the frame it registered.
+        """Record the margin, the plate and the play area ``classify()`` used.
 
-        The margin is the model's own: it already eroded the play area by it
-        at construction, so this stage only reports what ``classify()`` used.
+        The part, the face and the frame live on ``DrillData.case`` instead,
+        a typed member with a codec inverse -- they must not exist in both
+        places. The margin is the model's own: it already eroded the play
+        area by it at construction, so this stage only reports what
+        ``classify()`` used.
         """
         return StageRun(
             self.name,
             (
-                ("part", self.model.part),
-                ("face", self.model.face),
                 ("margin_nm", int(self.model.margin_nm)),
                 ("plate_nm", int(self.model.plate_nm)),
                 ("play_area_nm", tuple(int(v) for v in self.model.play_area_nm)),
-                *self.model.frame.basis.as_parameters(),
             ),
         )
 
@@ -60,7 +60,13 @@ class CheckCaseClearance:
             rejection = self.model.classify(hole.x_nm, hole.y_nm, radius_nm)
             if rejection is not None:
                 diagnostics.append(self._reject(hole, rejection))
-        return data.with_diagnostics(*diagnostics)
+        # Attached unconditionally, even when a diagnostic above errored: a
+        # document must state what it was checked against either way.
+        return data.with_diagnostics(*diagnostics).with_case(
+            CaseRegistration(
+                self.model.part, self.model.face, self.model.model_name, self.model.frame
+            )
+        )
 
     def _reject(self, hole: Hole, rejection: Rejection) -> Diagnostic:
         return Diagnostic.error(

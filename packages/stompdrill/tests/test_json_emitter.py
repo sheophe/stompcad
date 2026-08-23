@@ -237,7 +237,7 @@ def test_diagnostic_payloads_survive_serialisation():
     after = Pipeline([Deduplicate()]).run(data)
     doc = json.loads(JsonEmitter().emit(after))
 
-    assert doc["version"] == 5
+    assert doc["version"] == 6
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
     assert duplicate["data"]["dropped"] == 1
     assert duplicate["location_nm"] == [doc["holes"][0]["x_nm"], doc["holes"][0]["y_nm"]]

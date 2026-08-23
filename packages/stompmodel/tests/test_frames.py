@@ -68,16 +68,6 @@ def test_reframe_onto_the_same_frame_is_the_identity() -> None:
     )
 
 
-def test_as_parameters_flattens_every_member() -> None:
-    """``StageRun`` provenance names all four, so none may be dropped."""
-    assert ROTATED.as_parameters() == (
-        ("frame_origin_nm", (1_000_000, 2_000_000, 3_000_000)),
-        ("frame_u", (0.0, -1.0, 0.0)),
-        ("frame_v", (0.0, 0.0, 1.0)),
-        ("frame_w", (1.0, 0.0, 0.0)),
-    )
-
-
 def test_the_frame_is_frozen() -> None:
     """A registration is a value; a transform returns a replacement."""
     import dataclasses

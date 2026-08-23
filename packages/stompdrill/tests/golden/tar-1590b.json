@@ -142,12 +142,7 @@
     },
     {
       "name": "route",
-      "parameters": [
-        [
-          "key",
-          "default"
-        ]
-      ]
+      "parameters": []
     },
     {
       "name": "check-outline-containment",

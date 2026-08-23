@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .diagnostics import ParameterValue
 from .units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 __all__ = ["CoordinateFrame", "FaceFrame"]
@@ -62,15 +61,6 @@ class CoordinateFrame:
         """Restate a canonical point registered here in ``target``'s frame."""
         x_mm, y_mm = target.to_canonical(self.to_model(x_nm, y_nm))
         return nm_from_mm(x_mm), nm_from_mm(y_mm)
-
-    def as_parameters(self) -> tuple[tuple[str, ParameterValue], ...]:
-        """Flatten to ``StageRun``-safe scalars and float tuples."""
-        return (
-            ("frame_origin_nm", tuple(self.origin_nm)),
-            ("frame_u", self.u),
-            ("frame_v", self.v),
-            ("frame_w", self.w),
-        )
 
 
 @dataclass(frozen=True, slots=True)

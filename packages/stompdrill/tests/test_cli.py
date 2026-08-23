@@ -1280,7 +1280,7 @@ def test_the_traced_path_folds_through_the_same_pipeline_as_the_plain_one():
 
     assert traced.processing == plain.processing
     assert [run.name for run in traced.processing] == [stage.name for stage in pipeline]
-    assert traced.last_run("route").get("key") == "default"
+    assert traced.last_run("route") is not None
 
 
 def test_the_grid_reaches_the_drawing_through_the_quantiser_not_the_options(

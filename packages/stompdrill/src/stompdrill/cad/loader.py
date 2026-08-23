@@ -29,6 +29,7 @@ class OcpCaseModel:
 
     part: str
     face: str
+    model_name: str
     footprint_nm: tuple[Nanometre, Nanometre]
     plate_nm: Nanometre
     play_area_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre]
@@ -111,6 +112,7 @@ def load_case_model(
     return OcpCaseModel(
         part=part or _part_of(solid.name),
         face=face,
+        model_name=path.name,
         footprint_nm=footprint_nm,
         plate_nm=faces.plate_nm,
         play_area_nm=region_bbox_nm(own_region, own_frame, axis),

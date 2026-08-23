@@ -29,7 +29,7 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
 from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
-from tests.conftest import FakeCase, at, codes, diameters, holes, make_data, positions
+from tests.conftest import FakeCase, at, codes, holes, make_data, positions
 
 # --------------------------------------------------------------------------
 # helpers
@@ -589,15 +589,6 @@ class TestRouteHoles:
             (-20_000_000, 18_000_000),
         ]
 
-    def test_accepts_a_custom_key(self):
-        data = make_data(
-            at(0, 0, 7_000_000, index=4),
-            at(10_000_000, 0, 3_200_000, index=1),
-            at(-10_000_000, 0, 5_000_000, index=9),
-        )
-        out = RouteHoles(key=lambda h: h.diameter_nm).apply(data)
-        assert diameters(out) == [3_200_000, 5_000_000, 7_000_000]
-
     def test_is_deterministic_under_input_permutation(self):
         given = [
             at(-40_000_000, 18_000_000, index=4),
@@ -678,8 +669,23 @@ class TestPipelineComposition:
         hole_b = dataclasses.replace(
             hole_b, raw=dataclasses.replace(hole_b.raw, x=Millimetre(9.9993))
         )
+        class NumberByIndex:
+            """A trivial numbering stage: witnesses stage order, not
+            ``RouteHoles``'s own routing rule, which has no ordering knob."""
+
+            name = "number-by-index"
+
+            def apply(self, data: DrillData) -> DrillData:
+                ordered = sorted(data.holes, key=lambda h: h.index or 0)
+                return data.with_holes(
+                    hole.with_number(number) for number, hole in enumerate(ordered, start=1)
+                )
+
+            def describe(self) -> StageRun:
+                return StageRun(self.name)
+
         data = make_data(hole_a, hole_b)
-        dedupe, sort = Deduplicate(), RouteHoles(key=lambda h: h.index)
+        dedupe, sort = Deduplicate(), NumberByIndex()
 
         dedupe_first = Pipeline([dedupe, sort]).run(data)
         sort_first = Pipeline([sort, dedupe]).run(data)
@@ -811,12 +817,9 @@ class TestDescribe:
         assert run.name == "deduplicate"
         assert run.parameters == ()
 
-    def test_sort_names_its_key_function(self):
-        def by_diameter(hole):
-            return hole.diameter_nm
-
-        assert RouteHoles().describe().get("key") == "default"
-        assert RouteHoles(key=by_diameter).describe().get("key") == "by_diameter"
+    def test_route_has_no_ordering_knob_to_report(self):
+        """No ``key`` argument exists, so there is nothing to name."""
+        assert RouteHoles().describe().parameters == ()
 
 
 class TestPipelineRecordsProvenance:
@@ -825,7 +828,7 @@ class TestPipelineRecordsProvenance:
         after = Pipeline([Deduplicate(), RouteHoles()]).run(data)
 
         assert [r.name for r in after.processing] == ["deduplicate", "route"]
-        assert after.last_run("route").get("key") == "default"
+        assert after.last_run("route").parameters == ()
 
     def test_a_stage_that_changed_nothing_still_records_that_it_ran(self):
         """An empty diagnostics list cannot tell a consumer whether a panel had

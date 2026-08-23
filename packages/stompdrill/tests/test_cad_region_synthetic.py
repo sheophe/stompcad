@@ -129,7 +129,7 @@ def test_obstructed_is_reachable_with_a_genuine_raised_boss():
     box_region = build_region(box_face, AXIS, OUTWARD)
 
     model = OcpCaseModel(
-        part="synthetic", face="lid",
+        part="synthetic", face="lid", model_name="synthetic.stp",
         footprint_nm=(nm(100.0), nm(100.0)), plate_nm=nm(2.0),
         play_area_nm=(nm(-50.0), nm(-50.0), nm(50.0), nm(50.0)),
         frame=own_frame, margin_nm=Nanometre(0), axis=AXIS,
@@ -178,7 +178,7 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
     box_region = build_region(box_face, AXIS, OUTWARD)
 
     model = OcpCaseModel(
-        part="synthetic", face="lid",
+        part="synthetic", face="lid", model_name="synthetic.stp",
         footprint_nm=(nm(100.0), nm(100.0)), plate_nm=nm(2.0),
         play_area_nm=(nm(-50.0), nm(-50.0), nm(50.0), nm(50.0)),
         frame=own_frame, margin_nm=Nanometre(0), axis=AXIS,
