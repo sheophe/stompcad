@@ -1010,6 +1010,140 @@ def test_io_failure_is_exit_three(fake_source, tmp_path, capsys):
     assert "Traceback" not in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------------------
+# one invocation, one transaction (ticket 22): a write-time IO failure at any
+# target withholds every artefact of this invocation, not only the ones
+# after the failure -- and never disturbs an artefact a previous, successful
+# invocation already left at one of these same paths.
+# ---------------------------------------------------------------------------
+
+
+def _sabotage_write(monkeypatch, target: Path) -> None:
+    """Make writing ``target``'s own staged temporary raise ``OSError``.
+
+    Every other path's temporary is written normally, so this isolates the
+    failure to exactly one target regardless of its position in ``--emit``.
+    """
+    marker = f".{target.name}."
+    original_write_bytes = Path.write_bytes
+
+    def write_bytes(self: Path, data: bytes) -> int:
+        if self.parent == target.parent and self.name.startswith(marker):
+            raise OSError(f"simulated write failure for {target}")
+        return original_write_bytes(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", write_bytes)
+
+
+@pytest.mark.parametrize("position", ["first", "middle", "last"])
+def test_a_write_failure_at_any_position_leaves_no_artefact_of_this_run(
+    fake_source, tmp_path, capsys, monkeypatch, position
+):
+    """F3-04: the theme's class criterion, not just its reproduction.
+
+    An IO failure writing one target must withhold every target of this
+    invocation -- whichever position it happens to be at -- because the
+    document's "any error withholds every requested artefact" rule is a
+    fact about the whole invocation, not only about rendering.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    c = tmp_path / "c.svg"
+    targets = {"first": a, "middle": b, "last": c}
+    _sabotage_write(monkeypatch, targets[position])
+
+    exit_code = cli.main(
+        [
+            str(FIXTURE),
+            "--emit",
+            f"json={a}",
+            "--emit",
+            f"excellon={b}",
+            "--emit",
+            f"drawing-svg={c}",
+        ]
+    )
+
+    assert exit_code == 3
+    assert not a.exists(), "an earlier target survived a run that failed later"
+    assert not b.exists()
+    assert not c.exists(), "a later target was written before the failure was even reached"
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
+    fake_source, tmp_path, capsys, monkeypatch
+):
+    """The dangerous form: a stale artefact is worse than a missing one.
+
+    With every target already holding a previous, successful run's bytes,
+    a failed re-run must leave every one of them exactly as that previous
+    run left it -- never this run's bytes, and never deleted outright.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    c = tmp_path / "c.svg"
+    argv = [
+        str(FIXTURE),
+        "--emit",
+        f"json={a}",
+        "--emit",
+        f"excellon={b}",
+        "--emit",
+        f"drawing-svg={c}",
+    ]
+
+    assert cli.main(argv) == 0
+    previous = {path: path.read_bytes() for path in (a, b, c)}
+
+    # A different panel, so this run's bytes would visibly differ from the
+    # previous run's if any of them reached disk.
+    fake_source(
+        read(
+            holes=(RawHole(Millimetre(-10.0), Millimetre(10.0), Millimetre(5.0)),)
+        )
+    )
+    _sabotage_write(monkeypatch, b)
+
+    assert cli.main(argv) == 3
+
+    for path in (a, b, c):
+        assert path.exists(), f"{path} was deleted outright by the failed run"
+        assert path.read_bytes() == previous[path], (
+            f"{path} was replaced by the failed run's bytes instead of being "
+            "left exactly as the previous run left it"
+        )
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_successful_runs_report_lines_stay_in_emit_order(fake_source, tmp_path, capsys):
+    """A successful run's per-artefact sentences print in ``--emit`` order."""
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    c = tmp_path / "c.svg"
+
+    assert (
+        cli.main(
+            [
+                str(FIXTURE),
+                "--emit",
+                f"json={a}",
+                "--emit",
+                f"excellon={b}",
+                "--emit",
+                f"drawing-svg={c}",
+            ]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    assert out.index(str(a)) < out.index(str(b)) < out.index(str(c))
+
+
 def test_missing_input_file_is_exit_three(tmp_path, capsys):
     missing = tmp_path / "nope.ai"
     assert cli.main([str(missing)]) == 3

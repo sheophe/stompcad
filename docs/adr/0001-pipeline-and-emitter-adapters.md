@@ -35,6 +35,21 @@ An invocation selects one to five emitters through repeatable
 The processing blocks, aggregate boundaries, and typed transfers are shown in ADR-0001,
 Figure 1.
 
+One invocation's artefacts are one transaction: the command line writes every
+requested artefact or none of them. An ERROR diagnostic withholds all of them before
+rendering begins, as already stated above. Past that gate, every payload is rendered
+before any target path is touched; the command line then stages every rendered payload
+to a temporary beside its own target, and only once every one of those writes has
+succeeded does it replace each target from its temporary. A failure anywhere in
+rendering or staging — an emitter's own fault, or the operating system refusing a
+write, at any target and at any position in the requested set — unwinds whatever this
+invocation had staged and leaves every target exactly as it was before the run,
+whether that is absent or holding a previous invocation's artefact. ADR-0005 gives
+`write_payload` the matching guarantee for one path in isolation; this is the
+set-level rule built on top of it, and it stays the command line's own for as long as
+`stompdrill` is the only caller composing a set of several artefact paths for one
+invocation.
+
 Emitter registration is extensible: a format maps to an emitter without changing the
 processing contract. The CLI explicitly composes the ordered post-quantisation stages;
 each stage remains independent, and `Pipeline` applies them in the supplied order.
@@ -107,3 +122,10 @@ Processing changes must occur before emission and update the canonical document.
 extra separation between quantisation, independent pipeline stages, and emitters is a
 deliberate cost: callers and maintainers must preserve the typed flow and must not move
 domain decisions into format-specific code.
+
+Staging every artefact before committing any of them costs one extra temporary file per
+target, briefly present beside it until the whole set commits. That is the deliberate
+price of never leaving a previous invocation's artefact replaced by only part of this
+one's. The set-level rule composes with a per-path one rather than duplicating it: if a
+second tool ever needs the same guarantee across several paths, that composition is
+what moves below `stompdrill`, not a rewrite of it.

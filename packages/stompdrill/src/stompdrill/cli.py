@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import inspect
 import math
+import os
 import sys
+import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +28,7 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace, DrillData
-from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, write_payload
+from stompmodel.protocols import Emitter, Payload, Pipeline, Stage
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import CaseModel, OcpCaseModel
@@ -709,10 +711,52 @@ def _render(
     return [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
 
 
-def _write(emitter: Emitter[DrillData], path: Path, payload: Payload) -> str:
-    """Report one artefact. The dispatch is ``stompmodel``'s; the sentence is ours."""
-    size = write_payload(path, payload)
-    return f"wrote {path}  ({emitter.name}, {size} bytes)"
+#: One rendered artefact staged for commit: its emitter (for the report line),
+#: its real target, the temporary its bytes already reached, and their count.
+_Staged = tuple[Emitter[DrillData], Path, Path, int]
+
+
+def _stage(rendered: Iterable[tuple[Emitter[DrillData], Path, Payload]]) -> list[_Staged]:
+    """Write every payload to a fresh temporary beside its target.
+
+    No target path is touched here. A failure partway through unwinds every
+    temporary this call already wrote and re-raises, so a write failure on
+    any one artefact leaves every target of the invocation exactly as it
+    was — see ADR-0001.
+    """
+    staged: list[_Staged] = []
+    try:
+        for emitter, path, payload in rendered:
+            data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
+            tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            tmp.write_bytes(data)
+            staged.append((emitter, path, tmp, len(data)))
+    except BaseException:
+        for _, _, tmp, _ in staged:
+            tmp.unlink(missing_ok=True)
+        raise
+    return staged
+
+
+def _commit(staged: list[_Staged]) -> list[str]:
+    """Replace every target from its already-written temporary, in order.
+
+    Every temporary here was already written in full, so this is the
+    low-risk half of the transaction: one atomic ``os.replace`` per target,
+    same as a single ``write_payload`` call makes for one path. A target not
+    yet reached when ``os.replace`` itself fails is unlinked rather than
+    left as an orphan; one already replaced stays replaced.
+    """
+    lines = []
+    try:
+        for index, (emitter, path, tmp, size) in enumerate(staged):
+            os.replace(tmp, path)
+            lines.append(f"wrote {path}  ({emitter.name}, {size} bytes)")
+    except BaseException:
+        for _, _, tmp, _ in staged[index:]:
+            tmp.unlink(missing_ok=True)
+        raise
+    return lines
 
 
 def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
@@ -769,8 +813,8 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
             # here, and one of them may legitimately refuse data this broken.
             print("\n".join(_withheld(emitters)), file=out)
         else:
-            for emitter, path, payload in _render(emitters, data):
-                print(_write(emitter, path, payload), file=out)
+            for line in _commit(_stage(_render(emitters, data))):
+                print(line, file=out)
 
     print("\n".join(format_summary(data)), file=out)
     return exit_for_severity(data.worst_severity)
