@@ -323,22 +323,6 @@ caught; only the failure's legibility suffers.
 **Acceptance:** The lookup uses `.get()` with a dedicated "position not found" assertion, and
 the same mutant now fails with that message rather than a bare traceback.
 
-## Give `stompgeom.step` a public seam for an in-memory document's solids
-
-**Status:** Confirmed gap, not scheduled. Raised in priority by the `stompgeom`
-extraction.
-
-**Constraint:** `read_step` takes a path; there is no public way to enumerate an in-memory
-XCAF document's solids. The STEP recovery arm therefore reuses the private `_collect` plus
-five lines of shape-tool glue that mirrors `read_step`'s own. That reuse was one package
-reaching into its own module; it now crosses a distribution boundary, so a `stompgeom`
-release is free to rename or reshape `_collect` and break `stompdrill`'s tests without
-touching anything either package calls public.
-
-**Acceptance:** A small public function takes an in-memory XCAF document and returns its
-solids, both `read_step` and the STEP recovery arm call it, and the duplicated glue is
-deleted.
-
 ## Comment `fact_set`'s `"tools"` key before the golden is next regenerated
 
 **Status:** Confirmed gap, not scheduled.
@@ -530,6 +514,12 @@ speculative generality this repo's design rules forbid.
 exists to shape the interface against, not before; the ADR that governs it is amended in
 the same change that moves it.
 
+**Rediscovered, wave 2 (2026-08):** the transactional-write ticket considered folding its
+own cross-file write policy into a shared command-line layer below `stompdrill` and
+declined, for the identical reason recorded above — the coordinator's adjudication records
+this rediscovery as a rejection by name. A future rediscovery of the same shape is Settled
+by citing this entry, not re-argued from scratch.
+
 ## Two verified OCP kernel-binding segfault hazards
 
 **Status:** Confirmed gap, not scheduled. Verified by experiment during the 2026-08
@@ -702,3 +692,199 @@ emitter" rule says it should not need.
 
 **Acceptance:** The redundant entry is deleted, `JsonEmitter` still receives its options
 exactly as before, and the full suite passes unchanged.
+
+## Correct the two docstrings that say the play area is pre-eroded
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F3-M1).
+
+**Constraint:** `stompdrill.cad.base.CaseModel.margin_nm`'s docstring says "Clearance the
+play area was already eroded by, at construction," and `CheckCaseClearance.describe`'s
+docstring in `pipeline/clearance.py` repeats the claim (the margin "already eroded the
+play area by it at construction"). Neither is true: `stompdrill.cad.loader.load_case_model`
+builds `play_area_nm` as the flat face's raw `region_bbox_nm`, with no margin subtracted,
+and the margin is applied only at query time, inside `region.contains`'s call from
+`classify()`. The CLI's printed play-area line and the JSON provenance both restate this
+same unenroded rectangle, so both overstate the usable area by twice the margin along each
+axis. ADR-0007's own wording — the clearance rule is "the flat inner face's outer boundary
+eroded by the margin" — describes `classify()`'s rule correctly and is not at fault.
+
+**Acceptance:** Both docstrings state that `play_area_nm` is the face's raw extent and
+that the margin is applied only inside `classify()`/`contains()`, not at construction, and
+the CLI's play-area line and the JSON provenance either restate this plainly or carry the
+same correction beside them.
+
+## Make `region.build_region` refuse a structure wire it cannot subtract, instead of dropping it
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F3-M2).
+
+**Constraint:** `stompdrill.cad.region.build_region` rebuilds the outer wire first and
+raises `StompdrillError` when that rebuild does not complete (`if not builder.IsDone():
+raise ...`). A few lines later, subtracting each structure wire (a boss boundary) uses
+`if adder.IsDone(): region = adder.Face()` with no `else` — a subtraction that does not
+complete is silently skipped, so that boss's boundary never narrows the drillable region.
+`CheckCaseClearance` explicitly refuses to guess in the direction that would hide a real
+obstruction; this fail-open path biases the other way.
+
+**Acceptance:** A structure-wire subtraction that does not complete raises
+`StompdrillError`, the same way the outer-wire rebuild already does, and a test drives an
+`adder.IsDone()` failure directly (not through a real kernel geometry that happens to
+trigger it) to prove the refusal.
+
+## Give the model-side geometry helpers a real tie-break instead of kernel traversal order
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F3-M3). Adjacent to "`stompgeom` should own kernel lifetimes rather
+than expose them" above; worth attaching to any future work that already touches
+`build_frame`.
+
+**Constraint:** `stompdrill.cad.case._inner_level` and `_nearest_companion_level`, and
+`stompdrill.cad.region._floor_face` and `_proud_mm`, each pick among several kernel faces
+or wires with a `max`/comparison over one property (area, position) and no explicit
+tie-break clause. Where two candidates tie, Python's stable `max` returns whichever one
+`TopExp_Explorer` happened to enumerate first — kernel traversal order, not a geometric
+rule. A tie here decides the plate thickness, the drillable region, and the
+relief-versus-structure verdict: the same class of ordering defect wave 1 closed on the
+reader side with ADR-0006's total order over `Hole`.
+
+**Acceptance:** Each of the four helpers breaks a tie on a stated geometric property,
+never on enumeration order, and a test constructs two candidates with equal area/position
+and asserts the same winner regardless of which one the kernel enumerates first.
+
+## `wrong-case-model` names the operator's `--case` designator as the model's own
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F3-M4).
+
+**Constraint:** `cli.build_case_model` passes the declared `--case` designator into
+`load_case_model(part=...)`, so `OcpCaseModel.part` holds the operator's typed value
+rather than a value read from the model file itself. When the footprint check in
+`pipeline/clearance.py` raises `wrong-case-model`, its message ("the supplied {part}
+model is...") therefore repeats the same designator on both sides of the mismatch whenever
+`--case` was supplied. The refusal itself is correct and the payload's dimensions are the
+model's true, measured ones — only the designator half of the sentence is misleading.
+
+**Acceptance:** Either the message is worded so it cannot be read as comparing two
+different designators when `--case` made them the same one (for example, naming the
+supplied model by file rather than by declared part), or `part` falls back to a value read
+from the model file (`_part_of(solid.name)`, already used when `--case` is absent) so the
+two sides can genuinely differ; either way a test drives a mismatch with `--case` supplied
+and inspects the message text.
+
+## `route._two_opt`'s improvement threshold sits below its own floating-point noise floor
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F3-M5). Latent, not live: no artefact has been observed to change.
+
+**Constraint:** `_two_opt` accepts a swap only when `delta < -1e-9`, an absolute
+nanometre threshold. Over panel-sized legs, coordinate arithmetic carried out in
+nanometres already accumulates roughly `1e-8` nm of representation error — an order of
+magnitude above the threshold — so the comparison can in principle accept or reject a
+swap on floating-point noise rather than a real improvement. Output stays deterministic
+(the same arithmetic runs the same way on every invocation), which is why this is latent
+rather than an observed defect.
+
+**Acceptance:** The threshold is either justified in a comment, with the arithmetic
+shown, as safely below any realistic panel's noise floor, or restated relative to the
+route's own scale (for example a relative threshold, or one derived from the nanometre
+representation error at the panel's size) so it cannot fall below the noise it exists to
+filter.
+
+## The AI-PDF reader's inherited graphics state is a four-value clump
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F2-05). **Considered and rejected as a fold, in the same wave**:
+recorded so a future wave does not re-derive the fold and meet the same rejection again.
+
+**Constraint:** `sources.ai_pdf._walk` threads four positional arguments — `ctm`, `clip`,
+`marks`, `depth` — through every recursive call: one graphics state a nested form
+inherits, carried as separate parameters rather than as one value. A `_GraphicsState`
+value object was considered and does not clear this repository's folding guard: it
+*relocates* the four values into one object rather than *concentrating* any behaviour, and
+it adds a concept the reader does not otherwise need. `clip` joined the other three once
+the page-clip theme landed, which makes the clump marginally worse, not better.
+`stompcollider` does not inherit the AI-PDF reader, so this is local to `stompdrill` only.
+
+**Acceptance:** Not scheduled as a fold. If `_walk` gains a fifth inherited value later,
+re-weigh the fold then against that new shape, rather than treating this entry as already
+having decided it.
+
+## Give `Diagnosable` its first real adapter, without touching the deferred CLI half
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2 (its own finding F2-06). Not litigated: ADR-0009 admits `Diagnosable` explicitly
+under its own admission rules, so the protocol having no consumer today is not itself a
+defect.
+
+**Constraint:** `stompmodel.protocols.Diagnosable` is implemented only by test fixtures.
+`cli.format_diagnostics` and `cli.format_summary` already use exactly its surface
+(`data.diagnostics`, `data.of_severity`) but are typed against the concrete `DrillData`.
+Retyping those two annotations to `Diagnosable` would give the protocol its first real
+production adapter without moving a line of code and without touching "Defer moving the
+CLI's usage/IO policy below `stompdrill`" above, which stays deferred either way.
+
+**Acceptance:** `cli.format_diagnostics` and `cli.format_summary` are typed against
+`Diagnosable` rather than `DrillData`, both functions' behaviour is unchanged, and the
+full suite passes.
+
+## Make `make_emitter`'s failure handler cause-aware
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+wave 2; the lens that found it deliberately did not file it as a theme. Recorded here so
+the decision not to act on it this wave is visible rather than invisible.
+
+**Constraint:** `cli.make_emitter` catches `TypeError` raised while constructing an
+emitter and reports it as a usage failure at exit 3 (ruling 5 of the 2026-08 architecture
+review's wave 1 settled that exit code for a registered emitter that cannot be
+constructed). An emitter whose own `__init__` body raises a `TypeError` for a reason of
+its own — not a missing or mismatched option the CLI failed to supply — is reported
+identically, as if the CLI itself had passed the wrong arguments.
+
+**Acceptance:** Either `make_emitter` distinguishes a `TypeError` raised by argument
+binding (a genuine usage failure) from one raised inside an already-constructed emitter's
+own body, with a test proving the distinction; or the decision to leave the two
+indistinguishable is confirmed here in writing, with the reason.
+
+## A reference-outline candidate straddling the page clip contributes its whole unclipped bounds
+
+**Status:** Confirmed gap, not scheduled. Named by the 2026-08 architecture review's
+page-clip theme and deliberately left unfixed there: no artwork reproducing it exists, and
+the theme's own extent rule (a non-circular candidate is judged by its extent, a circle by
+its centre) already governs the case; inventing a remedy for an exposure nobody has
+reproduced would outrun the evidence.
+
+**Constraint:** `sources.ai_pdf._largest_non_circular` compares reference-outline
+candidates by `path.bbox` — the path's own unclipped bounding box — and `_entirely_outside`
+only culls a candidate that shares no extent at all with the current clip. A candidate
+that is only partly inside the clip (a rectangle bisected by a form's `/BBox` or the
+page's crop box) is kept, and contributes its *entire* unclipped bounds rather than the
+extent actually painted inside the clip. Because the reference outline sets the panel's
+frame and centre, this one candidate can move every hole's reported coordinate.
+
+**Acceptance:** Either reproduced with real artwork (a bisected reference-outline
+candidate) and then fixed by clipping the candidate's contributed bounds to the region it
+is judged in before comparison, or left recorded here until such artwork exists — not
+fixed speculatively against a synthetic case alone.
+
+## Promote the kernel compound-builder idiom into `stompgeom`, once a second consumer needs it
+
+**Status:** Deliberate deferral, not scheduled. Recorded in the 2026-08 architecture
+review's ticket 01 out-of-scope text; re-derived, and Settled, in wave 2 (its finding
+F4-W2-01 — REFUTED as a claim that the deferral went unrecorded, but the underlying
+duplication is real and unchanged). **A wave re-finding this triplication must cite this
+entry and mark it Settled**, unless it now has a second consumer that makes the promotion
+arrive as recognition — matching "Promote the kernel document builder into `stompgeom`"
+above, a related but separate idiom.
+
+**Constraint:** `stompdrill.cad.case` and `stompdrill.cad.region` each build a
+`TopoDS_Compound` from several shapes with the identical `BRep_Builder()` /
+`builder.MakeCompound(compound)` pair, at three call sites: `case.py`'s `_compound`
+helper, `region.py`'s `_boundary` helper, and the `nearest_mm` closure inside
+`region.py`'s `clearance_reason`. This is real, unchanged duplication, deliberately
+deferred rather than folded: it has no second consumer yet to design the promoted
+interface against, and folding it now would be Speculative Generality.
+
+**Acceptance:** The three sites promote to one `stompgeom` helper once a real second
+consumer (for example `stompcollider`'s assembly emitter) needs the same idiom; until
+then this entry stands.

@@ -58,21 +58,24 @@ also_copy = ["tests/fixtures/"]
 # collected. Excluding it costs nothing: it is a literal catalogue table, so a
 # mutant of it is either caught by the first assertion or meaningless.
 do_not_mutate = ["src/stompdrill/enclosures.py"]
-# Two tests read source text rather than behaviour, so mutmut's rewritten files
-# fail them for every mutant and abort the survey. test_enclosures.py re-reads
-# docs/parts/dimensions.tsv, which is outside the copied tree; the CLI test
-# ast.parses cli.py, whose mutated form contains every mutant literal. The
-# routing performance test asserts a wall-clock bound; under mutmut (and
-# especially under --cov, which inflates pure-Python time several-fold) a
-# timeout scores as a killed mutant regardless of the mutation's actual
-# effect, which quietly inflates the survey CLAUDE.md tells readers to read
-# by module. Deselecting it here does not weaken coverage: it targets a
-# cubic-vs-linear regression that no other test in the suite checks, and
-# `--tb=short` runs still exercise it on every commit.
+# Four tests read source text or a path outside the copied tree rather than
+# behaviour, so mutmut's rewritten files fail them for every mutant and abort
+# the survey before any result is collected. test_enclosures.py re-reads
+# docs/parts/dimensions.tsv; the CLI test ast.parses cli.py, whose mutated
+# form contains every mutant literal; the routing performance test asserts a
+# wall-clock bound, and under mutmut (and especially under --cov, which
+# inflates pure-Python time several-fold) a timeout scores as a killed mutant
+# regardless of the mutation's actual effect. test_documentation.py's
+# collider-spec test resolves docs/specs/stompcollider-technical.md through a
+# path two levels above this file, which is outside the copied tree the same
+# way dimensions.tsv is. None of the four costs real coverage: each targets
+# something no other test in the suite checks, and `--tb=short` runs still
+# exercise all four on every commit.
 pytest_add_cli_args_test_selection = [
     "--deselect=tests/test_enclosures.py",
     "--deselect=tests/test_cli.py::test_cli_source_never_names_a_registered_format",
     "--deselect=tests/test_route.py::test_a_realistic_panel_routes_without_the_cubic_term",
+    "--deselect=tests/test_documentation.py::test_the_collider_spec_names_the_format_string_the_codec_actually_writes",
 ]
 # mutmut runs the test command from inside mutants/, one directory deeper than
 # this file's own location, so the "../.." above (correct for a plain `pytest`
