@@ -48,6 +48,28 @@ def _reload(payload: bytes, tmp_path: Path):
     return read_step(target)
 
 
+def test_emit_touches_no_temporary_directory():
+    """``render_step`` already holds the finished bytes; ``emit`` must return
+    them directly rather than bridging with a temp-file round trip."""
+    import tempfile
+
+    from tests.conftest import at
+
+    calls: list[int] = []
+    real = tempfile.TemporaryDirectory
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(tempfile, "TemporaryDirectory", spy)
+        payload = _emit(at(0, 0, 6 * MM, index=1))
+
+    assert isinstance(payload, bytes)
+    assert calls == []
+
+
 def _volume(shape) -> float:
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
@@ -393,7 +415,7 @@ def test_the_written_header_carries_the_constants_originating_system():
     """The plumbing from the constant to the file, not just the formula.
 
     ``_ORIGINATING_SYSTEM`` reading correctly proves nothing about the call
-    site at ``emit`` actually passing it through to ``write_step`` -- a
+    site at ``emit`` actually passing it through to ``render_step`` -- a
     stray ``self.options.title`` there would still satisfy a test that only
     recomputes the constant. Reading it back out of the written bytes,
     against the constant rather than a hardcoded string, is what closes

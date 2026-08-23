@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 
 from stompgeom import kernel
 from stompgeom.step import label_name
-from stompgeom.writer import label_entry, write_step
+from stompgeom.writer import label_entry, render_step
 from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
@@ -64,24 +64,17 @@ class StepEmitter:
         ``emit`` on the same instance sees the pristine geometry again: this
         emitter only translates and serialises, it does not own state.
         """
-        import tempfile
-        from pathlib import Path
-
         model = self.options.model
         assert model is not None, "__init__ already refused a missing model"
         document, undo, touched = cut_shape(model, data)
         try:
-            with tempfile.TemporaryDirectory() as scratch:
-                target = Path(scratch) / "out.stp"
-                write_step(
-                    document,
-                    target,
-                    title=self.options.title or "stompdrill",
-                    timestamp=model.document_timestamp,
-                    originating_system=_ORIGINATING_SYSTEM,
-                    replaced_labels=touched,
-                )
-                return target.read_bytes()
+            return render_step(
+                document,
+                title=self.options.title or "stompdrill",
+                timestamp=model.document_timestamp,
+                originating_system=_ORIGINATING_SYSTEM,
+                replaced_labels=touched,
+            )
         finally:
             undo()
 
@@ -94,7 +87,7 @@ def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None], fro
     ``target_shape``, whose location may differ from the one carried by the
     document's own label. Returns the mutated document, an ``undo`` closure
     that restores every changed label to its pre-cut shape, and the entry
-    strings of the labels it changed: ``write_step`` needs these, since a
+    strings of the labels it changed: ``render_step`` needs these, since a
     replaced label does not keep its colour in the written STEP.
     """
     from OCP.TDF import TDF_LabelSequence

@@ -17,9 +17,15 @@ becoming part of the format's correctness.
 The emitter payload is `Payload = str | bytes`. An emitter returns whichever its format
 is; a text emitter continues to return `str` and is unchanged.
 
-The dispatch on the value is `stompmodel.protocols.write_payload`, the one function
-that writes a file; the command line owns the report it prints around the count that
-function returns. As first taken, that dispatch was the command line's own:
+The dispatch on the value is `stompmodel.protocols.write_payload`, the only function in
+the emit path that writes a **caller-visible** file; the command line owns the report it
+prints around the count that function returns. The qualifier is load-bearing:
+`stompgeom.writer.render_step` writes its own STEP bytes through a scratch file first,
+because the kernel's writer exposes no in-memory target, only a path — but that write is
+forced by the kernel's path-only API, is invisible to callers, and is why the claim
+needed the qualifier at all. `render_step` returns finished bytes and leaves nothing on
+disk a caller can observe; `write_payload` remains the only function whose file a caller
+asked for. As first taken, that dispatch was the command line's own:
 
 ```python
 def _write(emitter: Emitter, path: Path, payload: Payload) -> str:

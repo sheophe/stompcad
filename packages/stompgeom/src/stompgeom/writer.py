@@ -1,6 +1,6 @@
 """Three OCC process-global effects — a translator product-name suffix, the
 assembly usage occurrence ids, and which numeric slot each colour is written
-into — are not controllable through any exposed API, so ``write_step``
+into — are not controllable through any exposed API, so ``render_step``
 normalises the written bytes afterwards instead.
 """
 
@@ -10,6 +10,7 @@ import contextlib
 import itertools
 import os
 import re
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ from stompmodel.errors import EmitterError
 
 from .kernel import require_kernel
 
-__all__ = ["write_step", "label_entry"]
+__all__ = ["render_step", "label_entry"]
 
 #: The translator's auto-generated wrapper product. Set at write time, and the
 #: volatile counter it appends is erased afterwards. All three uses -- the
@@ -157,7 +158,7 @@ def _silence_stdout() -> Iterator[None]:
 # only substitutes the wrapper product's *prefix*, never the "<counter>.1"
 # suffix appended after it, and the NAUO counter has no exposed key at all.
 # Post-processing the written bytes is not a workaround pending a better
-# fix; it is the only route this kernel's bindings leave open. (``write_step``
+# fix; it is the only route this kernel's bindings leave open. (``render_step``
 # does call ``Init_s()`` below, but for an unrelated reason — it defines the
 # ``Interface_Static`` keys so those settings take effect at all — and it
 # still does nothing for the counters below.)
@@ -231,16 +232,21 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     return b"".join(pieces)
 
 
-def write_step(
+def render_step(
     document: Any,
-    path: Path,
     *,
     title: str,
     timestamp: str,
     originating_system: str,
     replaced_labels: frozenset[str] = frozenset(),
-) -> None:
-    """Write the XCAF document with a header that carries no clock reading."""
+) -> bytes:
+    """Render the XCAF document to STEP bytes, with a header carrying no clock reading.
+
+    OCC's writer exposes no in-memory target, only a path, so this aims it at
+    a scratch file the caller never sees and returns the finished bytes
+    instead of a location -- the scratch file is an implementation detail of
+    a path-only kernel API, not part of this function's contract.
+    """
     require_kernel()
 
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
@@ -265,14 +271,20 @@ def write_step(
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
     expected = _count_colour_assignments(document, replaced_labels)
-    with _silence_stdout():
-        writer.Transfer(document)
+    descriptor, scratch = tempfile.mkstemp(suffix=".stp")
+    os.close(descriptor)
+    scratch_path = Path(scratch)
+    try:
+        with _silence_stdout():
+            writer.Transfer(document)
 
-        header = APIHeaderSection_MakeHeader(session.Model())
-        header.SetName(TCollection_HAsciiString(title))
-        header.SetTimeStamp(TCollection_HAsciiString(timestamp))
-        header.SetAuthorValue(1, TCollection_HAsciiString(""))
-        header.SetOriginatingSystem(TCollection_HAsciiString(originating_system))
-        writer.Write(str(path))
-    payload = _normalise(path.read_bytes())
-    path.write_bytes(_reslot_colours(payload, expected))
+            header = APIHeaderSection_MakeHeader(session.Model())
+            header.SetName(TCollection_HAsciiString(title))
+            header.SetTimeStamp(TCollection_HAsciiString(timestamp))
+            header.SetAuthorValue(1, TCollection_HAsciiString(""))
+            header.SetOriginatingSystem(TCollection_HAsciiString(originating_system))
+            writer.Write(str(scratch_path))
+        payload = _normalise(scratch_path.read_bytes())
+        return _reslot_colours(payload, expected)
+    finally:
+        scratch_path.unlink(missing_ok=True)

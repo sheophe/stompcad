@@ -64,16 +64,16 @@ def test_reading_a_non_step_file_is_a_document_error(tmp_path: Path) -> None:
 
 def _written(tmp_path: Path) -> Path:
     """A real STEP assembly, built in memory and written by this package."""
-    from stompgeom.writer import write_step
+    from stompgeom.writer import render_step
 
     target = tmp_path / "round-trip.stp"
-    write_step(
+    payload = render_step(
         build_document(),
-        target,
         title="a round trip",
         timestamp="2020-01-02T03:04:05",
         originating_system="a supplied originating system 9.9",
     )
+    target.write_bytes(payload)
     return target
 
 

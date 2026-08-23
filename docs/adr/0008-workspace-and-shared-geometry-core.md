@@ -110,6 +110,17 @@ exactly one implementation; a caller reading a label's name, in `stompdrill` or 
 future consumer, goes through it rather than keeping a private copy that could
 drift from the reader's own.
 
+On the writing side, `stompgeom` now owns a document it can **render to bytes**:
+`stompgeom.writer.render_step` is the one serialising entry point, returning the
+finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
+along the way is an implementation detail forced by that kernel's own path-only API, not
+part of this function's contract. The fourth verb, **build** — assembling a document
+from placed, named, coloured solids — is deliberately **not yet owned**. ADR-0008's own
+rule is why: the interface grows when a real second consumer arrives, and today the only
+caller of that shape is a test fixture. The builder is expected, not omitted: plan 3's
+first geometry ticket promotes that fixture's construction into `stompgeom` once
+`stompcollider` gives it a real caller to be designed against.
+
 The risk carried is that `stompgeom` accumulates whatever is convenient rather than
 what is universal. `Frame` is the live example: it is a rigid transform, which
 is universal, wrapped in a meaning — Y-up, originating at the reference-outline
