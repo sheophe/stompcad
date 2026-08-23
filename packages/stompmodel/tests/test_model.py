@@ -1006,3 +1006,30 @@ def test_two_holes_half_a_millimetre_apart_are_two_rows() -> None:
     )
 
     assert [y for y, _ in panel.rows()] == [18_000_000, 17_500_000]
+
+
+def test_two_holes_tied_on_nominal_x_come_back_in_the_same_order_either_way() -> None:
+    """Ticket 15, AC2: nominal X alone ties for two holes sharing one point,
+    grouped into a row by different diameter. ``sorted`` is stable, so
+    without ``Hole.tie_break`` the survivor of the tie would be whichever one
+    arrived first -- an ADR-0006 violation latent inside the type that
+    publishes it. Same raw measurement placed on each of a pair of nominally
+    identical positions, so the winner is decided by geometry, not diameter.
+    """
+
+    def hole(diameter_nm: int, raw_x: float, number: int) -> Hole:
+        return Hole(
+            Nanometre(0),
+            Nanometre(18_000_000),
+            Nanometre(diameter_nm),
+            raw=RawHole(Millimetre(raw_x), Millimetre(18.0), Millimetre(0.0)),
+        ).with_number(number)
+
+    smaller_raw = hole(3_000_000, 0.0001, 1)
+    larger_raw = hole(4_000_000, 0.0002, 2)
+
+    forward = DrillData(holes=(smaller_raw, larger_raw)).rows()
+    backward = DrillData(holes=(larger_raw, smaller_raw)).rows()
+
+    order = lambda rows: [h.diameter_nm for _, holes in rows for h in holes]  # noqa: E731
+    assert order(forward) == order(backward) == [3_000_000, 4_000_000]

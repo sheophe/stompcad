@@ -345,6 +345,36 @@ def test_a_tie_inside_one_block_cannot_reach_the_emitted_bytes():
     assert len(rendered) == 1, "arrival order reached the emitted bytes"
 
 
+def test_dedupe_keeps_the_hole_routing_visits_first():
+    """Coupling, both directions (ticket 15, AC1): ``Deduplicate``'s survivor
+    and ``RouteHoles``'s first visit are the same hole because both now call
+    ``Hole.tie_break`` -- not because two independent implementations happen
+    to agree. Compared by ``raw``, not by the whole hole: routing assigns an
+    index, so whole-value equality would pass even if the two stages picked
+    different holes that later carried the same number.
+    """
+    ref = ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000))
+
+    def hole(raw_x: float) -> Hole:
+        return Hole(
+            Nanometre(0),
+            Nanometre(0),
+            Nanometre(7_000_000),
+            RawHole(Millimetre(raw_x), Millimetre(0.0), Millimetre(7.0)),
+        )
+
+    pair = (hole(0.0001), hole(0.0002))
+
+    for order in itertools.permutations(pair):
+        deduped = Deduplicate().apply(DrillData(holes=order)).holes
+        assert len(deduped) == 1
+        survivor_raw = deduped[0].raw
+
+        first_routed = routed(DrillData(holes=order, reference=ref)).holes[0]
+
+        assert survivor_raw == first_routed.raw
+
+
 # --------------------------------------------------------------------------
 # F3-01, AC4: the invariance property starts at the content stream itself
 # --------------------------------------------------------------------------
