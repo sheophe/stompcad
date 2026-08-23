@@ -144,7 +144,11 @@ def _cut_leaf(
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     placed = XCAFDoc_ShapeTool.GetShape_s(label)
-    if placed.IsNull():  # pragma: no cover - a label matched by name always carries a shape
+    if placed.IsNull():
+        # A name match carries no guarantee of a shape: two leaves can share
+        # a keyword while only one holds geometry. ``cut_shape`` steps over
+        # this leaf and tries the next match; see
+        # ``test_cut_shape_steps_over_a_null_shaped_leaf_and_cuts_the_next_match``.
         return False
     cut = BRepAlgoAPI_Cut(placed, tools)
     cut.Build()
