@@ -45,6 +45,11 @@ _NO_PAINT_OPS = frozenset({"n"})
 #: Overridable with ``--form-depth``; reaching it is reported, never fatal.
 DEFAULT_FORM_DEPTH = 12
 
+#: A clip region in page space: ``(x0, y0, x1, y1)``. ``x0 > x1`` or ``y0 > y1``
+#: is a valid, deliberately empty rectangle -- the intersection of two boxes
+#: that do not overlap -- and culls everything, not just what falls in the gap.
+_Rect = tuple[float, float, float, float]
+
 
 @dataclass(frozen=True, slots=True)
 class _LayerPath:
@@ -267,12 +272,12 @@ def _walk_page(page: pikepdf.Page, max_depth: int) -> tuple[list[_LayerPath], bo
     """Painted, non-clipping subpaths in page space, and whether nesting was cut.
 
     Page space is PDF points from the ``/MediaBox`` lower-left corner; the base
-    CTM removes a non-zero box offset.
+    CTM removes a non-zero box offset. The page itself carries no clip.
     """
     box = [float(v) for v in page.MediaBox]
     base: Matrix = (1.0, 0.0, 0.0, 1.0, -box[0], -box[1])
     out: list[_LayerPath] = []
-    truncated = _walk(page, page.get("/Resources"), base, (), out, 0, max_depth)
+    truncated = _walk(page, page.get("/Resources"), base, None, (), out, 0, max_depth)
     return out, truncated
 
 
@@ -280,6 +285,7 @@ def _walk(
     source,
     resources,
     ctm: Matrix,
+    clip: _Rect | None,
     marks: tuple[frozenset[str], ...],
     out: list[_LayerPath],
     depth: int,
@@ -288,8 +294,10 @@ def _walk(
     """Interpret one content stream, appending to ``out``.
 
     ``marks`` is inherited by nested forms, but each stream may close only the
-    marked-content entries it opened. Returns whether a form went unread for
-    want of depth, here or anywhere below.
+    marked-content entries it opened. ``clip`` is the cumulative Form ``/BBox``
+    intersection inherited from every enclosing form, in page space; ``None``
+    means unbounded. Returns whether a form went unread for want of depth, here
+    or anywhere below.
     """
     truncated = False
     stack: list[Matrix] = []
@@ -336,6 +344,12 @@ def _walk(
                 continue
             layers = frozenset().union(*marks) if marks else frozenset()
             for path in painted:
+                # A form's /BBox is an unconditional clip (ISO 32000-1 8.10.2):
+                # geometry entirely outside it is not part of the page, and is
+                # no candidate for a hole or the reference outline. Straddling
+                # geometry is kept -- only a *wholly* outside extent is culled.
+                if _entirely_outside(path.bbox, clip):
+                    continue
                 out.append(_LayerPath(layers=layers, path=path))
 
         # -- forms
@@ -353,10 +367,17 @@ def _walk(
             inner = builder.ctm
             if matrix is not None:
                 inner = multiply(_as_matrix(matrix), inner)
+            # The declared /BBox clips in page space, so it is mapped through
+            # the same matrix -- the form's own, then the CTM at this ``Do``
+            # -- that maps the form's content, then intersected with whatever
+            # clip this form was itself entered under.
+            bbox = _numbers(form.get("/BBox"), 4)
+            inner_clip = clip if bbox is None else _intersect(clip, _bbox_rect(bbox, inner))
             truncated |= _walk(
                 form,
                 form.get("/Resources", resources),
                 inner,
+                inner_clip,
                 marks,
                 out,
                 depth + 1,
@@ -537,6 +558,47 @@ def _empty_layer(
 def _as_matrix(values: Sequence[float]) -> Matrix:
     a, b, c, d, e, f = values
     return (a, b, c, d, e, f)
+
+
+def _bbox_rect(bbox: Sequence[float], matrix: Matrix) -> _Rect:
+    """Bound ``bbox``'s four corners after ``matrix``, not just two opposite ones.
+
+    ``matrix`` may rotate or skew, so the mapped corners need not stay a
+    rectangle; their axis-aligned bounds are what a rectangular clip can hold.
+    """
+    llx, lly, urx, ury = bbox
+    corners = (
+        transform(matrix, llx, lly),
+        transform(matrix, urx, lly),
+        transform(matrix, urx, ury),
+        transform(matrix, llx, ury),
+    )
+    xs = [p[0] for p in corners]
+    ys = [p[1] for p in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _intersect(a: _Rect | None, b: _Rect) -> _Rect:
+    """Intersect two page-space clips; ``None`` is unbounded, not empty."""
+    if a is None:
+        return b
+    return (max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3]))
+
+
+def _entirely_outside(bbox: tuple[float, float, float, float], clip: _Rect | None) -> bool:
+    """Whether ``bbox`` shares no extent with ``clip``; ``None`` never culls.
+
+    An empty ``clip`` (``x0 > x1`` or ``y0 > y1``, from two boxes that do not
+    overlap) culls every bbox outright rather than relying on the ordinary
+    disjoint test, which a degenerate interval can fool.
+    """
+    if clip is None:
+        return False
+    cx0, cy0, cx1, cy1 = clip
+    if cx0 > cx1 or cy0 > cy1:
+        return True
+    x0, y0, x1, y1 = bbox
+    return x1 < cx0 or x0 > cx1 or y1 < cy0 or y0 > cy1
 
 
 def _largest_non_circular(

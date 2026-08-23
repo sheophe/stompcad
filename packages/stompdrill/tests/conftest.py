@@ -132,6 +132,7 @@ def build_pdf(
     *,
     media: tuple[float, float, float, float] = (0, 0, 400, 400),
     form: tuple[list[float], str] | None = None,
+    form_bbox: tuple[float, float, float, float] = (0, 0, 10000, 10000),
     form_properties: dict[str, str] | None = None,
     image: bool = False,
     extra: str = "",
@@ -161,7 +162,7 @@ def build_pdf(
         stream = pdf.make_stream(form_content.encode())
         stream.Type = Name.XObject
         stream.Subtype = Name.Form
-        stream.BBox = Array([0, 0, 10000, 10000])
+        stream.BBox = Array(list(form_bbox))
         stream.Matrix = Array(list(matrix))
         if form_properties is not None:
             own = Dictionary()

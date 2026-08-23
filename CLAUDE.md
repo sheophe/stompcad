@@ -217,7 +217,14 @@ CLI.
   `/Resources/Properties` -> `/MCn`. Only top-level layers are recoverable.
 - Paths with neither fill nor stroke are absent from the stream, which is why
   `EmptyLayerError` names the remedy: give the drill circles a stroke.
-- `W` and `W*` establish clipping boundaries; `n`, not `W`, makes a path invisible.
+- `W` and `W*` mark a clipping path but are not tracked as a clip region; `n`, not `W`,
+  makes a path invisible.
+- A Form XObject's declared `/BBox` is an unconditional clip (ISO 32000-1 §8.10.2):
+  geometry whose extent lies entirely outside it is not part of the page, in any
+  conforming viewer, and reaches no artefact — only geometry wholly outside is culled, so
+  a path straddling the box's edge is kept. The box clips in page space: it is mapped
+  through the form's own `/Matrix` and the current matrix before it is applied. Nested
+  forms intersect their boxes cumulatively.
 - Circle recognition validates four cubic Beziers by equal anchor radii and kappa
   consistency around their centroid, so it remains rotation-invariant.
 - Apply every `cm` current transformation matrix, including a Form XObject's `/Matrix`.

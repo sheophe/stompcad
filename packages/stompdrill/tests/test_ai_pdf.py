@@ -622,6 +622,138 @@ def test_a_do_without_any_xobject_resource_is_ignored(tmp_path):
     assert len(AiPdfSource(pdf).read().holes) == 1
 
 
+def test_geometry_entirely_outside_a_forms_bbox_is_not_a_hole(tmp_path):
+    """ISO 32000-1 8.10.2: a Form XObject's /BBox is an unconditional clip.
+
+    A circle drawn well outside its form's declared box is invisible to any
+    conforming viewer, including Illustrator, and must not become a hole."""
+    pdf = build_pdf(
+        tmp_path / "bbox-outside.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 0, 0], circle_ops(150.0, 150.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_the_same_geometry_inside_a_genuine_bbox_is_still_a_hole(tmp_path):
+    """Control for the previous test: the clip, not the geometry, is what differs."""
+    pdf = build_pdf(
+        tmp_path / "bbox-inside.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 0, 0], circle_ops(150.0, 150.0, 6.0)),
+        form_bbox=(0, 0, 400, 400),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_circle_straddling_the_bbox_edge_is_kept(tmp_path):
+    """Only an extent entirely outside the clip is culled -- straddling is not."""
+    pdf = build_pdf(
+        tmp_path / "bbox-straddle.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        # centred on (20, 10), radius 6: the circle's bbox runs x 14..26,
+        # crossing the box's right edge at x=20.
+        form=([1, 0, 0, 1, 0, 0], circle_ops(20.0, 10.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_bbox_clips_in_page_space_not_form_space(tmp_path):
+    """Both the form's own /Matrix and the CTM at the ``Do`` map the box.
+
+    The form's content is drawn far outside a box that looks generous in its
+    own, untransformed coordinates -- only correctly mapping the box into page
+    space culls it."""
+    pdf = build_pdf(
+        tmp_path / "bbox-matrix.pdf",
+        {
+            "Background": "0 0 400 400 re f",
+            "Drill": "q 1 0 0 1 100 0 cm /Fm0 Do Q",
+        },
+        form=([1, 0, 0, 1, 0, 100], circle_ops(150.0, 150.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_a_bbox_mapped_into_page_space_still_admits_its_own_content(tmp_path):
+    """Control for the previous test: content the mapped box genuinely contains."""
+    pdf = build_pdf(
+        tmp_path / "bbox-matrix-control.pdf",
+        {
+            "Background": "0 0 400 400 re f",
+            "Drill": "q 1 0 0 1 100 0 cm /Fm0 Do Q",
+        },
+        # box (0,0,20,20) maps, through matrix then CTM, to (100,100)-(120,120)
+        # in page space; the circle at form-local (10, 10) maps to (110, 110).
+        form=([1, 0, 0, 1, 0, 100], circle_ops(10.0, 10.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_nested_forms_intersect_their_clips_cumulatively(tmp_path):
+    """A generous inner /BBox does not override a stricter box inherited from
+    outside it -- nested clips intersect, they do not reset."""
+    pdf = pikepdf.new()
+    ocgs = []
+    properties = pikepdf.Dictionary()
+    body = []
+    for i, (name, content) in enumerate(
+        {"Drill": "/Fm0 Do", "Background": "0 0 400 400 re f"}.items()
+    ):
+        ocg = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String(name)))
+        ocgs.append(ocg)
+        properties[f"/MC{i}"] = ocg
+        body.append(f"/OC /MC{i} BDC {content} EMC")
+    pdf.Root.OCProperties = pdf.make_indirect(
+        pikepdf.Dictionary(
+            OCGs=pikepdf.Array(ocgs),
+            D=pikepdf.Dictionary(Order=pikepdf.Array(ocgs), ON=pikepdf.Array(ocgs)),
+        )
+    )
+
+    # Inner form's own box is generous enough to admit the circle on its own.
+    inner = pdf.make_stream(circle_ops(150.0, 150.0, 6.0).encode())
+    inner.Type = pikepdf.Name.XObject
+    inner.Subtype = pikepdf.Name.Form
+    inner.BBox = pikepdf.Array([0, 0, 300, 300])
+    inner.Matrix = pikepdf.Array([1, 0, 0, 1, 0, 0])
+
+    # Outer form's box is tiny, and encloses the inner form's invocation.
+    outer = pdf.make_stream(b"/Fm1 Do")
+    outer.Type = pikepdf.Name.XObject
+    outer.Subtype = pikepdf.Name.Form
+    outer.BBox = pikepdf.Array([0, 0, 20, 20])
+    outer.Matrix = pikepdf.Array([1, 0, 0, 1, 0, 0])
+    outer.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm1=pdf.make_indirect(inner)))
+
+    resources = pikepdf.Dictionary(
+        Properties=properties, XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(outer))
+    )
+    pdf.pages.append(
+        pikepdf.Page(
+            pdf.make_indirect(
+                pikepdf.Dictionary(
+                    Type=pikepdf.Name.Page,
+                    MediaBox=pikepdf.Array([0, 0, 400, 400]),
+                    Resources=resources,
+                    Contents=pdf.make_indirect(pdf.make_stream("\n".join(body).encode())),
+                )
+            )
+        )
+    )
+    path = tmp_path / "bbox-nested.pdf"
+    pdf.save(path)
+
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(path).read()
+
+
 def test_a_placed_image_is_not_walked_as_a_content_stream(tmp_path):
     """Illustrator files carry linked images; only Form XObjects hold paths."""
     pdf = build_pdf(
