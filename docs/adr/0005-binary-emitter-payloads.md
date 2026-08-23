@@ -41,6 +41,14 @@ def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
 Every artifact is still rendered before any path is written, so a failure in one emitter
 withholds all of them.
 
+`write_payload` writes to a temporary file beside the target and renames it into place,
+so the same declaration this ADR already makes — the one function where an artefact's
+bytes reach a path and are counted — now also covers what a failure at that path leaves
+behind: the write is all-or-nothing for one path. Afterwards the target holds either the
+complete payload or exactly what it held before, and the temporary does not survive
+either outcome. A caller never observes a truncated artefact and never needs to know the
+mechanism that prevents it.
+
 ## Rationale
 
 A `binary: ClassVar[bool]` alongside `media_type` and `extension` would match the
@@ -58,7 +66,14 @@ branch at one site, and a union that every consumer of `Emitter` must accept: a 
 that assumes `str` is now wrong, and `mypy` says so.
 
 The reporting line still counts encoded bytes, so its number means the same thing for
-both kinds of payload.
+both kinds of payload. Text payloads still keep their existing newline handling — nothing
+about writing through a temporary changes how a "\n" in the payload reaches disk — and
+the returned count remains the untranslated encoded length on every platform.
+
+This per-path guarantee is one half of a larger claim CLAUDE.md makes: "every artefact
+from one invocation must agree." Whether a whole invocation's artefacts land or withhold
+together as a set is a fact about the caller's loop over several paths, not about this
+one function, and stays out of this ADR's scope; ADR-0001 owns it.
 
 `stompcollider` inherits this counting convention from `stompmodel.protocols.write_payload`
 rather than re-deriving it, which is what makes "means the same thing for both kinds of
