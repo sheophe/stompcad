@@ -78,8 +78,10 @@ def _measurement_key(hole: Hole) -> tuple[float, float, float]:
 
     Nominal position and diameter already tie by the group's own definition
     (``Deduplicate._same_hole``); this is what is left to choose a survivor
-    by, so no arrival order is consulted. If the measurement also ties
-    exactly, every field a caller can observe already agrees, so the pick
-    between them is unconstrained.
+    by, so no arrival order is consulted. Compared as raw ``x``, then raw
+    ``y``, then raw ``diameter`` -- an arbitrary but total order over three
+    independent measurements, not a priority among them. If the measurement
+    also ties exactly, every field a caller can observe already agrees, so
+    the pick between them is unconstrained.
     """
     return (hole.raw.x, hole.raw.y, hole.raw.diameter)

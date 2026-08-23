@@ -877,9 +877,15 @@ def test_the_tie_break_is_geometric_not_positional(tmp_path):
 def test_the_second_tie_break_clause_is_load_bearing(tmp_path):
     """Area and ``x0`` tie; only ``y0`` separates the pair -- the bottommost
     (smaller ``y0``) must win, in either content-stream order.
+
+    ``bottommost`` and ``higher`` are also built to disagree on ``x1`` (100
+    vs. 200): if the ``y0`` comparison were dropped or reordered, the next
+    clause (``x1``) would pick ``higher`` instead, so this fixture -- unlike
+    one where the two candidates happen to tie or agree on ``x1`` too --
+    actually catches a mutant that skips the ``y0`` term.
     """
-    bottommost = "0 0 200 100 re S"  # bounds (0, 0, 200, 100); area 20000
-    higher = "0 5 100 200 re S"  # bounds (0, 5, 100, 205); same area, x0
+    bottommost = "0 0 100 200 re S"  # bounds (0, 0, 100, 200); area 20000
+    higher = "0 5 200 100 re S"  # bounds (0, 5, 200, 105); same area, x0; larger x1
 
     for index, background in enumerate((f"{bottommost} {higher}", f"{higher} {bottommost}")):
         pdf = build_pdf(
@@ -889,8 +895,8 @@ def test_the_second_tie_break_clause_is_load_bearing(tmp_path):
         )
         reference = AiPdfSource(pdf).read().reference
         assert reference is not None
-        assert reference.width == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
-        assert reference.height == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+        assert reference.width == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
 
 
 def test_the_third_tie_break_clause_is_load_bearing(tmp_path):
