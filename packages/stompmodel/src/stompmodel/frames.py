@@ -143,6 +143,10 @@ class CoordinateFrame:
 class FaceFrame:
     """A face's registration: a frame whose third axis is that face's normal.
 
+    ``basis.origin_nm`` sits on the drilled plate's **inner** surface -- the
+    side a seated board rests against, never the side the bit enters. See
+    ADR-0007 for why that surface, not the drilled one, is the datum.
+
     Composes rather than extends. A subclass would pass wherever a bare
     ``CoordinateFrame`` is wanted, which is exactly the universal-wrapped-in-a-
     meaning leak ADR-0008 names as this boundary's standing risk.

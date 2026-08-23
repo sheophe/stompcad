@@ -124,6 +124,22 @@ flowchart LR
     load -.->|before| panel
 ```
 
+**Amended: the face frame's origin registers the plate's inner surface, not the drilled
+one.** `build_frame` places `basis.origin_nm` on the flat face found opposite the
+drilled one — the side a seated board rests against, never the side the bit enters —
+and `FaceFrame`'s own docstring states this plainly, so a reader with only
+`stompmodel` installed need not guess it from `stompdrill`'s source. This is a stated
+convention rather than a derived one for the same reason the axis correspondence below
+is: nothing about *which* flat face a frame's origin sits on is observable from the
+frame alone, so the choice has to be published, not inferred. The clearance rule is
+unaffected by it: `cad.region.contains` and `clearance_reason` already project a
+canonical point and then overwrite its coordinate along the drill axis with the
+region's own measured plane, so wherever the frame's origin happens to sit along that
+axis has never reached a verdict. The STEP cutter is where the datum is load-bearing —
+its cut must still start at the drilled surface and run through the plate, so it reads
+that position explicitly from the model rather than from the frame's origin, the same
+explicit-plane idiom `cad.region` already uses.
+
 **Amended: the axis correspondence is a stated convention, and the frame that reaches
 both consumers is the checked registration, not a bare re-read of the model.** The
 footprint identification records only *that* the drawn panel is the catalogue footprint

@@ -7,7 +7,7 @@ import pytest
 from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid
 from stompgeom.step import read_step
 from stompmodel.model import CaseFace
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, mm_from_nm
 from tests.hammond import MODELS
 
 pytestmark = pytest.mark.hammond
@@ -111,6 +111,23 @@ def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
     )
 
     assert pytest.approx(cross, abs=1e-9) == w
+
+
+def test_the_frame_origin_registers_the_inner_surface_not_the_drilled_one(document):
+    """docs/specs/stompcollider-technical.md's Seating-depth section measures
+    seating travel "against the inner surface of the drilled plate, which the
+    face frame registers". Compare the frame's own origin against the two
+    surface positions ``find_faces`` already measured, rather than
+    re-deriving a number from the code under test (ticket 20, AC1).
+    """
+    axis = drill_axis(document, FOOTPRINT)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
+
+    frame = build_frame(faces, axis)
+
+    assert faces.inner_position_mm != pytest.approx(faces.drilled_position_mm)
+    origin_mm = mm_from_nm(frame.basis.origin_nm[axis])
+    assert origin_mm == pytest.approx(faces.inner_position_mm)
 
 
 def test_the_frame_is_orthonormal(document):

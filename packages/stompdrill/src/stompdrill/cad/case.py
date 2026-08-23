@@ -336,7 +336,7 @@ def build_frame(faces: Faces, axis: int) -> FaceFrame:
     u = _normalise(_cross(tuple(reference), w))
     v = _cross(w, u)
     origin = [0.0, 0.0, 0.0]
-    origin[axis] = faces.drilled_position_mm
+    origin[axis] = faces.inner_position_mm
     return FaceFrame(
         basis=CoordinateFrame(
             origin_nm=(nm_from_mm(origin[0]), nm_from_mm(origin[1]), nm_from_mm(origin[2])),

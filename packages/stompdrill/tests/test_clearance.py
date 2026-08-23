@@ -464,4 +464,4 @@ def test_a_real_rotated_1590b_is_reconciled_to_the_named_model_point(hammond_b):
 
     assert codes(result) == []
     point = result.case.frame.basis.to_model(Nanometre(0), Nanometre(40 * MM))
-    assert point == pytest.approx((-40.0, -27.0, 0.0))
+    assert point == pytest.approx((-40.0, -25.0, 0.0))

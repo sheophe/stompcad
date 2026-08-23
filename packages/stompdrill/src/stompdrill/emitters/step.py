@@ -210,24 +210,31 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     builder = BRep_Builder()
     builder.MakeCompound(compound)
     for _, hole in holes:
-        start = _face_point(frame, hole, overshoot)
+        start = _face_point(model, frame, hole, overshoot)
         axis = gp_Ax2(gp_Pnt(*start), gp_Dir(*direction))
         radius = float(mm_from_nm(hole.diameter_nm)) / 2
         builder.Add(compound, BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
     return compound
 
 
-def _face_point(frame: FaceFrame, hole: Any, overshoot: float) -> tuple[float, float, float]:
+def _face_point(
+    model: OcpCaseModel, frame: FaceFrame, hole: Any, overshoot: float
+) -> tuple[float, float, float]:
     """The cylinder's start, ``overshoot`` mm outside the drilled face.
 
     ``frame`` is the published registration's frame, already reconciled with
-    the panel's drawn orientation -- see ``pipeline.clearance``.
+    the panel's drawn orientation -- see ``pipeline.clearance``. Its origin
+    registers the plate's *inner* surface (see ``FaceFrame``), so the drilled
+    (outer) surface the cut must start from is read explicitly from the
+    model, the same idiom ``cad.region`` already uses for its own plane
+    coordinate, rather than trusted to fall out of the frame's own origin.
     """
     basis = frame.basis
-    x, y, z = basis.to_model(hole.x_nm, hole.y_nm)
+    point: list[float] = list(basis.to_model(hole.x_nm, hole.y_nm))
+    point[model.axis] = model.drilled_position_mm
     wx, wy, wz = basis.w
     return (
-        float(x) + overshoot * wx,
-        float(y) + overshoot * wy,
-        float(z) + overshoot * wz,
+        point[0] + overshoot * wx,
+        point[1] + overshoot * wy,
+        point[2] + overshoot * wz,
     )

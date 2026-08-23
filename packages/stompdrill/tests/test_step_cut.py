@@ -216,8 +216,12 @@ def test_the_hole_lands_at_the_canonical_position_not_its_mirror(tmp_path):
     depth_mm = (model.plate_nm / 1_000_000) / 2  # mid-plate: solidly inside real material
 
     def classify(x_mm: float, y_mm: float):
+        # ``origin`` sits on the plate's inner surface (see ``FaceFrame``), so
+        # mid-plate is reached by moving *outward*, towards the drilled
+        # surface, by half the plate thickness -- the opposite sign from a
+        # drilled-surface origin.
         point = tuple(
-            origin[i] + x_mm * frame.u[i] + y_mm * frame.v[i] - depth_mm * frame.w[i]
+            origin[i] + x_mm * frame.u[i] + y_mm * frame.v[i] + depth_mm * frame.w[i]
             for i in range(3)
         )
         return BRepClass3d_SolidClassifier(box.shape, gp_Pnt(*point), 1e-6).State()
