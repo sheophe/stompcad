@@ -133,12 +133,14 @@ def test_cut_shape_steps_over_a_null_shaped_leaf_and_cuts_the_next_match() -> No
     from OCP.gp import gp_Pnt
 
     from stompdrill.emitters.step import cut_shape
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     real_box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
     document = _two_leaf_document(real_box)
     model = _model(document, _drilled_face_frame())
-    data = make_data(at(5_000_000, 5_000_000, 4_000_000, index=1))
+    data = make_data(at(5_000_000, 5_000_000, 4_000_000, index=1)).with_case(
+        registration_for(model)
+    )
 
     cut_document, undo, touched = cut_shape(model, data)
     try:
@@ -169,7 +171,7 @@ def test_cut_shape_refuses_when_no_leaf_matches() -> None:
 
     from stompdrill.emitters.step import cut_shape
     from stompmodel.errors import EmitterError
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     app = XCAFApp_Application.GetApplication_s()
     document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
@@ -181,7 +183,9 @@ def test_cut_shape_refuses_when_no_leaf_matches() -> None:
     shapes.UpdateAssemblies()
 
     model = _model(document, _drilled_face_frame())
-    data = make_data(at(5_000_000, 5_000_000, 4_000_000, index=1))
+    data = make_data(at(5_000_000, 5_000_000, 4_000_000, index=1)).with_case(
+        registration_for(model)
+    )
 
     with pytest.raises(EmitterError, match="no component named 'BOX' was found to cut"):
         cut_shape(model, data)

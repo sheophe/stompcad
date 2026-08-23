@@ -303,6 +303,7 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
     from stompdrill.cad import load_case_model
     from stompdrill.emitters.step import StepEmitter, StepOptions
     from stompgeom.step import read_step
+    from tests.conftest import registration_for
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
@@ -312,7 +313,7 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
     data = make_data(
         at(0, 0, 6_000_000, index=1),
         at(20_000_000, 0, 8_000_000, index=2),
-    )
+    ).with_case(registration_for(model))
 
     out = tmp_path / "out.stp"
     out.write_bytes(StepEmitter(StepOptions(model=model)).emit(data))

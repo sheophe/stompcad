@@ -18,7 +18,7 @@ import pytest
 
 from stompdrill import cli
 from stompmodel.units import Nanometre
-from tests.conftest import FakeCase, at, build_pdf, circle_ops, make_data
+from tests.conftest import FakeCase, at, build_pdf, circle_ops, make_data, registration_for
 from tests.hammond import BB_PROBES, require_model
 
 __all__: list[str] = []
@@ -340,7 +340,7 @@ def test_the_step_emitter_refuses_data_that_was_never_routed():
     app.InitDocument(document)
 
     model = _stub_ocp_case_model(document=document)
-    unrouted = make_data(at(0, 0))
+    unrouted = make_data(at(0, 0)).with_case(registration_for(model))
 
     with pytest.raises(EmitterError, match="no artifact can state a sequence"):
         StepEmitter(StepOptions(model=model)).emit(unrouted)

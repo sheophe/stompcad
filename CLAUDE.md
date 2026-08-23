@@ -112,8 +112,8 @@ Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usag
 failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `unverifiable-enclosure`, `unmatched-enclosure`, `wrong-enclosure`, `hole-off-face`,
 `hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine`,
-`grid-ambiguous`, `hole-outside-outline` and `nesting-truncated` are warnings and reach
-exit 1.
+`grid-ambiguous`, `hole-outside-outline`, `nesting-truncated` and
+`case-orientation-unverifiable` are warnings and reach exit 1.
 
 `packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2`
 (112.40 × 60.50) and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it

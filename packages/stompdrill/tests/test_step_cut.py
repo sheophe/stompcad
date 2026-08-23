@@ -37,9 +37,11 @@ def _model(face: CaseFace = CaseFace.BOX):
 
 def _emit(*holes, face=CaseFace.BOX, model=None):
     from stompdrill.emitters.step import StepEmitter, StepOptions
-    from tests.conftest import make_data
+    from tests.conftest import make_data, registration_for
 
-    return StepEmitter(StepOptions(model=model or _model(face))).emit(make_data(*holes))
+    resolved = model or _model(face)
+    data = make_data(*holes).with_case(registration_for(resolved))
+    return StepEmitter(StepOptions(model=resolved)).emit(data)
 
 
 def _reload(payload: bytes, tmp_path: Path):
@@ -293,7 +295,7 @@ def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
 
     from stompdrill.cad.case import select_solid
     from stompdrill.emitters import step as step_module
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     model = _model()
     document = model.document
@@ -304,10 +306,12 @@ def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
 
     # A library caller bypassing the type -- CaseFace's own value is never
     # constructible from "top", so this simulates the one way the vocabulary
-    # can still be violated at runtime.
+    # can still be violated at runtime. The cutter now reads the face from
+    # the registration, so that is where the bypassed value must sit.
     top_model = dataclasses.replace(model, face="top")
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(top_model))
     with pytest.raises(KeyError):
-        step_module.cut_shape(top_model, make_data(at(0, 0, 6 * MM, index=1)))
+        step_module.cut_shape(top_model, data)
 
 
 def test_no_matching_component_is_an_emitter_error():
@@ -316,17 +320,18 @@ def test_no_matching_component_is_an_emitter_error():
     not a silent no-op."""
     from stompdrill.emitters import step as step_module
     from stompmodel.errors import EmitterError
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     def never_named(label: object) -> str:
         return ""
 
     model = _model()
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
     original = step_module.label_name
     step_module.label_name = never_named
     try:
         with pytest.raises(EmitterError, match="no component named"):
-            step_module.cut_shape(model, make_data(at(0, 0, 6 * MM, index=1)))
+            step_module.cut_shape(model, data)
     finally:
         step_module.label_name = original
 
@@ -337,12 +342,14 @@ def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
 
     from stompdrill.emitters import step as step_module
     from stompmodel.errors import EmitterError
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     monkeypatch.setattr(BRepAlgoAPI_Cut, "IsDone", lambda self: False)
 
+    model = _model()
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
     with pytest.raises(EmitterError, match="boolean cut failed"):
-        step_module.cut_shape(_model(), make_data(at(0, 0, 6 * MM, index=1)))
+        step_module.cut_shape(model, data)
 
 
 def test_five_emits_in_one_process_are_byte_identical():
@@ -407,14 +414,16 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompmodel.model import CaseFace, DrillData, Hole
+        from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole
         from stompmodel.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face=CaseFace.BOX,
                                  margin_nm=Nanometre(1_000_000))
         hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
                                      Nanometre(6_000_000)).with_number(1)
-        payload = StepEmitter(StepOptions(model=model)).emit(DrillData(holes=(hole,)))
+        registration = CaseRegistration(model.part, model.face, model.model_name, model.frame)
+        data = DrillData(holes=(hole,)).with_case(registration)
+        payload = StepEmitter(StepOptions(model=model)).emit(data)
         sys.stdout.buffer.write(payload)
         """
     )
@@ -507,14 +516,19 @@ def test_drill_compound_builds_children_in_index_order_not_tuple_order():
     the second assertion's child order reverses.
     """
     from stompdrill.emitters import step as step_module
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     model = _model()
     a = at(0, 0, 6 * MM, index=1)
     b = at(8 * MM, 0, 6 * MM, index=2)
+    registration = registration_for(model)
 
-    forward = _cylinder_centres(step_module._drill_compound(model, make_data(a, b)))
-    backward = _cylinder_centres(step_module._drill_compound(model, make_data(b, a)))
+    forward = _cylinder_centres(
+        step_module._drill_compound(model, make_data(a, b).with_case(registration))
+    )
+    backward = _cylinder_centres(
+        step_module._drill_compound(model, make_data(b, a).with_case(registration))
+    )
 
     assert forward == [(0.0, -28.875, -0.0), (8.0, -28.875, -0.0)]
     assert forward == backward
@@ -673,14 +687,16 @@ def test_two_emissions_describe_the_same_model(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompmodel.model import CaseFace, DrillData, Hole
+        from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole
         from stompmodel.units import Nanometre
 
         model = load_case_model(Path({str(model_path)!r}), face=CaseFace.BOX,
                                  margin_nm=Nanometre(1_000_000))
         hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
                                      Nanometre(6_000_000)).with_number(1)
-        payload = StepEmitter(StepOptions(model=model)).emit(DrillData(holes=(hole,)))
+        registration = CaseRegistration(model.part, model.face, model.model_name, model.frame)
+        data = DrillData(holes=(hole,)).with_case(registration)
+        payload = StepEmitter(StepOptions(model=model)).emit(data)
         sys.stdout.buffer.write(payload)
         """
     )

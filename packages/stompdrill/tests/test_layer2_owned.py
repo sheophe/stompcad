@@ -218,6 +218,7 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     from stompdrill.cad import load_case_model
     from stompdrill.emitters.step import cut_shape
     from stompmodel.units import nm_from_mm
+    from tests.conftest import registration_for
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
@@ -225,7 +226,7 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     data = make_data(
         at(0, 0, 6_000_000, index=1),
         at(20_000_000, -15_000_000, 8_000_000, index=2),
-    )
+    ).with_case(registration_for(model))
 
     before = cylinders(model.target_shape)
     document, undo, _touched = cut_shape(model, data)

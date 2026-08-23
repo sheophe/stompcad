@@ -12,7 +12,7 @@ from stompdrill.cad import Rejection
 from stompdrill.emitters import base
 from stompdrill.geometry import KAPPA
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, DrillData, Hole, ReferenceOutline, SourceInfo
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, ReferenceOutline, SourceInfo
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
@@ -25,6 +25,7 @@ __all__ = [
     "make_data",
     "positions",
     "circle_ops",
+    "registration_for",
     "self_nesting_form",
     "image_ending_form",
     "build_pdf",
@@ -89,6 +90,17 @@ def make_data(*given: Hole, reference: ReferenceOutline | None = None) -> DrillD
 def codes(data: DrillData) -> list[str]:
     """The stable machine key of every diagnostic a stage raised, in order."""
     return [d.code for d in data.diagnostics]
+
+
+def registration_for(model) -> CaseRegistration:
+    """A ``CaseRegistration`` naming ``model`` verbatim.
+
+    For a test that drives ``cut_shape``/``StepEmitter.emit`` directly,
+    without first running ``CheckCaseClearance`` -- the cutter now reads its
+    frame and face from ``DrillData.case``, never from the model, so a test
+    exercising it must attach one itself.
+    """
+    return CaseRegistration(model.part, model.face, model.model_name, model.frame)
 
 
 def positions(data: DrillData) -> list[tuple[Nanometre, Nanometre]]:

@@ -18,6 +18,7 @@ from stompgeom import kernel
 from stompgeom.step import label_name, leaf_labels
 from stompgeom.writer import label_entry, render_step
 from stompmodel.errors import EmitterError
+from stompmodel.frames import FaceFrame
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
 
@@ -94,17 +95,24 @@ def cut_shape(
     walk, first match in document order — a name-matching leaf with no
     shape is stepped over, never treated as the cut. Returns the mutated
     document, an ``undo`` closure restoring every changed label, and the
-    entry strings ``render_step`` needs: a replaced label keeps no colour.
+    entry strings ``render_step`` needs. The face and frame are read from
+    ``data.case``, already reconciled by ``CheckCaseClearance``, not
+    re-derived from ``model``.
     """
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
+    if data.case is None:
+        raise EmitterError(
+            "the step emitter needs a checked case registration; run "
+            "CheckCaseClearance before emitting"
+        )
     document = model.document
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     tools = _drill_compound(model, data)
     if tools is None:
         return document, lambda: None, frozenset()
 
-    keyword = step_keyword(model.face)
+    keyword = step_keyword(data.case.face)
     originals: list[tuple[Any, Any]] = []
     cut_any = any(
         _cut_leaf(tool, label, tools, originals)
@@ -189,29 +197,35 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
         return None
+    assert data.case is not None, "cut_shape already refused a missing registration"
+    frame = data.case.frame
 
     # Bounded by the two levels the clearance check already found, plus a
     # little either side. An unbounded cylinder would punch the far wall too.
     overshoot = 1.0
     depth = abs(model.inner_position_mm - model.drilled_position_mm) + 2 * overshoot
-    direction = tuple(-component for component in model.frame.basis.w)
+    direction = tuple(-component for component in frame.basis.w)
 
     compound = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(compound)
     for _, hole in holes:
-        start = _face_point(model, hole, overshoot)
+        start = _face_point(frame, hole, overshoot)
         axis = gp_Ax2(gp_Pnt(*start), gp_Dir(*direction))
         radius = float(mm_from_nm(hole.diameter_nm)) / 2
         builder.Add(compound, BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
     return compound
 
 
-def _face_point(model: OcpCaseModel, hole: Any, overshoot: float) -> tuple[float, float, float]:
-    """The cylinder's start, ``overshoot`` mm outside the drilled face."""
-    frame = model.frame.basis
-    x, y, z = frame.to_model(hole.x_nm, hole.y_nm)
-    wx, wy, wz = frame.w
+def _face_point(frame: FaceFrame, hole: Any, overshoot: float) -> tuple[float, float, float]:
+    """The cylinder's start, ``overshoot`` mm outside the drilled face.
+
+    ``frame`` is the published registration's frame, already reconciled with
+    the panel's drawn orientation -- see ``pipeline.clearance``.
+    """
+    basis = frame.basis
+    x, y, z = basis.to_model(hole.x_nm, hole.y_nm)
+    wx, wy, wz = basis.w
     return (
         float(x) + overshoot * wx,
         float(y) + overshoot * wy,

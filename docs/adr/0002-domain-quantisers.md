@@ -48,6 +48,15 @@ state which convention it holds both sides to; the cross-check in
 order before comparing, because a measured pair's own orientation is already gone by the
 time it reaches that check.
 
+The same rule extends from footprint pairs to frames: two registrations of one drilled
+face — the panel's own canonical axes and the supplied model's independently-chosen
+ones — are two orderings of the same thing, not already the same thing, and must be
+named before they are compared. The descending-sort cross-check above is blind to a
+pure axis swap **by construction** — reducing a pair to a sorted order is exactly what
+discards which axis is which — so it is not, and never was, the place that catches a
+panel drawn a quarter turn from the model's own orientation. [ADR-0007](0007-case-model-and-clearance.md)'s
+axis-correspondence convention is the rule that does.
+
 The `Background` outline is drawn to enclosure backplate dimensions. A face-drawn 1590B
 is approximately 1.9 mm from both its own backplate and the nearby 1590BS footprint.
 Below that tolerance neither footprint is accepted; at that tolerance both are accepted.

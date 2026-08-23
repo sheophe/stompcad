@@ -124,6 +124,35 @@ flowchart LR
     load -.->|before| panel
 ```
 
+**Amended: the axis correspondence is a stated convention, and the frame that reaches
+both consumers is the checked registration, not a bare re-read of the model.** The
+footprint identification records only *that* the drawn panel is the catalogue footprint
+turned a quarter turn (`EnclosureMatch.rotated`) — nothing relates the panel's own
+canonical axes to the model's independently-chosen ones. `CheckCaseClearance` is the one
+place in the system holding both facts at once — the identified enclosure, known only
+after quantisation, and the loaded model's own frame, known only before it — so it
+reconciles the two once, into a `FaceFrame` restated in the panel's drawn orientation,
+and publishes that frame and the drilled face together as `DrillData.case`, the checked
+registration. `StepEmitter` reads its frame and face from that registration, never from
+`model.frame`/`model.face` directly, and refuses with a typed error when no registration
+is present. The diagram above still holds for the parsed `CaseModel` itself — built once,
+handed to both — but what each consumer classifies or cuts against is the registration's
+frame, not an independent read of the model's.
+
+Both candidate quarter turns are orthonormal, right-handed and preserve the face normal
+`w`; they differ by a half turn in the plane, and nothing in a drill document can decide
+between them — the artwork states only that a turn happened, never which way. The
+direction is therefore a **stated convention**, not a derived value: reconciling a
+rotated panel's frame swaps `u` onto the model's own `v`, and `v` onto the model's own
+negated `u`, leaving `w` and the origin untouched. Where the correspondence cannot be
+established at all — no identified enclosure, or an identified footprint whose two
+dimensions are equal, so the model's own in-plane tie-break
+(`cad.case.build_frame`'s "arbitrarily but deterministically") carries no signal to
+confirm or contradict — the run emits `case-orientation-unverifiable` at WARNING rather
+than guessing a direction, mirroring `case-model-unverified`: both report that the check
+could not run, not a wrong answer, and an error would refuse every square-enclosure user
+the tool serves today.
+
 ## Rationale
 
 Precomputing an obstruction map in the helper script was rejected: it keeps `stompdrill`
