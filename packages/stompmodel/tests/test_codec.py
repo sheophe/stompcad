@@ -451,6 +451,43 @@ def test_a_case_registration_with_a_face_outside_the_vocabulary_is_refused() -> 
         from_document(document)
 
 
+def test_a_case_registration_with_a_float_frame_origin_is_refused() -> None:
+    """The frame's own guard is what catches this, exactly as a malformed
+    hole coordinate is caught by ``Hole``'s -- see the sibling assertion in
+    the malformed-document section below."""
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [1.5, 0.0, -30_000_000]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_short_basis_vector_is_refused() -> None:
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["u"] = [1.0, 0.0]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_degenerate_basis_is_refused() -> None:
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["u"] = [0.0, 0.0, 0.0]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_left_handed_basis_is_refused() -> None:
+    """Orthonormal, but mirrored -- the shape a bare-float codec would have
+    let straight through and every downstream hole with it."""
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["w"] = [0.0, 0.0, 1.0]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
 # --------------------------------------------------------------------------
 # holes
 # --------------------------------------------------------------------------
