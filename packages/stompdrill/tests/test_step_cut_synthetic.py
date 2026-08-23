@@ -189,3 +189,141 @@ def test_cut_shape_refuses_when_no_leaf_matches() -> None:
 
     with pytest.raises(EmitterError, match="no component named 'BOX' was found to cut"):
         cut_shape(model, data)
+
+
+def _centred_frame() -> FaceFrame:
+    """Drilled-face frame whose origin sits at the top face's own centre.
+
+    Centring (rather than reusing ``_drilled_face_frame``'s corner origin)
+    lets a swapped-axis point and its unswapped counterpart both land
+    inside the cube: a corner origin would push one of the two outside it.
+    """
+    half_nm = int(_SIZE_MM * 1_000_000 / 2)
+    full_nm = int(_SIZE_MM * 1_000_000)
+    return FaceFrame(
+        CoordinateFrame(
+            origin_nm=(Nanometre(half_nm), Nanometre(half_nm), Nanometre(full_nm)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+
+
+def _quarter_turned(frame: FaceFrame) -> FaceFrame:
+    """The same convention ``CheckCaseClearance._reconciled_frame`` pins:
+    ``u`` takes the model's own ``v``, ``v`` takes its negated ``u``."""
+    basis = frame.basis
+    ux, uy, uz = basis.u
+    return FaceFrame(
+        CoordinateFrame(
+            origin_nm=basis.origin_nm,
+            u=basis.v,
+            v=(-ux, -uy, -uz),
+            w=basis.w,
+        )
+    )
+
+
+def _classify(shape: Any, point: tuple[float, float, float]) -> Any:
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.gp import gp_Pnt
+
+    return BRepClass3d_SolidClassifier(shape, gp_Pnt(*point), 1e-6).State()
+
+
+def test_cut_shape_reads_the_registrations_frame_not_the_models_own(tmp_path) -> None:
+    """The registration's frame -- not ``model.frame`` -- decides where the
+    cut lands. Only ``registration_for`` (identity to the model) reached
+    ``cut_shape`` before this test: reverting ``_drill_compound``'s
+    ``frame = data.case.frame`` back to ``model.frame`` left every other
+    cutter test passing, because none attached a registration whose frame
+    actually diverged from the model it names. This one does: the
+    registration carries the quarter-turned frame ``CheckCaseClearance``
+    would have published for a rotated panel, while ``model.frame`` stays
+    the identity -- so a wrong read cuts a provably different point.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_State
+
+    from stompdrill.emitters.step import cut_shape
+    from stompmodel.model import CaseRegistration
+    from tests.conftest import at, make_data
+
+    cube = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    document = _two_leaf_document(cube)
+    identity = _centred_frame()
+    model = _model(document, identity)
+    registration = CaseRegistration(
+        model.part, model.face, model.model_name, _quarter_turned(identity)
+    )
+
+    # x=3, y=-1 mm from the centred origin: the identity frame would drill
+    # at model (8, 4); the quarter-turned registration drills at (6, 8).
+    # Both are comfortably inside the 10 mm face and far enough apart that
+    # a 2 mm-diameter bore at one cannot brush the other.
+    data = make_data(at(3_000_000, -1_000_000, 2_000_000, index=1)).with_case(registration)
+
+    cut_document, undo, _ = cut_shape(model, data)
+    try:
+        (drilled,) = _named_solid_shapes(cut_document, "BOX")
+        assert _classify(drilled, (8.0, 4.0, 5.0)) == TopAbs_State.TopAbs_IN, (
+            "cut at the model's own frame instead of the registration's"
+        )
+        assert _classify(drilled, (6.0, 8.0, 5.0)) == TopAbs_State.TopAbs_OUT, (
+            "not cut at the registration's reconciled point"
+        )
+    finally:
+        undo()
+
+
+def test_cut_shape_reads_the_registrations_face_not_the_models_own(tmp_path) -> None:
+    """The registration's face -- not ``model.face`` -- picks the keyword.
+
+    Two identically-shaped, identically-placed leaves named ``BOX`` and
+    ``LID``; the model itself names ``box``, the registration names
+    ``lid``. Reverting ``cut_shape``'s ``step_keyword(data.case.face)``
+    back to ``step_keyword(model.face)`` would cut ``BOX`` here instead --
+    every other test in this suite builds its registration with
+    ``registration_for``, whose face is always the model's own, so none of
+    them can see that regression.
+    """
+    import pytest
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    from stompdrill.emitters.step import cut_shape
+    from stompmodel.model import CaseFace, CaseRegistration
+    from tests.conftest import at, make_data
+
+    app = XCAFApp_Application.GetApplication_s()
+    document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    app.InitDocument(document)
+    shapes = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    box_shape = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    lid_shape = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    _leaf(shapes, box_shape, "BOX")
+    _leaf(shapes, lid_shape, "LID")
+    shapes.UpdateAssemblies()
+
+    frame = _drilled_face_frame()
+    model = _model(document, frame)  # model.face is CaseFace.BOX
+    registration = CaseRegistration(model.part, CaseFace.LID, model.model_name, frame)
+    data = make_data(at(5_000_000, 5_000_000, 2_000_000, index=1)).with_case(registration)
+
+    cut_document, undo, touched = cut_shape(model, data)
+    try:
+        assert len(touched) == 1
+        (box_after,) = _named_solid_shapes(cut_document, "BOX")
+        (lid_after,) = _named_solid_shapes(cut_document, "LID")
+        assert _volume_mm3(box_after) == pytest.approx(_volume_mm3(box_shape)), (
+            "cut the model's own face (box) instead of the registration's (lid)"
+        )
+        assert _volume_mm3(lid_after) < _volume_mm3(lid_shape)
+    finally:
+        undo()
