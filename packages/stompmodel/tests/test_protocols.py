@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
@@ -122,6 +124,99 @@ def test_a_binary_payload_is_written_unchanged(tmp_path) -> None:
 
 def test_a_binary_payload_counts_its_own_length(tmp_path) -> None:
     assert write_payload(tmp_path / "out.bin", b"%PDF-1.7\n\x00\xff") == 11
+
+
+def test_a_failed_write_leaves_a_preexisting_file_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two clauses of a failed write are independent: a fix that cleans
+    up its temporary but still corrupts the target passes the companion test
+    below and fails this one.
+    """
+    path = tmp_path / "out.bin"
+    path.write_bytes(b"ORIGINAL")
+
+    def _boom(self: Path, data: bytes) -> int:
+        # Actually truncate and partially write whatever file this call
+        # targets, so the fault is indistinguishable from a real disk-full
+        # error partway through -- a mock that raises before touching the
+        # filesystem would leave the pre-existing file untouched by
+        # construction and prove nothing about a direct-write implementation.
+        with open(self, "wb") as handle:
+            handle.write(data[: len(data) // 2])
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr(Path, "write_bytes", _boom)
+
+    with pytest.raises(OSError):
+        write_payload(path, b"REPLACEMENT-THAT-NEVER-ARRIVES")
+
+    assert path.read_bytes() == b"ORIGINAL"
+
+
+def test_a_failed_write_leaves_no_temporary_file_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two clauses are independent: a fix that preserves the target but
+    litters the directory with an abandoned temporary passes the test above
+    and fails this one.
+    """
+    path = tmp_path / "out.bin"
+    path.write_bytes(b"ORIGINAL")
+
+    def _boom(self: Path, data: bytes) -> int:
+        # Actually truncate and partially write whatever file this call
+        # targets, so the fault is indistinguishable from a real disk-full
+        # error partway through -- a mock that raises before touching the
+        # filesystem would leave the pre-existing file untouched by
+        # construction and prove nothing about a direct-write implementation.
+        with open(self, "wb") as handle:
+            handle.write(data[: len(data) // 2])
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr(Path, "write_bytes", _boom)
+
+    with pytest.raises(OSError):
+        write_payload(path, b"REPLACEMENT-THAT-NEVER-ARRIVES")
+
+    assert [entry.name for entry in tmp_path.iterdir()] == ["out.bin"]
+
+
+def test_the_temporary_and_the_target_share_a_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proved rather than asserted: spy on the rename call itself, so the
+    replacement is shown to be atomic on the target's own filesystem rather
+    than merely tidy.
+    """
+    path = tmp_path / "out.bin"
+    seen: dict[str, Path] = {}
+    real_replace = os.replace
+
+    def _spy_replace(src: str | Path, dst: str | Path) -> None:
+        seen["src"] = Path(src)
+        seen["dst"] = Path(dst)
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", _spy_replace)
+
+    write_payload(path, b"DATA")
+
+    assert seen["src"] != seen["dst"]
+    assert seen["src"].parent == seen["dst"].parent == tmp_path
+
+
+def test_a_target_whose_directory_is_missing_still_raises_an_os_error(
+    tmp_path: Path,
+) -> None:
+    """The temp-and-rename mechanism must not change which failures occur --
+    only what a failure leaves behind. A missing parent is still the same
+    class of error the command line already translates to its IO exit code.
+    """
+    missing = tmp_path / "nope" / "out.bin"
+
+    with pytest.raises(OSError):
+        write_payload(missing, b"DATA")
 
 
 # --------------------------------------------------------------------------

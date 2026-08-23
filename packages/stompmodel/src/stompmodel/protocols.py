@@ -8,6 +8,8 @@ ADR-0001's consistency argument bites. See ADR-0009.
 
 from __future__ import annotations
 
+import os
+import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
@@ -88,23 +90,29 @@ Payload = str | bytes
 
 
 def write_payload(path: Path, payload: Payload) -> int:
-    """Write ``payload``, letting its own type choose the mode.
+    """Write ``payload`` to ``path``, letting its own type choose the mode.
 
-    Returns the encoded byte count, which is the number both tools report
-    and ``stompcad`` reduces over. A second copy of this branch is a second
-    counting convention, which is the drift ADR-0005's consequence forbids.
+    Writes to a temporary file beside ``path`` and renames it into place, so
+    ``path`` afterwards holds either the complete payload or exactly what it
+    held before: a failure partway through never leaves a truncated
+    artefact, and the temporary does not survive the failure. Returns the
+    encoded byte count, which is the number both tools report and
+    ``stompcad`` reduces over -- a second copy of either branch is the drift
+    ADR-0005's consequence forbids.
     """
-    if isinstance(payload, bytes):
-        path.write_bytes(payload)
-        return len(payload)
-    encoded = payload.encode("utf-8")
-    # newline="\n" disables universal-newline translation, which otherwise
-    # rewrites "\n" to os.linesep and makes the returned count -- the
-    # untranslated encoding length -- wrong on a platform where the two
-    # differ. On POSIX os.linesep is already "\n", so no artefact byte
-    # changes here; this makes the contract true everywhere, not just here.
-    path.write_text(payload, encoding="utf-8", newline="\n")
-    return len(encoded)
+    # Encoding first means one write path serves both payload types, and it
+    # is what makes the "untranslated encoded length" contract exact: bytes
+    # written this way are never subject to newline translation, on any
+    # platform, so there is no "\n"-vs-os.linesep case to reason about.
+    data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return len(data)
 
 
 @runtime_checkable
