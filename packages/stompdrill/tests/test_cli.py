@@ -1999,15 +1999,196 @@ def test_a_hole_outside_the_outline_exits_one_and_still_writes_the_artefact(
     assert target.exists()
 
 
-def test_the_report_names_the_model_face_and_play_area():
-    from stompdrill.cli import format_case
-    from tests.test_clearance import FakeCase
+def _case_checked_document():
+    """A ``DrillData`` carrying the two carriers a real ``--case-model`` run
+    produces: the typed ``CaseRegistration`` and the clearance stage's own
+    ``StageRun`` provenance -- not a stand-in that shares field names by
+    construction.
+    """
+    from stompdrill.pipeline import CheckCaseClearance
+    from tests.conftest import FakeCase, at, make_data
 
-    lines = "\n".join(format_case(FakeCase()))
+    stage = CheckCaseClearance(FakeCase())
+    data = stage.apply(
+        make_data(
+            at(-1_000_000, 2_000_000, 5_000_000, index=1),
+            at(3_000_000, -4_000_000, 4_000_000, index=2),
+        )
+    )
+    return data.with_processing(stage.describe())
+
+
+def test_the_report_names_the_model_face_and_play_area():
+    """``format_case`` reads identity from ``.case`` and plate/play area from
+    the clearance stage's own provenance -- the two carriers a real run
+    produces -- rather than a live ``CaseModel`` handle.
+    """
+    from stompdrill.cli import format_case
+
+    lines = "\n".join(format_case(_case_checked_document()))
 
     assert "CASE MODEL" in lines
     assert "1590BB" in lines
     assert "box" in lines
+    assert "plate" in lines
+    assert "play area" in lines
+
+
+def test_report_is_byte_identical_after_a_codec_round_trip_with_a_case():
+    """The report the live pipeline result prints and the report a document
+    round-tripped through the codec prints must agree byte for byte -- the
+    behaviour lock cannot see this, since it excludes standard output, so
+    this equality is what protects a report regression instead.
+    """
+    from stompdrill.cli import format_report
+    from stompmodel.codec import from_document, to_document
+
+    live = _case_checked_document()
+    restored = from_document(to_document(live))
+
+    live_report = format_report(live)
+    restored_report = format_report(restored)
+
+    assert live_report == restored_report
+    assert "CASE MODEL" in live_report
+    assert "1590BB" in live_report
+
+
+def test_format_report_reads_the_case_from_a_registration_alone():
+    """A ``DrillData`` carrying only ``.case``, with no clearance provenance at
+    all (e.g. hand-built, or a document from a tool that never ran the
+    clearance stage), still states identity -- it must not require the live
+    ``CaseModel`` handle ``format_report`` no longer accepts.
+
+    Reproduces .scratch/architecture-review/falsify/tests/test_f2_02_case_report_from_data.py.
+    """
+    from stompdrill.cli import format_report
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registration = CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face)
+    data = DrillData().with_case(registration)
+
+    report = format_report(data)
+
+    assert "CASE MODEL" in report
+
+
+def test_format_report_states_the_case_a_restored_document_carries():
+    """A document round-tripped through the codec, carrying a registration
+    but no clearance provenance (the shape a second tool receives, per
+    ADR-0009), still states identity and never raises -- it degrades to
+    fewer lines, not an exception.
+
+    Reproduces .scratch/architecture-review/falsify/tests/test_f2_02_case_report_blind.py.
+    """
+    from stompdrill.cli import format_report
+    from stompmodel.codec import from_document, to_document
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registered = DrillData().with_case(CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face))
+    data = from_document(to_document(registered))
+
+    assert data.case is not None
+    assert data.case.part == "1590BB"
+
+    report = format_report(data)
+
+    assert "CASE MODEL" in report
+    assert "1590BB" in report
+    # Identity only: no clearance stage ran, so there is no plate or play
+    # area to state.
+    assert "plate" not in report
+    assert "play area" not in report
+
+
+def test_case_plate_guard_ignores_a_value_of_the_wrong_shape():
+    """``plate_nm`` is checked elementwise by ``StageRun``'s whole-nanometre
+    guard (ADR-0004), which only inspects a *tuple* value's own elements --
+    so a tuple where a scalar is expected is legitimately constructible, and
+    ``format_case``'s own guard, not the type, must be what rejects it.
+    """
+    from stompdrill.cli import format_case
+    from stompdrill.pipeline import CheckCaseClearance
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registration = CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face)
+    run = StageRun(
+        CheckCaseClearance.name,
+        (
+            ("plate_nm", (2_250_000,)),
+            ("play_area_nm", (-50_000_000, -40_000_000, 50_000_000, 40_000_000)),
+        ),
+    )
+    data = DrillData(case=registration, processing=(run,))
+
+    lines = "\n".join(format_case(data))
+
+    assert "CASE MODEL" in lines
+    assert "plate" not in lines
+    assert "play area" in lines
+
+
+def test_case_play_area_guard_ignores_a_value_of_the_wrong_shape():
+    """A ``play_area_nm`` of the wrong length passes ``StageRun``'s
+    elementwise nanometre check (every element is still a whole nanometre)
+    but is the wrong shape to unpack as four corners, and only
+    ``format_case``'s own guard catches that.
+    """
+    from stompdrill.cli import format_case
+    from stompdrill.pipeline import CheckCaseClearance
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registration = CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face)
+    run = StageRun(
+        CheckCaseClearance.name,
+        (
+            ("plate_nm", 2_250_000),
+            ("play_area_nm", (-50_000_000, -40_000_000, 50_000_000)),
+        ),
+    )
+    data = DrillData(case=registration, processing=(run,))
+
+    lines = "\n".join(format_case(data))
+
+    assert "CASE MODEL" in lines
+    assert "plate" in lines
+    assert "play area" not in lines
 
 
 # ---------------------------------------------------------------------------

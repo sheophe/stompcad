@@ -31,7 +31,7 @@ from stompmodel.model import CaseFace, DrillData
 from stompmodel.protocols import Emitter, Payload, Pipeline, Stage
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
-from .cad import CaseModel, OcpCaseModel
+from .cad import OcpCaseModel
 from .emitters import (
     DrawingOptions,
     ExcellonOptions,
@@ -532,23 +532,47 @@ def format_enclosure(data: DrillData) -> list[str]:
     return lines
 
 
-def format_case(model: CaseModel | None) -> list[str]:
-    """Report the supplied model, the drilled side, and the usable area."""
-    if model is None:
+#: The keys ``CheckCaseClearance.describe`` records the plate and play area
+#: under -- read back here the same way ``_tool_label`` reads ``standard``.
+_PLATE_PARAMETER = "plate_nm"
+_PLAY_AREA_PARAMETER = "play_area_nm"
+
+
+def format_case(data: DrillData) -> list[str]:
+    """Report the supplied model's identity, plate, and play area.
+
+    Identity comes from ``data.case``, the typed registration a case check
+    attaches. Plate and play area come from the clearance stage's own
+    provenance, read through ``StageRun.get`` behind the same ``isinstance``
+    idiom ``_tool_label`` uses for the drill standard: absent or malformed
+    provenance degrades to fewer lines, never an exception -- this is the
+    workspace's only human-facing reader of these facts, so it must not
+    require a live, kernel-backed model to state them.
+    """
+    case = data.case
+    if case is None:
         return []
-    x0, y0, x1, y1 = model.play_area_nm
-    return [
-        "",
-        "CASE MODEL",
-        _field("part", f"{model.part}  ({model.face.value})"),
-        _field("plate", f"{format_nm(model.plate_nm)} mm"),
-        _field(
-            "play area",
-            f"{format_nm(Nanometre(x1 - x0))} x {format_nm(Nanometre(y1 - y0))} mm"
-            f"  |  x {format_nm(x0)}…{format_nm(x1)}"
-            f"  y {format_nm(y0)}…{format_nm(y1)}",
-        ),
-    ]
+    lines = ["", "CASE MODEL", _field("part", f"{case.part}  ({case.face.value})")]
+    run = data.last_run(CheckCaseClearance.name)
+    plate_nm = None if run is None else run.get(_PLATE_PARAMETER)
+    if isinstance(plate_nm, int):
+        lines.append(_field("plate", f"{format_nm(Nanometre(plate_nm))} mm"))
+    play_area = None if run is None else run.get(_PLAY_AREA_PARAMETER)
+    if (
+        isinstance(play_area, tuple)
+        and len(play_area) == 4
+        and all(isinstance(v, int) for v in play_area)
+    ):
+        x0, y0, x1, y1 = (Nanometre(int(v)) for v in play_area)
+        lines.append(
+            _field(
+                "play area",
+                f"{format_nm(Nanometre(x1 - x0))} x {format_nm(Nanometre(y1 - y0))} mm"
+                f"  |  x {format_nm(x0)}…{format_nm(x1)}"
+                f"  y {format_nm(y0)}…{format_nm(y1)}",
+            )
+        )
+    return lines
 
 
 def format_holes(data: DrillData) -> list[str]:
@@ -665,8 +689,8 @@ def format_summary(data: DrillData) -> list[str]:
     return ["", ", ".join(parts)]
 
 
-def format_report(data: DrillData, model: CaseModel | None = None) -> str:
-    lines = format_source(data) + format_enclosure(data) + format_case(model) + format_holes(data)
+def format_report(data: DrillData) -> str:
+    lines = format_source(data) + format_enclosure(data) + format_case(data) + format_holes(data)
     lines += format_tools(data)
     lines += format_diagnostics(data)
     return "\n".join(lines)
@@ -804,7 +828,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     data = run_pipeline(pipeline, data, trace)
 
-    print(format_report(data, model=args.case_model_object), file=out)
+    print(format_report(data), file=out)
 
     if emitters:
         print(file=out)

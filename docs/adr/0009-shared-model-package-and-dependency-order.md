@@ -14,6 +14,12 @@ member must also state the convention under which it is read -- with
 `CaseRegistration.face` as the worked example: it was a bare string with no
 published vocabulary until `stompmodel.model.CaseFace` closed it. See the admission
 rules below.
+**Amended again:** the behaviour rule and the provenance-versus-contract rule are
+restated as obligations with a completion condition, not permissions to use once
+convenient, and the Consequences gain a standing gate -- the human-facing report
+must be reproducible from the document alone. `CaseRegistration`, promoted under
+the provenance rule with no reader outside the codec, is the worked example: see
+the admission rules and the Consequences section below.
 
 Amends [ADR-0008](0008-workspace-and-shared-geometry-core.md), which decided four
 packages. There are five.
@@ -83,6 +89,14 @@ Four admission rules, and nothing else gets in:
    this rule applied: the type they guard already lives in `stompmodel`, so a
    caller enforcing it again outside the module is one rule with two
    implementations that can drift, not a second rule.
+
+   This is an obligation, not a permission to use once convenient: the rule
+   is not satisfied by the shared implementation merely existing while a
+   site it constrains keeps its own copy. **A publication under this rule is
+   complete only once every site it constrains calls the published
+   implementation instead of restating it.** `Hole.tie_break` joins
+   `check_millimetres` and `check_nanometres` as the rule applied; ADR-0006
+   records which sites it migrated.
 4. **Provenance versus contract** — `StageRun.parameters` is provenance for the
    tool that produced it, a string-keyed bag nothing outside that tool should
    read. A fact a second consumer must read is a typed member with a codec
@@ -103,6 +117,20 @@ Four admission rules, and nothing else gets in:
    member lives, so a reader with only `stompmodel` installed can enumerate
    every legal face without reading `stompdrill`'s source, and a face the type
    does not hold is a construction failure everywhere, never a default.
+
+   This rule too is an obligation, not a permission: **a promotion under it is
+   complete only when every consumer that states the fact reads the typed
+   member**, not only when the type exists and a codec can round-trip it. A
+   typed member whose only reader is the codec is an unexercised promotion --
+   a defect in its writer surfaces nowhere else in this workspace.
+   `CaseRegistration` is the worked example: admitted under this rule with a
+   codec inverse, it was left with no reader outside `to_document`/
+   `from_document`, so the one place that states these facts to a human --
+   `stompdrill.cli`'s report -- kept reading a live, kernel-backed case model
+   instead of the document it was standing beside. The promotion completes
+   only once that formatter reads `DrillData.case`, and the plate and play
+   area recorded beside it in the clearance stage's own provenance, rather
+   than the live handle it used to require.
 
 A type a package owns and merely exposes to a library consumer **stays home**.
 `stompcad` reading `stompcollider`'s `DockReport` is ordinary library consumption, not
@@ -260,3 +288,11 @@ key is read rather than handed an unexpected member.
 The risk is that `stompmodel` accumulates types on rule 2's authority. The check is
 that a type admitted under rule 2 must name the `stompcad` behaviour that depends on
 the uniformity; a type that cannot name one is being moved for tidiness.
+
+**Amended again: a standing gate joins the four admission rules above.** The
+human-facing report must be reproducible from the document alone: every fact
+`stompdrill.cli.format_report` states comes from a typed member or from
+provenance the document itself carries, never from a value only a live
+pipeline run holds. `CaseRegistration`'s promotion above is one instance of
+this gate; it names no member, so it binds every future typed member the
+same way.
