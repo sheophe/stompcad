@@ -171,6 +171,53 @@ def test_a_model_agreeing_with_the_panel_raises_nothing():
     assert codes(result) == []
 
 
+def test_a_1590lb_model_is_not_wrong_case_model_though_its_footprint_is_transposed():
+    """The catalogue publishes 1590LB with length (50.55 mm) smaller than
+    width (50.60 mm) -- the one row where "length" is not the larger figure.
+    ``load_case_model`` always sorts a model's in-plane spans descending, so a
+    genuine 1590LB model's ``footprint_nm`` is (larger, smaller) while the
+    catalogue match's (length_nm, width_nm) is (smaller, larger). The
+    cross-check must recognise these as the same pair, not two different
+    footprints.
+    """
+    model = FakeCase()
+    model.part = "1590LB"
+    model.footprint_nm = (Nanometre(50_600_000), Nanometre(50_550_000))
+    match = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=Nanometre(50_550_000),
+        width_nm=Nanometre(50_600_000),
+        candidates=("1590LB",),
+        selected_part="1590LB",
+    )
+
+    result = run(model, at(0, 0, 7 * MM, index=1), enclosure=match)
+
+    assert "wrong-case-model" not in codes(result)
+
+
+def test_a_1590lb_model_against_a_genuinely_different_footprint_still_fails():
+    """Order independence must not blur a footprint that is actually
+    different -- only a transposed-but-equal pair passes. Same fixture model
+    as the transposed case above; only the identified match differs, so the
+    distinction is the test's, not the fixture's.
+    """
+    model = FakeCase()
+    model.part = "1590LB"
+    model.footprint_nm = (Nanometre(50_600_000), Nanometre(50_550_000))
+    match = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=Nanometre(50_500_000),
+        width_nm=Nanometre(50_500_000),
+        candidates=("1590LLB",),
+        selected_part="1590LLB",
+    )
+
+    result = run(model, at(0, 0, 7 * MM, index=1), enclosure=match)
+
+    assert "wrong-case-model" in codes(result)
+
+
 def test_an_unidentified_panel_skips_the_cross_check_with_an_info():
     result = run(FakeCase(), at(0, 0, 7 * MM, index=1), enclosure=None)
 

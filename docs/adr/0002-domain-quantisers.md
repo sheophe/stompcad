@@ -38,6 +38,16 @@ the question from identification to positive verification:
 | Declared case | The declared part's footprint is positively verified | Accept the footprint and record the declared part as selected. |
 | Declared case | Any other outcome | Report an error. |
 
+A catalogue footprint and a measured span pair are two orderings of the same pair, not a
+length and a width in the everyday sense. `docs/parts/dimensions.tsv` publishes each row
+in whatever order Hammond's own drawing states, and nothing asserts that the published
+length is always the larger figure — `1590LB` publishes it smaller. A rule that compares
+a supplied model's measured footprint against an identified catalogue footprint must
+state which convention it holds both sides to; the cross-check in
+[ADR-0007](0007-case-model-and-clearance.md) reduces both pairs to the same descending
+order before comparing, because a measured pair's own orientation is already gone by the
+time it reaches that check.
+
 The `Background` outline is drawn to enclosure backplate dimensions. A face-drawn 1590B
 is approximately 1.9 mm from both its own backplate and the nearby 1590BS footprint.
 Below that tolerance neither footprint is accepted; at that tolerance both are accepted.

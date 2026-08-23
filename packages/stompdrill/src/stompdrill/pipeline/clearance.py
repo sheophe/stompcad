@@ -81,12 +81,13 @@ class CheckCaseClearance:
     def _cross_check(self, data: DrillData) -> Diagnostic | None:
         """Compare the model's footprint with the identified enclosure.
 
-        Unidentified: skipped with an INFO, not guessed at. Exact nanometre
-        equality, stricter than ``case.py``'s 0.05 mm or ``enclosure.py``'s
-        1.5 mm, because this gates an exit-2 error withholding every
-        artefact. Safe because it is measured: all four cached Hammond
-        models' in-plane spans round to their catalogue nanometre exactly.
-        Revisit if a future model's bbox carries a nanometre of noise.
+        Unidentified: skipped with an INFO, not guessed at. Both footprints
+        are reduced to the same descending order before comparing -- see
+        ADR-0002 -- because the loader has already discarded the model's own
+        length/width labelling, and the catalogue publishes its own pair in
+        whatever order Hammond's drawing states (``1590LB`` smaller first).
+        Still exact nanometre equality once reduced, stricter than
+        ``case.py``'s 0.05 mm or ``enclosure.py``'s 1.5 mm tolerance.
         """
         match = data.enclosure
         if match is None:
@@ -96,7 +97,9 @@ class CheckCaseClearance:
                 f"{self.model.part} model could not be checked against it",
             )
         length_nm, width_nm = self.model.footprint_nm
-        if (match.length_nm, match.width_nm) == (length_nm, width_nm):
+        model_pair = tuple(sorted((length_nm, width_nm), reverse=True))
+        catalogue_pair = tuple(sorted((match.length_nm, match.width_nm), reverse=True))
+        if model_pair == catalogue_pair:
             return None
         return Diagnostic.error(
             "wrong-case-model",
