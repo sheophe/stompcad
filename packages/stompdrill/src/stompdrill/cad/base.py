@@ -26,11 +26,14 @@ class Rejection(Enum):
 
 @runtime_checkable
 class CaseModel(Protocol):
-    """A supplied enclosure, reduced to what clearance and cutting need.
+    """The kernel-free clearance contract: what ``CheckCaseClearance`` needs.
 
-    Declared as read-only properties, not plain attributes: a frozen,
-    slotted implementation's fields are themselves read-only, and mypy
-    only matches a Protocol's structural members when settability agrees.
+    Cutting needs a live kernel document and is typed against the
+    kernel-backed model directly, never against this protocol — see
+    ADR-0007. Declared as read-only properties, not plain attributes: a
+    frozen, slotted implementation's fields are themselves read-only, and
+    mypy only matches a Protocol's structural members when settability
+    agrees.
     """
 
     @property

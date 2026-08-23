@@ -29,7 +29,7 @@ from stompmodel.model import DrillData
 from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, write_payload
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
-from .cad import CaseModel
+from .cad import CaseModel, OcpCaseModel
 from .emitters import (
     DrawingOptions,
     ExcellonOptions,
@@ -292,7 +292,7 @@ def _selected_sizes(text: str | None, flag: str) -> tuple[Nanometre, ...] | None
     return tuple(nm_from_mm(size) for size in parse_sizes(text, flag))
 
 
-def build_case_model(args: argparse.Namespace) -> CaseModel | None:
+def build_case_model(args: argparse.Namespace) -> OcpCaseModel | None:
     """Load the supplied case model, or ``None`` when none was given.
 
     ``--case-face`` and ``--case-margin`` are validated whether or not a
@@ -365,7 +365,7 @@ def build_pipeline(args: argparse.Namespace) -> Pipeline[DrillData]:
         RouteHoles(),
         CheckOutlineContainment(),
     ]
-    model = getattr(args, "case_model_object", None)
+    model: OcpCaseModel | None = getattr(args, "case_model_object", None)
     if model is not None:
         stages.append(CheckCaseClearance(model))
     return Pipeline(stages)
@@ -389,7 +389,7 @@ class OutputSettings:
     """Command-line values from which emitter-specific options are built."""
 
     title: str = ""
-    case_model: Any | None = None
+    case_model: OcpCaseModel | None = None
 
 
 #: Keyed by options **class**, never by format name. An emitter whose options
@@ -443,7 +443,8 @@ def make_emitter(name: str, settings: OutputSettings) -> Emitter[DrillData]:
 
 
 def settings_from(args: argparse.Namespace) -> OutputSettings:
-    return OutputSettings(title=args.title, case_model=getattr(args, "case_model_object", None))
+    model: OcpCaseModel | None = getattr(args, "case_model_object", None)
+    return OutputSettings(title=args.title, case_model=model)
 
 
 def run_pipeline(

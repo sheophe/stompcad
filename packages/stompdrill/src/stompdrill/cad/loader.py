@@ -16,7 +16,7 @@ from typing import Any
 from stompmodel.frames import FaceFrame
 from stompmodel.units import Nanometre, nm_from_mm
 
-from .base import CaseModel, Rejection
+from .base import Rejection
 
 __all__ = ["OcpCaseModel", "load_case_model"]
 
@@ -86,7 +86,7 @@ class OcpCaseModel:
 
 def load_case_model(
     path: Path, *, face: str, margin_nm: Nanometre, part: str | None = None
-) -> CaseModel:
+) -> OcpCaseModel:
     """Read ``path`` and build the model for the named face."""
     from stompgeom import kernel
     from stompgeom.step import read_step

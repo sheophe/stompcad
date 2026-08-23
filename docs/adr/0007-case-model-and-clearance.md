@@ -144,8 +144,20 @@ and clip. It is kept on the kernel anyway: `BRepClass_FaceClassifier` and
 `BRepExtrema_DistShapeShape` answer containment and clearance exactly against the real
 trimmed face, where hand-rolled code would tessellate the arcs and inherit a resolution
 parameter. If the `stompdrill[step]` requirement proves annoying, a pure-Python `cad`
-backend can be added behind the `CaseModel` protocol later without touching the stage —
-which is most of why the protocol exists rather than a concrete OCP type.
+backend can be added behind the `CaseModel` protocol later without touching the stage.
+
+**Sharpened: `CaseModel` is the kernel-free *clearance* contract; cutting is bound to
+the kernel-backed model and is deliberately not behind a protocol.** A cut needs a live
+kernel document — `cut_shape` reads a `TDocStd_Document` and runs `BRepAlgoAPI_Cut` on
+it — and no pure-Python backend can ever supply one, so a `CuttableCaseModel` protocol
+would have exactly one possible implementation. The escape hatch above is therefore a
+*clearance* adapter, and remains possible at the protocol's declared size; the cutting
+path (`cut_shape`, `StepOptions.model`, `OutputSettings.case_model`,
+`load_case_model`'s return, the CLI's case-model construction) is typed against
+`OcpCaseModel`, the one implementation, instead. `StepEmitter.__init__` refuses a
+clearance-only model with the same typed `EmitterError` it already raises for a missing
+one, naming `--case-model` as the remedy, rather than letting `cut_shape` reach for a
+member `CaseModel` never promised and die with a bare `AttributeError` mid-emit.
 
 **Amended: there is no extra to find annoying.** The kernel arrives with `stompgeom`,
 so the motive above is gone. The escape hatch is not: a pure-Python backend behind the

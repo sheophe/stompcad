@@ -21,6 +21,7 @@ from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
 
+from ..cad import OcpCaseModel
 from .base import register_emitter
 
 __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
@@ -36,7 +37,7 @@ _ORIGINATING_SYSTEM = f"stompdrill {_VERSION}"
 class StepOptions:
     """The supplied case model to cut, and the title recorded in the header."""
 
-    model: Any | None = None
+    model: OcpCaseModel | None = None
     title: str = ""
 
 
@@ -56,6 +57,11 @@ class StepEmitter:
             kernel.require_kernel()
         except kernel.KernelUnavailable as failure:
             raise EmitterError(str(failure)) from failure
+        if not isinstance(self.options.model, OcpCaseModel):
+            raise EmitterError(
+                "the step emitter needs a kernel-backed case model from --case-model; "
+                "a clearance-only model cannot be cut"
+            )
 
     def emit(self, data: DrillData) -> bytes:
         """Cut every numbered hole, write STEP, then undo the cut in place.
@@ -79,7 +85,9 @@ class StepEmitter:
             undo()
 
 
-def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None], frozenset[str]]:
+def cut_shape(
+    model: OcpCaseModel, data: DrillData
+) -> tuple[Any, Callable[[], None], frozenset[str]]:
     """Replace the drilled solid in the model's document with a cut copy.
 
     The solid is located by product-name keyword, walking the assembly tree
@@ -184,7 +192,7 @@ def _cut_leaf(
     return True
 
 
-def _drill_compound(model: Any, data: DrillData) -> Any | None:
+def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     """One compound of bounded cylinders, sorted into drill-number order.
 
     ``data.numbered()`` pairs each hole with its ``Hole.index`` but yields
@@ -218,11 +226,13 @@ def _drill_compound(model: Any, data: DrillData) -> Any | None:
     return compound
 
 
-def _face_point(model: Any, hole: Any, overshoot: float) -> tuple[float, float, float]:
+def _face_point(model: OcpCaseModel, hole: Any, overshoot: float) -> tuple[float, float, float]:
     """The cylinder's start, ``overshoot`` mm outside the drilled face."""
     frame = model.frame.basis
     x, y, z = frame.to_model(hole.x_nm, hole.y_nm)
-    return tuple(
-        float(value) + overshoot * frame.w[i]
-        for i, value in enumerate((x, y, z))
+    wx, wy, wz = frame.w
+    return (
+        float(x) + overshoot * wx,
+        float(y) + overshoot * wy,
+        float(z) + overshoot * wz,
     )
