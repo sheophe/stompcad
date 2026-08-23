@@ -436,10 +436,19 @@ def _options_for(emitter_cls: type, settings: OutputSettings) -> Any | None:
 
 
 def make_emitter(name: str, settings: OutputSettings) -> Emitter[DrillData]:
-    """Resolve ``name`` through the registry and give it its options."""
+    """Resolve ``name`` through the registry and give it its options.
+
+    A registered emitter is a conforming extension by definition; one whose
+    constructor needs more than this CLI can supply is a usage failure, not an
+    unexpected fault, so only the construction call itself is guarded — an
+    emitter's later ``emit`` step keeps its own tracebacks.
+    """
     emitter_cls = get_emitter(name)  # raises EmitterError for an unknown format
     options = _options_for(emitter_cls, settings)
-    return emitter_cls() if options is None else emitter_cls(options)
+    try:
+        return emitter_cls() if options is None else emitter_cls(options)
+    except TypeError as failure:
+        raise UsageError(f"--emit {name}=...: cannot construct this emitter: {failure}") from failure
 
 
 def settings_from(args: argparse.Namespace) -> OutputSettings:

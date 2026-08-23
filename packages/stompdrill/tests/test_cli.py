@@ -219,6 +219,97 @@ def test_unregistering_the_dummy_leaves_the_registry_as_it_was(clean_registry):
     assert "dummy-test-format" not in available()
 
 
+def test_a_registered_emitter_needing_options_this_cli_cannot_supply_exits_three(
+    clean_registry, fake_source, tmp_path, capsys
+):
+    """The documented "New emitter" recipe, executed to the letter.
+
+    Implement ``Emitter``, decorate with ``register_emitter``, skip the CLI
+    edit because no flags are needed -- and give the options a required,
+    no-default constructor parameter. The CLI cannot supply one, so this is a
+    usage failure (exit 3), not the unhandled ``TypeError`` it used to be.
+    """
+
+    @dataclasses.dataclass(frozen=True, slots=True)
+    class FooOptions:
+        thing: str  # required, no default -- no CLI flags needed per the recipe
+
+    @register_emitter
+    class FooEmitter:
+        name = "foo-needs-options"
+        media_type = "text/plain"
+        extension = ".foo"
+
+        def __init__(self, options: FooOptions) -> None:
+            self.options = options
+
+        def emit(self, data):
+            return self.options.thing.encode()
+
+    fake_source(read())
+    out = tmp_path / "out.foo"
+
+    code = cli.main([str(FIXTURE), "--emit", f"foo-needs-options={out}"])
+
+    assert code == 3
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "foo-needs-options" in err
+
+
+def test_a_registered_emitter_with_defaulted_options_still_emits_normally(
+    clean_registry, fake_source, tmp_path
+):
+    """The recipe's other lawful shape -- a constructor needing nothing -- is
+    unaffected: the fix must not refuse a conforming extension wholesale."""
+
+    @register_emitter
+    class BareEmitter:
+        name = "bare-needs-nothing"
+        media_type = "text/plain"
+        extension = ".bare"
+
+        def __init__(self):
+            pass
+
+        def emit(self, data):
+            return b"bare\n"
+
+    fake_source(read())
+    out = tmp_path / "out.bare"
+
+    code = cli.main([str(FIXTURE), "--emit", f"bare-needs-nothing={out}"])
+
+    assert code == 0
+    assert out.read_bytes() == b"bare\n"
+
+
+def test_an_unrelated_typeerror_from_an_emitters_own_emit_step_still_propagates(
+    clean_registry, fake_source, tmp_path
+):
+    """Proves the narrowness: only construction is guarded. A ``TypeError``
+    raised later, from ``emit`` itself, is a genuinely unexpected fault and
+    must keep its traceback rather than being reclassified as usage error 3."""
+
+    @register_emitter
+    class BrokenEmitEmitter:
+        name = "broken-emit"
+        media_type = "text/plain"
+        extension = ".broken"
+
+        def __init__(self):
+            pass
+
+        def emit(self, data):
+            raise TypeError("unrelated fault inside emit, not construction")
+
+    fake_source(read())
+    out = tmp_path / "out.broken"
+
+    with pytest.raises(TypeError, match="unrelated fault inside emit"):
+        cli.main([str(FIXTURE), "--emit", f"broken-emit={out}"])
+
+
 def _docstring_constants(tree: ast.AST) -> set[int]:
     """``id()`` of every string-literal ``Constant`` node that is a docstring.
 
