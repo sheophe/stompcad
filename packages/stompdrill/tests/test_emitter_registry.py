@@ -177,10 +177,10 @@ def test_a_bytes_payload_is_written_verbatim(tmp_path):
             return payload
 
     path = tmp_path / "out.bin"
-    line = cli._write(BinaryEmitter(), path, payload)
+    lines = cli._commit(cli._stage([(BinaryEmitter(), path, payload)]))
 
     assert path.read_bytes() == payload
-    assert "20 bytes" in line
+    assert "20 bytes" in lines[0]
 
 
 def test_a_text_payload_is_still_written_as_utf8(tmp_path):
@@ -195,8 +195,8 @@ def test_a_text_payload_is_still_written_as_utf8(tmp_path):
         def emit(self, data):
             return "⌀7.000"
 
-    line = cli._write(TextEmitter(), path, "⌀7.000")
+    lines = cli._commit(cli._stage([(TextEmitter(), path, "⌀7.000")]))
 
     assert path.read_text(encoding="utf-8") == "⌀7.000"
     # ⌀ is three bytes in UTF-8, so the count is not the character count.
-    assert "8 bytes" in line
+    assert "8 bytes" in lines[0]
