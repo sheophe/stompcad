@@ -16,9 +16,12 @@ __all__ = ["Deduplicate"]
 
 
 class Deduplicate:
-    """Keep the first of holes equal in ``x_nm``, ``y_nm`` and ``diameter_nm``.
+    """Collapse holes equal in ``x_nm``, ``y_nm`` and ``diameter_nm``.
 
-    Input order selects the survivor; near misses are retained.
+    A coincident group's survivor is chosen by its own raw measurement, total
+    on geometry (ADR-0006) rather than on arrival: no prior stage need sort
+    the input for the choice to be order-independent. Near misses are
+    retained.
     """
 
     name: ClassVar[str] = "deduplicate"
@@ -39,22 +42,28 @@ class Deduplicate:
                 groups.append([hole])
 
         diagnostics = [self._report(group) for group in groups if len(group) > 1]
+        survivors = [min(group, key=_measurement_key) for group in groups]
 
-        return data.with_holes([group[0] for group in groups]).with_diagnostics(*diagnostics)
+        return data.with_holes(survivors).with_diagnostics(*diagnostics)
 
     def _report(self, group: list[Hole]) -> Diagnostic:
-        """Report the place, the diameter, and how many holes were collapsed."""
-        survivor, dropped = group[0], group[1:]
-        plural = "" if len(dropped) == 1 else "s"
+        """Report the place, the diameter, and how many holes were collapsed.
+
+        Every member of a coincident group shares one nominal ``x_nm``,
+        ``y_nm`` and ``diameter_nm`` by ``_same_hole``'s own definition, so
+        which member is read here does not depend on which one survives.
+        """
+        sample, dropped = group[0], len(group) - 1
+        plural = "" if dropped == 1 else "s"
         return Diagnostic.warning(
             "duplicate-hole",
-            f"{len(group)} coincident ⌀{format_nm(survivor.diameter_nm)} mm holes at "
-            f"({format_nm(survivor.x_nm)}, {format_nm(survivor.y_nm)}); "
-            f"{len(dropped)} hole{plural} dropped",
-            location_nm=(survivor.x_nm, survivor.y_nm),
+            f"{len(group)} coincident ⌀{format_nm(sample.diameter_nm)} mm holes at "
+            f"({format_nm(sample.x_nm)}, {format_nm(sample.y_nm)}); "
+            f"{dropped} hole{plural} dropped",
+            location_nm=(sample.x_nm, sample.y_nm),
             data=(
-                ("diameter_nm", survivor.diameter_nm),
-                ("dropped", len(dropped)),
+                ("diameter_nm", sample.diameter_nm),
+                ("dropped", dropped),
             ),
         )
 
@@ -62,3 +71,15 @@ class Deduplicate:
         return (
             a.diameter_nm == b.diameter_nm and a.x_nm == b.x_nm and a.y_nm == b.y_nm
         )
+
+
+def _measurement_key(hole: Hole) -> tuple[float, float, float]:
+    """Tie-break within a coincident group: the measurement each hole came from.
+
+    Nominal position and diameter already tie by the group's own definition
+    (``Deduplicate._same_hole``); this is what is left to choose a survivor
+    by, so no arrival order is consulted. If the measurement also ties
+    exactly, every field a caller can observe already agrees, so the pick
+    between them is unconstrained.
+    """
+    return (hole.raw.x, hole.raw.y, hole.raw.diameter)

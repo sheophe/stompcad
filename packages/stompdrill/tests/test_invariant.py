@@ -8,9 +8,11 @@ import random
 from dataclasses import replace
 from pathlib import Path
 
+import pikepdf
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from pikepdf import Array, Dictionary, Name, String
 
 from stompdrill.cli import build_parser, build_pipeline
 from stompdrill.emitters import get_emitter
@@ -27,7 +29,7 @@ from stompdrill.sources import AiPdfSource
 from stompmodel.model import DrillData, Hole, RawHole, RawOutline, ReferenceOutline, SourceInfo
 from stompmodel.protocols import Payload, Pipeline
 from stompmodel.units import Millimetre, Nanometre
-from tests.conftest import FakeCase
+from tests.conftest import FakeCase, circle_ops
 
 __all__: list[str] = []
 
@@ -248,11 +250,11 @@ def test_no_permutation_of_any_hole_set_reaches_any_artifact(drawn, seed):
     assert_permutation_stable(raw, "1590B", shipped_pipeline(), seed=seed)
 
 
-def test_the_bare_dedupe_stage_is_order_sensitive_and_quantise_is_what_saves_it():
-    """``Deduplicate`` alone keeps whichever duplicate arrived first. That is
-    only compatible with ADR-0006 because ``quantise`` sorts before it runs,
-    so the composed path never hands it an input order to consult. Pinning
-    both halves keeps the coupling visible if either moves.
+def test_the_bare_dedupe_stage_no_longer_needs_quantise_to_save_it():
+    """``Deduplicate`` alone now picks its survivor by measurement, not by
+    arrival -- the mirror image of F3-01's outline fix (ADR-0006): it no
+    longer depends on ``quantise()`` sorting raw holes first to be
+    order-independent.
     """
 
     def hole(raw_x: float) -> Hole:
@@ -265,13 +267,14 @@ def test_the_bare_dedupe_stage_is_order_sensitive_and_quantise_is_what_saves_it(
 
     first, second = hole(0.0001), hole(0.0002)
 
-    # The bare stage: order-sensitive, exactly as its own docstring says.
+    # The bare stage: geometric now, whichever order it is handed. The
+    # smaller raw x wins regardless.
     assert Deduplicate().apply(DrillData(holes=(first, second))).holes == (first,)
-    assert Deduplicate().apply(DrillData(holes=(second, first))).holes == (second,)
+    assert Deduplicate().apply(DrillData(holes=(second, first))).holes == (first,)
 
-    # The composed path: quantise() sorts raw holes on entry, so the
-    # duplicate pair in _synthetic_raw() never hands Deduplicate an arrival
-    # order to consult -- the survivor is the same whichever end it reads from.
+    # The composed path stays stable too: quantise()'s own entry sort still
+    # runs, for the diagnostics it also protects (per-hole findings, grid
+    # ties), but is no longer load-bearing for Deduplicate specifically.
     raw = _synthetic_raw()
     reversed_raw = replace(raw, holes=tuple(reversed(raw.holes)))
 
@@ -340,3 +343,97 @@ def test_a_tie_inside_one_block_cannot_reach_the_emitted_bytes():
     }
 
     assert len(rendered) == 1, "arrival order reached the emitted bytes"
+
+
+# --------------------------------------------------------------------------
+# F3-01, AC4: the invariance property starts at the content stream itself
+# --------------------------------------------------------------------------
+
+#: 1590B's published footprint (112.40 x 60.50 mm), in PDF points. Both
+#: candidates share the same anchor-bbox area and the same origin, so the
+#: tie-break's later clauses -- rightmost, then topmost bound -- are what
+#: separate them: the upright rectangle has the larger ``x1`` and must win.
+#: The transposed rectangle is the outline the pre-fix code could win on
+#: arrival alone, which would centre every hole on a different point.
+_BACKGROUND_UPRIGHT_PT = "0 0 318.6141732283465 171.49606299212599 re S"
+_BACKGROUND_TRANSPOSED_PT = "0 0 171.49606299212599 318.6141732283465 re S"
+
+#: Five drill positions, all well inside the upright candidate's bounds, so
+#: no ``hole-outside-outline`` warning complicates the comparison.
+_DRILL_CENTRES_PT = ((60.0, 40.0), (150.0, 40.0), (260.0, 40.0), (100.0, 120.0), (220.0, 120.0))
+
+
+def _content_stream_pdf(path: Path, chunks: list[str], media: tuple[float, float, float, float]) -> Path:
+    """Write a page whose content stream is exactly ``chunks``, joined in order.
+
+    Each chunk is a complete, self-contained ``/OC /MCn BDC … EMC`` block --
+    its own path construction and paint operator -- so concatenating them in
+    any order is a legal content stream. That is what lets the property below
+    permute drawing operations directly, rather than the holes the source has
+    already parsed out of them.
+    """
+    pdf = pikepdf.new()
+    drill = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String("Drill")))
+    background = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String("Background")))
+    pdf.Root.OCProperties = pdf.make_indirect(
+        Dictionary(
+            OCGs=Array([drill, background]),
+            D=Dictionary(Order=Array([drill, background]), ON=Array([drill, background])),
+        )
+    )
+    resources = Dictionary(Properties=Dictionary(MC0=drill, MC1=background))
+    page = pikepdf.Page(
+        pdf.make_indirect(
+            Dictionary(
+                Type=Name.Page,
+                MediaBox=Array(list(media)),
+                Resources=resources,
+                Contents=pdf.make_indirect(pdf.make_stream("\n".join(chunks).encode())),
+            )
+        )
+    )
+    pdf.pages.append(page)
+    pdf.save(path)
+    return path
+
+
+def _drill_chunk(cx: float, cy: float, r: float = 3.5) -> str:
+    return f"/OC /MC0 BDC {circle_ops(cx, cy, r)} EMC"
+
+
+def _background_chunk(ops: str) -> str:
+    return f"/OC /MC1 BDC {ops} EMC"
+
+
+def _emit_from_chunk_order(tmp_path: Path, order: list[str]) -> dict[str, Payload]:
+    # One fixed filename for every permutation: the Excellon header embeds
+    # the source path, and a per-variant name would vary bytes for a reason
+    # this property is not about.
+    pdf = _content_stream_pdf(tmp_path / "panel.pdf", order, media=(0, 0, 400, 330))
+    raw = AiPdfSource(pdf).read()
+    return artifacts(raw, "1590B", shipped_pipeline())
+
+
+def test_content_stream_order_cannot_reach_any_artifact(tmp_path):
+    """AC4: the invariance property starts at the content stream itself, not
+    at ``RawDrillData``, the source's already-parsed output.
+
+    Per the coordinator's ruling on cost, this is a small fixed set of
+    content-stream permutations -- reversal plus two seeded shuffles -- not
+    an exhaustive or generated permutation space, compared at the level of
+    the emitted artefact bytes rather than any intermediate value.
+    """
+    chunks = [
+        _background_chunk(_BACKGROUND_UPRIGHT_PT),
+        _background_chunk(_BACKGROUND_TRANSPOSED_PT),
+    ] + [_drill_chunk(cx, cy) for cx, cy in _DRILL_CENTRES_PT]
+
+    expected = _emit_from_chunk_order(tmp_path, chunks)
+
+    assert _emit_from_chunk_order(tmp_path, list(reversed(chunks))) == expected
+
+    rng = random.Random(23)
+    for _ in range(2):
+        shuffled = chunks[:]
+        rng.shuffle(shuffled)
+        assert _emit_from_chunk_order(tmp_path, shuffled) == expected
