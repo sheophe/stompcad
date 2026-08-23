@@ -144,7 +144,7 @@ def test_region_bbox_nm_transforms_through_the_frame_not_kernel_axes():
     frame = FaceFrame(
         basis=CoordinateFrame(
             origin_nm=(nm(50.0), Nanometre(0), Nanometre(0)),
-            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
         )
     )
 

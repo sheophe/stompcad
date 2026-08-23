@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from stompmodel.frames import CoordinateFrame
 from stompmodel.units import Nanometre
 
@@ -11,7 +13,7 @@ ROTATED = CoordinateFrame(
     origin_nm=(Nanometre(1_000_000), Nanometre(2_000_000), Nanometre(3_000_000)),
     u=(0.0, -1.0, 0.0),
     v=(0.0, 0.0, 1.0),
-    w=(1.0, 0.0, 0.0),
+    w=(-1.0, 0.0, 0.0),
 )
 
 
@@ -51,7 +53,7 @@ def test_reframe_restates_a_point_on_another_frame() -> None:
     canonical x of +5 mm on the source reads as -5 mm on the target.
     """
     target = CoordinateFrame(
-        origin_nm=ROTATED.origin_nm, u=(0.0, 1.0, 0.0), v=(0.0, 0.0, 1.0), w=(-1.0, 0.0, 0.0)
+        origin_nm=ROTATED.origin_nm, u=(0.0, 1.0, 0.0), v=(0.0, 0.0, 1.0), w=(1.0, 0.0, 0.0)
     )
 
     assert ROTATED.reframe(Nanometre(5_000_000), Nanometre(0), target) == (
@@ -91,3 +93,108 @@ def test_a_face_frame_is_not_a_coordinate_frame() -> None:
     from stompmodel.frames import FaceFrame
 
     assert not isinstance(FaceFrame(basis=ROTATED), CoordinateFrame)
+
+
+# --------------------------------------------------------------------------
+# construction guards -- each clause refused independently
+# --------------------------------------------------------------------------
+
+
+def test_a_non_integer_origin_component_is_refused() -> None:
+    with pytest.raises(TypeError, match=r"origin_nm\[1\] must be a whole number of nanometres"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0), 1.5, Nanometre(0)),  # type: ignore[arg-type]
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+
+
+def test_an_origin_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match="origin_nm must have exactly three components"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0)),  # type: ignore[arg-type]
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+
+
+def test_a_basis_vector_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"CoordinateFrame\.u must have exactly three components"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0),) * 3,
+            u=(1.0, 0.0),  # type: ignore[arg-type]
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+
+
+def test_a_zero_length_vector_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"CoordinateFrame\.u must be unit length"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0),) * 3,
+            u=(0.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+
+
+def test_a_non_unit_length_vector_is_refused() -> None:
+    """Distinct from the zero-length case: this vector is merely too long."""
+    with pytest.raises(ValueError, match=r"CoordinateFrame\.w must be unit length"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0),) * 3,
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 2.0),
+        )
+
+
+def test_a_non_finite_component_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"CoordinateFrame\.v must be finite"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0),) * 3,
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, float("nan"), 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+
+
+def test_a_non_orthogonal_pair_is_refused() -> None:
+    """Both unit length, so only the orthogonality clause can catch this."""
+    root_half = 2**-0.5
+    with pytest.raises(
+        ValueError, match=r"CoordinateFrame\.u and CoordinateFrame\.v must be orthogonal"
+    ):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0),) * 3,
+            u=(1.0, 0.0, 0.0),
+            v=(root_half, root_half, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+
+
+def test_an_otherwise_valid_left_handed_triple_is_refused() -> None:
+    """Orthonormal in every pairwise sense, but ``w`` is the wrong sign --
+    exactly the shape that would mirror every hole on the panel if let
+    through silently."""
+    with pytest.raises(ValueError, match="must equal u cross v"):
+        CoordinateFrame(
+            origin_nm=(Nanometre(0),) * 3,
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, -1.0),
+        )
+
+
+def test_a_well_formed_frame_is_the_control() -> None:
+    """The guard refuses malformed frames and nothing else."""
+    frame = CoordinateFrame(
+        origin_nm=(Nanometre(1), Nanometre(2), Nanometre(3)),
+        u=(1.0, 0.0, 0.0),
+        v=(0.0, 1.0, 0.0),
+        w=(0.0, 0.0, 1.0),
+    )
+
+    assert frame.origin_nm == (1, 2, 3)

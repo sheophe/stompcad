@@ -128,3 +128,17 @@ owner and the member that failed. The nanometre side is public for the same reas
 millimetre side already was: several `stompdrill` quantisers and stages applied this exact
 rule outside `stompmodel`, each with its own copy, and a shared rule left private would
 break every one of those callers with no `__all__`, ruff or mypy saying so.
+
+**Amended: the guard covers every canonical length the emitted document carries, the case
+frame's origin included.** `CoordinateFrame.origin_nm` is a `Nanometre` triple like any
+other canonical length, so it is checked by `check_nanometres` at construction like every
+other one — not by the `Nanometre(...)` cast that produces it. A `NewType` cast is a
+runtime no-op: it returns its argument unchanged and cannot refuse a float any more than
+assigning it to a variable could, so a reader that treats the cast as validation is
+trusting a call that performs none. Before this amendment the case block was restored by
+exactly that cast, the one canonical value in the document not checked at the boundary
+that checks everything else; a float origin, a two-component basis, an all-zero basis, and
+a left-handed basis all restored silently as a result. The same construction guard also
+requires the basis to be orthonormal and right-handed within a measured tolerance, so a
+malformed or mirrored frame is refused there rather than corrupting every hole position an
+emitter later maps through it.
