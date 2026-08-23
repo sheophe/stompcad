@@ -25,7 +25,26 @@ __all__ = [
 #: Used when the source file declares no timestamp. Never a clock reading.
 _EPOCH = "1970-01-01T00:00:00+00:00"
 
-_TIMESTAMP_PATTERN = re.compile(r"time_stamp\s*\*?/?\s*'([^']*)'")
+#: A STEP string literal: an unescaped closing quote ends it, and a doubled
+#: quote (``''``) inside represents one literal quote character (ISO 10303-21
+#: §6). The two alternatives cover disjoint cases at every position -- the
+#: next character is a quote or it is not -- so this cannot backtrack: a run
+#: of quotes with no closing call still matches in linear time.
+_STEP_STRING = r"'(?:[^']|'')*'"
+
+#: Zero or more ``/* field_name */`` comment annotations, the way a
+#: conforming ST-Developer file labels a field immediately before its own
+#: value -- never a second copy of the value carried without the field.
+_COMMENT = r"(?:/\*.*?\*/\s*)*"
+
+#: ``FILE_NAME``'s own second positional argument (ISO 10303-21 §6.4.3): the
+#: field the writer actually sets. The name field's comment and value are
+#: matched but not captured; only the time-stamp field's value is.
+_FILE_NAME_PATTERN = re.compile(
+    r"FILE_NAME\s*\(\s*" + _COMMENT + _STEP_STRING + r"\s*,\s*" + _COMMENT
+    + r"(" + _STEP_STRING + r")",
+    re.DOTALL,
+)
 
 #: OCC's own synthesised indirection, written on a component occurrence that
 #: carries no name of its own -- e.g. ``=>[0:1:1:34]``. Matched with
@@ -36,18 +55,22 @@ _OCC_INDIRECTION = re.compile(r"=>\[[0-9:]+\]")
 
 
 def source_timestamp(path: Path) -> str:
-    """The source file's ``/* time_stamp */`` comment marker, or the epoch when absent.
+    """``FILE_NAME``'s own time-stamp field, or the epoch when absent or empty.
 
-    This matches ST-Developer's comment above ``FILE_NAME``, not the
-    ``FILE_NAME`` field itself, so reading back a STEP file this workspace
-    wrote drops provenance to the epoch even though the file carries a real
-    stamp -- this workspace's own writer does not emit that comment.
+    This is the field the writer actually sets (see :mod:`stompgeom.writer`),
+    read positionally rather than through ST-Developer's ``/* time_stamp */``
+    comment convention -- a second producer's labelling for the same field,
+    which this workspace's own writer never emits. A declared but empty field
+    degrades to the epoch too, rather than reporting an empty string.
     Determinism is unaffected: every write from one source still copies the
     same value, whatever it is.
     """
     head = path.read_bytes()[:4096].decode("latin-1")
-    found = _TIMESTAMP_PATTERN.search(head)
-    return found.group(1) if found else _EPOCH
+    found = _FILE_NAME_PATTERN.search(head)
+    if not found:
+        return _EPOCH
+    value = found.group(1)[1:-1].replace("''", "'")
+    return value if value else _EPOCH
 
 
 @dataclass(frozen=True, slots=True)
