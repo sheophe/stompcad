@@ -568,7 +568,14 @@ def test_the_wrapper_products_name_is_the_one_the_writer_set():
 
 
 def _colours_by_product(document) -> dict:
-    """Every coloured product name in a document, deduplicated by referred label."""
+    """Every coloured product name in a document, deduplicated by referred label.
+
+    Deliberately independent of ``stompgeom.step.leaf_labels`` (see
+    ``test_the_leaf_walk_is_stated_once.py``'s named allow-list entry for
+    this function): folding it in would verify the writer's colour count
+    with the code that produces it, which this repository's testing rules
+    forbid.
+    """
     from OCP.Quantity import Quantity_Color
     from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_Label, TDF_LabelSequence
@@ -578,12 +585,16 @@ def _colours_by_product(document) -> dict:
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
 
     def name_of(label):
+        # Guarded like stompgeom.step.label_name: this binding's
+        # FindAttribute segfaults on a label with no TDataStd_Name rather
+        # than returning False, so presence is checked first.
+        if not label.IsAttribute(TDataStd_Name.GetID_s()):
+            return ""
         holder = TDataStd_Name()
-        if label.FindAttribute(TDataStd_Name.GetID_s(), holder):
-            return str(holder.Get().ToExtString())
-        return ""
+        label.FindAttribute(TDataStd_Name.GetID_s(), holder)
+        return str(holder.Get().ToExtString())
 
-    def leaves(label, out):
+    def leaves(label, out):  # allow-listed walk, see this function's own docstring
         if XCAFDoc_ShapeTool.IsAssembly_s(label):
             children = TDF_LabelSequence()
             XCAFDoc_ShapeTool.GetComponents_s(label, children)

@@ -14,6 +14,7 @@ from stompgeom.step import (
     _EPOCH,
     bounding_box_mm,
     label_name,
+    leaf_labels,
     read_step,
     source_timestamp,
 )
@@ -201,8 +202,8 @@ def _written(tmp_path: Path) -> Path:
 
 
 def test_read_step_returns_every_leaf_solid_and_no_assembly(tmp_path: Path) -> None:
-    """``_collect`` recurses past an assembly label rather than recording it,
-    so three components come back as three solids under their own names."""
+    """``leaf_labels`` recurses past an assembly label rather than recording
+    it, so three components come back as three solids under their own names."""
     document = read_step(_written(tmp_path))
 
     assert len(document.solids) == 3
@@ -210,7 +211,7 @@ def test_read_step_returns_every_leaf_solid_and_no_assembly(tmp_path: Path) -> N
 
 
 def test_read_step_places_each_solid_in_assembly_coordinates(tmp_path: Path) -> None:
-    """``_collect``'s central claim: reading the *component* label applies the
+    """``leaf_labels``'s central claim: reading the *component* label applies the
     placement its parent gave it. The lid is modelled at the origin like the
     body and lifted 5 mm by the assembly, so a reader taking the referred
     product label instead would hand it back sitting at zero."""
@@ -241,6 +242,42 @@ def test_a_file_this_package_wrote_reads_back_its_own_timestamp(
 
     assert b"'2020-01-02T03:04:05'" in target.read_bytes()
     assert read_step(target).timestamp == "2020-01-02T03:04:05"
+
+
+# ---------------------------------------------------------------------------
+# leaf_labels -- the one XCAF leaf descent, published for every caller
+# ---------------------------------------------------------------------------
+
+
+def test_leaf_labels_of_an_empty_document_is_empty() -> None:
+    """No free shapes at all is not an error; it is an empty result."""
+    document, _shapes = _new_shape_tool()
+
+    assert leaf_labels(document) == ()
+
+
+def test_leaf_labels_does_not_filter_a_null_shaped_leaf() -> None:
+    """What a leaf is *for* is a call-site decision, not this function's:
+    a leaf with no shape at all is returned like any other, not skipped."""
+    from OCP.TopoDS import TopoDS_Shape
+
+    document, shapes = _new_shape_tool()
+    label = shapes.AddShape(_a_box(), False)
+    shapes.SetShape(label, TopoDS_Shape())
+
+    (found,) = leaf_labels(document)
+    assert found.IsEqual(label)
+
+
+def test_leaf_labels_returns_leaves_not_assemblies() -> None:
+    """An assembly's own label never comes back, only its leaf components --
+    the distinction ``read_step`` relies on to avoid double-counting a solid."""
+    document, component = _named_occurrence_document("body")
+
+    found = leaf_labels(document)
+
+    assert len(found) == 1
+    assert found[0].IsEqual(component)
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from typing import Any
 from stompmodel.errors import EmitterError
 
 from .kernel import require_kernel
+from .step import leaf_labels
 
 __all__ = ["render_step", "label_entry"]
 
@@ -98,29 +99,13 @@ def _count_colour_assignments(document: Any, replaced_labels: frozenset[str]) ->
     twice (four screw instances, one product) counts once, matching one
     written chain.
     """
-    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.TDF import TDF_Label
     from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
-    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
 
-    def leaves(label: Any, out: list[Any]) -> None:
-        if XCAFDoc_ShapeTool.IsAssembly_s(label):
-            children = TDF_LabelSequence()
-            XCAFDoc_ShapeTool.GetComponents_s(label, children)
-            for index in range(1, children.Length() + 1):
-                leaves(children.Value(index), out)
-        else:
-            out.append(label)
-
-    free = TDF_LabelSequence()
-    shape_tool.GetFreeShapes(free)
-    components: list[Any] = []
-    for index in range(1, free.Length() + 1):
-        leaves(free.Value(index), components)
-
     coloured: set[str] = set()
-    for component in components:
+    for component in leaf_labels(document):
         referred = TDF_Label()
         target = referred if XCAFDoc_ShapeTool.GetReferredShape_s(component, referred) \
             else component

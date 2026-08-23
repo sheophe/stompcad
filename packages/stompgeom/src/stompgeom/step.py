@@ -18,8 +18,8 @@ from stompmodel.errors import DocumentError
 from .kernel import require_kernel
 
 __all__ = [
-    "StepSolid", "StepDocument", "read_step", "label_name", "bounding_box_mm",
-    "source_timestamp",
+    "StepSolid", "StepDocument", "read_step", "leaf_labels", "label_name",
+    "bounding_box_mm", "source_timestamp",
 ]
 
 #: Used when the source file declares no timestamp. Never a clock reading.
@@ -128,10 +128,9 @@ def read_step(path: Path) -> StepDocument:
     from OCP.Interface import Interface_Static
     from OCP.STEPCAFControl import STEPCAFControl_Reader
     from OCP.TCollection import TCollection_ExtendedString
-    from OCP.TDF import TDF_LabelSequence
     from OCP.TDocStd import TDocStd_Document
     from OCP.XCAFApp import XCAFApp_Application
-    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     if not path.is_file():
         raise DocumentError(f"no model at {path}")
@@ -152,20 +151,43 @@ def read_step(path: Path) -> StepDocument:
     if not reader.Transfer(document):
         raise DocumentError(f"{path} contains no transferable shape")
 
-    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
-    labels = TDF_LabelSequence()
-    tool.GetFreeShapes(labels)
-
     solids: list[StepSolid] = []
-    for index in range(1, labels.Length() + 1):
-        _collect(labels.Value(index), solids)
+    for label in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(label)
+        if shape.IsNull():
+            continue
+        solids.append(StepSolid(name=label_name(label), shape=shape, unit_mm=1.0))
     if not solids:
         raise DocumentError(f"{path} contains no solids")
     return StepDocument(tuple(solids), document, source_timestamp(path))
 
 
-def _collect(label: Any, out: list[StepSolid]) -> None:
-    """Walk one XCAF label, recording leaf solids in document order.
+def leaf_labels(document: Any) -> tuple[Any, ...]:
+    """Every leaf (non-assembly) label under ``document``'s free shapes.
+
+    The one XCAF descent this workspace performs, ``GetFreeShapes`` prologue
+    included, in document order. Labels, not shapes or names, with no
+    filtering -- a null-shaped leaf comes back too, since what a leaf is
+    *for* is a call-site decision, not this function's. Eager, not lazy: a
+    caller mutates the document mid-walk, and a suspended descent holding a
+    kernel handle over a tree being rewritten is a hazard this package has
+    already paid for once. Raises nothing; an empty document returns ``()``.
+    """
+    from OCP.TDF import TDF_LabelSequence
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    free = TDF_LabelSequence()
+    tool.GetFreeShapes(free)
+
+    leaves: list[Any] = []
+    for index in range(1, free.Length() + 1):
+        _walk_leaves(free.Value(index), leaves)
+    return tuple(leaves)
+
+
+def _walk_leaves(label: Any, out: list[Any]) -> None:
+    """Append ``label`` if it is a leaf, else recurse into its components.
 
     A component label refers to a shape in the product's own local
     coordinates, plus a placement relative to its parent. ``GetShape_s`` on
@@ -181,13 +203,9 @@ def _collect(label: Any, out: list[StepSolid]) -> None:
         children = TDF_LabelSequence()
         XCAFDoc_ShapeTool.GetComponents_s(label, children)
         for index in range(1, children.Length() + 1):
-            _collect(children.Value(index), out)
+            _walk_leaves(children.Value(index), out)
         return
-
-    shape = XCAFDoc_ShapeTool.GetShape_s(label)
-    if shape.IsNull():
-        return
-    out.append(StepSolid(name=label_name(label), shape=shape, unit_mm=1.0))
+    out.append(label)
 
 
 def label_name(label: Any) -> str:

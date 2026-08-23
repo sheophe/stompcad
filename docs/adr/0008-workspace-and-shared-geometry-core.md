@@ -126,6 +126,19 @@ escaping; the comment-only pattern is deleted rather than kept as a second,
 narrower reader for the same field, because two readers for one written field
 is this defect's exact shape.
 
+The document's **traversal** is owned on the same terms as its names:
+`stompgeom.step` publishes the one walk from a document to its leaf labels,
+`GetFreeShapes` prologue included, and a caller that must act on a leaf — read
+it, colour it, cut it — goes through that walk rather than re-deriving it. A
+consumer that can only reach `stompgeom`'s own enumeration through a private
+name is evidence that a rule is owned in the wrong place, not that the
+consumer was impolite.
+
+The traversal publishes bare kernel labels, as `StepSolid.shape` and
+`StepDocument.document` already do. Those three are one debt against
+`stompgeom` owning kernel lifetimes, not three: they are wrapped together or
+not at all.
+
 On the writing side, `stompgeom` now owns a document it can **render to bytes**:
 `stompgeom.writer.render_step` is the one serialising entry point, returning the
 finished STEP payload rather than a path — the scratch file its OCC-backed writer needs

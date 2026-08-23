@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompgeom import kernel
-from stompgeom.step import label_name
+from stompgeom.step import label_name, leaf_labels
 from stompgeom.writer import label_entry, render_step
 from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData
@@ -90,15 +90,12 @@ def cut_shape(
 ) -> tuple[Any, Callable[[], None], frozenset[str]]:
     """Replace the drilled solid in the model's document with a cut copy.
 
-    The solid is located by product-name keyword, walking the assembly tree
-    the way ``select_solid`` does — not by ``IsSame`` against
-    ``target_shape``, whose location may differ from the one carried by the
-    document's own label. Returns the mutated document, an ``undo`` closure
-    that restores every changed label to its pre-cut shape, and the entry
-    strings of the labels it changed: ``render_step`` needs these, since a
-    replaced label does not keep its colour in the written STEP.
+    Located by product-name keyword over ``stompgeom``'s published leaf
+    walk, first match in document order — a name-matching leaf with no
+    shape is stepped over, never treated as the cut. Returns the mutated
+    document, an ``undo`` closure restoring every changed label, and the
+    entry strings ``render_step`` needs: a replaced label keeps no colour.
     """
-    from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
     document = model.document
@@ -109,11 +106,10 @@ def cut_shape(
 
     keyword = step_keyword(model.face)
     originals: list[tuple[Any, Any]] = []
-    free = TDF_LabelSequence()
-    tool.GetFreeShapes(free)
     cut_any = any(
-        _cut_component(tool, free.Value(index), keyword, tools, originals)
-        for index in range(1, free.Length() + 1)
+        _cut_leaf(tool, label, tools, originals)
+        for label in leaf_labels(document)
+        if keyword in label_name(label).upper()
     )
     if not cut_any:
         raise EmitterError(f"no component named {keyword!r} was found to cut")
@@ -130,25 +126,6 @@ def cut_shape(
 
     touched = frozenset(label_entry(referred) for referred, _ in originals)
     return document, undo, touched
-
-
-def _cut_component(
-    tool: Any, label: Any, keyword: str, tools: Any, originals: list[tuple[Any, Any]]
-) -> bool:
-    """Recurse into an assembly; cut the first ``keyword``-matching leaf."""
-    from OCP.TDF import TDF_LabelSequence
-    from OCP.XCAFDoc import XCAFDoc_ShapeTool
-
-    if XCAFDoc_ShapeTool.IsAssembly_s(label):
-        children = TDF_LabelSequence()
-        XCAFDoc_ShapeTool.GetComponents_s(label, children)
-        return any(
-            _cut_component(tool, children.Value(index), keyword, tools, originals)
-            for index in range(1, children.Length() + 1)
-        )
-    if keyword not in label_name(label).upper():
-        return False
-    return _cut_leaf(tool, label, tools, originals)
 
 
 def _cut_leaf(

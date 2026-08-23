@@ -183,25 +183,24 @@ def test_every_owned_representation_agrees_about_the_same_holes():
 
 
 def _cut_component_shape(document: Any, keyword: str) -> Any:
-    """The cut leaf's shape, found with ``stompgeom.step``'s own traversal.
+    """The cut leaf's shape, found with ``stompgeom.step``'s own published walk.
 
     ``cut_shape`` hands back the XCAF document rather than the shape it
-    touched, so the leaf has to be found again. ``_collect`` is the walk
-    that already does it and ``named`` the keyword rule, so neither is
-    re-typed here -- a second copy of the recursion would keep working
+    touched, so the leaf has to be found again. ``leaf_labels`` is the one
+    walk this workspace performs and ``named`` the keyword rule, so neither
+    is re-typed here -- a second copy of the recursion would keep working
     while diverging from the one the emitter actually uses.
     """
-    from OCP.TDF import TDF_LabelSequence
-    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
-    from stompgeom.step import StepDocument, StepSolid, _collect
+    from stompgeom.step import StepDocument, StepSolid, label_name, leaf_labels
 
-    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
-    labels = TDF_LabelSequence()
-    tool.GetFreeShapes(labels)
     solids: list[StepSolid] = []
-    for index in range(1, labels.Length() + 1):
-        _collect(labels.Value(index), solids)
+    for label in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(label)
+        if shape.IsNull():
+            continue
+        solids.append(StepSolid(name=label_name(label), shape=shape, unit_mm=1.0))
 
     found = StepDocument(tuple(solids), document).named(keyword)
     assert found, f"the cut document holds no solid named like {keyword!r}"
