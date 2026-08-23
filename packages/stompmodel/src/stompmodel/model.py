@@ -138,6 +138,18 @@ class Hole:
         )
 
     @property
+    def tie_break(self) -> tuple[Millimetre, Millimetre, Millimetre]:
+        """An arbitrary but total order over the measurement this hole came from.
+
+        A tie-break, not a ranking: a caller composes it *after* the term it
+        wants, once nominal geometry has already tied. If two holes tie here
+        too, every field a caller can observe already agrees, so the pick
+        between them is unconstrained. The sole implementation of the
+        raw-measurement rule — see ADR-0006.
+        """
+        return (self.raw.x, self.raw.y, self.raw.diameter)
+
+    @property
     def residual_nm(self) -> tuple[Nanometre, Nanometre, Nanometre]:
         """(dx, dy, ddia) between nominal and measured, in nanometres.
 
@@ -415,14 +427,17 @@ class DrillData:
     def rows(self) -> list[tuple[Nanometre, list[Hole]]]:
         """Holes grouped by Y, rows from the top down, each row left to right.
 
-        Exact nanometre equality groups rows; ordering supports top-down layout
-        and left-to-right chain dimensions.
+        Exact nanometre equality groups rows. Within a row, ``Hole.tie_break``
+        breaks a tie on nominal X, so two holes sharing one nominal point come
+        back in the same order regardless of arrival — see ADR-0006. This is
+        a different question from routing's reading order, and deliberately
+        not folded into it: one groups, the other sorts.
         """
         buckets: dict[Nanometre, list[Hole]] = {}
         for hole in self.holes:
             buckets.setdefault(hole.y_nm, []).append(hole)
         return [
-            (y_nm, sorted(hs, key=lambda h: h.x_nm))
+            (y_nm, sorted(hs, key=lambda h: (h.x_nm, *h.tie_break)))
             for y_nm, hs in sorted(buckets.items(), reverse=True)
         ]
 

@@ -3,7 +3,10 @@
 **Status:** Accepted, amended in place: `RouteHoles(key=…)` is deleted rather than
 retained. See Consequences. Amended again: every selection rule in the pipeline must be
 total on geometry, not only the routing tie-break this ADR already pinned. See Decision
-and Consequences.
+and Consequences. Amended a third time: the raw-measurement tie-break this ADR requires
+now has one published implementation, a structural gate over the installed packages'
+source enforces it, and the reader's own selection rule is recorded as the same class of
+obligation. See Decision and Consequences.
 
 ## Context
 
@@ -36,9 +39,38 @@ decide it. Where the measure a rule uses first can tie, the tie breaks on the ca
 own further bounds, compared in a stated order, until the rule is total; a rule that
 still cannot separate two candidates after that has proved they are interchangeable, and
 either survives. This is enforced at the reader (`sources/ai_pdf.py`'s
-`_largest_non_circular`, on each candidate's bounds) and in `pipeline/dedupe.py`'s
-`Deduplicate` (on the raw measurement a coincident group's members were quantised from),
-in addition to `RouteHoles`'s tie-break below.
+`_largest_non_circular`, on each candidate's bounds), in `pipeline/dedupe.py`'s
+`Deduplicate` and in `pipeline/route.py`'s `RouteHoles` (both composing `Hole.tie_break`,
+below), and in `stompmodel.model.DrillData.rows()`'s within-row grouping (the same
+property, for a different question — see Consequences).
+
+**Amended again: the raw-measurement tie-break has one owner.** `Hole.tie_break`, a
+read-only property on `stompmodel.model.Hole`, is the sole implementation of "the
+measurement a hole was quantised from, compared as raw `x`, then raw `y`, then raw
+`diameter`." It is a tie-break, not a ranking: a caller composes it *after* whatever term
+it wants to sort or select by, once nominal geometry has already tied — `RouteHoles`
+after its reading-order prefix, `Deduplicate` directly (a coincident group already ties
+on nominal position and diameter by its own definition), `rows()` after nominal `x`. A
+site restating the tuple by hand, rather than calling the property, is one rule with two
+implementations — this ADR's own defect a level down, and the reason
+`packages/stompdrill/tests/test_tie_break_owner.py` fails any tuple built from a hole's
+raw `x`, raw `y` and raw `diameter` outside `stompmodel.model`. The gate resolves the
+packages it scans by importing them, not by a path relative to the working directory, so
+it binds a second consumer — in a package not yet in its scan — the moment that package
+is added, and it names no stage: a fourth field on the raw measurement reaches every
+consumer by editing the property once. The routing stage's reading-order prefix
+(`-y_nm, x_nm` below) stays routing's own policy and is not folded into the property; only
+this ADR changes it.
+
+**Doctrine, not work.** The reader's `_largest_non_circular` selects one candidate over
+another by a total order over the candidates' own bounds — the same class of rule
+`Hole.tie_break` publishes, over a type (`sources/ai_pdf.py`'s path bounds) that
+`stompdrill` owns rather than `stompmodel`. It has one implementation and one caller
+today, which is why it stays where it is: publishing a rule beside a type it has no
+second consumer for is the same defect this ADR corrects, inverted. The obligation is
+recorded here so it is not rediscovered by a second reviewer: the moment a second caller
+needs that selection, it is published beside the type it selects over, exactly as
+`Hole.tie_break` now is.
 
 `SortHoles` becomes `RouteHoles` in `pipeline/route.py`, recording itself as `"route"`.
 It plans the drilling sequence and is the only place holes are ordered or numbered:
@@ -50,12 +82,12 @@ It plans the drilling sequence and is the only place holes are ordered or number
 - Within a block: nearest-neighbour with visited tracking from the block's
   topmost-then-leftmost hole, then 2-opt improvement with the start hole fixed, sweeping
   `i < j` and taking the first improving reversal.
-- Ties break on `(-y_nm, x_nm)` and then on the measurement the hole was quantised from.
-  Nominal position alone is not a total order: two holes can share one nominal point,
-  and `min` would otherwise keep whichever the caller listed first. `Deduplicate`
-  collapses such a pair, but stages are independent and a caller may omit it. Two holes
-  equal in both nominal and measured values are interchangeable, so no output can
-  distinguish them.
+- Ties break on `(-y_nm, x_nm)` — routing's own reading-order policy — and then on
+  `Hole.tie_break`. Nominal position alone is not a total order: two holes can share one
+  nominal point, and `min` would otherwise keep whichever the caller listed first.
+  `Deduplicate` collapses such a pair, but stages are independent and a caller may omit
+  it. Two holes equal in both nominal and measured values are interchangeable, so no
+  output can distinguish them.
 
 Every rule is geometric; none consults input order. ADR-0006, Figure 1 shows the phases.
 
@@ -136,7 +168,18 @@ kept whichever member of a coincident group arrived first, which was only geomet
 because `quantise()` happened to sort its input before handing it to the stage; the bare
 stage, and any caller composing it without that upstream sort, was order-sensitive.
 Both now pick a survivor by a tie-break total on the candidates' own bounds or
-measurement, so neither depends on a sort run elsewhere.
+measurement, so neither depends on a sort run elsewhere. Deduplicate's tie-break is
+`Hole.tie_break`; the outline's remains the reader's own, over a type it owns (see the
+doctrine above).
+
+**Amended a third time.** `Hole.tie_break` replaces two independent restatements of the
+raw-measurement order — `pipeline/dedupe.py`'s and `pipeline/route.py`'s own tuple
+literals, identical by execution but coupled by nothing — with one property both stages
+call. `stompmodel.model.DrillData.rows()`'s within-row grouping, which broke a tie on
+nominal `x` with a stable sort and so depended on arrival for two holes sharing a nominal
+point, now breaks it the same way. "No rule may consult input order" is no longer only a
+promise: `test_tie_break_owner.py` fails any tuple built from a hole's raw measurement
+outside the module that owns it.
 
 Changes to the block order, the routing rule, the tie-break, or the point at which numbers
 are assigned are architectural changes to this decision.

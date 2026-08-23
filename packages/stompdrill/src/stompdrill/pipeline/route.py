@@ -11,14 +11,15 @@ __all__ = ["RouteHoles"]
 
 
 def _total_order(hole: Hole) -> tuple[int, int, float, float, float]:
-    """Reading order, then the measurement, so no two holes can tie.
+    """Reading order, then ``Hole.tie_break``, so no two holes can tie.
 
     Nominal position ties for two holes at one point, and ``min``
     would then keep whichever arrived first — input order deciding an answer
-    that must be geometric. The measurement that produced each hole breaks it.
-    Two holes equal in both are interchangeable, so no output distinguishes them.
+    that must be geometric. The reading-order prefix is this stage's own
+    policy; the tie-break it composes after is published beside ``Hole``,
+    the one implementation ADR-0006 pins.
     """
-    return (-hole.y_nm, hole.x_nm, hole.raw.x, hole.raw.y, hole.raw.diameter)
+    return (-hole.y_nm, hole.x_nm, *hole.tie_break)
 
 
 def _distance_sq(a: Hole, b: Hole) -> int:

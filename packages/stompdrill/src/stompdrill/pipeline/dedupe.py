@@ -18,10 +18,10 @@ __all__ = ["Deduplicate"]
 class Deduplicate:
     """Collapse holes equal in ``x_nm``, ``y_nm`` and ``diameter_nm``.
 
-    A coincident group's survivor is chosen by its own raw measurement, total
-    on geometry (ADR-0006) rather than on arrival: no prior stage need sort
-    the input for the choice to be order-independent. Near misses are
-    retained.
+    A coincident group's survivor is chosen by ``Hole.tie_break``, so no
+    prior stage need sort the input for the choice to be order-independent —
+    see ADR-0006, which that property is the one implementation of. Near
+    misses are retained.
     """
 
     name: ClassVar[str] = "deduplicate"
@@ -42,7 +42,7 @@ class Deduplicate:
                 groups.append([hole])
 
         diagnostics = [self._report(group) for group in groups if len(group) > 1]
-        survivors = [min(group, key=_measurement_key) for group in groups]
+        survivors = [min(group, key=lambda h: h.tie_break) for group in groups]
 
         return data.with_holes(survivors).with_diagnostics(*diagnostics)
 
@@ -71,17 +71,3 @@ class Deduplicate:
         return (
             a.diameter_nm == b.diameter_nm and a.x_nm == b.x_nm and a.y_nm == b.y_nm
         )
-
-
-def _measurement_key(hole: Hole) -> tuple[float, float, float]:
-    """Tie-break within a coincident group: the measurement each hole came from.
-
-    Nominal position and diameter already tie by the group's own definition
-    (``Deduplicate._same_hole``); this is what is left to choose a survivor
-    by, so no arrival order is consulted. Compared as raw ``x``, then raw
-    ``y``, then raw ``diameter`` -- an arbitrary but total order over three
-    independent measurements, not a priority among them. If the measurement
-    also ties exactly, every field a caller can observe already agrees, so
-    the pick between them is unconstrained.
-    """
-    return (hole.raw.x, hole.raw.y, hole.raw.diameter)
