@@ -1,7 +1,9 @@
 # ADR-0006: Toolpath ordering and hole numbering
 
 **Status:** Accepted, amended in place: `RouteHoles(key=…)` is deleted rather than
-retained. See Consequences.
+retained. See Consequences. Amended again: every selection rule in the pipeline must be
+total on geometry, not only the routing tie-break this ADR already pinned. See Decision
+and Consequences.
 
 ## Context
 
@@ -23,6 +25,20 @@ agree. And no artifact expressed a toolpath at all.
 **Geometry alone determines output.** If two input artifacts represent the same geometry,
 this program's artifacts are byte-identical, whatever the inputs' internal structure or
 element order.
+
+**Amended: this binds every selection rule in the pipeline, not only routing's.** A rule
+that picks one candidate over another — the reference outline, a coincident group's
+survivor, a routed hole's tie-break — must be total on the candidates' own geometry: for
+any two candidates it names a winner, and that winner does not change if the candidates'
+order in the source is swapped. A rule that is total everywhere except one tie has an
+untotal rule, because that tie is exactly where nothing but arrival order is left to
+decide it. Where the measure a rule uses first can tie, the tie breaks on the candidates'
+own further bounds, compared in a stated order, until the rule is total; a rule that
+still cannot separate two candidates after that has proved they are interchangeable, and
+either survives. This is enforced at the reader (`sources/ai_pdf.py`'s
+`_largest_non_circular`, on each candidate's bounds) and in `pipeline/dedupe.py`'s
+`Deduplicate` (on the raw measurement a coincident group's members were quantised from),
+in addition to `RouteHoles`'s tie-break below.
 
 `SortHoles` becomes `RouteHoles` in `pipeline/route.py`, recording itself as `"route"`.
 It plans the drilling sequence and is the only place holes are ordered or numbered:
@@ -111,6 +127,16 @@ The `processing` record names the stage `"route"`, so a consumer matching `"sort
 Emitters accept less than before: unrouted data is an error rather than a drawing whose
 balloons carry artwork order. `Source` implementations construct `RawHole` without an
 index.
+
+**Amended: the totality rule above is not only routing's.** Before this amendment, the
+reference-outline candidate with the greatest measured area won on a strict `>`, so two
+equal-area candidates were separated by nothing but which one the content stream named
+first — a hole 110 mm away for the same artwork in two content-stream orders. Deduplicate
+kept whichever member of a coincident group arrived first, which was only geometric
+because `quantise()` happened to sort its input before handing it to the stage; the bare
+stage, and any caller composing it without that upstream sort, was order-sensitive.
+Both now pick a survivor by a tie-break total on the candidates' own bounds or
+measurement, so neither depends on a sort run elsewhere.
 
 Changes to the block order, the routing rule, the tie-break, or the point at which numbers
 are assigned are architectural changes to this decision.

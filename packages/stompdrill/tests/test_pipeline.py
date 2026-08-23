@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import random
 
 import pytest
@@ -26,7 +27,15 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
+from stompmodel.model import (
+    DrillData,
+    Hole,
+    RawHole,
+    RawOutline,
+    ReferenceOutline,
+    SourceInfo,
+    StageRun,
+)
 from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import FakeCase, at, codes, holes, make_data, positions
@@ -155,11 +164,80 @@ class TestDeduplicate:
         out = Deduplicate().apply(data)
         assert len(out.holes) == 1
 
-    def test_keeps_the_first_hole_in_input_order(self):
+    def test_the_survivor_does_not_depend_on_arrival_order(self):
+        """Nominal position and diameter already tie for a coincident pair,
+        and here so does the raw measurement built from them, so every field
+        a caller can observe already agrees: which arrives first must not
+        change what a consumer sees (ADR-0006 -- geometry alone, never
+        arrival, decides).
+        """
         first = at(-40_000_000, 18_000_000, 7_000_000, index=4)
         second = at(-40_000_000, 18_000_000, 7_000_000, index=1)
-        out = Deduplicate().apply(make_data(first, second))
-        assert out.holes == (first,)
+
+        forward = Deduplicate().apply(make_data(first, second)).holes[0]
+        backward = Deduplicate().apply(make_data(second, first)).holes[0]
+
+        observable = lambda h: (h.x_nm, h.y_nm, h.diameter_nm, h.raw)  # noqa: E731
+        assert observable(forward) == observable(backward)
+
+    def test_the_survivor_of_a_genuine_measurement_tie_break_is_geometric(self):
+        """When the raw measurement differs -- the residual two circles that
+        quantised to the same nominal point actually carry -- the smaller
+        ``raw.x`` wins, whichever order the duplicates arrive in.
+        """
+        smaller_raw = dataclasses.replace(
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            raw=RawHole(Millimetre(-40.0004), Millimetre(18.0), Millimetre(7.0)),
+        )
+        larger_raw = dataclasses.replace(
+            at(-40_000_000, 18_000_000, 7_000_000, index=1),
+            raw=RawHole(Millimetre(-40.0002), Millimetre(18.0), Millimetre(7.0)),
+        )
+
+        forward = Deduplicate().apply(make_data(smaller_raw, larger_raw)).holes
+        backward = Deduplicate().apply(make_data(larger_raw, smaller_raw)).holes
+
+        assert forward == (smaller_raw,)
+        assert backward == (smaller_raw,)
+
+    def test_the_second_measurement_clause_is_load_bearing(self):
+        """``raw.x`` ties; only ``raw.y`` separates the pair -- the smaller
+        ``raw.y`` must win, whichever order the duplicates arrive in.
+        """
+        smaller_y = dataclasses.replace(
+            at(0, 0, 7_000_000, index=1),
+            raw=RawHole(Millimetre(0.0001), Millimetre(-0.0002), Millimetre(7.0)),
+        )
+        larger_y = dataclasses.replace(
+            at(0, 0, 7_000_000, index=2),
+            raw=RawHole(Millimetre(0.0001), Millimetre(0.0003), Millimetre(7.0)),
+        )
+
+        forward = Deduplicate().apply(make_data(smaller_y, larger_y)).holes
+        backward = Deduplicate().apply(make_data(larger_y, smaller_y)).holes
+
+        assert forward == (smaller_y,)
+        assert backward == (smaller_y,)
+
+    def test_the_third_measurement_clause_is_load_bearing(self):
+        """``raw.x`` and ``raw.y`` tie; only ``raw.diameter`` separates the
+        pair -- two circles that quantised to the same nominal diameter can
+        still carry different residuals, and the smaller wins.
+        """
+        smaller_diameter = dataclasses.replace(
+            at(0, 0, 7_000_000, index=1),
+            raw=RawHole(Millimetre(0.0001), Millimetre(0.0002), Millimetre(6.9998)),
+        )
+        larger_diameter = dataclasses.replace(
+            at(0, 0, 7_000_000, index=2),
+            raw=RawHole(Millimetre(0.0001), Millimetre(0.0002), Millimetre(7.0002)),
+        )
+
+        forward = Deduplicate().apply(make_data(smaller_diameter, larger_diameter)).holes
+        backward = Deduplicate().apply(make_data(larger_diameter, smaller_diameter)).holes
+
+        assert forward == (smaller_diameter,)
+        assert backward == (smaller_diameter,)
 
     def test_emits_one_warning_per_collapsed_group(self):
         data = make_data(
@@ -335,6 +413,27 @@ class TestDeduplicate:
         survivors = Deduplicate().apply(data).holes
 
         assert len(survivors) == 2
+
+    def test_the_survivor_is_stable_under_every_permutation_of_a_coincident_group(self):
+        """AC3: unsorted input, no prior stage -- the bare stage's own rule,
+        not a sort performed elsewhere, must pick the same survivor whichever
+        order a coincident group of more than two arrives in.
+        """
+
+        def hole(raw_x: float, raw_y: float, index: int) -> Hole:
+            return dataclasses.replace(
+                at(0, 0, 7_000_000, index=index),
+                raw=RawHole(Millimetre(raw_x), Millimetre(raw_y), Millimetre(7.0)),
+            )
+
+        group = [hole(0.0002, 0.0, 1), hole(-0.0001, 0.0003, 2), hole(0.0001, -0.0002, 3)]
+
+        survivors = {
+            Deduplicate().apply(make_data(*permutation)).holes
+            for permutation in itertools.permutations(group)
+        }
+
+        assert len(survivors) == 1
 
 
 def test_a_collapsed_pair_reports_one_hole_dropped() -> None:
@@ -654,44 +753,39 @@ class TestPipelineComposition:
         assert codes(out) == ["a", "b", "c"]
 
     def test_stage_order_is_observable(self):
-        """Sorting before deduplicating keeps a different hole.
+        """Whether two holes coincide can depend on which stage ran first.
 
-        Both candidates share one quantised position, so ``RouteHoles``
-        renumbers whichever survives to 1 regardless of stage order — the raw
-        measurement, which renumbering never touches, is what still tells
-        them apart.
+        ``WidenToMatch`` grows every hole's diameter to the first hole's;
+        running it before ``Deduplicate`` makes the pair coincide and
+        collapses to one hole, and running it after leaves both distinct.
+        This is stage order, a property of ``Pipeline`` composing stages
+        left to right -- not the hole-arrival order ADR-0006 forbids any
+        stage from consulting, which is a property of one stage's input.
         """
-        hole_a = at(10_000_000, 5_000_000, 7_000_000, index=7)
-        hole_b = at(10_000_000, 5_000_000, 7_000_000, index=1)
-        hole_a = dataclasses.replace(
-            hole_a, raw=dataclasses.replace(hole_a.raw, x=Millimetre(10.0007))
-        )
-        hole_b = dataclasses.replace(
-            hole_b, raw=dataclasses.replace(hole_b.raw, x=Millimetre(9.9993))
-        )
-        class NumberByIndex:
-            """A trivial numbering stage: witnesses stage order, not
-            ``RouteHoles``'s own routing rule, which has no ordering knob."""
+        hole_a = at(10_000_000, 5_000_000, 7_000_000, index=1)
+        hole_b = at(10_000_000, 5_000_000, 5_000_000, index=2)
 
-            name = "number-by-index"
+        class WidenToMatch:
+            """Grows every hole's diameter to the first hole's, witnessing
+            stage order rather than anything about ``Deduplicate`` itself."""
+
+            name = "widen-to-match"
 
             def apply(self, data: DrillData) -> DrillData:
-                ordered = sorted(data.holes, key=lambda h: h.index or 0)
-                return data.with_holes(
-                    hole.with_number(number) for number, hole in enumerate(ordered, start=1)
-                )
+                target = data.holes[0].diameter_nm
+                return data.with_holes(hole.with_diameter(target) for hole in data.holes)
 
             def describe(self) -> StageRun:
                 return StageRun(self.name)
 
         data = make_data(hole_a, hole_b)
-        dedupe, sort = Deduplicate(), NumberByIndex()
+        widen, dedupe = WidenToMatch(), Deduplicate()
 
-        dedupe_first = Pipeline([dedupe, sort]).run(data)
-        sort_first = Pipeline([sort, dedupe]).run(data)
+        widen_first = Pipeline([widen, dedupe]).run(data)
+        dedupe_first = Pipeline([dedupe, widen]).run(data)
 
-        assert [h.raw.x for h in dedupe_first.holes] == [hole_a.raw.x]
-        assert [h.raw.x for h in sort_first.holes] == [hole_b.raw.x]
+        assert len(widen_first.holes) == 1
+        assert len(dedupe_first.holes) == 2
 
     def test_the_phase_and_the_pipeline_compose_into_one_tool_for_a_noisy_row(self):
         """The library flow, end to end, on the shape of panel it meets."""

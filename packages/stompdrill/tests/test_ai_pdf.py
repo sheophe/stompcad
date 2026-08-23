@@ -805,6 +805,119 @@ def test_circles_on_the_reference_layer_are_not_the_outline(tmp_path):
     assert reference.width == pytest.approx(100.0, abs=TOL_MM)
 
 
+# ---------------------------------------------------------------------------
+# F3-01: the reference outline tie-break is total on geometry (ADR-0006)
+# ---------------------------------------------------------------------------
+
+
+def test_reference_outline_independent_of_content_stream_order(tmp_path):
+    """Two equal-area non-circular candidates yield the same outline, centre
+    and hole position regardless of which is drawn first.
+
+    Moved from the falsifier at
+    ``.scratch/architecture-review/falsify/tests/test_f3_01_reference_outline_order.py``,
+    which failed before ``_largest_non_circular`` gained a geometric tie-break.
+    """
+    a_rect = "0 0 200 100 re S"
+    b_rect = "250 250 100 200 re S"  # same anchor-bbox area as A, transposed
+
+    results = {}
+    for label, background in (
+        ("A-then-B", f"{a_rect} {b_rect}"),
+        ("B-then-A", f"{b_rect} {a_rect}"),
+    ):
+        pdf = build_pdf(
+            tmp_path / f"{label}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        raw = AiPdfSource(pdf).read()
+        results[label] = (raw.reference, raw.centre, raw.holes[0])
+
+    first, second = results["A-then-B"], results["B-then-A"]
+    assert first == second, (
+        "reference outline, centre and hole position must be a function of "
+        f"geometry alone, not traversal order; got {first!r} vs {second!r}"
+    )
+
+
+def test_the_tie_break_is_geometric_not_positional(tmp_path):
+    """Swapping the tied pair's content-stream order changes nothing; moving
+    one candidate's own bound past the other's changes the winner exactly as
+    the stated rule predicts (leftmost, then bottommost, then rightmost, then
+    topmost bound -- see ``_largest_non_circular``'s docstring).
+    """
+    a_rect = "0 0 200 100 re S"  # bounds (0, 0, 200, 100); smaller x0 than B
+    b_rect = "250 250 100 200 re S"  # bounds (250, 250, 350, 450)
+
+    for index, background in enumerate((f"{a_rect} {b_rect}", f"{b_rect} {a_rect}")):
+        pdf = build_pdf(
+            tmp_path / f"order{index}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        reference = AiPdfSource(pdf).read().reference
+        assert reference is not None
+        assert reference.width == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+
+    # Move A's x0 past B's: B now holds the smaller x0 and must win instead.
+    moved_a = "260 0 200 100 re S"  # bounds (260, 0, 460, 100)
+    pdf = build_pdf(
+        tmp_path / "moved.pdf",
+        {"Drill": circle_ops(60, 40, 5), "Background": f"{moved_a} {b_rect}"},
+        media=(0, 0, 600, 500),
+    )
+    reference = AiPdfSource(pdf).read().reference
+    assert reference is not None
+    assert reference.width == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+    assert reference.height == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+
+
+def test_the_second_tie_break_clause_is_load_bearing(tmp_path):
+    """Area and ``x0`` tie; only ``y0`` separates the pair -- the bottommost
+    (smaller ``y0``) must win, in either content-stream order.
+
+    ``bottommost`` and ``higher`` are also built to disagree on ``x1`` (100
+    vs. 200): if the ``y0`` comparison were dropped or reordered, the next
+    clause (``x1``) would pick ``higher`` instead, so this fixture -- unlike
+    one where the two candidates happen to tie or agree on ``x1`` too --
+    actually catches a mutant that skips the ``y0`` term.
+    """
+    bottommost = "0 0 100 200 re S"  # bounds (0, 0, 100, 200); area 20000
+    higher = "0 5 200 100 re S"  # bounds (0, 5, 200, 105); same area, x0; larger x1
+
+    for index, background in enumerate((f"{bottommost} {higher}", f"{higher} {bottommost}")):
+        pdf = build_pdf(
+            tmp_path / f"y0-{index}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        reference = AiPdfSource(pdf).read().reference
+        assert reference is not None
+        assert reference.width == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+
+
+def test_the_third_tie_break_clause_is_load_bearing(tmp_path):
+    """Area, ``x0`` and ``y0`` tie; only ``x1`` separates the pair -- the
+    rightmost (larger ``x1``) must win, in either content-stream order.
+    """
+    narrower = "0 0 100 200 re S"  # bounds (0, 0, 100, 200); area 20000
+    wider = "0 0 200 100 re S"  # bounds (0, 0, 200, 100); same area, x0, y0
+
+    for index, background in enumerate((f"{narrower} {wider}", f"{wider} {narrower}")):
+        pdf = build_pdf(
+            tmp_path / f"x1-{index}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        reference = AiPdfSource(pdf).read().reference
+        assert reference is not None
+        assert reference.width == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+
+
 def test_the_source_rounds_nothing(data):
     """The source preserves the measured outline without rounding.
 

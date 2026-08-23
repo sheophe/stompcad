@@ -544,17 +544,23 @@ def _largest_non_circular(
 ) -> tuple[float, float, float, float] | None:
     """Return the largest-area non-circular path's bounds, or ``None``.
 
-    Circles cannot define the panel; area prevents a long thin path from winning.
+    Total on geometry, never on arrival (ADR-0006): greatest bounding-box area
+    wins; a tie breaks on the box's own bounds, compared leftmost (smallest
+    ``x0``), then bottommost (smallest ``y0``), then rightmost (largest
+    ``x1``), then topmost (largest ``y1``). Two boxes surviving all four are
+    the same rectangle, so no candidate can win only by appearing first in the
+    content stream. Circles cannot define the panel.
     """
-    best: tuple[float, float, float, float] | None = None
-    best_area = 0.0
+    best_key: tuple[float, float, float, float, float] | None = None
+    best_bbox: tuple[float, float, float, float] | None = None
     for path in paths:
         if fit_circle(path) is not None:
             continue
         # every emitted subpath begins with a MoveTo, so bbox always has anchors
         x0, y0, x1, y1 = path.bbox
         area = (x1 - x0) * (y1 - y0)
-        if area > best_area:
-            best_area = area
-            best = (x0, y0, x1, y1)
-    return best
+        key = (area, -x0, -y0, x1, y1)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_bbox = (x0, y0, x1, y1)
+    return best_bbox
