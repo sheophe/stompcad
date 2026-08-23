@@ -587,6 +587,27 @@ worth chasing, and it is a pre-existing incompatibility this review did not intr
 mutmut's baseline pass succeeds, or the incompatibility is reported upstream and worked
 around, and `dedupe`/`geometry` get a real scoped mutation reading afterwards.
 
+## `falsify/tests/`'s wave-1 fixtures going stale against a later refactor is not a defect
+
+**Status:** Deliberate ruling, not a gap. Made during the 2026-08 architecture review's
+wave 2: ticket 14's implementer found the staleness and correctly left the file alone
+rather than editing outside its own ticket's scope; the coordinator ruled on what it means.
+
+**Constraint:** `.scratch/architecture-review/falsify/tests/` holds one-shot
+falsification fixtures, each built to reproduce a specific wave's finding before it was
+fixed. Several of wave 1's still pass a bare `"box"` string where the code has since moved
+to a `CaseFace` enum (`stompmodel.model.CaseFace`, introduced closing this review's ticket
+13) — for example `test_f2_04_face_keyword_totality.py` and
+`test_wave2_f1_02_case_frame_codec_unvalidated.py`. Falsify tests are scratch evidence of
+the wave that wrote them, not a maintained suite: they are **not** updated to track later
+refactors, and the directory is git-ignored and outside every suite the gate runs.
+
+**Acceptance:** Not a scheduled fix. This entry only prevents a future reader from
+mistaking a stale `falsify/tests/` fixture for a live defect: a wave that meets one of
+these fixtures failing or looking wrong against current types cites this entry and marks
+the question Settled, rather than re-deriving the ruling or filing the staleness itself as
+a finding. Only promoting `falsify/tests/` to a maintained, tracked suite would reopen it.
+
 ## Ticket 01's nanometre-guard singularity test is textual, not semantic
 
 **Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
