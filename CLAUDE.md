@@ -148,6 +148,21 @@ The accepted architecture is defined by:
 - [ADR-0010](docs/adr/0010-the-stomp-prefix.md): the `stomp` prefix every package
   carries.
 
+`stompmodel` publishes the guards a measurement's unit must satisfy — `check_millimetres`
+and `check_nanometres` — beside the newtypes they check, and the diagnostics vocabulary a
+second tool's value type interoperates through: `Diagnosable`, and the plain-tuple
+`of_severity`/`worst_severity` reductions beside `Diagnostic`. The `DrillData` JSON codec is
+versioned; the document is at version 6, whose `CaseRegistration` member carries the
+resolved part, drilled face, supplied model's file name and cutting frame as one typed fact
+rather than four — see [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md).
+`stompgeom` owns the kernel layer on both sides it currently touches: reading, where
+`stompgeom.step` publishes the one rule for what XCAF recorded as a label's name,
+distinguishing an unnamed label from OCC's own synthesised placeholder; and writing, where
+`stompgeom.writer.render_step` is the one serialising entry point and returns the finished
+STEP payload rather than a path. Assembling a document from placed, named, coloured solids
+("build") is deliberately not yet owned — see
+[ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md).
+
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
 measurements with the enclosure, drill-size, and grid answer sets, then produces canonical
@@ -241,17 +256,25 @@ CLI.
 - **New emitter:** implement `stompmodel`'s `Emitter` protocol, decorate with
   `@register_emitter`, add one import in `emitters/__init__.py`. The CLI resolves
   `--emit FORMAT=PATH` through the registry and never names a format. An emitter needing
-  its own CLI flags still requires a `cli.py` edit. A binary emitter writes its payload
-  through `stompmodel.protocols.write_payload(path, payload) -> int`, which is where the
-  bytes are written and counted; the CLI keeps only the sentence it prints from that count
-  — see [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
+  its own CLI flags still requires a `cli.py` edit. A registered emitter whose constructor
+  needs something this CLI cannot supply is refused as a usage failure (exit 3, no
+  artefact written) rather than crashing; only construction is guarded, so a fault raised
+  later from the emitter's own `emit` step keeps its traceback. A binary emitter writes its
+  payload through `stompmodel.protocols.write_payload(path, payload) -> int`, which is where
+  the bytes are written and counted; the CLI keeps only the sentence it prints from that
+  count — see [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
   `render(scene, title)`, the same seam `drawing_svg` and `drawing_pdf` serialise a
   `Scene` through.
 - **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`, then
   insert it in `cli.build_pipeline`. Order is the one thing a stage cannot self-declare,
   so `build_pipeline` is the integration point by design.
 - **New source:** implement `stompdrill`'s own `Source` protocol, returning
-  `RawDrillData`. There is no source registry.
+  `RawDrillData`. This is a library caller's extension point, not the CLI's: `stompdrill`'s
+  command line always reads Illustrator artwork through `AiPdfSource`, and no flag selects
+  another one. That is deliberate, not an omission — wiring a selection flag ahead of a real
+  second source would be speculative generality, so a reader who finds this recipe
+  unreachable from the CLI should treat this sentence as the answer, not as a gap to close.
+  There is no source registry.
 - **A new stage or source also gets one line in
   `packages/stompdrill/src/stompdrill/__init__.py`.** A new emitter does not — it has a
   registry, and is resolved through `stompdrill.emitters.get_emitter`. The root exports

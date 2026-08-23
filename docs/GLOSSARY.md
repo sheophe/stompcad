@@ -131,6 +131,13 @@ A STEP model of a real enclosure. Never synthesised: one is supplied undrilled,
 and `stompdrill` emits the drilled one that `stompcollider` docks into.
 _Avoid_: enclosure model, case file, box model
 
+**Case registration**:
+The supplied case model a drill document's holes were decided against: the
+resolved part, the drilled face, the model file's name, and the face frame,
+carried as one fact rather than four. `CaseRegistration` in `stompmodel`.
+_Avoid_: case info, case metadata
+_See also_: Case model, which this names; Face frame, which it carries.
+
 **Drilled face**:
 The face of the case that holes are cut through. Told to a tool, never guessed
 when a caller already knows it.

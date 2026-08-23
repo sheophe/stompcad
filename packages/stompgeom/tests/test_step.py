@@ -130,7 +130,10 @@ def _new_shape_tool() -> tuple[object, Any]:
 
     Returns the document alongside the tool; the caller must keep the
     document referenced for as long as it uses any label drawn from it --
-    the document owns the label's underlying data.
+    the document owns the label's underlying data. Verified by experiment,
+    not merely conventional: once the document is garbage-collected, a label
+    drawn from it dangles and this binding segfaults (exit 139) on next use
+    rather than raising -- there is no exception a caller could catch instead.
     """
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document

@@ -50,7 +50,7 @@ derived:
 
 | Input | Why it is given, not recovered |
 | --- | --- |
-| Drill document (`stomp-drill-data` v6) | Those holes were cut *from* exact nanometre values. Reading them back out of the drilled geometry could only lose precision or fail. It also carries the face frame `stompdrill` cut in — see ADR-0009. |
+| Drill document (`stompcad-drill-data` v6) | Those holes were cut *from* exact nanometre values. Reading them back out of the drilled geometry could only lose precision or fail. It also carries the face frame `stompdrill` cut in — see ADR-0009. |
 | Drilled case model | `stompcollider` verifies clearance against real geometry; it has no catalogue from which to invent a casting, and the pre-spec forbids synthesising one. |
 | Board models | KiCad emits solids. Nothing upstream knows a board's protrusion axes, so this side must be measured. |
 
@@ -585,6 +585,16 @@ which is what ADR-0008 means by an interface discovered rather than invented.
 `stompdrill`'s suite is the instrument for the first two plans: a move that
 breaks something says so immediately, which is the whole reason ADR-0008
 extracts before the new tools rather than after.
+
+**The kernel document builder promotes on plan 3's first geometry ticket, not
+before.** ADR-0008 defers `stompgeom` owning "build" — assembling a document
+from placed, named, coloured solids — because today's only caller of that
+shape is a test fixture, not a real second consumer, so the interface is not
+yet designable. Plan 3's first geometry ticket is what supplies one: it
+promotes the existing test-only builder into `stompgeom` with `placement` and
+`colour` parameters, and the solid value gains whatever reading half that
+caller turns out to need. The assembly emitter must not construct kernel
+documents itself; it calls the promoted builder.
 
 **`fixtures/tar-pcb.stp` sits at the repository root until plan 3.** Plan 1's
 bulk move swept it into `stompdrill`, where no test reads it and mutmut copied

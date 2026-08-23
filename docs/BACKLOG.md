@@ -498,3 +498,207 @@ order is correct today; this is about what the tests would catch if it were not.
 **Acceptance:** `packages/stompmodel/tests/test_frames.py` reframes through a target frame
 carrying a genuine rotation rather than a pure mirror, and exchanging the two frame
 arguments in `reframe` fails that test.
+
+## Promote the kernel document builder into `stompgeom`, once plan 3 needs it
+
+**Status:** Deliberate deferral, not scheduled. ADR-0008 records the same deferral.
+
+**Constraint:** Assembling a document from placed, named, coloured solids ("build") has
+exactly one caller today, and that caller is a test fixture — not a real second consumer,
+so the interface is not yet designable. Plan 3's first geometry ticket is what supplies
+one: it promotes the existing test-only builder into `stompgeom` with `placement` and
+`colour` parameters, and the solid value gains whatever reading half that caller turns out
+to need. `stompcollider`'s assembly emitter must not construct kernel documents itself.
+
+**Acceptance:** The builder moves into `stompgeom`, taking `placement` and `colour`
+parameters, once `stompcollider`'s assembly emitter is its real caller; the assembly
+emitter calls it rather than building a document itself; and
+`docs/specs/stompcollider-technical.md`'s Order of work section and ADR-0008 agree about
+why it waited.
+
+## Defer moving the CLI's usage/IO policy below `stompdrill`, until a second consumer exists
+
+**Status:** Deliberate deferral, not scheduled.
+
+**Constraint:** `stompdrill.cli` translates domain and IO failures into the workspace's
+exit-code contract and withholds every artefact on any error. A second CLI-shaped consumer
+would need the same policy, which argues for a shared layer below `stompdrill` — but today
+`stompdrill` is the only implementation, and a shared layer with one implementation is the
+speculative generality this repo's design rules forbid.
+
+**Acceptance:** The policy moves below `stompdrill` once a second CLI-shaped consumer
+exists to shape the interface against, not before; the ADR that governs it is amended in
+the same change that moves it.
+
+## Two verified OCP kernel-binding segfault hazards
+
+**Status:** Confirmed gap, not scheduled. Verified by experiment during the 2026-08
+architecture review's ticket 04; recorded again at `stompgeom.step.label_name`'s docstring
+and at `test_step.py`'s `_new_shape_tool` docstring, where a kernel-test author meets them.
+
+**Constraint:** Two independent OCP behaviours fault the interpreter (exit 139) instead of
+raising, so no `except` can catch either. A `TDF_Label` outliving the `TDocStd_Document` it
+was drawn from dangles and faults on next use. `FindAttribute` on a live label carrying no
+`TDataStd_Name` attribute faults rather than returning `False`, which is why `label_name`
+checks `IsAttribute` first.
+
+**Acceptance:** Not independently closeable — see "`stompgeom` should own kernel lifetimes
+rather than expose them" below, which removes the hazard rather than merely documenting it.
+
+## `stompgeom` should own kernel lifetimes rather than expose them
+
+**Status:** Agreed direction, not scheduled. Raised by the user during the 2026-08
+architecture review, on the strength of the two hazards above.
+
+**Constraint:** Neither hazard above is guardable by a caller who only remembers a
+convention — the penalty for forgetting is a process death with no traceback, enforced by
+neither the type system nor an exception. `stompgeom` should never publish a bare label or
+shape whose owning document a caller must keep alive by discipline; it should publish a
+Python object that holds the document reference itself, so the lifetime is structural
+rather than remembered. This generalises the kernel document builder's own deferral above
+to every kernel handle `stompgeom` publishes, not only the builder's output.
+
+**Acceptance:** Every public `stompgeom` value that wraps a kernel handle also holds
+(directly or transitively) the document that handle depends on, so a caller cannot
+construct a dangling reference by discarding the wrong object, and the two hazards above no
+longer need a "keep both alive" convention to stay safe.
+
+## Order "ban `Any` at package boundaries" behind "`stompgeom` owns kernel lifetimes"
+
+**Status:** Agreed direction, ordered, not scheduled. Raised by the user during the 2026-08
+architecture review; refines "Adopt mypy `strict` on `packages/stompdrill/src/stompdrill`"
+above with where its argument actually lands.
+
+**Constraint:** The `CaseModel` defect's own `Any` lived in `stompdrill`
+(`StepOptions.model: Any | None`), which the strict-adoption item above already reaches —
+`disallow_any_explicit` on `stompmodel` would not have caught it, and `stompmodel` carries
+exactly one explicit `Any` in its source, so banning it there is nearly free. `stompgeom`'s
+`Any`s sit at the kernel seam (`StepSolid.shape`, `StepDocument.document`, label parameters
+throughout) and are honest — OCP ships no stubs — until the lifetime item above wraps them;
+banning `Any` there first just pushes authors to an unsearchable `# type: ignore`.
+
+**Acceptance:** `stompgeom` bans `Any` at its public boundary only after the kernel-lifetime
+item above wraps the kernel handles it currently exposes bare; `stompmodel` can ban it
+independently at any time, since the ordering does not apply there.
+
+## A mutmut/hypothesis incompatibility blocks `dedupe` and `geometry`'s mutation surveys
+
+**Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
+ticket 09.
+
+**Constraint:** A `@given` method inside a pytest class trips hypothesis's
+`HealthCheck.differing_executors` during mutmut's clean-baseline pass, aborting the survey
+outright — reproduced at `test_snap.py`'s `TestSnapPositions`. This blocks `stompdrill`'s
+`dedupe` and `geometry` mutation surveys, the two modules CLAUDE.md itself names as most
+worth chasing, and it is a pre-existing incompatibility this review did not introduce:
+`[tool.mutmut]` already documents two other cases where test structure aborts a survey.
+
+**Acceptance:** Either the affected `@given` methods move out of their pytest class so
+mutmut's baseline pass succeeds, or the incompatibility is reported upstream and worked
+around, and `dedupe`/`geometry` get a real scoped mutation reading afterwards.
+
+## Ticket 01's nanometre-guard singularity test is textual, not semantic
+
+**Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
+ticket 01.
+
+**Constraint:** `test_nanometre_guard_is_singular.py` detects a duplicate nanometre guard
+by grepping for the literal phrase "whole number of nanometres" inside a
+`raise TypeError(...)`; a future duplicate written with different wording (for example
+`type(x) is not int: raise TypeError(...)`) evades it silently. The test enforces the
+rule's wording, not the rule.
+
+**Acceptance:** The test detects a duplicate guard by what it does — rejects a non-int
+nanometre value — rather than by its message text, and a duplicate guard written with
+different wording still fails it.
+
+## `stompdrill`'s package root re-exports a signature naming a type it does not export
+
+**Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
+ticket 06; relevant to plan 3, which reads this root.
+
+**Constraint:** `stompdrill/__init__.py` re-exports `CaseModel` and `load_case_model`, but
+not `OcpCaseModel` — and `load_case_model`'s return type is now `OcpCaseModel`.
+`stompdrill.cad` exports `OcpCaseModel`, so the ticket's own wording ("exported from the
+package that owns it") is satisfied, but a consumer reading only the package root meets a
+return type the root itself will not give it.
+
+**Acceptance:** Either `stompdrill/__init__.py` also re-exports `OcpCaseModel`, or
+`load_case_model`'s published return type at the root is `CaseModel` (the protocol), and a
+test at the root proves whichever is chosen.
+
+## Take the `levels()` cut a level below where plan 3 currently plans it
+
+**Status:** Confirmed gap, not scheduled. Found independently by two lenses in the 2026-08
+architecture review's wave 1 (its own findings F1-07 and F2-04).
+
+**Constraint:** `_levels` (planned for `stompgeom`) consumes an unnamed
+`(area, position, outward, face)` clump, and the ~22 lines that build that clump — the
+planar filter, the axis test, `TopAbs_REVERSED`'s sign, the area and the bbox position —
+are inline in `stompdrill`'s `find_faces`. Whoever makes plan 3's `levels()` cut should take
+the harvest along with the grouping and name the clump; sizing the task as "move `_levels`"
+under-estimates it.
+
+**Acceptance:** The cut moves both the clump's construction and `_levels` into `stompgeom`,
+the clump is a named type rather than a bare tuple, and `stompdrill`'s suite passes
+unchanged.
+
+## Give `assembly_spans` and `_part_of` a home wider than `stompdrill.cad`
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
+(its own finding F1-06).
+
+**Constraint:** Both are private to `stompdrill.cad` today, and both feed a diagnostic that
+more than one tool raises — the same duplication rule `check_millimetres`/
+`check_nanometres` were published to close.
+
+**Acceptance:** Either the two helpers move to a package both tools depend on, with an
+admission rule naming the `stompcad`-visible reason, or the decision to leave them is
+recorded with why the duplication is acceptable here.
+
+## Delete `cli._options_for`'s type-hint introspection
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
+(its own finding F2-05).
+
+**Constraint:** `_options_for` inspects a constructor's type hints to route options, over a
+map (`_OPTION_BUILDERS`) already one-to-one with the emitter registry — a Middle Man a
+deletion test shows is not load-bearing.
+
+**Acceptance:** `_options_for` is replaced by the direct one-to-one lookup, the deletion
+test passes, and every existing emitter still receives its options unchanged.
+
+## Give `Pipeline` a per-stage observation point
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
+(its own finding F2-06).
+
+**Constraint:** `Pipeline` exposes no per-stage hook, so `cli.run_pipeline` iterates it a
+second time to produce `-v` output, and `stompcollider` would have to write the same
+duplicated iteration to get the same five lines.
+
+**Acceptance:** `Pipeline` (or `Stage`) exposes a seam a caller can observe each stage's
+`StageRun` through as it runs, `cli.run_pipeline` uses it instead of its second iteration,
+and both tools' `-v` output is unchanged.
+
+## Refuse a zero or negative `--grid`, rather than clamping it
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
+(its own finding F3-05).
+
+**Constraint:** A zero or negative `--grid` is silently clamped to one micron with a
+warning, while every neighbouring flag refuses nonsense outright as a usage error.
+
+**Acceptance:** A zero or negative `--grid` is a usage error (exit 3) like its neighbouring
+flags, the clamp-with-warning behaviour is deleted, and a test proves the refusal.
+
+## Delete `_OPTION_BUILDERS`'s redundant `JsonOptions` entry
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
+(its own finding F5-M1).
+
+**Constraint:** `_OPTION_BUILDERS` carries a `JsonOptions` entry that the documented "New
+emitter" rule says it should not need.
+
+**Acceptance:** The redundant entry is deleted, `JsonEmitter` still receives its options
+exactly as before, and the full suite passes unchanged.
