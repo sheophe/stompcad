@@ -234,12 +234,18 @@ CLI.
   `EmptyLayerError` names the remedy: give the drill circles a stroke.
 - `W` and `W*` mark a clipping path but are not tracked as a clip region; `n`, not `W`,
   makes a path invisible.
-- A Form XObject's declared `/BBox` is an unconditional clip (ISO 32000-1 §8.10.2):
-  geometry whose extent lies entirely outside it is not part of the page, in any
-  conforming viewer, and reaches no artefact — only geometry wholly outside is culled, so
-  a path straddling the box's edge is kept. The box clips in page space: it is mapped
-  through the form's own `/Matrix` and the current matrix before it is applied. Nested
-  forms intersect their boxes cumulatively.
+- The page's own crop box — its media box when none is declared (ISO 32000-1 §14.11.2) —
+  and every Form XObject's declared `/BBox` (ISO 32000-1 §8.10.2) are each an
+  unconditional clip, carried through the walk as **one** inherited region rather than
+  two policies: entering a form intersects its box, mapped through the form's own
+  `/Matrix` and the current matrix, into the region inherited from the page and every
+  enclosing form. Nested forms intersect cumulatively; no unconditional box is exempt
+  because no test named it.
+- The culling decision is taken on the quantity the recovered feature actually is. A
+  recognised circle is judged by its **centre** — a hole is point-like, so a circle
+  painting only a thin crescent inside the clip is not a hole, however far its bounding
+  box reaches into it. Any other feature, an outline candidate among them, is judged by
+  its **extent**, so a path merely straddling the region's edge is kept.
 - Circle recognition validates four cubic Beziers by equal anchor radii and kappa
   consistency around their centroid, so it remains rotation-invariant.
 - Apply every `cm` current transformation matrix, including a Form XObject's `/Matrix`.

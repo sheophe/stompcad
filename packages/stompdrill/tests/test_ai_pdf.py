@@ -754,6 +754,115 @@ def test_nested_forms_intersect_their_clips_cumulatively(tmp_path):
         AiPdfSource(path).read()
 
 
+def test_a_pasteboard_circle_outside_the_media_box_is_not_a_hole(tmp_path):
+    """F3-01: the page's own box clips exactly as unconditionally as a form's.
+
+    A native Illustrator save keeps pasteboard artwork in the content stream,
+    so a spare circle parked outside /MediaBox must not surface as a hole."""
+    pdf = build_pdf(
+        tmp_path / "media.ai",
+        {
+            "Drill": circle_ops(50, 50, 5) + " " + circle_ops(900, 900, 5),
+            "Background": "10 10 180 80 re S",
+        },
+        media=(0, 0, 200, 100),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_the_same_pasteboard_circle_is_the_only_thing_on_an_otherwise_bare_layer(tmp_path):
+    """Control: with nothing else drillable, culling it raises the same
+    empty-layer error a genuinely bare layer would -- naming the same remedy."""
+    pdf = build_pdf(
+        tmp_path / "media-empty.ai",
+        {"Drill": circle_ops(900, 900, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+    )
+    with pytest.raises(EmptyLayerError) as excinfo:
+        AiPdfSource(pdf).read()
+    assert "stroke" in str(excinfo.value)
+
+
+def test_a_crop_box_narrower_than_the_media_box_bites(tmp_path):
+    """The crop box, where present, is what clips -- proving the media box is
+    only the default, not the rule."""
+    pdf = build_pdf(
+        tmp_path / "crop.ai",
+        {"Drill": circle_ops(150, 50, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+        crop=(0, 0, 100, 100),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_the_same_circle_inside_the_crop_box_is_still_a_hole(tmp_path):
+    """Control for the previous test: the crop box, not the geometry, differs."""
+    pdf = build_pdf(
+        tmp_path / "crop-control.ai",
+        {"Drill": circle_ops(50, 50, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+        crop=(0, 0, 100, 100),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_circle_centred_outside_the_page_clip_is_not_a_hole_even_straddling_it(tmp_path):
+    """F3-02, at page level: a hole is a point-like feature. A Ø40pt circle
+    centred just past the crop edge paints only a thin crescent inside it and
+    must not be recovered at all, let alone at its full diameter."""
+    pdf = build_pdf(
+        tmp_path / "centre-cull.ai",
+        {"Drill": circle_ops(118, 50, 20), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 400, 400),
+        crop=(0, 0, 100, 400),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_a_circle_centred_inside_the_page_clip_is_kept_even_where_clipped(tmp_path):
+    """The other clause of the same rule: a centre inside the clip keeps the
+    hole even though part of the circle is clipped away."""
+    pdf = build_pdf(
+        tmp_path / "centre-keep.ai",
+        {"Drill": circle_ops(90, 50, 20), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 400, 400),
+        crop=(0, 0, 100, 400),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_circle_centred_outside_a_forms_bbox_paints_only_a_crescent(tmp_path):
+    """F3-02: the centre rule applies under a form's box exactly as under the
+    page's. The form's /BBox ends at x=100; a Ø40pt circle centred at x=118
+    paints only a thin crescent and must not be recovered at all."""
+    body = circle_ops(118, 50, 20) + " " + circle_ops(50, 50, 5)
+    pdf = build_pdf(
+        tmp_path / "bbox-centre.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 0, 0], body),
+        form_bbox=(0, 0, 100, 400),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_the_reference_outline_is_still_judged_by_extent_under_the_page_clip(tmp_path):
+    """The class criterion's other half: an outline candidate is judged by its
+    extent, not a centre, even under the page's own clip -- unchanged from the
+    wave-1 form-box rule, now reachable at the page level too."""
+    pdf = build_pdf(
+        tmp_path / "outline-extent.ai",
+        {"Drill": circle_ops(50, 50, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+        crop=(0, 0, 100, 100),
+    )
+    data = AiPdfSource(pdf).read()
+    # The reference rectangle straddles the crop edge (extent 10..190) but is
+    # kept as the outline: only a wholly outside extent would be culled.
+    assert data.reference is not None
+
+
 def test_a_placed_image_is_not_walked_as_a_content_stream(tmp_path):
     """Illustrator files carry linked images; only Form XObjects hold paths."""
     pdf = build_pdf(

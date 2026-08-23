@@ -272,12 +272,17 @@ def _walk_page(page: pikepdf.Page, max_depth: int) -> tuple[list[_LayerPath], bo
     """Painted, non-clipping subpaths in page space, and whether nesting was cut.
 
     Page space is PDF points from the ``/MediaBox`` lower-left corner; the base
-    CTM removes a non-zero box offset. The page itself carries no clip.
+    CTM removes a non-zero box offset. The page's own crop box -- its media box
+    when none is declared (ISO 32000-1 14.11.2) -- is exactly as unconditional
+    a clip as a Form XObject's ``/BBox``, so it seeds the walk's one inherited
+    clip region rather than leaving the top level unbounded.
     """
     box = [float(v) for v in page.MediaBox]
     base: Matrix = (1.0, 0.0, 0.0, 1.0, -box[0], -box[1])
+    crop = [float(v) for v in page.cropbox]
+    page_clip: _Rect = (crop[0] - box[0], crop[1] - box[1], crop[2] - box[0], crop[3] - box[1])
     out: list[_LayerPath] = []
-    truncated = _walk(page, page.get("/Resources"), base, None, (), out, 0, max_depth)
+    truncated = _walk(page, page.get("/Resources"), base, page_clip, (), out, 0, max_depth)
     return out, truncated
 
 
@@ -294,10 +299,12 @@ def _walk(
     """Interpret one content stream, appending to ``out``.
 
     ``marks`` is inherited by nested forms, but each stream may close only the
-    marked-content entries it opened. ``clip`` is the cumulative Form ``/BBox``
-    intersection inherited from every enclosing form, in page space; ``None``
-    means unbounded. Returns whether a form went unread for want of depth, here
-    or anywhere below.
+    marked-content entries it opened. ``clip`` is the one region carried
+    through the walk -- the page's own crop box intersected with every
+    enclosing form's ``/BBox`` -- in page space; ``None`` means unbounded, which
+    a top-level call never passes since the page always supplies its own box.
+    Returns whether a form went unread for want of depth, here or anywhere
+    below.
     """
     truncated = False
     stack: list[Matrix] = []
@@ -344,11 +351,18 @@ def _walk(
                 continue
             layers = frozenset().union(*marks) if marks else frozenset()
             for path in painted:
-                # A form's /BBox is an unconditional clip (ISO 32000-1 8.10.2):
-                # geometry entirely outside it is not part of the page, and is
-                # no candidate for a hole or the reference outline. Straddling
-                # geometry is kept -- only a *wholly* outside extent is culled.
-                if _entirely_outside(path.bbox, clip):
+                # ``clip`` is unconditional (ISO 32000-1 8.10.2, 14.11.2), but
+                # the quantity it is tested against depends on what the path
+                # recognises as. A hole is point-like: a circle painting only
+                # a thin crescent inside the clip is not a hole, so it is
+                # judged by its centre. Anything else -- an outline candidate
+                # among them -- is judged by its extent, so a path merely
+                # straddling the clip's edge is kept.
+                circle = fit_circle(path)
+                if circle is not None:
+                    if _centre_outside(circle.cx, circle.cy, clip):
+                        continue
+                elif _entirely_outside(path.bbox, clip):
                     continue
                 out.append(_LayerPath(layers=layers, path=path))
 
@@ -588,6 +602,10 @@ def _intersect(a: _Rect | None, b: _Rect) -> _Rect:
 def _entirely_outside(bbox: tuple[float, float, float, float], clip: _Rect | None) -> bool:
     """Whether ``bbox`` shares no extent with ``clip``; ``None`` never culls.
 
+    For a non-circular path only: an outline candidate genuinely is an extent,
+    so straddling the clip's edge keeps it. A recognised circle is judged by
+    ``_centre_outside`` instead -- see its docstring for why.
+
     An empty ``clip`` (``x0 > x1`` or ``y0 > y1``, from two boxes that do not
     overlap) culls every bbox outright rather than relying on the ordinary
     disjoint test, which a degenerate interval can fool.
@@ -599,6 +617,22 @@ def _entirely_outside(bbox: tuple[float, float, float, float], clip: _Rect | Non
         return True
     x0, y0, x1, y1 = bbox
     return x1 < cx0 or x0 > cx1 or y1 < cy0 or y0 > cy1
+
+
+def _centre_outside(cx: float, cy: float, clip: _Rect | None) -> bool:
+    """Whether a recovered circle's centre lies outside ``clip``.
+
+    A hole is point-like: an extent test would keep a circle painting only a
+    thin crescent inside the clip, mostly outside it, as long as any sliver
+    overlaps. ``None`` never culls; a degenerate empty ``clip`` always does,
+    matching ``_entirely_outside``.
+    """
+    if clip is None:
+        return False
+    cx0, cy0, cx1, cy1 = clip
+    if cx0 > cx1 or cy0 > cy1:
+        return True
+    return cx < cx0 or cx > cx1 or cy < cy0 or cy > cy1
 
 
 def _largest_non_circular(
