@@ -2054,6 +2054,54 @@ def test_report_is_byte_identical_after_a_codec_round_trip_with_a_case():
     assert "1590BB" in live_report
 
 
+def test_the_report_states_the_rotated_panels_reframed_play_area():
+    """A rotated panel's play area line states the frame ``apply()`` actually
+    checked holes against -- the clearance stage's own reframed provenance
+    (ADR-0007, ticket 19) -- not the live model's permanently unrotated
+    ``play_area_nm``. The two genuinely disagree for a rotated panel; per
+    progress.md Phase 7 ruling R1, a changed line here is ticket 19 finally
+    reaching the report, not this ticket regressing it. Fix-round-1 finding:
+    the byte-identical round-trip test above never exercised a rotated panel
+    (``_case_checked_document`` supplies no enclosure, so ``apply()`` takes
+    the identity fast path), so nothing pinned this number before now.
+    """
+    from stompdrill.cli import format_case
+    from stompdrill.pipeline import CheckCaseClearance
+    from tests.conftest import FakeCase, at, make_data
+
+    model = FakeCase()  # play_area_nm = (-50mm, -40mm, 50mm, 40mm)
+    rotated = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=Nanometre(94_000_000),
+        width_nm=Nanometre(119_500_000),
+        candidates=(model.part,),
+        selected_part=model.part,
+        rotated=True,
+    )
+    stage = CheckCaseClearance(model)
+    data = stage.apply(make_data(at(0, 0, 5_000_000, index=1)).with_enclosure(rotated))
+    data = data.with_processing(stage.describe())
+
+    lines = "\n".join(format_case(data))
+
+    # The reframed rectangle swaps axes relative to the model's own, still
+    # unrotated ``model.play_area_nm``: 80 x 100 mm (x -40..40, y -50..50),
+    # not the model's native 100 x 80 mm (x -50..50, y -40..40).
+    assert model.play_area_nm == (
+        Nanometre(-50_000_000),
+        Nanometre(-40_000_000),
+        Nanometre(50_000_000),
+        Nanometre(40_000_000),
+    )
+    assert "80.000 x 100.000 mm" in lines
+    assert "x -40.000…40.000" in lines
+    assert "y -50.000…50.000" in lines
+    # The falsified claim: the live model's own, unrotated rectangle must not
+    # appear -- that would mean the report went back to the live handle.
+    assert "100.000 x 80.000 mm" not in lines
+    assert "x -50.000…50.000" not in lines
+
+
 def test_format_report_reads_the_case_from_a_registration_alone():
     """A ``DrillData`` carrying only ``.case``, with no clearance provenance at
     all (e.g. hand-built, or a document from a tool that never ran the

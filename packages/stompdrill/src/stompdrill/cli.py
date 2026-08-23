@@ -558,11 +558,11 @@ def format_case(data: DrillData) -> list[str]:
     if isinstance(plate_nm, int):
         lines.append(_field("plate", f"{format_nm(Nanometre(plate_nm))} mm"))
     play_area = None if run is None else run.get(_PLAY_AREA_PARAMETER)
-    if (
-        isinstance(play_area, tuple)
-        and len(play_area) == 4
-        and all(isinstance(v, int) for v in play_area)
-    ):
+    # Only the length is this guard's own to check: ``StageRun.__post_init__``
+    # already runs ``check_nanometres`` over every element of any ``_nm``-suffixed
+    # tuple (ADR-0004), so a stored ``play_area_nm`` can never carry a non-``int``
+    # element -- only the wrong length, which nothing upstream constrains.
+    if isinstance(play_area, tuple) and len(play_area) == 4:
         x0, y0, x1, y1 = (Nanometre(int(v)) for v in play_area)
         lines.append(
             _field(
