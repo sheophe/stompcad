@@ -143,6 +143,7 @@ def build_pdf(
     layers: dict[str, str],
     *,
     media: tuple[float, float, float, float] = (0, 0, 400, 400),
+    crop: tuple[float, float, float, float] | None = None,
     form: tuple[list[float], str] | None = None,
     form_bbox: tuple[float, float, float, float] = (0, 0, 10000, 10000),
     form_properties: dict[str, str] | None = None,
@@ -152,6 +153,9 @@ def build_pdf(
     """Write a one-page PDF whose layers are OCGs, like a native ``.ai`` save.
 
     Forms only receive resources when requested, keeping lookup and fallback distinct.
+    ``crop`` states a ``/CropBox`` narrower than ``media``, so a test can make
+    the page's own box bite exactly as ``form_bbox`` already lets a form's box
+    bite; omitted, the page carries no ``/CropBox`` and its media box governs.
     """
     pdf = pikepdf.new()
     ocgs = []
@@ -194,16 +198,15 @@ def build_pdf(
         table.Im0 = pdf.make_indirect(picture)
         resources.XObject = table
 
-    page = pikepdf.Page(
-        pdf.make_indirect(
-            Dictionary(
-                Type=Name.Page,
-                MediaBox=Array(list(media)),
-                Resources=resources,
-                Contents=pdf.make_indirect(pdf.make_stream(("\n".join(body) + extra).encode())),
-            )
-        )
+    page_dict = Dictionary(
+        Type=Name.Page,
+        MediaBox=Array(list(media)),
+        Resources=resources,
+        Contents=pdf.make_indirect(pdf.make_stream(("\n".join(body) + extra).encode())),
     )
+    if crop is not None:
+        page_dict.CropBox = Array(list(crop))
+    page = pikepdf.Page(pdf.make_indirect(page_dict))
     pdf.pages.append(page)
     pdf.save(path)
     return path
