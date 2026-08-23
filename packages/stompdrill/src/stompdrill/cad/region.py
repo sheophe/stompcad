@@ -144,11 +144,11 @@ def contains(
 ) -> bool:
     """Is the drill circle, grown by the margin, wholly inside ``region``?
 
-    ``frame`` is only ever seated on the *drilled* face, never re-derived for
-    ``region``'s own plane. ``region`` sits on a parallel plane offset along
-    ``axis``, so the incoming point is projected onto that plane before
-    classification, rather than requiring a second, region-specific frame
-    from every caller.
+    ``frame`` is never re-derived for ``region``'s own plane: ``region`` sits
+    on a parallel plane offset along ``axis``, so the incoming point's
+    ``axis`` component is overwritten with that plane before classification,
+    whichever surface ``frame``'s own origin registers -- rather than
+    requiring a second, region-specific frame from every caller.
     """
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
     from OCP.BRepClass import BRepClass_FaceClassifier
