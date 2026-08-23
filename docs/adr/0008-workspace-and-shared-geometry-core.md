@@ -110,6 +110,22 @@ exactly one implementation; a caller reading a label's name, in `stompdrill` or 
 future consumer, goes through it rather than keeping a private copy that could
 drift from the reader's own.
 
+The reading side must also be **closed under its own round trip**: every value
+this layer writes into a document or a file is read back from the field it was
+actually written to, never from a second producer's labelling convention for
+that field, and a reader added for a field the writer sets arrives with the
+round trip that proves it. The timestamp was the counter-example that forced
+this paragraph: `stompgeom.writer.render_step` sets the timestamp into
+`FILE_NAME`'s own field, but `stompgeom.step.source_timestamp` matched only
+ST-Developer's `/* time_stamp */` comment annotation — a different producer's
+label for that field, which this workspace's own writer never emits — so a
+file this layer had just written read its own timestamp back as the epoch
+sentinel. The fix is one rule reading one field, positionally, tolerant of a
+conforming file's comment annotations and of the field's own quoted-quote
+escaping; the comment-only pattern is deleted rather than kept as a second,
+narrower reader for the same field, because two readers for one written field
+is this defect's exact shape.
+
 On the writing side, `stompgeom` now owns a document it can **render to bytes**:
 `stompgeom.writer.render_step` is the one serialising entry point, returning the
 finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
