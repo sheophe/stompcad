@@ -259,8 +259,9 @@ class CaseRegistration:
     """The supplied case model a document's holes were decided against.
 
     ``part`` is *resolved*, not verified: the operator's ``--case`` when
-    typed, otherwise the model's own product name -- a different fact from
-    ``EnclosureMatch.selected_part``, the artwork's declared footprint.
+    typed, otherwise the model's own product name. Nothing compares a
+    declared designator against the model's own product name -- ``part`` is
+    a different fact from ``EnclosureMatch.selected_part``.
 
     ``model`` is the file's name, not its path. Nesting ``frame`` here is a
     bet that holds only while a supplied model always has a frame.
