@@ -21,7 +21,7 @@ from stompmodel.errors import EmitterError
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
 
-from ..cad import OcpCaseModel
+from ..cad import OcpCaseModel, step_keyword
 from .base import register_emitter
 
 __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
@@ -107,7 +107,7 @@ def cut_shape(
     if tools is None:
         return document, lambda: None, frozenset()
 
-    keyword = "BOX" if model.face == "box" else "LID"
+    keyword = step_keyword(model.face)
     originals: list[tuple[Any, Any]] = []
     free = TDF_LabelSequence()
     tool.GetFreeShapes(free)

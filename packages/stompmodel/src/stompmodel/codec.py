@@ -16,6 +16,7 @@ from .diagnostics import Diagnostic, Severity
 from .errors import DocumentError
 from .frames import CoordinateFrame, FaceFrame
 from .model import (
+    CaseFace,
     CaseRegistration,
     DrillData,
     EnclosureMatch,
@@ -163,7 +164,7 @@ def _case(case: CaseRegistration | None) -> dict[str, Any] | None:
         return None
     return {
         "part": case.part,
-        "face": case.face,
+        "face": case.face.value,
         "model": case.model,
         "frame": _frame(case.frame),
     }
@@ -313,7 +314,7 @@ def _read_case(payload: Mapping[str, Any] | None) -> CaseRegistration | None:
         return None
     return CaseRegistration(
         part=payload["part"],
-        face=payload["face"],
+        face=CaseFace(payload["face"]),
         model=payload["model"],
         frame=_read_frame(payload["frame"]),
     )

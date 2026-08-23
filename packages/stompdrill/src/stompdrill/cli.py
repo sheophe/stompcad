@@ -25,7 +25,7 @@ from stompmodel.diagnostics import (
     exit_for_severity,
 )
 from stompmodel.errors import StompError
-from stompmodel.model import DrillData
+from stompmodel.model import CaseFace, DrillData
 from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, write_payload
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
@@ -238,15 +238,15 @@ def parse_case(text: str) -> str:
     )
 
 
-_FACES = ("box", "lid")
-
-
-def parse_face(text: str) -> str:
+def parse_face(text: str) -> CaseFace:
     """Normalise the drilled side, rejecting anything else as a usage error."""
-    face = text.strip().lower()
-    if face not in _FACES:
-        raise UsageError(f"--case-face {text!r} must be one of: {', '.join(_FACES)}")
-    return face
+    try:
+        return CaseFace(text.strip().lower())
+    except ValueError:
+        raise UsageError(
+            f"--case-face {text!r} must be one of: "
+            f"{', '.join(face.value for face in CaseFace)}"
+        ) from None
 
 
 def parse_emit(spec: str) -> tuple[str, Path]:
@@ -538,7 +538,7 @@ def format_case(model: CaseModel | None) -> list[str]:
     return [
         "",
         "CASE MODEL",
-        _field("part", f"{model.part}  ({model.face})"),
+        _field("part", f"{model.part}  ({model.face.value})"),
         _field("plate", f"{format_nm(model.plate_nm)} mm"),
         _field(
             "play area",

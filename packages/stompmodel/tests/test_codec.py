@@ -14,6 +14,7 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import DocumentError
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    CaseFace,
     CaseRegistration,
     DrillData,
     EnclosureMatch,
@@ -71,7 +72,7 @@ _FRAME = FaceFrame(
     )
 )
 
-_REGISTRATION = CaseRegistration(part="1590BB", face="box", model="1590BB.stp", frame=_FRAME)
+_REGISTRATION = CaseRegistration(part="1590BB", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
 
 
 def _make_data(*given: Hole) -> DrillData:
@@ -437,6 +438,17 @@ def test_a_document_without_a_case_model_round_trips_with_the_member_absent() ->
     rebuilt = from_document(document)
 
     assert rebuilt.case is None
+
+
+def test_a_case_registration_with_a_face_outside_the_vocabulary_is_refused() -> None:
+    """Restored by constructing the type: ``CaseFace``'s own ``ValueError``
+    escapes into the codec's malformed-document handler, exactly as any
+    other constructor guard does."""
+    document = to_document(_case_fixture_data())
+    document["case"]["face"] = "top"
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
 
 
 # --------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from stompdrill.cad import Rejection
 from stompdrill.emitters import base
 from stompdrill.geometry import KAPPA
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import DrillData, Hole, ReferenceOutline, SourceInfo
+from stompmodel.model import CaseFace, DrillData, Hole, ReferenceOutline, SourceInfo
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
@@ -205,7 +205,7 @@ class FakeCase:
     """
 
     part = "1590BB"
-    face = "box"
+    face = CaseFace.BOX
     model_name = "1590BB.stp"
     footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
     plate_nm = Nanometre(2_250_000)

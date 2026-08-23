@@ -12,9 +12,11 @@ from typing import Any
 
 from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from ..errors import StompdrillError
+from .base import step_keyword
 
 __all__ = [
     "Faces", "drill_axis", "assembly_spans", "select_solid", "find_faces",
@@ -32,8 +34,6 @@ __all__ = [
 #: match the other's catalogue footprint. 0.05 mm is generous against Hammond's
 #: 0.1 mm publication rounding while staying well inside that 0.40 mm gap.
 _MATCH_TOLERANCE_MM = 0.05
-
-_FACE_KEYWORDS = {"box": "BOX", "lid": "LID"}
 
 #: Below this fraction of a level's own outer-wire area that isn't real
 #: surface (1 - true area / outer-wire area), a level is a candidate plate;
@@ -95,16 +95,14 @@ def assembly_spans(document: StepDocument) -> tuple[float, float, float]:
     return (highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2])
 
 
-def select_solid(document: StepDocument, face: str) -> StepSolid:
+def select_solid(document: StepDocument, face: CaseFace) -> StepSolid:
     """Pick the box or lid solid, by name and then verified by thickness."""
-    keyword = _FACE_KEYWORDS.get(face)
-    if keyword is None:
-        raise StompdrillError(f"unknown case face {face!r}; expected 'box' or 'lid'")
+    keyword = step_keyword(face)
     found = document.named(keyword)
     if len(found) != 1:
         raise StompdrillError(
             f"the model names {len(found)} products containing {keyword!r}; "
-            f"exactly one is needed to drill the {face}"
+            f"exactly one is needed to drill the {face.value}"
         )
     return found[0]
 

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from stompmodel.model import CaseFace
+
 pytestmark = pytest.mark.hammond
 
 MM = 1_000_000
@@ -26,14 +28,14 @@ def _model_path():
     return require_model("1590BB")
 
 
-def _model(face: str = "box"):
+def _model(face: CaseFace = CaseFace.BOX):
     from stompdrill.cad import load_case_model
     from stompmodel.units import Nanometre
 
     return load_case_model(_model_path(), face=face, margin_nm=Nanometre(1 * MM))
 
 
-def _emit(*holes, face="box", model=None):
+def _emit(*holes, face=CaseFace.BOX, model=None):
     from stompdrill.emitters.step import StepEmitter, StepOptions
     from tests.conftest import make_data
 
@@ -269,13 +271,43 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
     after = {s.name: _volume(s.shape)
-             for s in _reload(_emit(at(0, 0, 6 * MM, index=1), face="lid"), tmp_path).solids}
+             for s in _reload(_emit(at(0, 0, 6 * MM, index=1), face=CaseFace.LID), tmp_path).solids}
 
     for name, volume in before.items():
         if "LID" in name.upper():
             assert after[name] < volume
         else:
             assert after[name] == pytest.approx(volume, abs=0.05)
+
+
+def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
+    """F2-04: ``cut_shape``'s face-to-keyword mapping used to be
+    ``"BOX" if model.face == "box" else "LID"`` -- total over every string
+    that is not exactly ``"box"`` -- where ``select_solid``'s was partial and
+    raised. A library caller who builds a kernel-backed model directly
+    (unreachable from the CLI, which validates first) used to see a face
+    outside the vocabulary silently drilled as the lid. Both consumers now
+    read the same published lookup and refuse it alike.
+    """
+    import dataclasses
+
+    from stompdrill.cad.case import select_solid
+    from stompdrill.emitters import step as step_module
+    from tests.conftest import at, make_data
+
+    model = _model()
+    document = model.document
+
+    # Control: the selector already refuses an unrecognised face.
+    with pytest.raises(KeyError):
+        select_solid(document, "top")
+
+    # A library caller bypassing the type -- CaseFace's own value is never
+    # constructible from "top", so this simulates the one way the vocabulary
+    # can still be violated at runtime.
+    top_model = dataclasses.replace(model, face="top")
+    with pytest.raises(KeyError):
+        step_module.cut_shape(top_model, make_data(at(0, 0, 6 * MM, index=1)))
 
 
 def test_no_matching_component_is_an_emitter_error():
@@ -375,10 +407,10 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompmodel.model import DrillData, Hole
+        from stompmodel.model import CaseFace, DrillData, Hole
         from stompmodel.units import Nanometre
 
-        model = load_case_model(Path({str(model_path)!r}), face="box",
+        model = load_case_model(Path({str(model_path)!r}), face=CaseFace.BOX,
                                  margin_nm=Nanometre(1_000_000))
         hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
                                      Nanometre(6_000_000)).with_number(1)
@@ -630,10 +662,10 @@ def test_two_emissions_describe_the_same_model(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompmodel.model import DrillData, Hole
+        from stompmodel.model import CaseFace, DrillData, Hole
         from stompmodel.units import Nanometre
 
-        model = load_case_model(Path({str(model_path)!r}), face="box",
+        model = load_case_model(Path({str(model_path)!r}), face=CaseFace.BOX,
                                  margin_nm=Nanometre(1_000_000))
         hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
                                      Nanometre(6_000_000)).with_number(1)

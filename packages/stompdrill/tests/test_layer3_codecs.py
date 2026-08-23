@@ -20,7 +20,7 @@ from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
 from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
 from stompdrill.emitters.json_out import JsonEmitter
 from stompmodel.codec import from_document
-from stompmodel.model import DrillData, Origin, ReferenceOutline
+from stompmodel.model import CaseFace, DrillData, Origin, ReferenceOutline
 from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 from tests.recovery.excellon import read_excellon
@@ -306,7 +306,7 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
-    model = load_case_model(model_path, face="box", margin_nm=Nanometre(1_000_000))
+    model = load_case_model(model_path, face=CaseFace.BOX, margin_nm=Nanometre(1_000_000))
     # Two distinct diameters: a count that is right with wrong radii, and
     # radii that are right with a wrong count, must be different defects.
     data = make_data(

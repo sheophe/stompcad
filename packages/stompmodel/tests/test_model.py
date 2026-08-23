@@ -10,6 +10,7 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import EmitterError
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    CaseFace,
     CaseRegistration,
     DrillData,
     EnclosureMatch,
@@ -670,29 +671,39 @@ _FRAME = FaceFrame(
     )
 )
 
-_REGISTRATION = CaseRegistration(part="1590BB", face="box", model="1590BB.stp", frame=_FRAME)
+_REGISTRATION = CaseRegistration(part="1590BB", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
 
 
 def test_a_registration_names_the_part_the_face_the_model_and_the_frame() -> None:
     assert _REGISTRATION.part == "1590BB"
-    assert _REGISTRATION.face == "box"
+    assert _REGISTRATION.face is CaseFace.BOX
     assert _REGISTRATION.model == "1590BB.stp"
     assert _REGISTRATION.frame is _FRAME
 
 
 def test_an_empty_part_is_refused() -> None:
     with pytest.raises(ValueError):
-        CaseRegistration(part="", face="box", model="1590BB.stp", frame=_FRAME)
-
-
-def test_an_empty_face_is_refused() -> None:
-    with pytest.raises(ValueError):
-        CaseRegistration(part="1590BB", face="", model="1590BB.stp", frame=_FRAME)
+        CaseRegistration(part="", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
 
 
 def test_an_empty_model_name_is_refused() -> None:
     with pytest.raises(ValueError):
-        CaseRegistration(part="1590BB", face="box", model="", frame=_FRAME)
+        CaseRegistration(part="1590BB", face=CaseFace.BOX, model="", frame=_FRAME)
+
+
+def test_case_face_has_exactly_two_legal_members() -> None:
+    """The published vocabulary, closed: this is the whole of it."""
+    assert {member.value for member in CaseFace} == {"box", "lid"}
+
+
+def test_a_case_face_member_is_never_falsy() -> None:
+    """The registration's guard can drop the face clause because of this."""
+    assert bool(CaseFace.BOX) and bool(CaseFace.LID)
+
+
+def test_a_value_outside_the_vocabulary_is_refused_by_the_enum_itself() -> None:
+    with pytest.raises(ValueError):
+        CaseFace("top")
 
 
 def test_the_registration_is_frozen_and_slotted() -> None:

@@ -6,6 +6,7 @@ import pytest
 
 from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid
 from stompgeom.step import read_step
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre
 from tests.hammond import MODELS
 
@@ -44,31 +45,24 @@ def test_a_footprint_matching_nothing_is_rejected(document):
 
 
 def test_the_box_and_lid_are_selected_by_name(document):
-    assert "BOX" in select_solid(document, "box").name.upper()
-    assert "LID" in select_solid(document, "lid").name.upper()
+    assert "BOX" in select_solid(document, CaseFace.BOX).name.upper()
+    assert "LID" in select_solid(document, CaseFace.LID).name.upper()
 
 
 def test_the_selected_lid_is_the_thinner_solid(document):
     from stompgeom.step import bounding_box_mm
 
     axis = drill_axis(document, FOOTPRINT)
-    box = bounding_box_mm(select_solid(document, "box").shape)
-    lid = bounding_box_mm(select_solid(document, "lid").shape)
+    box = bounding_box_mm(select_solid(document, CaseFace.BOX).shape)
+    lid = bounding_box_mm(select_solid(document, CaseFace.LID).shape)
 
     assert (lid[axis + 3] - lid[axis]) < (box[axis + 3] - box[axis])
-
-
-def test_an_unknown_face_name_is_rejected(document):
-    from stompdrill.errors import StompdrillError
-
-    with pytest.raises(StompdrillError):
-        select_solid(document, "flange")
 
 
 def test_the_box_plate_thickness_is_measured_from_the_two_faces(document):
     axis = drill_axis(document, FOOTPRINT)
 
-    faces = find_faces(select_solid(document, "box"), axis)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
 
     assert faces.plate_nm == 2_250_000
 
@@ -76,7 +70,7 @@ def test_the_box_plate_thickness_is_measured_from_the_two_faces(document):
 def test_the_lid_plate_thickness_is_measured_from_the_two_faces(document):
     axis = drill_axis(document, FOOTPRINT)
 
-    faces = find_faces(select_solid(document, "lid"), axis)
+    faces = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert faces.plate_nm == 2_000_000
 
@@ -84,7 +78,7 @@ def test_the_lid_plate_thickness_is_measured_from_the_two_faces(document):
 def test_the_outward_normal_points_away_from_the_solid(document):
     """same_sense, not the surface normal, decides which way is out."""
     axis = drill_axis(document, FOOTPRINT)
-    box = select_solid(document, "box")
+    box = select_solid(document, CaseFace.BOX)
     faces = find_faces(box, axis)
 
     from stompgeom.step import bounding_box_mm
@@ -98,15 +92,15 @@ def test_the_outward_normal_points_away_from_the_solid(document):
 def test_the_box_and_lid_face_in_opposite_directions(document):
     axis = drill_axis(document, FOOTPRINT)
 
-    box = find_faces(select_solid(document, "box"), axis)
-    lid = find_faces(select_solid(document, "lid"), axis)
+    box = find_faces(select_solid(document, CaseFace.BOX), axis)
+    lid = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert box.outward[axis] == -lid.outward[axis]
 
 
 def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
     axis = drill_axis(document, FOOTPRINT)
-    faces = find_faces(select_solid(document, "box"), axis)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
 
     frame = build_frame(faces, axis)
     u, v, w = frame.basis.u, frame.basis.v, frame.basis.w
@@ -121,7 +115,7 @@ def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
 
 def test_the_frame_is_orthonormal(document):
     axis = drill_axis(document, FOOTPRINT)
-    frame = build_frame(find_faces(select_solid(document, "box"), axis), axis)
+    frame = build_frame(find_faces(select_solid(document, CaseFace.BOX), axis), axis)
 
     for a in (frame.basis.u, frame.basis.v, frame.basis.w):
         assert pytest.approx(sum(c * c for c in a), abs=1e-9) == 1.0
@@ -137,8 +131,8 @@ def _frame_for(request, part: str) -> tuple[int, Faces, Faces]:
         Nanometre(round(model.footprint_mm[1] * 1_000_000)),
     )
     axis = drill_axis(document, footprint)
-    box = find_faces(select_solid(document, "box"), axis)
-    lid = find_faces(select_solid(document, "lid"), axis)
+    box = find_faces(select_solid(document, CaseFace.BOX), axis)
+    lid = find_faces(select_solid(document, CaseFace.LID), axis)
     return axis, box, lid
 
 
@@ -207,8 +201,8 @@ def test_the_plate_thickness_is_correct_for_every_catalogued_model(request, part
     )
 
     axis = drill_axis(document, footprint)
-    box = find_faces(select_solid(document, "box"), axis)
-    lid = find_faces(select_solid(document, "lid"), axis)
+    box = find_faces(select_solid(document, CaseFace.BOX), axis)
+    lid = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert box.plate_nm == round(model.box_plate_mm * 1_000_000)
     assert lid.plate_nm == round(model.lid_plate_mm * 1_000_000)

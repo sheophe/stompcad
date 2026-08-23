@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from stompmodel.frames import FaceFrame
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, nm_from_mm
 
 from .base import Rejection
@@ -28,7 +29,7 @@ class OcpCaseModel:
     """A kernel-backed case model. Built by :func:`load_case_model`."""
 
     part: str
-    face: str
+    face: CaseFace
     model_name: str
     footprint_nm: tuple[Nanometre, Nanometre]
     plate_nm: Nanometre
@@ -85,7 +86,7 @@ class OcpCaseModel:
 
 
 def load_case_model(
-    path: Path, *, face: str, margin_nm: Nanometre, part: str | None = None
+    path: Path, *, face: CaseFace, margin_nm: Nanometre, part: str | None = None
 ) -> OcpCaseModel:
     """Read ``path`` and build the model for the named face."""
     from stompgeom import kernel
@@ -104,8 +105,8 @@ def load_case_model(
     own_frame = build_frame(faces, axis)
 
     box_region = box_frame = None
-    if face == "lid":
-        box_faces = find_faces(select_solid(document, "box"), axis)
+    if face is CaseFace.LID:
+        box_faces = find_faces(select_solid(document, CaseFace.BOX), axis)
         box_region = build_region(box_faces.inner, axis, box_faces.outward[axis])
         box_frame = build_frame(box_faces, axis)
 

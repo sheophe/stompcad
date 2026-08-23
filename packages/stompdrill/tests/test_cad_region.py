@@ -8,6 +8,7 @@ from stompdrill.cad.case import build_frame, drill_axis, find_faces, select_soli
 from stompdrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm
 from stompgeom.step import read_step
 from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre
 
 pytestmark = pytest.mark.hammond
@@ -25,7 +26,7 @@ def nm(value_mm: float) -> Nanometre:
 def box(hammond_bb):
     document = read_step(hammond_bb)
     axis = drill_axis(document, FOOTPRINT)
-    faces = find_faces(select_solid(document, "box"), axis)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
     return axis, faces, build_frame(faces, axis)
 
 
@@ -239,14 +240,14 @@ def test_floor_face_rejects_a_compound_with_no_planar_face():
 def bb_box(hammond_bb):
     from stompdrill.cad import load_case_model
 
-    return load_case_model(hammond_bb, face="box", margin_nm=Nanometre(1 * MM))
+    return load_case_model(hammond_bb, face=CaseFace.BOX, margin_nm=Nanometre(1 * MM))
 
 
 @pytest.fixture(scope="module")
 def bb_lid(hammond_bb):
     from stompdrill.cad import load_case_model
 
-    return load_case_model(hammond_bb, face="lid", margin_nm=Nanometre(1 * MM))
+    return load_case_model(hammond_bb, face=CaseFace.LID, margin_nm=Nanometre(1 * MM))
 
 
 def test_the_loaded_model_satisfies_the_protocol(bb_box):

@@ -73,9 +73,9 @@ class CheckCaseClearance:
             rejection.value,
             f"⌀{format_nm(hole.diameter_nm)} mm hole at "
             f"({format_nm(hole.x_nm)}, {format_nm(hole.y_nm)}) "
-            f"{_REASON[rejection]} of {self.model.part} {self.model.face}",
+            f"{_REASON[rejection]} of {self.model.part} {self.model.face.value}",
             location_nm=(hole.x_nm, hole.y_nm),
-            data=(("diameter_nm", hole.diameter_nm), ("face", self.model.face)),
+            data=(("diameter_nm", hole.diameter_nm), ("face", self.model.face.value)),
         )
 
     def _cross_check(self, data: DrillData) -> Diagnostic | None:

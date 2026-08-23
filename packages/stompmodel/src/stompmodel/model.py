@@ -34,6 +34,7 @@ __all__ = [
     "RawOutline",
     "ReferenceOutline",
     "EnclosureMatch",
+    "CaseFace",
     "CaseRegistration",
     "SourceInfo",
     "StageRun",
@@ -254,6 +255,18 @@ class EnclosureMatch:
         object.__setattr__(self, "candidates", tuple(self.candidates))
 
 
+class CaseFace(Enum):
+    """Which side of a Hammond box a document was drilled against.
+
+    The only two legal values, published once so no reader re-spells them:
+    a mapping from a face to anything else is keyed on this type, and a
+    face outside it is a construction failure, never a silent default.
+    """
+
+    BOX = "box"
+    LID = "lid"
+
+
 @dataclass(frozen=True, slots=True)
 class CaseRegistration:
     """The supplied case model a document's holes were decided against.
@@ -268,12 +281,12 @@ class CaseRegistration:
     """
 
     part: str
-    face: str
+    face: CaseFace
     model: str
     frame: FaceFrame
 
     def __post_init__(self) -> None:
-        if not self.part or not self.face or not self.model:
+        if not self.part or not self.model:
             raise ValueError(
                 "a case registration names a part, a face and the model file it came from"
             )

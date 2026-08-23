@@ -16,7 +16,7 @@ from stompdrill.emitters.drawing.scene import Circle, Group, Scene
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
 from stompdrill.emitters.drawing_svg import DrawingSvgEmitter
 from stompmodel.codec import to_document
-from stompmodel.model import DrillData, ReferenceOutline
+from stompmodel.model import CaseFace, DrillData, ReferenceOutline
 from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 
@@ -222,7 +222,7 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
-    model = load_case_model(model_path, face="box", margin_nm=Nanometre(1_000_000))
+    model = load_case_model(model_path, face=CaseFace.BOX, margin_nm=Nanometre(1_000_000))
     data = make_data(
         at(0, 0, 6_000_000, index=1),
         at(20_000_000, -15_000_000, 8_000_000, index=2),

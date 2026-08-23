@@ -1771,9 +1771,10 @@ def test_the_two_empty_layer_causes_do_not_read_alike():
 
 def test_case_face_accepts_only_box_or_lid():
     from stompdrill.cli import UsageError, parse_face
+    from stompmodel.model import CaseFace
 
-    assert parse_face("box") == "box"
-    assert parse_face("LID") == "lid"
+    assert parse_face("box") is CaseFace.BOX
+    assert parse_face("LID") is CaseFace.LID
     with pytest.raises(UsageError, match="box"):
         parse_face("flange")
 

@@ -9,6 +9,11 @@ document's version bump to 6 and the `CaseRegistration` member land now rather t
 plan 3, the frame nests inside the registration rather than sitting bare on the
 document, and a fourth admission rule governs the promotion. See "The drill document
 gains the face frame", the Consequences section, and the admission rules below.
+**Amended again:** the fourth admission rule gains its second half -- a promoted
+member must also state the convention under which it is read -- with
+`CaseRegistration.face` as the worked example: it was a bare string with no
+published vocabulary until `stompmodel.model.CaseFace` closed it. See the admission
+rules below.
 
 Amends [ADR-0008](0008-workspace-and-shared-geometry-core.md), which decided four
 packages. There are five.
@@ -85,6 +90,19 @@ Four admission rules, and nothing else gets in:
    the model's identity and the frame were reachable only as a clearance stage's
    parameters, string-keyed and unreconstructable, until a second consumer
    needed them and the rule said where they belonged.
+
+   A promotion under this rule is not finished at the type declaration. **A
+   fact promoted to a typed member must also state the convention under which
+   it is read, or it is a member in name only.** `CaseRegistration.face` is
+   the worked example: promoting it to a member said nothing about which
+   faces are legal, so each of `stompdrill.cli`, `stompdrill.cad.case` and
+   `stompdrill.emitters.step` spelled out its own answer, and the STEP
+   emitter's answer was total where the other two were partial -- a face
+   nobody recognised was silently drilled as the lid rather than refused.
+   `stompmodel.model.CaseFace` closes the vocabulary once, published where the
+   member lives, so a reader with only `stompmodel` installed can enumerate
+   every legal face without reading `stompdrill`'s source, and a face the type
+   does not hold is a construction failure everywhere, never a default.
 
 A type a package owns and merely exposes to a library consumer **stays home**.
 `stompcad` reading `stompcollider`'s `DockReport` is ordinary library consumption, not
