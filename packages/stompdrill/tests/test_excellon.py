@@ -506,19 +506,22 @@ def test_coordinates_are_grouped_under_their_tool_ascending_by_diameter():
     body = out[out.index("G05") + 1 :]
 
     assert body[0] == "T1"
-    assert body[1:3] == ["X37.500Y11.250", "X75.500Y11.250"]  # the two ⌀5
+    assert body[1:3] == ["X75.500Y11.250", "X37.500Y11.250"]  # the two ⌀5, index=3 then index=5
     assert body[3] == "T2"
     assert len(body[4:-2]) == 5  # the five ⌀7
     assert body[-2:] == ["T0", "M30"]
 
 
-def test_hole_order_is_preserved_not_re_sorted():
-    """Ordering is ``pipeline.RouteHoles``' decision, not this emitter's."""
+def test_hole_order_follows_the_number_not_the_tuple_position():
+    """Sequence is ``Hole.index``, read through ``numbered()`` — ADR-0006 — never
+    tuple position. One tool block, numbered the reverse of arrival order: an
+    emitter that wrote holes as they arrived would drill this backwards.
+    """
     data = make_data(
-        at(10_000_000, -10_000_000, 7_000_000, index=1),
-        at(-10_000_000, 10_000_000, 7_000_000, index=2),
-        at(10_000_000, 10_000_000, 7_000_000, index=3),
-        at(-10_000_000, -10_000_000, 7_000_000, index=4),
+        at(10_000_000, -10_000_000, 7_000_000, index=4),
+        at(-10_000_000, 10_000_000, 7_000_000, index=3),
+        at(10_000_000, 10_000_000, 7_000_000, index=2),
+        at(-10_000_000, -10_000_000, 7_000_000, index=1),
         reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
 
@@ -526,20 +529,23 @@ def test_hole_order_is_preserved_not_re_sorted():
     coords = [ln for ln in out if ln.startswith("X")]
 
     assert coords == [
-        "X60.000Y40.000",
-        "X40.000Y60.000",
-        "X60.000Y60.000",
-        "X40.000Y40.000",
+        "X40.000Y40.000",  # index=1
+        "X60.000Y60.000",  # index=2
+        "X40.000Y60.000",  # index=3
+        "X60.000Y40.000",  # index=4
     ]
 
 
-def test_tool_blocks_stay_ascending_while_order_inside_them_is_untouched():
-    """Grouping is the emitter's job; sequence is not."""
+def test_tool_blocks_stay_ascending_while_the_within_block_order_follows_the_number():
+    """Grouping into tool blocks is this emitter's own job; so is the sequence
+    within each block, and both blocks below are numbered opposite their
+    tuple position so neither could pass by accidentally restoring order.
+    """
     data = make_data(
-        at(0, -20_000_000, 7_000_000, index=1),
-        at(-30_000_000, 20_000_000, 5_000_000, index=2),
-        at(30_000_000, 20_000_000, 7_000_000, index=3),
-        at(0, 20_000_000, 5_000_000, index=4),
+        at(0, -20_000_000, 7_000_000, index=3),
+        at(-30_000_000, 20_000_000, 5_000_000, index=4),
+        at(30_000_000, 20_000_000, 7_000_000, index=1),
+        at(0, 20_000_000, 5_000_000, index=2),
         reference=ReferenceOutline(Nanometre(100_000_000), Nanometre(100_000_000)),
     )
 
@@ -548,12 +554,29 @@ def test_tool_blocks_stay_ascending_while_order_inside_them_is_untouched():
 
     assert body == [
         "T1",
-        "X20.000Y70.000",  # the ⌀5, in the order the pipeline left them
-        "X50.000Y70.000",
+        "X50.000Y70.000",  # ⌀5, index=2
+        "X20.000Y70.000",  # ⌀5, index=4
         "T2",
-        "X50.000Y30.000",  # the ⌀7, likewise — not reading order
-        "X80.000Y70.000",
+        "X80.000Y70.000",  # ⌀7, index=1
+        "X50.000Y30.000",  # ⌀7, index=3
     ]
+
+
+def test_excellon_drills_in_index_order_not_tuple_order():
+    """Moved from ``.scratch/architecture-review/falsify/tests/
+    test_f2_04_excellon_drills_tuple_order.py`` (ticket 30). Two holes of one
+    diameter, numbered opposite their tuple order: the file must drill the
+    lower number first.
+    """
+    data = make_data(
+        at(20_000_000, 18_000_000, 7_000_000, index=2),
+        at(-20_000_000, 18_000_000, 7_000_000, index=1),
+    )
+
+    out = lines(emit(data, origin=Origin.CENTRE))
+    coords = [ln for ln in out if ln.startswith("X")]
+
+    assert coords[0] == "X-20.000Y18.000"
 
 
 def test_decimals_option_controls_coordinate_and_diameter_precision():

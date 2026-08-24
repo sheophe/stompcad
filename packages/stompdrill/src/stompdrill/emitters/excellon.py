@@ -72,8 +72,13 @@ class ExcellonEmitter:
         lines += [f"T{number}C{tokens[diameter_nm]}" for diameter_nm, number in tools.items()]
         lines += ["%", "G90", "G05"]
 
+        # ADR-0006: the drill sequence is the hole's number, read through
+        # ``numbered()`` and sorted here — the same rule ``emitters/step.py``
+        # applies. Grouping into tool blocks is this emitter's own job; the
+        # order within a block is not.
+        ordered = sorted(framed.numbered(), key=lambda pair: pair[0])
         for diameter_nm, number in tools.items():
-            holes = [h for h in framed.holes if h.diameter_nm == diameter_nm]
+            holes = [h for _, h in ordered if h.diameter_nm == diameter_nm]
             if not holes:  # pragma: no cover - tools() is derived from the holes
                 continue
             lines.append(f"T{number}")
@@ -167,7 +172,7 @@ class ExcellonEmitter:
         return self.options.title or data.source.path or "untitled"
 
     def _coordinates(self, holes: Iterable[Hole]) -> list[str]:
-        """Holes in the order they arrive. Sequence is ``RouteHoles``' decision."""
+        """Holes in the order they arrive — already sorted by drill number."""
         return [f"X{self._value(h.x_nm)}Y{self._value(h.y_nm)}" for h in holes]
 
     def _value(self, nanometres: Nanometre) -> str:
