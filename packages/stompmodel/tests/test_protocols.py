@@ -18,7 +18,16 @@ from stompmodel.diagnostics import (
     worst_severity,
 )
 from stompmodel.model import DrillData, StageRun
-from stompmodel.protocols import Diagnosable, Pipeline, Processable, Stage, write_payload
+from stompmodel.protocols import (
+    Diagnosable,
+    Pipeline,
+    Processable,
+    Stage,
+    StagedWrite,
+    commit_staged,
+    discard_staged,
+    stage_payload,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +111,7 @@ def test_then_returns_a_new_pipeline_and_leaves_the_original_alone() -> None:
 def test_a_text_payload_is_written_as_utf_eight(tmp_path) -> None:
     path = tmp_path / "out.txt"
 
-    write_payload(path, "⌀7.000")
+    commit_staged(stage_payload(path, "⌀7.000"))
 
     assert path.read_text(encoding="utf-8") == "⌀7.000"
 
@@ -110,27 +119,38 @@ def test_a_text_payload_is_written_as_utf_eight(tmp_path) -> None:
 def test_a_text_payload_counts_encoded_bytes_not_characters(tmp_path) -> None:
     """``⌀`` is three bytes in UTF-8 and one character. The count is the whole
     reason this lives here: ``stompcad`` reduces over both tools' numbers and
-    they have to mean one thing."""
-    assert write_payload(tmp_path / "out.txt", "⌀7.000") == 8
+    they have to mean one thing. Asserted at both steps -- the staging step's
+    reported size and the commit step's return value -- so "computed once
+    and returned unchanged" is what fails if either drifts from the other.
+    """
+    staged = stage_payload(tmp_path / "out.txt", "⌀7.000")
+
+    assert staged.size == 8
+    assert commit_staged(staged) == 8
 
 
 def test_a_binary_payload_is_written_unchanged(tmp_path) -> None:
     path = tmp_path / "out.bin"
 
-    write_payload(path, b"%PDF-1.7\n\x00\xff")
+    commit_staged(stage_payload(path, b"%PDF-1.7\n\x00\xff"))
 
     assert path.read_bytes() == b"%PDF-1.7\n\x00\xff"
 
 
 def test_a_binary_payload_counts_its_own_length(tmp_path) -> None:
-    assert write_payload(tmp_path / "out.bin", b"%PDF-1.7\n\x00\xff") == 11
+    staged = stage_payload(tmp_path / "out.bin", b"%PDF-1.7\n\x00\xff")
+
+    assert staged.size == 11
+    assert commit_staged(staged) == 11
 
 
-def test_a_failed_write_leaves_a_preexisting_file_unchanged(
+def test_a_failed_stage_leaves_a_preexisting_file_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The two clauses of a failed write are independent: a fix that cleans
-    up its temporary but still corrupts the target passes the companion test
+    """``stage_payload`` never touches ``path``, so a failure while writing
+    its temporary leaves whatever ``path`` already held completely alone --
+    the two clauses of that guarantee are independent: a fix that cleans up
+    its temporary but still corrupts the target passes the companion test
     below and fails this one.
     """
     path = tmp_path / "out.bin"
@@ -149,12 +169,12 @@ def test_a_failed_write_leaves_a_preexisting_file_unchanged(
     monkeypatch.setattr(Path, "write_bytes", _boom)
 
     with pytest.raises(OSError):
-        write_payload(path, b"REPLACEMENT-THAT-NEVER-ARRIVES")
+        stage_payload(path, b"REPLACEMENT-THAT-NEVER-ARRIVES")
 
     assert path.read_bytes() == b"ORIGINAL"
 
 
-def test_a_failed_write_leaves_no_temporary_file_behind(
+def test_a_failed_stage_leaves_no_temporary_file_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The two clauses are independent: a fix that preserves the target but
@@ -177,7 +197,7 @@ def test_a_failed_write_leaves_no_temporary_file_behind(
     monkeypatch.setattr(Path, "write_bytes", _boom)
 
     with pytest.raises(OSError):
-        write_payload(path, b"REPLACEMENT-THAT-NEVER-ARRIVES")
+        stage_payload(path, b"REPLACEMENT-THAT-NEVER-ARRIVES")
 
     assert [entry.name for entry in tmp_path.iterdir()] == ["out.bin"]
 
@@ -200,7 +220,7 @@ def test_the_temporary_and_the_target_share_a_directory(
 
     monkeypatch.setattr(os, "replace", _spy_replace)
 
-    write_payload(path, b"DATA")
+    commit_staged(stage_payload(path, b"DATA"))
 
     assert seen["src"] != seen["dst"]
     assert seen["src"].parent == seen["dst"].parent == tmp_path
@@ -216,7 +236,56 @@ def test_a_target_whose_directory_is_missing_still_raises_an_os_error(
     missing = tmp_path / "nope" / "out.bin"
 
     with pytest.raises(OSError):
-        write_payload(missing, b"DATA")
+        stage_payload(missing, b"DATA")
+
+
+def test_a_failed_commit_leaves_the_target_unchanged_and_discards_its_temporary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``commit_staged`` cleans up after its own failed rename, exactly as
+    the old single-call writer did for one path: the target is untouched
+    and no orphaned temporary is left behind.
+    """
+    path = tmp_path / "out.bin"
+    path.write_bytes(b"ORIGINAL")
+    staged = stage_payload(path, b"REPLACEMENT")
+
+    def _boom(src: str | Path, dst: str | Path) -> None:
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(os, "replace", _boom)
+
+    with pytest.raises(OSError):
+        commit_staged(staged)
+
+    assert path.read_bytes() == b"ORIGINAL"
+    assert [entry.name for entry in tmp_path.iterdir()] == ["out.bin"]
+
+
+def test_discard_staged_removes_the_temporary_without_touching_the_target(
+    tmp_path: Path,
+) -> None:
+    """Abandoning a staged write leaves the target exactly as it was."""
+    path = tmp_path / "out.bin"
+    path.write_bytes(b"ORIGINAL")
+    staged = stage_payload(path, b"NEVER COMMITTED")
+
+    discard_staged(staged)
+
+    assert path.read_bytes() == b"ORIGINAL"
+    assert [entry.name for entry in tmp_path.iterdir()] == ["out.bin"]
+
+
+def test_discard_staged_never_raises_when_its_temporary_is_already_gone() -> None:
+    """A caller may discard the same staged write twice, or discard after a
+    commit already moved the temporary away; neither is an error."""
+    staged = StagedWrite(
+        path=Path("/nonexistent/does-not-matter"),
+        size=0,
+        _tmp=Path("/nonexistent/already-gone.tmp"),
+    )
+
+    discard_staged(staged)  # must not raise
 
 
 # --------------------------------------------------------------------------

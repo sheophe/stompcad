@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import stompmodel.protocols as protocols
 from stompdrill import cli
 from stompdrill.emitters.base import available, register_emitter
 from stompdrill.errors import EmptyLayerError, LayerNotFoundError
@@ -1116,6 +1117,101 @@ def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
             "left exactly as the previous run left it"
         )
     assert "Traceback" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# ticket 26: the CLI writes an artefact's bytes through the one published
+# mechanism (stompmodel.protocols.stage_payload / commit_staged /
+# discard_staged), never by re-implementing it. Naming each function's
+# production caller directly, rather than only its observable effect, is
+# what F1-01/F2-01/F3-04/F5-01 asked for and what criterion 2 demands.
+# ---------------------------------------------------------------------------
+
+
+def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
+    """Control: prove the spy mechanism the next test relies on actually
+    catches a call, before trusting it to prove an absence."""
+    calls: list[str] = []
+    original_stage, original_commit = protocols.stage_payload, protocols.commit_staged
+
+    def spy_stage(path, payload):
+        calls.append("stage")
+        return original_stage(path, payload)
+
+    def spy_commit(staged):
+        calls.append("commit")
+        return original_commit(staged)
+
+    target = tmp_path / "control.bin"
+    written = spy_commit(spy_stage(target, b"hello"))
+
+    assert calls == ["stage", "commit"]
+    assert written == 5
+    assert target.read_bytes() == b"hello"
+
+
+def test_the_cli_write_path_calls_stage_payload_then_commit_staged(fake_source, tmp_path, monkeypatch):
+    """F1-01/F2-01/F3-04/F5-01, migrated: a full ``--emit`` run must call the
+    published mechanism, not re-implement it (``write_payload`` no longer
+    exists; the design verdict deletes it outright). Patched on ``cli``, not
+    on ``stompmodel.protocols``: ``cli.py`` imports both names directly, so
+    a caller must patch the reference the CLI actually holds.
+    """
+    fake_source(read())
+    calls: list[str] = []
+    original_stage, original_commit = cli.stage_payload, cli.commit_staged
+
+    def spy_stage(path, payload):
+        calls.append(("stage", path))
+        return original_stage(path, payload)
+
+    def spy_commit(staged):
+        calls.append(("commit", staged.path))
+        return original_commit(staged)
+
+    monkeypatch.setattr(cli, "stage_payload", spy_stage)
+    monkeypatch.setattr(cli, "commit_staged", spy_commit)
+
+    out = tmp_path / "out.json"
+    code = cli.main([str(FIXTURE), "--emit", f"json={out}"])
+
+    assert code in (0, 1)
+    assert out.exists() and out.read_text(encoding="utf-8").strip() != ""
+    assert calls == [("stage", out), ("commit", out)], (
+        "the CLI's write path did not call stompmodel.protocols.stage_payload "
+        f"then commit_staged, in that order, for {out}: saw {calls}"
+    )
+
+
+def test_a_write_failure_calls_discard_staged_on_every_temporary_it_abandons(
+    fake_source, tmp_path, monkeypatch
+):
+    """``discard_staged``'s production caller, named directly: a failure at
+    one target must discard every *other* staged write through the
+    published function, not through a caller-local ``tmp.unlink``. Patched
+    on ``cli`` for the same reason as the test above.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    discarded: list[Path] = []
+    original_discard = cli.discard_staged
+
+    def spy_discard(staged):
+        discarded.append(staged.path)
+        original_discard(staged)
+
+    monkeypatch.setattr(cli, "discard_staged", spy_discard)
+    _sabotage_write(monkeypatch, b)
+
+    code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"])
+
+    assert code == 3
+    assert not a.exists() and not b.exists()
+    # ``a`` staged successfully and was then discarded when ``b``'s own
+    # staging failed; ``b`` never reached ``discard_staged`` because it
+    # never produced a ``StagedWrite`` to discard in the first place.
+    assert discarded == [a]
 
 
 def test_a_successful_runs_report_lines_stay_in_emit_order(fake_source, tmp_path, capsys):

@@ -45,8 +45,8 @@ rendering or staging — an emitter's own fault, or the operating system refusin
 write, at any target and at any position in the requested set — unwinds whatever this
 invocation had staged and leaves every target exactly as it was before the run,
 whether that is absent or holding a previous invocation's artefact. ADR-0005 gives
-`write_payload` the matching guarantee for one path in isolation; this is the
-set-level rule built on top of it, and it stays the command line's own for as long as
+`stage_payload`/`commit_staged` the matching guarantee for one path in isolation; this is
+the set-level rule built on top of it, and it stays the command line's own for as long as
 `stompdrill` is the only caller composing a set of several artefact paths for one
 invocation.
 
@@ -126,6 +126,14 @@ domain decisions into format-specific code.
 Staging every artefact before committing any of them costs one extra temporary file per
 target, briefly present beside it until the whole set commits. That is the deliberate
 price of never leaving a previous invocation's artefact replaced by only part of this
-one's. The set-level rule composes with a per-path one rather than duplicating it: if a
-second tool ever needs the same guarantee across several paths, that composition is
-what moves below `stompdrill`, not a rewrite of it.
+one's. The set-level rule is composed from `stompmodel`'s per-path mechanism rather than
+restating it: the command line calls `stage_payload` for every requested target, then
+`commit_staged` for each in turn, and `discard_staged` for whatever it abandons.
+`stompdrill` states no temporary-file mechanism of its own. What order the set is
+committed in, and what happens to the rest when one commit fails, remain the command
+line's own and are stated nowhere below it.
+
+The opening claim above — that one invocation's artefacts are one transaction, full
+stop — remains false of the code as shipped: a commit failure partway through a set
+leaves every target already replaced holding this run's bytes, as the commit loop's own
+docstring concedes. This move does not close that gap; ticket 29 owns it.
