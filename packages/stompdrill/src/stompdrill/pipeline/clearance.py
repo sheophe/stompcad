@@ -59,7 +59,7 @@ class CheckCaseClearance:
         )
 
     def apply(self, data: DrillData) -> DrillData:
-        frame = self._reconciled_frame(data.enclosure)
+        frame = self._reconciled_frame(data)
         self._checked_frame = frame
         identity = frame is self.model.frame
         diagnostics = [
@@ -91,18 +91,21 @@ class CheckCaseClearance:
             CaseRegistration(self.model.part, self.model.face, self.model.model_name, frame)
         )
 
-    def _reconciled_frame(self, match: EnclosureMatch | None) -> FaceFrame:
-        """Restate the model's own face frame in the panel's drawn orientation.
+    def _reconciled_frame(self, data: DrillData) -> FaceFrame:
+        """Restate the model's face frame in the panel's own drawn orientation.
 
-        ``EnclosureMatch.rotated`` records only *that* the panel is the
-        catalogue footprint turned a quarter turn, never *which way*: both
-        candidate turns are orthonormal, right-handed and preserve ``w``, so
-        the direction is a stated convention (pinned in ADR-0007), not a
-        derived value -- ``u`` takes the model's own ``v``, ``v`` its
-        negated ``u``. Unidentified or unrotated returns the same object
-        unchanged, so ``apply()`` can skip reframing.
+        Whether a turn is needed is read from ``ReferenceOutline.raw``, never
+        from ``EnclosureMatch.rotated``: that bit only records a transpose
+        from the catalogue's printed row, and Hammond does not always print
+        largest-first. ``build_frame`` puts ``u`` on the larger measured
+        span, so canonical x is ``u`` iff the drawn width is the larger
+        drawn extent. Which way stays ADR-0007's convention; unidentified or
+        no outline leaves the model's frame unchanged.
         """
-        if match is None or not match.rotated:
+        outline = data.reference
+        if data.enclosure is None or outline is None:
+            return self.model.frame
+        if outline.raw.width >= outline.raw.height:
             return self.model.frame
         basis = self.model.frame.basis
         ux, uy, uz = basis.u

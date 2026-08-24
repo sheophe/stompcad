@@ -169,6 +169,35 @@ than guessing a direction, mirroring `case-model-unverified`: both report that t
 could not run, not a wrong answer, and an error would refuse every square-enclosure user
 the tool serves today.
 
+**Amended (T15): what decides *whether* a quarter turn is needed is the panel's own
+measurement, not `EnclosureMatch.rotated`.** That bit records only that the drawn pair
+matched the catalogue's printed row transposed, and Hammond's printed order is not
+always largest-first — `1590LB` prints 50.55 × 50.60 mm — so it cannot answer which
+model axis canonical *x* falls on. `CheckCaseClearance` compares the two extents of
+`ReferenceOutline.raw`, the measurement quantisation preserves: canonical *x* registers
+on the model's `u` — the axis `build_frame` puts the larger measured span on — exactly
+when the drawn width is the larger drawn extent. *Which way* the turn goes is unchanged
+and remains the stated convention above. Where no enclosure was identified, no outline
+reached the stage, or the two drawn extents are equal, the model's own frame is used
+unchanged.
+
+**What this does not decide.** The extents are compared as drawn, at whatever precision
+the artwork carries, and the decision assumes the model's larger measured in-plane span
+is the same physical dimension the catalogue prints as larger — `_cross_check` sorts
+both footprints descending before comparing and therefore does not check that ranking.
+Where a footprint's two catalogue dimensions differ by less than the 1.5 mm per-axis
+slack the match was made with — in the shipped catalogue `1590LB` alone, at 0.05 mm —
+the turn rests on a difference the identification itself never had to resolve, and no
+diagnostic marks it. **That premise is checked, not assumed, and the check is
+inconclusive rather than confirming it:** a solid fed the catalogue's own asymmetric
+figures (50.55 × 50.60 mm) has `build_frame` put `u` on the 50.60 mm axis, so the
+algorithm itself does what this rule needs. But the real cached `1590LB` model does not
+carry that asymmetry at all — its own box measures both in-plane spans equal to kernel
+precision (50.6 mm each, difference 0.0), so `build_frame`'s own tie-break (the
+lower-indexed free axis), not "the larger span", governs it there, and whether the
+catalogue's 0.05 mm ranking matches the physical casting is unverifiable from the
+supplied model for this one part.
+
 ## Rationale
 
 Precomputing an obstruction map in the helper script was rejected: it keeps `stompdrill`

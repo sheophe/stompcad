@@ -2175,7 +2175,12 @@ def test_the_report_states_the_rotated_panels_reframed_play_area():
         rotated=True,
     )
     stage = CheckCaseClearance(model)
-    data = stage.apply(make_data(at(0, 0, 5_000_000, index=1)).with_enclosure(rotated))
+    data = stage.apply(
+        make_data(
+            at(0, 0, 5_000_000, index=1),
+            reference=ReferenceOutline(Nanometre(94_000_000), Nanometre(119_500_000)),
+        ).with_enclosure(rotated)
+    )
     data = data.with_processing(stage.describe())
 
     lines = "\n".join(format_case(data))
