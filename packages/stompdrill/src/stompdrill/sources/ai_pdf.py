@@ -543,21 +543,15 @@ def _empty_layer(
 ) -> EmptyLayerError:
     """The right ``EmptyLayerError`` for why ``layer`` yielded no circle.
 
-    A positive count means every path failed the circle predicate. Zero paths
-    means no painted artwork reached the stream -- unless nesting was cut
-    first, in which case that, not a missing stroke, is named as the cause.
+    ``path_count`` always reaches the constructor, so the published attribute
+    and the composed message agree on every real path. Truncation is a fact
+    only this reader holds -- the constructor cannot compose a sentence about
+    a nesting depth it never sees -- so that one sentence is stated here
+    directly rather than adding a parameter the constructor would carry for a
+    single caller.
     """
-    error = EmptyLayerError(layer)
-    if path_count:
-        error.args = (
-            (
-                f"layer {layer!r} has {path_count} path(s) but none of them is a circle. "
-                "Only true circles are drillable: four cubic Beziers, equal radii, "
-                "kappa-consistent controls. Rounded rectangles, ellipses, compound "
-                "shapes and stray marks all read as non-circular here."
-            ),
-        )
-    elif truncated_at is not None:
+    error = EmptyLayerError(layer, path_count)
+    if not path_count and truncated_at is not None:
         error.args = (
             (
                 f"layer {layer!r} contained no drillable geometry, but reading "

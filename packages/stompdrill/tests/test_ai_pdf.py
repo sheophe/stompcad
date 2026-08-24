@@ -405,6 +405,44 @@ def test_drill_layer_with_paths_but_no_circles_says_so(tmp_path):
     assert "1 path" in message
     assert "circle" in message
     assert "stroke" not in message
+    assert exc.value.path_count == 1, (
+        "the message names 1 path but the published attribute a library "
+        "consumer branches on says otherwise"
+    )
+
+
+def test_reader_reports_the_real_path_count_it_names_in_its_own_message(tmp_path):
+    """The message says '5 path(s)'; ``error.path_count`` must say the same
+    thing a consumer branching on the published attribute would read.
+
+    ``_empty_layer`` is the only production caller of ``EmptyLayerError``; this
+    drives it end to end rather than constructing the error directly, which is
+    the path the bug lived on.
+    """
+    pdf = build_pdf(
+        tmp_path / "five_non_circles.pdf",
+        {
+            "Background": "10 10 100 50 re f",
+            "Drill": (
+                "0 0 400 400 re W n "
+                "10 10 m 20 20 l S "
+                "30 30 m 40 40 l S "
+                "50 50 m 60 60 l S "
+                "70 70 m 80 80 l S "
+                "90 90 m 100 100 l S"
+            ),
+        },
+    )
+    with pytest.raises(EmptyLayerError) as exc:
+        AiPdfSource(pdf).read()
+    message = str(exc.value)
+    assert "5 path" in message
+    assert exc.value.path_count == 5, (
+        f"message names 5 paths but error.path_count == {exc.value.path_count}; "
+        "a library consumer branching on the published attribute "
+        "(`if e.path_count: ...`) takes the wrong branch because _empty_layer "
+        "never passed the real count to the EmptyLayerError constructor"
+    )
 
 
 def test_a_layer_present_but_undrawn_blames_the_missing_paint(tmp_path):
@@ -1331,6 +1369,10 @@ def test_no_circles_because_of_truncation_names_the_depth(tmp_path):
     assert "Form XObject" in message, "the message did not name the refused construct"
     assert "depth" in message, "the message did not name the limit that was hit"
     assert "give the drill circles a stroke" not in message
+    assert excinfo.value.path_count == 0, (
+        "no drill path was actually read before nesting was cut short, so the "
+        "published attribute must agree with that, not merely with the message"
+    )
 
 
 @pytest.mark.parametrize("bad", [0, -1, 1.5, True])
