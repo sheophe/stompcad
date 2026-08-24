@@ -63,25 +63,6 @@ string at different points. Both backends move together or neither does.
 alongside the vendored file, and the agreement tests still show the two sheets stating the
 same facts about every row they both list.
 
-## Clarify what ADR-0001 means by the pipeline's "fixed composition"
-
-**Status:** Noted; no implementation agreed. Downgraded 2026-08-21 after measurement.
-
-**Constraint:** ADR-0001's Rationale says the stages' "fixed composition" is "read at the
-invocation boundary". A review of every live restatement of the stage order — ADR-0001's
-prose and Figure 1, ADR-0007, CLAUDE.md, the `cli` module and `build_pipeline` docstrings —
-found all of them current and in agreement, including the conditional `CheckCaseClearance`
-edge. Nothing here is stale, so this is a wording question and not a correction: "fixed"
-could be read as denying that the fifth stage is conditional, when what the sentence means
-is that the composition is settled *at* the boundary rather than negotiated between stages.
-If it is touched at all, adjust only that connotation. Do not retrofit the Context or
-Rationale's narration of the original decision, which is history.
-
-**Acceptance:** Either the sentence is left alone with this entry closed as
-"measured, no change needed", or one clause distinguishes "settled at the invocation
-boundary" from "identical on every invocation", and Figure 1 is untouched because it is
-already right.
-
 ## Run the unscoped `stompdrill` mutation survey once
 
 **Status:** Confirmed gap, not scheduled.
@@ -344,21 +325,6 @@ plainly rather than fabricating coverage.
 **Acceptance:** Each of the four rows is triaged; any that needs a mutant gets one that fails
 only against the behaviour the row names, and any row declined is recorded with the reason.
 
-## Comment the distinct-keys dedupe property's coverage boundary
-
-**Status:** Confirmed gap, not scheduled.
-
-**Constraint:** The distinct-keys dedupe property does not, alone, catch an over-merging
-defect that drops `diameter_nm` from the comparison key — a single wrongly-merged survivor is
-trivially distinct from the rest. Coverage is sound in practice: the pre-existing
-`test_does_not_collapse_different_diameters_at_the_same_place` and the new near-miss example
-both close it, so the property complements adjacent tests rather than subsuming the
-idempotence loop it replaced.
-
-**Acceptance:** A comment beside the property states which named test carries the
-diameter-key case, so a future reader does not mistake the property for standalone proof of
-it.
-
 ## Shorten the `LATTICE_MM` comment, if the file opens anyway
 
 **Status:** Informational; not a rule violation. Not scheduled.
@@ -609,27 +575,6 @@ worth chasing, and it is a pre-existing incompatibility this review did not intr
 mutmut's baseline pass succeeds, or the incompatibility is reported upstream and worked
 around, and `dedupe`/`geometry` get a real scoped mutation reading afterwards.
 
-## `falsify/tests/`'s wave-1 fixtures going stale against a later refactor is not a defect
-
-**Status:** Deliberate ruling, not a gap. Made during the 2026-08 architecture review's
-wave 2: ticket 14's implementer found the staleness and correctly left the file alone
-rather than editing outside its own ticket's scope; the coordinator ruled on what it means.
-
-**Constraint:** `.scratch/architecture-review/falsify/tests/` holds one-shot
-falsification fixtures, each built to reproduce a specific wave's finding before it was
-fixed. Several of wave 1's still pass a bare `"box"` string where the code has since moved
-to a `CaseFace` enum (`stompmodel.model.CaseFace`, introduced closing this review's ticket
-13) — for example `test_f2_04_face_keyword_totality.py` and
-`test_wave2_f1_02_case_frame_codec_unvalidated.py`. Falsify tests are scratch evidence of
-the wave that wrote them, not a maintained suite: they are **not** updated to track later
-refactors, and the directory is git-ignored and outside every suite the gate runs.
-
-**Acceptance:** Not a scheduled fix. This entry only prevents a future reader from
-mistaking a stale `falsify/tests/` fixture for a live defect: a wave that meets one of
-these fixtures failing or looking wrong against current types cites this entry and marks
-the question Settled, rather than re-deriving the ruling or filing the staleness itself as
-a finding. Only promoting `falsify/tests/` to a maintained, tracked suite would reopen it.
-
 ## Ticket 01's nanometre-guard singularity test is textual, not semantic
 
 **Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
@@ -791,9 +736,26 @@ rule. A tie here decides the plate thickness, the drillable region, and the
 relief-versus-structure verdict: the same class of ordering defect wave 1 closed on the
 reader side with ADR-0006's total order over `Hole`.
 
+**Sharper evidence (wave 4, M3-02):** two of the four do not even agree on what "by area"
+means, and one's docstring claims otherwise. `region._floor_face` picks the single largest
+**face** by its own area inside a compound; `case._inner_level` picks by the **aggregate**
+area of every face grouped into a level (`_Level.area = sum(item[0] for item in members)`,
+and `_plates`'s own comment states the choice is deliberate: "on the level's aggregate
+areas, not per face"). `_floor_face`'s docstring nonetheless says it picks "exactly as
+`case._inner_level`/`_drilled_level` pick by area too" — false: the two use different
+metrics, not the same rule stated twice. Confirmed by reading both functions; unreachable
+on the four cached Hammond models, so it has not yet produced a wrong artefact. This
+sharpens rather than replaces the tie-break gap above: two candidates could tie under one
+metric and not the other, so a fix to this entry's own tie-break defect should settle
+*which* metric each helper is meant to use before adding the tie-break clause, and correct
+the docstring's false claim of agreement in the same change.
+
 **Acceptance:** Each of the four helpers breaks a tie on a stated geometric property,
 never on enumeration order, and a test constructs two candidates with equal area/position
-and asserts the same winner regardless of which one the kernel enumerates first.
+and asserts the same winner regardless of which one the kernel enumerates first. The fix
+also states, for `_floor_face` and `_inner_level`, which metric each uses and why they
+differ, and corrects `_floor_face`'s docstring to stop claiming agreement it does not
+have.
 
 ## `wrong-case-model` names the operator's `--case` designator as the model's own
 
@@ -1005,8 +967,9 @@ through.
 
 ## The write mechanism replaces a symlink instead of writing through it
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
-(M3-04) against the pre-ticket-26 code; the call site has since moved but the defect has not.
+**Status:** Resolved by ticket 33 (2026-08). Found in the 2026-08 architecture review's
+wave 3 (M3-04) against the pre-ticket-26 code; the call site moved once more under this
+wave before the decision landed.
 
 **Constraint:** `os.replace(tmp, path)` where `path` is a symlink replaces the link itself
 with a regular file, rather than writing through it to its target. Before this review's write-
@@ -1017,10 +980,15 @@ there is exactly one production site to fix rather than two. An operator keeping
 `latest.svg -> builds/2026-08-24.svg` loses the link on the next run, silently — worth
 deciding alongside ticket 29's `/dev/null` narrowing, since both are "what may a target be".
 
-**Acceptance:** Either `commit_staged` resolves a symlink target before replacing (writing
-through it, preserving the link), or the behaviour is declared deliberate and stated in
-ADR-0005's target-domain paragraph; either way a test creates a symlink target and asserts the
-chosen outcome.
+**Resolution (ticket 33):** Declared deliberate, on this entry's own second branch.
+ADR-0005's target-domain paragraph now states plainly that committing replaces the
+target's *name*, not the file its name used to resolve to: a symlink standing where the
+target should be is afterwards a regular file holding the new payload, and whatever file
+the link pointed at is left alone. Pinned by
+`test_committing_a_staged_write_replaces_a_symlink_target_with_a_regular_file` in
+`stompmodel`'s own suite (verified passing, independently, while preparing ticket 38 —
+`.venv/bin/python -m pytest -o addopts= packages/stompmodel/tests/test_protocols.py -k
+symlink -q`). Closed; nothing further to do.
 
 ## `OcpCaseModel.frame` and `OcpCaseModel.own_frame` are the same value
 
@@ -1189,49 +1157,6 @@ warning is built against it; or the risk is accepted as recorded here for as lon
 shipped catalogue's only near-square row is `1590LB`, and the acceptance test above is what
 notices if a future catalogue addition joins the band.
 
-## Wave 3's declined and rejected design proposals, recorded for citation
-
-**Status:** Ruled — recorded so a later wave can mark a rediscovery Settled by citing this
-entry rather than re-deriving the argument. From the 2026-08 architecture review's wave 3
-design verdicts (T13, `design/wave3-t13-one-write-rule-VERDICT.md`; T15,
-`design/wave3-t15-registration-stated-at-value-VERDICT.md`) and T17's own theme text
-(`reviews/wave3-themes.md`). All five below are **decisions**: each states a considered
-alternative and the reason it was not built, with no residual "not yet done" — the review's
-own rule is that an ADR or design record stating a decision ("we chose X over Y") is Settled,
-while one recording a gap ("not yet owned", "a debt") is open work wearing a citation. None of
-these five is the latter; the residual limitations two of them leave behind are filed as
-their own Minor entries above ("The checked registration does not record whether it was
-reconciled"; "The 1590LB reconciliation turns on a difference finer than the matcher's own
-tolerance, silently") rather than folded into this entry.
-
-**Constraint:**
-
-- **A `reconciled: bool` flag on `CaseRegistration`.** Declined: no consumer today reads it —
-  `stompcollider-technical.md:281-284, 405, 502-506` reads `case.frame` as a complete
-  registration and never asks after its provenance — and a forecast consumer licenses not
-  narrowing an interface, never adding one.
-- **A public `axis_correspondence` primitive in `stompmodel`.** Rejected: one call site after
-  the fix, so publishing it would be a hypothetical seam.
-- **The predicted fold across `CoordinateFrame` / `FaceFrame` / `basis` /
-  `EnclosureMatch.rotated`.** Declined, and scored *further away* after ticket 28 than
-  before it: post-fix, `rotated` states the catalogue's printed row order (read by two
-  display sites) and the registration states the panel's own measurement — two concepts that
-  no longer even read the same input. Collapsing them would leave both concepts standing and
-  add a translation between them — Speculative Generality by name. This is wave 3's scored
-  answer to wave 2's forecast (prediction P1 in the wave-3 synthesis), not an omission.
-- **A shared ordered view both the Excellon and STEP emitters read, instead of each sorting
-  `numbered()` itself.** Rejected: two call sites, and the shared thing would be one
-  `sorted()` call — a helper that relocates rather than concentrates, failing the folding
-  guard's second clause.
-- **A batch-write helper or shared-CLI write layer for the write mechanism (T13).** Barred by
-  wave 1's ruling and wave 2's ticket 22 adjudication, both already recorded at "Defer moving
-  the CLI's usage/IO policy below `stompdrill`" above; none of T13's three design lanes
-  proposed one. Rediscovery is noted on that entry, not repeated here.
-
-**Acceptance:** Not implementation work. A later wave that reconsiders any item above cites
-this entry and marks its own finding Settled without repeating the argument, unless it has a
-real second consumer the argument above did not have.
-
 ## Harvest candidate: a document must not claim a class closed in the same change that ships the fix
 
 **Status:** Recorded for the coordinator to route (harvest candidate) — not a repository rule
@@ -1276,3 +1201,278 @@ mechanical.
 replaces all three inline checks, every existing bound-validation test still passes
 unchanged (the error messages it asserts against are preserved or the tests are updated
 in the same change), and the full suite, lint, and both mypy configurations stay green.
+
+## The staged write's commit-or-discard obligation is unenforced, and a private field crosses a package boundary
+
+**Status:** Confirmed gap, not scheduled — explicitly declined as work this wave. Found in
+the 2026-08 architecture review's wave 4 (its own finding F2-05); see ticket 33's report,
+"Scope discipline".
+
+**Constraint:** `stompmodel.protocols.stage_payload` returns a `StagedWrite` whose `_tmp`
+field two module-level functions, `commit_staged` and `discard_staged`, read directly
+rather than through a method on the dataclass — a private field crossing the module's own
+boundary twice. Nothing enforces that a caller who stages a payload goes on to call one of
+the two: a `StagedWrite` a caller drops leaks its temporary silently, with no warning and
+no finalizer. Expressing the pair as `StagedWrite.commit()` and `StagedWrite.discard()`
+would stop the field crossing the boundary and would narrow the mechanism's four published
+names to two.
+
+**Acceptance:** Either `commit_staged`/`discard_staged` become methods on `StagedWrite`
+(closing the private-field crossing) and something — a `__del__` warning, a context-manager
+requirement, or a documented convention with a gate — makes an abandoned `StagedWrite`
+detectable rather than silent; or the trade-off is recorded as accepted, since ADR-0005's
+own reason for the two-call split (a caller composing a whole set must be able to pause
+between staging and committing) is settled and correct and does not by itself require the
+enforcement half.
+
+## `codec._read_frame` reads a face frame's origin without the length guard `_read_diagnostic` already carries
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 4
+(its own finding F2-06).
+
+**Constraint:** `stompmodel.codec._read_diagnostic` checks `len(location) != _LOCATION_VALUES`
+explicitly before indexing a diagnostic's `location_nm`, with a docstring stating why: a
+short one would raise past the reader, and a long one would be silently truncated into a
+position the writer never stated. `_read_frame` indexes `origin[0]`, `origin[1]`,
+`origin[2]` directly with no equivalent check (confirmed by reading
+`packages/stompmodel/src/stompmodel/codec.py`). A four-element `origin_nm` in a supplied
+document is silently truncated to three rather than rejected; a two-element one still
+raises, but only through the codec's broad `except (IndexError, TypeError, ValueError,
+AttributeError)` wrapper rather than a named guard stating why.
+
+**Acceptance:** `_read_frame` gains the same length check `_read_diagnostic` already
+carries, symmetric in shape and reason, and a test supplies a four-element `origin_nm` and
+asserts `DocumentError` rather than silent truncation.
+
+## `tools/workspace_membership.py` cites a `CLAUDE.md` section by a word `CLAUDE.md` never uses
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 4
+(its own finding F6-02).
+
+**Constraint:** `tools/workspace_membership.py`'s module docstring says "See ADR-0008, and
+`CLAUDE.md`'s Testing rules on ownership gates." `CLAUDE.md` never uses the word
+"ownership" anywhere in the file (`grep -n ownership CLAUDE.md` returns nothing). The five
+gate modules the docstring is pointing a reader toward are real, and `CLAUDE.md`'s Testing
+rules section does discuss the ownership-gate family under other language — the citation
+names the wrong word, not a section that does not exist.
+
+**Acceptance:** Either the docstring's citation is corrected to the wording `CLAUDE.md`
+actually carries, or `CLAUDE.md` gains the word its own tooling already expects to find
+there. A one-line fix either way.
+
+## Both `stompcollider` specs still place the length newtypes and the frame values in `stompgeom`
+
+**Status:** Confirmed gap, not scheduled, and explicitly deferred rather than fixed by this
+wave's own documents ticket — see ticket 38's "Out of scope". Found in the 2026-08
+architecture review's wave 4 (its own finding F1-03).
+
+**Constraint:** ADR-0008's own preamble states plainly that the length newtypes and the
+frame values "have since settled in `stompmodel`", not `stompgeom` — confirmed in the
+shipped source: `Nanometre`, `Millimetre`, `Micron`, `CoordinateFrame` and `FaceFrame` are
+all defined under `packages/stompmodel/src/stompmodel/`, and `stompgeom` names none of the
+four. Two spec sentences have not caught up: `docs/specs/stompcad.md` states "`stompcad`
+depends on `stompgeom` only for lengths it reports", and
+`docs/specs/stompcollider-technical.md`'s plan table (line ~560) credits plan 2
+(`stompgeom`) with "the `CoordinateFrame` / `FaceFrame` split". Both name the wrong package
+for values that now live in `stompmodel`. A plan-3 implementer reading either sentence
+looks in the wrong package for both.
+
+**Acceptance:** Both sentences are corrected to name `stompmodel` for the newtypes and the
+frame values, and to state what `stompgeom` actually contributes at that seam (the kernel
+reader and writer, and the STEP-specific `StepLabel`/`StepSolid`/`StepDocument` types).
+Should land **before plan 3 starts**, per this wave's own synthesis — a spec-axis,
+doc-only fix, same category as the `wrong-case-model` misdescription entry above.
+
+## `StepSolid.unit_mm` is a published field with one possible value and no reader
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 4
+(its own finding F1-04).
+
+**Constraint:** `stompgeom.step.read_step` forces `xstep.cascade.unit = "MM"` before
+reading, so every `StepSolid.unit_mm` it constructs is `1.0` — the field can hold no other
+value on the path that sets it, and nothing in `stompgeom` or `stompdrill` reads it (a
+`stompcollider` board reader is the invited future reader, per the field's own apparent
+purpose, but plan 3 has not been written yet).
+
+**Acceptance:** Either the field's docstring states plainly that it is always `1.0` because
+`read_step` fixes the cascade unit, and why it is published anyway (for the reader plan 3
+is expected to add), or the field is deleted until that reader exists and re-added with it.
+Deleting it is the interface-moving half and belongs with `stompgeom` work, not with a
+documentation-only pass — matching ticket 34's own refusal to add a field speculatively.
+
+## The `--emit` duplicate-target check is defeated by a case-insensitive filesystem
+
+**Status:** Confirmed gap, not scheduled — explicitly deferred by ticket 35, this wave's
+own fix to the surrounding pre-flight. Found in the 2026-08 architecture review's wave 4
+(its own finding M3-01).
+
+**Constraint:** `stompdrill.cli._preflight_targets` detects a duplicate `--emit` target by
+`path.resolve()` equality. On this repository's own filesystem (macOS, case-insensitive by
+default) two targets differing only in case — `out.json` and `OUT.json` — resolve to
+different `Path` values, both pass the duplicate check, and both are staged; the second to
+commit silently overwrites the first, and only one of the two "wrote ..." lines the
+operator sees is honest about what is on disk afterwards. Ticket 35's own "Out of scope"
+names this and declines it: "every available fix either over-fires on case-sensitive
+filesystems or needs a probe that writes."
+
+**Acceptance:** Not scheduled by this entry — ticket 35's stated reason stands. Reopen only
+with a fix that does not over-fire on a case-sensitive filesystem and does not need a probe
+that writes to decide.
+
+## Rulings, for citation
+
+Entries below are decisions, not open work: each states an alternative that was considered
+and the reason it was not taken (or, for the first, a wording question that measurement
+settled), with no residual "not yet done" left standing. Separated from the sections above
+so the count of open backlog entries means what it says. Nothing here is deleted — a later
+wave that rediscovers one of these questions cites the entry rather than re-deriving the
+argument, per this repo's own rule that a decision record is Settled while a record naming
+a gap is open work wearing a citation.
+
+### Clarify what ADR-0001 means by the pipeline's "fixed composition"
+
+**Status:** Ruled — closed, no change needed. Noted 2026-08-21 after measurement; the
+status line is flipped here on the entry's own first branch rather than left open
+indefinitely for a wording question the measurement already answered.
+
+**Constraint:** ADR-0001's Rationale says the stages' "fixed composition" is "read at the
+invocation boundary". A review of every live restatement of the stage order — ADR-0001's
+prose and Figure 1, ADR-0007, CLAUDE.md, the `cli` module and `build_pipeline` docstrings —
+found all of them current and in agreement, including the conditional `CheckCaseClearance`
+edge. Nothing here is stale, so this was a wording question and not a correction: "fixed"
+could be read as denying that the fifth stage is conditional, when what the sentence means
+is that the composition is settled *at* the boundary rather than negotiated between stages.
+
+**Resolution:** Left alone. Spot-checked again while preparing ticket 38 (2026-08):
+ADR-0001's Rationale sentence is unchanged and Figure 1 still shows
+`contain -.->|DrillData, if --case-model| clearance` as the conditional edge it always
+was. This entry's own acceptance criterion is satisfied by its first branch — "measured,
+no change needed" — and is recorded here for citation rather than deleted, since a later
+reader who meets the same wording question should cite this measurement rather than
+re-derive it.
+
+### `falsify/tests/`'s wave-1 fixtures going stale against a later refactor is not a defect
+
+**Status:** Deliberate ruling, not a gap. Made during the 2026-08 architecture review's
+wave 2: ticket 14's implementer found the staleness and correctly left the file alone
+rather than editing outside its own ticket's scope; the coordinator ruled on what it means.
+
+**Constraint:** `.scratch/architecture-review/falsify/tests/` holds one-shot
+falsification fixtures, each built to reproduce a specific wave's finding before it was
+fixed. Several of wave 1's still pass a bare `"box"` string where the code has since moved
+to a `CaseFace` enum (`stompmodel.model.CaseFace`, introduced closing this review's ticket
+13) — for example `test_f2_04_face_keyword_totality.py` and
+`test_wave2_f1_02_case_frame_codec_unvalidated.py`. Falsify tests are scratch evidence of
+the wave that wrote them, not a maintained suite: they are **not** updated to track later
+refactors, and the directory is git-ignored and outside every suite the gate runs.
+
+**Acceptance:** Not a scheduled fix. This entry only prevents a future reader from
+mistaking a stale `falsify/tests/` fixture for a live defect: a wave that meets one of
+these fixtures failing or looking wrong against current types cites this entry and marks
+the question Settled, rather than re-deriving the ruling or filing the staleness itself as
+a finding. Only promoting `falsify/tests/` to a maintained, tracked suite would reopen it.
+
+### Wave 3's declined and rejected design proposals, recorded for citation
+
+**Status:** Ruled — recorded so a later wave can mark a rediscovery Settled by citing this
+entry rather than re-deriving the argument. From the 2026-08 architecture review's wave 3
+design verdicts (T13, `design/wave3-t13-one-write-rule-VERDICT.md`; T15,
+`design/wave3-t15-registration-stated-at-value-VERDICT.md`) and T17's own theme text
+(`reviews/wave3-themes.md`). All five below are **decisions**: each states a considered
+alternative and the reason it was not built, with no residual "not yet done" — the review's
+own rule is that an ADR or design record stating a decision ("we chose X over Y") is Settled,
+while one recording a gap ("not yet owned", "a debt") is open work wearing a citation. None of
+these five is the latter; the residual limitations two of them leave behind are filed as
+their own Minor entries above ("The checked registration does not record whether it was
+reconciled"; "The 1590LB reconciliation turns on a difference finer than the matcher's own
+tolerance, silently") rather than folded into this entry.
+
+**Constraint:**
+
+- **A `reconciled: bool` flag on `CaseRegistration`.** Declined: no consumer today reads it —
+  `stompcollider-technical.md:281-284, 405, 502-506` reads `case.frame` as a complete
+  registration and never asks after its provenance — and a forecast consumer licenses not
+  narrowing an interface, never adding one.
+- **A public `axis_correspondence` primitive in `stompmodel`.** Rejected: one call site after
+  the fix, so publishing it would be a hypothetical seam.
+- **The predicted fold across `CoordinateFrame` / `FaceFrame` / `basis` /
+  `EnclosureMatch.rotated`.** Declined, and scored *further away* after ticket 28 than
+  before it: post-fix, `rotated` states the catalogue's printed row order (read by two
+  display sites) and the registration states the panel's own measurement — two concepts that
+  no longer even read the same input. Collapsing them would leave both concepts standing and
+  add a translation between them — Speculative Generality by name. This is wave 3's scored
+  answer to wave 2's forecast (prediction P1 in the wave-3 synthesis), not an omission.
+- **A shared ordered view both the Excellon and STEP emitters read, instead of each sorting
+  `numbered()` itself.** Rejected: two call sites, and the shared thing would be one
+  `sorted()` call — a helper that relocates rather than concentrates, failing the folding
+  guard's second clause.
+- **A batch-write helper or shared-CLI write layer for the write mechanism (T13).** Barred by
+  wave 1's ruling and wave 2's ticket 22 adjudication, both already recorded at "Defer moving
+  the CLI's usage/IO policy below `stompdrill`" above; none of T13's three design lanes
+  proposed one. Rediscovery is noted on that entry, not repeated here.
+
+**Acceptance:** Not implementation work. A later wave that reconsiders any item above cites
+this entry and marks its own finding Settled without repeating the argument, unless it has a
+real second consumer the argument above did not have.
+
+### Wave 4's declined and rejected design proposals, recorded for citation
+
+**Status:** Ruled — recorded so a later wave can mark a rediscovery Settled by citing this
+entry rather than re-deriving the argument. From the 2026-08 architecture review's wave 4
+design verdicts (`design/wave4-t18-stompgeom-owns-its-handles-VERDICT-v2.md`,
+`design/wave4-t19-the-mechanism-states-its-contract-VERDICT.md`) and tickets 32, 33, 34, 35
+and 36's own "Out of scope" sections. Each item below states what was refused, why, and
+what would make it correct later — the third clause is what a "decision" record owes that
+a bare rejection does not, and its absence is how a ruling is mistaken for a "not yet".
+
+**Constraint:**
+
+- **A mutation, edit or undo session owning `stompgeom`'s cut-and-restore protocol
+  (ticket 34).** Rejected by name as Speculative Generality: the protocol has exactly one
+  call site (`stompdrill.emitters.step.cut_shape`), its undo closure never crosses a
+  package boundary, and three independently designed lanes refused it unprompted before
+  any probe was run. **Correct later if:** a second call site appears whose undo crosses a
+  package boundary — the shape chosen (a document, an `undo` closure, and an entry-string
+  set) is a strict subset of the session, so nothing already built forecloses it.
+- **A shared AST-scan helper across the five ownership gates (ticket 32; the same fold T20
+  names and declines).** Declined: the gates' differing reaches — source plus `tools/` for
+  three of them, source only for one, source plus `tests/` for the fifth — are three
+  argued policies, not one rule restated three times, and flattening them would destroy a
+  real distinction. **Correct later if:** two or more gates' reach areas collapse onto the
+  same policy through an unrelated change, so the "three argued policies" premise no
+  longer holds; not correct merely because the five gates look similar today.
+- **A movement-reporting protocol or base class shared by the position and diameter
+  quantisers (ticket 36).** Rejected: one side compares a two-dimensional distance over a
+  uniform, operator-declared pitch without taking a square root; the other compares a
+  one-dimensional signed scalar over a non-uniform published table. The only shared text is
+  the comparison operator itself — a helper here would relocate one line, not concentrate a
+  rule. **Correct later if:** a third quantiser needs the identical comparison shape *and*
+  the identical inputs (a uniform pitch, or a non-uniform table — not merely "some
+  threshold"), giving the fold a real third data point rather than a second name for the
+  same coincidence.
+- **A published target-domain predicate, or a set-level writer, in `stompmodel` (tickets
+  33 and 35, settled by the coordinator's own Q6 ruling).** Forbidden: a forecast consumer
+  licenses not narrowing an interface, never adding one, and no second caller of a
+  target-domain check exists yet. The narrow way to satisfy the theme without adding a name
+  — making `stage_payload` enforce its own domain — was taken instead. **Correct later
+  if:** `stompcollider` (or another real caller) needs to validate a target's domain ahead
+  of a write it does not itself perform, at which point the predicate has a genuine second
+  consumer and the forecast-consumer rule licenses publishing it.
+- **A pre-flight readability probe in `stompdrill`'s command line (tickets 33 and 35).**
+  Refused: this wave's own reproduced defect is that the *existing* probes are less
+  accurate than the operation they anticipate — they consult the real uid/gid and ignore
+  ACLs where the write itself reports the filesystem's true answer at the moment it
+  matters — and a readability probe repeats exactly that mistake for reading instead of
+  writing. **Correct later if:** never, on the reasoning given — this is closer to a
+  standing rule than a "not yet" deferral. The only way this becomes correct is if the
+  filesystem stopped being able to answer authoritatively at the moment of the real
+  operation, which is not a forecast that has a trigger.
+- **A "dry-run" staged write used as a pre-flight probe (ticket 33).** Rejected: it invents
+  the concept of a staged write that is not a write, which makes ADR-0001's "nothing has
+  yet been staged" before the pre-flight false. **Correct later if:** operators complain
+  about the cost of a wasted render on a target that turns out to be out of domain — ticket
+  33 names this explicitly as the trigger, not a hypothetical one.
+
+**Acceptance:** Not implementation work. A later wave that reconsiders any item above cites
+this entry and marks its own finding Settled without repeating the argument, unless it has
+the real second consumer or trigger named above.
