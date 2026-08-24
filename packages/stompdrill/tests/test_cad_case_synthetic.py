@@ -9,9 +9,36 @@ from __future__ import annotations
 
 import pytest
 
-from stompdrill.cad.case import find_faces
+from stompdrill.cad.case import Faces, build_frame, find_faces
 from stompdrill.errors import StompdrillError
 from stompgeom.step import StepSolid
+from stompmodel.units import Nanometre
+
+
+def test_build_frame_puts_u_on_the_larger_of_1590lbs_two_catalogue_dimensions():
+    """ADR-0007's narrowing paragraph (T15): the reconciliation assumes
+    ``build_frame`` puts ``u`` on the model's larger measured in-plane span.
+    Checked here against the catalogue's own asymmetric ``1590LB`` figures
+    (50.55 x 50.60 mm) fed directly as ``Faces.footprint_mm`` -- the only
+    inputs ``build_frame`` reads for axis selection -- because the real
+    cached model does not resolve that 0.05 mm difference at all (see
+    ``test_cad_case.py``'s real-model test, which is why this is fed rather
+    than measured from a constructed solid).
+    """
+    faces = Faces(
+        inner=None,
+        plate_nm=Nanometre(0),
+        outward=(0.0, -1.0, 0.0),
+        drilled_position_mm=0.0,
+        inner_position_mm=0.0,
+        footprint_mm=(50.55, 0.0, 50.60),
+    )
+
+    frame = build_frame(faces, axis=1)
+
+    free = [index for index in range(3) if index != 1]
+    u_axis = next(index for index in free if abs(frame.basis.u[index]) > 0.5)
+    assert faces.footprint_mm[u_axis] == pytest.approx(50.60)
 
 
 def test_a_closed_solid_has_no_unambiguous_drilled_face():

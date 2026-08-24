@@ -254,3 +254,33 @@ def test_the_published_frames_normal_points_away_from_the_solid(request, part):
         centre = (bbox[axis] + bbox[axis + 3]) / 2
 
         assert (faces.drilled_position_mm - centre) * frame.basis.w[axis] > 0
+
+
+def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
+    """ADR-0007's narrowing paragraph (T15): whether ``build_frame``'s axis
+    choice for this fix's one reachable part agrees with the catalogue's
+    stated 50.55 x 50.60 mm asymmetry cannot be checked against the real
+    supplied model. Its own box measures both in-plane spans EQUAL to
+    kernel precision, so ``build_frame``'s own tie-break (the lower-indexed
+    free axis) -- not "the larger span" -- governs it there. Executed, not
+    assumed: this is what the ADR's narrowing paragraph reports, rather than
+    a premise nothing checked. Requires a pre-fetched model (``python
+    tools/fetch_case_model.py 1590LB``); skipped, not failed, if absent.
+    """
+    from tools.fetch_case_model import cache_dir
+
+    path = cache_dir() / "1590LB.stp"
+    if not path.is_file():
+        pytest.skip("1590LB not cached; run `python tools/fetch_case_model.py 1590LB`")
+
+    document = read_step(path)
+    box = select_solid(document, CaseFace.BOX)
+    # 1590LB, like every other cached Hammond model, is assembled Y-up
+    # (axis 1 is the drill axis); the catalogue's own 0.05 mm asymmetry is
+    # too fine for ``drill_axis``'s 0.05 mm match tolerance to resolve at
+    # float precision, so the axis is stated directly rather than derived.
+    faces = find_faces(box, axis=1)
+
+    free = [index for index in range(3) if index != 1]
+    spans = [faces.footprint_mm[index] for index in free]
+    assert spans[0] == pytest.approx(spans[1], abs=1e-6)
