@@ -36,19 +36,42 @@ The processing blocks, aggregate boundaries, and typed transfers are shown in AD
 Figure 1.
 
 One invocation's artefacts are one transaction: the command line writes every
-requested artefact or none of them. An ERROR diagnostic withholds all of them before
-rendering begins, as already stated above. Past that gate, every payload is rendered
-before any target path is touched; the command line then stages every rendered payload
-to a temporary beside its own target, and only once every one of those writes has
-succeeded does it replace each target from its temporary. A failure anywhere in
-rendering or staging — an emitter's own fault, or the operating system refusing a
-write, at any target and at any position in the requested set — unwinds whatever this
-invocation had staged and leaves every target exactly as it was before the run,
-whether that is absent or holding a previous invocation's artefact. ADR-0005 gives
-`stage_payload`/`commit_staged` the matching guarantee for one path in isolation; this is
-the set-level rule built on top of it, and it stays the command line's own for as long as
-`stompdrill` is the only caller composing a set of several artefact paths for one
-invocation.
+requested artefact or none of them. Before anything is rendered, the requested target
+set is validated once, as a set: no two targets may name one path, and every target
+must satisfy the write mechanism's own preconditions — its parent directory must
+already exist and accept a new file, and the target itself must not already be a
+directory. ADR-0005 states the target domain those preconditions draw. Failing this
+check costs nothing, because nothing has yet been rendered, staged, or replaced. An
+ERROR diagnostic withholds all of them before rendering begins, as already stated
+above. Past both gates, every payload is rendered before any target path is touched;
+the command line then stages every rendered payload to a temporary beside its own
+target, and only once every one of those writes has succeeded does it replace each
+target from its temporary — reading a target's own prior bytes first, whenever the
+target already exists, so they can be put back. A failure anywhere in rendering,
+staging, or committing — an emitter's own fault, the operating system refusing a
+write, or a later target's replace failing after an earlier one has already
+succeeded — unwinds whatever this invocation had staged or already replaced and
+leaves every target exactly as it was before the run, whether that is absent or
+holding a previous invocation's artefact. Restoring an already-replaced target uses
+the same `stage_payload`/`commit_staged` mechanism as every other write in the loop,
+never a filesystem operation of its own: the command line states no write path
+`stompmodel.protocols` does not already publish.
+
+This guarantee carries one named exclusion: restoring a target already replaced
+depends on the bytes read from it before its own commit still describing what a
+correct restoration should write back — true unless another process changes that
+same target between the read and the rollback that later reaches for it, or the
+restoring write itself fails for a reason the pre-flight could not have seen. Either
+leaves that one target holding this run's bytes rather than restored, and the
+failure that triggered the rollback is what propagates rather than a second one
+about the failed restoration. Closing that race needs a lock this command line does
+not take, which is a durability question this document leaves out alongside fsync
+and power loss.
+
+ADR-0005 gives `stage_payload`/`commit_staged` the matching guarantee for one path in
+isolation; this is the set-level rule built on top of it, and it stays the command
+line's own for as long as `stompdrill` is the only caller composing a set of several
+artefact paths for one invocation.
 
 Emitter registration is extensible: a format maps to an emitter without changing the
 processing contract. The CLI explicitly composes the ordered post-quantisation stages;
@@ -128,12 +151,17 @@ target, briefly present beside it until the whole set commits. That is the delib
 price of never leaving a previous invocation's artefact replaced by only part of this
 one's. The set-level rule is composed from `stompmodel`'s per-path mechanism rather than
 restating it: the command line calls `stage_payload` for every requested target, then
-`commit_staged` for each in turn, and `discard_staged` for whatever it abandons.
-`stompdrill` states no temporary-file mechanism of its own. What order the set is
-committed in, and what happens to the rest when one commit fails, remain the command
-line's own and are stated nowhere below it.
+`commit_staged` for each in turn, and `discard_staged` for whatever it abandons; reading
+a target's prior bytes before its own commit, and restoring them through that same
+`stage_payload`/`commit_staged` pair on a later failure, is the command line's own
+bookkeeping around that mechanism, never a second write path beside it. `stompdrill`
+states no temporary-file mechanism of its own. The set commits in the order its targets
+were requested; when one commit fails, every target already committed in the same loop
+is restored to what it held before this run, and every target not yet reached is
+discarded through `discard_staged` — both stated above and enforced by ticket 29.
 
 The opening claim above — that one invocation's artefacts are one transaction, full
-stop — remains false of the code as shipped: a commit failure partway through a set
-leaves every target already replaced holding this run's bytes, as the commit loop's own
-docstring concedes. This move does not close that gap; ticket 29 owns it.
+stop — now holds of the code as shipped, modulo the one named exclusion stated above: a
+commit failure partway through a set no longer leaves an earlier target holding this
+run's bytes while a later one holds the previous run's, because the commit loop restores
+what it already replaced before propagating the failure that stopped it.

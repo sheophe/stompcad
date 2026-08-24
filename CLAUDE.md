@@ -104,6 +104,15 @@ size, or a part number in no catalogue is a usage error rather than a diagnostic
 `--emit` formats come from the registry: `drawing-pdf`, `drawing-svg`, `excellon`,
 `json`, `step`.
 
+The requested `--emit` targets are validated once, as a set, before anything is
+rendered: two targets may not name one path, and each target's parent directory must
+already exist and accept a new file while the target itself must not already be a
+directory — the write mechanism's target domain, stated in
+[ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A run that fails this check, or
+fails while writing, writes none of its requested artefacts and leaves every existing
+target exactly as it was, modulo the one named exclusion; see
+[ADR-0001](docs/adr/0001-pipeline-and-emitter-adapters.md).
+
 `drawing-pdf` writes an ISO 5457 sheet at 1:1, choosing the smallest of A4 portrait, A3,
 A2, A1 and A0 landscape that holds the panel. ISO 5457 §4.1 fixes the orientation of each
 size, so there is no orientation to choose.
