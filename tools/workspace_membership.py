@@ -37,13 +37,14 @@ def member_package_dirs() -> tuple[Path, ...]:
 
 def member_area_roots(area: str) -> frozenset[Path]:
     """Ground truth for a gate's reach control, independent of
-    :func:`member_package_dirs`.
+    :func:`member_package_dirs`'s own control flow.
 
-    Every ``<area>`` directory (``"src"``, ``"tests"``) under a workspace
-    member, found by a walk of ``packages/`` that never calls
-    ``member_package_dirs``. Comparing a scan to that function called a
-    second time proves nothing about under-reaching, only self-agreement;
-    this is computed a second, independent way so the two can disagree.
+    Every ``<area>`` directory under a workspace member, found by a second
+    walk of ``packages/`` that never calls ``member_package_dirs``. It
+    applies that function's own "ships a src" predicate again on purpose:
+    the independence a reach control needs is a call site immune to a
+    narrowed *return*, not a rival definition of membership -- a change to
+    the predicate itself still needs both sites edited.
     """
     packages_dir = REPO / "packages"
     return frozenset(
