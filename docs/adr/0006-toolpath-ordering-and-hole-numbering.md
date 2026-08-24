@@ -6,7 +6,11 @@ total on geometry, not only the routing tie-break this ADR already pinned. See D
 and Consequences. Amended a third time: the raw-measurement tie-break this ADR requires
 now has one published implementation, a structural gate over the installed packages'
 source enforces it, and the reader's own selection rule is recorded as the same class of
-obligation. See Decision and Consequences.
+obligation. See Decision and Consequences. Amended a fourth time: reading a number
+through `DrillData.numbered()` means *sorting by* it — the Excellon emitter grouped
+holes into tool blocks and wrote each block in tuple order, which a since-repaired test
+fixture could not distinguish from number order because the scramble never crossed a
+block boundary. See Decision and Consequences.
 
 ## Context
 
@@ -115,6 +119,17 @@ instead of by number, which is what frees the number to be assigned late.
 `DrillData.numbered()` pairs each hole with its number and is the only place a number is
 read. An emitter given unrouted data raises `EmitterError` naming the remedy.
 
+**Amended a fourth time: reading through `numbered()` means sorting by the number it
+yields.** `numbered()` deliberately returns tuple order, not drill order — so an artefact
+whose own structure states a sequence (file position, for a format with no separate
+number field) must sort the pairs by the first element before it presents them; reading
+the pairs and trusting their order is reading past the one thing `numbered()` promises.
+`emitters/step.py`'s `_drill_compound` sorts explicitly, and `emitters/excellon.py` now
+does the same within each tool block. An artefact that instead states the number as an
+explicit field per element — the schedule table, the JSON `holes` array, the CLI's
+verbose report — does not assert a sequence through element position at all, so it owes
+`numbered()` nothing beyond the pairing itself.
+
 ## Rationale
 
 Numbering at the source and adding an offset per renderer were both rejected: the
@@ -186,3 +201,13 @@ outside the module that owns it.
 
 Changes to the block order, the routing rule, the tie-break, or the point at which numbers
 are assigned are architectural changes to this decision.
+
+**Amended a fourth time.** `emitters/excellon.py` grouped holes into tool blocks by
+filtering `framed.holes` (tuple order) rather than the sorted pairs `numbered()` yields,
+so within-block sequence was `RouteHoles`' tuple order rather than the hole's own number
+— correct only because `cli.build_pipeline` happens to run `RouteHoles` last, a fact
+about pipeline composition the emitter had no business depending on. It now sorts each
+block by number, the same rule `emitters/step.py`'s `_drill_compound` already applied.
+The guard that should have caught this scrambled hole numbers *across* tool blocks but
+never *within* one, so the emitter's tool-major grouping restored ascending order by
+accident and the test could not fail; the fixture now scrambles within a block too.

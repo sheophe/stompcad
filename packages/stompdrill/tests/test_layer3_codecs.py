@@ -48,15 +48,16 @@ def quantised(value: int, quantum: int) -> int:
 def panel() -> DrillData:
     """Two tools, four holes, numbered out of tuple order.
 
-    The scrambled numbering is load-bearing: an emitter that recomputed a
-    drill number from a list position would agree with a fixture numbered
-    ascending and disagree with this one.
+    The scramble is *within* the ⌀5 block (indices 1, 2 sit in reverse of
+    their tuple order), not only across the two blocks — an emitter that
+    only sorted block boundaries, not hole order within one, would still
+    pass on ⌀7 (already ascending in tuple order) and fail here.
     """
     return make_data(
         at(-20_000_000, 18_000_000, 7_000_000, index=3),
         at(20_000_000, 18_000_000, 7_000_000, index=4),
-        at(-19_000_000, -18_750_000, 5_000_000, index=1),
-        at(19_000_000, -18_750_000, 5_000_000, index=2),
+        at(-19_000_000, -18_750_000, 5_000_000, index=2),
+        at(19_000_000, -18_750_000, 5_000_000, index=1),
         reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000)),
     )
 
@@ -285,7 +286,7 @@ def test_the_json_bytes_preserve_a_drill_number_that_is_not_a_list_position():
 
     rebuilt = from_document(json.loads(JsonEmitter().emit(data)))
 
-    assert [hole.index for hole in rebuilt.holes] == [3, 4, 1, 2]
+    assert [hole.index for hole in rebuilt.holes] == [3, 4, 2, 1]
 
 
 # ---------------------------------------------------------------------------
