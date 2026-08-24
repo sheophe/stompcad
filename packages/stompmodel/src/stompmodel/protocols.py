@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
 
@@ -23,7 +24,10 @@ __all__ = [
     "Stage",
     "Emitter",
     "Payload",
-    "write_payload",
+    "StagedWrite",
+    "stage_payload",
+    "commit_staged",
+    "discard_staged",
     "Pipeline",
 ]
 
@@ -89,16 +93,28 @@ class Stage(Protocol[T]):
 Payload = str | bytes
 
 
-def write_payload(path: Path, payload: Payload) -> int:
-    """Write ``payload`` to ``path``, letting its own type choose the mode.
+@dataclass(frozen=True, slots=True)
+class StagedWrite:
+    """One payload already written in full to a temporary beside its target.
 
-    Writes to a temporary file beside ``path`` and renames it into place, so
-    ``path`` afterwards holds either the complete payload or exactly what it
-    held before: a failure partway through never leaves a truncated
-    artefact, and the temporary does not survive the failure. Returns the
-    encoded byte count, which is the number both tools report and
-    ``stompcad`` reduces over -- a second copy of either branch is the drift
-    ADR-0005's consequence forbids.
+    Produced only by :func:`stage_payload`; never built by hand. ``path`` is
+    the target :func:`commit_staged` will replace and ``size`` is the
+    encoded byte count both tools report -- the two facts a caller's report
+    line needs. The temporary is not a caller's business: it is committed or
+    discarded through the two functions below, never named.
+    """
+
+    path: Path
+    size: int
+    _tmp: Path
+
+
+def stage_payload(path: Path, payload: Payload) -> StagedWrite:
+    """Encode ``payload`` and write it in full to a fresh temporary beside ``path``.
+
+    ``path`` itself is never touched here. On failure this call's own
+    temporary is unlinked before the exception propagates, so a caller
+    staging several paths unwinds only the values it already holds.
     """
     # Encoding first means one write path serves both payload types, and it
     # is what makes the "untranslated encoded length" contract exact: bytes
@@ -108,11 +124,32 @@ def write_payload(path: Path, payload: Payload) -> int:
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_bytes(data)
-        os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    return len(data)
+    return StagedWrite(path=path, size=len(data), _tmp=tmp)
+
+
+def commit_staged(staged: StagedWrite) -> int:
+    """Replace ``staged.path`` from its temporary. Returns ``staged.size``.
+
+    Atomic: afterwards ``staged.path`` holds either the complete payload or
+    exactly what it held before, and the temporary survives neither
+    outcome. The count is the one :func:`stage_payload` already computed,
+    returned unchanged -- a second derivation of it is the drift ADR-0005's
+    consequence forbids.
+    """
+    try:
+        os.replace(staged._tmp, staged.path)
+    except BaseException:
+        staged._tmp.unlink(missing_ok=True)
+        raise
+    return staged.size
+
+
+def discard_staged(staged: StagedWrite) -> None:
+    """Abandon a staged write without touching its target. Never raises."""
+    staged._tmp.unlink(missing_ok=True)
 
 
 @runtime_checkable

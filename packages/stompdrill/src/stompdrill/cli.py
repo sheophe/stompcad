@@ -11,9 +11,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import math
-import os
 import sys
-import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,7 +26,16 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace, DrillData
-from stompmodel.protocols import Emitter, Payload, Pipeline, Stage
+from stompmodel.protocols import (
+    Emitter,
+    Payload,
+    Pipeline,
+    Stage,
+    StagedWrite,
+    commit_staged,
+    discard_staged,
+    stage_payload,
+)
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .cad import OcpCaseModel
@@ -735,50 +742,51 @@ def _render(
     return [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
 
 
-#: One rendered artefact staged for commit: its emitter (for the report line),
-#: its real target, the temporary its bytes already reached, and their count.
-_Staged = tuple[Emitter[DrillData], Path, Path, int]
+#: One rendered artefact staged for commit: its emitter (for the report
+#: line) beside the value ``stage_payload`` already wrote in full.
+_Staged = tuple[Emitter[DrillData], StagedWrite]
 
 
 def _stage(rendered: Iterable[tuple[Emitter[DrillData], Path, Payload]]) -> list[_Staged]:
-    """Write every payload to a fresh temporary beside its target.
+    """Stage every payload through :func:`stompmodel.protocols.stage_payload`.
 
-    No target path is touched here. A failure partway through unwinds every
-    temporary this call already wrote and re-raises, so a write failure on
-    any one artefact leaves every target of the invocation exactly as it
-    was — see ADR-0001.
+    No target path is touched here. A failure partway through discards
+    every staged write this call already produced and re-raises, so a write
+    failure on any one artefact leaves every target of the invocation
+    exactly as it was — see ADR-0001. This is the set-level loop composed
+    on top of `stompmodel`'s per-path mechanism; `stompdrill` states no
+    temporary-file mechanism of its own.
     """
     staged: list[_Staged] = []
     try:
         for emitter, path, payload in rendered:
-            data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
-            tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-            tmp.write_bytes(data)
-            staged.append((emitter, path, tmp, len(data)))
+            staged.append((emitter, stage_payload(path, payload)))
     except BaseException:
-        for _, _, tmp, _ in staged:
-            tmp.unlink(missing_ok=True)
+        for _, written in staged:
+            discard_staged(written)
         raise
     return staged
 
 
 def _commit(staged: list[_Staged]) -> list[str]:
-    """Replace every target from its already-written temporary, in order.
+    """Replace every target from its already-staged write, in order.
 
-    Every temporary here was already written in full, so this is the
-    low-risk half of the transaction: one atomic ``os.replace`` per target,
-    same as a single ``write_payload`` call makes for one path. A target not
-    yet reached when ``os.replace`` itself fails is unlinked rather than
-    left as an orphan; one already replaced stays replaced.
+    Every staged write here already reached its temporary in full, so this
+    is the low-risk half of the transaction: one
+    :func:`~stompmodel.protocols.commit_staged` call per target, same as a
+    single ``stage_payload``/``commit_staged`` pair makes for one path.
+    ``commit_staged`` itself discards the temporary of the target it fails
+    on, so only the targets *not yet reached* need discarding here; one
+    already replaced stays replaced.
     """
     lines = []
     try:
-        for index, (emitter, path, tmp, size) in enumerate(staged):
-            os.replace(tmp, path)
-            lines.append(f"wrote {path}  ({emitter.name}, {size} bytes)")
+        for index, (emitter, written) in enumerate(staged):
+            size = commit_staged(written)
+            lines.append(f"wrote {written.path}  ({emitter.name}, {size} bytes)")
     except BaseException:
-        for _, _, tmp, _ in staged[index:]:
-            tmp.unlink(missing_ok=True)
+        for _, written in staged[index + 1 :]:
+            discard_staged(written)
         raise
     return lines
 

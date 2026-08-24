@@ -17,14 +17,16 @@ becoming part of the format's correctness.
 The emitter payload is `Payload = str | bytes`. An emitter returns whichever its format
 is; a text emitter continues to return `str` and is unchanged.
 
-The dispatch on the value is `stompmodel.protocols.write_payload`, the only function in
-the emit path that writes a **caller-visible** file; the command line owns the report it
-prints around the count that function returns. The qualifier is load-bearing:
+The dispatch on the value is `stompmodel.protocols.stage_payload`, which encodes the
+payload and writes it in full to a temporary beside its target. `commit_staged` is the
+only function in the emit path that puts bytes at a **caller-visible** path, and
+`discard_staged` the only one that abandons them; the command line owns the report it
+prints around the count `commit_staged` returns. The qualifier is load-bearing:
 `stompgeom.writer.render_step` writes its own STEP bytes through a scratch file first,
 because the kernel's writer exposes no in-memory target, only a path — but that write is
 forced by the kernel's path-only API, is invisible to callers, and is why the claim
 needed the qualifier at all. `render_step` returns finished bytes and leaves nothing on
-disk a caller can observe; `write_payload` remains the only function whose file a caller
+disk a caller can observe; `commit_staged` remains the only function whose file a caller
 asked for. As first taken, that dispatch was the command line's own:
 
 ```python
@@ -41,13 +43,15 @@ def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
 Every artifact is still rendered before any path is written, so a failure in one emitter
 withholds all of them.
 
-`write_payload` writes to a temporary file beside the target and renames it into place,
-so the same declaration this ADR already makes — the one function where an artefact's
-bytes reach a path and are counted — now also covers what a failure at that path leaves
-behind: the write is all-or-nothing for one path. Afterwards the target holds either the
-complete payload or exactly what it held before, and the temporary does not survive
-either outcome. A caller never observes a truncated artefact and never needs to know the
-mechanism that prevents it.
+`stage_payload` writes to a temporary file beside the target; `commit_staged` renames it
+into place. Afterwards the target holds either the complete payload or exactly what it
+held before, and the temporary survives neither outcome — `discard_staged` removes it
+explicitly when a caller abandons the write instead of committing it. A caller never
+observes a truncated artefact and never needs to know the mechanism that prevents it.
+The write is split across two calls, rather than made in one as it first was, because
+today's only caller must stage a whole set of artefacts before committing any of them —
+see ADR-0001 — and a single write-and-rename call cannot be paused between the two
+halves.
 
 ## Rationale
 
@@ -75,8 +79,9 @@ from one invocation must agree." Whether a whole invocation's artefacts land or 
 together as a set is a fact about the caller's loop over several paths, not about this
 one function, and stays out of this ADR's scope; ADR-0001 owns it.
 
-`stompcollider` inherits this counting convention from `stompmodel.protocols.write_payload`
-rather than re-deriving it, which is what makes "means the same thing for both kinds of
-payload" hold across two tools rather than within one — the move satisfies ADR-0009's
-admission rule 2 (contract), naming `stompcad`'s dependence on one report and one
-byte-counting convention across both tools it orchestrates.
+`stompcollider` inherits this counting convention from
+`stompmodel.protocols.stage_payload`/`commit_staged` rather than re-deriving it, which is
+what makes "means the same thing for both kinds of payload" hold across two tools rather
+than within one — the move satisfies ADR-0009's admission rule 2 (contract), naming
+`stompcad`'s dependence on one report and one byte-counting convention across both tools
+it orchestrates.

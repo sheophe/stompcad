@@ -265,10 +265,11 @@ CLI.
   its own CLI flags still requires a `cli.py` edit. A registered emitter whose constructor
   needs something this CLI cannot supply is refused as a usage failure (exit 3, no
   artefact written) rather than crashing; only construction is guarded, so a fault raised
-  later from the emitter's own `emit` step keeps its traceback. A binary emitter writes its
-  payload through `stompmodel.protocols.write_payload(path, payload) -> int`, which is where
-  the bytes are written and counted; the CLI keeps only the sentence it prints from that
-  count — see [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
+  later from the emitter's own `emit` step keeps its traceback. An emitter returns its
+  payload and never writes it. The command line stages every requested artefact through
+  `stompmodel.protocols.stage_payload`, then commits each through `commit_staged`, which is
+  where the bytes reach a path and are counted; the CLI keeps only the sentence it prints
+  from that count — see [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
   `render(scene, title)`, the same seam `drawing_svg` and `drawing_pdf` serialise a
   `Scene` through.
 - **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`, then
