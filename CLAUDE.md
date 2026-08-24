@@ -333,6 +333,13 @@ CLI.
 - Break accidental equality in fixtures: number routed holes out of tuple order, so a test
   only passes an emitter that reads the number through `DrillData.numbered()` rather than
   recomputing one from list position.
+- The fixture rule above is a special case of a general one: a verification instrument that
+  can pass by finding nothing — a structural gate scanning for a restated rule, an ordering
+  guard whose fixture never exercises the order it claims to police, a property that never
+  reaches the branch it means to constrain — is not evidence until a control shows it, by a
+  deliberate breach of the rule it enforces, actually failing. Write that control beside the
+  instrument, in the same suite, run by the same command; a report that a control was run by
+  hand is not the control.
 - Preserve property tests for snapping (onto the grid, within half a pitch, and
   idempotent) and tool stability under hole reordering — not deduplication idempotence,
   which exact integer equality makes structurally unfalsifiable.

@@ -520,6 +520,12 @@ declined, for the identical reason recorded above — the coordinator's adjudica
 this rediscovery as a rejection by name. A future rediscovery of the same shape is Settled
 by citing this entry, not re-argued from scratch.
 
+**Rediscovered, wave 3 (2026-08):** T13's design verdict (relocating the write mechanism into
+`stompmodel.protocols.stage_payload`/`commit_staged`) weighed a batch-write helper or a
+shared-CLI write layer again and rejected both, for the same reason — see "Wave 3's declined
+and rejected design proposals" below. Two rediscoveries now cite this entry; a third should
+too, unless it names a real second consumer the first two did not have.
+
 ## Two verified OCP kernel-binding segfault hazards
 
 **Status:** Confirmed gap, not scheduled. Verified by experiment during the 2026-08
@@ -909,3 +915,321 @@ interface against, and folding it now would be Speculative Generality.
 **Acceptance:** The three sites promote to one `stompgeom` helper once a real second
 consumer (for example `stompcollider`'s assembly emitter) needs the same idiom; until
 then this entry stands.
+
+## `CheckCaseClearance` is stateful, and nothing states the `apply`-before-`describe` order it relies on
+
+**Status:** Confirmed gap, not scheduled. Found independently by three lenses in the 2026-08
+architecture review's wave 3 (F2-05, M3-02, F1-06); recorded once because all three name the
+same mutable field.
+
+**Constraint:** `pipeline/clearance.py`'s `CheckCaseClearance` assigns `self._checked_frame`
+in `apply()` and reads it back in `describe()` — the only self-mutating stage in the
+workspace — so that two statements of one fact keep agreeing: the reconciled frame, typed on
+`DrillData.case.frame`, and the play area, string-keyed in `StageRun.parameters`. Nothing
+pays today: `Pipeline.run` always calls `apply` then `describe` on one instance, and
+`_checked_frame` defaults to the model's own frame, so an out-of-order `describe()` degrades
+to the unreconciled play area rather than crashing. Two observations travel with it.
+`stompmodel.protocols.Stage`'s own docstring — "A deterministic preprocessing step
+independent of pipeline position" — states nothing about an ordering obligation between its
+two methods, so a second implementer (`stompcollider`'s `Match`/`Seat` stages,
+`docs/specs/stompcollider-technical.md:532`) meets no warning before writing the same shape.
+And `apply`/`_play_area_in` both decide whether to reframe by testing
+`frame is self.model.frame` — object identity, which the concrete `OcpCaseModel` dataclass
+happens to preserve but which the `CaseModel` protocol never promises; a computed-property
+implementation of `.frame` would silently take the reframe branch on every access.
+
+**Acceptance:** Either `Stage.describe()`'s docstring states the ordering obligation a stage
+may rely on (or forbids one) and `CheckCaseClearance` keeps or loses its mutable field to
+match; or the field is removed by moving `play_area_nm` onto `CaseRegistration` (the fix
+wave 2's ticket 12 ruled out of scope as "not yet true of the play area" — a ground this
+wave's reconciliation changed, since a play area now needs the reconciled frame to be stated
+at all). Either way, the identity comparisons are replaced by an equality the `CaseModel`
+protocol actually promises, or the protocol is amended to promise identity.
+
+## The checked registration does not record whether it was reconciled
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(M3-01). The fix considered for it — a boolean field — was weighed and declined; see "Wave
+3's declined and rejected design proposals" below for the reasoning.
+
+**Constraint:** `CaseRegistration` carries `frame` with no record of whether it is the
+model's own frame or a quarter turn from it (ticket 28's reconciliation), and
+`EnclosureMatch.rotated` cannot recover that either — it states only that the drawn pair
+matched the catalogue's printed row transposed, which ADR-0007's T15 amendment establishes is
+a different fact from whether the registration itself turned. A consumer restoring a `v6`
+document from bytes alone — `stompcollider` reading a drilled model's registration, per
+`docs/specs/stompcollider-technical.md` — cannot tell the two apart, and the turn direction is
+a stated convention rather than a derivable one, so inspection cannot recover it either. Harm
+today is nil: no consumer reads the registration's provenance.
+
+**Acceptance:** Not scheduled. Reopen only against a real second consumer that needs to
+distinguish a reconciled registration from an unreconciled one — a forecast consumer alone
+does not license adding the field, per the ruling below.
+
+## `_walk_page` reads the crop box unnormalised and unclamped
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(M3-03).
+
+**Constraint:** `sources/ai_pdf._walk_page` builds `crop = [float(v) for v in page.cropbox]`
+and reads it in stored array order. ISO 32000-1 §7.9.5 does not guarantee `[llx lly urx ury]`
+ordering, and pikepdf's `cropbox` property returns the raw `Array` rather than a normalised
+rectangle, so a reversed box yields `x0 > x1`; `_centre_outside` and `_entirely_outside` both
+treat that as degenerate-and-cull-everything, discarding every path in the document and
+failing the run as `EmptyLayerError` — loud, but for the wrong reason. Separately, the crop
+box is never intersected with the media box, so a crop box larger than the media box would
+let pasteboard artwork back past ticket 21's fix. The same function also mixes
+`page.cropbox` (inheritance-aware) with `page.MediaBox` (raw dictionary access) two lines
+apart.
+
+**Acceptance:** `_walk_page` normalises the crop box to `x0 <= x1, y0 <= y1` before using it
+and intersects it with the media box, and a test drives a reversed-order crop box (and a crop
+box larger than the media box) to prove neither degrades culling nor lets pasteboard artwork
+through.
+
+## The write mechanism replaces a symlink instead of writing through it
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(M3-04) against the pre-ticket-26 code; the call site has since moved but the defect has not.
+
+**Constraint:** `os.replace(tmp, path)` where `path` is a symlink replaces the link itself
+with a regular file, rather than writing through it to its target. Before this review's write-
+mechanism consolidation, the predecessor `path.write_bytes` followed the link and updated its
+target; the rename-based mechanism does not. After ticket 26 the call site is
+`stompmodel.protocols.commit_staged`'s single `os.replace(staged._tmp, staged.path)`, so
+there is exactly one production site to fix rather than two. An operator keeping
+`latest.svg -> builds/2026-08-24.svg` loses the link on the next run, silently — worth
+deciding alongside ticket 29's `/dev/null` narrowing, since both are "what may a target be".
+
+**Acceptance:** Either `commit_staged` resolves a symlink target before replacing (writing
+through it, preserving the link), or the behaviour is declared deliberate and stated in
+ADR-0005's target-domain paragraph; either way a test creates a symlink target and asserts the
+chosen outcome.
+
+## `OcpCaseModel.frame` and `OcpCaseModel.own_frame` are the same value
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(F2-06).
+
+**Constraint:** `cad/loader.py` builds one frame and passes it to both `OcpCaseModel.frame`
+and `OcpCaseModel.own_frame`. `classify()` reads `own_frame`; `CheckCaseClearance` reads
+`frame`. Two public names for one value on one frozen dataclass — a reader must discover by
+inspection that they cannot differ.
+
+**Acceptance:** `own_frame` is deleted and every reader uses `frame`; the loader builds the
+value once, and the full stompdrill suite passes unchanged.
+
+## An unidentified enclosure is reported under two diagnostic codes at two severities
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(F2-07).
+
+**Constraint:** `pipeline/clearance.py`'s `_cross_check` emits `case-model-unverified` (INFO)
+and `_orientation_notice` emits `case-orientation-unverifiable` (WARNING) for the identical
+condition, `data.enclosure is None`. A run with no identified enclosure and a supplied case
+model therefore carries two findings for one absence, and the run's exit code moves from 0 to
+1 on the strength of the second alone. `enclosure.quantise`'s own comment states the opposite
+rule — that a second finding would report one absence twice.
+
+**Acceptance:** One of the two diagnostics is deleted (or downgraded to a comment) so a
+missing enclosure is reported once, at one severity, and a test proves that a run supplying a
+case model but no identifiable enclosure produces exactly one diagnostic for the absence.
+
+## Two rules decide "which solid is the drilled one"
+
+**Status:** Deliberate deferral, not scheduled. Found in the 2026-08 architecture review's
+wave 3 (F2-08). Explicitly not proposed as a fold: one inline site each, so a shared helper
+would be a hypothetical seam.
+
+**Constraint:** `cad/case.select_solid` refuses unless exactly one product name contains the
+keyword; `emitters/step.cut_shape` cuts the *first* name-matching leaf that carries a shape.
+They cannot disagree today only because `load_case_model` always runs `select_solid` first.
+This is the half of wave 1's `leaf_labels` fold that did not close: `cut_shape` still walks
+labels itself because `StepSolid` drops its label, so the selection rule could not be shared
+with it.
+
+**Acceptance:** Not scheduled as a fold until `cut_shape` gains a second call site, or
+`StepSolid` carries its label and can call `select_solid` directly; until then this entry
+stands as the reason the two must be changed together if either is.
+
+## The `last_run → get → isinstance` provenance read is stated four times, deliberately not folded
+
+**Status:** Confirmed gap, recorded as a relocation rather than a fold. Found in the 2026-08
+architecture review's wave 3 (F2-09).
+
+**Constraint:** `pipeline/snap.ReviewGridTies._pitch`, `cli._tool_label`, and
+`cli.format_case` (twice) each read a stage's prior provenance as
+`last_run(name) → get(key) → isinstance`. A shared accessor was considered and rejected: the
+three readers want three different result types, so a shared accessor would need a type
+parameter and would add more machinery than it removes — the deletion test does not
+concentrate. The real answer is fewer string-keyed facts (see the `CheckCaseClearance` entry
+above), not a nicer way to read them.
+
+**Acceptance:** Not scheduled as a fold; this entry records the ruling so a later wave does
+not manufacture a shared accessor and meet the same rejection again. Reopen only if a fourth
+reader wants the same result *type* as an existing one.
+
+## `cli.py` imports `SheetText` from the wrong drawing module
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(F2-10). Drawing-subsystem locality only; Minor by the review's own charter regardless of
+severity elsewhere.
+
+**Constraint:** `SheetText` is `emitters.drawing.content`'s type, re-exported by
+`emitters.drawing.build`; `cli.py` imports it from `build`, reaching two levels into the
+drawing subsystem for a name that belongs one level in.
+
+**Acceptance:** `cli.py` imports `SheetText` from `emitters.drawing.content` directly, and the
+full stompdrill suite passes unchanged.
+
+## `fit_circle` runs up to three times per painted path
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(F2-11). Locality only; no behaviour depends on it.
+
+**Constraint:** `fit_circle` runs once in `_walk`'s cull, once in `AiPdfSource.read`'s drill
+fit, and once in `_largest_non_circular`'s skip test. Correct but not shared: the `Circle`
+the cull already computed is discarded rather than threaded through to the later two call
+sites.
+
+**Acceptance:** The cull's own `Circle` is threaded through (or memoised) so a painted path
+is fit at most once per read, and the full stompdrill suite passes unchanged.
+
+## `stompcollider-technical.md` misdescribes `wrong-case-model` as a product-name check
+
+**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
+(F1-04). Spec-axis; harm is entirely forecast.
+
+**Constraint:** `docs/specs/stompcollider-technical.md:505-507` says `stompcollider`'s
+`wrong-case-model` "compares the drill document's declared enclosure part against the
+model's own product name — the same check `stompdrill` already makes." `stompdrill` makes no
+such check: `pipeline/clearance.py`'s `_cross_check` reduces both the model's measured
+`footprint_nm` and the matched catalogue pair to descending order and compares them for exact
+nanometre equality; the model's product name never enters the comparison (`OcpCaseModel.part`
+is read only into message strings — see "`wrong-case-model` names the operator's `--case`
+designator as the model's own" above, a related finding from a different direction). Left as
+written, two tools would emit one diagnostic code meaning two different things — a
+dimensional mismatch in one, a designator-string mismatch in the other — which `stompcad`
+cannot reduce over, since it matches diagnostics by code.
+
+**Acceptance:** `stompcollider-technical.md`'s sentence is corrected to describe a footprint
+comparison (or `stompcollider`'s own check is designed to match `stompdrill`'s dimensional
+one), before `stompcollider`'s clearance stage is implemented against the current wording.
+
+## `stompdrill` has no library entry point below `main`
+
+**Status:** Recorded, not proposed as work. Found in the 2026-08 architecture review's wave 3
+(F1-05); the review's own wave-3 asymmetry rule governs it — a forecast consumer licenses not
+narrowing an interface, never adding one — and wave 1 already ruled the neighbouring CLI-half
+question DEFERRED.
+
+**Constraint:** The composition that turns a panel path plus options into `DrillData` lives
+in `cli._run`, private, keyed to an `argparse.Namespace`, printing to a `TextIO` and returning
+an exit code. Every helper it calls takes the same `Namespace` (`build_quantisers(args)`,
+`build_pipeline(args)`, `build_case_model(args)`), and `read_source`, `run_pipeline`,
+`settings_from`, `make_emitter` and `format_report` are not in `cli.__all__`. The package
+root exports the parts (`Source`, `quantise`, the stages, `load_case_model`) but nothing that
+composes them, so `stompcad` — which must import `stompdrill` as a library and never shell
+out (`docs/specs/stompcad.md:112`) — would either synthesise a fake `Namespace` or
+re-implement `_run`.
+
+**Acceptance:** Not scheduled as work by this entry. Its value is directional: the next thing
+added below `cli.main` should be a value-returning composition rather than another
+`build_*(args)` helper keyed to `Namespace`, so the eventual seam does not get more expensive
+to cut. A wave that finds this again cites this entry rather than re-deriving it, unless it is
+ready to design the facade against a real caller.
+
+## The 1590LB reconciliation turns on a difference finer than the matcher's own tolerance, silently
+
+**Status:** Confirmed gap, not scheduled. Found by the T15 design verdict during the 2026-08
+architecture review's wave 3 (`design/wave3-t15-registration-stated-at-value-VERDICT.md §6`);
+the diagnostic that would close it is deliberately not built.
+
+**Constraint:** `CheckCaseClearance`'s panel-to-model reconciliation (ticket 28) decides
+whether a quarter turn is needed by comparing `ReferenceOutline.raw`'s two drawn extents. For
+`1590LB`, the catalogue's own two dimensions differ by 0.05 mm — thirty times finer than
+`IdentifyHammondFootprint`'s 1.5 mm per-axis matching slack — so the turn decision rests on a
+difference the identification itself never had to resolve, and no diagnostic marks it. A
+catalogue sweep
+(`packages/stompdrill/tests/test_clearance.py::test_the_near_square_band_is_computed_and_is_exactly_1590lb`)
+is the reproduction: it computes, rather than hard-codes, every catalogue row whose two
+dimensions fall inside the matcher's own tolerance band, and today that is `1590LB` alone.
+The near-square warning that would close it — extending `case-orientation-unverifiable` to
+any footprint inside that band — was considered and deliberately not built in the same
+ticket, because `CheckCaseClearance` cannot see `IdentifyHammondFootprint.tolerance_nm`, and
+inventing a threshold to stand in for it would be exactly the ungrounded machinery this
+repository's design rules refuse.
+
+**Acceptance:** Either `IdentifyHammondFootprint`'s matching tolerance becomes visible to
+`CheckCaseClearance` (as a value on `EnclosureMatch`, or otherwise) and the near-square
+warning is built against it; or the risk is accepted as recorded here for as long as the
+shipped catalogue's only near-square row is `1590LB`, and the acceptance test above is what
+notices if a future catalogue addition joins the band.
+
+## Wave 3's declined and rejected design proposals, recorded for citation
+
+**Status:** Ruled — recorded so a later wave can mark a rediscovery Settled by citing this
+entry rather than re-deriving the argument. From the 2026-08 architecture review's wave 3
+design verdicts (T13, `design/wave3-t13-one-write-rule-VERDICT.md`; T15,
+`design/wave3-t15-registration-stated-at-value-VERDICT.md`) and T17's own theme text
+(`reviews/wave3-themes.md`). All five below are **decisions**: each states a considered
+alternative and the reason it was not built, with no residual "not yet done" — the review's
+own rule is that an ADR or design record stating a decision ("we chose X over Y") is Settled,
+while one recording a gap ("not yet owned", "a debt") is open work wearing a citation. None of
+these five is the latter; the residual limitations two of them leave behind are filed as
+their own Minor entries above ("The checked registration does not record whether it was
+reconciled"; "The 1590LB reconciliation turns on a difference finer than the matcher's own
+tolerance, silently") rather than folded into this entry.
+
+**Constraint:**
+
+- **A `reconciled: bool` flag on `CaseRegistration`.** Declined: no consumer today reads it —
+  `stompcollider-technical.md:281-284, 405, 502-506` reads `case.frame` as a complete
+  registration and never asks after its provenance — and a forecast consumer licenses not
+  narrowing an interface, never adding one.
+- **A public `axis_correspondence` primitive in `stompmodel`.** Rejected: one call site after
+  the fix, so publishing it would be a hypothetical seam.
+- **The predicted fold across `CoordinateFrame` / `FaceFrame` / `basis` /
+  `EnclosureMatch.rotated`.** Declined, and scored *further away* after ticket 28 than
+  before it: post-fix, `rotated` states the catalogue's printed row order (read by two
+  display sites) and the registration states the panel's own measurement — two concepts that
+  no longer even read the same input. Collapsing them would leave both concepts standing and
+  add a translation between them — Speculative Generality by name. This is wave 3's scored
+  answer to wave 2's forecast (prediction P1 in the wave-3 synthesis), not an omission.
+- **A shared ordered view both the Excellon and STEP emitters read, instead of each sorting
+  `numbered()` itself.** Rejected: two call sites, and the shared thing would be one
+  `sorted()` call — a helper that relocates rather than concentrates, failing the folding
+  guard's second clause.
+- **A batch-write helper or shared-CLI write layer for the write mechanism (T13).** Barred by
+  wave 1's ruling and wave 2's ticket 22 adjudication, both already recorded at "Defer moving
+  the CLI's usage/IO policy below `stompdrill`" above; none of T13's three design lanes
+  proposed one. Rediscovery is noted on that entry, not repeated here.
+
+**Acceptance:** Not implementation work. A later wave that reconsiders any item above cites
+this entry and marks its own finding Settled without repeating the argument, unless it has a
+real second consumer the argument above did not have.
+
+## Harvest candidate: a document must not claim a class closed in the same change that ships the fix
+
+**Status:** Recorded for the coordinator to route (harvest candidate) — not a repository rule
+adopted by this entry, and not implementation work. Raised by the 2026-08 architecture
+review's wave-3 synthesis (`reviews/wave3-themes.md`, forecast P5) while scoring wave 2's own
+forecast.
+
+**Constraint:** Wave 2's ticket 22 fixed the CLI's partial-write hazard well past its own red
+test — staging every artefact before committing any, unwinding the whole set on failure — and
+then its ADR-0001 amendment, written in the same change, asserted the transaction claim
+closed. The implementer's own `_commit` docstring honestly conceded the residue the mechanism
+did not anticipate (`os.replace` can fail after an earlier target already replaced), but nothing
+checked that concession against the ADR sentence it sat beside. Wave 3 reproduced the gap
+directly — three independent findings (F3-03, F6-01, and F2-02's first half) all reduce to
+the same false ADR-0001 sentence, closed only now, by ticket 29 of this later wave. The
+proposed workflow rule: **a document may not claim a class of failure closed in the same
+change that ships its fix, unless the acceptance evidence names the mechanism's actual
+preconditions and shows each one held** — a docstring conceding a residual precondition and an
+ADR sentence asserting the class closed, side by side in one diff, is the shape to catch.
+
+**Acceptance:** Not scheduled as repository tooling by this entry. The coordinator decides
+where this rule lives — a `CLAUDE.md` testing or documentation rule, a step in the review
+workflow's own Implement or Review phase, or left recorded here only — and this entry is
+superseded once that decision is made, rather than acted on directly.
