@@ -1233,3 +1233,23 @@ ADR sentence asserting the class closed, side by side in one diff, is the shape 
 where this rule lives — a `CLAUDE.md` testing or documentation rule, a step in the review
 workflow's own Implement or Review phase, or left recorded here only — and this entry is
 superseded once that decision is made, rather than acted on directly.
+
+## Extract the "a bound is whole nanometres and not negative" validation rule
+
+**Status:** Confirmed duplication, not scheduled. Named by ticket 36 (T21, "the tool says
+how far it moved the diameter") while adding `SnapDiametersToDrillTable.warn_over_nm`.
+
+**Constraint:** `SnapPositions.__init__`/`_threshold` in `pipeline/snap.py` and
+`SnapDiametersToDrillTable.__init__` in `pipeline/diameters.py` each check, inline and
+independently, that a bound is a plain non-negative whole number of nanometres —
+`tolerance_nm`, `warn_over_nm` on both stages, and `grid_nm`. Ticket 36 makes this the
+third independent copy of the same two-clause rule rather than folding it, deliberately:
+taking the fold would put a lock-covered stage into that ticket's diff for no behavioural
+gain — see its "Out of scope". The shape both stages now share (validate in `__init__`,
+raise `ValueError` naming the parameter and the negative value) makes a later extraction
+mechanical.
+
+**Acceptance:** A single published helper (in `stompdrill.tolerance` or a new module)
+replaces all three inline checks, every existing bound-validation test still passes
+unchanged (the error messages it asserts against are preserved or the tests are updated
+in the same change), and the full suite, lint, and both mypy configurations stay green.

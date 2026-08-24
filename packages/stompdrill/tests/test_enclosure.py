@@ -813,3 +813,29 @@ class TestTheFixturePanelNeedsADeclaredCase:
         assert diagnostics == ()
         assert match.candidates == ("1590BS",)
         assert (outline.width_nm, outline.height_nm) == (112_000_000, 60_500_000)
+
+
+class TestTheEnclosureQuantiserEmitsNoMovementDiagnostic:
+    """AC6 (F3-03/T21): the negative that keeps the diameter amendment honest.
+
+    A drawn outline snapping onto a catalogue footprint moves further than any
+    diameter reporting threshold ever does, and states nothing about it -- by
+    design, per ADR-0002. A future reader must not take the diameter side's
+    new reporting clause as a rule every quantiser now follows.
+    """
+
+    def test_a_real_hundreds_of_microns_snap_states_no_movement(self):
+        outline, match, diagnostics = IdentifyHammondFootprint().quantise(UNAMBIGUOUS, ORIGIN)
+
+        drawn_width_nm = round(UNAMBIGUOUS.width * MM)
+        drawn_height_nm = round(UNAMBIGUOUS.height * MM)
+        moved_width_nm = abs(outline.width_nm - drawn_width_nm)
+        moved_height_nm = abs(outline.height_nm - drawn_height_nm)
+
+        assert (outline.width_nm, outline.height_nm) == A_FOOTPRINT
+        assert match is not None and match.candidates == ("1590A",)
+        # 400 000 nm and 500 000 nm — both well past any diameter reporting
+        # threshold in this suite, including the widest metric band's.
+        assert moved_width_nm == 400_000
+        assert moved_height_nm == 500_000
+        assert diagnostics == ()

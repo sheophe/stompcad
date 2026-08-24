@@ -21,11 +21,30 @@ Each measured quantity is resolved against its own domain answer set:
 | Quantity | Authoritative answer set | Required result |
 |---|---|---|
 | Hole position | Multiples of the declared grid | Every accepted position lands on that grid. |
-| Hole diameter | The selected drill standard, optionally narrowed by the operator | Every accepted diameter is a member; an unmatched diameter is an error and its hole is excluded. |
+| Hole diameter | The selected drill standard, optionally narrowed by the operator | Every accepted diameter is a member; an unmatched diameter is an error and its hole is excluded. An accepted diameter that moved past its size's local-pitch reporting threshold is a warning naming the signed movement; the hole is still drilled. |
 | `Background` outline | Catalogue footprints distributed in `docs/parts/dimensions.tsv` | Matching follows the enclosure outcomes below. |
 
 Any error withholds every requested artifact. Excluding a hole whose diameter is
 unmatched therefore cannot silently produce an otherwise valid-looking partial artifact.
+
+Acceptance and reporting are two different bounds on the same measured diameter, not one.
+The acceptance tolerance decides membership: whether a stocked bit exists close enough to
+stand in for what was drawn. A second, tighter reporting threshold then decides whether
+that acceptance is worth telling the operator about, because a hole can be a legitimate
+member of the drill standard and still be far enough from the artwork to matter on
+aluminium. That threshold is a quarter of the *effective* table's own local pitch at the
+size actually selected — the gap to that size's nearer neighbour in the operator's
+possibly-narrowed drawer, not a fixed constant, because the published metric series
+changes pitch at two points and one number cannot be right at both the 0.05 mm and the
+0.5 mm end. A drawer narrowed to a single size has no neighbour to derive a pitch from,
+so every non-zero movement there is reported. A departure past the threshold is a WARNING
+naming the signed movement — positive when the drilled bit rounds the drawn diameter up,
+negative when it is drilled undersize, the convention `Hole.residual_nm` already
+publishes — and the hole is drilled regardless: a reported hole is not a rejected one.
+This clause governs hole diameter alone. It does not generalise: the enclosure quantiser
+below snaps a drawn outline onto a catalogue footprint inside a tolerance an order of
+magnitude wider than any diameter reporting threshold and states nothing about how far it
+moved, and no other quantiser in this pipeline reports a measurement's departure at all.
 
 Undeclared enclosure matching distinguishes three outcomes, while a declaration changes
 the question from identification to positive verification:
@@ -106,6 +125,16 @@ the published facts; the repository consumes the reviewed table.
 Operators must declare the grid and drill standard that govern the panel, and may narrow
 the available drill sizes. A diameter outside that selection is never passed through as
 a nominal size.
+
+The diameter reporting threshold takes an explicit override in library code —
+`SnapDiametersToDrillTable(warn_over_nm=…)`, the same parameter name and "unset means
+derive" convention `SnapPositions.warn_over_nm` already takes — but the command line does
+not expose it as a flag. The reproduced defect was that a departure is never reported at
+all; a tuning want for the derived default was never reproduced, and wiring a flag ahead
+of a real request for one would be speculative generality. The precedent is the drawing
+emitters' `DrawingOptions(scale=…)`, likewise reachable only from library code and never
+from a `--scale` flag: a constructor parameter earns a command-line flag when an operator
+asks for one, not merely because the constructor already accepts it.
 
 Operators drawing a catalogue enclosure must use its backplate outline. Uncatalogued
 enclosures remain usable when undeclared, but ambiguous outlines require a declaration,
