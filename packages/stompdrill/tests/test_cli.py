@@ -10,6 +10,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -1122,8 +1123,12 @@ def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
 
 # ---------------------------------------------------------------------------
 # ticket 29: the requested --emit target set is validated once, as a set,
-# before anything is rendered -- duplicate targets and targets the write
-# mechanism cannot replace are usage errors caught up front, and a
+# before anything is rendered -- a duplicate target or an existing target
+# that is not a regular file is a usage error caught up front. Ticket 35:
+# every other precondition a target must satisfy is the write mechanism's
+# own (ADR-0005, enforced by stage_payload), not restated here, so it
+# surfaces during staging instead -- still a clean usage error with
+# nothing on disk, just after a render rather than before one. A
 # commit-phase failure rolls back every target this same invocation had
 # already replaced, not only the ones still unattempted.
 # ---------------------------------------------------------------------------
@@ -1183,13 +1188,15 @@ def test_an_ordinary_writable_target_still_passes_the_domain_check(fake_source, 
     assert target.exists()
 
 
-def test_a_target_whose_parent_is_not_writable_is_rejected_before_rendering(
+def test_a_target_whose_parent_is_not_writable_is_rejected_before_committing(
     fake_source, tmp_path, capsys
 ):
-    """The target-domain decision (ADR-0005), executed at its boundary: a
-    target whose parent directory cannot accept a new file is a usage
-    error caught by the pre-flight, rather than surfacing mid-transaction
-    as an OSError the way it used to."""
+    """The target-domain decision (ADR-0005): a target whose parent
+    directory cannot accept a new file is refused by ``stage_payload``
+    itself, not restated in the pre-flight (ticket 35). The invocation
+    still withholds the whole set with a clean usage error and nothing
+    on disk -- it now costs a render first, which the pre-flight's own
+    docstring states rather than hides."""
     fake_source(read())
     locked = tmp_path / "locked"
     locked.mkdir()
@@ -1207,6 +1214,26 @@ def test_a_target_whose_parent_is_not_writable_is_rejected_before_rendering(
     assert exit_code == 3
     assert not target.exists()
     assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes on this platform")
+def test_a_fifo_target_is_refused_by_the_preflight_without_being_opened(tmp_path, capsys):
+    """Ticket 35: an existing target that is not a regular file -- a named
+    pipe here -- is refused by ``_preflight_targets`` itself, by a raise,
+    not a wait. ADR-0005 admits a FIFO to the write mechanism's own
+    domain, but this command line's commit loop reads a target's prior
+    bytes before replacing it, and nothing is writing to the other end of
+    this pipe -- so a regression that dropped the check would hang this
+    test rather than merely fail it. The input path does not exist, which
+    proves the refusal happens before the panel is even opened, matching
+    test_the_target_set_is_checked_before_the_panel_is_even_opened."""
+    fifo = tmp_path / "out.drl"
+    os.mkfifo(fifo)
+
+    exit_code = cli.main(["/no/such/panel.ai", "--emit", f"excellon={fifo}"])
+
+    assert exit_code == 3
+    assert str(fifo) in capsys.readouterr().err
 
 
 _DEV_NULL = Path("/dev/null")
@@ -1261,7 +1288,7 @@ def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
     a.write_text("OLD-A")
     b.write_text("OLD-B")
 
-    real_replace = cli.os.replace
+    real_replace = os.replace
     calls = {"n": 0}
 
     def sabotage_replace(src, dst):
@@ -1270,7 +1297,7 @@ def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
             raise OSError("simulated commit-phase failure on the 2nd target")
         return real_replace(src, dst)
 
-    monkeypatch.setattr(cli.os, "replace", sabotage_replace)
+    monkeypatch.setattr(os, "replace", sabotage_replace)
 
     exit_code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"drawing-svg={b}"])
 
@@ -1281,6 +1308,102 @@ def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
     )
     assert b.read_bytes() == b"OLD-B"
     assert "Traceback" not in capsys.readouterr().err
+
+
+class _SimulatedFailure(Exception):
+    """Marks a failure this test injects, distinct from a real OSError."""
+
+
+@pytest.mark.parametrize(
+    ("position", "kind"),
+    [
+        (position, kind)
+        for position in ("first", "middle", "last")
+        for kind in ("staging", "the pre-commit read", "the commit")
+    ],
+)
+def test_every_position_and_failure_kind_leaves_no_temporary_behind(
+    position: str, kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Criterion 1 (ticket 35): the leak is closed at every position and
+    every failure kind. Three real targets, seeded with distinct prior
+    bytes so "restored" is distinguishable from "never written", swept
+    across {first, middle, last} x {staging fails, the pre-commit read
+    fails, the commit fails}. After the raise, the directory holds
+    exactly the three target names -- no temporary of any shape -- and
+    every target holds its seeded prior bytes. Supersedes the falsify
+    suite's F2-01/F3-01 leak reproductions; see report-35 for both
+    falsifiers this test was run against.
+    """
+    index = {"first": 0, "middle": 1, "last": 2}[position]
+    names = ["a.json", "b.drl", "c.svg"]
+    prior = [b"OLD-A", b"OLD-B", b"OLD-C"]
+    new_text = ["NEW-A", "NEW-B", "NEW-C"]
+    targets = [tmp_path / name for name in names]
+    for target, data in zip(targets, prior):
+        target.write_bytes(data)
+
+    class _FakeEmitter:
+        name: ClassVar[str] = "fake"
+        media_type: ClassVar[str] = "text/plain"
+        extension: ClassVar[str] = "txt"
+
+        def emit(self, data: DrillData) -> protocols.Payload:
+            raise NotImplementedError("this fake never renders; payloads are supplied directly")
+
+    rendered: list[tuple[cli.Emitter[DrillData], Path, protocols.Payload]] = [
+        (_FakeEmitter(), target, new_text[i]) for i, target in enumerate(targets)
+    ]
+    failing = targets[index]
+
+    if kind == "staging":
+        real_stage = cli.stage_payload
+
+        def fake_stage(path: Path, payload: protocols.Payload) -> protocols.StagedWrite:
+            if path == failing:
+                raise _SimulatedFailure("staging")
+            return real_stage(path, payload)
+
+        monkeypatch.setattr(cli, "stage_payload", fake_stage)
+        with pytest.raises(_SimulatedFailure):
+            cli._stage(rendered)
+    else:
+        staged = cli._stage(rendered)
+        if kind == "the pre-commit read":
+            real_read_bytes = Path.read_bytes
+
+            def fake_read_bytes(self: Path, *args: object, **kwargs: object) -> bytes:
+                if self == failing:
+                    raise _SimulatedFailure("read")
+                return real_read_bytes(self, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+        else:
+            real_commit = cli.commit_staged
+
+            def fake_commit(written: protocols.StagedWrite) -> int:
+                if written.path == failing:
+                    raise _SimulatedFailure("commit")
+                return real_commit(written)
+
+            monkeypatch.setattr(cli, "commit_staged", fake_commit)
+
+        with pytest.raises(_SimulatedFailure):
+            cli._commit(staged)
+
+    # Undo the patches before inspecting the result: the assertions below
+    # read the same targets and must see the real filesystem, not the
+    # injected failure.
+    monkeypatch.undo()
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == names, (
+        f"a temporary survived the {kind!r} failure at the {position} position"
+    )
+    for target, data in zip(targets, prior):
+        assert target.read_bytes() == data, (
+            f"{target} was not restored to its seeded prior bytes after the "
+            f"{kind!r} failure at the {position} position"
+        )
 
 
 def test_re_running_over_existing_targets_leaves_no_backup_files_behind(fake_source, tmp_path):

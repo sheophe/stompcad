@@ -38,10 +38,13 @@ Figure 1.
 One invocation's artefacts are one transaction: the command line writes every
 requested artefact or none of them. Before anything is rendered, the requested target
 set is validated once, as a set: no two targets may name one path, and every target
-must satisfy the write mechanism's own preconditions — its parent directory must
-already exist and accept a new file, and the target itself must not already be a
-directory. ADR-0005 states the target domain those preconditions draw. Failing this
-check costs nothing, because nothing has yet been rendered, staged, or replaced. An
+that already exists must be a regular file, because this command line reads a
+target's prior bytes before replacing it and a named pipe or character device would
+never return from that read. The write mechanism's own preconditions are **not
+restated here** — ADR-0005 states them and `stage_payload` enforces them itself, and
+it runs before any target is replaced, so a target outside its domain still
+withholds the whole set; it costs a render first, and that price is stated rather
+than hidden. This pre-flight is not a guarantee that the commit will succeed. An
 ERROR diagnostic withholds all of them before rendering begins, as already stated
 above. Past both gates, every payload is rendered before any target path is touched;
 the command line then stages every rendered payload to a temporary beside its own
@@ -156,12 +159,22 @@ a target's prior bytes before its own commit, and restoring them through that sa
 `stage_payload`/`commit_staged` pair on a later failure, is the command line's own
 bookkeeping around that mechanism, never a second write path beside it. `stompdrill`
 states no temporary-file mechanism of its own. The set commits in the order its targets
-were requested; when one commit fails, every target already committed in the same loop
-is restored to what it held before this run, and every target not yet reached is
-discarded through `discard_staged` — both stated above and enforced by ticket 29.
+were requested; when one target's own read or commit fails, or an earlier target's
+commit fails, every target already committed in the same loop is restored to what it
+held before this run, and every other staged write — the one whose own read or commit
+just failed, and every one not yet reached — is discarded through `discard_staged`,
+never left as a temporary. This is a stated invariant, not an index into the target
+list: the loop tracks the set of staged writes not yet committed, which includes the
+one currently being attempted, and a write leaves that set only once its own commit has
+returned — both stated above and enforced by tickets 29 and 35.
 
-The opening claim above — that one invocation's artefacts are one transaction, full
-stop — now holds of the code as shipped, modulo the one named exclusion stated above: a
-commit failure partway through a set no longer leaves an earlier target holding this
-run's bytes while a later one holds the previous run's, because the commit loop restores
-what it already replaced before propagating the failure that stopped it.
+Whatever this invocation leaves behind is one of two states per target and nothing
+else: this run's artefact, or exactly the bytes that target held before the run. **No
+temporary this invocation created survives it, on any path — committed, rolled back, or
+failed.** This is a claim about a *path*, not about a file: `commit_staged` replaces
+the name, so a target that was a symlink or a named pipe is afterwards a regular file
+(see ADR-0005). The set is not atomic against another process and it is not durable
+against power loss; those, and the one named exclusion above — unchanged, not upgraded
+— are outside the guarantee. The opening claim above, that one invocation's artefacts
+are one transaction, now holds of the code as shipped exactly to that extent, and no
+further.

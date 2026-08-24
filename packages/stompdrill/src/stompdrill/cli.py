@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import inspect
 import math
-import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -270,14 +269,15 @@ def parse_emit(spec: str) -> tuple[str, Path]:
 
 
 def _preflight_targets(targets: Sequence[tuple[str, Path]]) -> None:
-    """Validate the whole requested target set before anything is rendered.
+    """Validate the target set itself before anything is rendered.
 
-    Two ``--emit`` specs may not resolve to one path, and each target must
-    satisfy the write mechanism's own preconditions — see
-    :func:`_check_target_domain`. Raising here costs nothing: nothing has
-    yet been rendered, staged, or replaced, so the invocation withholds
-    every artefact the same way an unresolvable flag already does. See
-    ADR-0001.
+    Two ``--emit`` specs may not resolve to one path, and an existing
+    target must be a regular file: this command line reads a target's
+    prior bytes before replacing it, and a pipe or character device would
+    never return from that read. The write mechanism's own preconditions
+    are not restated here — ``stage_payload`` enforces them (ADR-0005)
+    before any target is replaced, so an out-of-domain target still
+    withholds the whole set, just after a render. See ADR-0001.
     """
     seen: dict[Path, tuple[str, Path]] = {}
     for name, path in targets:
@@ -291,25 +291,11 @@ def _preflight_targets(targets: Sequence[tuple[str, Path]]) -> None:
                 "share one path"
             )
         seen[resolved] = (name, path)
-        _check_target_domain(name, path)
-
-
-def _check_target_domain(name: str, path: Path) -> None:
-    """Probe one target against ``stage_payload``/``commit_staged``'s own needs.
-
-    A temporary is always written beside the target, so its parent must
-    already exist and accept a new file; and a rename can never land bytes
-    at a path that is already a directory. This is the target domain
-    ADR-0005 states — derived from what the mechanism does, not from "must
-    be a regular file", which is narrower than what it actually needs.
-    """
-    parent = path.parent
-    if not parent.is_dir():
-        raise UsageError(f"--emit {name}={path}: {parent} is not a directory")
-    if not os.access(parent, os.W_OK):
-        raise UsageError(f"--emit {name}={path}: {parent} does not accept a new file")
-    if path.is_dir():
-        raise UsageError(f"--emit {name}={path}: {path} is already a directory")
+        if path.exists() and not path.is_file():
+            raise UsageError(
+                f"--emit {name}={path}: exists and is not a regular file; this "
+                "command line reads a target's prior bytes before replacing it"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -849,24 +835,28 @@ def _rollback(committed: list[_Committed]) -> None:
 def _commit(staged: list[_Staged]) -> list[str]:
     """Replace every target from its already-staged write, in order.
 
-    Before replacing a target that already exists, its prior bytes are
-    read so they can be restored. If a later target's own commit then
-    fails, :func:`_rollback` restores every target already replaced in
-    this loop, and the ones not yet reached are discarded through
-    :func:`~stompmodel.protocols.discard_staged` — this loop is what
-    makes the whole set one transaction, not only each path alone.
+    ``pending`` holds exactly the staged writes not yet committed,
+    including the one currently being attempted; a write leaves it only
+    once its own :func:`~stompmodel.protocols.commit_staged` returns. An
+    existing target's prior bytes are read first, so they can be
+    restored. On failure, :func:`_rollback` restores what this loop
+    already replaced, and everything still in ``pending`` is discarded —
+    this is what makes the whole set one transaction, not only each path.
     """
     lines: list[str] = []
     committed: list[_Committed] = []
+    pending = list(staged)
     try:
-        for index, (emitter, written) in enumerate(staged):
+        while pending:
+            emitter, written = pending[0]
             previous = written.path.read_bytes() if written.path.exists() else None
             size = commit_staged(written)
+            pending.pop(0)
             committed.append(_Committed(written.path, previous))
             lines.append(f"wrote {written.path}  ({emitter.name}, {size} bytes)")
     except BaseException:
         _rollback(committed)
-        for _, written in staged[index + 1 :]:
+        for _, written in pending:
             discard_staged(written)
         raise
     return lines
