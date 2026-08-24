@@ -110,7 +110,7 @@ already exist and accept a new file while the target itself must not already be 
 directory — the write mechanism's target domain, stated in
 [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A run that fails this check, or
 fails while writing, writes none of its requested artefacts and leaves every existing
-target exactly as it was; see
+target exactly as it was, modulo the one named exclusion; see
 [ADR-0001](docs/adr/0001-pipeline-and-emitter-adapters.md).
 
 `drawing-pdf` writes an ISO 5457 sheet at 1:1, choosing the smallest of A4 portrait, A3,
