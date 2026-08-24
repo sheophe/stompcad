@@ -8,6 +8,7 @@ ADR-0001's consistency argument bites. See ADR-0009.
 
 from __future__ import annotations
 
+import errno
 import os
 import uuid
 from collections.abc import Iterable, Iterator, Sequence
@@ -112,18 +113,33 @@ class StagedWrite:
 def stage_payload(path: Path, payload: Payload) -> StagedWrite:
     """Encode ``payload`` and write it in full to a fresh temporary beside ``path``.
 
-    ``path`` itself is never touched here. On failure this call's own
-    temporary is unlinked before the exception propagates, so a caller
-    staging several paths unwinds only the values it already holds.
+    ``path`` itself is never touched here. A directory target is refused
+    before any temporary exists, rather than deferred to a later rename
+    failure. Every other precondition is the filesystem's own answer to the
+    write below; on failure the temporary is unlinked and the raised
+    exception is corrected to name ``path``, never the temporary.
     """
     # Encoding first means one write path serves both payload types, and it
     # is what makes the "untranslated encoded length" contract exact: bytes
     # written this way are never subject to newline translation, on any
     # platform, so there is no "\n"-vs-os.linesep case to reason about.
     data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
+    if path.is_dir():
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(path))
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_bytes(data)
+    except OSError as failure:
+        # Cleanup is best-effort here: the same broken parent that failed
+        # the write (not a directory, say) fails the unlink identically,
+        # and that second failure must not displace the first -- the one
+        # ``failure`` below is corrected to report.
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        failure.filename = str(path)
+        raise
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

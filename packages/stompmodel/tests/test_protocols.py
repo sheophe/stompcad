@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
@@ -235,8 +236,132 @@ def test_a_target_whose_directory_is_missing_still_raises_an_os_error(
     """
     missing = tmp_path / "nope" / "out.bin"
 
-    with pytest.raises(OSError):
+    with pytest.raises(FileNotFoundError) as excinfo:
         stage_payload(missing, b"DATA")
+
+    # The filename clause: a missing parent is discovered while writing the
+    # temporary, so the raw exception names the temporary. stage_payload
+    # must correct it before it propagates -- a caller never sees the
+    # mechanism's own scratch file, only the target it asked for.
+    assert excinfo.value.filename == str(missing)
+
+
+def test_a_target_whose_parent_is_not_a_directory_names_the_target(
+    tmp_path: Path,
+) -> None:
+    """The second condition the mechanism leaves to the filesystem: writing
+    beside a target whose parent is itself a plain file. Same filename
+    correction as the missing-parent case, checked independently.
+    """
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"a file, not a directory")
+    target = blocker / "out.bin"
+
+    with pytest.raises(NotADirectoryError) as excinfo:
+        stage_payload(target, b"DATA")
+
+    assert excinfo.value.filename == str(target)
+
+
+def test_a_parent_that_refuses_a_new_file_names_the_target(
+    tmp_path: Path,
+) -> None:
+    """The third condition: a parent directory that exists but will not
+    accept a new file, as an unprivileged caller usually finds ``/dev``
+    does. Same filename correction, checked independently of the other two.
+    """
+    parent = tmp_path / "readonly"
+    parent.mkdir()
+    target = parent / "out.bin"
+    os.chmod(parent, 0o500)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            stage_payload(target, b"DATA")
+
+        assert excinfo.value.filename == str(target)
+    finally:
+        os.chmod(parent, 0o700)
+
+
+def test_staging_at_a_directory_target_raises_before_any_temporary_exists(
+    tmp_path: Path,
+) -> None:
+    """A target that is already a directory is outside stage_payload's own
+    domain: a rename can never land bytes there. Deferring to
+    commit_staged's rename failure would surface this one target too late
+    for a caller withholding a whole set -- so stage_payload refuses it
+    itself, before writing anything, and leaves the directory as the only
+    entry in its own parent.
+    """
+    target = tmp_path / "outdir"
+    target.mkdir()
+
+    with pytest.raises(IsADirectoryError) as excinfo:
+        stage_payload(target, "hello")
+
+    assert excinfo.value.filename == str(target)
+    assert [entry.name for entry in tmp_path.iterdir()] == ["outdir"]
+
+
+def test_committing_a_staged_write_replaces_a_symlink_target_with_a_regular_file(
+    tmp_path: Path,
+) -> None:
+    """Pins the deliberate answer to the standing backlog entry: committing
+    replaces the target's *name*, so a symlink target is afterwards a
+    regular file holding the new payload, and the file it used to point at
+    is left completely alone.
+    """
+    real = tmp_path / "elsewhere.bin"
+    real.write_bytes(b"ORIGINAL ELSEWHERE")
+    link = tmp_path / "out.bin"
+    link.symlink_to(real)
+
+    commit_staged(stage_payload(link, b"REPLACEMENT"))
+
+    assert not link.is_symlink()
+    assert link.read_bytes() == b"REPLACEMENT"
+    assert real.read_bytes() == b"ORIGINAL ELSEWHERE"
+
+
+def test_committing_a_staged_write_can_replace_a_named_pipe_with_a_regular_file(
+    tmp_path: Path,
+) -> None:
+    """Nothing in the mechanism requires the target to be a regular file: a
+    named pipe qualifies exactly as an ordinary file does, provided its
+    parent accepts the sibling temporary. A FIFO is a distinct node type
+    from a symlink, so this is demonstrated directly rather than inferred
+    from the symlink case above.
+    """
+    target = tmp_path / "out.bin"
+    os.mkfifo(target)
+
+    commit_staged(stage_payload(target, b"REPLACEMENT"))
+
+    assert not stat.S_ISFIFO(target.stat().st_mode)
+    assert target.read_bytes() == b"REPLACEMENT"
+
+
+def test_stage_payload_and_commit_staged_add_no_new_published_name() -> None:
+    """ADR-0005's forecast-consumer rule licenses narrowing what
+    stage_payload already does, never adding a name for a caller that does
+    not exist yet. Pinning the whole exported surface, not just its count,
+    is what fails if a target-domain predicate is published alongside the
+    narrowing this ticket makes.
+    """
+    import stompmodel.protocols as protocols
+
+    assert protocols.__all__ == [
+        "Processable",
+        "Diagnosable",
+        "Stage",
+        "Emitter",
+        "Payload",
+        "StagedWrite",
+        "stage_payload",
+        "commit_staged",
+        "discard_staged",
+        "Pipeline",
+    ]
 
 
 def test_a_failed_commit_leaves_the_target_unchanged_and_discards_its_temporary(
