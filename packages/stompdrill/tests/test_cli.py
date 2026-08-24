@@ -2619,3 +2619,68 @@ def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, cap
 
     assert code == 2
     assert "hole-through-boss" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# F3-03 / T21 -- a diameter that moves far is reported, and still drilled
+# ---------------------------------------------------------------------------
+
+
+def _panel_with_one_hole(tmp_path: Path, name: str, diameter_mm: float) -> Path:
+    """A real 1590B backplate (CLAUDE.md) with one centred drill circle.
+
+    112.40 x 60.50 mm is within tolerance of both 1590B/1590B2 and 1590BS,
+    hence the explicit ``--case`` every caller of this helper must pass.
+    """
+    width, height = _pt_from_mm(112.40), _pt_from_mm(60.50)
+    return build_pdf(
+        tmp_path / name,
+        {
+            "Background": f"0 0 {width} {height} re S",
+            "Drill": circle_ops(width / 2, height / 2, _pt_from_mm(diameter_mm) / 2),
+        },
+        media=(0, 0, width + 20, height + 20),
+    )
+
+
+def test_imperial_hardware_under_the_default_metric_standard_is_reported_not_silent(tmp_path):
+    """A 7/8" (22.225 mm) hole drilled 22.0 mm under the default metric standard.
+
+    Before F3-03/T21: exit 0, an empty ``diagnostics`` array, and a hole cut
+    0.225 mm undersize with nothing anywhere stating it moved. That silence
+    was the defect -- see ``.scratch/architecture-review/issues/
+    36-the-tool-says-how-far-it-moved-the-diameter.md``.
+    """
+    panel = _panel_with_one_hole(tmp_path, "pedal.ai", 22.225)
+    out_json = tmp_path / "out.json"
+
+    exit_code = cli.main([str(panel), "--case", "1590B", "--emit", f"json={out_json}"])
+
+    doc = json.loads(out_json.read_text())
+    diagnostics = doc["diagnostics"]
+    hole = doc["holes"][0]
+
+    # The hole is still drilled: still one hole, still numbered, still the
+    # nearest stocked size -- a reported hole is not a rejected one.
+    assert exit_code == 1, "a departure this loud is a warning, not a clean exit"
+    assert hole["diameter_nm"] == 22_000_000
+    assert hole["index"] == 1
+    assert abs(hole["raw"]["diameter"] - 22.225) < 1e-6
+
+    assert [d["code"] for d in diagnostics] == ["off-size"]
+    finding = diagnostics[0]
+    assert finding["severity"] == "warning"
+    assert finding["data"]["moved_nm"] == -225_000, "undersize is negative"
+
+
+def test_the_reported_hole_still_reaches_the_toolpath(tmp_path):
+    """The warned hole is cut: it is one of the tool definitions in the drill file."""
+    panel = _panel_with_one_hole(tmp_path, "pedal2.ai", 22.225)
+    drl = tmp_path / "out.drl"
+
+    exit_code = cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={drl}"])
+
+    assert exit_code == 1
+    lines = drl.read_text().splitlines()
+    assert "T1C22.000" in lines, "the drilled 22.0 mm bit has a tool definition"
+    assert lines.count("T1") == 1, "the one hole reaches the toolpath under that tool"

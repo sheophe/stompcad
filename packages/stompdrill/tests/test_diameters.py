@@ -17,7 +17,7 @@ from stompdrill.pipeline import (
 )
 from stompmodel.diagnostics import Severity
 from stompmodel.model import RawHole
-from stompmodel.units import Millimetre, Nanometre, format_nm, nm_from_mm
+from stompmodel.units import Millimetre, Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 
 def measured(diameter: float, *, x: float = 0.0, y: float = 0.0) -> RawHole:
@@ -327,14 +327,17 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
         size, found = SnapDiametersToDrillTable(drawer).quantise(measured(5.0250004))
 
         assert size == 5_050_000
-        assert found == ()
+        # The larger bit is still selected -- this test is about the tie, not
+        # the reporting threshold -- but the near-25 000 nm move past a 50 000 nm
+        # local pitch is loud enough to be reported too (F3-03/T21).
+        assert codes(found) == ["off-size"]
 
     def test_the_same_hair_moves_a_bit_on_the_shipped_metric_series(self):
         """2.9750004 mm, between the 2.95 and 3.00 sizes the standard really has."""
         size, found = SnapDiametersToDrillTable().quantise(measured(2.9750004))
 
         assert size == 3_000_000
-        assert found == ()
+        assert codes(found) == ["off-size"]
 
     def test_the_tolerance_is_decided_on_the_measurement_and_not_on_a_rounding(self):
         """25.2500004 mm lies outside the 250 000 nm tolerance unrounded.
@@ -459,7 +462,11 @@ class TestSnapDiametersToDrillTable:
         """
         quantiser = SnapDiametersToDrillTable()
 
-        assert quantiser.quantise(measured(25.25)) == (25_000_000, ())
+        size, found = quantiser.quantise(measured(25.25))
+        assert size == 25_000_000
+        # Accepted, and now reported: 250 000 nm exceeds the 125 000 nm quarter
+        # of this size's 500 000 nm local pitch (F3-03/T21).
+        assert codes(found) == ["off-size"]
         assert quantiser.quantise(measured(25.3))[0] is None
 
     def test_a_tighter_tolerance_refuses_what_a_looser_one_accepted(self):
@@ -497,9 +504,12 @@ class TestSnapDiametersToDrillTable:
         assert [quantiser.quantise(h)[0] for h in panel] == [5_000_000, 7_000_000, 5_000_000]
 
     def test_every_nominal_it_produces_is_a_size_the_drawer_holds(self):
-        """Every accepted nominal is a table size within tolerance.
+        """Every accepted nominal is a table size within tolerance, and never an ERROR.
 
         Membership rejects returning the rounded measurement, which distance permits.
+        Unaligned synthetic measurements routinely clear the reporting threshold
+        added by F3-03/T21 -- that is a WARNING, never a reason to reject a value
+        the acceptance tolerance already let through.
         """
         rng = random.Random(20250815)
         standard = DRILL_STANDARDS["metric"]
@@ -509,7 +519,7 @@ class TestSnapDiametersToDrillTable:
         for index, millimetres in enumerate(measurements, start=1):
             size, found = quantiser.quantise(measured(millimetres))
 
-            assert found == ()
+            assert set(codes(found)) <= {"off-size"}
             assert size in standard.sizes_nm
             assert type(size) is int
             # Spelled out rather than routed through the module's own helper: a
@@ -564,3 +574,235 @@ class TestDescribe:
 
         assert run.get("sizes_nm") == (3_200_000, 7_000_000)
         assert run.get("size_count") == 2
+
+
+# ---------------------------------------------------------------------------
+# F3-03 / T21 -- a reporting threshold beside the acceptance tolerance
+# ---------------------------------------------------------------------------
+
+
+def _independent_local_pitch_nm(sizes: tuple[int, ...], index: int) -> int:
+    """The gap to ``sizes[index]``'s nearer neighbour, computed independently
+    of ``SnapDiametersToDrillTable._local_pitch_nm`` so this suite cannot pass
+    by asserting the implementation against itself."""
+    gaps = [sizes[index] - sizes[index - 1]] if index > 0 else []
+    if index < len(sizes) - 1:
+        gaps.append(sizes[index + 1] - sizes[index])
+    return min(gaps) if gaps else 0
+
+
+class TestTwoThresholdsNotOne:
+    """AC1: acceptance and reporting are different bounds on one hole."""
+
+    def test_a_move_between_the_reporting_threshold_and_the_tolerance_is_accepted_and_warned(
+        self,
+    ):
+        """22.225 mm (7/8") under the default metric standard: the F3-03 recipe.
+
+        Moved 225 000 nm -- past the 125 000 nm quarter-pitch reporting
+        threshold at 22.0 mm's 500 000 nm band, and still inside the
+        250 000 nm acceptance tolerance.
+        """
+        quantiser = SnapDiametersToDrillTable()
+
+        size, found = quantiser.quantise(measured(22.225))
+
+        assert size == 22_000_000, "still the nearest stocked bit"
+        assert codes(found) == ["off-size"]
+        assert found[0].severity is Severity.WARNING
+
+    def test_removing_the_reporting_threshold_would_fail_this(self):
+        """A quantiser that only ever emits ``unknown-diameter`` cannot pass
+        the assertion above without a second, tighter bound: 225 000 nm is
+        inside the 250 000 nm acceptance tolerance, so a one-threshold design
+        can only ever return ``found == ()`` here."""
+        quantiser = SnapDiametersToDrillTable()
+
+        size, found = quantiser.quantise(measured(22.225))
+
+        assert size is not None, "225 000 nm is inside the acceptance tolerance"
+        assert found != (), "and a departure this size must not be silent"
+
+
+class TestTheReportingThresholdIsAQuarterOfTheLocalPitch:
+    """AC2: no size in any registered standard is silent about a departure
+    past a quarter of its own local pitch, while still inside tolerance.
+
+    Every band of the metric series, both band boundaries (2.95/3.00 mm and
+    13.90/14.00 mm, where the step itself changes), and the whole fractional
+    series -- not only the 22.225 mm recipe, which is one row of this table.
+    """
+
+    @pytest.mark.parametrize("standard_name", ["metric", "fractional"])
+    def test_every_size_stays_quiet_at_the_boundary_and_warns_one_nanometre_past_it(
+        self, standard_name
+    ):
+        standard = DRILL_STANDARDS[standard_name]
+        quantiser = SnapDiametersToDrillTable(standard)
+        sizes = standard.sizes_nm
+
+        checked_a_nonzero_threshold = False
+        for index, size_nm in enumerate(sizes):
+            threshold_nm = _independent_local_pitch_nm(sizes, index) // 4
+            if threshold_nm == 0:
+                continue  # the single-size drawer is its own test, below
+            checked_a_nonzero_threshold = True
+
+            at_boundary = measured(mm_from_nm(Nanometre(size_nm - threshold_nm)))
+            size, found = quantiser.quantise(at_boundary)
+            assert size == size_nm, (standard_name, size_nm)
+            assert found == (), (
+                f"{standard_name} size {size_nm} nm: exactly the threshold stays quiet"
+            )
+
+            past_boundary = measured(mm_from_nm(Nanometre(size_nm - threshold_nm - 1)))
+            size, found = quantiser.quantise(past_boundary)
+            assert size == size_nm
+            assert codes(found) == ["off-size"], (
+                f"{standard_name} size {size_nm} nm: silent one nanometre past its "
+                f"own quarter-pitch threshold"
+            )
+
+        assert checked_a_nonzero_threshold, "the fixture standard proved nothing"
+
+    def test_the_two_metric_band_boundaries_use_the_narrower_neighbouring_step(self):
+        """2.95/3.00 mm (0.05 -> 0.1 mm) and 13.90/14.00 mm (0.1 -> 0.5 mm):
+        the size on each side of a pitch change takes the smaller of its two
+        neighbouring gaps, never the wider one a fixed constant would need."""
+        metric = DRILL_STANDARDS["metric"]
+        quantiser = SnapDiametersToDrillTable(metric)
+
+        for size_nm, narrower_gap_nm in (
+            (2_950_000, 50_000),   # last of the 0.05 mm band
+            (3_000_000, 50_000),   # first of the 0.1 mm band, neighbours 2.95 and 3.10
+            (13_900_000, 100_000),  # last of the 0.1 mm band
+            (14_000_000, 100_000),  # first of the 0.5 mm band, neighbours 13.90 and 14.50
+        ):
+            assert size_nm in metric.sizes_nm
+            threshold_nm = narrower_gap_nm // 4
+            _, quiet = quantiser.quantise(measured(mm_from_nm(Nanometre(size_nm - threshold_nm))))
+            _, loud = quantiser.quantise(
+                measured(mm_from_nm(Nanometre(size_nm - threshold_nm - 1)))
+            )
+            assert quiet == (), size_nm
+            assert codes(loud) == ["off-size"], size_nm
+
+    def test_a_drawer_narrowed_to_one_size_has_no_pitch_and_reports_every_move(self):
+        """A single-size drawer cannot derive a quarter of a pitch it does not
+        have; falling back to the acceptance tolerance there would silently
+        reproduce F3-03 inside the narrowed case, so every non-zero movement
+        is reported instead."""
+        one_size = DRILL_STANDARDS["metric"].select(include=(7_000_000,))
+        quantiser = SnapDiametersToDrillTable(one_size)
+
+        exact = quantiser.quantise(measured(7.0))
+        one_nm_off = quantiser.quantise(measured(mm_from_nm(Nanometre(7_000_001))))
+
+        assert exact == (7_000_000, ())
+        assert one_nm_off[0] == 7_000_000
+        assert codes(one_nm_off[1]) == ["off-size"]
+
+    def test_a_fixed_constant_would_be_wrong_at_both_ends_of_the_metric_series(self):
+        """The 12 500 nm threshold correct for the 0.05 mm band would silence
+        the 22.225 mm recipe at the 0.5 mm band; the 125 000 nm threshold
+        correct there would silence a departure the fine band must report."""
+        quantiser = SnapDiametersToDrillTable()
+
+        # 12 500 nm would be far too loose for 22.0 mm's 125 000 nm threshold:
+        # a genuine 100 000 nm departure there must still be reported.
+        _, wide_band = quantiser.quantise(measured(mm_from_nm(Nanometre(22_000_000 - 100_000))))
+        assert wide_band == (), "100 000 nm is still inside the wide band's own threshold"
+
+        # 125 000 nm would be far too tight for 0.55 mm's 12 500 nm threshold:
+        # a fixed constant this loose would silence a departure the fine band
+        # must report at 20 000 nm -- well short of the 25 000 nm half-pitch
+        # to 0.50 mm, so 0.55 mm stays the nearest size.
+        _, fine_band = quantiser.quantise(measured(mm_from_nm(Nanometre(550_000 - 20_000))))
+        assert codes(fine_band) == ["off-size"], (
+            "20 000 nm departure on the 0.05 mm band must not be silenced by a "
+            "constant sized for the 0.5 mm band"
+        )
+
+
+class TestTheSignedMovementIsCarried:
+    """AC3: the diagnostic's own payload states the movement, signed."""
+
+    def test_undersize_is_negative(self):
+        """22.225 mm drilled 22.0 mm: the drilled bit is smaller than drawn."""
+        _, found = SnapDiametersToDrillTable().quantise(measured(22.225))
+
+        assert found[0].get("moved_nm") == -225_000
+
+    def test_rounding_up_is_positive(self):
+        """21.775 mm (an inch minus 7/8") snaps up to 22.0 mm: the drilled bit
+        is larger than drawn, the same 225 000 nm apart in the other direction."""
+        _, found = SnapDiametersToDrillTable().quantise(measured(21.775))
+
+        assert found[0].get("nearest_nm") == 22_000_000
+        assert found[0].get("moved_nm") == 225_000
+
+    def test_the_payload_carries_the_movement_not_its_magnitude(self):
+        """Both directions produce distinct signed values, not one absolute one."""
+        _, undersize = SnapDiametersToDrillTable().quantise(measured(22.225))
+        _, oversize = SnapDiametersToDrillTable().quantise(measured(21.775))
+
+        assert undersize[0].get("moved_nm") == -(oversize[0].get("moved_nm"))
+
+
+class TestTheHoleIsStillDrilled:
+    """AC4 at the quantiser boundary: a reported diameter is still returned,
+    never dropped -- the full-pipeline and exit-code half of this criterion is
+    ``test_cli.py::test_imperial_hardware_under_the_default_metric_standard_is_reported_not_silent``
+    and its toolpath companion, which run the real CLI end to end."""
+
+    def test_a_reported_diameter_is_not_none(self):
+        size, found = SnapDiametersToDrillTable().quantise(measured(22.225))
+
+        assert size == 22_000_000
+        assert found[0].severity is Severity.WARNING, "warned, not withheld as an ERROR"
+
+
+class TestWarnOverNmOverride:
+    """The override takes the same shape as ``SnapPositions.warn_over_nm``."""
+
+    def test_unset_means_derive_from_the_local_pitch(self):
+        assert SnapDiametersToDrillTable().warn_over_nm is None
+
+    def test_an_explicit_override_replaces_the_derived_threshold_everywhere(self):
+        """A single fixed bound, applied uniformly, rather than per size."""
+        quantiser = SnapDiametersToDrillTable(warn_over_nm=Nanometre(0))
+
+        # 22.225 mm moves only 225 000 nm off 22.0 mm's derived 125 000 nm
+        # threshold; a zero override reports it too, same as the derived one
+        # -- but now also reports a move the derived default would have kept
+        # quiet, proving the override actually took effect.
+        _, tiny = quantiser.quantise(measured(7.0002))
+        assert codes(tiny) == ["off-size"], "zero override reports even a 200 nm move"
+
+    def test_the_override_is_recorded_in_provenance_when_set(self):
+        run = SnapDiametersToDrillTable(warn_over_nm=Nanometre(10_000)).describe()
+
+        assert run.get("warn_over_nm") == 10_000
+
+    def test_an_unset_override_is_absent_from_provenance(self):
+        run = SnapDiametersToDrillTable().describe()
+
+        assert "warn_over_nm" not in dict(run.parameters)
+
+    def test_a_tolerance_that_is_not_whole_nanometres_is_refused(self):
+        with pytest.raises(TypeError, match="warn_over_nm"):
+            SnapDiametersToDrillTable(warn_over_nm=10_000.0)
+
+    def test_a_boolean_override_is_refused(self):
+        with pytest.raises(TypeError, match="warn_over_nm"):
+            SnapDiametersToDrillTable(warn_over_nm=True)
+
+    def test_a_negative_override_is_refused_rather_than_clamped(self):
+        with pytest.raises(ValueError, match="negative"):
+            SnapDiametersToDrillTable(warn_over_nm=Nanometre(-1))
+
+    def test_a_zero_override_is_a_real_bound_and_is_kept(self):
+        quantiser = SnapDiametersToDrillTable(warn_over_nm=Nanometre(0))
+
+        assert quantiser.quantise(measured(7.0))[1] == (), "an exact match stays quiet"
+        assert codes(quantiser.quantise(measured(7.0002))[1]) == ["off-size"]
