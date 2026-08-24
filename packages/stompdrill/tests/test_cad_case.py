@@ -224,3 +224,33 @@ def test_the_plate_thickness_is_correct_for_every_catalogued_model(request, part
     assert box.plate_nm == round(model.box_plate_mm * 1_000_000)
     assert lid.plate_nm == round(model.lid_plate_mm * 1_000_000)
     assert box.outward[axis] == -lid.outward[axis]
+
+
+@pytest.mark.parametrize("part", sorted(MODELS))
+def test_the_published_frames_normal_points_away_from_the_solid(request, part):
+    """Ticket 27, AC2/AC3: stompmodel.frames.FaceFrame now states that its
+    third axis is the outward normal. This checks that stated convention
+    against the value ``build_frame`` actually publishes (``frame.basis.w``),
+    for every catalogued model and both faces -- not against ``Faces.outward``,
+    which ``test_the_outward_normal_points_away_from_the_solid`` above already
+    covers and which is not evidence for the published frame's own sense.
+    """
+    from stompgeom.step import bounding_box_mm
+
+    model = MODELS[part]
+    document = read_step(request.getfixturevalue(_FIXTURE_OF[part]))
+    footprint = (
+        Nanometre(round(model.footprint_mm[0] * 1_000_000)),
+        Nanometre(round(model.footprint_mm[1] * 1_000_000)),
+    )
+    axis = drill_axis(document, footprint)
+
+    for case_face in (CaseFace.BOX, CaseFace.LID):
+        solid = select_solid(document, case_face)
+        faces = find_faces(solid, axis)
+        frame = build_frame(faces, axis)
+
+        bbox = bounding_box_mm(solid.shape)
+        centre = (bbox[axis] + bbox[axis + 3]) / 2
+
+        assert (faces.drilled_position_mm - centre) * frame.basis.w[axis] > 0
