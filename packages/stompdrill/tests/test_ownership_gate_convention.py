@@ -138,6 +138,7 @@ def _make_probe(source: str) -> Path:
 
 _GUILTY_PROBE_SOURCE = (
     "from OCP.XCAFDoc import XCAFDoc_ShapeTool\n"
+    "from OCP.TDF import TDF_Label\n"
     '_FACES = {"box": "BOX", "lid": "LID"}\n'
     "def guard(name, value):\n"
     "    if type(value) is not int:\n"
@@ -151,6 +152,12 @@ _GUILTY_PROBE_SOURCE = (
     "    os.replace(tmp, path)\n"
     "def temp_name(target):\n"
     '    return f".{target.name}.{id(target)}.tmp"\n'
+    # Ticket 34's gate (stompgeom: no published name returns a bare
+    # label): a re-exported, bare-label-returning free function under one
+    # of the two deleted names is exactly the shape that gate polices.
+    "__all__ = ['label_name']\n"
+    "def label_name(label: TDF_Label) -> TDF_Label:\n"
+    "    return label\n"
 )
 
 _INNOCENT_PROBE_SOURCE = "INNOCENT = 1\n"

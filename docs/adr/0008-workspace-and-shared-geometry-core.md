@@ -138,10 +138,49 @@ consumer that can only reach `stompgeom`'s own enumeration through a private
 name is evidence that a rule is owned in the wrong place, not that the
 consumer was impolite.
 
-The traversal publishes bare kernel labels, as `StepSolid.shape` and
-`StepDocument.document` already do. Those three are one debt against
-`stompgeom` owning kernel lifetimes, not three: they are wrapped together or
-not at all.
+The traversal's own labels were bare kernel handles too, alongside
+`StepSolid.shape` and `StepDocument.document` — **seven published names, and
+not one debt.** A shape is independently reference-counted and measures
+identically whether or not the document that produced it is still held; a
+document is the anchor and cannot dangle by being held. Only a label points
+into a document's own label tree, and only a label dangles — **silently**: a
+label drawn from a released document still answers not-null, and reports the
+document's own root entry and a null shape rather than faulting. Wrapping the
+shape or the document would buy nothing and would weaken the honest sentence
+that they owe nothing to a caller's discipline.
+
+`stompgeom.step` now publishes no bare label: one reaches a caller only
+inside `StepLabel`, which holds the `TDocStd_Document` it was drawn from —
+that object specifically, since neither the document's own `ShapeTool` nor
+its own root label (`document.Main()`) keeps a label valid — and which
+answers its own name and its own entry string, computed on access rather
+than cached. Two labels drawn for one node by separate kernel calls compare
+unequal by `==` (kernel object identity, not `IsEqual`) even though their
+entry strings agree and `IsEqual` answers true; this is why "the same label"
+is tested and carried as an entry string, not as a set of owned labels, in
+the one place a caller still needs it — `stompgeom.writer.render_step`'s
+`replaced_labels` parameter, unchanged in shape by this ticket.
+
+The other six kernel-typed names keep their bare kernel handle, now spelled
+with its real OCP type under a `TYPE_CHECKING` guard for readability.
+**This spelling documents intent and checks nothing:** `cadquery-ocp` ships
+no `py.typed` marker and both this workspace's mypy configurations already
+set `ignore_missing_imports` for `OCP.*`, so removing that override would
+make the gate red at the import for zero additional checking, and nobody
+should "fix" that later expecting it to buy safety.
+
+None of this is a claim that `stompgeom` owns kernel lifetimes in general —
+it owns a label's, by design — or that no `Any` crosses this boundary (the
+raw handle field, `StepSolid.shape` and `bounding_box_mm`'s parameter stay
+`Any` to mypy, honestly), or that the kernel handles generally are now
+type-checked (exactly one value is), or that a caller can no longer
+construct a dangling reference (one who keeps the raw handle and drops
+`StepLabel` still can). The true claim is narrower: **the *published
+surface* offers no route that hands out a label already dangling.**
+`StepLabel.label` stays a public, raw field for the same reason the ADR's
+build verb stays deferred — the cutting path needs four XCAF verbs this
+package does not yet wrap, and a private field plus a reach-in would be the
+same convention, unnamed, plus a lie about encapsulation.
 
 **A rule a member owns is enforced by that member's own tests, not by
 whichever member's suite happened to notice the duplication first.** Five

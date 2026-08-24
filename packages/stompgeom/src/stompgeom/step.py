@@ -11,14 +11,23 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from stompmodel.errors import DocumentError
 
 from .kernel import require_kernel
 
+if TYPE_CHECKING:
+    # Real OCP names, for readability only: cadquery-ocp ships no py.typed
+    # marker and this workspace's mypy configurations set
+    # ignore_missing_imports for OCP.*, so these resolve to Any either way
+    # and check nothing beyond what a bare Any already did. See ADR-0008.
+    from OCP.TDF import TDF_Label
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopoDS import TopoDS_Shape
+
 __all__ = [
-    "StepSolid", "StepDocument", "read_step", "leaf_labels", "label_name",
+    "StepSolid", "StepDocument", "StepLabel", "read_step", "leaf_labels",
     "bounding_box_mm", "source_timestamp",
 ]
 
@@ -74,15 +83,43 @@ def source_timestamp(path: Path) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class StepLabel:
+    """A label together with the ``TDocStd_Document`` it was drawn from.
+
+    ``document`` keeps ``label`` valid -- that object specifically, since
+    neither the document's ``ShapeTool`` nor its root label does (ADR-0008).
+    ``label`` routinely holds a *referred* label, not a leaf. ``name`` and
+    ``entry`` are computed on access, never stored: they compare unequal by
+    ``==`` (kernel identity), why ``replaced_labels`` is entries. ``label``
+    stays public and raw: the cutting path needs four XCAF verbs this
+    package does not wrap.
+    """
+
+    document: TDocStd_Document
+    label: TDF_Label
+
+    @property
+    def name(self) -> str:
+        """See :func:`_label_name`."""
+        return _label_name(self.label)
+
+    @property
+    def entry(self) -> str:
+        """See :func:`_label_entry`."""
+        return _label_entry(self.label)
+
+
+@dataclass(frozen=True, slots=True)
 class StepSolid:
     """One product's solid, placed in assembly coordinates and scaled to mm.
 
     ``name`` is empty exactly when nobody named this solid -- see
-    :func:`label_name`, the one rule that decides that.
+    :func:`_label_name`, the one rule that decides that, reached through the
+    :class:`StepLabel` :func:`leaf_labels` hands back.
     """
 
     name: str
-    shape: Any
+    shape: TopoDS_Shape
     unit_mm: float
 
 
@@ -95,7 +132,7 @@ class StepDocument:
     """
 
     solids: tuple[StepSolid, ...]
-    document: Any
+    document: TDocStd_Document
     timestamp: str = _EPOCH
 
     def named(self, keyword: str) -> tuple[StepSolid, ...]:
@@ -104,7 +141,7 @@ class StepDocument:
         return tuple(s for s in self.solids if wanted in s.name.upper())
 
 
-def bounding_box_mm(shape: Any) -> tuple[float, float, float, float, float, float]:
+def bounding_box_mm(shape: TopoDS_Shape) -> tuple[float, float, float, float, float, float]:
     """``(x0, y0, z0, x1, y1, z1)`` of ``shape`` in millimetres.
 
     ``AddOptimal_s`` rather than plain ``Add_s``: without a precomputed mesh,
@@ -152,26 +189,26 @@ def read_step(path: Path) -> StepDocument:
         raise DocumentError(f"{path} contains no transferable shape")
 
     solids: list[StepSolid] = []
-    for label in leaf_labels(document):
-        shape = XCAFDoc_ShapeTool.GetShape_s(label)
+    for entry in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
         if shape.IsNull():
             continue
-        solids.append(StepSolid(name=label_name(label), shape=shape, unit_mm=1.0))
+        solids.append(StepSolid(name=entry.name, shape=shape, unit_mm=1.0))
     if not solids:
         raise DocumentError(f"{path} contains no solids")
     return StepDocument(tuple(solids), document, source_timestamp(path))
 
 
-def leaf_labels(document: Any) -> tuple[Any, ...]:
+def leaf_labels(document: TDocStd_Document) -> tuple[StepLabel, ...]:
     """Every leaf (non-assembly) label under ``document``'s free shapes.
 
     The one XCAF descent this workspace performs, ``GetFreeShapes`` prologue
-    included, in document order. Labels, not shapes or names, with no
-    filtering -- a null-shaped leaf comes back too, since what a leaf is
-    *for* is a call-site decision, not this function's. Eager, not lazy: a
-    caller mutates the document mid-walk, and a suspended descent holding a
-    kernel handle over a tree being rewritten is a hazard this package has
-    already paid for once. Raises nothing; an empty document returns ``()``.
+    included, in document order. Each leaf comes back wrapped in a
+    :class:`StepLabel` holding ``document`` itself, with no filtering -- a
+    null-shaped leaf comes back too, since what a leaf is *for* is a
+    call-site decision. Eager, not lazy: a suspended descent holding a
+    kernel handle over a tree a caller then mutates is a hazard this package
+    has already paid for once. Raises nothing; an empty document is ``()``.
     """
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
@@ -180,13 +217,13 @@ def leaf_labels(document: Any) -> tuple[Any, ...]:
     free = TDF_LabelSequence()
     tool.GetFreeShapes(free)
 
-    leaves: list[Any] = []
+    leaves: list[TDF_Label] = []
     for index in range(1, free.Length() + 1):
         _walk_leaves(free.Value(index), leaves)
-    return tuple(leaves)
+    return tuple(StepLabel(document, label) for label in leaves)
 
 
-def _walk_leaves(label: Any, out: list[Any]) -> None:
+def _walk_leaves(label: TDF_Label, out: list[TDF_Label]) -> None:
     """Append ``label`` if it is a leaf, else recurse into its components.
 
     A component label refers to a shape in the product's own local
@@ -208,7 +245,7 @@ def _walk_leaves(label: Any, out: list[Any]) -> None:
     out.append(label)
 
 
-def label_name(label: Any) -> str:
+def _label_name(label: TDF_Label) -> str:
     """The name XCAF recorded for ``label``, or "" when nobody named it.
 
     OCC synthesises an indirection placeholder such as ``=>[0:1:1:34]`` on a
@@ -227,3 +264,21 @@ def label_name(label: Any) -> str:
     label.FindAttribute(TDataStd_Name.GetID_s(), holder)
     name = str(holder.Get().ToExtString())
     return "" if _OCC_INDIRECTION.fullmatch(name) else name
+
+
+def _label_entry(label: TDF_Label) -> str:
+    """A label's document-unique tag path, stable across shape mutation.
+
+    Unlike a shape's own identity, a label's entry string survives
+    ``SetShape``, and unlike the label itself survives being compared with
+    one drawn from a separate kernel call for the same node -- label
+    equality is kernel object identity, not this. A general fact about the
+    label tree, not the writer's alone, which is why it lives here rather
+    than in :mod:`stompgeom.writer`, its original, one-time home.
+    """
+    from OCP.TCollection import TCollection_AsciiString
+    from OCP.TDF import TDF_Tool
+
+    text = TCollection_AsciiString()
+    TDF_Tool.Entry_s(label, text)
+    return text.ToCString()

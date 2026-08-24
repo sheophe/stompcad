@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompgeom import kernel
-from stompgeom.step import label_name, leaf_labels
-from stompgeom.writer import label_entry, render_step
+from stompgeom.step import StepLabel, leaf_labels
+from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
 from stompmodel.frames import FaceFrame
 from stompmodel.model import DrillData
@@ -115,9 +115,9 @@ def cut_shape(
     keyword = step_keyword(data.case.face)
     originals: list[tuple[Any, Any]] = []
     cut_any = any(
-        _cut_leaf(tool, label, tools, originals)
-        for label in leaf_labels(document)
-        if keyword in label_name(label).upper()
+        _cut_leaf(tool, entry.label, tools, originals)
+        for entry in leaf_labels(document)
+        if keyword in entry.name.upper()
     )
     if not cut_any:
         raise EmitterError(f"no component named {keyword!r} was found to cut")
@@ -132,7 +132,16 @@ def cut_shape(
             tool.SetShape(referred, original)
         tool.UpdateAssemblies()
 
-    touched = frozenset(label_entry(referred) for referred, _ in originals)
+    # Entries come from the *referred* label, never the component -- the
+    # same choice stompgeom.writer._count_colour_assignments makes for the
+    # colour census, which names this site back. `originals` already holds
+    # the referred label `_cut_leaf` wrote through (see its own docstring);
+    # rewrap it in the document it was drawn from, `document` itself, before
+    # reading its entry -- the invisible step named in this ticket's "single
+    # biggest risk": a rewrap taken from the wrong label, or from no
+    # document at all, type-checks either way and only this artefact's
+    # bytes would show it.
+    touched = frozenset(StepLabel(document, referred).entry for referred, _ in originals)
     return document, undo, touched
 
 
@@ -142,10 +151,12 @@ def _cut_leaf(
     """Cut one placed leaf shape and write the result back through its label.
 
     A component label is a reference: its own ``GetShape_s`` bakes in the
-    assembly placement, but ``SetShape`` only accepts the *referred* label's
-    own, unplaced geometry. The cut runs in the placed (world) frame, where
-    ``tools`` was built, then the component's own location is undone before
-    the result is written back — otherwise the placement would apply twice.
+    placement, but ``SetShape`` only accepts the *referred* label's own,
+    unplaced geometry -- undone before the result is written back.
+    Referred-versus-component (see also
+    ``stompgeom.writer._count_colour_assignments``, the same choice on the
+    colour census): ``originals`` records the *referred* label, never the
+    component -- what ``cut_shape`` reads ``touched`` from.
     """
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     from OCP.TDF import TDF_Label

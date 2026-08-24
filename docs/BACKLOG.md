@@ -528,40 +528,52 @@ too, unless it names a real second consumer the first two did not have.
 
 ## Two verified OCP kernel-binding segfault hazards
 
-**Status:** Confirmed gap, not scheduled. Verified by experiment during the 2026-08
-architecture review's ticket 04; recorded again at `stompgeom.step.label_name`'s docstring
-and at `test_step.py`'s `_new_shape_tool` docstring, where a kernel-test author meets them.
+**Status:** One hazard closed by ticket 34 (2026-08); the other confirmed and still open,
+not scheduled. Originally verified during the 2026-08 architecture review's ticket 04.
 
-**Constraint:** Two independent OCP behaviours fault the interpreter (exit 139) instead of
-raising, so no `except` can catch either. A `TDF_Label` outliving the `TDocStd_Document` it
-was drawn from dangles and faults on next use. `FindAttribute` on a live label carrying no
-`TDataStd_Name` attribute faults rather than returning `False`, which is why `label_name`
-checks `IsAttribute` first.
+**Correction (ticket 34):** this entry's first hazard was factually wrong about its own
+penalty. A `TDF_Label` outliving the `TDocStd_Document` it was drawn from does **not**
+fault on next use, for every reachable label operation this workspace performs — it
+answers **silently and wrongly**: not-null, an empty name, the document's own root entry,
+and a null shape. Reproduced directly (`.scratch/architecture-review/design/wave4-t18-
+probes-judge-v2.py`, P1/P5) and again by `packages/stompgeom/tests/test_step.py`'s
+`StepLabel` tests. `stompgeom.step.StepLabel` closes it: a label reaches a caller only
+inside the value that holds its document, so the published surface has no route to a
+dangling one — see ADR-0008.
 
-**Acceptance:** Not independently closeable — see "`stompgeom` should own kernel lifetimes
-rather than expose them" below, which removes the hazard rather than merely documenting it.
+**Still real, untouched:** `FindAttribute` on a *live* label carrying no `TDataStd_Name`
+attribute faults (exit 139) rather than returning `False`. `StepLabel.name` keeps the
+`IsAttribute` guard that avoids it, unchanged by this ticket.
+
+**Acceptance:** The dangling-label hazard's acceptance is met by `StepLabel`. The
+`FindAttribute` hazard is not independently closeable by wrapping — it is a live-label
+attribute-presence check, not a lifetime one — and stays open, guarded by convention at
+its one call site.
 
 ## `stompgeom` should own kernel lifetimes rather than expose them
 
-**Status:** Agreed direction, not scheduled. Raised by the user during the 2026-08
-architecture review, on the strength of the two hazards above.
+**Status:** Narrowed to labels and closed for that scope by ticket 34 (2026-08). Raised by
+the user during the review, on the strength of the two hazards above.
 
-**Constraint:** Neither hazard above is guardable by a caller who only remembers a
-convention — the penalty for forgetting is a process death with no traceback, enforced by
-neither the type system nor an exception. `stompgeom` should never publish a bare label or
-shape whose owning document a caller must keep alive by discipline; it should publish a
-Python object that holds the document reference itself, so the lifetime is structural
-rather than remembered. This generalises the kernel document builder's own deferral above
-to every kernel handle `stompgeom` publishes, not only the builder's output.
+**Correction (ticket 34):** the acceptance below as originally written ("*every* public
+value that wraps a kernel handle") is too strong. A shape is independently
+reference-counted and measures identically after its document is released; a document is
+the anchor and cannot dangle by being held. Neither owes anything to a wrapper. Only a
+label dangles, and only a label needed this.
 
-**Acceptance:** Every public `stompgeom` value that wraps a kernel handle also holds
-(directly or transitively) the document that handle depends on, so a caller cannot
-construct a dangling reference by discarding the wrong object, and the two hazards above no
-longer need a "keep both alive" convention to stay safe.
+**Constraint:** The hazard above is not guardable by a caller who only remembers a
+convention — the penalty for forgetting is a silent wrong answer, not an exception.
+`stompgeom.step.StepLabel` publishes the Python object that holds the document a label
+depends on, so the lifetime is structural rather than remembered.
+
+**Acceptance (narrowed, met):** Every public `stompgeom` value that wraps a kernel
+*label* also holds the document that label depends on. Shapes and the document itself are
+excluded by name: they do not dangle by being held, and wrapping them is not part of this
+acceptance. Closed.
 
 ## Order "ban `Any` at package boundaries" behind "`stompgeom` owns kernel lifetimes"
 
-**Status:** Agreed direction, ordered, not scheduled. Raised by the user during the 2026-08
+**Status:** Unblocked, not scheduled — not deleted. Raised by the user during the 2026-08
 architecture review; refines "Adopt mypy `strict` on `packages/stompdrill/src/stompdrill`"
 above with where its argument actually lands.
 
@@ -569,13 +581,17 @@ above with where its argument actually lands.
 (`StepOptions.model: Any | None`), which the strict-adoption item above already reaches —
 `disallow_any_explicit` on `stompmodel` would not have caught it, and `stompmodel` carries
 exactly one explicit `Any` in its source, so banning it there is nearly free. `stompgeom`'s
-`Any`s sit at the kernel seam (`StepSolid.shape`, `StepDocument.document`, label parameters
-throughout) and are honest — OCP ships no stubs — until the lifetime item above wraps them;
-banning `Any` there first just pushes authors to an unsearchable `# type: ignore`.
+`Any`s sit at the kernel seam and are honest — OCP ships no stubs. Ticket 34 wrapped the
+one handle whose validity depended on document lifetime (the label); the remaining six
+names (`StepSolid.shape`, `StepDocument.document`, `bounding_box_mm`'s parameter and
+others) stay bare `Any` **on purpose** — they owe nothing to a wrapper, so wrapping them
+buys no safety and banning `Any` there would just push authors to an unsearchable
+`# type: ignore`.
 
-**Acceptance:** `stompgeom` bans `Any` at its public boundary only after the kernel-lifetime
-item above wraps the kernel handles it currently exposes bare; `stompmodel` can ban it
-independently at any time, since the ordering does not apply there.
+**Acceptance:** Unblocked now that the kernel-lifetime item above is closed for the class
+of handle that needed it. Scheduling this item is still a separate decision: banning `Any`
+at `stompgeom`'s boundary would apply only to the six honestly-bare names above, which is
+a real trade-off for whoever schedules it to weigh, not a blocked precondition any more.
 
 ## A mutmut/hypothesis incompatibility blocks `dedupe` and `geometry`'s mutation surveys
 
@@ -1051,6 +1067,13 @@ with it.
 **Acceptance:** Not scheduled as a fold until `cut_shape` gains a second call site, or
 `StepSolid` carries its label and can call `select_solid` directly; until then this entry
 stands as the reason the two must be changed together if either is.
+
+**Annotated, not satisfied (ticket 34, 2026-08):** `stompgeom.step.StepLabel` now exists
+and makes the "`StepSolid` carries its label" trigger cheap — `leaf_labels` already hands
+back a `StepLabel` per solid, so wiring one onto `StepSolid` is no longer new plumbing.
+This ticket deliberately does not take it: adding a label field to `StepSolid` was refused
+by name as manufacturing this entry's own trigger rather than being asked for it. The
+condition above still governs when this is taken.
 
 ## The `last_run → get → isinstance` provenance read is stated four times, deliberately not folded
 

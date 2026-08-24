@@ -193,14 +193,14 @@ def _cut_component_shape(document: Any, keyword: str) -> Any:
     """
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
-    from stompgeom.step import StepDocument, StepSolid, label_name, leaf_labels
+    from stompgeom.step import StepDocument, StepSolid, leaf_labels
 
     solids: list[StepSolid] = []
-    for label in leaf_labels(document):
-        shape = XCAFDoc_ShapeTool.GetShape_s(label)
+    for entry in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
         if shape.IsNull():
             continue
-        solids.append(StepSolid(name=label_name(label), shape=shape, unit_mm=1.0))
+        solids.append(StepSolid(name=entry.name, shape=shape, unit_mm=1.0))
 
     found = StepDocument(tuple(solids), document).named(keyword)
     assert found, f"the cut document holds no solid named like {keyword!r}"
