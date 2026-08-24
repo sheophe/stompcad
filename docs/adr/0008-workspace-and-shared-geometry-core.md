@@ -144,19 +144,41 @@ The traversal publishes bare kernel labels, as `StepSolid.shape` and
 not at all.
 
 **A rule a member owns is enforced by that member's own tests, not by
-whichever member's suite happened to notice the duplication first.** Four
+whichever member's suite happened to notice the duplication first.** Five
 structural gates enforce "this rule is stated once" — the whole-nanometre
-guard, the case-face vocabulary, this section's own XCAF leaf descent, and
-ADR-0006's raw-measurement tie-break — and each now lives in the suite of
-the package that owns the rule it polices: three in `stompmodel`'s own
-suite, one (the leaf descent) in `stompgeom`'s. A gate may read a sibling's
-source as text to reach a rule's every possible violator; it may never
-*import* a package above its own, which is why a gate homed in `stompmodel`
-resolves `stompgeom` and `stompdrill` by reading their files rather than
-importing them. Every gate derives the packages it scans from one shared
-statement, `tools.workspace_membership.member_package_dirs` — a directory
-under `packages/` shipping its own `src` — so a package this workspace gains
-later is scanned by every existing gate with no edit to any of them. `stompgeom` now owns a document it can **render to bytes**:
+guard, the case-face vocabulary, this section's own XCAF leaf descent,
+ADR-0006's raw-measurement tie-break, and ADR-0005's atomic-write mechanism
+— and each now lives in the suite of the package that owns the rule it
+polices: four in `stompmodel`'s own suite, one (the leaf descent) in
+`stompgeom`'s. A gate may read a sibling's source as text to reach a rule's
+every possible violator; it may never *import* a package above its own,
+which is why a gate homed in `stompmodel` resolves `stompgeom` and
+`stompdrill` by reading their files rather than importing them. Every gate
+derives the packages it scans from one shared statement,
+`tools.workspace_membership.member_package_dirs` — a directory under
+`packages/` shipping its own `src` — so a package this workspace gains later
+is scanned by every existing gate with no edit to any of them.
+
+**The claim above binds a gate's reach control too, not only its scan.**
+Deriving the scan from `member_package_dirs` is not enough on its own: each
+gate's reach control — the assertion that the scan reached something it
+could have missed, rather than nothing — must itself avoid naming the
+member set, or the scan is variable while the instrument that proves it
+reached anything is not. Each gate's reach control instead checks two
+properties: every member the scan discovered really ships the `src` it
+claims to, and the scan's own roots cover every `src` (and, where the
+gate's reach includes it, `tests`) directory an independent walk of
+`packages/` finds — `tools.workspace_membership.member_area_roots`, which
+never calls `member_package_dirs` and so can disagree with it if that
+function's own discovery narrows. The ownership-gate convention test
+(`packages/stompdrill/tests/test_ownership_gate_convention.py`) carries the
+same discipline one level up: it finds the gate family itself by the
+reach-control marker every gate defines, not by a literal list of gate
+files, and runs a matched pair of probe packages — one breaching every
+rule the family polices, one breaching none — so its own coverage of "every
+gate" cannot silently narrow either. A package or a gate this workspace
+gains later needs no edit to any existing gate or to this convention test.
+`stompgeom` now owns a document it can **render to bytes**:
 `stompgeom.writer.render_step` is the one serialising entry point, returning the
 finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
 along the way is an implementation detail forced by that kernel's own path-only API, not

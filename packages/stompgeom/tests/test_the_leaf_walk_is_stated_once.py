@@ -13,7 +13,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tools.workspace_membership import REPO, member_package_dirs
+from tools.workspace_membership import REPO, member_area_roots, member_package_dirs
 
 #: Every workspace member's own source and tests -- the reach the theme
 #: names ("no module under any package's source or tests"), so a second
@@ -72,9 +72,21 @@ def test_a_plain_name_is_read_too() -> None:
 
 
 def test_the_scan_reaches_every_workspace_member() -> None:
-    """An empty or narrowed walk would pass the check below by finding nothing."""
-    member_names = {pkg.name for pkg in member_package_dirs()}
-    assert member_names == {"stompmodel", "stompgeom", "stompdrill"}
+    """The reach control is a property of the scan, not a pinned answer.
+
+    Checked two ways: every member the scan discovered really ships the
+    ``src`` it claims to (well-formedness), and the scan's own roots cover
+    every ``src``/``tests`` directory an independent walk of ``packages/``
+    finds — one that never calls ``member_package_dirs`` — so narrowing the
+    shared discovery itself, not only this gate's use of it, is caught.
+    """
+    for pkg in member_package_dirs():
+        assert (pkg / "src").is_dir(), f"{pkg} was discovered but ships no src"
+    discovered = set(SOURCE_ROOTS)
+    ground_truth = member_area_roots("src") | member_area_roots("tests")
+    assert ground_truth, "no member ships a src or tests -- nothing for this control to check"
+    missing = ground_truth - discovered
+    assert not missing, f"the scan's own roots do not cover: {sorted(missing)}"
 
 
 def test_the_walk_is_named_in_exactly_two_places() -> None:
