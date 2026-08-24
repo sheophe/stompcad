@@ -53,12 +53,15 @@ after its reading-order prefix, `Deduplicate` directly (a coincident group alrea
 on nominal position and diameter by its own definition), `rows()` after nominal `x`. A
 site restating the tuple by hand, rather than calling the property, is one rule with two
 implementations — this ADR's own defect a level down, and the reason
-`packages/stompdrill/tests/test_tie_break_owner.py` fails any tuple built from a hole's
-raw `x`, raw `y` and raw `diameter` outside `stompmodel.model`. The gate resolves the
-packages it scans by importing them, not by a path relative to the working directory, so
-it binds a second consumer — in a package not yet in its scan — the moment that package
-is added, and it names no stage: a fourth field on the raw measurement reaches every
-consumer by editing the property once. The routing stage's reading-order prefix
+`packages/stompmodel/tests/test_tie_break_owner.py` fails any tuple built from a hole's
+raw `x`, raw `y` and raw `diameter` outside `stompmodel.model`. The gate lives in
+`stompmodel`'s own suite — the rule's owner — per ADR-0008's ownership clause, and
+resolves the packages it scans by reading each as text from
+`tools.workspace_membership.member_package_dirs`, never by importing one (this package
+sits below its siblings in the dependency order and must not import upward). It binds a
+second consumer — in a package not yet in its scan — the moment that package's `src`
+directory exists, and it names no stage: a fourth field on the raw measurement reaches
+every consumer by editing the property once. The routing stage's reading-order prefix
 (`-y_nm, x_nm` below) stays routing's own policy and is not folded into the property; only
 this ADR changes it.
 

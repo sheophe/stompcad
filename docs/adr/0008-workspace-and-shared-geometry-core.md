@@ -43,7 +43,11 @@ user-facing tool. It holds four packages:
 
 Each package must install and pass its own tests **alone**. `stompdrill` stays
 usable without a collision engine, and `stompcollider` without an Illustrator
-parser.
+parser. This extends to a structural rule a member owns, not only to its
+distribution's runtime dependencies: the gate enforcing that rule is run by
+the *owning* member's own documented command, never by a consumer's, so a
+breach of the rule inside the owner's own source fails the owner's own suite
+without any other member's tests having to run at all.
 
 `stompcad` consumes `stompdrill` and `stompcollider` as **libraries**, not subprocesses.
 
@@ -139,7 +143,20 @@ The traversal publishes bare kernel labels, as `StepSolid.shape` and
 `stompgeom` owning kernel lifetimes, not three: they are wrapped together or
 not at all.
 
-On the writing side, `stompgeom` now owns a document it can **render to bytes**:
+**A rule a member owns is enforced by that member's own tests, not by
+whichever member's suite happened to notice the duplication first.** Four
+structural gates enforce "this rule is stated once" — the whole-nanometre
+guard, the case-face vocabulary, this section's own XCAF leaf descent, and
+ADR-0006's raw-measurement tie-break — and each now lives in the suite of
+the package that owns the rule it polices: three in `stompmodel`'s own
+suite, one (the leaf descent) in `stompgeom`'s. A gate may read a sibling's
+source as text to reach a rule's every possible violator; it may never
+*import* a package above its own, which is why a gate homed in `stompmodel`
+resolves `stompgeom` and `stompdrill` by reading their files rather than
+importing them. Every gate derives the packages it scans from one shared
+statement, `tools.workspace_membership.member_package_dirs` — a directory
+under `packages/` shipping its own `src` — so a package this workspace gains
+later is scanned by every existing gate with no edit to any of them. `stompgeom` now owns a document it can **render to bytes**:
 `stompgeom.writer.render_step` is the one serialising entry point, returning the
 finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
 along the way is an implementation detail forced by that kernel's own path-only API, not

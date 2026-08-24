@@ -3,8 +3,9 @@
 ``stompmodel.model.CaseFace`` is the vocabulary's one home. A module that
 spells out the set of legal faces again -- a container holding both
 ``"box"`` and ``"lid"``, or a comparison against either as a bare string --
-is the defect ticket 13 exists to remove: `cli._FACES`, `cad._FACE_KEYWORDS`
-and the STEP emitter's ternary were three such spellings. See ADR-0009.
+is the defect ticket 13 exists to remove. This gate lives in the owner's own
+suite (ticket 25): running this package's own command must fail when the
+duplication reappears anywhere in the workspace. See ADR-0008 and ADR-0009.
 """
 
 from __future__ import annotations
@@ -12,16 +13,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tools.workspace_membership import REPO, member_package_dirs
+
 PACKAGE = Path(__file__).resolve().parent.parent
-REPO = PACKAGE.parent.parent
 #: Same reach as ``test_nanometre_guard_is_singular.py``: every workspace
-#: member with runtime source, plus the catalogue generator.
-SOURCE_ROOTS = (
-    REPO / "packages" / "stompmodel" / "src",
-    REPO / "packages" / "stompgeom" / "src",
-    PACKAGE / "src",
-    REPO / "tools",
-)
+#: member's own source, discovered rather than named, plus the catalogue
+#: generator.
+SOURCE_ROOTS = tuple(pkg / "src" for pkg in member_package_dirs()) + (REPO / "tools",)
 _VOCABULARY = {"box", "lid"}
 
 
@@ -79,6 +77,12 @@ def test_the_scanner_finds_a_bare_comparison_against_either_face():
 def test_a_single_legal_value_used_alone_is_not_a_restatement():
     """An argparse default naming one legal value is not the vocabulary."""
     assert not _restates_the_vocabulary('default = "box"')
+
+
+def test_the_scan_reaches_every_workspace_member():
+    """An empty or narrowed walk would pass the rule below by finding nothing."""
+    names = {root.parent.name for root in SOURCE_ROOTS if root.name == "src"}
+    assert names == {"stompmodel", "stompgeom", "stompdrill"}
 
 
 def test_no_module_states_the_face_vocabulary_a_second_time():

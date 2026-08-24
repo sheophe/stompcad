@@ -32,16 +32,23 @@ stompmodel = ["py.typed"]
 [dependency-groups]
 dev = ["pytest", "hypothesis", "mypy"]
 
+# `pythonpath` reaches the repo root, mirroring stompdrill's own: three of
+# this workspace's four ownership gates (ticket 25) now live here, and each
+# reads `tools.workspace_membership` for the one statement of which packages
+# to scan -- a text read across siblings, never an import of one.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["../.."]
 
 # Runs where the root gate cannot: `mypy packages` excludes this member's
 # `tests/` to avoid a duplicate-module collision with stompdrill's own
 # `tests` package, so this config is what actually checks those files.
+# `mypy_path` gains the repo root for the same reason `pythonpath` does above:
+# the ownership gates import `tools.workspace_membership`.
 [tool.mypy]
 python_version = "3.10"
-mypy_path = "src"
+mypy_path = ["src", "../.."]
 files = ["src", "tests"]
 
 # Runs where the root survey cannot, for the identical reason as the [tool.mypy]

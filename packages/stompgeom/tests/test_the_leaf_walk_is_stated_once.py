@@ -1,11 +1,11 @@
 """``stompgeom.step.leaf_labels`` is the only XCAF leaf descent in the workspace.
 
-Deduplicating the three sites this fold found closes three recipes; a fourth
-site reopens the class, which has already happened once (a private
-cross-package import, then a fifth walk in the writer's own tests). This
-gate is the one that catches the next one, whichever package adds it. See
-ADR-0008 and ``test_nanometre_guard_is_singular.py``, the sibling gate this
-one is modelled on.
+Deduplicating the three sites this fold found closes three recipes; a
+fourth site reopens the class, which has already happened once. This gate
+lives in the owner's own suite (ticket 25): running this package's own
+command must fail when a second descent reappears anywhere in the
+workspace -- previously a duplicate added to this package's own
+``writer.py`` went uncaught by this package's own suite, run alone.
 """
 
 from __future__ import annotations
@@ -13,14 +13,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent.parent.parent
+from tools.workspace_membership import REPO, member_package_dirs
+
 #: Every workspace member's own source and tests -- the reach the theme
 #: names ("no module under any package's source or tests"), so a second
 #: consumer package is caught the day it is added, with no edit here.
+#: ``member_package_dirs`` is the one statement of which members that is.
 SOURCE_ROOTS = tuple(
-    REPO / "packages" / package / area
-    for package in ("stompmodel", "stompgeom", "stompdrill")
-    for area in ("src", "tests")
+    pkg / area for pkg in member_package_dirs() for area in ("src", "tests")
 )
 
 #: The one module allowed to name these: it is what publishes the walk.
@@ -69,6 +69,12 @@ def test_the_scanner_finds_the_walk_it_exists_to_catch() -> None:
 def test_a_plain_name_is_read_too() -> None:
     """Not every offender would qualify the call with a module or tool."""
     assert _names_the_walk("from OCP.XCAFDoc import IsAssembly_s\nIsAssembly_s(label)")
+
+
+def test_the_scan_reaches_every_workspace_member() -> None:
+    """An empty or narrowed walk would pass the check below by finding nothing."""
+    member_names = {pkg.name for pkg in member_package_dirs()}
+    assert member_names == {"stompmodel", "stompgeom", "stompdrill"}
 
 
 def test_the_walk_is_named_in_exactly_two_places() -> None:

@@ -1,8 +1,11 @@
 """There is exactly one implementation of the whole-nanometre type guard.
 
-`stompmodel.units.check_nanometres` is the rule's one home; a module that
+``stompmodel.units.check_nanometres`` is the rule's one home; a module that
 spells the rule out again with its own ``raise TypeError`` is the defect
-ticket 01 exists to remove. See ADR-0004 and ADR-0009.
+ticket 01 exists to remove. This gate lives in the owner's own suite (ticket
+25): running this package's own documented command is what must fail when
+the duplication reappears, in this package's source or any other's. See
+ADR-0004, ADR-0008 and ADR-0009.
 """
 
 from __future__ import annotations
@@ -10,17 +13,15 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tools.workspace_membership import REPO, member_package_dirs
+
 PACKAGE = Path(__file__).resolve().parent.parent
-REPO = PACKAGE.parent.parent
-#: Every workspace member with runtime source, plus the catalogue generator --
-#: the same reach as the enclosure catalogue's own currency check, because a
-#: private copy could as easily hide in the generator as in a package.
-SOURCE_ROOTS = (
-    REPO / "packages" / "stompmodel" / "src",
-    REPO / "packages" / "stompgeom" / "src",
-    PACKAGE / "src",
-    REPO / "tools",
-)
+#: Every workspace member's own source, discovered rather than named, plus
+#: the catalogue generator -- a private copy could as easily hide there as
+#: in a package. One statement (``member_package_dirs``) decides which
+#: packages that is; a member added under the workspace is scanned with no
+#: edit here.
+SOURCE_ROOTS = tuple(pkg / "src" for pkg in member_package_dirs()) + (REPO / "tools",)
 GUARD_HOME = REPO / "packages" / "stompmodel" / "src" / "stompmodel" / "units.py"
 _PHRASE = "whole number of nanometres"
 
@@ -76,6 +77,12 @@ def test_a_plain_string_argument_is_read_too():
     assert raises_the_guards_phrase(
         'raise TypeError("y must be a whole number of nanometres")'
     )
+
+
+def test_the_scan_reaches_every_workspace_member():
+    """An empty or narrowed walk would pass the rule below by finding nothing."""
+    names = {root.parent.name for root in SOURCE_ROOTS if root.name == "src"}
+    assert names == {"stompmodel", "stompgeom", "stompdrill"}
 
 
 def test_the_guards_phrase_appears_in_exactly_one_module():

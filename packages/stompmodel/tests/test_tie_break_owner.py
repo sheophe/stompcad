@@ -1,26 +1,22 @@
 """Structural gate: the raw-measurement tie-break has one owner (ADR-0006).
 
-Scans the *installed* packages' source -- resolved through ``importlib``,
-never a path relative to the working directory -- for a tuple literal built
-from a hole's raw ``x``, ``y`` and ``diameter`` in any order: that shape is
-the tie-break restated by hand, and the property is the one legitimate
-occurrence. Names no stage and no package, so a second consumer is caught
-the moment its package joins ``PACKAGES`` below. A separate gate polices the
-document-traversal rule over its own, different type, in its own module.
+Scans every workspace member's own source -- discovered from
+``member_package_dirs``, read as plain text and never imported (this
+package must not import a sibling above it) -- for a tuple built from a
+hole's raw ``x``, ``y`` and ``diameter`` in any order: the tie-break
+restated by hand. This gate lives in the owner's own suite (ticket 25):
+running this package's own command must fail when the restatement
+reappears anywhere in the workspace.
 """
 
 from __future__ import annotations
 
 import ast
-import importlib
 from pathlib import Path
 
-__all__: list[str] = []
+from tools.workspace_membership import member_package_dirs
 
-#: Every package this gate is responsible for. Adding a name here is the
-#: whole of what "a second consumer" requires -- no stage, no path, no
-#: caller-specific allowance.
-PACKAGES = ("stompmodel", "stompdrill", "stompgeom")
+__all__: list[str] = []
 
 #: The one module allowed to state the tuple literally: it is what
 #: ``Hole.tie_break`` returns, the sole owner ADR-0006 names.
@@ -30,27 +26,14 @@ _OWNER_MODULE = "model.py"
 _RAW_FIELDS = ("x", "y", "diameter")
 
 
-def _package_roots() -> list[Path]:
-    """Every scanned package's source directory, resolved via import.
-
-    Not a path relative to this file or the working directory: importing
-    each package and reading its own ``__path__`` is what makes the gate
-    bind whatever source a caller's interpreter actually resolves to.
-    """
-    roots: list[Path] = []
-    for name in PACKAGES:
-        pkg = importlib.import_module(name)
-        assert pkg.__path__, f"{name} has no source directory to scan"
-        roots.extend(Path(location) for location in pkg.__path__)
-    return roots
-
-
 def _source_files() -> list[Path]:
-    """Every ``.py`` file under a scanned package's source, sorted for a stable failure."""
+    """Every ``.py`` file under a scanned member's own ``src``, sorted for a
+    stable failure. ``member_package_dirs`` is the one statement of which
+    members that is; adding a package here requires no edit to this file."""
     return sorted(
         path
-        for root in _package_roots()
-        for path in root.rglob("*.py")
+        for pkg in member_package_dirs()
+        for path in (pkg / "src").rglob("*.py")
         if "__pycache__" not in path.parts
     )
 
@@ -138,10 +121,12 @@ def test_the_gate_does_not_fire_on_a_derived_computation():
     assert not tuple_restates_the_tie_break(ast.parse(source, mode="eval").body)
 
 
-def test_the_scan_reaches_every_source_file():
+def test_the_scan_reaches_every_workspace_member():
     """An empty or narrowed walk would pass every check below by finding nothing."""
     names = {path.name for path in _source_files()}
     assert {"model.py", "dedupe.py", "route.py"} <= names
+    member_names = {pkg.name for pkg in member_package_dirs()}
+    assert member_names == {"stompmodel", "stompgeom", "stompdrill"}
     assert len(_source_files()) > 20  # the workspace's three packages are not tiny
 
 
@@ -153,10 +138,10 @@ def test_the_scan_reaches_every_source_file():
 def test_no_module_outside_the_owner_restates_the_raw_measurement_tuple():
     """Criterion 3: the rule has one owner and cannot be restated.
 
-    Binds every package in ``PACKAGES``, named neither by stage nor by
-    package -- so a fourth field on ``RawHole`` reaches every consumer by
-    editing ``Hole.tie_break`` alone, and a second package gaining a
-    restated copy fails here the moment it is added to the scan.
+    Binds every member ``member_package_dirs`` names, named neither by stage
+    nor by package -- so a fourth field on ``RawHole`` reaches every consumer
+    by editing ``Hole.tie_break`` alone, and a second package gaining a
+    restated copy fails here the moment its ``src`` directory exists.
     """
     offenders = {
         str(path): lines
