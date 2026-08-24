@@ -57,13 +57,44 @@ halves.
 and `commit_staged` needs to rename onto it. Together they define the only domain a
 target must satisfy: its parent directory must already exist and accept a new file, and
 the target itself must not already be a directory, because a rename can never land bytes
-there. Nothing here requires the target to be a regular file — a device node or a named
-pipe qualifies exactly as an ordinary file does, provided its parent will accept the
-sibling temporary. A target whose parent refuses new files, as an unprivileged caller
-usually finds `/dev` does, falls outside the domain for that reason alone, not because it
-is a device. A caller composing a set of several targets for one invocation validates
-every target against this domain before rendering the first payload; ADR-0001 states
-that pre-flight for `stompdrill`'s own command line.
+there. The mechanism states this domain and enforces every clause of it itself; no
+caller-side probe of these facts is needed or published.
+
+Exactly one of those two clauses is checked ahead of the write: a target that is already
+a directory is refused by `stage_payload` before any temporary is written, because the
+alternative — waiting for `commit_staged`'s rename to fail — surfaces the violation one
+target too late for a caller withholding a whole set to withhold it as a whole (test:
+`test_staging_at_a_directory_target_raises_before_any_temporary_exists`, in
+`stompmodel`'s own suite). Every other clause — a missing parent, a parent that is not a
+directory, a parent that refuses a new file — is answered by the filesystem itself, at
+the write attempt that actually needs the answer, so no caller repeats a probe of its own
+(tests: `test_a_target_whose_directory_is_missing_still_raises_an_os_error`,
+`test_a_target_whose_parent_is_not_a_directory_names_the_target`,
+`test_a_parent_that_refuses_a_new_file_names_the_target`). In every case the raised
+exception keeps its standard errno-mapped subclass, and its filename names the target —
+never the mechanism's own temporary, whose name a caller never otherwise learns.
+
+Nothing here requires the target to be a regular file: `commit_staged`'s rename replaces
+whatever non-directory node currently occupies the target's name, whatever type of node
+that is, rather than requiring it to already be an ordinary file — so a named pipe
+qualifies for this mechanism exactly as an ordinary file does, provided its parent will
+accept the sibling temporary (test:
+`test_committing_a_staged_write_can_replace_a_named_pipe_with_a_regular_file`). A target
+whose parent refuses new files, as an unprivileged caller usually finds `/dev` does,
+falls outside the domain for that reason alone, not because of what kind of node the
+target is.
+
+Committing replaces the target's *name*, not the file its name used to resolve to: a
+symlink standing where the target should be is afterwards a regular file holding the new
+payload, deliberately, and whatever file the link pointed at is left completely alone
+(test: `test_committing_a_staged_write_replaces_a_symlink_target_with_a_regular_file`).
+
+A caller that needs to read a target before replacing it — to compare it against a
+supplied model before deciding whether to proceed, say — needs more of that target than
+this mechanism does: readability, and possibly more, neither of which staging or
+committing ever asks for. That further requirement belongs to the caller, not to this
+mechanism, and is stated where that caller's own pre-flight is: ADR-0001, for
+`stompdrill`'s command line.
 
 ## Rationale
 
