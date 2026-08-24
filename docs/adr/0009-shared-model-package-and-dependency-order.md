@@ -20,6 +20,11 @@ convenient, and the Consequences gain a standing gate -- the human-facing report
 must be reproducible from the document alone. `CaseRegistration`, promoted under
 the provenance rule with no reader outside the codec, is the worked example: see
 the admission rules and the Consequences section below.
+**Amended again:** `FaceFrame.basis.w`'s sense is stated as a convention -- the
+drilled face's outward normal, independent of `basis.origin_nm`'s inner-surface
+datum -- because both senses satisfy the type's own checks equally and no
+validator can choose between them. See "Why the frame values sit in
+`stompmodel`" below.
 
 Amends [ADR-0008](0008-workspace-and-shared-geometry-core.md), which decided four
 packages. There are five.
@@ -218,6 +223,21 @@ produces the face frame, `stompcollider` consumes it, and neither is its home. T
 what unblocks "The drill document gains the face frame" above: `DrillData` can carry a
 `FaceFrame` and the codec can serialise it without `stompmodel` growing a dependency on
 OpenCASCADE.
+
+**`FaceFrame`'s third axis states its own sense, per admission rule 4's obligation.**
+Rule 4's second half applies to any promoted member, not only one that arrived by the
+provenance route: a fact published without its reading convention is a member in name
+only. `FaceFrame.basis.w` is fixed by convention to the drilled face's **outward**
+normal -- pointing away from the material and out of the enclosure -- independent of
+`basis.origin_nm`'s inner-surface datum. This is stated rather than derived because it
+is unrecoverable: both senses of `w` satisfy `CoordinateFrame`'s own orthonormality and
+right-handedness checks equally, so no validator over the type can choose between them.
+Checked, not merely asserted: `packages/stompdrill/tests/test_cad_case.py` runs this
+claim against the frame `stompdrill.cad.case.build_frame` actually publishes, over the
+four catalogued Hammond models the kernel suite can fetch (1590BB, 1590B, 1590A,
+1590Y), both box and lid faces -- narrowed to those four because no STEP model is
+fetched for the catalogue's other parts, not because the convention is believed to
+hold only there.
 
 **Why lengths sit in `stompmodel` rather than `stompgeom`.** ADR-0008 listed lengths
 among the geometry, which was reasonable when `stompgeom` was the only shared package.
