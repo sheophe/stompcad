@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import math
+import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -266,6 +267,49 @@ def parse_emit(spec: str) -> tuple[str, Path]:
             f"--emit expects FORMAT=PATH, got {spec!r}; formats: {', '.join(available())}"
         )
     return (name.strip(), Path(path.strip()))
+
+
+def _preflight_targets(targets: Sequence[tuple[str, Path]]) -> None:
+    """Validate the whole requested target set before anything is rendered.
+
+    Two ``--emit`` specs may not resolve to one path, and each target must
+    satisfy the write mechanism's own preconditions — see
+    :func:`_check_target_domain`. Raising here costs nothing: nothing has
+    yet been rendered, staged, or replaced, so the invocation withholds
+    every artefact the same way an unresolvable flag already does. See
+    ADR-0001.
+    """
+    seen: dict[Path, tuple[str, Path]] = {}
+    for name, path in targets:
+        resolved = path.resolve()
+        earlier = seen.get(resolved)
+        if earlier is not None:
+            earlier_name, earlier_path = earlier
+            raise UsageError(
+                f"--emit {name}={path}: names the same target as "
+                f"--emit {earlier_name}={earlier_path}; two artefacts cannot "
+                "share one path"
+            )
+        seen[resolved] = (name, path)
+        _check_target_domain(name, path)
+
+
+def _check_target_domain(name: str, path: Path) -> None:
+    """Probe one target against ``stage_payload``/``commit_staged``'s own needs.
+
+    A temporary is always written beside the target, so its parent must
+    already exist and accept a new file; and a rename can never land bytes
+    at a path that is already a directory. This is the target domain
+    ADR-0005 states — derived from what the mechanism does, not from "must
+    be a regular file", which is narrower than what it actually needs.
+    """
+    parent = path.parent
+    if not parent.is_dir():
+        raise UsageError(f"--emit {name}={path}: {parent} is not a directory")
+    if not os.access(parent, os.W_OK):
+        raise UsageError(f"--emit {name}={path}: {parent} does not accept a new file")
+    if path.is_dir():
+        raise UsageError(f"--emit {name}={path}: {path} is already a directory")
 
 
 # ---------------------------------------------------------------------------
@@ -768,23 +812,60 @@ def _stage(rendered: Iterable[tuple[Emitter[DrillData], Path, Payload]]) -> list
     return staged
 
 
+@dataclass(frozen=True, slots=True)
+class _Committed:
+    """One target already swapped to this run's bytes during this loop.
+
+    ``previous`` is the bytes this target held before this run, read
+    before its own commit; ``None`` when the target did not exist before.
+    :func:`_rollback` restores the two cases differently: rewrite one,
+    delete the other.
+    """
+
+    path: Path
+    previous: bytes | None
+
+
+def _rollback(committed: list[_Committed]) -> None:
+    """Undo every target already replaced earlier in this commit loop.
+
+    Restores each target through the same published mechanism every other
+    write in this loop uses — never a filesystem write of its own; see
+    ADR-0005. Never raises: a target this cannot restore is the one
+    residual ADR-0001 names as excluded from the guarantee, and
+    swallowing it here keeps the failure that triggered the rollback the
+    one that propagates.
+    """
+    for done in reversed(committed):
+        try:
+            if done.previous is None:
+                done.path.unlink(missing_ok=True)
+            else:
+                commit_staged(stage_payload(done.path, done.previous))
+        except OSError:
+            pass
+
+
 def _commit(staged: list[_Staged]) -> list[str]:
     """Replace every target from its already-staged write, in order.
 
-    Every staged write here already reached its temporary in full, so this
-    is the low-risk half of the transaction: one
-    :func:`~stompmodel.protocols.commit_staged` call per target, same as a
-    single ``stage_payload``/``commit_staged`` pair makes for one path.
-    ``commit_staged`` itself discards the temporary of the target it fails
-    on, so only the targets *not yet reached* need discarding here; one
-    already replaced stays replaced.
+    Before replacing a target that already exists, its prior bytes are
+    read so they can be restored. If a later target's own commit then
+    fails, :func:`_rollback` restores every target already replaced in
+    this loop, and the ones not yet reached are discarded through
+    :func:`~stompmodel.protocols.discard_staged` — this loop is what
+    makes the whole set one transaction, not only each path alone.
     """
-    lines = []
+    lines: list[str] = []
+    committed: list[_Committed] = []
     try:
         for index, (emitter, written) in enumerate(staged):
+            previous = written.path.read_bytes() if written.path.exists() else None
             size = commit_staged(written)
+            committed.append(_Committed(written.path, previous))
             lines.append(f"wrote {written.path}  ({emitter.name}, {size} bytes)")
     except BaseException:
+        _rollback(committed)
         for _, written in staged[index + 1 :]:
             discard_staged(written)
         raise
@@ -800,6 +881,7 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
 
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
+    _preflight_targets(targets)
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a

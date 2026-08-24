@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
+import os
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -1117,6 +1118,187 @@ def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
             "left exactly as the previous run left it"
         )
     assert "Traceback" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# ticket 29: the requested --emit target set is validated once, as a set,
+# before anything is rendered -- duplicate targets and targets the write
+# mechanism cannot replace are usage errors caught up front, and a
+# commit-phase failure rolls back every target this same invocation had
+# already replaced, not only the ones still unattempted.
+# ---------------------------------------------------------------------------
+
+
+def test_two_emit_specs_naming_one_path_are_a_usage_error(fake_source, tmp_path, capsys):
+    """F2-02(b): two artefacts cannot share one path -- caught before rendering."""
+    fake_source(read())
+    out = tmp_path / "out.x"
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"json={out}", "--emit", f"excellon={out}"])
+
+    assert exit_code == 3
+    assert not out.exists(), "a rejected invocation must not write the colliding path"
+    err = capsys.readouterr().err
+    assert str(out) in err
+    assert "Traceback" not in err
+
+
+def test_a_directory_at_one_target_withholds_the_whole_set(fake_source, tmp_path, capsys):
+    """F2-02(a)/F3-03: a directory at one target must not let an earlier,
+    otherwise-ordinary target commit first -- the whole set is validated
+    before any of it is rendered, so nothing reaches disk at all."""
+    fake_source(read())
+    a = tmp_path / "a.json"
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={outdir}"])
+
+    assert exit_code == 3
+    assert not a.exists(), (
+        "a.json was committed even though this invocation overall failed -- the "
+        "whole target set must be validated before anything is rendered"
+    )
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_the_target_set_is_checked_before_the_panel_is_even_opened(tmp_path, capsys):
+    """Mirrors test_the_case_is_checked_before_the_file_is_even_opened: a
+    colliding --emit pair is reported without a PDF parse being attempted."""
+    dup = tmp_path / "dup.x"
+
+    exit_code = cli.main(["/no/such/panel.ai", "--emit", f"json={dup}", "--emit", f"excellon={dup}"])
+
+    assert exit_code == 3
+    assert str(dup) in capsys.readouterr().err
+
+
+def test_an_ordinary_writable_target_still_passes_the_domain_check(fake_source, tmp_path):
+    """Control for the two domain-boundary tests below: an everyday target
+    in a writable directory is unaffected by the new pre-flight."""
+    fake_source(read())
+    target = tmp_path / "out.json"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={target}"]) == 0
+    assert target.exists()
+
+
+def test_a_target_whose_parent_is_not_writable_is_rejected_before_rendering(
+    fake_source, tmp_path, capsys
+):
+    """The target-domain decision (ADR-0005), executed at its boundary: a
+    target whose parent directory cannot accept a new file is a usage
+    error caught by the pre-flight, rather than surfacing mid-transaction
+    as an OSError the way it used to."""
+    fake_source(read())
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    if os.access(locked, os.W_OK):
+        locked.chmod(0o700)
+        pytest.skip("this account can write into a mode-0500 directory")
+    target = locked / "out.json"
+
+    try:
+        exit_code = cli.main([str(FIXTURE), "--emit", f"json={target}"])
+    finally:
+        locked.chmod(0o700)
+
+    assert exit_code == 3
+    assert not target.exists()
+    assert "Traceback" not in capsys.readouterr().err
+
+
+_DEV_NULL = Path("/dev/null")
+
+
+def _dev_is_locked_down() -> bool:
+    """True when /dev refuses a new sibling file for an unprivileged user --
+    the precondition the narrowed-domain reproduction below needs."""
+    probe = _DEV_NULL.with_name(".ticket29_dev_probe.tmp")
+    try:
+        probe.write_bytes(b"x")
+    except OSError:
+        return True
+    else:
+        probe.unlink()
+        return False
+
+
+@pytest.mark.skipif(not _DEV_NULL.exists(), reason="no /dev/null on this platform")
+@pytest.mark.skipif(
+    not _dev_is_locked_down(),
+    reason="this account can create files directly in /dev -- narrowing precondition absent",
+)
+def test_dev_null_is_a_clean_usage_error_before_anything_renders(fake_source, capsys):
+    """F3-02's transaction half: /dev's own directory cannot accept a
+    sibling temporary, so /dev/null is refused by the pre-flight -- a
+    clean usage error before rendering, not the mid-transaction
+    PermissionError the mechanism silently narrowed to. The ability to
+    write a device or pipe target itself is not restored by this ticket;
+    see the target-domain paragraph this ticket adds to ADR-0005."""
+    fake_source(read())
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"excellon={_DEV_NULL}"])
+
+    assert exit_code == 3
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
+    fake_source, tmp_path, monkeypatch, capsys
+):
+    """F6-01: a failure part-way through the commit loop -- after an
+    earlier target has already been swapped to this run's bytes -- must
+    restore that earlier target too, not merely discard the ones still
+    unattempted. Sabotages the *second* call to ``os.replace`` (the
+    commit loop's own primitive), a distinct failure point from the
+    staging-write sabotage the tests above this section already cover.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.svg"
+    a.write_text("OLD-A")
+    b.write_text("OLD-B")
+
+    real_replace = cli.os.replace
+    calls = {"n": 0}
+
+    def sabotage_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("simulated commit-phase failure on the 2nd target")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cli.os, "replace", sabotage_replace)
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"drawing-svg={b}"])
+
+    assert exit_code == 3
+    assert a.read_bytes() == b"OLD-A", (
+        "target a should have been rolled back to what the previous run left, "
+        "but its os.replace (call #1) had already landed this run's new bytes"
+    )
+    assert b.read_bytes() == b"OLD-B"
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_re_running_over_existing_targets_leaves_no_backup_files_behind(fake_source, tmp_path):
+    """A normal successful re-run over its own previous outputs must leave
+    nothing behind beyond the requested target itself -- the backup this
+    loop makes while committing is cleaned up once the whole set succeeds."""
+    fake_source(read())
+    a = tmp_path / "a.json"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={a}"]) == 0
+    first = a.read_bytes()
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={a}"]) == 0
+
+    assert a.read_bytes() == first
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.json"], (
+        "a successful commit over an existing target left a stray file behind"
+    )
 
 
 # ---------------------------------------------------------------------------

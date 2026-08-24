@@ -53,6 +53,18 @@ today's only caller must stage a whole set of artefacts before committing any of
 see ADR-0001 — and a single write-and-rename call cannot be paused between the two
 halves.
 
+**Target domain.** `stage_payload` needs to create a fresh temporary beside the target,
+and `commit_staged` needs to rename onto it. Together they define the only domain a
+target must satisfy: its parent directory must already exist and accept a new file, and
+the target itself must not already be a directory, because a rename can never land bytes
+there. Nothing here requires the target to be a regular file — a device node or a named
+pipe qualifies exactly as an ordinary file does, provided its parent will accept the
+sibling temporary. A target whose parent refuses new files, as an unprivileged caller
+usually finds `/dev` does, falls outside the domain for that reason alone, not because it
+is a device. A caller composing a set of several targets for one invocation validates
+every target against this domain before rendering the first payload; ADR-0001 states
+that pre-flight for `stompdrill`'s own command line.
+
 ## Rationale
 
 A `binary: ClassVar[bool]` alongside `media_type` and `extension` would match the
