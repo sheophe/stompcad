@@ -67,14 +67,27 @@ def test_stompgeoms_own_suite_catches_a_second_leaf_walk_in_its_own_source() -> 
     )
 
 
+#: The four gate files, each run in its own subprocess below. Combining them
+#: into one pytest invocation would only prove that *at least one* fires --
+#: exactly the vacuous-pass shape this ticket exists to close -- so each is
+#: checked independently and every one of the four must fail on its own.
+_GATE_FILES = (
+    "packages/stompmodel/tests/test_nanometre_guard_is_singular.py",
+    "packages/stompmodel/tests/test_case_face_vocabulary_is_singular.py",
+    "packages/stompgeom/tests/test_the_leaf_walk_is_stated_once.py",
+    "packages/stompmodel/tests/test_tie_break_owner.py",
+)
+
+
 def test_a_fourth_package_breaching_all_four_rules_is_caught_by_every_gate() -> None:
     """A new workspace member is covered by every ownership gate unedited.
 
-    ``stompcollider`` is plan 3's named fourth member. A file inside it that
-    breaches all four "stated once" rules at once is caught by at least one
-    of the four gates -- each derives the packages it scans from
-    ``member_package_dirs``, which discovers this probe the moment its
-    ``src`` directory exists, with no edit to any gate.
+    ``stompcollider``, a file inside it breaching all four "stated once"
+    rules, is caught by every one of the four gates individually -- each
+    derives its scan from ``member_package_dirs``, which discovers the probe
+    with no edit to any gate. Each gate file runs in its own subprocess, not
+    combined into one, so a future change silently weakening two or three of
+    the four cannot hide behind the other's pass.
     """
     probe_pkg = REPO / "packages" / "stompcollider"
     probe_src = probe_pkg / "src" / "stompcollider"
@@ -95,32 +108,38 @@ def test_a_fourth_package_breaching_all_four_rules_is_caught_by_every_gate() -> 
         encoding="utf-8",
     )
     try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                "-o",
-                "addopts=",
-                "-q",
-                "packages/stompmodel/tests/test_nanometre_guard_is_singular.py",
-                "packages/stompmodel/tests/test_case_face_vocabulary_is_singular.py",
-                "packages/stompgeom/tests/test_the_leaf_walk_is_stated_once.py",
-                "packages/stompmodel/tests/test_tie_break_owner.py",
-            ],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        results = {
+            gate_file: subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "no:cacheprovider",
+                    "-o",
+                    "addopts=",
+                    "-q",
+                    gate_file,
+                ],
+                cwd=REPO,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            for gate_file in _GATE_FILES
+        }
     finally:
         shutil.rmtree(probe_pkg, ignore_errors=True)
 
-    assert result.returncode != 0, (
-        "all four ownership gates passed with a file in a fourth package "
+    vacuously_passed = [
+        gate_file for gate_file, result in results.items() if result.returncode == 0
+    ]
+    assert vacuously_passed == [], (
+        "these gates passed (exit 0) with a file in a fourth package "
         "(stompcollider) breaching every one of their published-once rules "
-        "at once -- member_package_dirs() should have discovered it.\n"
-        f"stdout tail:\n{result.stdout[-800:]}"
+        "at once, when EVERY one of the four must fail on its own:\n"
+        + "\n".join(
+            f"{gate_file}:\n{results[gate_file].stdout[-600:]}"
+            for gate_file in vacuously_passed
+        )
     )
