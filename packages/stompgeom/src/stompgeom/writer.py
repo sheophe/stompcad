@@ -13,14 +13,20 @@ import re
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from stompmodel.errors import EmitterError
 
 from .kernel import require_kernel
-from .step import leaf_labels
+from .step import StepLabel, leaf_labels
 
-__all__ = ["render_step", "label_entry"]
+if TYPE_CHECKING:
+    # See stompgeom.step's own TYPE_CHECKING block: real OCP names for
+    # readability only, resolved to Any either way by this workspace's
+    # mypy configuration. See ADR-0008.
+    from OCP.TDocStd import TDocStd_Document
+
+__all__ = ["render_step"]
 
 #: The translator's auto-generated wrapper product. Set at write time, and the
 #: volatile counter it appends is erased afterwards. All three uses -- the
@@ -65,21 +71,6 @@ _COLOUR_CHAIN = re.compile(
 )
 
 
-def label_entry(label: Any) -> str:
-    """A label's document-unique tag path, stable across shape mutation.
-
-    Unlike a shape's own identity, a label's entry string survives
-    ``SetShape``: it is what lets ``_count_colour_assignments`` recognise
-    "the same label" before and after a caller replaces its geometry.
-    """
-    from OCP.TCollection import TCollection_AsciiString
-    from OCP.TDF import TDF_Tool
-
-    text = TCollection_AsciiString()
-    TDF_Tool.Entry_s(label, text)
-    return text.ToCString()
-
-
 # Re-establishing the cut solid's own colour was tried and abandoned: neither
 # re-linking the referred label to its original XCAFDoc_ColorTool colour
 # label nor re-setting the RGB value directly, at solid, component, or
@@ -88,16 +79,16 @@ def label_entry(label: Any) -> str:
 # keeps its colour, so the mechanism is sound; STEPCAFControl_Writer simply
 # does not serialise colour for a shape it had to replace. No further
 # in-kernel route is exposed through this binding to force it.
-def _count_colour_assignments(document: Any, replaced_labels: frozenset[str]) -> int:
+def _count_colour_assignments(document: TDocStd_Document, replaced_labels: frozenset[str]) -> int:
     """Distinct shapes coloured in ``document``, excluding a replaced solid.
 
     A replaced solid keeps its ``XCAFDoc_ColorTool`` assignment (``SetShape``
     does not clear it) but not its written colour, so counting
-    ``replaced_labels`` labels in would overcount against what the writer
-    actually produces. Excluding them is what makes this agree with the real
-    output rather than approximate it. A component referring to one label
-    twice (four screw instances, one product) counts once, matching one
-    written chain.
+    ``replaced_labels`` in would overcount. A component referring to one
+    label twice counts once. Referred-versus-component (see also
+    ``stompdrill.emitters.step.cut_shape``, the same choice on the cutting
+    path): "the shape a component names" is its *referred* label when one
+    exists, else the component itself.
     """
     from OCP.TDF import TDF_Label
     from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
@@ -107,13 +98,15 @@ def _count_colour_assignments(document: Any, replaced_labels: frozenset[str]) ->
     coloured: set[str] = set()
     for component in leaf_labels(document):
         referred = TDF_Label()
-        target = referred if XCAFDoc_ShapeTool.GetReferredShape_s(component, referred) \
+        target = (
+            StepLabel(document, referred)
+            if XCAFDoc_ShapeTool.GetReferredShape_s(component.label, referred)
             else component
-        entry = label_entry(target)
-        if entry in replaced_labels:
+        )
+        if target.entry in replaced_labels:
             continue
-        if color_tool.IsSet(target, XCAFDoc_ColorType.XCAFDoc_ColorSurf):
-            coloured.add(entry)
+        if color_tool.IsSet(target.label, XCAFDoc_ColorType.XCAFDoc_ColorSurf):
+            coloured.add(target.entry)
     return len(coloured)
 
 
@@ -218,7 +211,7 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
 
 
 def render_step(
-    document: Any,
+    document: TDocStd_Document,
     *,
     title: str,
     timestamp: str,

@@ -12,8 +12,8 @@ from hypothesis import strategies as st
 
 from stompgeom.step import (
     _EPOCH,
+    StepLabel,
     bounding_box_mm,
-    label_name,
     leaf_labels,
     read_step,
     source_timestamp,
@@ -266,7 +266,8 @@ def test_leaf_labels_does_not_filter_a_null_shaped_leaf() -> None:
     shapes.SetShape(label, TopoDS_Shape())
 
     (found,) = leaf_labels(document)
-    assert found.IsEqual(label)
+    assert found.label.IsEqual(label)
+    assert found.document is document
 
 
 def test_leaf_labels_returns_leaves_not_assemblies() -> None:
@@ -277,11 +278,11 @@ def test_leaf_labels_returns_leaves_not_assemblies() -> None:
     found = leaf_labels(document)
 
     assert len(found) == 1
-    assert found[0].IsEqual(component)
+    assert found[0].label.IsEqual(component)
 
 
 # ---------------------------------------------------------------------------
-# label_name -- the one rule for what XCAF recorded as a label's name
+# StepLabel.name -- the one rule for what XCAF recorded as a label's name
 # ---------------------------------------------------------------------------
 
 
@@ -291,9 +292,10 @@ def _new_shape_tool() -> tuple[object, Any]:
     Returns the document alongside the tool; the caller must keep the
     document referenced for as long as it uses any label drawn from it --
     the document owns the label's underlying data. Verified by experiment,
-    not merely conventional: once the document is garbage-collected, a label
-    drawn from it dangles and this binding segfaults (exit 139) on next use
-    rather than raising -- there is no exception a caller could catch instead.
+    not merely conventional: once the document is released, a label drawn
+    from it dangles and answers silently wrong (empty name, the document's
+    own root entry, a null shape) rather than raising -- see ``StepLabel``
+    below and ``docs/BACKLOG.md``'s corrected segfault-hazard entry.
     """
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document
@@ -393,27 +395,27 @@ def _unattributed_label() -> tuple[object, object]:
 def test_label_name_reports_the_occ_indirection_placeholder_as_unnamed() -> None:
     """An occurrence with no name of its own must read as unnamed, not as
     OCC's synthesised ``=>[0:1:1:N]`` indirection string."""
-    _document, component = _unnamed_occurrence_document()
+    document, component = _unnamed_occurrence_document()
 
-    assert label_name(component) == ""
+    assert StepLabel(document, component).name == ""
 
 
 def test_label_name_reports_a_genuine_occurrence_name_exactly() -> None:
     """The other direction of the same rule: a component whose occurrence
     label *was* named reports that name, not the placeholder and not the
     referred product's own name."""
-    _document, component = _named_occurrence_document("body")
+    document, component = _named_occurrence_document("body")
 
-    assert label_name(component) == "body"
+    assert StepLabel(document, component).name == "body"
 
 
 def test_label_name_reports_a_label_with_no_name_attribute_as_unnamed() -> None:
     """A label that was never named at all -- no placeholder, no attribute --
     reads the same as one carrying the synthesised indirection: both are
     "nobody named this", and the caller must not be able to tell them apart."""
-    _document, label = _unattributed_label()
+    document, label = _unattributed_label()
 
-    assert label_name(label) == ""
+    assert StepLabel(document, label).name == ""
 
 
 def test_label_name_leaves_a_genuine_bracketed_colonned_name_untouched() -> None:
@@ -425,13 +427,195 @@ def test_label_name_leaves_a_genuine_bracketed_colonned_name_untouched() -> None
     suffixed = "=>[0:1:1:34]suffix"
 
     for name in (embedded, prefixed, suffixed):
-        _document, label = _labelled(name)
-        assert label_name(label) == name
+        document, label = _labelled(name)
+        assert StepLabel(document, label).name == name
 
 
 def test_the_reader_keeps_no_private_twin_of_the_name_rule() -> None:
-    """``label_name`` is the one implementation; a private ``_name_of`` would
-    let the reader and the writer disagree about what a name is."""
+    """``_label_name`` is the one implementation, reached only through
+    ``StepLabel.name``; a private ``_name_of`` would let the reader and the
+    writer disagree about what a name is."""
     import stompgeom.step as step_module
 
     assert not hasattr(step_module, "_name_of")
+
+
+def test_steplabel_equality_is_by_field_not_by_kernel_identity() -> None:
+    """A frozen dataclass compares its fields; ``TDF_Label.__eq__`` is
+    CPython object identity (not the kernel's own ``IsEqual``), so two
+    ``StepLabel``s are equal only when they wrap the *same* Python label
+    object -- the property the anti-regraft tests below rely on."""
+    document, label = _labelled("body")
+
+    assert StepLabel(document, label) == StepLabel(document, label)
+
+
+# ---------------------------------------------------------------------------
+# StepLabel -- the label carries its document (ticket 34, ADR-0008)
+#
+# ``leaf_labels`` used to return bare ``TDF_Label`` handles whose validity
+# depended on a document lifetime the return value gave no way to see. Every
+# claim below is executed evidence, not narrated: `.scratch/architecture-
+# review/design/wave4-t18-probes.py` (V1-V5) reproduces each one directly
+# against the bare pre-ticket API, independently of these tests.
+# ---------------------------------------------------------------------------
+
+
+def _build_one_leaf_document() -> Any:
+    """A single named leaf under a named assembly -- one label whose name,
+    entry and shape should all survive its document's release once wrapped."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    app = XCAFApp_Application.GetApplication_s()
+    document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    app.InitDocument(document)
+
+    shapes = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 1.0, 2.0, 3.0).Shape()
+    leaf = shapes.AddShape(box, False)
+    TDataStd_Name.Set_s(leaf, TCollection_ExtendedString("named-leaf"))
+
+    assembly = shapes.NewShape()
+    TDataStd_Name.Set_s(assembly, TCollection_ExtendedString("assembly"))
+    component = shapes.AddComponent(assembly, leaf, TopLoc_Location())
+    TDataStd_Name.Set_s(component, TCollection_ExtendedString("named-leaf"))
+    shapes.UpdateAssemblies()
+    return document
+
+
+def test_a_steplabel_reads_correctly_after_the_document_that_produced_it_is_released() -> None:
+    """Criterion 1. The composition the published surface invites: take a
+    document's leaves, drop every other reference to the document, force
+    collection, then read each fact back. Before this ticket ``leaf_labels``
+    returned bare labels and every one of these read back wrong once the
+    document was released (F1-01); wrapped in ``StepLabel``, which holds the
+    document itself, all three answer correctly because the document is
+    still referenced -- through the wrapper, not through caller discipline.
+    """
+    import gc
+
+    def _leaves_from_a_document_nobody_else_holds() -> tuple[StepLabel, ...]:
+        return leaf_labels(_build_one_leaf_document())
+
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
+
+    leaves = _leaves_from_a_document_nobody_else_holds()
+    gc.collect()
+
+    names = [leaf.name for leaf in leaves]
+    entries = [leaf.entry for leaf in leaves]
+    shapes_null = [XCAFDoc_ShapeTool.GetShape_s(leaf.label).IsNull() for leaf in leaves]
+
+    assert names == ["named-leaf"], names
+    assert entries and all(entry != "" for entry in entries), entries
+    assert shapes_null == [False], shapes_null
+
+
+def test_anchoring_on_the_shape_tool_or_the_root_label_does_not_keep_a_label_valid() -> None:
+    """Criterion 2. The anchor is the ``TDocStd_Document`` object itself,
+    nothing drawn from it: a value that instead held the document's own
+    ``ShapeTool`` or its own root label (``document.Main()``) would look
+    equally sound and still fail this test, because neither keeps the
+    document alive. Reproduced for both wrong anchors; the owned value
+    (holding the document itself) reads back correctly in the same process.
+    """
+    import gc
+
+    from stompgeom.step import _label_name
+
+    def _via_shape_tool() -> Any:
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+        document = _build_one_leaf_document()
+        tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+        (leaf,) = leaf_labels(document)
+        return tool, leaf.label
+
+    def _via_root_label() -> Any:
+        document = _build_one_leaf_document()
+        root = document.Main()
+        (leaf,) = leaf_labels(document)
+        return root, leaf.label
+
+    def _via_document() -> StepLabel:
+        (leaf,) = leaf_labels(_build_one_leaf_document())
+        return leaf
+
+    # Each scenario is built and collected on its own, one at a time --
+    # matching `.scratch/architecture-review/design/wave4-t18-probes-
+    # judge-v2.py` (P5) exactly, which this reproduces. Building all three
+    # scenarios first and collecting once at the end does NOT reproduce the
+    # defect reliably: memory the C++ side has already freed can still read
+    # back its old, coherent bytes until something else overwrites them --
+    # itself further evidence that a dangling label is a memory-safety
+    # hazard, not a documented contract, which is exactly why this package
+    # must never publish one bare.
+    _tool, tool_label = _via_shape_tool()
+    gc.collect()
+    assert _label_name(tool_label) == "", (
+        "the shape tool kept the label valid -- it should not have"
+    )
+
+    _root, root_label = _via_root_label()
+    gc.collect()
+    assert _label_name(root_label) == "", (
+        "the document's own root label kept the label valid -- it should not have"
+    )
+
+    document_anchored = _via_document()
+    gc.collect()
+    assert document_anchored.name == "named-leaf"
+
+
+def test_two_walks_of_one_live_document_disagree_by_identity_agree_by_entry() -> None:
+    """Criterion 3, the anti-regraft test. ``TDF_Label.__eq__`` is CPython
+    object identity and each walk obtains its own Python label object for
+    the same node, so two ``StepLabel``s for one node compare unequal even
+    though their entry strings agree and the kernel's own ``IsEqual``
+    answers true. This is why the writer's ``replaced_labels`` parameter is,
+    and must stay, a set of entry strings: narrowing it to a set of owned
+    ``StepLabel``s would make membership silently false for the same node on
+    the happy path. A diff narrowing that parameter is a defect, not this
+    test's job to permit.
+    """
+    document = _build_one_leaf_document()
+
+    (first,) = leaf_labels(document)
+    (second,) = leaf_labels(document)
+
+    assert first != second, "two separate kernel calls must not compare == by accident"
+    assert first.entry == second.entry
+    assert first.label.IsEqual(second.label)
+
+
+def test_a_shape_measures_identically_whether_or_not_its_document_is_held() -> None:
+    """Criterion 4, the negative half. ``TopoDS_Shape`` is independently
+    reference-counted and owes nothing to its document -- unlike a label, it
+    does not dangle by the document being released. Without this test,
+    "these are two debts, not one" is an assertion rather than executed
+    evidence, and a later wave could re-wrap the shape on the strength of
+    the label's own, unrelated hazard.
+    """
+    import gc
+
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
+
+    def _shape_from_a_document_nobody_holds() -> Any:
+        (leaf,) = leaf_labels(_build_one_leaf_document())
+        return XCAFDoc_ShapeTool.GetShape_s(leaf.label)
+
+    released = _shape_from_a_document_nobody_holds()
+    gc.collect()
+
+    held_document = _build_one_leaf_document()
+    (held_leaf,) = leaf_labels(held_document)
+    held = XCAFDoc_ShapeTool.GetShape_s(held_leaf.label)
+
+    assert bounding_box_mm(released) == pytest.approx(bounding_box_mm(held), abs=1e-9)

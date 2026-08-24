@@ -109,13 +109,13 @@ def _named_solid_shapes(document: Any, keyword: str) -> list[Any]:
     """Every non-null leaf shape named like ``keyword``, via the published walk."""
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
-    from stompgeom.step import label_name, leaf_labels
+    from stompgeom.step import leaf_labels
 
     return [
         shape
-        for label in leaf_labels(document)
-        if keyword in label_name(label).upper()
-        and not (shape := XCAFDoc_ShapeTool.GetShape_s(label)).IsNull()
+        for entry in leaf_labels(document)
+        if keyword in entry.name.upper()
+        and not (shape := XCAFDoc_ShapeTool.GetShape_s(entry.label)).IsNull()
     ]
 
 

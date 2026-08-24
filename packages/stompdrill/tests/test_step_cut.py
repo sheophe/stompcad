@@ -318,26 +318,27 @@ def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
         step_module.cut_shape(top_model, data)
 
 
-def test_no_matching_component_is_an_emitter_error():
-    """``label_name`` never matching anything is the same failure a
+def test_no_matching_component_is_an_emitter_error(monkeypatch):
+    """A label's name never matching anything is the same failure a
     renamed or mis-supplied model would produce — worth a named diagnostic,
-    not a silent no-op."""
+    not a silent no-op. Monkeypatched through ``StepLabel.name`` itself
+    (the public surface every caller reads through), not through a private
+    free function this ticket deleted."""
     from stompdrill.emitters import step as step_module
+    from stompgeom.step import StepLabel
     from stompmodel.errors import EmitterError
     from tests.conftest import at, make_data, registration_for
 
-    def never_named(label: object) -> str:
-        return ""
-
+    # Built (and its solids named) before the patch: load_case_model's own
+    # select_solid must still see real names, so only cut_shape's later,
+    # fresh kernel walk is affected.
     model = _model()
     data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
-    original = step_module.label_name
-    step_module.label_name = never_named
-    try:
-        with pytest.raises(EmitterError, match="no component named"):
-            step_module.cut_shape(model, data)
-    finally:
-        step_module.label_name = original
+
+    monkeypatch.setattr(StepLabel, "name", property(lambda self: ""))
+
+    with pytest.raises(EmitterError, match="no component named"):
+        step_module.cut_shape(model, data)
 
 
 def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
