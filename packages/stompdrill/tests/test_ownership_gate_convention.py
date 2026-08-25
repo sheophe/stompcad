@@ -1,17 +1,18 @@
-"""Integration checks over the ownership-gate convention itself (tickets 25, 32).
+"""Integration checks over the ownership-gate convention itself (tickets 25, 32, 48).
 
-Neither test below polices one of the five singularity rules; each rule's
-own gate lives in the suite of the member that owns it. These check the
+No test below polices one of the five singularity rules; each rule's own
+gate lives in the suite of the member that owns it. These check the
 *convention*: a breach in a member's own source fails that member's own
-command, a package no gate names literally is still caught, and an
-innocent new package trips no gate. Each spawns a subprocess pytest run,
-so none is collected by the suite it drives. The gate family is discovered
-by the marker every gate defines (``_REACH_TEST``), not listed.
+command as that gate, a package no gate names literally is still caught,
+and an innocent new package trips no gate. Every check that drives a suite
+spawns a subprocess, so none is collected by the suite it drives. The gate
+family is discovered by the marker every gate defines (``_REACH_TEST``).
 """
 
 from __future__ import annotations
 
 import ast
+import re
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,14 @@ from pathlib import Path
 
 from tools.workspace_membership import REPO, member_package_dirs
 
-WRITER = REPO / "packages" / "stompgeom" / "src" / "stompgeom" / "writer.py"
+STOMPGEOM = REPO / "packages" / "stompgeom"
+WRITER = STOMPGEOM / "src" / "stompgeom" / "writer.py"
+
+#: The gate that owns the leaf-walk rule, in the suite that owns the walk.
+#: Its rule-checking test is read off by the family's own convention below,
+#: never spelled out here, so renaming it cannot leave this probe watching
+#: for a failure that can no longer be reported.
+_LEAF_WALK_GATE = STOMPGEOM / "tests" / "test_the_leaf_walk_is_stated_once.py"
 
 #: The name every gate file in the family gives its reach-control test.
 #: Carrying this function is what makes a module part of the family --
@@ -51,35 +59,199 @@ def _second_leaf_walk(document):  # deliberate duplicate, for this test only
     return out
 '''
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+#: The words pytest's own summary line counts an executed test with.
+#: ``deselected`` and ``warnings`` are absent on purpose: neither is a test
+#: that ran, and counting them would let a run that examined nothing clear
+#: the floor below.
+_OUTCOME = re.compile(r"(\d+) (?:passed|failed|skipped|xfailed|xpassed|errors?)\b")
+
+
+def _plain(text: str) -> str:
+    """Captured output with terminal colour escapes removed."""
+    return _ANSI.sub("", text)
+
+
+def _test_names(path: Path) -> list[str]:
+    """Every top-level ``test_`` function a test module defines, in file order."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+    ]
+
+
+def _rule_test_of(gate_file: Path) -> str:
+    """The rule-checking test of a gate, by this family's own convention.
+
+    It is the *last* top-level ``test_`` function defined, following the
+    reach control and every proof-the-scanner-fires positive control.
+    """
+    names = _test_names(gate_file)
+    assert _REACH_TEST in names, f"{gate_file} carries no reach control -- not a gate in this family"
+    return names[-1]
+
+
+def _tests_defined_by(package: Path) -> int:
+    """A floor on what a whole run of ``package``'s own suite must report.
+
+    Read from the source rather than written down, so no count in this file
+    drifts. It is a lower bound in both directions that matter: a skip is
+    still a reported outcome, and parametrised or class-bound tests only add
+    to what a run reports beyond the module-level functions counted here.
+    """
+    return sum(len(_test_names(path)) for path in sorted((package / "tests").rglob("test_*.py")))
+
+
+def _run_stompgeoms_own_command() -> subprocess.CompletedProcess[str]:
+    """Exactly the command CLAUDE.md documents for ``stompgeom``, captured."""
+    return subprocess.run(
+        ["uv", "run", "--no-sync", "pytest", "-o", "addopts=", "-q"],
+        cwd=STOMPGEOM,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def _outcomes_reported(result: subprocess.CompletedProcess[str]) -> int | None:
+    """How many executed tests pytest's own summary line reports, if any.
+
+    ``None`` means no summary line was printed, which is exactly what an
+    exit code on its own cannot tell apart from a suite that ran and failed.
+    """
+    for line in reversed(_plain(result.stdout).splitlines()):
+        counts = _OUTCOME.findall(line)
+        if counts and " in " in line:
+            return sum(int(count) for count in counts)
+    return None
+
+
+def _did_not_examine_stompgeoms_suite(result: subprocess.CompletedProcess[str]) -> list[str]:
+    """Every reason this run is no evidence that stompgeom's suite ran at all.
+
+    The size of what was examined, never the exit status: a summary line
+    reporting at least as many outcomes as stompgeom's tests define. A
+    resolver failure, an import or collection error, a timeout or an
+    interpreter that never started prints no such line and is refused here.
+    """
+    floor = _tests_defined_by(STOMPGEOM)
+    if floor == 0:
+        return ["stompgeom's tests/ defines no test function -- this floor would pass on nothing"]
+    reported = _outcomes_reported(result)
+    if reported is None:
+        return ["pytest printed no summary line at all -- the suite never ran"]
+    if reported < floor:
+        return [
+            (
+                f"pytest's own summary covers {reported} of the {floor} tests "
+                "stompgeom's own tests/ defines -- part of the suite never ran"
+            )
+        ]
+    return []
+
+
+def _is_not_the_leaf_walk_gate_failing(result: subprocess.CompletedProcess[str]) -> list[str]:
+    """Every reason this run is not the leaf-walk gate catching this breach.
+
+    Identity, not exit status: the failure pytest reports must be the node
+    id of that gate's own rule-checking test, and its output must name the
+    file the probe mutated. A non-zero exit is necessary and is checked
+    last, because on its own it is what ticket 48 found proves nothing.
+    """
+    problems = _did_not_examine_stompgeoms_suite(result)
+    node_id = f"{_LEAF_WALK_GATE.relative_to(STOMPGEOM).as_posix()}::{_rule_test_of(_LEAF_WALK_GATE)}"
+    breached = WRITER.relative_to(STOMPGEOM).as_posix()
+    text = _plain(result.stdout + result.stderr)
+    if f"FAILED {node_id}" not in text:
+        problems.append(f"pytest reported no failure of {node_id}")
+    if breached not in text:
+        problems.append(f"the reported failure never names {breached}, the file this probe mutated")
+    if result.returncode == 0:
+        problems.append("the command exited 0")
+    return problems
+
+
+def _fabricated(returncode: int, stdout: str) -> subprocess.CompletedProcess[str]:
+    """A run that never happened, for the sabotage control below."""
+    return subprocess.CompletedProcess(args=["uv", "run"], returncode=returncode, stdout=stdout, stderr="")
+
 
 def test_stompgeoms_own_suite_catches_a_second_leaf_walk_in_its_own_source() -> None:
     """A regression entirely inside ``stompgeom`` is caught by ``stompgeom`` alone.
 
     Appending a second XCAF leaf descent to ``stompgeom``'s own ``writer.py``
-    and running exactly the command CLAUDE.md documents for ``stompgeom``
-    ("cd packages/stompgeom && uv run --no-sync pytest") must fail: the fold
-    this rule protects belongs to ``stompgeom``, and ticket 25 moved the gate
-    that notices its violation into ``stompgeom``'s own suite.
+    and running exactly the command CLAUDE.md documents for that member must
+    fail *as the leaf-walk gate*: over a summary covering the whole suite,
+    naming that gate's own rule test and the mutated file. Ticket 25 moved
+    the gate here; ticket 48 replaced this probe's exit-code-only assertion,
+    which a resolver or collection failure satisfied just as well.
     """
     original = WRITER.read_text(encoding="utf-8")
     try:
         WRITER.write_text(original + _DUPLICATE_WALK, encoding="utf-8")
-        result = subprocess.run(
-            ["uv", "run", "--no-sync", "pytest", "-o", "addopts=", "-q"],
-            cwd=REPO / "packages" / "stompgeom",
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        result = _run_stompgeoms_own_command()
     finally:
         WRITER.write_text(original, encoding="utf-8")
 
-    assert result.returncode != 0, (
-        "stompgeom's own suite passed (exit 0) with a second XCAF leaf walk "
-        "sitting in its own writer.py -- the ownership gate is supposed to "
-        "catch this from stompgeom's own suite alone.\n"
-        f"stdout tail:\n{result.stdout[-800:]}"
+    problems = _is_not_the_leaf_walk_gate_failing(result)
+    assert problems == [], (
+        "stompgeom's own suite did not fail as its own leaf-walk gate with a "
+        "second XCAF leaf walk sitting in its own writer.py:\n"
+        + "\n".join(problems)
+        + f"\nstdout tail:\n{result.stdout[-800:]}"
     )
+
+
+def test_stompgeoms_own_suite_is_green_with_that_breach_absent() -> None:
+    """The innocent probe matched to the guilty one above (ticket 48).
+
+    Unmutated, the same command examines the same suite and exits 0. Without
+    this, a stompgeom suite left permanently red -- by an unrelated
+    regression, or by a restore that silently failed -- would let the guilty
+    probe pass while proving nothing about the gate.
+    """
+    result = _run_stompgeoms_own_command()
+
+    assert _did_not_examine_stompgeoms_suite(result) == [], (
+        "stompgeom's own suite did not run at all, unmutated:\n"
+        f"{result.stdout[-800:]}\n{result.stderr[-800:]}"
+    )
+    assert result.returncode == 0, (
+        "stompgeom's own suite is red before this module mutates anything, so the "
+        f"guilty probe beside it proves nothing:\n{result.stdout[-800:]}"
+    )
+
+
+def test_a_non_zero_run_that_is_not_the_gate_firing_is_refused() -> None:
+    """The sabotage control: the strengthening is what rejects these (ticket 48).
+
+    Each fabricated run is non-zero, so the exit-code-only assertion this
+    module carried until ticket 48 accepts all three -- a resolver failure
+    before pytest started, a command that collected nothing, and an
+    unrelated test failing over a full suite. Asserting on identity and on
+    the size examined refuses all three, which is the whole difference.
+    """
+    unrelated = (
+        "F" + "." * 69 + "\n"
+        "=================================== FAILURES ===================================\n"
+        "tests/test_writer.py:42: AssertionError\n"
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/test_writer.py::test_a_wholly_unrelated_claim - AssertionError\n"
+        "1 failed, 69 passed in 1.66s\n"
+    )
+    fabricated = {
+        "uv failed before pytest started": _fabricated(1, ""),
+        "the command collected nothing": _fabricated(5, "no tests ran in 0.01s\n"),
+        "an unrelated test failed": _fabricated(1, unrelated),
+    }
+    for label, result in fabricated.items():
+        assert result.returncode != 0, f"{label}: this control must satisfy the old assertion"
+        assert _is_not_the_leaf_walk_gate_failing(result), (
+            f"{label}: accepted by the strengthened verdict, which is the hole ticket 48 closes"
+        )
 
 
 def _discover_gates() -> tuple[tuple[Path, str], ...]:
@@ -89,9 +261,7 @@ def _discover_gates() -> tuple[tuple[Path, str], ...]:
     appearing in a literal list -- found by walking every workspace
     member's own ``tests/``, so a new gate built the same way is exercised
     here the moment it exists. Its rule-checking test is read off
-    structurally too: by this family's own convention (every gate file
-    above), it is the *last* top-level ``test_`` function defined, following
-    the reach control and every proof-the-scanner-fires positive control.
+    structurally too, by ``_rule_test_of`` above.
     """
     found: list[tuple[Path, str]] = []
     for pkg in member_package_dirs():
@@ -99,14 +269,8 @@ def _discover_gates() -> tuple[tuple[Path, str], ...]:
         if not tests_dir.is_dir():
             continue
         for path in sorted(tests_dir.rglob("test_*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            test_names = [
-                node.name
-                for node in tree.body
-                if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
-            ]
-            if _REACH_TEST in test_names:
-                found.append((path, test_names[-1]))
+            if _REACH_TEST in _test_names(path):
+                found.append((path, _rule_test_of(path)))
     return tuple(found)
 
 
