@@ -58,10 +58,10 @@ halves.
 `stage_payload` hands back a `StagedWrite`, and exactly one of `StagedWrite.commit`
 and `StagedWrite.discard` is owed on every value it hands out. The verbs are the
 value's own methods because the temporary is the value's own state: a caller can no
-longer reach a verb without the value it applies to, and cannot name the temporary at
-all. That narrows what the module publishes — `stage_payload` and the value it returns
-are the whole surface — without narrowing what it can do, because the split across two
-calls the paragraph above requires is unchanged.
+longer reach a verb without the value it applies to, and neither verb names the
+temporary. That narrows what the module publishes — `stage_payload` and the value
+it returns are the whole surface — without narrowing what it can do, because the
+split across two calls the paragraph above requires is unchanged.
 
 Nothing detects a `StagedWrite` a caller stages and then drops. That is a weighed
 decision rather than an omission, and these are the candidates it weighed:
