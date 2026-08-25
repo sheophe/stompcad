@@ -122,7 +122,12 @@ The hole pattern passes from `stompdrill` to `stompcollider` in memory. It remai
 available as an explicit artefact for anyone running `stompcollider` standalone, but
 `stompcad` has no reason to write a file it immediately reads back.
 
-`stompcad` depends on `stompgeom` only for lengths it reports. It does no geometry.
+`stompcad` depends on `stompmodel`, not on `stompgeom`: on the lengths it reports, and
+on the drill document and the diagnostics it hands between the two tools. It does no
+geometry, so it takes no direct dependency on `stompgeom`; the kernel reaches it only
+transitively — through `stompdrill`, whose distribution declares `stompgeom` today, and
+through `stompcollider`, which `docs/specs/stompcollider-technical.md` has writing its
+assembly through `stompgeom`'s writer.
 
 ## Interaction
 

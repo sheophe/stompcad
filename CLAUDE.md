@@ -111,9 +111,11 @@ size, or a part number in no catalogue is a usage error rather than a diagnostic
 `json`, `step`.
 
 The requested `--emit` targets are validated once, as a set, before anything is
-rendered: two targets may not name one path, and every target that already exists
-must be a regular file. The write mechanism's own preconditions are not restated
-there — it enforces and reports them itself; see
+rendered: two targets may not name one path, compared under a case- and
+normalisation-folded key, because a filesystem may hold two such spellings as one
+file; and every target that already exists must be a regular file. The write
+mechanism's own preconditions are not restated there — it enforces and reports them
+itself; see
 [ADR-0005](docs/adr/0005-binary-emitter-payloads.md) and
 [ADR-0001](docs/adr/0001-pipeline-and-emitter-adapters.md). A run that fails this
 check, or fails while writing, writes none of its requested artefacts and leaves
@@ -284,9 +286,10 @@ CLI.
   artefact written) rather than crashing; only construction is guarded, so a fault raised
   later from the emitter's own `emit` step keeps its traceback. An emitter returns its
   payload and never writes it. The command line stages every requested artefact through
-  `stompmodel.protocols.stage_payload`, then commits each through `commit_staged`, which is
-  where the bytes reach a path and are counted; the CLI keeps only the sentence it prints
-  from that count — see [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
+  `stompmodel.protocols.stage_payload`, then commits each through the `StagedWrite.commit`
+  that staging handed back, which is where the bytes reach a path and are counted; the CLI
+  keeps only the sentence it prints from that count — see
+  [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
   `render(scene, title)`, the same seam `drawing_svg` and `drawing_pdf` serialise a
   `Scene` through.
 - **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`, then
