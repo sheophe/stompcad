@@ -5,8 +5,8 @@ boundary already excludes every boss. A raised feature's hole in that face
 is coplanar with the floor by construction, so its height is invisible from
 the hole's own geometry; ``find_faces`` bundles each floor with candidate
 companions so a hole pairs with the face carrying its height. Relief unless
-a companion stands proud, towards the drilled face, past
-``_STRUCTURE_HEIGHT_MM``; a receding companion removes material, never structure.
+a companion stands proud -- away from the drilled face, into the cavity --
+past ``_STRUCTURE_HEIGHT_MM``; a receding companion removes material, never structure.
 """
 
 from __future__ import annotations
@@ -30,16 +30,17 @@ __all__ = [
 #: features, so it cannot pair a hole with an unrelated patch.
 _COMPANION_MATCH_MM = 0.01
 
-#: How far a companion must stand proud, towards the drilled face, before it
-#: is structure rather than cast relief. Not a clearance: pedal builders
-#: drill straight through lettering, and on many castings its background is
-#: flush or recessed, so height above the floor -- not distance from a bit
-#: -- is what tells relief from a real boss. Cast lettering measures 0.50 mm
-#: proud on the 1590BB (``tests.hammond.BB_RELIEF_MM``) and is often flush
-#: or recessed; a moulded boss or standoff is millimetres. 2.0 mm sits in
-#: that gap with 4x headroom over the tallest lettering measured. No cached
-#: model's own structure needs this exact value -- see the synthetic tests
-#: in ``tests/test_cad_region_synthetic.py``.
+#: How far a companion must stand proud of the floor -- away from the drilled
+#: face, into the cavity -- before it is structure rather than cast relief.
+#: Not a clearance: pedal builders drill straight through lettering, and on
+#: many castings its background is flush or recessed, so height above the
+#: floor -- not distance from a bit -- is what tells relief from a real boss.
+#: Cast lettering measures 0.50 mm proud on the 1590BB
+#: (``tests.hammond.BB_RELIEF_MM``) and is often flush or recessed; a moulded
+#: boss or standoff is millimetres. 2.0 mm sits in that gap with 4x headroom
+#: over the tallest lettering measured. No cached model's own structure needs
+#: this exact value -- see the synthetic tests in
+#: ``tests/test_cad_region_synthetic.py``.
 _STRUCTURE_HEIGHT_MM = 2.0
 
 
@@ -47,8 +48,8 @@ def classify_bounds(face: Any, axis: int, outward: float) -> tuple[list[Any], li
     """Split the floor's inner wires into structure and cast relief.
 
     ``outward`` is the drilled face's own outward normal component along
-    ``axis`` (``Faces.outward[axis]``): a companion nearer the drilled face
-    than the floor is proud, one further away recedes and is never
+    ``axis`` (``Faces.outward[axis]``): a companion further from the drilled
+    face than the floor stands proud, one nearer it recedes and is never
     structure -- ``_proud_mm`` needs the sign to tell those apart, not just
     a distance. A hole with no companion is structure too, since an
     unmeasured depth is never safe to assume shallow.
