@@ -333,19 +333,24 @@ def test_the_inner_level_tie_break_never_outranks_a_real_area_difference():
     assert _inner_level([far, near], drilled).faces == ("B",)
 
 
-def test_the_nearest_companion_breaks_an_exact_distance_tie_towards_the_drilled_face():
+def test_the_nearest_companion_breaks_an_exact_distance_tie_towards_the_proud_side():
     """Equal distances put the two candidates on opposite sides of ``inner``,
-    and exactly one of those sides is the drilled one (``-inner.outward``),
-    so the rule is total on the candidates' own geometry.
+    and exactly one of those sides is the proud one (``+inner.outward``),
+    so the rule is total on the candidates' own geometry. Positions mirror
+    the real 1590BB: its floor sits at -27.75 facing ``+``, its drilled
+    face at -30.0, and its 0.5 mm cast lettering at -27.25 -- so the proud
+    side is the one *away* from the drilled face. Preferring it can only
+    turn a would-be relief into structure; the other side reports a boss
+    as a negative height and lets a hole through it.
     """
-    inner = _level(-3.0, 100.0, -1.0, "I")
-    towards_drilled = _level(-1.0, 10.0, -1.0, "P")
-    away = _level(-5.0, 10.0, -1.0, "Q")
+    inner = _level(-27.75, 100.0, 1.0, "I")
+    proud = _level(-27.25, 10.0, 1.0, "P")
+    receding = _level(-28.25, 10.0, 1.0, "Q")
     # The control: the two distances are exactly, not approximately, equal.
-    assert abs(towards_drilled.position - inner.position) == abs(away.position - inner.position)
+    assert abs(proud.position - inner.position) == abs(receding.position - inner.position)
 
-    assert _nearest_companion_level([towards_drilled, away], inner).faces == ("P",)
-    assert _nearest_companion_level([away, towards_drilled], inner).faces == ("P",)
+    assert _nearest_companion_level([proud, receding], inner).faces == ("P",)
+    assert _nearest_companion_level([receding, proud], inner).faces == ("P",)
 
 
 def test_the_nearest_companion_tie_break_never_outranks_a_real_distance():
@@ -353,12 +358,12 @@ def test_the_nearest_companion_tie_break_never_outranks_a_real_distance():
 
     ``receding`` sits on the side the tie-break disfavours and is nearer;
     a ranking that consulted the side first would elect the further
-    ``towards_drilled`` instead.
+    ``proud`` instead.
     """
-    inner = _level(-3.0, 100.0, -1.0, "I")
-    receding = _level(-4.0, 10.0, -1.0, "Q")
-    towards_drilled = _level(0.0, 10.0, -1.0, "P")
-    assert abs(receding.position - inner.position) != abs(towards_drilled.position - inner.position)
+    inner = _level(-27.75, 100.0, 1.0, "I")
+    receding = _level(-28.25, 10.0, 1.0, "Q")
+    proud = _level(-26.75, 10.0, 1.0, "P")
+    assert abs(receding.position - inner.position) != abs(proud.position - inner.position)
 
-    assert _nearest_companion_level([receding, towards_drilled], inner).faces == ("Q",)
-    assert _nearest_companion_level([towards_drilled, receding], inner).faces == ("Q",)
+    assert _nearest_companion_level([receding, proud], inner).faces == ("Q",)
+    assert _nearest_companion_level([proud, receding], inner).faces == ("Q",)

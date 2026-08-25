@@ -9,7 +9,7 @@ from stompdrill.cad.region import build_region, classify_bounds, contains, regio
 from stompgeom.step import read_step
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, nm_from_mm
 
 pytestmark = pytest.mark.hammond
 
@@ -439,6 +439,13 @@ def _tie_compound(*faces):
     return compound
 
 
+def _bounding_box(face) -> tuple[int, ...]:
+    """``_floor_face``'s own secondary key: the box in whole nanometres."""
+    from stompgeom.step import bounding_box_mm
+
+    return tuple(nm_from_mm(value) for value in bounding_box_mm(face))
+
+
 def _face_area(face) -> float:
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
@@ -475,6 +482,48 @@ def test_the_floor_face_breaks_an_exact_area_tie_on_the_rounded_bounding_box():
 
     assert _floor_face(_tie_compound(low, high)).IsSame(high)
     assert _floor_face(_tie_compound(high, low)).IsSame(high)
+
+
+def test_the_floor_face_tie_break_reads_whole_nanometres_not_kernel_floats():
+    """The stated rule ranks the bounding box *in whole nanometres*, for the
+    reason ``case._levels`` already gives: a difference below a nanometre
+    is kernel-float noise, not geometry, and letting it decide would put
+    the winner back where the tie-break exists to take it from. ``noise``
+    leads on raw floats by half a nanometre; ``real`` leads once both are
+    rounded, by a difference a machinist could measure.
+    """
+    from stompdrill.cad.region import _floor_face
+    from stompgeom.step import bounding_box_mm
+
+    noise = _rectangle_face(0.0, _square_corners(2**-31, 0.0, 10.0))
+    real = _rectangle_face(0.0, _square_corners(0.0, 2**-10, 10.0))
+    # The controls: an exact area tie, so the box decides; and ``noise``
+    # really does win on raw floats, so the rounding is what is under test.
+    assert _face_area(noise) == _face_area(real)
+    assert tuple(bounding_box_mm(noise)) > tuple(bounding_box_mm(real))
+    assert _bounding_box(noise) < _bounding_box(real)
+
+    assert _floor_face(_tie_compound(noise, real)).IsSame(real)
+    assert _floor_face(_tie_compound(real, noise)).IsSame(real)
+
+
+def test_the_floor_face_tie_break_compares_minima_before_maxima():
+    """The stated coordinate order is ``bounding_box_mm``'s own -- the three
+    minima, then the three maxima. ``low`` leads on ``x_min`` and trails on
+    ``z_max``, so reading the box in any other order would elect ``high``
+    instead; naming the order is what makes the rule a stated one.
+    """
+    from stompdrill.cad.region import _floor_face
+
+    low = _rectangle_face(0.0, _square_corners(5.0, 0.0, 10.0))
+    high = _rectangle_face(0.0, _square_corners(0.0, 5.0, 10.0))
+    # The controls: an exact area tie, and a box pair the reversed order
+    # really would decide the other way.
+    assert _face_area(low) == _face_area(high)
+    assert tuple(reversed(_bounding_box(low))) < tuple(reversed(_bounding_box(high)))
+
+    assert _floor_face(_tie_compound(low, high)).IsSame(low)
+    assert _floor_face(_tie_compound(high, low)).IsSame(low)
 
 
 def test_the_floor_face_tie_break_never_outranks_a_real_area_difference():

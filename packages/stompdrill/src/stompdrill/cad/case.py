@@ -293,20 +293,20 @@ def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
 def _nearest_companion_level(levels: list[_Level], inner: _Level) -> _Level | None:
     """The same-facing level physically closest to ``inner``, if any.
 
-    A raised feature's own flat top is never part of the inner level's own
-    wire boundary -- the hole cut for it is, by construction, exactly
-    coplanar with the level around it -- so the nearest other same-facing
-    level is where ``region.py`` finds the faces that carry its true height.
-    An exactly equal distance means the two lie on opposite sides of
-    ``inner``, and the side towards the drilled face (``-inner.outward``)
-    wins; exactly one side is that one, so the rule is total.
+    A raised feature's flat top is never part of the inner level's own
+    wire boundary -- the hole cut for it is coplanar with the level around
+    it -- so the nearest other same-facing level is where ``region.py``
+    finds the faces carrying its true height. Equal distances put the two
+    on opposite sides of ``inner``; the proud side (``+inner.outward``)
+    wins, because preferring it can only turn a relief into structure,
+    never hide one, and exactly one side is proud, so the rule is total.
     """
     candidates = [level for level in levels if level.outward == inner.outward and level is not inner]
     if not candidates:
         return None
     return min(
         candidates,
-        key=lambda level: (abs(level.position - inner.position), inner.outward * level.position),
+        key=lambda level: (abs(level.position - inner.position), -inner.outward * level.position),
     )
 
 
