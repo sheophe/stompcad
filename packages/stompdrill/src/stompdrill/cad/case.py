@@ -270,14 +270,15 @@ def _drilled_level(
 
 
 def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
-    """The largest-area level facing back at ``drilled``.
+    """The largest-area level facing back at ``drilled``; nearest it on a tie.
 
-    A small raised pad or a lettering fragment forms its own level nearer
-    the drilled face than the true floor; picking by total area rather than
-    nearest position is what keeps a pad such as the 1590Y's 25 x 10 mm one
-    from outranking its 84 x 84 mm floor. A level coincident with ``drilled``
-    itself is excluded on top of the opposite-facing filter, so a degenerate
-    zero-thickness plate can never silently win and zero the plate thickness.
+    A raised pad or a lettering fragment forms its own level nearer the
+    drilled face than the true floor, so total area, not nearest position,
+    keeps a pad such as the 1590Y's 25 x 10 mm one from outranking its
+    84 x 84 mm floor. A level coincident with ``drilled`` is excluded too,
+    so a degenerate zero-thickness plate cannot silently zero the plate
+    thickness. Exactly equal areas break towards ``drilled``: a further
+    level reports the metal thicker than it is. Positions are distinct.
     """
     inward = -drilled.outward
     candidates = [
@@ -286,21 +287,27 @@ def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
     ]
     if not candidates:
         raise StompdrillError("no flat face backs the drilled face")
-    return max(candidates, key=lambda level: level.area)
+    return max(candidates, key=lambda level: (level.area, -abs(level.position - drilled.position)))
 
 
 def _nearest_companion_level(levels: list[_Level], inner: _Level) -> _Level | None:
     """The same-facing level physically closest to ``inner``, if any.
 
-    A raised feature's own flat top is never part of the inner level's own
-    wire boundary -- the hole cut for it is, by construction, exactly
-    coplanar with the level around it -- so the nearest other same-facing
-    level is where ``region.py`` finds the faces that carry its true height.
+    A raised feature's flat top is never part of the inner level's own
+    wire boundary -- the hole cut for it is coplanar with the level around
+    it -- so the nearest other same-facing level is where ``region.py``
+    finds the faces carrying its true height. Equal distances put the two
+    on opposite sides of ``inner``; the proud side (``+inner.outward``)
+    wins, because preferring it can only turn a relief into structure,
+    never hide one, and exactly one side is proud, so the rule is total.
     """
     candidates = [level for level in levels if level.outward == inner.outward and level is not inner]
     if not candidates:
         return None
-    return min(candidates, key=lambda level: abs(level.position - inner.position))
+    return min(
+        candidates,
+        key=lambda level: (abs(level.position - inner.position), -inner.outward * level.position),
+    )
 
 
 def _compound(faces: tuple[Any, ...]) -> Any:

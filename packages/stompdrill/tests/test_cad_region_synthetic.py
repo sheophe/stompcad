@@ -21,8 +21,9 @@ from stompmodel.units import Nanometre
 AXIS = 1
 MM = 1_000_000
 #: The floor faces built below face -y (towards more negative y), matching
-#: ``Faces.outward``'s convention: a companion nearer that direction than
-#: the floor is proud, one further away recedes.
+#: ``Faces.outward``'s convention: a companion set the other way from the
+#: floor -- away from the drilled face, into the cavity -- stands proud, one
+#: displaced towards that direction recedes.
 OUTWARD = -1.0
 
 

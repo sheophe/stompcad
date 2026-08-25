@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid
+from stompdrill.cad.case import (
+    Faces,
+    _inner_level,
+    _Level,
+    _nearest_companion_level,
+    build_frame,
+    drill_axis,
+    find_faces,
+    select_solid,
+)
 from stompgeom.step import read_step
 from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm
@@ -284,3 +293,77 @@ def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
     free = [index for index in range(3) if index != 1]
     spans = [faces.footprint_mm[index] for index in free]
     assert spans[0] == pytest.approx(spans[1], abs=1e-6)
+
+
+def _level(position: float, area: float, outward: float, name: str) -> _Level:
+    """One synthetic level, identified by the single name in its ``faces``."""
+    return _Level(position=position, area=area, outward=outward, faces=(name,))
+
+
+def test_the_inner_level_breaks_an_exact_area_tie_towards_the_drilled_face():
+    """ADR-0006 binds every selection rule, not only routing's: an exact tie
+    on the primary key must still name a winner from the candidates' own
+    geometry rather than from the order the kernel enumerated them. The
+    level that backs the drilled face is the first one behind it.
+    """
+    drilled = _level(0.0, 100.0, 1.0, "D")
+    near = _level(-3.0, 50.0, -1.0, "A")
+    far = _level(-7.0, 50.0, -1.0, "B")
+    # The control: without exactly equal areas the permutation assertions
+    # below would pass by never reaching the tie-break at all.
+    assert near.area == far.area
+
+    assert _inner_level([near, far], drilled).faces == ("A",)
+    assert _inner_level([far, near], drilled).faces == ("A",)
+
+
+def test_the_inner_level_tie_break_never_outranks_a_real_area_difference():
+    """The innocent probe: the secondary key is a tie-break, not a co-primary.
+
+    ``near`` wins the secondary key and loses the primary one, so a
+    ``(position, area)`` ranking would elect it. Aggregate area must still
+    decide, in either arrival order.
+    """
+    drilled = _level(0.0, 100.0, 1.0, "D")
+    near = _level(-3.0, 10.0, -1.0, "A")
+    far = _level(-7.0, 50.0, -1.0, "B")
+    assert near.area != far.area
+
+    assert _inner_level([near, far], drilled).faces == ("B",)
+    assert _inner_level([far, near], drilled).faces == ("B",)
+
+
+def test_the_nearest_companion_breaks_an_exact_distance_tie_towards_the_proud_side():
+    """Equal distances put the two candidates on opposite sides of ``inner``,
+    and exactly one of those sides is the proud one (``+inner.outward``),
+    so the rule is total on the candidates' own geometry. Positions mirror
+    the real 1590BB: its floor sits at -27.75 facing ``+``, its drilled
+    face at -30.0, and its 0.5 mm cast lettering at -27.25 -- so the proud
+    side is the one *away* from the drilled face. Preferring it can only
+    turn a would-be relief into structure; the other side reports a boss
+    as a negative height and lets a hole through it.
+    """
+    inner = _level(-27.75, 100.0, 1.0, "I")
+    proud = _level(-27.25, 10.0, 1.0, "P")
+    receding = _level(-28.25, 10.0, 1.0, "Q")
+    # The control: the two distances are exactly, not approximately, equal.
+    assert abs(proud.position - inner.position) == abs(receding.position - inner.position)
+
+    assert _nearest_companion_level([proud, receding], inner).faces == ("P",)
+    assert _nearest_companion_level([receding, proud], inner).faces == ("P",)
+
+
+def test_the_nearest_companion_tie_break_never_outranks_a_real_distance():
+    """The innocent probe: distance still decides when there is no tie.
+
+    ``receding`` sits on the side the tie-break disfavours and is nearer;
+    a ranking that consulted the side first would elect the further
+    ``proud`` instead.
+    """
+    inner = _level(-27.75, 100.0, 1.0, "I")
+    receding = _level(-28.25, 10.0, 1.0, "Q")
+    proud = _level(-26.75, 10.0, 1.0, "P")
+    assert abs(receding.position - inner.position) != abs(proud.position - inner.position)
+
+    assert _nearest_companion_level([receding, proud], inner).faces == ("Q",)
+    assert _nearest_companion_level([proud, receding], inner).faces == ("Q",)

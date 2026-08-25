@@ -5,8 +5,8 @@ boundary already excludes every boss. A raised feature's hole in that face
 is coplanar with the floor by construction, so its height is invisible from
 the hole's own geometry; ``find_faces`` bundles each floor with candidate
 companions so a hole pairs with the face carrying its height. Relief unless
-a companion stands proud, towards the drilled face, past
-``_STRUCTURE_HEIGHT_MM``; a receding companion removes material, never structure.
+a companion stands proud -- away from the drilled face, into the cavity --
+past ``_STRUCTURE_HEIGHT_MM``; a receding companion removes material, never structure.
 """
 
 from __future__ import annotations
@@ -30,16 +30,17 @@ __all__ = [
 #: features, so it cannot pair a hole with an unrelated patch.
 _COMPANION_MATCH_MM = 0.01
 
-#: How far a companion must stand proud, towards the drilled face, before it
-#: is structure rather than cast relief. Not a clearance: pedal builders
-#: drill straight through lettering, and on many castings its background is
-#: flush or recessed, so height above the floor -- not distance from a bit
-#: -- is what tells relief from a real boss. Cast lettering measures 0.50 mm
-#: proud on the 1590BB (``tests.hammond.BB_RELIEF_MM``) and is often flush
-#: or recessed; a moulded boss or standoff is millimetres. 2.0 mm sits in
-#: that gap with 4x headroom over the tallest lettering measured. No cached
-#: model's own structure needs this exact value -- see the synthetic tests
-#: in ``tests/test_cad_region_synthetic.py``.
+#: How far a companion must stand proud of the floor -- away from the drilled
+#: face, into the cavity -- before it is structure rather than cast relief.
+#: Not a clearance: pedal builders drill straight through lettering, and on
+#: many castings its background is flush or recessed, so height above the
+#: floor -- not distance from a bit -- is what tells relief from a real boss.
+#: Cast lettering measures 0.50 mm proud on the 1590BB
+#: (``tests.hammond.BB_RELIEF_MM``) and is often flush or recessed; a moulded
+#: boss or standoff is millimetres. 2.0 mm sits in that gap with 4x headroom
+#: over the tallest lettering measured. No cached model's own structure needs
+#: this exact value -- see the synthetic tests in
+#: ``tests/test_cad_region_synthetic.py``.
 _STRUCTURE_HEIGHT_MM = 2.0
 
 
@@ -47,8 +48,8 @@ def classify_bounds(face: Any, axis: int, outward: float) -> tuple[list[Any], li
     """Split the floor's inner wires into structure and cast relief.
 
     ``outward`` is the drilled face's own outward normal component along
-    ``axis`` (``Faces.outward[axis]``): a companion nearer the drilled face
-    than the floor is proud, one further away recedes and is never
+    ``axis`` (``Faces.outward[axis]``): a companion further from the drilled
+    face than the floor stands proud, one nearer it recedes and is never
     structure -- ``_proud_mm`` needs the sign to tell those apart, not just
     a distance. A hole with no companion is structure too, since an
     unmeasured depth is never safe to assume shallow.
@@ -249,8 +250,12 @@ def _floor_face(face: Any) -> Any:
     """The largest planar face in ``face``, which may be a bare face or a compound.
 
     ``find_faces`` bundles the floor with candidate companion faces into a
-    compound, so callers here must first pick the floor back out by area,
-    exactly as ``case._inner_level``/``_drilled_level`` pick by area too.
+    compound, so the floor is picked back out here by **one face's own**
+    area -- not by ``case._inner_level``'s aggregate over a whole level,
+    which would merge the floor with the very companions the bundle exists
+    to keep separable. Exactly equal areas break on the candidates' own
+    bounding boxes in whole nanometres, greatest first, minima before
+    maxima; alike on both keys they are interchangeable and either wins.
     """
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
@@ -258,18 +263,21 @@ def _floor_face(face: Any) -> Any:
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
+    from stompgeom.step import bounding_box_mm
+
     if face.ShapeType() == TopAbs_ShapeEnum.TopAbs_FACE:
         return face
 
     best: Any = None
-    best_area = -1.0
+    best_key: tuple[float, tuple[Nanometre, ...]] | None = None
     explorer = TopExp_Explorer(face, TopAbs_ShapeEnum.TopAbs_FACE)
     while explorer.More():
         candidate = TopoDS.Face_s(explorer.Current())
         props = GProp_GProps()
         BRepGProp.SurfaceProperties_s(candidate, props)
-        if props.Mass() > best_area:
-            best_area, best = props.Mass(), candidate
+        key = (props.Mass(), tuple(nm_from_mm(value) for value in bounding_box_mm(candidate)))
+        if best_key is None or key > best_key:
+            best_key, best = key, candidate
         explorer.Next()
     if best is None:
         raise StompdrillError("the play area's compound has no planar face")
@@ -302,26 +310,27 @@ def _proud_mm(
     """How far the hole's best-matching companion stands proud of the floor.
 
     The companion whose in-plane footprint is closest to the hole's own is
-    its true feature, but only within ``_COMPANION_MATCH_MM``: with no match
-    -- including none at all -- the height is unmeasured, reported as
+    its true feature, but only within ``_COMPANION_MATCH_MM``: with no
+    match -- including none at all -- the height is unmeasured, reported as
     unboundedly proud rather than assumed shallow. Signed, not a distance:
-    nearer the drilled face (towards ``outward``) is positive and proud;
-    further away recedes into the material and is negative -- never structure.
+    standing proud of the floor is positive; receding into the material is
+    negative and never structure. An exactly equal gap breaks towards the
+    most proud candidate, so the number cannot vary with arrival order.
     """
     from stompgeom.step import bounding_box_mm
 
     box = bounding_box_mm(wire)
-    best_gap: float | None = None
-    best_position: float | None = None
+    best: tuple[float, float] | None = None
     for candidate in companions:
         other = bounding_box_mm(candidate)
         gap = sum(abs(box[index] - other[index]) + abs(box[index + 3] - other[index + 3])
                   for index in in_plane)
-        if best_gap is None or gap < best_gap:
-            best_gap, best_position = gap, other[axis]
-    if best_position is None or best_gap is None or best_gap > _COMPANION_MATCH_MM:
+        key = (gap, -((plane_at - other[axis]) * outward))
+        if best is None or key < best:
+            best = key
+    if best is None or best[0] > _COMPANION_MATCH_MM:
         return float("inf")
-    return (plane_at - best_position) * outward
+    return -best[1]
 
 
 def _boundary(region: Any) -> Any:
