@@ -120,7 +120,6 @@ class StepSolid:
 
     name: str
     shape: TopoDS_Shape
-    unit_mm: float
 
 
 @dataclass(frozen=True)
@@ -193,7 +192,7 @@ def read_step(path: Path) -> StepDocument:
         shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
         if shape.IsNull():
             continue
-        solids.append(StepSolid(name=entry.name, shape=shape, unit_mm=1.0))
+        solids.append(StepSolid(name=entry.name, shape=shape))
     if not solids:
         raise DocumentError(f"{path} contains no solids")
     return StepDocument(tuple(solids), document, source_timestamp(path))

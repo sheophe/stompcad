@@ -281,6 +281,15 @@ rather than hides.
 does not: `emitters/step.py` registers itself, and `import stompdrill` must not pull in
 400 MB of kernel through the package root.
 
+**Amended: `OcpCaseModel` gains that line too.** A root that publishes `load_case_model`
+and withholds the type it returns sends a consumer who follows the signature to an
+`ImportError` whose suggestion — `CaseModel` — is the one value `StepEmitter.__init__`
+refuses. The rule the root now states, and a test now enforces, is the general one:
+every type a root-exported signature names, and that this package itself defines, is
+reachable from the root; `stompmodel`'s values deliberately are not (ADR-0009). The
+kernel promise above is untouched — `stompdrill.cad` already imports `.loader`, so the
+name costs no new import and pulls in no kernel.
+
 `CheckCaseClearance` depends only on the `CaseModel` protocol, never on the OCP
 implementation, so the clearance rule is testable against a hand-built fake
 `CaseModel` — the same move the repository already makes when it tests emitters with

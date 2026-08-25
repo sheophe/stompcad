@@ -200,7 +200,7 @@ def _cut_component_shape(document: Any, keyword: str) -> Any:
         shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
         if shape.IsNull():
             continue
-        solids.append(StepSolid(name=entry.name, shape=shape, unit_mm=1.0))
+        solids.append(StepSolid(name=entry.name, shape=shape))
 
     found = StepDocument(tuple(solids), document).named(keyword)
     assert found, f"the cut document holds no solid named like {keyword!r}"

@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import itertools
 import random
+import typing
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from stompdrill.cad import CaseModel, OcpCaseModel, load_case_model
+from stompdrill.enclosures import Enclosure
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -1021,3 +1027,94 @@ def test_the_generative_bands_stay_in_the_subpackage():
 
     assert not hasattr(stompdrill, "METRIC_BANDS")
     assert not hasattr(stompdrill, "FRACTIONAL_SIXTY_FOURTHS")
+
+
+# --------------------------------------------------------------------------
+# What a root-exported signature obliges the root to publish
+# --------------------------------------------------------------------------
+
+
+def _unreachable_signature_types(namespace: Any, package: str) -> tuple[tuple[str, str, str], ...]:
+    """Types a root's own signatures name but its own root does not publish.
+
+    Only leaves ``package`` itself defines are judged: the standard library's
+    and another member's are deliberately not republished (ADR-0009).
+    ``typing.get_args`` unwraps before the class test, and that order is
+    load-bearing -- ``isinstance(list[int], type)`` is true, so a class-first
+    walk would stop at a parameterised generic and see nothing inside it.
+    Nothing is caught: an annotation that will not resolve must raise here
+    rather than be stepped over.
+    """
+    violations: set[tuple[str, str, str]] = set()
+    for exported in namespace.__all__:
+        obj = getattr(namespace, exported)
+        target = obj.__init__ if inspect.isclass(obj) else obj
+        if not callable(target):
+            continue
+        work = list(typing.get_type_hints(target).items())
+        while work:
+            position, annotation = work.pop()
+            arguments = typing.get_args(annotation)
+            if arguments:
+                work.extend((position, argument) for argument in arguments)
+                continue
+            if not inspect.isclass(annotation):
+                continue
+            if annotation.__module__.split(".")[0] != package:
+                continue
+            name = annotation.__name__
+            if getattr(namespace, name, None) is not annotation or name not in namespace.__all__:
+                violations.add((exported, position, name))
+    return tuple(sorted(violations))
+
+
+def test_every_type_a_root_signature_names_is_reachable_from_the_root():
+    """A caller who follows a root signature must not have to guess a submodule."""
+    import stompdrill
+
+    assert _unreachable_signature_types(stompdrill, "stompdrill") == ()
+    assert stompdrill.OcpCaseModel is OcpCaseModel
+
+
+def test_the_gate_fails_when_the_root_binds_the_name_to_the_wrong_type():
+    """Guilty probe: the near miss the real ImportError suggested."""
+    stand_in = SimpleNamespace(
+        load_case_model=load_case_model,
+        OcpCaseModel=CaseModel,
+        __all__=["OcpCaseModel", "load_case_model"],
+    )
+
+    assert _unreachable_signature_types(stand_in, "stompdrill") == (
+        ("load_case_model", "return", "OcpCaseModel"),
+    )
+
+
+def test_the_gate_fails_when_the_type_is_bound_but_left_out_of_all():
+    """Guilty probe: reachable by luck is not published."""
+    stand_in = SimpleNamespace(
+        load_case_model=load_case_model,
+        OcpCaseModel=OcpCaseModel,
+        __all__=["load_case_model"],
+    )
+
+    assert _unreachable_signature_types(stand_in, "stompdrill") == (
+        ("load_case_model", "return", "OcpCaseModel"),
+    )
+
+
+def test_the_gate_is_silent_on_a_legitimate_root():
+    """Innocent probe: a root that publishes what it names, plus one more export.
+
+    ``load_case_model`` also names ``Path``, ``CaseFace`` and ``Nanometre``,
+    and none of the three is a violation: the first is the standard
+    library's and the other two are ``stompmodel``'s, which this root
+    deliberately does not republish (ADR-0009).
+    """
+    stand_in = SimpleNamespace(
+        load_case_model=load_case_model,
+        OcpCaseModel=OcpCaseModel,
+        Enclosure=Enclosure,
+        __all__=["load_case_model", "OcpCaseModel", "Enclosure"],
+    )
+
+    assert _unreachable_signature_types(stand_in, "stompdrill") == ()

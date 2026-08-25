@@ -54,7 +54,7 @@ def test_a_closed_solid_has_no_unambiguous_drilled_face():
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
 
     cube = BRepPrimAPI_MakeBox(100.0, 50.0, 20.0).Shape()
-    solid = StepSolid(name="test-cube", shape=cube, unit_mm=1.0)
+    solid = StepSolid(name="test-cube", shape=cube)
 
     with pytest.raises(StompdrillError, match=r"test-cube has 2 planar levels.*0\.0000, 50\.0000"):
         find_faces(solid, axis=1)
