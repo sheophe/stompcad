@@ -94,11 +94,15 @@ def build_region(face: Any, axis: int, outward: float) -> Any:
     region = builder.Face()
 
     structure, _ = classify_bounds(face, axis, outward)
+    # No guard on the subtraction: ``BRepBuilderAPI_MakeFace.Add`` reports done
+    # unconditionally, so a wire the kernel could not use is indistinguishable
+    # here from one it took. A dropped structure wire would widen the drillable
+    # region silently, and nothing at this point can detect it -- see
+    # ``tests/test_cad_region_synthetic.py``'s hostile-wire test for the fact.
     for wire in structure:
         adder = BRepBuilderAPI_MakeFace(region)
         adder.Add(TopoDS.Wire_s(wire.Reversed()))
-        if adder.IsDone():
-            region = adder.Face()
+        region = adder.Face()
     return region
 
 
