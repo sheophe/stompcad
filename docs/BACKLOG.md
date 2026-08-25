@@ -825,9 +825,9 @@ ranks distance from `inner` and breaks a tie towards the **proud** side (`+inner
 bounding box, lexicographically greatest, in `bounding_box_mm`'s own order (minima before
 maxima); `region._proud_mm` ranks the in-plane footprint gap and breaks a tie towards the
 most proud. `_floor_face`'s docstring no longer claims agreement with `case._inner_level`
-that it does not have -- the two metrics are stated, and stated as different. Eight tests,
-four per owned file, each a guilty probe whose fixture asserts its own exact tie in the
-body, plus an innocent probe proving the new key is a tie-break and not a co-primary; both
+that it does not have -- the two metrics are stated, and stated as different. Every
+tie-break ships a guilty probe whose fixture asserts its own exact tie in the body, and
+an innocent probe proving the new key is a tie-break and not a co-primary; both
 owned test modules are `--hammond`-marked at module scope. No primary comparison, threshold
 or cited constant moved and the behaviour lock held unmoved. The tie direction was
 corrected once mid-ticket: round 1 transcribed `region.py`'s then-inverted prose and pointed
@@ -1344,7 +1344,7 @@ first by construction and the second as the recorded-and-accepted trade-off. `co
 and `discard_staged` are deleted outright -- no deprecating wrapper -- and their bodies
 move verbatim onto the value they already operated on, as `StagedWrite.commit()` and
 `StagedWrite.discard()`; `_tmp` is now read only by `self`, inside its own class, in its
-own module, and the published surface narrows from ten names to eight and gains none. The
+own module, and `stompmodel.protocols.__all__` loses both names and gains none. The
 enforcement half is refused rather than shipped: ADR-0005 gains a Decision subsection
 carrying the four candidate detectors and why each was refused, and naming the caller-side
 residue assertion that does catch an abandoned temporary. Three independent design seats
@@ -1497,10 +1497,10 @@ reporting a byte count for an artefact it destroyed, on a machine whose output d
 aluminium. The fold is conservative rather than exact: Windows's trailing-dot stripping and
 8.3 aliases and locale-specific folds are not closed, and are not to be added pre-emptively
 for a filesystem nobody here runs on; the failure direction there is silent
-under-detection, which is today's behaviour, never a false refusal. Five tests: two guilty
-probes (case-only and NFC/NFD-only collisions, the second carrying its own fixture control
-that its two paths really are two distinct strings) and three innocent probes keeping the
-narrowing scoped. `CLAUDE.md`'s `--emit` paragraph was amended by ticket 46 to state the
+under-detection, which is today's behaviour, never a false refusal. Guilty probes cover
+the case-only and the NFC/NFD-only collision, the second carrying its own fixture control
+that its two paths really are two distinct strings; innocent probes keep the narrowing
+scoped to case and normalisation form alone. `CLAUDE.md`'s `--emit` paragraph was amended by ticket 46 to state the
 folded key. Closed; nothing further to do.
 
 ## `clearance_reason` breaks a distance tie on a source-literal dict order
