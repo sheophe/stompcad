@@ -1,11 +1,11 @@
 """There is exactly one statement of how an artefact's bytes reach a path.
 
-``stompmodel.protocols`` (``stage_payload``/``commit_staged``) is the rule's
-one home: the atomic ``os.replace`` and the ``.{name}.{hex}.tmp`` temporary
-naming it depends on. A module that restates either itself is the defect
-ticket 26 exists to remove. This gate lives in the owner's own suite (ticket
-25's convention). It must not fire on ``stompgeom.writer``'s kernel scratch
-file (``tempfile.mkstemp``), already carved out by ADR-0005's
+``stompmodel.protocols`` (``stage_payload``/``StagedWrite.commit``) is the
+rule's one home: the atomic ``os.replace`` and the ``.{name}.{hex}.tmp``
+temporary naming it depends on. A module that restates either itself is the
+defect ticket 26 exists to remove. This gate lives in the owner's own suite
+(ticket 25's convention). It must not fire on ``stompgeom.writer``'s kernel
+scratch file (``tempfile.mkstemp``), already carved out by ADR-0005's
 "caller-visible" qualifier. See ADR-0001, ADR-0005 and ADR-0008.
 """
 
@@ -147,7 +147,8 @@ def test_no_module_outside_stompmodel_protocols_writes_an_artefacts_bytes():
 
     No module outside ``stompmodel.protocols`` may call ``os.replace`` or
     build the ``.{...}.{...}.tmp`` temporary name -- both are the owner's
-    alone, published as ``stage_payload``/``commit_staged``/``discard_staged``.
+    alone, published as ``stage_payload`` and the two verbs on the
+    ``StagedWrite`` it returns.
     """
     offenders = {
         str(path): [node.lineno for node in nodes]
@@ -158,6 +159,6 @@ def test_no_module_outside_stompmodel_protocols_writes_an_artefacts_bytes():
     }
     assert offenders == {}, (
         "a module outside stompmodel.protocols performs the atomic replace or "
-        "builds the temporary-name shape itself -- call stage_payload/"
-        "commit_staged/discard_staged instead"
+        "builds the temporary-name shape itself -- call stage_payload and "
+        "commit/discard the value it returns instead"
     )

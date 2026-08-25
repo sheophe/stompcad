@@ -27,8 +27,6 @@ __all__ = [
     "Payload",
     "StagedWrite",
     "stage_payload",
-    "commit_staged",
-    "discard_staged",
     "Pipeline",
 ]
 
@@ -99,15 +97,36 @@ class StagedWrite:
     """One payload already written in full to a temporary beside its target.
 
     Produced only by :func:`stage_payload`; never built by hand. ``path`` is
-    the target :func:`commit_staged` will replace and ``size`` is the
-    encoded byte count both tools report -- the two facts a caller's report
-    line needs. The temporary is not a caller's business: it is committed or
-    discarded through the two functions below, never named.
+    the target :meth:`commit` will replace and ``size`` is the encoded byte
+    count both tools report -- the two facts a caller's report line needs.
+    Exactly one of :meth:`commit` and :meth:`discard` is owed on every value
+    handed out; the temporary is not a caller's business, so neither verb
+    names it and neither is reachable without the value it applies to.
     """
 
     path: Path
     size: int
     _tmp: Path
+
+    def commit(self) -> int:
+        """Replace :attr:`path` from its temporary. Returns :attr:`size`.
+
+        Atomic: afterwards :attr:`path` holds either the complete payload
+        or exactly what it held before, and the temporary survives neither
+        outcome. The count is the one :func:`stage_payload` already
+        computed, returned unchanged -- a second derivation of it is the
+        drift ADR-0005's consequence forbids.
+        """
+        try:
+            os.replace(self._tmp, self.path)
+        except BaseException:
+            self._tmp.unlink(missing_ok=True)
+            raise
+        return self.size
+
+    def discard(self) -> None:
+        """Abandon a staged write without touching its target. Never raises."""
+        self._tmp.unlink(missing_ok=True)
 
 
 def stage_payload(path: Path, payload: Payload) -> StagedWrite:
@@ -144,28 +163,6 @@ def stage_payload(path: Path, payload: Payload) -> StagedWrite:
         tmp.unlink(missing_ok=True)
         raise
     return StagedWrite(path=path, size=len(data), _tmp=tmp)
-
-
-def commit_staged(staged: StagedWrite) -> int:
-    """Replace ``staged.path`` from its temporary. Returns ``staged.size``.
-
-    Atomic: afterwards ``staged.path`` holds either the complete payload or
-    exactly what it held before, and the temporary survives neither
-    outcome. The count is the one :func:`stage_payload` already computed,
-    returned unchanged -- a second derivation of it is the drift ADR-0005's
-    consequence forbids.
-    """
-    try:
-        os.replace(staged._tmp, staged.path)
-    except BaseException:
-        staged._tmp.unlink(missing_ok=True)
-        raise
-    return staged.size
-
-
-def discard_staged(staged: StagedWrite) -> None:
-    """Abandon a staged write without touching its target. Never raises."""
-    staged._tmp.unlink(missing_ok=True)
 
 
 @runtime_checkable

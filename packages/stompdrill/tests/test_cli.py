@@ -1484,14 +1484,14 @@ def test_every_position_and_failure_kind_leaves_no_temporary_behind(
 
             monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
         else:
-            real_commit = cli.commit_staged
+            real_commit = protocols.StagedWrite.commit
 
-            def fake_commit(written: protocols.StagedWrite) -> int:
-                if written.path == failing:
+            def fake_commit(self: protocols.StagedWrite) -> int:
+                if self.path == failing:
                     raise _SimulatedFailure("commit")
-                return real_commit(written)
+                return real_commit(self)
 
-            monkeypatch.setattr(cli, "commit_staged", fake_commit)
+            monkeypatch.setattr(protocols.StagedWrite, "commit", fake_commit)
 
         with pytest.raises(_SimulatedFailure):
             cli._commit(staged)
@@ -1531,8 +1531,8 @@ def test_re_running_over_existing_targets_leaves_no_backup_files_behind(fake_sou
 
 # ---------------------------------------------------------------------------
 # ticket 26: the CLI writes an artefact's bytes through the one published
-# mechanism (stompmodel.protocols.stage_payload / commit_staged /
-# discard_staged), never by re-implementing it. Naming each function's
+# mechanism (stompmodel.protocols.stage_payload / StagedWrite.commit /
+# StagedWrite.discard), never by re-implementing it. Naming each function's
 # production caller directly, rather than only its observable effect, is
 # what F1-01/F2-01/F3-04/F5-01 asked for and what criterion 2 demands.
 # ---------------------------------------------------------------------------
@@ -1542,7 +1542,8 @@ def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
     """Control: prove the spy mechanism the next test relies on actually
     catches a call, before trusting it to prove an absence."""
     calls: list[str] = []
-    original_stage, original_commit = protocols.stage_payload, protocols.commit_staged
+    original_stage = protocols.stage_payload
+    original_commit = protocols.StagedWrite.commit
 
     def spy_stage(path, payload):
         calls.append("stage")
@@ -1560,16 +1561,19 @@ def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
     assert target.read_bytes() == b"hello"
 
 
-def test_the_cli_write_path_calls_stage_payload_then_commit_staged(fake_source, tmp_path, monkeypatch):
+def test_the_cli_write_path_calls_stage_payload_then_staged_write_commit(fake_source, tmp_path, monkeypatch):
     """F1-01/F2-01/F3-04/F5-01, migrated: a full ``--emit`` run must call the
     published mechanism, not re-implement it (``write_payload`` no longer
-    exists; the design verdict deletes it outright). Patched on ``cli``, not
-    on ``stompmodel.protocols``: ``cli.py`` imports both names directly, so
-    a caller must patch the reference the CLI actually holds.
+    exists; the design verdict deletes it outright). The two halves are
+    patched at different seams for one reason: ``cli.py`` holds its own
+    module reference to ``stage_payload``, and reaches the commit verb only
+    through the value staging handed it, so the class attribute is the only
+    reference the CLI actually resolves through.
     """
     fake_source(read())
     calls: list[str] = []
-    original_stage, original_commit = cli.stage_payload, cli.commit_staged
+    original_stage = cli.stage_payload
+    original_commit = protocols.StagedWrite.commit
 
     def spy_stage(path, payload):
         calls.append(("stage", path))
@@ -1580,7 +1584,7 @@ def test_the_cli_write_path_calls_stage_payload_then_commit_staged(fake_source, 
         return original_commit(staged)
 
     monkeypatch.setattr(cli, "stage_payload", spy_stage)
-    monkeypatch.setattr(cli, "commit_staged", spy_commit)
+    monkeypatch.setattr(protocols.StagedWrite, "commit", spy_commit)
 
     out = tmp_path / "out.json"
     code = cli.main([str(FIXTURE), "--emit", f"json={out}"])
@@ -1589,29 +1593,30 @@ def test_the_cli_write_path_calls_stage_payload_then_commit_staged(fake_source, 
     assert out.exists() and out.read_text(encoding="utf-8").strip() != ""
     assert calls == [("stage", out), ("commit", out)], (
         "the CLI's write path did not call stompmodel.protocols.stage_payload "
-        f"then commit_staged, in that order, for {out}: saw {calls}"
+        f"then StagedWrite.commit, in that order, for {out}: saw {calls}"
     )
 
 
-def test_a_write_failure_calls_discard_staged_on_every_temporary_it_abandons(
+def test_a_write_failure_calls_discard_on_every_temporary_it_abandons(
     fake_source, tmp_path, monkeypatch
 ):
-    """``discard_staged``'s production caller, named directly: a failure at
-    one target must discard every *other* staged write through the
-    published function, not through a caller-local ``tmp.unlink``. Patched
-    on ``cli`` for the same reason as the test above.
+    """``StagedWrite.discard``'s production caller, named directly: a
+    failure at one target must discard every *other* staged write through
+    the published verb, not through a caller-local ``tmp.unlink``. Patched
+    on the class for the same reason as the test above: the CLI reaches the
+    verb only through the value staging handed it.
     """
     fake_source(read())
     a = tmp_path / "a.json"
     b = tmp_path / "b.drl"
     discarded: list[Path] = []
-    original_discard = cli.discard_staged
+    original_discard = protocols.StagedWrite.discard
 
     def spy_discard(staged):
         discarded.append(staged.path)
         original_discard(staged)
 
-    monkeypatch.setattr(cli, "discard_staged", spy_discard)
+    monkeypatch.setattr(protocols.StagedWrite, "discard", spy_discard)
     _sabotage_write(monkeypatch, b)
 
     code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"])
@@ -1619,8 +1624,8 @@ def test_a_write_failure_calls_discard_staged_on_every_temporary_it_abandons(
     assert code == 3
     assert not a.exists() and not b.exists()
     # ``a`` staged successfully and was then discarded when ``b``'s own
-    # staging failed; ``b`` never reached ``discard_staged`` because it
-    # never produced a ``StagedWrite`` to discard in the first place.
+    # staging failed; ``b`` never reached ``StagedWrite.discard`` because
+    # it never produced a ``StagedWrite`` to discard in the first place.
     assert discarded == [a]
 
 
