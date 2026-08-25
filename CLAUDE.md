@@ -111,9 +111,10 @@ size, or a part number in no catalogue is a usage error rather than a diagnostic
 `json`, `step`.
 
 The requested `--emit` targets are validated once, as a set, before anything is
-rendered: two targets may not name one path, compared under a case- and
-normalisation-folded key, because a filesystem may hold two such spellings as one
-file; and every target that already exists must be a regular file. The write
+rendered: two targets may not reach one file, compared as a case- and
+normalisation-folded key over each target's *resolved* path, because a filesystem may
+hold two such spellings, or two paths joined by a symlink, as one file; and every
+target that already exists must be a regular file. The write
 mechanism's own preconditions are not restated there — it enforces and reports them
 itself; see
 [ADR-0005](docs/adr/0005-binary-emitter-payloads.md) and
