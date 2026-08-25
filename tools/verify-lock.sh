@@ -19,8 +19,109 @@
 #   DIR/SHA256SUMS absent  -> capture it;  present -> compare against it.
 #   Artefacts are kept in DIR/artefacts either way, so a break can be diffed;
 #   the previous run's are cleared first, so nothing stale is ever hashed.
+#   A verify compares the whole set both sides name, so a reference that has
+#   lost rows, or gained one this harness no longer writes, is refused rather
+#   than certified over the artefacts it still happens to cover.
 # Exit: 0 identical or captured, 1 a byte differs, 2 a run or precondition failed.
 set -uo pipefail
+
+# --- the seam the committed control drives -------------------------------
+# packages/stompdrill/tests/test_lock_reference_completeness.py sources this
+# file with LOCK_FUNCTIONS_ONLY set and calls the four functions below over a
+# synthetic directory, so the comparison is probed without rendering artefacts.
+
+sha256() {  # sha256sum on most Linux distributions, shasum on macOS; both print
+            # "<digest>  <name>", which is the reference file's format.
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"
+    else shasum -a 256 "$@"; fi
+}
+
+produced_artefacts() {  # produced_artefacts <dir>: the artefact names a run left
+                        # there, sorted. Every file but a panel log counts, so an
+                        # emitter's output joins the set whatever it is named --
+                        # a rule reading a prefix would hash only today's names.
+                        # One rule, so capture and verify cannot come to disagree.
+    (cd "$1" 2>/dev/null || return 0
+     for name in *; do
+        case "$name" in *.log | '*') continue ;; esac
+        [ -f "$name" ] && printf '%s\n' "$name"
+     done | LC_ALL=C sort)
+}
+
+capture_reference() {  # capture_reference <reference> <dir>
+    # Records exactly the set produced_artefacts names, so a later verify has
+    # the whole set to demand back. The digests go through the shell function
+    # one name at a time: xargs would find whatever `sha256` is on PATH.
+    local reference="$1" dir="$2" name
+    (cd "$dir" && produced_artefacts . | while IFS= read -r name; do
+        sha256 "$name"
+     done) > "$reference"
+    if [ ! -s "$reference" ]; then
+        rm -f "$reference"
+        echo "LOCK FAILED: the panels left nothing to hash, so nothing was"
+        echo "  captured; a reference over no artefact is not a reference."
+        return 2
+    fi
+    echo "reference captured: $reference"; cat "$reference"
+    return 0
+}
+
+compare_to_reference() {  # compare_to_reference <reference> <dir>
+    # The reference must name exactly the set the run produced. Comparing a
+    # subset finds nothing and says so in the same words as comparing
+    # everything, which is the one failure a byte lock cannot afford.
+    local reference="$1" dir="$2"
+    local named produced short extra expected rows=0 fail=0 want name got
+    named="$(awk '$2 != "" {print $2}' "$reference" | LC_ALL=C sort)"
+    produced="$(produced_artefacts "$dir")"
+    if [ -z "$named" ]; then
+        echo "LOCK FAILED: $reference names no artefact; a comparison over nothing"
+        echo "  is not a lock. Delete it and run again to capture a reference."
+        return 2
+    fi
+    short="$(LC_ALL=C comm -13 <(printf '%s\n' "$named") <(printf '%s\n' "$produced") | tr '\n' ' ')"
+    extra="$(LC_ALL=C comm -23 <(printf '%s\n' "$named") <(printf '%s\n' "$produced") | tr '\n' ' ')"
+    if [ -n "${short// /}" ] || [ -n "${extra// /}" ]; then
+        echo "LOCK FAILED: $reference does not name the set this run produced,"
+        echo "  so a verdict over it would be a verdict over part of the panels."
+        [ -n "${short// /}" ] && echo "  this run produced, unnamed by the reference:$short"
+        [ -n "${extra// /}" ] && echo "  named by the reference, not produced here:$extra"
+        echo "  Capture and verify within one episode: delete it and run again."
+        return 2
+    fi
+    echo "reference: $reference"
+    while read -r want name; do
+        # A row naming nothing -- a blank line -- claims nothing, so it is neither
+        # counted nor reported; the set comparison above is what proves the whole.
+        [ -n "$name" ] || continue
+        rows=$((rows + 1))
+        got=$(sha256 "$dir/$name" 2>/dev/null | awk '{print $1}')
+        if [ "$want" = "$got" ]; then echo "  ok       $name"
+        else echo "  CHANGED  $name"; echo "    want $want"; echo "    got  ${got:-<missing>}"; fail=1; fi
+    done < "$reference"
+    expected="$(printf '%s\n' "$produced" | wc -l | tr -d ' ')"
+    if [ "$rows" -ne "$expected" ]; then
+        echo "LOCK FAILED: $reference names $expected artefacts but yielded $rows"
+        echo "  rows; a final row with no newline ends the read without being"
+        echo "  compared. Delete it and run again to capture a reference."
+        return 2
+    fi
+    echo "  compared $rows artefacts, the whole set this run produced"
+    if [ "$fail" -eq 0 ]; then echo "BEHAVIOUR LOCK HELD"; else echo "BEHAVIOUR LOCK BROKEN"; fi
+    return "$fail"
+}
+
+# Sourced by the control, the file stops here: nothing below is a definition,
+# and the setup below would otherwise create directories in the caller's tree.
+# Executed with the switch set, it refuses aloud instead: exiting 0 having run
+# no panel and compared no byte is the one verdict this script must never give,
+# and it is the verdict a caller with the variable in its environment would read.
+if [ -n "${LOCK_FUNCTIONS_ONLY:-}" ]; then
+    if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
+    echo "LOCK FAILED: LOCK_FUNCTIONS_ONLY is set in the environment, so this run"
+    echo "  would render nothing and compare nothing. Unset it to run the lock."
+    exit 2
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -45,12 +146,6 @@ if [ ! -x "$PY" ]; then
     exit 2
 fi
 
-sha256() {  # sha256sum on most Linux distributions, shasum on macOS; both print
-            # "<digest>  <name>", which is the reference file's format.
-    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"
-    else shasum -a 256 "$@"; fi
-}
-
 run() {  # run <label> <args...>; exit codes 0 and 1 are both successful runs,
          # because a panel carrying a warning exits 1 by the CLI's contract.
     local label="$1"; shift
@@ -74,7 +169,8 @@ wrote() {  # wrote <label> <name...>; a crash and a warning both leave rc 1, so
     fi
 }
 
-rm -f "$OUT"/a.* "$OUT"/b.*   # a stale artefact would certify a run that crashed
+rm -f "$OUT"/*   # a stale artefact would certify a run that crashed, and one an
+                 # older harness left behind would join the set read back above
 
 run a packages/stompdrill/tests/fixtures/tar.ai \
     --case 1590B --case-model "$MODEL" \
@@ -89,28 +185,9 @@ run b packages/stompdrill/tests/fixtures/pax.ai \
 wrote b b.drl b.json b.svg b.pdf
 
 if [ ! -f "$REFERENCE" ]; then
-    (cd "$OUT" && sha256 a.* b.* | grep -v '\.log$') > "$REFERENCE"
-    if [ ! -s "$REFERENCE" ]; then
-        rm -f "$REFERENCE"
-        echo "LOCK FAILED: the panels left nothing to hash, so nothing was"
-        echo "  captured; a reference over no artefact is not a reference."
-        exit 2
-    fi
-    echo "reference captured: $REFERENCE"; cat "$REFERENCE"; exit 0
+    capture_reference "$REFERENCE" "$OUT"
+    exit $?
 fi
 
-fail=0
-rows=0
-while read -r want name; do
-    rows=$((rows + 1))
-    got=$(sha256 "$OUT/$name" 2>/dev/null | awk '{print $1}')
-    if [ "$want" = "$got" ]; then echo "  ok       $name"
-    else echo "  CHANGED  $name"; echo "    want $want"; echo "    got  ${got:-<missing>}"; fail=1; fi
-done < "$REFERENCE"
-if [ "$rows" -eq 0 ]; then
-    echo "LOCK FAILED: $REFERENCE names no artefact; a comparison over nothing"
-    echo "  is not a lock. Delete it and run again to capture a reference."
-    exit 2
-fi
-[ "$fail" -eq 0 ] && echo "BEHAVIOUR LOCK HELD" || echo "BEHAVIOUR LOCK BROKEN"
-exit "$fail"
+compare_to_reference "$REFERENCE" "$OUT"
+exit $?
