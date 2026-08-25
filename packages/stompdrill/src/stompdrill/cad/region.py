@@ -249,8 +249,12 @@ def _floor_face(face: Any) -> Any:
     """The largest planar face in ``face``, which may be a bare face or a compound.
 
     ``find_faces`` bundles the floor with candidate companion faces into a
-    compound, so callers here must first pick the floor back out by area,
-    exactly as ``case._inner_level``/``_drilled_level`` pick by area too.
+    compound, so the floor is picked back out here by **one face's own**
+    area -- not by ``case._inner_level``'s aggregate over a whole level,
+    which would merge the floor with the very companions the bundle exists
+    to keep separable. Exactly equal areas break on the candidates' own
+    bounding boxes in whole nanometres, greatest first, minima before
+    maxima; alike on both keys they are interchangeable and either wins.
     """
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
@@ -258,18 +262,21 @@ def _floor_face(face: Any) -> Any:
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
+    from stompgeom.step import bounding_box_mm
+
     if face.ShapeType() == TopAbs_ShapeEnum.TopAbs_FACE:
         return face
 
     best: Any = None
-    best_area = -1.0
+    best_key: tuple[float, tuple[Nanometre, ...]] | None = None
     explorer = TopExp_Explorer(face, TopAbs_ShapeEnum.TopAbs_FACE)
     while explorer.More():
         candidate = TopoDS.Face_s(explorer.Current())
         props = GProp_GProps()
         BRepGProp.SurfaceProperties_s(candidate, props)
-        if props.Mass() > best_area:
-            best_area, best = props.Mass(), candidate
+        key = (props.Mass(), tuple(nm_from_mm(value) for value in bounding_box_mm(candidate)))
+        if best_key is None or key > best_key:
+            best_key, best = key, candidate
         explorer.Next()
     if best is None:
         raise StompdrillError("the play area's compound has no planar face")
@@ -302,26 +309,27 @@ def _proud_mm(
     """How far the hole's best-matching companion stands proud of the floor.
 
     The companion whose in-plane footprint is closest to the hole's own is
-    its true feature, but only within ``_COMPANION_MATCH_MM``: with no match
-    -- including none at all -- the height is unmeasured, reported as
+    its true feature, but only within ``_COMPANION_MATCH_MM``: with no
+    match -- including none at all -- the height is unmeasured, reported as
     unboundedly proud rather than assumed shallow. Signed, not a distance:
-    nearer the drilled face (towards ``outward``) is positive and proud;
-    further away recedes into the material and is negative -- never structure.
+    standing proud of the floor is positive; receding into the material is
+    negative and never structure. An exactly equal gap breaks towards the
+    most proud candidate, so the number cannot vary with arrival order.
     """
     from stompgeom.step import bounding_box_mm
 
     box = bounding_box_mm(wire)
-    best_gap: float | None = None
-    best_position: float | None = None
+    best: tuple[float, float] | None = None
     for candidate in companions:
         other = bounding_box_mm(candidate)
         gap = sum(abs(box[index] - other[index]) + abs(box[index + 3] - other[index + 3])
                   for index in in_plane)
-        if best_gap is None or gap < best_gap:
-            best_gap, best_position = gap, other[axis]
-    if best_position is None or best_gap is None or best_gap > _COMPANION_MATCH_MM:
+        key = (gap, -((plane_at - other[axis]) * outward))
+        if best is None or key < best:
+            best = key
+    if best is None or best[0] > _COMPANION_MATCH_MM:
         return float("inf")
-    return (plane_at - best_position) * outward
+    return -best[1]
 
 
 def _boundary(region: Any) -> Any:
