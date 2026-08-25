@@ -66,6 +66,12 @@ cd packages/stompgeom && uv run --no-sync mypy
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
+# Behaviour lock: whole artefacts from two panels, hashed. Capture before a change
+# that must move no artefact byte, then run again after. It is not a gate on HEAD
+# and no reference is committed; panel A needs the 1590B model cached. See ADR-0011
+# for what a green run does not reach.
+bash tools/verify-lock.sh
+
 # Mutation survey, per package -- there is no workspace-wide run
 (cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
   && ../../.venv/bin/mutmut results)
@@ -156,6 +162,8 @@ The accepted architecture is defined by:
   model package and the workspace's dependency order.
 - [ADR-0010](docs/adr/0010-the-stomp-prefix.md): the `stomp` prefix every package
   carries.
+- [ADR-0011](docs/adr/0011-behaviour-lock-and-its-blind-spots.md): the behaviour
+  lock, its uncommitted reference, and what a green run does not prove.
 
 `stompmodel` publishes the guards a measurement's unit must satisfy — `check_millimetres`
 and `check_nanometres` — beside the newtypes they check, and the diagnostics vocabulary a

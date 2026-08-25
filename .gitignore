@@ -42,7 +42,9 @@ mutants.sqlite
 # SDD scratch
 .superpowers/
 
-# Wayfinder maps and issue tracker: live working state, not history
+# Wayfinder maps and issue tracker: live working state, not history. A captured
+# behaviour-lock reference lands here too (.scratch/lock/) and stays ignored: it
+# is a fact about one machine's kernel build, not about this repository -- ADR-0011.
 .scratch/
 
 # Session docs that might go stale
