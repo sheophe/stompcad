@@ -81,9 +81,12 @@ decision rather than an omission, and these are the candidates it weighed:
   reachable only through an exit stack threaded through every caller — restructuring
   the set-level transaction ADR-0001 owns, for no change in behaviour.
 - A static gate over workspace source can only judge the shape a caller writes in the
-  frame that staged the write. Every production call here composes a set, staging into
-  a collection rather than binding a name a gate could follow to its discharge, so such
-  a gate has no subject to judge and could pass only by finding nothing.
+  frame that staged the write, and the shapes written here give it no work to do. A
+  call that discharges in the same expression that stages it is followed trivially and
+  can never be found wanting; a call that stages into a collection binds no name at the
+  staging site, and its discharge reaches the value only by iterating that collection,
+  so a gate has nothing to follow from the one to the other. Both shapes are in the
+  workspace today, so such a gate could pass only by finding nothing.
 
 What does catch an abandoned temporary is the caller-side residue assertion a caller
 composing a set already makes: `stompdrill`'s command line asserts, at every failure
