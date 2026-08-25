@@ -61,7 +61,14 @@ class CheckCaseClearance:
     def apply(self, data: DrillData) -> DrillData:
         frame = self._reconciled_frame(data)
         self._checked_frame = frame
-        identity = frame is self.model.frame
+        # Equality, not object identity: ``CaseModel`` declares ``frame`` a
+        # read-only property, so an implementation may build an equal frame
+        # on every read and share no object with this one. Widening the test
+        # to value cannot move an answer, because the shortcut *skips* the
+        # reframe: it can only remove float drift, never add any. That there
+        # is none to remove at panel scale either is the property
+        # ``test_pipeline_clearance.py`` sweeps, bound and all.
+        untouched = frame == self.model.frame
         diagnostics = [
             d
             for d in (self._cross_check(data), self._orientation_notice(data.enclosure))
@@ -73,7 +80,7 @@ class CheckCaseClearance:
             # nanometre, biasing a marginal hole towards passing -- the wrong
             # direction for a check whose job is to stop metal being cut.
             radius_nm = Nanometre(-(-hole.diameter_nm // 2))
-            if identity:
+            if untouched:
                 # No detour through the reframe arithmetic below: an
                 # unrotated (or unidentified) panel is checked exactly as it
                 # always was, byte for byte -- see ADR-0007.
@@ -124,14 +131,14 @@ class CheckCaseClearance:
         """Restate the model's own play-area rectangle in ``frame``.
 
         Every corner is carried through the model's own frame rather than
-        assuming which axis moved, so one implementation covers the identity
-        case and either quarter turn alike -- the same generality
-        ``cad.region.region_bbox_nm`` already relies on for its own corners.
-        The identity case is returned untouched rather than reframed: a
-        reframe round-trips through millimetres, and a document that was
-        never rotated must not gain a nanometre of drift it never earned.
+        assuming which axis moved, so one turn-agnostic implementation covers
+        either quarter turn -- ``cad.region.region_bbox_nm`` relies on the
+        same generality for its own corners. A frame **equal** to the
+        model's own -- equality, not identity, as ``apply()`` explains --
+        is handed back untouched: a reframe round-trips through
+        millimetres, work the rectangle it already is cannot repay.
         """
-        if frame is self.model.frame:
+        if frame == self.model.frame:
             return self.model.play_area_nm
         x0_nm, y0_nm, x1_nm, y1_nm = self.model.play_area_nm
         basis = self.model.frame.basis
