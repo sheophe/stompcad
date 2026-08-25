@@ -401,7 +401,14 @@ class DrillData:
 
     # -- derived ---------------------------------------------------------
     def numbered(self) -> tuple[tuple[int, Hole], ...]:
-        """Every hole with its drill number, or raise if routing never ran."""
+        """Every hole with its drill number, or raise if routing never ran.
+
+        The numbers are read, not audited: that they form ``1…n`` is the
+        routing stage's guarantee and the document reader's, never this
+        accessor's. Any positive number is accepted, which is what lets a
+        fixture number a lone hole 4 and so tell an emitter that read the
+        model from one that counted the list. See ADR-0006.
+        """
         pairs: list[tuple[int, Hole]] = []
         for hole in self.holes:
             if hole.index is None:

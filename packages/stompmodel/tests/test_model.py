@@ -267,6 +267,22 @@ def test_the_refusal_names_the_remedy_without_naming_a_class() -> None:
         data.numbered()
 
 
+def test_numbered_reads_the_numbers_it_is_given_without_auditing_the_set() -> None:
+    """ADR-0006's fifth amendment: ``1…n`` is established by the routing stage
+    and enforced by ``stompmodel.codec.from_document``, never by this
+    accessor. Any positive number is accepted here on purpose, which is what
+    lets a fixture number a lone hole out of range and so tell an emitter that
+    read the model from one that counted the list. Moving the rule into this
+    accessor deletes that instrument, so this test fails if anyone does.
+    """
+    data = DrillData(holes=(
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(4),
+        Hole.from_measurement(Nanometre(10_000_000), Nanometre(0), Nanometre(7_000_000)).with_number(9),
+    ))
+
+    assert [number for number, _ in data.numbered()] == [4, 9]
+
+
 def test_the_residual_is_the_nominal_position_less_the_measured_one() -> None:
     """Positive means the nominal value is the larger, in nanometres. Named
     ``residual_nm`` because it is three lengths, and a caller printing it as
