@@ -1,11 +1,12 @@
 """The one statement of which packages this workspace contains.
 
 Every structural gate that must scan "every workspace member" derives its
-target list from :func:`member_package_dirs` rather than restating one. A
-package added under ``packages/`` — any directory shipping its own ``src`` —
+target list from :func:`member_package_dirs` rather than restating one, and
+proves its reach with :func:`member_area_roots` — so no gate is the kind of
+instrument ``CLAUDE.md``'s Testing rules reject, one that "can pass by
+finding nothing". Any directory under ``packages/`` shipping its own ``src``
 is included the moment it exists, with no edit to this module or to any gate
-that calls it. See ADR-0008, and ``CLAUDE.md``'s Testing rules on ownership
-gates.
+that calls it. ADR-0008 states both halves of that rule.
 """
 
 from __future__ import annotations
