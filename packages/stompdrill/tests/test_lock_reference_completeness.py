@@ -10,6 +10,7 @@ files this module writes. See ADR-0011.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -62,6 +63,36 @@ def capture(reference: Path, directory: Path) -> subprocess.CompletedProcess[str
         text=True,
         check=False,
     )
+
+
+def produced(directory: Path) -> tuple[str, ...]:
+    """Run the script's set rule alone, and return the names it yields."""
+    program = f'LOCK_FUNCTIONS_ONLY=1 . "{SCRIPT}"\nproduced_artefacts "$1"\n'
+    listed = subprocess.run(
+        ["bash", "-c", program, "verify-lock", str(directory)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return tuple(listed.stdout.split())
+
+
+def uncalled_seam_functions(script: str) -> frozenset[str]:
+    """Seam functions the script's own paths no longer call.
+
+    Comments go first, by the shell's own rule, so a call quoted in header
+    prose cannot stand in for one a run performs. Indentation and trailing
+    prose are ignored: reindenting a branch is a legitimate edit, and a
+    check that fired on one would cost more than it caught.
+    """
+    commands = re.sub(r"(?m)(?:^|(?<=\s))#.*$", "", script)
+    seam = ("capture_reference", "compare_to_reference")
+    called = {
+        name
+        for name in seam
+        if re.search(rf'(?m)^\s*{name} "\$REFERENCE" "\$OUT"\s*$', commands)
+    }
+    return frozenset(seam) - called
 
 
 def prepared(tmp_path: Path, reference_text: str) -> subprocess.CompletedProcess[str]:
@@ -157,14 +188,35 @@ def test_the_panel_logs_are_not_part_of_the_artefact_set(tmp_path: Path):
     directory = tmp_path / "artefacts"
     synthesise(directory)
 
-    listed = subprocess.run(
-        ["bash", "-c", f'LOCK_FUNCTIONS_ONLY=1 . "{SCRIPT}"\nproduced_artefacts "$1"\n', "x", str(directory)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    assert produced(directory) == ARTEFACTS
 
-    assert tuple(listed.stdout.split()) == ARTEFACTS
+
+def test_an_artefact_named_outside_the_panel_prefixes_is_in_the_set(tmp_path: Path):
+    """Guilty probe: a set read by prefix would leave a new emitter's output unhashed.
+
+    Both sides of the lock read this one rule, so a name it does not yield is
+    neither captured nor demanded back, and the green verdict then covers less
+    than it says it does.
+    """
+    directory = tmp_path / "artefacts"
+    synthesise(directory)
+    (directory / "panel.dxf").write_bytes(b"an emitter this harness does not yet have\n")
+
+    assert produced(directory) == tuple(sorted(ARTEFACTS + ("panel.dxf",)))
+
+
+def test_a_blank_row_claims_nothing_and_is_passed_over(tmp_path: Path):
+    """A row naming no artefact is neither counted nor reported as compared.
+
+    Trailing whitespace is ordinary in an edited text file and costs the
+    reference no name, so the set rule still proves the whole; what it must
+    not do is print an `ok` line over nothing and inflate the tally.
+    """
+    result = prepared(tmp_path, synthesise(tmp_path / "artefacts") + "\n")
+
+    assert result.returncode == 0, result.stdout
+    assert len(re.findall(r"(?m)^  ok  ", result.stdout)) == len(ARTEFACTS)
+    assert f"compared {len(ARTEFACTS)} artefacts" in result.stdout
 
 
 def test_a_captured_reference_is_one_a_verify_accepts(tmp_path: Path):
@@ -206,7 +258,62 @@ def test_the_script_runs_through_the_functions_these_probes_drive():
     on passing if the script's own paths stopped calling them.
     """
     script = SCRIPT.read_text(encoding="utf-8")
-    commands = re.sub(r"(?m)(?:^|(?<=\s))#.*$", "", script)
+    assert script
 
-    assert re.search(r'(?m)^compare_to_reference "\$REFERENCE" "\$OUT"$', commands)
-    assert re.search(r'(?m)^    capture_reference "\$REFERENCE" "\$OUT"$', commands)
+    assert uncalled_seam_functions(script) == frozenset()
+
+
+def test_a_seam_function_the_script_only_mentions_is_reported():
+    """Guilty probe: a call that survives as prose is not a call."""
+    assert uncalled_seam_functions(
+        'compare_to_reference "$REFERENCE" "$OUT"\n'
+        '# capture_reference "$REFERENCE" "$OUT" -- described, no longer run\n'
+    ) == frozenset({"capture_reference"})
+
+
+def test_a_reindented_call_site_is_not_reported():
+    """Innocent probe: layout is not the claim, so reformatting must not fire.
+
+    A tab for four spaces, `then` on its own line and a trailing comment are
+    all edits that change no path; a check that went red on them would train
+    a reader to switch it off.
+    """
+    assert uncalled_seam_functions(
+        'if [ ! -f "$REFERENCE" ]\nthen\n\tcapture_reference "$REFERENCE" "$OUT"\n'
+        '\texit $?\nfi\ncompare_to_reference "$REFERENCE" "$OUT"   # the verify path\n'
+    ) == frozenset()
+
+
+def test_the_script_refuses_to_run_with_the_sourcing_switch_set(tmp_path: Path):
+    """Guilty probe: the switch that opens the seam must not open a silent pass.
+
+    Exported into a real invocation it would otherwise stop the script above
+    every precondition and leave exit 0 -- the code a wrapper reads as held --
+    over no panel run and no byte compared.
+    """
+    directory = tmp_path / "lock"
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(directory)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "LOCK_FUNCTIONS_ONLY": "1"},
+    )
+
+    assert result.returncode == 2, result.stdout
+    assert "LOCK_FUNCTIONS_ONLY" in result.stdout
+    assert not directory.exists()
+
+
+def test_sourcing_with_the_switch_set_still_yields_the_seam():
+    """Innocent probe: that refusal must not have closed the seam these probes use."""
+    result = subprocess.run(
+        ["bash", "-c", f'LOCK_FUNCTIONS_ONLY=1 . "{SCRIPT}"\ntype -t compare_to_reference\n'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "function"

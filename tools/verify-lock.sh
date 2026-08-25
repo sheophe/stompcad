@@ -37,11 +37,13 @@ sha256() {  # sha256sum on most Linux distributions, shasum on macOS; both print
 }
 
 produced_artefacts() {  # produced_artefacts <dir>: the artefact names a run left
-                        # there, sorted. One rule, so capture and verify cannot
-                        # come to disagree about what "the set" means.
+                        # there, sorted. Every file but a panel log counts, so an
+                        # emitter's output joins the set whatever it is named --
+                        # a rule reading a prefix would hash only today's names.
+                        # One rule, so capture and verify cannot come to disagree.
     (cd "$1" 2>/dev/null || return 0
-     for name in a.* b.*; do
-        case "$name" in *.log | 'a.*' | 'b.*') continue ;; esac
+     for name in *; do
+        case "$name" in *.log | '*') continue ;; esac
         [ -f "$name" ] && printf '%s\n' "$name"
      done | LC_ALL=C sort)
 }
@@ -70,7 +72,7 @@ compare_to_reference() {  # compare_to_reference <reference> <dir>
     # everything, which is the one failure a byte lock cannot afford.
     local reference="$1" dir="$2"
     local named produced short extra expected rows=0 fail=0 want name got
-    named="$(awk '{print $2}' "$reference" | LC_ALL=C sort)"
+    named="$(awk '$2 != "" {print $2}' "$reference" | LC_ALL=C sort)"
     produced="$(produced_artefacts "$dir")"
     if [ -z "$named" ]; then
         echo "LOCK FAILED: $reference names no artefact; a comparison over nothing"
@@ -89,6 +91,9 @@ compare_to_reference() {  # compare_to_reference <reference> <dir>
     fi
     echo "reference: $reference"
     while read -r want name; do
+        # A row naming nothing -- a blank line -- claims nothing, so it is neither
+        # counted nor reported; the set comparison above is what proves the whole.
+        [ -n "$name" ] || continue
         rows=$((rows + 1))
         got=$(sha256 "$dir/$name" 2>/dev/null | awk '{print $1}')
         if [ "$want" = "$got" ]; then echo "  ok       $name"
@@ -108,7 +113,15 @@ compare_to_reference() {  # compare_to_reference <reference> <dir>
 
 # Sourced by the control, the file stops here: nothing below is a definition,
 # and the setup below would otherwise create directories in the caller's tree.
-if [ -n "${LOCK_FUNCTIONS_ONLY:-}" ]; then return 0 2>/dev/null || exit 0; fi
+# Executed with the switch set, it refuses aloud instead: exiting 0 having run
+# no panel and compared no byte is the one verdict this script must never give,
+# and it is the verdict a caller with the variable in its environment would read.
+if [ -n "${LOCK_FUNCTIONS_ONLY:-}" ]; then
+    if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
+    echo "LOCK FAILED: LOCK_FUNCTIONS_ONLY is set in the environment, so this run"
+    echo "  would render nothing and compare nothing. Unset it to run the lock."
+    exit 2
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -156,7 +169,8 @@ wrote() {  # wrote <label> <name...>; a crash and a warning both leave rc 1, so
     fi
 }
 
-rm -f "$OUT"/a.* "$OUT"/b.*   # a stale artefact would certify a run that crashed
+rm -f "$OUT"/*   # a stale artefact would certify a run that crashed, and one an
+                 # older harness left behind would join the set read back above
 
 run a packages/stompdrill/tests/fixtures/tar.ai \
     --case 1590B --case-model "$MODEL" \

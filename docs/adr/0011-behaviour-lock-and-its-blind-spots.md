@@ -46,6 +46,13 @@ undescribed for a fourth programme to rebuild.
   a reference that names more is refused as well, because the two sides then
   disagree about which artefacts exist, which is a stale reference rather than a
   moved byte and cannot honestly be reported as a break.
+- **"The set" is every file the panels leave behind but their consoles.** The rule
+  reads the output directory rather than a list of names the script also has to
+  keep current, so an emitter added later is hashed under whatever it is called; a
+  rule matching today's `a.`/`b.` prefixes would have left it silently outside both
+  the capture and the comparison, which is the same blindness one directory further
+  out. A row of the reference naming nothing — a blank line — claims nothing and is
+  passed over; it costs the set no name, so completeness is untouched.
 
 ## Rationale
 
@@ -132,6 +139,16 @@ must still reach the green verdict and state how many artefacts it compared; and
 single artefact's bytes moved under a complete reference, which must still reach the
 break verdict rather than a refusal.
 
+That control drives the comparison directly, so it would go on passing if the script's
+own paths stopped calling it. A scan of the script's text answers that, and the scan is
+itself held to the rule it serves: a guilty probe, a call surviving only as comment
+prose, must be named, and an innocent probe, the same call reindented with its branch
+reformatted and a comment appended, must not be — a check that fired on a reformat
+would teach a reader to switch it off. The switch that opens the seam is probed the
+same way, because a variable that stops the script before its preconditions is a second
+way to exit zero having examined nothing: exported into an executed run it must refuse
+aloud, and it must still open the seam when the file is sourced.
+
 **Why the complementary claim is pinned.** The script's header claims every
 registered emitter appears at least once. That claim can go false *silently in the
 harmful direction*: register a sixth emitter, touch nothing else, and both the
@@ -165,7 +182,9 @@ guessed at.
 The set rule above is enforced on both sides of that discipline by one statement of
 what "the set" is, so capture and verify cannot come to disagree about it: the
 capture records exactly the names that rule yields, and the verify demands exactly
-those names back before it reads a digest. The rows the reference yields are counted
+those names back before it reads a digest. The previous run's output is cleared to the
+same breadth the rule reads, so a file an older harness wrote cannot join the set as
+though this run had produced it. The rows the reference yields are counted
 against that set afterwards, because a final row lacking its newline ends the read
 without being compared and would otherwise leave a green verdict one artefact short.
 
