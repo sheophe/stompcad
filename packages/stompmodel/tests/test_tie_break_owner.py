@@ -12,18 +12,43 @@ reappears anywhere in the workspace.
 from __future__ import annotations
 
 import ast
+from collections.abc import Collection
 from pathlib import Path
 
-from tools.workspace_membership import member_area_roots, member_package_dirs
+from tools.workspace_membership import REPO, member_area_roots, member_package_dirs
 
 __all__: list[str] = []
 
-#: The one module allowed to state the tuple literally: it is what
-#: ``Hole.tie_break`` returns, the sole owner ADR-0006 names.
-_OWNER_PACKAGE = "stompmodel"
-_OWNER_MODULE = "model.py"
+#: The one definition allowed to state the tuple: it is what ``Hole.tie_break``
+#: returns, the sole owner ADR-0006 names. A definition, not a module -- a
+#: second statement added elsewhere in ``model.py`` is a breach like any other.
+TIE_BREAK_HOME = REPO / "packages" / "stompmodel" / "src" / "stompmodel" / "model.py"
+_SANCTIONED = frozenset({"tie_break"})
 
 _RAW_FIELDS = ("x", "y", "diameter")
+
+
+def _outside(tree: ast.Module, sanctioned: Collection[str] = ()) -> list[ast.AST]:
+    """Every node in ``tree`` outside the definitions ``sanctioned`` names.
+
+    The exempt unit is the definition, never the file: a second statement
+    added beside the owner, in the owner's own module, is exactly the
+    regression a whole-file exclusion hides.
+    """
+    found: list[ast.AST] = []
+
+    def descend(parent: ast.AST) -> None:
+        for child in ast.iter_child_nodes(parent):
+            if (
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child.name in sanctioned
+            ):
+                continue
+            found.append(child)
+            descend(child)
+
+    descend(tree)
+    return found
 
 
 def _source_files() -> list[Path]:
@@ -72,17 +97,15 @@ def tuple_restates_the_tie_break(node: ast.AST) -> bool:
     return present == set(_RAW_FIELDS)
 
 
-def _offending_lines(path: Path) -> list[int]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Tuple) and tuple_restates_the_tie_break(node)
-    ]
-
-
-def _is_owner(path: Path) -> bool:
-    return path.name == _OWNER_MODULE and path.parent.name == _OWNER_PACKAGE
+def _offending_lines(source: str, sanctioned: Collection[str] = ()) -> list[int]:
+    """Every line outside ``sanctioned`` where ``source`` restates the tuple."""
+    return sorted(
+        {
+            node.lineno
+            for node in _outside(ast.parse(source), sanctioned)
+            if isinstance(node, ast.expr) and tuple_restates_the_tie_break(node)
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +142,35 @@ def test_the_gate_does_not_fire_on_a_derived_computation():
         "Nanometre(d_nm - nm_from_mm(hole.raw.diameter)))"
     )
     assert not tuple_restates_the_tie_break(ast.parse(source, mode="eval").body)
+
+
+def test_a_second_statement_in_the_rules_own_home_is_caught():
+    """The guilty home probe: the exemption is a definition, not a file.
+
+    The home file's real text with a second tuple spliced in beside the
+    owner -- in memory, never on disk, and in a *different* field order, so
+    the gate's order-independence is exercised here too -- offends even
+    under the sanction list, which a whole-file exclusion would have hidden.
+    """
+    spliced = TIE_BREAK_HOME.read_text(encoding="utf-8") + (
+        "\n\ndef _second_tie_break(hole):\n"
+        "    return (hole.raw.diameter, hole.raw.y, hole.raw.x)\n"
+    )
+    assert _offending_lines(spliced, _SANCTIONED)
+
+
+def test_the_exemption_covers_the_owning_definition_and_nothing_more():
+    """The anchor probe, matched to the guilty one above.
+
+    Unexempted, the home really does state the tuple -- so the exemption is
+    load-bearing and a renamed ``tie_break`` fails loudly rather than
+    silently widening. Exempted, nothing else in the home states it, so the
+    exemption is no wider than the definition it names.
+    """
+    home = TIE_BREAK_HOME.read_text(encoding="utf-8")
+
+    assert _offending_lines(home), "the home no longer states the tuple it owns"
+    assert _offending_lines(home, _SANCTIONED) == []
 
 
 def test_the_scan_reaches_every_workspace_member():
@@ -158,11 +210,15 @@ def test_no_module_outside_the_owner_restates_the_raw_measurement_tuple():
     offenders = {
         str(path): lines
         for path in _source_files()
-        if not _is_owner(path)
-        for lines in [_offending_lines(path)]
+        for lines in [
+            _offending_lines(
+                path.read_text(encoding="utf-8"),
+                _SANCTIONED if path == TIE_BREAK_HOME else (),
+            )
+        ]
         if lines
     }
     assert offenders == {}, (
-        "a module outside stompmodel.model restates the raw-measurement "
+        "a definition outside Hole.tie_break restates the raw-measurement "
         "tie-break as its own tuple literal -- call Hole.tie_break instead"
     )

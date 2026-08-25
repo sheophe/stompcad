@@ -12,6 +12,7 @@ scratch file (``tempfile.mkstemp``), already carved out by ADR-0005's
 from __future__ import annotations
 
 import ast
+from collections.abc import Collection
 from pathlib import Path
 
 from tools.workspace_membership import REPO, member_area_roots, member_package_dirs
@@ -22,6 +23,38 @@ PACKAGE = Path(__file__).resolve().parent.parent
 #: generator -- a private copy could as easily hide there as in a package.
 SOURCE_ROOTS = tuple(pkg / "src" for pkg in member_package_dirs()) + (REPO / "tools",)
 OWNER_MODULE = REPO / "packages" / "stompmodel" / "src" / "stompmodel" / "protocols.py"
+
+#: The definitions allowed to state the mechanism: ``stage_payload`` builds
+#: the temporary name and ``StagedWrite.commit`` performs the atomic
+#: replace. ``discard`` is deliberately absent -- it states neither shape,
+#: and sanctioning a definition pre-emptively is the too-wide exemption
+#: this replaces. A definition, not a file: a second statement added
+#: elsewhere in ``protocols.py`` is a breach like any other.
+_SANCTIONED = frozenset({"stage_payload", "commit"})
+
+
+def _outside(tree: ast.Module, sanctioned: Collection[str] = ()) -> list[ast.AST]:
+    """Every node in ``tree`` outside the definitions ``sanctioned`` names.
+
+    The exempt unit is the definition, never the file: a second statement
+    added beside the owner, in the owner's own module, is exactly the
+    regression a whole-file exclusion hides.
+    """
+    found: list[ast.AST] = []
+
+    def descend(parent: ast.AST) -> None:
+        for child in ast.iter_child_nodes(parent):
+            if (
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child.name in sanctioned
+            ):
+                continue
+            found.append(child)
+            descend(child)
+
+    descend(tree)
+    return found
+
 
 
 def performs_the_atomic_replace(node: ast.AST) -> bool:
@@ -55,13 +88,23 @@ def builds_the_temporary_name_shape(node: ast.AST) -> bool:
     return literal.startswith(".") and literal.endswith(".tmp") and dynamic >= 2
 
 
-def _offending_nodes(source: str) -> list[ast.AST]:
-    tree = ast.parse(source)
+def _offending_nodes(source: str, sanctioned: Collection[str] = ()) -> list[ast.AST]:
     return [
         node
-        for node in ast.walk(tree)
+        for node in _outside(ast.parse(source), sanctioned)
         if performs_the_atomic_replace(node) or builds_the_temporary_name_shape(node)
     ]
+
+
+def _offending_lines(source: str, sanctioned: Collection[str] = ()) -> list[int]:
+    """The lines of ``_offending_nodes``, sorted, for a readable failure."""
+    return sorted(
+        {
+            node.lineno
+            for node in _offending_nodes(source, sanctioned)
+            if isinstance(node, (ast.stmt, ast.expr))
+        }
+    )
 
 
 def _source_files() -> list[Path]:
@@ -119,6 +162,35 @@ def test_stompgeoms_kernel_scratch_file_is_not_caught():
     assert _offending_nodes(writer.read_text(encoding="utf-8")) == []
 
 
+def test_a_second_statement_in_the_rules_own_home_is_caught() -> None:
+    """The guilty home probe: the exemption is a definition, not a file.
+
+    The home file's real text with a second write mechanism spliced in
+    beside the owner -- in memory, never on disk -- offends even under the
+    sanction list, which a whole-file exclusion would have hidden.
+    """
+    spliced = OWNER_MODULE.read_text(encoding="utf-8") + (
+        "\n\ndef _second_write_mechanism(tmp, path, target):\n"
+        "    os.replace(tmp, path)\n"
+        '    return f".{target.name}.{id(target)}.tmp"\n'
+    )
+    assert _offending_lines(spliced, _SANCTIONED)
+
+
+def test_the_exemption_covers_the_owning_definitions_and_nothing_more() -> None:
+    """The anchor probe, matched to the guilty one above.
+
+    Unexempted, the home really does state the mechanism -- so the
+    exemption is load-bearing and a renamed owner fails loudly rather than
+    silently widening. Exempted, nothing else in the home states it, so the
+    exemption is no wider than the definitions it names.
+    """
+    home = OWNER_MODULE.read_text(encoding="utf-8")
+
+    assert _offending_lines(home), "the home no longer states the mechanism it owns"
+    assert _offending_lines(home, _SANCTIONED) == []
+
+
 def test_the_scan_reaches_every_workspace_member():
     """The reach control is a property of the scan, not a pinned answer.
 
@@ -145,20 +217,25 @@ def test_the_scan_reaches_every_workspace_member():
 def test_no_module_outside_stompmodel_protocols_writes_an_artefacts_bytes():
     """Criterion 1 and 6: the mechanism has one statement, in one module.
 
-    No module outside ``stompmodel.protocols`` may call ``os.replace`` or
-    build the ``.{...}.{...}.tmp`` temporary name -- both are the owner's
-    alone, published as ``stage_payload`` and the two verbs on the
-    ``StagedWrite`` it returns.
+    No definition outside ``stage_payload`` and ``StagedWrite.commit`` may
+    call ``os.replace`` or build the ``.{...}.{...}.tmp`` temporary name --
+    both are the owner's alone, published as ``stage_payload`` and the two
+    verbs on the ``StagedWrite`` it returns. A definition, not a module:
+    a second statement in ``protocols.py`` itself is caught here too.
     """
     offenders = {
-        str(path): [node.lineno for node in nodes]
+        str(path): lines
         for path in _source_files()
-        if path != OWNER_MODULE
-        for nodes in [_offending_nodes(path.read_text(encoding="utf-8"))]
-        if nodes
+        for lines in [
+            _offending_lines(
+                path.read_text(encoding="utf-8"),
+                _SANCTIONED if path == OWNER_MODULE else (),
+            )
+        ]
+        if lines
     }
     assert offenders == {}, (
-        "a module outside stompmodel.protocols performs the atomic replace or "
-        "builds the temporary-name shape itself -- call stage_payload and "
-        "commit/discard the value it returns instead"
+        "a definition outside stage_payload and StagedWrite.commit performs "
+        "the atomic replace or builds the temporary-name shape itself -- call "
+        "stage_payload and commit/discard the value it returns instead"
     )
