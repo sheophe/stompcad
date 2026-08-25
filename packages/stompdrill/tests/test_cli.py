@@ -1200,6 +1200,42 @@ def test_two_emit_targets_differing_only_in_normalisation_form_are_a_usage_error
     assert "Traceback" not in err
 
 
+def test_two_emit_targets_reaching_one_file_through_a_symlink_are_a_usage_error(
+    fake_source, tmp_path, capsys
+):
+    """The folds above are only half of :func:`cli._target_key`; the other
+    half is ``Path.resolve``. Two spellings that fold apart still name one
+    file when a directory on the way is a symlink, and dropping
+    ``.resolve()`` leaves every other target-key probe in this module
+    green -- so without this one the resolution half is unpoliced."""
+    fake_source(read())
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    direct = real / "out.json"
+    through_link = link / "out.json"
+    # Fixture control: the collision must be real and not already folded
+    # away, or every assertion below passes by finding nothing.
+    assert str(direct) != str(through_link)
+    assert direct.resolve() == through_link.resolve()
+
+    exit_code = cli.main(
+        [
+            str(FIXTURE),
+            "--emit",
+            f"json={direct}",
+            "--emit",
+            f"drawing-svg={through_link}",
+        ]
+    )
+
+    assert exit_code == 3
+    assert not direct.exists() and not through_link.exists()
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+
+
 def test_two_ordinary_targets_one_character_apart_are_both_written(
     fake_source, tmp_path
 ):

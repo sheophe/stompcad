@@ -745,7 +745,7 @@ same correction beside them.
 
 ## Delete `region.build_region`'s always-true `if adder.IsDone()`
 
-**Status:** Premise refuted, residue open, not scheduled -- **wave 6, list A.** Found in
+**Status:** Resolved by ticket 50 (wave 6). Found in
 the 2026-08 architecture review's wave 2 (its own finding F3-M2); re-verified and refuted
 in wave 5's confirm phase (C7). Its own title has changed: the entry used to ask for a
 refusal, and there is nothing to refuse.
@@ -777,6 +777,20 @@ the time of writing; locate it by its text) -- the change is byte-identical on e
 artefact, and no test asserts the dead branch. Cosmetic, so **list A**, and it must be
 taken **after ticket 44 has merged**, because ticket 44 owned `cad/region.py`. That
 condition is now satisfied: ticket 44 merged at `07d7f66`.
+
+**Resolved by ticket 50 (wave 6).** The `if` is gone and `region = adder.Face()` is now
+unconditional. Two corrections this entry's own wording invites, both established by ticket
+50's own probe rather than inherited. First, wave 5's demonstration ran against a *different*
+construction -- a `BRepBuilderAPI_MakeFace` built from a wire -- so the re-probe against the
+constructor this call site actually uses, one built from an existing face, was necessary
+rather than ceremony; every hostile wire still reported done. Second, "the `if` is dead" is
+the imprecise form. `IsDone()` is *false* on a builder freshly constructed from a face, and
+only `Add` forces it true, so the flag is genuine and observable: what is unconditional is
+`Add`'s setting of it. A restatement that keeps the loose wording leaves a reader concluding
+`IsDone()` is a stub. A default-constructed null `TopoDS_Wire` passed to `Add` segfaults the
+kernel rather than reporting not-done; that is unreachable from `classify_bounds`, so it is
+not a defect, but it is the sharpest available statement of why no guard at this point could
+have helped.
 
 ## Give the model-side geometry helpers a real tie-break instead of kernel traversal order
 
@@ -991,10 +1005,14 @@ to the unreconciled play area rather than crashing. Two observations travel with
 independent of pipeline position" — states nothing about an ordering obligation between its
 two methods, so a second implementer (`stompcollider`'s `Match`/`Seat` stages,
 `docs/specs/stompcollider-technical.md:532`) meets no warning before writing the same shape.
-And `apply`/`_play_area_in` both decide whether to reframe by testing
+`apply`/`_play_area_in` used to decide whether to reframe by testing
 `frame is self.model.frame` — object identity, which the concrete `OcpCaseModel` dataclass
-happens to preserve but which the `CaseModel` protocol never promises; a computed-property
-implementation of `.frame` would silently take the reframe branch on every access.
+happens to preserve but which the `CaseModel` protocol never promises. Ticket 51 replaced
+both with `==`, the equality the protocol's read-only-property declaration actually
+supports: a computed-property implementation of `.frame`, which under identity would have
+taken the reframe branch on every access, is exactly the case the equality now serves. The
+`TwinFrameCase` fixture in `packages/stompdrill/tests/test_pipeline_clearance.py` is a live
+example of that implementation shape.
 
 **Acceptance:** Either `Stage.describe()`'s docstring states the ordering obligation a stage
 may rely on (or forbids one) and `CheckCaseClearance` keeps or loses its mutable field to
@@ -1004,13 +1022,15 @@ wave's reconciliation changed, since a play area now needs the reconciled frame 
 at all). Either way, the identity comparisons are replaced by an equality the `CaseModel`
 protocol actually promises, or the protocol is amended to promise identity.
 
-**Wave 5 confirm (C9), and the wave-6 mark:** re-verified against HEAD. Both identity
-comparisons are still there -- `pipeline/clearance.py`'s `apply` and `_play_area_in` each
-test `frame is self.model.frame`. The final clause of the Acceptance above, *replacing those
-identity comparisons with an equality the `CaseModel` protocol actually promises*, is
-**wave 6, list A**: it is Minor, because the shipped `OcpCaseModel` is a frozen dataclass
-whose `.frame` really is one object, so the change is byte-identical on every artefact the
-behaviour lock hashes and on every model this repository can fetch. The rest of this entry
+**Wave 5 confirm (C9), and the wave-6 outcome:** re-verified against HEAD in wave 5, where
+both identity comparisons were still present. **Ticket 51 (wave 6) discharged the final
+clause of the Acceptance above** -- *replacing those identity comparisons with an equality
+the `CaseModel` protocol actually promises*. Both sites now compare by value. It was Minor,
+because the shipped `OcpCaseModel` is a frozen dataclass whose `.frame` really is one object,
+so the change was byte-identical on every artefact the behaviour lock hashes and on every
+model this repository can fetch; the lock confirmed that at the merge. The widened `==`
+admits no false positive either: `_reconciled_frame`'s quarter-turned frame (u <- v,
+v <- -u) can never compare equal to its source for an orthonormal basis. The rest of this entry
 is left standing exactly as written: the confirm evidence addresses only the identity
 clause and says nothing about the mutable field, the `Stage` docstring, or moving
 `play_area_nm` onto `CaseRegistration`, so none of those is narrowed here.
