@@ -39,6 +39,13 @@ undescribed for a fourth programme to rebuild.
 - **A green lock is not a green suite.** Five causal classes bound what a green run
   reaches. They are stated as classes rather than as an enumeration of unreached
   paths, and they are deliberately not pinned by a control.
+- **A verify judges the whole set or nothing.** The reference must name exactly the
+  artefacts the run produced. A reference that names fewer is refused rather than
+  compared, because a subset compares clean in the same words as the whole and a
+  green verdict over unexamined bytes is the one answer a byte lock must never give;
+  a reference that names more is refused as well, because the two sides then
+  disagree about which artefacts exist, which is a stale reference rather than a
+  moved byte and cannot honestly be reported as a break.
 
 ## Rationale
 
@@ -111,6 +118,20 @@ the change it should welcome. That is an anti-instrument. It would also put a
 drifting enumeration of unreached paths under test, in a tracked document, which
 this repository forbids.
 
+**Why completeness is pinned.** The claim that a green verdict covers every artefact
+is not, like the five classes, a claim whose only falsifier is an improvement. It goes
+false in the harmful direction on its own — a reference edited, truncated by a
+half-finished write, or left over from a harness that emitted a different set — and it
+goes false silently, which is the whole complaint. It is therefore driven by
+`packages/stompdrill/tests/test_lock_reference_completeness.py`, which sources the
+script with `LOCK_FUNCTIONS_ONLY` set so it stops before rendering anything, and drives
+the capture and comparison over a synthetic directory. Guilty probes: a reference
+truncated to a subset, one naming an artefact no panel produces, one whose last row
+lacks its newline, and an empty one. Innocent probes: the whole set unaltered, which
+must still reach the green verdict and state how many artefacts it compared; and a
+single artefact's bytes moved under a complete reference, which must still reach the
+break verdict rather than a refusal.
+
 **Why the complementary claim is pinned.** The script's header claims every
 registered emitter appears at least once. That claim can go false *silently in the
 harmful direction*: register a sixth emitter, touch nothing else, and both the
@@ -137,15 +158,25 @@ the reference, where believing a run that did not happen does the greater damage
 
 A reference captured at a different commit reports a false break, so the discipline
 is capture-then-verify within one episode. The script echoes the reference path it
-used, and keeps the artefacts beside it, so a break can be diffed rather than
+used — on the path that captures one and on the path that verifies against one
+alike — and keeps the artefacts beside it, so a break can be diffed rather than
 guessed at.
 
+The set rule above is enforced on both sides of that discipline by one statement of
+what "the set" is, so capture and verify cannot come to disagree about it: the
+capture records exactly the names that rule yields, and the verify demands exactly
+those names back before it reads a digest. The rows the reference yields are counted
+against that set afterwards, because a final row lacking its newline ends the read
+without being compared and would otherwise leave a green verdict one artefact short.
+
 The digest format is `shasum -a 256`'s, which `sha256sum` also writes, so a
-reference captured by an earlier copy of the harness remains valid input. The
+reference captured by an earlier copy of the harness remains valid input as long as
+that copy emitted the same set. The
 architecture review's own copy under `.scratch/` is left in place and untouched for
 the review in flight; it is ignored and dies with that directory.
 
 **A tracked shell script is seen by neither `ruff` nor `mypy` nor the docstring
-audit.** The emitter-coverage gate is its only automatic protection, and this ADR
-states that rather than leaving a reader to assume the repository's Python gates
-reach it.
+audit.** Two Python gates reach it deliberately — the emitter-coverage check, which
+reads its text, and the completeness control, which sources it and drives its two
+paths — and nothing else does. This ADR states that rather than leaving a reader to
+assume the repository's Python gates reach it.
