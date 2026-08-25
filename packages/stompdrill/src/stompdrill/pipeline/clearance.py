@@ -63,10 +63,11 @@ class CheckCaseClearance:
         self._checked_frame = frame
         # Equality, not object identity: ``CaseModel`` declares ``frame`` a
         # read-only property, so an implementation may build an equal frame
-        # on every read and share no object with this one. A reframe through
-        # a value-equal frame returns the very nanometres it was given -- the
-        # property ``test_pipeline_clearance.py`` sweeps -- so this only
-        # decides whether the arithmetic below is worth doing.
+        # on every read and share no object with this one. Widening the test
+        # to value cannot move an answer, because the shortcut *skips* the
+        # reframe: it can only remove float drift, never add any. That there
+        # is none to remove at panel scale either is the property
+        # ``test_pipeline_clearance.py`` sweeps, bound and all.
         untouched = frame == self.model.frame
         diagnostics = [
             d
@@ -131,11 +132,11 @@ class CheckCaseClearance:
 
         Every corner is carried through the model's own frame rather than
         assuming which axis moved, so one turn-agnostic implementation covers
-        either quarter turn -- the same generality
-        ``cad.region.region_bbox_nm`` already relies on for its own corners.
-        A frame **equal** to the model's own is handed back untouched, on the
-        same reasoning ``apply()`` states: equality, not identity, and the
-        rectangle it would reframe to is the rectangle it already is.
+        either quarter turn -- ``cad.region.region_bbox_nm`` relies on the
+        same generality for its own corners. A frame **equal** to the
+        model's own -- equality, not identity, as ``apply()`` explains --
+        is handed back untouched: a reframe round-trips through
+        millimetres, work the rectangle it already is cannot repay.
         """
         if frame == self.model.frame:
             return self.model.play_area_nm

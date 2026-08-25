@@ -2,8 +2,9 @@
 
 Two properties, kept together because the second depends on the first: a
 reframe through a value-equal frame returns the very nanometres it was
-given, so selecting the shortcut by frame equality rather than object
-identity can only skip arithmetic, never change an answer.
+given -- across every frame a panel reaches, a bound measured below -- so
+selecting the shortcut by frame equality rather than object identity can
+only skip arithmetic, never change an answer.
 """
 
 from __future__ import annotations
@@ -80,16 +81,28 @@ _POINTS: tuple[int, ...] = (
 )
 
 
+#: How far a frame's origin may sit from the model origin before a reframe
+#: through a twin stops being exact. ``to_model`` adds the point to the
+#: origin in millimetres and ``to_canonical`` subtracts it back, so the
+#: cancellation costs an ulp of the origin; past this bound that ulp exceeds
+#: ``nm_from_mm``'s half-nanometre rounding. A thousand kilometres is far
+#: outside anything an enclosure reaches. Measured, not assumed -- see
+#: ``test_the_exactness_bound_is_where_it_is_claimed_to_be``.
+_EXACT_ORIGIN_LIMIT_NM = 10**15
+
+
 def test_reframing_through_a_value_equal_frame_is_exactly_value_preserving():
     """Every point comes back as the integer it went in as, not near it.
 
-    This is the fact the shortcut below rests on. Were it false, widening
-    the shortcut from object identity to equality would move artefact
-    bytes rather than only skipping work.
+    This is the fact the shortcut below rests on. It holds within a
+    measured regime rather than unconditionally: every frame swept keeps
+    its origin inside ``_EXACT_ORIGIN_LIMIT_NM``, which the sweep asserts
+    rather than trusts, so the property never claims more than it covers.
     """
     examined = 0
     drifted: list[tuple[int, int, int, int]] = []
     for frame in _FRAMES:
+        assert all(abs(int(o)) <= _EXACT_ORIGIN_LIMIT_NM for o in frame.origin_nm)
         twin = _twin(FaceFrame(basis=frame)).basis
         assert twin == frame and twin is not frame
         for x_nm in _POINTS:
@@ -123,6 +136,34 @@ def test_the_drift_sweep_would_notice_a_frame_that_was_not_a_twin():
     )
 
     assert moved == len(_POINTS) ** 2 - 1
+
+
+def _worst_twin_drift_nm(frame: CoordinateFrame) -> int:
+    """The largest nanometre a reframe through ``frame``'s twin moves."""
+    twin = _twin(FaceFrame(basis=frame)).basis
+    return max(
+        max(abs(got[0] - x_nm), abs(got[1] - y_nm))
+        for x_nm in _POINTS
+        for y_nm in _POINTS
+        for got in (frame.reframe(Nanometre(x_nm), Nanometre(y_nm), twin),)
+    )
+
+
+def test_the_exactness_bound_is_where_it_is_claimed_to_be():
+    """``_EXACT_ORIGIN_LIMIT_NM`` names a measurement, not a hedge.
+
+    A frame origin at the bound reframes exactly and one an order of
+    magnitude beyond it does not, so the sweep's qualification is a fact
+    about ``CoordinateFrame.reframe`` and the bound is not free to drift
+    unnoticed. The shortcut is unharmed either way: it *skips* the
+    reframe, so widening it by value can only remove drift, never add any.
+    """
+    turn = math.pi / 6
+    inside = _turned(turn, (_EXACT_ORIGIN_LIMIT_NM,) * 3)
+    beyond = _turned(turn, (_EXACT_ORIGIN_LIMIT_NM * 10,) * 3)
+
+    assert _worst_twin_drift_nm(inside) == 0
+    assert _worst_twin_drift_nm(beyond) > 0
 
 
 
