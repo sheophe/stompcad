@@ -31,8 +31,14 @@ PYTHON_ROOTS = (
 
 
 def missing_emit_formats(script: str, formats: tuple[str, ...]) -> frozenset[str]:
-    """Registry formats the lock script never asks the CLI to emit."""
-    asked = frozenset(re.findall(r"--emit\s+([a-z0-9-]+)=", script))
+    """Registry formats the lock script never asks the CLI to emit.
+
+    Comments are removed before the scan, by the shell's own rule that a
+    ``#`` opening a word begins one, so header prose cannot stand in for a
+    command a panel really runs.
+    """
+    commands = re.sub(r"(?m)(?:^|(?<=\s))#.*$", "", script)
+    asked = frozenset(re.findall(r"--emit\s+([a-z0-9-]+)=", commands))
     return frozenset(formats) - asked
 
 
@@ -114,3 +120,17 @@ def test_a_script_naming_every_format_reports_nothing():
         "--emit excellon=$OUT/a.drl --title ''\n",
         ("excellon", "step"),
     ) == frozenset()
+
+
+def test_a_format_named_only_in_a_comment_is_reported():
+    """Guilty probe: prose may not stand in for a command a panel runs.
+
+    A shell comment is not an invocation, so a format mentioned only in
+    the script's header — or after a `#` on an otherwise real line — is
+    still a format no panel emits.
+    """
+    assert missing_emit_formats(
+        "# the lock also passes --emit step=$OUT/a.stp\n"
+        "--emit excellon=$OUT/a.drl  # --emit step=$OUT/a.stp\n",
+        ("excellon", "step"),
+    ) == frozenset({"step"})

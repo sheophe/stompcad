@@ -17,7 +17,8 @@
 #
 # Usage: bash tools/verify-lock.sh [DIR]        (DIR defaults to .scratch/lock)
 #   DIR/SHA256SUMS absent  -> capture it;  present -> compare against it.
-#   Artefacts are kept in DIR/artefacts either way, so a break can be diffed.
+#   Artefacts are kept in DIR/artefacts either way, so a break can be diffed;
+#   the previous run's are cleared first, so nothing stale is ever hashed.
 # Exit: 0 identical or captured, 1 a byte differs, 2 a run or precondition failed.
 set -uo pipefail
 
@@ -60,18 +61,41 @@ run() {  # run <label> <args...>; exit codes 0 and 1 are both successful runs,
     fi
 }
 
+wrote() {  # wrote <label> <name...>; a crash and a warning both leave rc 1, so
+           # a panel is believed only once the artefacts it owed are present.
+    local label="$1"; shift
+    local absent=""
+    for name in "$@"; do
+        [ -s "$OUT/$name" ] || absent="$absent $name"
+    done
+    if [ -n "$absent" ]; then
+        echo "LOCK FAILED: scenario $label wrote no:$absent"
+        cat "$OUT/$label.log"; exit 2
+    fi
+}
+
+rm -f "$OUT"/a.* "$OUT"/b.*   # a stale artefact would certify a run that crashed
+
 run a packages/stompdrill/tests/fixtures/tar.ai \
     --case 1590B --case-model "$MODEL" \
     --emit excellon="$OUT/a.drl" --emit json="$OUT/a.json" \
     --emit drawing-svg="$OUT/a.svg" --emit drawing-pdf="$OUT/a.pdf" \
     --emit step="$OUT/a.stp"
+wrote a a.drl a.json a.svg a.pdf a.stp
 
 run b packages/stompdrill/tests/fixtures/pax.ai \
     --emit excellon="$OUT/b.drl" --emit json="$OUT/b.json" \
     --emit drawing-svg="$OUT/b.svg" --emit drawing-pdf="$OUT/b.pdf"
+wrote b b.drl b.json b.svg b.pdf
 
 if [ ! -f "$REFERENCE" ]; then
     (cd "$OUT" && sha256 a.* b.* | grep -v '\.log$') > "$REFERENCE"
+    if [ ! -s "$REFERENCE" ]; then
+        rm -f "$REFERENCE"
+        echo "LOCK FAILED: the panels left nothing to hash, so nothing was"
+        echo "  captured; a reference over no artefact is not a reference."
+        exit 2
+    fi
     echo "reference captured: $REFERENCE"; cat "$REFERENCE"; exit 0
 fi
 

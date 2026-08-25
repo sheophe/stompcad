@@ -8,7 +8,7 @@
 a function of the geometry alone. That guarantee creates a class of change the
 test suite structurally cannot see: a refactor that keeps every assertion green
 while moving a byte nobody asserted about.
-`packages/stompdrill/tests/test_layer1_model.py`'s
+`packages/stompdrill/tests/test_layer1_model.py:49`'s
 `test_two_fresh_processes_emit_identical_bytes` proves two runs *of one commit*
 agree with each other. Nothing in the tree compares a commit against its
 predecessor, and nothing in the tree can, because a working tree only ever holds
@@ -63,9 +63,9 @@ because a reviewer cannot tell an intended regeneration from an accidental one.
 can read. `docs/FOUNDATION.md`'s instrument table admits regression against a
 reference only as a recorded response, never as a recorded artefact, and
 `docs/specs/verification-technical.md` states plainly that golden is a fact-set and
-not bytes, because the panel path is provenance in most artefacts and a byte-golden
-therefore fails on legitimate change. Committing a digest would reverse both by
-side effect.
+not bytes, because the panel path is provenance in four of the five artefacts — the
+STEP writer falling back to a literal is the exception — so a byte-golden fails on
+legitimate change. Committing a digest would reverse both by side effect.
 
 *`.gitignore` cannot express the exception.* Git will not re-include a file whose
 parent directory is excluded, so a negation pattern is not available. The comment
@@ -127,6 +127,13 @@ fourth preservation programme inherits the harness rather than rebuilding it.
 The harness is opt-in and is not a gate on HEAD. Panel A needs the `1590B` model in
 the cache, exactly like the `--hammond` suite, and the script refuses with the fetch
 command rather than failing obscurely.
+
+A panel that crashes and a panel that warns both leave the command line's exit code
+at one, so a successful exit is not evidence that anything was written. The harness
+clears the previous run's artefacts before the panels run, refuses to hash a panel
+that wrote none of the artefacts it was asked for, and refuses to record a reference
+over nothing — the same rule as the empty-reference guard, on the side that creates
+the reference, where believing a run that did not happen does the greater damage.
 
 A reference captured at a different commit reports a false break, so the discipline
 is capture-then-verify within one episode. The script echoes the reference path it
