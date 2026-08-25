@@ -9,7 +9,7 @@ written elsewhere is how the two come to disagree about it. See ADR-0009.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .diagnostics import Diagnostic, Severity
@@ -208,7 +208,7 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
     # these for its own reasons is re-attributed but not erased.
     try:
         return DrillData(
-            holes=tuple(_read_hole(h) for h in document["holes"]),
+            holes=_read_holes(document["holes"]),
             reference=_read_reference(document["reference"]),
             diagnostics=tuple(_read_diagnostic(d) for d in document["diagnostics"]),
             source=_read_source(document["source"]),
@@ -245,6 +245,32 @@ def _read_reference(payload: Mapping[str, Any] | None) -> ReferenceOutline | Non
             Millimetre(payload["raw"]["width"]), Millimetre(payload["raw"]["height"])
         ),
     )
+
+
+def _read_holes(payload: Iterable[Mapping[str, Any]]) -> tuple[Hole, ...]:
+    """Restore every hole, refusing a numbering no routing stage could produce.
+
+    ``Hole`` refuses a number below 1; the set is what it cannot see. A
+    repeat or a gap balloons two holes with one number and makes a report
+    of holes by number meaningless. Three facts compose the rule -- none
+    below 1, none repeated, none above the count -- and together they admit
+    only ``1…n``. See ADR-0006.
+    """
+    holes = tuple(_read_hole(h) for h in payload)
+    count = len(holes)
+    seen: set[int] = set()
+    for hole in holes:
+        number = hole.index
+        if number is None:
+            raise DocumentError(f"{FORMAT} has a hole with no drill number")
+        if number in seen:
+            raise DocumentError(f"{FORMAT} hole number {number} is used twice")
+        if number > count:
+            raise DocumentError(
+                f"{FORMAT} hole number {number} is above {count}, the hole count"
+            )
+        seen.add(number)
+    return holes
 
 
 def _read_hole(payload: Mapping[str, Any]) -> Hole:
@@ -321,11 +347,16 @@ def _read_case(payload: Mapping[str, Any] | None) -> CaseRegistration | None:
 
 
 def _read_frame(payload: Mapping[str, Any]) -> FaceFrame:
-    """Restore a face frame from its nested object."""
-    origin = payload["origin_nm"]
+    """Restore a face frame, each vector handed whole to the frame's own guard.
+
+    ``origin_nm`` is passed like ``u``, ``v`` and ``w`` rather than indexed:
+    indexing would truncate a long vector into a frame no writer stated, and
+    report a short one as an error naming no field. ``CoordinateFrame`` owns
+    the three-component rule and the origin's whole-nanometre check.
+    """
     return FaceFrame(
         basis=CoordinateFrame(
-            origin_nm=(Nanometre(origin[0]), Nanometre(origin[1]), Nanometre(origin[2])),
+            origin_nm=tuple(payload["origin_nm"]),
             u=tuple(payload["u"]),
             v=tuple(payload["v"]),
             w=tuple(payload["w"]),

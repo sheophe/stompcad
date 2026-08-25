@@ -10,7 +10,10 @@ obligation. See Decision and Consequences. Amended a fourth time: reading a numb
 through `DrillData.numbered()` means *sorting by* it — the Excellon emitter grouped
 holes into tool blocks and wrote each block in tuple order, which a since-repaired test
 fixture could not distinguish from number order because the scramble never crossed a
-block boundary. See Decision and Consequences.
+block boundary. See Decision and Consequences. Amended a fifth time: the `1…n` set is
+established by `RouteHoles` and enforced by `stompmodel.codec.from_document`; neither
+`Hole`, `DrillData` nor `DrillData.numbered()` audits it, and the reasons are recorded.
+See Decision and Consequences.
 
 ## Context
 
@@ -112,8 +115,11 @@ flowchart TB
 ```
 
 `Hole.index` is the drill sequence: `1…n`, contiguous, typed `int | None` and defaulting
-to `None`. `RouteHoles` introduces the number and never rewrites one, because no earlier
-stage sets it. `RawHole.index` is removed; diagnostics identify holes by coordinate
+to `None`. `RouteHoles` establishes that set — it introduces the number and never rewrites
+one, because no earlier stage sets it — and `codec.from_document` enforces it, a document
+being the one place the numbers arrive from outside this workspace. `Hole` refuses a
+number below 1 and nothing further, and `DrillData.numbered()` reads the numbers without
+auditing them. `RawHole.index` is removed; diagnostics identify holes by coordinate
 instead of by number, which is what frees the number to be assigned late.
 
 `DrillData.numbered()` pairs each hole with its number and is the only place a number is
@@ -129,6 +135,16 @@ does the same within each tool block. An artefact that instead states the number
 explicit field per element — the schedule table, the JSON `holes` array, the CLI's
 verbose report — does not assert a sequence through element position at all, so it owes
 `numbered()` nothing beyond the pairing itself.
+
+**Amended a fifth time: the numbering rule is enforced at the document reader and nowhere
+else.** Three candidates were weighed and two refused. `DrillData.numbered()` cannot hold
+it: a fixture proves an emitter read the model rather than counted the list by numbering a
+hole out of range, and for a lone hole the only contiguous number is its own position — the
+accidental equality the fixture exists to break. `DrillData` cannot hold it either:
+`Deduplicate` composed after `RouteHoles` is a legal composition under ADR-0001, and it
+drops a hole and leaves a gap; a legal composition owes a diagnostic, not a constructor
+refusal raised from inside a stage. The reader can and does, and it is the only boundary
+where the numbers were written by something this workspace did not run.
 
 ## Rationale
 
@@ -211,3 +227,19 @@ block by number, the same rule `emitters/step.py`'s `_drill_compound` already ap
 The guard that should have caught this scrambled hole numbers *across* tool blocks but
 never *within* one, so the emitter's tool-major grouping restored ascending order by
 accident and the test could not fail; the fixture now scrambles within a block too.
+
+**Amended a fifth time.** `codec._read_holes` refuses a document whose hole numbers
+repeat, exceed the hole count, or are absent; `Hole`'s own floor supplies the fourth fact,
+and the four together admit only `1…n`. The refusal narrows acceptance solely over
+documents outside the format — `to_document` reads its numbers through `numbered()`, which
+refuses unrouted data — so the format version does not move. The reader is now stricter
+than the writer: a caller who numbers holes by hand can serialise a document this reader
+declines. That is accepted rather than overlooked; the writer serialises whatever the model
+holds, and the model tolerates any positive numbering on purpose. A caller who builds such
+a value in memory still reaches an artefact whose balloons repeat a number; putting the
+rule at the trust boundary rather than in the value type is what buys that, and it is the
+accepted cost. `_read_frame` hands `origin_nm` to `CoordinateFrame` whole, as it always did
+for the basis vectors, so the three-component rule has one statement rather than two and a
+long origin is refused instead of truncated. Each refusal carries a breach that must raise
+it and a legitimate document that must not — in particular a document numbering its holes
+out of tuple order, which is what separates a set check from a position check.

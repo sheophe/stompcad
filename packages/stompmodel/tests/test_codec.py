@@ -83,6 +83,9 @@ def _make_data(*given: Hole) -> DrillData:
 def _fixture_data() -> DrillData:
     """A DrillData exercising every field: nominal-vs-raw drift, a reference outline, one
     diagnostic of each severity, full source info, and the stages that produced it.
+
+    Numbered 2 then 1, out of tuple order: a codec that recomputed a number from list
+    position would give 1 then 2.
     """
     given = (
         Hole(
@@ -90,7 +93,7 @@ def _fixture_data() -> DrillData:
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
             raw=RawHole(Millimetre(-39.9906), Millimetre(18.0021), Millimetre(6.9998)),
-            index=4,
+            index=2,
         ),
         Hole(
             x_nm=Nanometre(-19_000_000),
@@ -973,6 +976,65 @@ def test_a_document_whose_location_is_long_is_refused_rather_than_truncated() ->
         from_document(document)
 
 
+def test_a_document_whose_frame_origin_is_long_is_refused_rather_than_truncated() -> None:
+    """A fourth value would be discarded, restoring a frame no writer stated.
+
+    ``CoordinateFrame`` states the three-component rule for all four of its
+    vectors, so the origin reaches it whole rather than indexed to three.
+    """
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [0, 0, -30_000_000, 999]
+
+    with pytest.raises(DocumentError, match="origin_nm must have exactly three components, not 4"):
+        from_document(document)
+
+
+def test_a_document_whose_frame_origin_is_short_is_refused_by_name_not_by_index_error() -> None:
+    """Indexing reported a short origin as ``list index out of range``, which
+    names neither the field nor the count it wanted. The second assertion
+    fails any repair that merely widens the blanket handler.
+    """
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [0, 0]
+
+    with pytest.raises(DocumentError) as excinfo:
+        from_document(document)
+
+    assert "origin_nm must have exactly three components, not 2" in str(excinfo.value)
+    assert "index out of range" not in str(excinfo.value)
+
+
+def test_a_document_whose_frame_origin_is_fractional_is_still_refused() -> None:
+    """The dropped ``Nanometre`` wrapper was a no-op brand; the load-bearing
+    guard is ``check_nanometres`` inside the frame, and it is still reached."""
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [0, 0, 3.5]
+
+    with pytest.raises(DocumentError, match="whole number of nanometres"):
+        from_document(document)
+
+
+def test_a_frame_origin_the_module_fixture_did_not_state_still_round_trips() -> None:
+    """The guard counts components; it does not recognise a known origin.
+
+    An off-by-one in that count would refuse this legitimate document, so
+    this is the origin gate's innocent probe.
+    """
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(11_000_000), Nanometre(-7_000_000), Nanometre(2_500_000)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, -1.0, 0.0),
+            w=(0.0, 0.0, -1.0),
+        )
+    )
+    registration = CaseRegistration(part="1590B", face=CaseFace.LID, model="1590B.stp", frame=frame)
+
+    rebuilt = from_document(to_document(replace(_fixture_data(), case=registration)))
+
+    assert rebuilt.case == registration
+
+
 def test_a_document_naming_an_unknown_severity_is_refused() -> None:
     """``Severity`` raises ``ValueError``, which is outside ``StompError``."""
     document = to_document(_data())
@@ -1030,6 +1092,76 @@ def test_a_document_numbering_a_hole_from_zero_is_refused() -> None:
 
     with pytest.raises(DocumentError, match="numbered from 1"):
         from_document(document)
+
+
+def test_a_document_that_numbers_two_holes_alike_is_refused() -> None:
+    """Two balloons printing one number is a corrupt drawing, not a curiosity."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = 2
+    document["holes"][1]["index"] = 2
+
+    with pytest.raises(DocumentError, match="hole number 2 is used twice"):
+        from_document(document)
+
+
+def test_a_document_whose_hole_numbers_leave_a_gap_is_refused() -> None:
+    """A gap makes a report of holes by number meaningless: the missing
+    number belongs to no hole, so nothing can be said about it."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = 1
+    document["holes"][1]["index"] = 3
+
+    with pytest.raises(DocumentError, match="hole number 3 is above 2, the hole count"):
+        from_document(document)
+
+
+def test_a_document_whose_hole_carries_no_drill_number_is_refused() -> None:
+    """``_read_hole`` takes whatever ``index`` says, so a literal ``null``
+    restores an unrouted hole no conforming writer could have emitted."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = None
+
+    with pytest.raises(DocumentError, match="has a hole with no drill number"):
+        from_document(document)
+
+
+def test_a_document_numbering_its_holes_out_of_tuple_order_round_trips_unchanged() -> None:
+    """The rule is over the set, not over each hole's position.
+
+    A reader that demanded number equal position would pass every refusal
+    above and reject this, which is what a routing stage really emits for a
+    panel whose drill order is not its tuple order.
+    """
+    original = _make_data(
+        _at(0, 0, index=3),
+        _at(10 * MM, 0, index=1),
+        _at(20 * MM, 0, index=2),
+    )
+
+    rebuilt = from_document(to_document(original))
+
+    assert [h.index for h in rebuilt.holes] == [3, 1, 2]
+    assert rebuilt == original
+
+
+def test_a_one_hole_document_numbered_one_is_read_back() -> None:
+    """The ``count == 1`` boundary, where both set comparisons are quiet."""
+    original = _make_data(_at(0, 0, index=1))
+
+    rebuilt = from_document(to_document(original))
+
+    assert [h.index for h in rebuilt.holes] == [1]
+    assert rebuilt == original
+
+
+def test_a_document_with_no_holes_is_accepted() -> None:
+    """The empty boundary: no hole can breach a rule about hole numbers."""
+    original = _make_data()
+
+    rebuilt = from_document(to_document(original))
+
+    assert rebuilt.holes == ()
+    assert rebuilt == original
 
 
 def test_a_refused_document_keeps_the_failure_it_was_refused_for() -> None:
