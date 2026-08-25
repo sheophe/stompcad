@@ -80,7 +80,8 @@ either matches what the run actually produced or is corrected to match it.
 
 ## Decide whether `numbered()` should validate its index set
 
-**Status:** Confirmed gap, not scheduled. Raised by the test-repair review of 2026-08-21.
+**Status:** Resolved by ticket 43 (2026-08). Raised by the test-repair review of
+2026-08-21.
 
 **Constraint:** `DrillData.numbered()` refuses unrouted data and pairs each hole with
 `hole.index` in tuple order. It does not check that the indices it returns form a
@@ -96,6 +97,19 @@ refuses a non-permutation with a diagnostic naming the offending index, a test p
 refusal, and the emitters' existing behaviour is unchanged. If it is declined, the ADR says
 why, and the accessor's docstring states plainly that the index set is the router's
 guarantee and not its own.
+
+**Resolution (ticket 43, `a79d9d1`):** Satisfied in full, and both branches of the
+Acceptance were taken at different seams. Declined at the accessor: `numbered()`'s
+docstring now states plainly that the index set is the router's guarantee and not its
+own. Enforced at the reader: the new `codec._read_holes` refuses a numbering no routing
+stage could produce -- none absent, none repeated, none above the hole count -- with
+`Hole`'s existing floor supplying the fourth fact, so the four together admit only
+`1...n`. ADR-0006 is amended a fifth time, ahead of the code and in the same commit, with
+the reasons for refusing the accessor: a fixture that numbers a lone hole out of range is
+this workspace's own "read the number, not the position" instrument, and a legal
+`Deduplicate`-after-`RouteHoles` composition owes a diagnostic rather than a constructor
+refusal. `VERSION` stays 6 because every refusal added is over input no conforming v6
+writer can produce. Closed; nothing further to do.
 
 ## Pass the case model to `build_pipeline` explicitly
 
@@ -436,7 +450,7 @@ longer swallowed as a usage error.
 
 ## Give a `reframe` test a target frame that is not its own inverse
 
-**Status:** Confirmed gap, not scheduled.
+**Status:** Resolved by ticket 42 (2026-08).
 
 **Constraint:** No `reframe` test can detect its source and target arguments being
 swapped. Every pair under test is a box/lid mirror, and a mirror transform is its own
@@ -448,6 +462,15 @@ order is correct today; this is about what the tests would catch if it were not.
 **Acceptance:** `packages/stompmodel/tests/test_frames.py` reframes through a target frame
 carrying a genuine rotation rather than a pure mirror, and exchanging the two frame
 arguments in `reframe` fails that test.
+
+**Resolution (ticket 42, `6e725b5`):** Delivered in full. `ROTATED`'s target is now a
+quarter turn about `v` standing at a different origin rather than a half turn sharing its
+origin, so the fixture is no longer an involution, and both clauses of the test were shown
+failing independently under the argument swap this entry names -- shown by running it, not
+by reading it. The branch's own report records the red run. Ticket 42's commit message asks
+for this section to be deleted; it is closed in place instead, because this backlog's
+"Rulings, for citation" preamble and ticket 46's own scope both keep an entry citable on
+rediscovery rather than removing it. Closed; nothing further to do.
 
 ## Promote the kernel document builder into `stompgeom`, once plan 3 needs it
 
@@ -487,10 +510,20 @@ this rediscovery as a rejection by name. A future rediscovery of the same shape 
 by citing this entry, not re-argued from scratch.
 
 **Rediscovered, wave 3 (2026-08):** T13's design verdict (relocating the write mechanism into
-`stompmodel.protocols.stage_payload`/`commit_staged`) weighed a batch-write helper or a
+`stompmodel.protocols.stage_payload`/`StagedWrite.commit`) weighed a batch-write helper or a
 shared-CLI write layer again and rejected both, for the same reason — see "Wave 3's declined
 and rejected design proposals" below. Two rediscoveries now cite this entry; a third should
 too, unless it names a real second consumer the first two did not have.
+
+**Rediscovered, wave 5 (2026-08):** ticket 40's design panel weighed giving
+`stompcollider` its own duplicate-target rule -- it will need one, since
+`docs/specs/stompcollider-technical.md` gives it two output paths in one invocation --
+and refused to design it now, citing this entry rather than re-arguing it. That is the
+third rediscovery this entry has absorbed, and the ticket left the note for the
+coordinator to land here. A fourth should cite it too, unless it names the real second
+consumer the first three did not have: `stompcollider`'s own command line, once it
+exists, is exactly that consumer, so this entry is expected to become schedulable at
+plan 3 rather than to be refused a fourth time.
 
 ## Two verified OCP kernel-binding segfault hazards
 
@@ -577,8 +610,8 @@ around, and `dedupe`/`geometry` get a real scoped mutation reading afterwards.
 
 ## Ticket 01's nanometre-guard singularity test is textual, not semantic
 
-**Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
-ticket 01.
+**Status:** Resolved by ticket 42 (2026-08). Found during the 2026-08 architecture
+review's ticket 01.
 
 **Constraint:** `test_nanometre_guard_is_singular.py` detects a duplicate nanometre guard
 by grepping for the literal phrase "whole number of nanometres" inside a
@@ -590,10 +623,19 @@ rule's wording, not the rule.
 nanometre value — rather than by its message text, and a duplicate guard written with
 different wording still fails it.
 
+**Resolution (ticket 42, `6e725b5`):** Delivered in full. The gate now decides on the
+union of the rule's own mechanism -- an exact-int test whose body raises `TypeError` --
+and the retained text match. Either arm alone is decided by wording or by spelling; the
+union is the point. The family's guilty probe is paraphrased so it shares no wording with
+any owner, so a gate that decides on prose fails against it, and that control runs in the
+same suite by the same command. As with the `reframe` entry above, ticket 42 asked for the
+section to be deleted and it is closed in place instead, for the same citability reason.
+Closed; nothing further to do.
+
 ## `stompdrill`'s package root re-exports a signature naming a type it does not export
 
-**Status:** Confirmed gap, not scheduled. Found during the 2026-08 architecture review's
-ticket 06; relevant to plan 3, which reads this root.
+**Status:** Resolved by ticket 45 (2026-08). Found during the 2026-08 architecture
+review's ticket 06; relevant to plan 3, which reads this root.
 
 **Constraint:** `stompdrill/__init__.py` re-exports `CaseModel` and `load_case_model`, but
 not `OcpCaseModel` — and `load_case_model`'s return type is now `OcpCaseModel`.
@@ -604,6 +646,18 @@ return type the root itself will not give it.
 **Acceptance:** Either `stompdrill/__init__.py` also re-exports `OcpCaseModel`, or
 `load_case_model`'s published return type at the root is `CaseModel` (the protocol), and a
 test at the root proves whichever is chosen.
+
+**Resolution (ticket 45, `03a19bd`):** The re-export branch was taken -- `OcpCaseModel` is
+published from `stompdrill/__init__.py`. Narrowing the root's return type to `CaseModel`
+was refused instead of chosen: it would replace an `ImportError` with the one value
+`StepEmitter.__init__` refuses, and it contradicts ADR-0007:279-282's root-export mandate.
+The name costs no new import and pulls in no kernel, because `stompdrill.cad` already
+imports `.loader`. The root test this entry's Acceptance demands now exists:
+`test_pipeline.py`'s `_unreachable_signature_types` gate, with two guilty probes (one per
+clause of its compound condition) and one innocent probe; the gate was watched red against
+the real root, reporting exactly `('load_case_model', 'return', 'OcpCaseModel')`, and it
+finds six already-satisfied obligations, so it cannot pass by finding nothing. ADR-0007
+gains the matching amended paragraph. Closed; nothing further to do.
 
 ## Take the `levels()` cut a level below where plan 3 currently plans it
 
@@ -645,19 +699,6 @@ deletion test shows is not load-bearing.
 
 **Acceptance:** `_options_for` is replaced by the direct one-to-one lookup, the deletion
 test passes, and every existing emitter still receives its options unchanged.
-
-## Give `Pipeline` a per-stage observation point
-
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
-(its own finding F2-06).
-
-**Constraint:** `Pipeline` exposes no per-stage hook, so `cli.run_pipeline` iterates it a
-second time to produce `-v` output, and `stompcollider` would have to write the same
-duplicated iteration to get the same five lines.
-
-**Acceptance:** `Pipeline` (or `Stage`) exposes a seam a caller can observe each stage's
-`StageRun` through as it runs, `cli.run_pipeline` uses it instead of its second iteration,
-and both tools' `-v` output is unchanged.
 
 ## Refuse a zero or negative `--grid`, rather than clamping it
 
@@ -702,27 +743,44 @@ that the margin is applied only inside `classify()`/`contains()`, not at constru
 the CLI's play-area line and the JSON provenance either restate this plainly or carry the
 same correction beside them.
 
-## Make `region.build_region` refuse a structure wire it cannot subtract, instead of dropping it
+## Delete `region.build_region`'s always-true `if adder.IsDone()`
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
-wave 2 (its own finding F3-M2).
+**Status:** Premise refuted, residue open, not scheduled -- **wave 6, list A.** Found in
+the 2026-08 architecture review's wave 2 (its own finding F3-M2); re-verified and refuted
+in wave 5's confirm phase (C7). Its own title has changed: the entry used to ask for a
+refusal, and there is nothing to refuse.
 
-**Constraint:** `stompdrill.cad.region.build_region` rebuilds the outer wire first and
-raises `StompdrillError` when that rebuild does not complete (`if not builder.IsDone():
+**What was claimed.** `stompdrill.cad.region.build_region` rebuilds the outer wire first
+and raises `StompdrillError` when that rebuild does not complete (`if not builder.IsDone():
 raise ...`). A few lines later, subtracting each structure wire (a boss boundary) uses
-`if adder.IsDone(): region = adder.Face()` with no `else` — a subtraction that does not
-complete is silently skipped, so that boss's boundary never narrows the drillable region.
-`CheckCaseClearance` explicitly refuses to guess in the direction that would hide a real
-obstruction; this fail-open path biases the other way.
+`if adder.IsDone(): region = adder.Face()` with no `else`, so -- the claim ran -- a
+subtraction that does not complete is silently skipped and that boss's boundary never
+narrows the drillable region. `CheckCaseClearance` explicitly refuses to guess in the
+direction that would hide a real obstruction; this looked like a fail-open path biasing the
+other way. **This entry was ranked as the item that reaches aluminium** -- the most
+dangerous on wave 5's frozen list.
 
-**Acceptance:** A structure-wire subtraction that does not complete raises
-`StompdrillError`, the same way the outer-wire rebuild already does, and a test drives an
-`adder.IsDone()` failure directly (not through a real kernel geometry that happens to
-trigger it) to prove the refusal.
+**Why the premise is false.** Both halves were proved independently and only one held.
+The *consequence* is real: forcing `IsDone()` false does flip a hole centred on a 3.0 mm
+proud boss from not-clear to **clear**, silently, so had the branch been reachable it would
+have passed a hole through structure. But the branch is not reachable.
+`BRepBuilderAPI_MakeFace::Add` sets `FaceDone` **unconditionally** -- demonstrated against
+the installed OCP kernel with nine hostile wires (non-planar, open, self-intersecting,
+off-surface), every one of which returned `FaceDone`. The `if` is dead, not fail-open, and
+no clearance verdict is at risk. The ranking was wrong and is recorded as wrong here so a
+later wave cites this rather than re-promoting the item.
+
+**Acceptance (narrowed to the residue).** One always-true `if` is deleted --
+`if adder.IsDone(): region = adder.Face()` becomes the unconditional
+`region = adder.Face()`, at `packages/stompdrill/src/stompdrill/cad/region.py` (line 100 at
+the time of writing; locate it by its text) -- the change is byte-identical on every
+artefact, and no test asserts the dead branch. Cosmetic, so **list A**, and it must be
+taken **after ticket 44 has merged**, because ticket 44 owned `cad/region.py`. That
+condition is now satisfied: ticket 44 merged at `07d7f66`.
 
 ## Give the model-side geometry helpers a real tie-break instead of kernel traversal order
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's
+**Status:** Resolved by ticket 44 (2026-08). Found in the 2026-08 architecture review's
 wave 2 (its own finding F3-M3). Adjacent to "`stompgeom` should own kernel lifetimes rather
 than expose them" above; worth attaching to any future work that already touches
 `build_frame`.
@@ -756,6 +814,28 @@ and asserts the same winner regardless of which one the kernel enumerates first.
 also states, for `_floor_face` and `_inner_level`, which metric each uses and why they
 differ, and corrects `_floor_face`'s docstring to stop claiming agreement it does not
 have.
+
+**Resolution (ticket 44, `6e66bc1` then `2eaacb2` and `660a94f`):** Closed in full,
+including the wave-4 area-metric clause and `_floor_face`'s false docstring. Each of the
+four helpers now names its winner from the candidates' own geometry, and the secondary key
+is consulted only where the primary compares exactly equal: `case._inner_level` ranks
+aggregate area and breaks a tie by nearness to `drilled`; `case._nearest_companion_level`
+ranks distance from `inner` and breaks a tie towards the **proud** side (`+inner.outward`);
+`region._floor_face` ranks one face's own area and breaks a tie on the whole-nanometre
+bounding box, lexicographically greatest, in `bounding_box_mm`'s own order (minima before
+maxima); `region._proud_mm` ranks the in-plane footprint gap and breaks a tie towards the
+most proud. `_floor_face`'s docstring no longer claims agreement with `case._inner_level`
+that it does not have -- the two metrics are stated, and stated as different. Eight tests,
+four per owned file, each a guilty probe whose fixture asserts its own exact tie in the
+body, plus an innocent probe proving the new key is a tie-break and not a co-primary; both
+owned test modules are `--hammond`-marked at module scope. No primary comparison, threshold
+or cited constant moved and the behaviour lock held unmoved. The tie direction was
+corrected once mid-ticket: round 1 transcribed `region.py`'s then-inverted prose and pointed
+the companion tie at the receding side, which would have let a receding face be bundled into
+`Faces.inner` beside a real boss and passed a hole straight through it; measured against the
+real cached 1590BB, the proud side is `+inner.outward`, away from the drilled face. That
+prose inversion was itself fixed in `660a94f` at all four of its sites, so nothing is left
+outstanding from it. Closed; nothing further to do.
 
 ## `wrong-case-model` names the operator's `--case` designator as the model's own
 
@@ -924,6 +1004,17 @@ wave's reconciliation changed, since a play area now needs the reconciled frame 
 at all). Either way, the identity comparisons are replaced by an equality the `CaseModel`
 protocol actually promises, or the protocol is amended to promise identity.
 
+**Wave 5 confirm (C9), and the wave-6 mark:** re-verified against HEAD. Both identity
+comparisons are still there -- `pipeline/clearance.py`'s `apply` and `_play_area_in` each
+test `frame is self.model.frame`. The final clause of the Acceptance above, *replacing those
+identity comparisons with an equality the `CaseModel` protocol actually promises*, is
+**wave 6, list A**: it is Minor, because the shipped `OcpCaseModel` is a frozen dataclass
+whose `.frame` really is one object, so the change is byte-identical on every artefact the
+behaviour lock hashes and on every model this repository can fetch. The rest of this entry
+is left standing exactly as written: the confirm evidence addresses only the identity
+clause and says nothing about the mutable field, the `Stage` docstring, or moving
+`play_area_nm` onto `CaseRegistration`, so none of those is narrowed here.
+
 ## The checked registration does not record whether it was reconciled
 
 **Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
@@ -975,7 +1066,7 @@ wave before the decision landed.
 with a regular file, rather than writing through it to its target. Before this review's write-
 mechanism consolidation, the predecessor `path.write_bytes` followed the link and updated its
 target; the rename-based mechanism does not. After ticket 26 the call site is
-`stompmodel.protocols.commit_staged`'s single `os.replace(staged._tmp, staged.path)`, so
+`stompmodel.protocols.StagedWrite.commit`'s single `os.replace(self._tmp, self.path)`, so
 there is exactly one production site to fix rather than two. An operator keeping
 `latest.svg -> builds/2026-08-24.svg` loses the link on the next run, silently — worth
 deciding alongside ticket 29's `/dev/null` narrowing, since both are "what may a target be".
@@ -1088,8 +1179,8 @@ is fit at most once per read, and the full stompdrill suite passes unchanged.
 
 ## `stompcollider-technical.md` misdescribes `wrong-case-model` as a product-name check
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 3
-(F1-04). Spec-axis; harm is entirely forecast.
+**Status:** Resolved by ticket 46 (2026-08). Found in the 2026-08 architecture review's
+wave 3 (F1-04). Spec-axis; harm was entirely forecast.
 
 **Constraint:** `docs/specs/stompcollider-technical.md:505-507` says `stompcollider`'s
 `wrong-case-model` "compares the drill document's declared enclosure part against the
@@ -1106,6 +1197,24 @@ cannot reduce over, since it matches diagnostics by code.
 **Acceptance:** `stompcollider-technical.md`'s sentence is corrected to describe a footprint
 comparison (or `stompcollider`'s own check is designed to match `stompdrill`'s dimensional
 one), before `stompcollider`'s clearance stage is implemented against the current wording.
+
+**Resolution (ticket 46):** The first branch of the Acceptance was taken -- the document is
+corrected, `stompdrill`'s dimensional check is left exactly as it is -- because the shipped
+comparison is the behaviour that ought to ship and `stompcollider` has no code yet. The
+misdescription occupied **two** sites, not the one this entry quoted: the diagnostics-table
+row as well as the prose. The row now reads "The model's footprint is not the enclosure the
+drill document identifies", and the prose names `length_nm` and `width_nm`, the descending-
+order reduction, the exact nanometre comparison, that product names never enter it, that
+`CheckCaseClearance._cross_check` is the tool already making it, and the
+unidentified-enclosure skip. Every clause is implementable against the shipped document:
+`stompmodel.codec` writes and restores `enclosure.length_nm` and `enclosure.width_nm`, and
+the skip matches `_cross_check`'s own `case-model-unverified` INFO branch. Re-verified
+before the edit with a probe driving `CheckCaseClearance` over two cases -- identical
+product names with different footprints, and totally different product names with identical
+footprints -- which returned `['wrong-case-model']` and `[]` respectively: the name is
+provably not consulted. The related finding one direction over, "`wrong-case-model` names
+the operator's `--case` designator as the model's own", is untouched and stays open. Closed;
+nothing further to do.
 
 ## `stompdrill` has no library entry point below `main`
 
@@ -1202,11 +1311,10 @@ replaces all three inline checks, every existing bound-validation test still pas
 unchanged (the error messages it asserts against are preserved or the tests are updated
 in the same change), and the full suite, lint, and both mypy configurations stay green.
 
-## The staged write's commit-or-discard obligation is unenforced, and a private field crosses a package boundary
+## The staged write's commit-or-discard obligation is unenforced
 
-**Status:** Confirmed gap, not scheduled — explicitly declined as work this wave. Found in
-the 2026-08 architecture review's wave 4 (its own finding F2-05); see ticket 33's report,
-"Scope discipline".
+**Status:** Resolved by ticket 41 (2026-08). Found in the 2026-08 architecture review's
+wave 4 (its own finding F2-05); see ticket 33's report, "Scope discipline".
 
 **Constraint:** `stompmodel.protocols.stage_payload` returns a `StagedWrite` whose `_tmp`
 field two module-level functions, `commit_staged` and `discard_staged`, read directly
@@ -1224,6 +1332,27 @@ detectable rather than silent; or the trade-off is recorded as accepted, since A
 own reason for the two-call split (a caller composing a whole set must be able to pause
 between staging and committing) is settled and correct and does not by itself require the
 enforcement half.
+
+**Title correction (ticket 41):** this entry was filed as "... and a private field crosses
+a package boundary". That clause was false and is not carried forward: `_tmp` appeared in
+exactly one production module, so what it crossed was the class's own encapsulation inside
+that module, not a package boundary. The Constraint above is left as written so the
+rediscovery is still findable; read it with this correction.
+
+**Resolution (ticket 41, `6a016b3`):** Both limbs of the Acceptance are satisfied, the
+first by construction and the second as the recorded-and-accepted trade-off. `commit_staged`
+and `discard_staged` are deleted outright -- no deprecating wrapper -- and their bodies
+move verbatim onto the value they already operated on, as `StagedWrite.commit()` and
+`StagedWrite.discard()`; `_tmp` is now read only by `self`, inside its own class, in its
+own module, and the published surface narrows from ten names to eight and gains none. The
+enforcement half is refused rather than shipped: ADR-0005 gains a Decision subsection
+carrying the four candidate detectors and why each was refused, and naming the caller-side
+residue assertion that does catch an abandoned temporary. Three independent design seats
+each proposed an enforcement mechanism and the judge refused all three -- `__del__` works
+on a frozen slotted dataclass and is refused on merit, not on impossibility. What would
+make enforcement correct later: a second production caller that stages without discharging
+in the same expression, which is the shape a detector could actually find. Closed; nothing
+further to do.
 
 ## `codec._read_frame` reads a face frame's origin without the length guard `_read_diagnostic` already carries
 
@@ -1262,8 +1391,8 @@ there. A one-line fix either way.
 
 ## Both `stompcollider` specs still place the length newtypes and the frame values in `stompgeom`
 
-**Status:** Confirmed gap, not scheduled, and explicitly deferred rather than fixed by this
-wave's own documents ticket — see ticket 38's "Out of scope". Found in the 2026-08
+**Status:** Resolved by ticket 46 (2026-08), having been explicitly deferred rather than
+fixed by wave 4's own documents ticket — see ticket 38's "Out of scope". Found in the 2026-08
 architecture review's wave 4 (its own finding F1-03).
 
 **Constraint:** ADR-0008's own preamble states plainly that the length newtypes and the
@@ -1283,10 +1412,33 @@ reader and writer, and the STEP-specific `StepLabel`/`StepSolid`/`StepDocument` 
 Should land **before plan 3 starts**, per this wave's own synthesis — a spec-axis,
 doc-only fix, same category as the `wrong-case-model` misdescription entry above.
 
+**Correction to this entry's own title (ticket 46):** neither file carried both halves.
+`docs/specs/stompcad.md` misattributed only the lengths; `docs/specs/stompcollider-technical.md`'s
+plan table misattributed only the frame values, and the row above it already credited plan 1
+(`stompmodel`) with lengths correctly. The Constraint's own body states this accurately; the
+title compounds it. Read the title as "two specification sentences", not "both specs, both
+halves".
+
+**Resolution (ticket 46):** `docs/specs/stompcad.md` now names `stompmodel`, and says what
+`stompgeom` really does contribute at that seam rather than leaving a hole: `stompcad` takes
+no direct dependency on it, and the kernel reaches it only transitively -- through
+`stompdrill`, whose distribution declares `stompgeom` today, and through `stompcollider`,
+which its own technical specification has writing its assembly through `stompgeom`'s writer.
+The same sentence was widened, not merely retargeted: "only for lengths" was an underclaim,
+since the orchestration section immediately above it already has the drill document and the
+structured diagnostics -- both `stompmodel` values -- passing through `stompcad`.
+`docs/specs/stompcollider-technical.md`'s plan-2 row now names the reader, the writer and
+the kernel guard, and records that the `CoordinateFrame` / `FaceFrame` split moved *down*
+into `stompmodel` rather than into `stompgeom`, citing ADR-0009 as amended. The row
+deliberately preserves the history instead of deleting the clause, because
+`docs/plans/2026-08-22-stompgeom-extraction.md` states the extraction's goal as moving the
+frame *values* down into `stompmodel`, and a row that erased the clause would make the plan
+table disagree with the plan it records. Closed; nothing further to do.
+
 ## `StepSolid.unit_mm` is a published field with one possible value and no reader
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 4
-(its own finding F1-04).
+**Status:** Resolved by ticket 45 (2026-08). Found in the 2026-08 architecture review's
+wave 4 (its own finding F1-04).
 
 **Constraint:** `stompgeom.step.read_step` forces `xstep.cascade.unit = "MM"` before
 reading, so every `StepSolid.unit_mm` it constructs is `1.0` — the field can hold no other
@@ -1300,11 +1452,21 @@ is expected to add), or the field is deleted until that reader exists and re-add
 Deleting it is the interface-moving half and belongs with `stompgeom` work, not with a
 documentation-only pass — matching ticket 34's own refusal to add a field speculatively.
 
+**Resolution (ticket 45, `03a19bd`):** The deletion branch of the Acceptance was taken --
+the field is gone, and it returns with its first real reader. Narrowing the claim to what
+the code delivers *is* removing the member here, because a `float` cannot express the domain
+{1.0}: the reader forces `xstep.cascade.unit` to MM and hard-coded the field to `1.0` at its
+sole construction site, and no attribute read of it exists anywhere in the workspace. The
+millimetre guarantee itself is unaffected -- it is already prose in three places and
+behaviour in `test_step_reader.py`. No docstring changed, because the absence of a field is
+not documented. Closed; the entry stands so that whoever adds the `stompcollider` board
+reader can see what was removed and why.
+
 ## The `--emit` duplicate-target check is defeated by a case-insensitive filesystem
 
-**Status:** Confirmed gap, not scheduled — explicitly deferred by ticket 35, this wave's
-own fix to the surrounding pre-flight. Found in the 2026-08 architecture review's wave 4
-(its own finding M3-01).
+**Status:** Resolved by ticket 40 (2026-08), having been explicitly deferred by ticket 35,
+wave 4's own fix to the surrounding pre-flight. Found in the 2026-08 architecture review's
+wave 4 (its own finding M3-01).
 
 **Constraint:** `stompdrill.cli._preflight_targets` detects a duplicate `--emit` target by
 `path.resolve()` equality. On this repository's own filesystem (macOS, case-insensitive by
@@ -1318,6 +1480,175 @@ filesystems or needs a probe that writes."
 **Acceptance:** Not scheduled by this entry — ticket 35's stated reason stands. Reopen only
 with a fix that does not over-fire on a case-sensitive filesystem and does not need a probe
 that writes to decide.
+
+**Resolution (ticket 40, `3d5b7c2`):** Reopened with a fix that meets both of this entry's
+own conditions -- it needs no probe that writes, and it does not decide differently on a
+case-sensitive filesystem. The pre-flight keeps its place and its phase; only the key it
+compares changes. `_target_key` reduces a resolved target to UAX #15 D145's canonical
+caseless match (NFD, casefold, NFD), applied unconditionally, so the refusal is
+deterministic and needs no filesystem access. It is a comparison key only: the bytes still
+go to the spelling the caller typed.
+
+**What the fix deliberately gives up.** It over-fires rather than under-fires: on a
+case-preserving, case-sensitive volume a caller who genuinely wanted
+`--emit json=out.json --emit drawing-svg=OUT.json` as two files is now refused, with exit 3
+and a message saying why. That was chosen knowingly -- the cost is one rename, against a run
+reporting a byte count for an artefact it destroyed, on a machine whose output drills
+aluminium. The fold is conservative rather than exact: Windows's trailing-dot stripping and
+8.3 aliases and locale-specific folds are not closed, and are not to be added pre-emptively
+for a filesystem nobody here runs on; the failure direction there is silent
+under-detection, which is today's behaviour, never a false refusal. Five tests: two guilty
+probes (case-only and NFC/NFD-only collisions, the second carrying its own fixture control
+that its two paths really are two distinct strings) and three innocent probes keeping the
+narrowing scoped. `CLAUDE.md`'s `--emit` paragraph was amended by ticket 46 to state the
+folded key. Closed; nothing further to do.
+
+## `clearance_reason` breaks a distance tie on a source-literal dict order
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Named by ticket 44 while
+closing the tie-break entry above, and recorded rather than fixed because it is outside
+that ticket's four owned helpers.
+
+**Constraint:** `stompdrill.cad.region.clearance_reason`'s `min(groups, ...)` (around
+`region.py:245`; locate it by its text) picks the nearest group and, where two groups sit at
+exactly the same distance, returns whichever the source literal happens to list first. That
+is the same class of defect the tie-break entry above closed on four other helpers -- a
+winner decided by a spelling rather than by geometry -- but it decides a diagnostic's stated
+*reason*, not a clearance verdict, so nothing a bit meets changes.
+
+**Acceptance:** The tie is broken on a stated property of the groups themselves, and a test
+constructs two groups at exactly equal distance and asserts the same reason whichever order
+they are supplied in.
+
+## `drill_axis` breaks a footprint tie on a source-literal axis index
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Named by ticket 44 while
+closing the tie-break entry above, and recorded rather than fixed for the same reason.
+
+**Constraint:** `stompdrill.cad.case.drill_axis` loops over `range(3)` and returns the first
+axis matching the footprint, so two axes with equal footprints are separated by the literal
+order of the loop rather than by anything about the enclosure. Latent on every model this
+repository can fetch, because a 1590 enclosure has no two equal footprints; it is recorded
+so a later cubic or square part does not discover it as an artefact difference.
+
+**Acceptance:** The choice among equal-footprint axes is stated as a geometric rule, and a
+test drives two equal footprints and asserts the same axis whichever order they appear in.
+
+## `_inner_level`'s primary key is a float sum over kernel-ordered members
+
+**Status:** Recorded, not proposed as work. Named by ticket 44, which found it while giving
+the same helper a secondary key and deliberately did not touch the primary.
+
+**Constraint:** `stompdrill.cad.case._inner_level` ranks levels by `_Level.area`, a plain
+float `sum()` over members held in kernel traversal order (`case.py:199`). Float addition is
+not associative, so in principle the aggregate -- and therefore the winner -- is a function
+of the order `TopExp_Explorer` walked. Latent rather than live: 40 random permutations of
+the plane list through `_levels` differ in zero aggregates on 1590BB and 1590Y. Ticket 44's
+own rules forbade quantising a primary key, so it recorded this rather than acting.
+
+**Acceptance:** None proposed. Reopen only with a case where two permutations of one model
+really do produce different aggregates; the fix then has to settle whether the primary key
+is quantised or the summation is ordered, and that is a decision about ADR-0006's reach,
+not a local repair.
+
+## Select `_floor_face` from `_inner_level`'s own level
+
+**Status:** Recorded, not argued for. Named by ticket 44 as the structural alternative it
+did not take.
+
+**Constraint:** `region._floor_face` ranks a single face by its own area; `case._inner_level`
+ranks a level by the aggregate area of its members. Ticket 44 stated both metrics and stopped
+claiming they agree, which was that entry's acceptance. Choosing `_floor_face` from
+`_inner_level`'s own level would make the two consistent by construction rather than by
+statement -- but it needs level information plumbed from `case.py` into `region.py` and it
+changes what `_floor_face` returns, so it is a design question rather than a cleanup.
+
+**Acceptance:** None proposed. Recorded so a later reader sees that the consistency was
+stated deliberately rather than left unexamined.
+
+## `tools/verify-lock.sh` certifies a truncated reference
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Found while ticket 46
+re-read what ticket 39 shipped.
+
+**Constraint:** The compare loop counts rows and refuses a reference naming **no** artefact
+(`if [ "$rows" -eq 0 ]`), which is the guard ticket 39 added. It does not check the count
+against what the run was asked to hash, so a `SHA256SUMS` truncated to one row still
+compares one row, finds it unchanged, and prints `BEHAVIOUR LOCK HELD`. The lock's whole
+value is that a green run means every hashed artefact was compared, and a partial reference
+makes that untrue while looking identical.
+
+**Acceptance:** The compare path refuses a reference whose row count is not the number of
+artefacts the panels were asked for, with the count in the message, and ships both probes: a
+guilty one truncating a real reference and an innocent one adding a legitimate artefact.
+
+## ADR-0011 says the script echoes the reference path it used, and the compare path does not
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Found while ticket 46
+re-read what ticket 39 shipped.
+
+**Constraint:** ADR-0011 states "The script echoes the reference path it used, and keeps the
+artefacts beside it, so a break can be diffed rather than guessed at." Only the *capture*
+path prints it (`echo "reference captured: $REFERENCE"`); the compare path prints per-row
+`ok`/`CHANGED` lines and the verdict, and never names the reference. A reader following the
+ADR to diff a break has to reconstruct the path from the invocation. The keeps-the-artefacts
+half is true.
+
+**Acceptance:** Either the compare path echoes `$REFERENCE` before the rows, or ADR-0011's
+sentence is narrowed to the capture path. This entry does not choose; note that ADR-0011 is
+an ADR, so whichever is taken, the ADR is amended in the same change.
+
+## ADR-0001 and `CLAUDE.md` now differ by one clause about the `--emit` pre-flight
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Deferred by ticket 40 under
+the coordinator's ruling, and landed here as an entry because ticket 46 amended the
+`CLAUDE.md` half.
+
+**Constraint:** ADR-0001's transaction paragraph says "no two targets may name one path".
+`CLAUDE.md`'s `--emit` paragraph now says the same thing "compared under a case- and
+normalisation-folded key, because a filesystem may hold two such spellings as one file",
+which is what ticket 40 shipped. Neither statement is false; the ADR is simply the less
+specific of the two, and this repository treats `docs/adr/` as the authority, so the
+authority is the vaguer document.
+
+**Acceptance:** ADR-0001's clause carries the folded key, or states plainly that the key is
+`CLAUDE.md`'s to specify. One line either way, and it is an ADR amendment.
+
+## ADR-0006's enforcement list underclaims by four sites
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Handed over by ticket 44,
+which addressed it to ticket 43; ticket 43 had already merged when the hand-off was written,
+so no wave-5 branch carried it.
+
+**Constraint:** ADR-0006's list of the sites that enforce its ordering rule does not include
+the four model-side helpers ticket 44 brought under it -- `cad/case.py`'s `_inner_level` and
+`_nearest_companion_level`, and `cad/region.py`'s `_floor_face` and `_proud_mm`. This is an
+underclaim rather than an overclaim, which is the direction nobody looks for by habit: the
+ADR states a narrower reach than the code delivers, so a reader deciding whether a new
+selection rule is bound by it can reasonably conclude it is not.
+
+**Acceptance:** ADR-0006's enforcement list names the four helpers, and says that its
+amendment binds every selection rule over kernel-derived candidates rather than routing's
+alone. An ADR amendment, so it is accepted before it is written.
+
+## `stompgeom`'s leaf-walk ownership probe passes on a harness that never ran
+
+**Status:** Confirmed gap, not scheduled -- **wave 6, list A.** Found while ticket 46
+re-read wave 5's instruments.
+
+**Constraint:** `packages/stompdrill/tests/test_ownership_gate_convention.py`'s
+`test_stompgeoms_own_suite_catches_a_second_leaf_walk_in_its_own_source` splices a duplicate
+XCAF leaf descent into `stompgeom`'s `writer.py`, runs `stompgeom`'s own suite in a
+subprocess, and asserts only `result.returncode != 0`. Every way of failing to run pytest at
+all -- `uv` absent, the working directory wrong, a resolver error, the `uv run --no-sync`
+form that the review's own worktree brief records as not working outside the main checkout --
+also returns non-zero, so the probe passes without the gate it names ever having been
+consulted. It is the same instrument class ticket 42 repaired elsewhere: a verification that
+can pass by finding nothing.
+
+**Acceptance:** The assertion binds to the gate's own failure -- the spliced-in breach named
+in the subprocess's output, or a distinguishable exit code -- and a control shows the test
+failing when the subprocess dies before collection.
 
 ## Rulings, for citation
 
@@ -1476,3 +1807,117 @@ a bare rejection does not, and its absence is how a ruling is mistaken for a "no
 **Acceptance:** Not implementation work. A later wave that reconsiders any item above cites
 this entry and marks its own finding Settled without repeating the argument, unless it has
 the real second consumer or trigger named above.
+
+### `Pipeline` has no per-stage observation point, and the DRY consequence claimed for it is false
+
+Raised in the 2026-08 architecture review's wave 1 (F2-06) as an open gap; refuted in
+wave 5's confirm phase (C8) and closed here as a decision.
+
+**The true clause.** `Pipeline` exposes no per-stage hook a caller can observe a
+`StageRun` through as it runs. That much is correct and unchanged.
+
+**The false consequence.** The entry claimed `cli.run_pipeline` "iterates it a second
+time to produce `-v` output". It does not. `run_pipeline`'s first statement is
+`if trace is None: return pipeline.run(data)`, so the traced and untraced paths are
+mutually exclusive, not one on top of the other. Instrumented `apply()` call counts are
+1 per stage on **both** paths, and artefacts are byte-identical between a `-v` run and a
+non-`-v` run. There is no duplicated iteration to remove, so the DRY argument that
+motivated the work is not available.
+
+**The refusal, and why.** A hook on `stompmodel.protocols`' published `Stage` /
+`Pipeline` contract, added for a consumer that does not exist, is exactly what this
+review's forecast-consumer rule declines to license: a forecast consumer licenses *not
+narrowing* an interface, never *adding* one. `stompcollider` is a certain future
+consumer, but a certain future consumer whose `-v` has not been designed cannot say what
+shape the seam should be, and today's single caller does not need it at all.
+
+**What would make it correct later.** A second real consumer that needs per-stage
+observation -- concretely, plan 3 shipping a `stompcollider -v` of its own that wants the
+same five lines. At that point there are two callers in the room, the seam is designable
+from both, and this entry is cited rather than re-derived. Nothing is owed before then.
+
+### Wave 5's declined and rejected design proposals, recorded for citation
+
+**Status:** Ruled — recorded so a later wave can mark a rediscovery Settled by citing this
+entry rather than re-deriving the argument. Transcribed from the wave-5 branches' own commit
+messages and "Out of scope" sections (tickets 39–45), not from memory. As with wave 3's and
+wave 4's entries above, each item states what was refused, why, and what would make it
+correct later; the third clause is what a decision record owes that a bare rejection does
+not.
+
+**Constraint:**
+
+- **Committing a `SHA256SUMS` reference for the behaviour lock (ticket 39).** Refused: the
+  digests carry the OpenCASCADE processor's version string and descend from a Hammond model
+  fetched at run time, so a committed reference would go red on a different kernel wheel for
+  no change in this repository at all. The decision is stated once in ADR-0011 — tracked, the
+  procedure; untracked, the reference. **Correct later if:** the artefacts stop carrying
+  kernel-version-dependent bytes, which would take the STEP panel out of the lock or the
+  version string out of the writer's output.
+- **Pinning the behaviour lock's blind-spot classes with a test (ticket 39).** Refused with
+  its reason recorded in ADR-0011: the only way to falsify a blind-spot class is to improve
+  the lock, so the guilty probe and the innocent probe would be the same event, and a gate
+  whose two probes cannot be distinguished is not an instrument. **Correct later if:** the
+  lock grows a second panel that exercises an error path, at which point the "any error
+  withholds every requested artefact" class becomes testable rather than assumed.
+- **`os.path.samefile`, `os.pathconf`, a write-probe, and fold-then-fall-back-to-samefile,
+  for the `--emit` duplicate-target key (ticket 40).** All four refused, and the reasons
+  differ: `samefile` raises when neither target exists, which is the reported reproduction's
+  own case; `PC_CASE_SENSITIVE` is not exposed by CPython here and answers about a volume
+  rather than about two names; a write-probe re-imports into the pre-flight the target-domain
+  preconditions ticket 35 deliberately moved out of it, and creates files for a run that may
+  never write one; and the hybrid would refuse a command line on Monday and accept it on
+  Tuesday, making the usage contract a function of what is already on disk. A
+  non-deterministic refusal is a worse instrument than a deterministic over-fire.
+  **Correct later if:** a platform appears whose folding rules the unconditional key gets
+  wrong in the *refusing* direction — today's residual error is silent under-detection only.
+- **A shared path-folding helper module (ticket 40).** Refused as ceremony: `cli.py`'s
+  duplicate key is the only site in the workspace asking whether two paths are the same file,
+  verified by grep over `packages/*/src` and `tools`. **Correct later if:** `stompcollider`'s
+  own command line needs the same key — and that case is already carried, with two earlier
+  rediscoveries, by "Defer moving the CLI's usage/IO policy below `stompdrill`" above.
+- **Every mechanism for enforcing the staged write's commit-or-discard obligation
+  (ticket 41).** Three independent design seats each proposed one and the judge refused all
+  three; the refusal, its four candidate detectors and the caller-side residue assertion that
+  does catch an abandoned temporary are recorded in ADR-0005's own Decision subsection.
+  `__del__` is refused on merit, not on impossibility — it works on a frozen slotted
+  dataclass. **Correct later if:** a second production caller stages a payload without
+  discharging it in the same expression, which is the shape a detector could actually find;
+  both of today's call shapes are followed trivially or reach their value only by iterating
+  the collection that holds it.
+- **A shared AST-scan helper across the ownership gates, rediscovered (ticket 42).** The
+  wave-4 ruling above was read and its correction condition tested rather than assumed: the
+  gates' reaches are still three argued policies, not one, so the condition has not fired and
+  the decline stands. Four copies of `_outside` are the accepted price. Function-level
+  pairing of the guilty and innocent probes was separately considered and refused.
+  **Correct later if:** two or more gates' reach areas collapse onto one policy — unchanged
+  from wave 4's statement of it.
+- **Enforcing the hole-index permutation at `DrillData.numbered()`, at `Hole`, at a
+  `DrillData.__post_init__` or at `to_document` (ticket 43).** All four refused; the reader
+  is where the rule lands. Two reasons, both recorded in ADR-0006's fifth amendment: a
+  fixture that numbers a lone hole out of range is this workspace's own "read the number, not
+  the position" instrument and a constructor refusal would delete it, and a legal
+  `Deduplicate`-after-`RouteHoles` composition owes a diagnostic rather than a crash.
+  **Correct later if:** the pipeline's stage order is fixed such that no legal composition
+  can produce a gapped set, at which point a constructor refusal costs nothing.
+- **Breaking `_nearest_companion_level`'s distance tie towards the drilled face
+  (ticket 44).** The ticket's own acceptance criterion 4 asked for it and was **waived as a
+  ticket defect** under the coordinator's ruling: the drilled-face side is the *receding*
+  one, so electing it would classify a real boss as relief and report an obstructed hole
+  clear. The shipped rule breaks the tie towards the proud side, `+inner.outward`.
+  **Correct later if:** nothing — this is a safety direction, and a later proposal to flip it
+  should cite the measurement on the real 1590BB that settled it rather than the criterion
+  that asked for it.
+- **Narrowing `stompdrill`'s published root return type to the `CaseModel` protocol
+  (ticket 45).** Refused twice over: it would replace an `ImportError` with the one value
+  `StepEmitter.__init__` refuses, and it contradicts ADR-0007:279-282's root-export mandate.
+  Removing `load_case_model` from the root was refused on the same ADR grounds.
+  **Correct later if:** ADR-0007's root-export mandate is itself revisited, which is an ADR
+  decision and not a code one.
+- **Adding a `stompcollider` duplicate-target rule, a `stompgeom` cut-and-restore session,
+  and any other seam with one caller.** Refused across several tickets under one rule, which
+  is worth stating once: a forecast consumer licenses **not narrowing** an interface; it never
+  licenses **adding** one. **Correct later if:** the forecast consumer becomes a real second
+  caller in the room while the seam is being designed — which is precisely what plan 3 is
+  expected to supply.
+

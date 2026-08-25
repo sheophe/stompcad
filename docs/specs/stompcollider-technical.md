@@ -461,7 +461,7 @@ to 2 — through `stompmodel`'s shared reduction.
 | `no-substrate` | ERROR | Every solid is named; no board body to group onto |
 | `unreadable-board` | ERROR | Not a readable STEP file, or no solids |
 | `degenerate-geometry` | ERROR | A boolean or profile could not be evaluated |
-| `wrong-case-model` | ERROR | The model is not the part the drill document names |
+| `wrong-case-model` | ERROR | The model's footprint is not the enclosure the drill document identifies |
 | `clash` | WARNING | Two solids occupy the same space in a completed placement |
 | `unmatched-part` | WARNING | An admitted part with no hole |
 | `unmatched-hole` | WARNING | A hole no board covers |
@@ -503,8 +503,13 @@ There is no `--case-face`: the drill document carries the face frame `stompdrill
 cut in, so `stompcollider` reads the registration instead of choosing a face. It
 checks against every solid of the case model and never selects one.
 
-`wrong-case-model` compares the drill document's declared enclosure part against
-the model's own product name — the same check `stompdrill` already makes.
+`wrong-case-model` compares the footprint the drill document's `enclosure` records —
+`length_nm` and `width_nm` — with the footprint measured from the supplied case model,
+both pairs reduced to descending order before an exact nanometre comparison. Product
+names never enter it, so the code means one thing in both tools: this is exactly the
+check `stompdrill`'s `CheckCaseClearance._cross_check` already makes. A drill document
+that identified no enclosure carries none to check against, and the comparison is
+skipped rather than guessed at.
 
 ## Determinism
 
@@ -557,7 +562,7 @@ is recorded rather than left to be rediscovered.
 | Plan | Contents | Done when |
 | --- | --- | --- |
 | 1 — `stompmodel` | lengths, `DrillData` and its members, diagnostics, the JSON codec plus the reader it never had, and the generic `Stage[T]` / `Pipeline[T]` / `Emitter[T]` contracts | done — 3af2bd9 |
-| 2 — `stompgeom` | the STEP reader, the deterministic writer with its OCC normalisation, and the `CoordinateFrame` / `FaceFrame` split | done — 277ac8d |
+| 2 — `stompgeom` | the STEP reader, the deterministic writer with its OCC normalisation, and the kernel guard; the `CoordinateFrame` / `FaceFrame` split moved *down* into `stompmodel`, not into `stompgeom` — see ADR-0009 as amended | done — 277ac8d |
 | 3 — `stompcollider` | everything this document specifies, built test-first | its own suite, and the cross-artefact agreement test |
 
 **Why three.** Plans 1 and 2 succeed when *nothing observable changes*; plan 3
