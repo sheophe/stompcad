@@ -49,17 +49,25 @@ def test_to_canonical_returns_millimetres_not_nanometres() -> None:
 def test_reframe_restates_a_point_on_another_frame() -> None:
     """A point measured against one face means something else on another.
 
-    The target is the same origin viewed from the opposite side, so a
-    canonical x of +5 mm on the source reads as -5 mm on the target.
+    The target is a quarter turn about ``v`` from ``ROTATED`` and stands at
+    a different origin, so the composed map is *not* its own inverse: swap
+    the two frames in ``reframe`` and the answer changes. A half turn about
+    a shared origin -- the pair this test used to carry -- is an involution,
+    and an involution cannot fail on that swap.
     """
     target = CoordinateFrame(
-        origin_nm=ROTATED.origin_nm, u=(0.0, 1.0, 0.0), v=(0.0, 0.0, 1.0), w=(1.0, 0.0, 0.0)
+        origin_nm=(Nanometre(4_000_000), Nanometre(6_000_000), Nanometre(10_000_000)),
+        u=(0.0, 0.0, 1.0),
+        v=(-1.0, 0.0, 0.0),
+        w=(0.0, -1.0, 0.0),
     )
+    here = (Nanometre(5_000_000), Nanometre(-2_000_000))
+    there = (Nanometre(-9_000_000), Nanometre(3_000_000))
 
-    assert ROTATED.reframe(Nanometre(5_000_000), Nanometre(0), target) == (
-        Nanometre(-5_000_000),
-        Nanometre(0),
-    )
+    assert ROTATED.reframe(*here, target) == there
+    # The control on the fixture itself: the day this pair becomes its own
+    # inverse again, the two directions agree and this line fails.
+    assert target.reframe(*here, ROTATED) != there
 
 
 def test_reframe_onto_the_same_frame_is_the_identity() -> None:

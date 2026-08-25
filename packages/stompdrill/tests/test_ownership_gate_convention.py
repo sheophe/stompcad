@@ -142,7 +142,10 @@ _GUILTY_PROBE_SOURCE = (
     '_FACES = {"box": "BOX", "lid": "LID"}\n'
     "def guard(name, value):\n"
     "    if type(value) is not int:\n"
-    '        raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")\n'
+    # Deliberately paraphrased: this probe shares no wording with any
+    # owner's implementation, so a gate deciding on prose rather than on
+    # the rule's own mechanism fails here rather than passing by luck.
+    '        raise TypeError(f"{name} must be an integral count of nanometres, not {value!r}")\n'
     "def order(hole):\n"
     "    return (hole.raw.x, hole.raw.y, hole.raw.diameter)\n"
     "def walk(label):\n"
