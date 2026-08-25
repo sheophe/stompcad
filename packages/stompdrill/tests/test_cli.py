@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
@@ -1130,7 +1131,10 @@ def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
 # surfaces during staging instead -- still a clean usage error with
 # nothing on disk, just after a render rather than before one. A
 # commit-phase failure rolls back every target this same invocation had
-# already replaced, not only the ones still unattempted.
+# already replaced, not only the ones still unattempted. Ticket 40: the
+# target set is compared under a case- and normalisation-folded key,
+# because a filesystem may unify two spellings this command line would
+# otherwise report as two artefacts.
 # ---------------------------------------------------------------------------
 
 
@@ -1146,6 +1150,107 @@ def test_two_emit_specs_naming_one_path_are_a_usage_error(fake_source, tmp_path,
     err = capsys.readouterr().err
     assert str(out) in err
     assert "Traceback" not in err
+
+
+def test_two_emit_targets_differing_only_in_case_are_a_usage_error(
+    fake_source, tmp_path, capsys
+):
+    """The confirmed defect: on a case-insensitive volume these name one
+    file, so the run printed a "wrote" line for an artefact the next
+    commit then destroyed, and exited 1 rather than 3. The refusal is
+    unconditional, so this also fails on a case-sensitive volume if the
+    fold is dropped."""
+    fake_source(read())
+    lower = tmp_path / "out.json"
+    upper = tmp_path / "OUT.json"
+
+    exit_code = cli.main(
+        [str(FIXTURE), "--emit", f"json={lower}", "--emit", f"drawing-svg={upper}"]
+    )
+
+    assert exit_code == 3
+    assert not lower.exists() and not upper.exists()
+    err = capsys.readouterr().err
+    assert str(lower) in err and str(upper) in err
+    assert "Traceback" not in err
+
+
+def test_two_emit_targets_differing_only_in_normalisation_form_are_a_usage_error(
+    fake_source, tmp_path, capsys
+):
+    """Case is not the only folding this repository's own APFS volume
+    applies: NFC and NFD spellings of one name are two distinct Python
+    strings and one file on disk. A ``casefold``-only repair passes the
+    probe above and leaves this one destroying an artefact."""
+    fake_source(read())
+    nfc = tmp_path / unicodedata.normalize("NFC", "café.json")
+    nfd = tmp_path / unicodedata.normalize("NFD", "café.json")
+    # Fixture control: a probe that can pass by finding nothing is not
+    # evidence. Were these already one string there would be no collision
+    # to refuse and every assertion below would be vacuous.
+    assert str(nfc) != str(nfd)
+
+    exit_code = cli.main(
+        [str(FIXTURE), "--emit", f"json={nfc}", "--emit", f"drawing-svg={nfd}"]
+    )
+
+    assert exit_code == 3
+    assert not nfc.exists() and not nfd.exists()
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+
+
+def test_two_ordinary_targets_one_character_apart_are_both_written(
+    fake_source, tmp_path
+):
+    """A pair as close as two targets can be without folding -- one ASCII
+    digit apart -- must still produce two artefacts. A fold that unified
+    more than case and normalisation form, or a pre-flight that refused a
+    repeated stem, fails here."""
+    fake_source(read())
+    a = tmp_path / "out-1.json"
+    b = tmp_path / "out-2.json"
+
+    assert cli.main(
+        [str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"]
+    ) == 0
+    assert a.is_file() and b.is_file()
+    assert a.read_bytes() != b.read_bytes()
+
+
+def test_case_distinct_basenames_in_distinct_directories_are_both_written(
+    fake_source, tmp_path
+):
+    """A fold applied to the basename alone would refuse this pair, which
+    names two genuinely different files on every filesystem."""
+    fake_source(read())
+    left = tmp_path / "d1"
+    right = tmp_path / "d2"
+    left.mkdir()
+    right.mkdir()
+    a = left / "out.json"
+    b = right / "OUT.json"
+
+    assert cli.main(
+        [str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"]
+    ) == 0
+    assert a.is_file() and b.is_file()
+    assert a.read_bytes() != b.read_bytes()
+
+
+def test_the_comparison_key_never_becomes_the_written_path(fake_source, tmp_path):
+    """The fold decides only whether two targets collide. The bytes go to
+    the spelling the caller typed: an upper-case target is created
+    upper-case, not lower-cased into the comparison key. This bites on a
+    case-insensitive volume too, because APFS is case- and
+    normalisation-preserving -- the directory entry records the spelling
+    the file was created with."""
+    fake_source(read())
+    target = tmp_path / "OUT.JSON"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={target}"]) == 0
+    assert "OUT.JSON" in os.listdir(tmp_path)
+    assert json.loads(target.read_text())
 
 
 def test_a_directory_at_one_target_withholds_the_whole_set(fake_source, tmp_path, capsys):
