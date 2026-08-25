@@ -56,7 +56,7 @@ write, or a later target's replace failing after an earlier one has already
 succeeded — unwinds whatever this invocation had staged or already replaced and
 leaves every target exactly as it was before the run, whether that is absent or
 holding a previous invocation's artefact. Restoring an already-replaced target uses
-the same `stage_payload`/`commit_staged` mechanism as every other write in the loop,
+the same `stage_payload`/`StagedWrite.commit` mechanism as every other write in the loop,
 never a filesystem operation of its own: the command line states no write path
 `stompmodel.protocols` does not already publish.
 
@@ -71,7 +71,7 @@ about the failed restoration. Closing that race needs a lock this command line d
 not take, which is a durability question this document leaves out alongside fsync
 and power loss.
 
-ADR-0005 gives `stage_payload`/`commit_staged` the matching guarantee for one path in
+ADR-0005 gives `stage_payload`/`StagedWrite.commit` the matching guarantee for one path in
 isolation; this is the set-level rule built on top of it, and it stays the command
 line's own for as long as `stompdrill` is the only caller composing a set of several
 artefact paths for one invocation.
@@ -154,15 +154,15 @@ target, briefly present beside it until the whole set commits. That is the delib
 price of never leaving a previous invocation's artefact replaced by only part of this
 one's. The set-level rule is composed from `stompmodel`'s per-path mechanism rather than
 restating it: the command line calls `stage_payload` for every requested target, then
-`commit_staged` for each in turn, and `discard_staged` for whatever it abandons; reading
+`StagedWrite.commit` for each in turn, and `StagedWrite.discard` for whatever it abandons; reading
 a target's prior bytes before its own commit, and restoring them through that same
-`stage_payload`/`commit_staged` pair on a later failure, is the command line's own
+`stage_payload`/`StagedWrite.commit` pair on a later failure, is the command line's own
 bookkeeping around that mechanism, never a second write path beside it. `stompdrill`
 states no temporary-file mechanism of its own. The set commits in the order its targets
 were requested; when one target's own read or commit fails, or an earlier target's
 commit fails, every target already committed in the same loop is restored to what it
 held before this run, and every other staged write — the one whose own read or commit
-just failed, and every one not yet reached — is discarded through `discard_staged`,
+just failed, and every one not yet reached — is discarded through `StagedWrite.discard`,
 never left as a temporary. This is a stated invariant, not an index into the target
 list: the loop tracks the set of staged writes not yet committed, which includes the
 one currently being attempted, and a write leaves that set only once its own commit has
@@ -171,7 +171,7 @@ returned — both stated above and enforced by tickets 29 and 35.
 Whatever this invocation leaves behind is one of two states per target and nothing
 else: this run's artefact, or exactly the bytes that target held before the run. **No
 temporary this invocation created survives it, on any path — committed, rolled back, or
-failed.** This is a claim about a *path*, not about a file: `commit_staged` replaces
+failed.** This is a claim about a *path*, not about a file: `StagedWrite.commit` replaces
 the name, so a target that was a symlink or a named pipe is afterwards a regular file
 (see ADR-0005). The set is not atomic against another process and it is not durable
 against power loss; those, and the one named exclusion above — unchanged, not upgraded

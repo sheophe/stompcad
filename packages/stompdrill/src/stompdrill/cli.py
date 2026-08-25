@@ -33,8 +33,6 @@ from stompmodel.protocols import (
     Pipeline,
     Stage,
     StagedWrite,
-    commit_staged,
-    discard_staged,
     stage_payload,
 )
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
@@ -811,7 +809,7 @@ def _stage(rendered: Iterable[tuple[Emitter[DrillData], Path, Payload]]) -> list
             staged.append((emitter, stage_payload(path, payload)))
     except BaseException:
         for _, written in staged:
-            discard_staged(written)
+            written.discard()
         raise
     return staged
 
@@ -845,7 +843,7 @@ def _rollback(committed: list[_Committed]) -> None:
             if done.previous is None:
                 done.path.unlink(missing_ok=True)
             else:
-                commit_staged(stage_payload(done.path, done.previous))
+                stage_payload(done.path, done.previous).commit()
         except OSError:
             pass
 
@@ -855,7 +853,7 @@ def _commit(staged: list[_Staged]) -> list[str]:
 
     ``pending`` holds exactly the staged writes not yet committed,
     including the one currently being attempted; a write leaves it only
-    once its own :func:`~stompmodel.protocols.commit_staged` returns. An
+    once its own :meth:`~stompmodel.protocols.StagedWrite.commit` returns. An
     existing target's prior bytes are read first, so they can be
     restored. On failure, :func:`_rollback` restores what this loop
     already replaced, and everything still in ``pending`` is discarded —
@@ -868,14 +866,14 @@ def _commit(staged: list[_Staged]) -> list[str]:
         while pending:
             emitter, written = pending[0]
             previous = written.path.read_bytes() if written.path.exists() else None
-            size = commit_staged(written)
+            size = written.commit()
             pending.pop(0)
             committed.append(_Committed(written.path, previous))
             lines.append(f"wrote {written.path}  ({emitter.name}, {size} bytes)")
     except BaseException:
         _rollback(committed)
         for _, written in pending:
-            discard_staged(written)
+            written.discard()
         raise
     return lines
 

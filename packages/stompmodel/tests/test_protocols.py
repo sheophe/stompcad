@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
+from stompmodel import protocols
 from stompmodel.diagnostics import (
     EXIT_ERRORS,
     Diagnostic,
@@ -25,8 +26,6 @@ from stompmodel.protocols import (
     Processable,
     Stage,
     StagedWrite,
-    commit_staged,
-    discard_staged,
     stage_payload,
 )
 
@@ -112,7 +111,7 @@ def test_then_returns_a_new_pipeline_and_leaves_the_original_alone() -> None:
 def test_a_text_payload_is_written_as_utf_eight(tmp_path) -> None:
     path = tmp_path / "out.txt"
 
-    commit_staged(stage_payload(path, "⌀7.000"))
+    stage_payload(path, "⌀7.000").commit()
 
     assert path.read_text(encoding="utf-8") == "⌀7.000"
 
@@ -127,13 +126,13 @@ def test_a_text_payload_counts_encoded_bytes_not_characters(tmp_path) -> None:
     staged = stage_payload(tmp_path / "out.txt", "⌀7.000")
 
     assert staged.size == 8
-    assert commit_staged(staged) == 8
+    assert staged.commit() == 8
 
 
 def test_a_binary_payload_is_written_unchanged(tmp_path) -> None:
     path = tmp_path / "out.bin"
 
-    commit_staged(stage_payload(path, b"%PDF-1.7\n\x00\xff"))
+    stage_payload(path, b"%PDF-1.7\n\x00\xff").commit()
 
     assert path.read_bytes() == b"%PDF-1.7\n\x00\xff"
 
@@ -142,7 +141,7 @@ def test_a_binary_payload_counts_its_own_length(tmp_path) -> None:
     staged = stage_payload(tmp_path / "out.bin", b"%PDF-1.7\n\x00\xff")
 
     assert staged.size == 11
-    assert commit_staged(staged) == 11
+    assert staged.commit() == 11
 
 
 def test_a_failed_stage_leaves_a_preexisting_file_unchanged(
@@ -221,7 +220,7 @@ def test_the_temporary_and_the_target_share_a_directory(
 
     monkeypatch.setattr(os, "replace", _spy_replace)
 
-    commit_staged(stage_payload(path, b"DATA"))
+    stage_payload(path, b"DATA").commit()
 
     assert seen["src"] != seen["dst"]
     assert seen["src"].parent == seen["dst"].parent == tmp_path
@@ -288,7 +287,7 @@ def test_staging_at_a_directory_target_raises_before_any_temporary_exists(
 ) -> None:
     """A target that is already a directory is outside stage_payload's own
     domain: a rename can never land bytes there. Deferring to
-    commit_staged's rename failure would surface this one target too late
+    StagedWrite.commit's rename failure would surface this one target too late
     for a caller withholding a whole set -- so stage_payload refuses it
     itself, before writing anything, and leaves the directory as the only
     entry in its own parent.
@@ -316,7 +315,7 @@ def test_committing_a_staged_write_replaces_a_symlink_target_with_a_regular_file
     link = tmp_path / "out.bin"
     link.symlink_to(real)
 
-    commit_staged(stage_payload(link, b"REPLACEMENT"))
+    stage_payload(link, b"REPLACEMENT").commit()
 
     assert not link.is_symlink()
     assert link.read_bytes() == b"REPLACEMENT"
@@ -335,21 +334,19 @@ def test_committing_a_staged_write_can_replace_a_named_pipe_with_a_regular_file(
     target = tmp_path / "out.bin"
     os.mkfifo(target)
 
-    commit_staged(stage_payload(target, b"REPLACEMENT"))
+    stage_payload(target, b"REPLACEMENT").commit()
 
     assert not stat.S_ISFIFO(target.stat().st_mode)
     assert target.read_bytes() == b"REPLACEMENT"
 
 
-def test_stage_payload_and_commit_staged_add_no_new_published_name() -> None:
+def test_the_write_mechanism_publishes_a_value_and_one_way_to_make_it() -> None:
     """ADR-0005's forecast-consumer rule licenses narrowing what
     stage_payload already does, never adding a name for a caller that does
-    not exist yet. Pinning the whole exported surface, not just its count,
-    is what fails if a target-domain predicate is published alongside the
-    narrowing this ticket makes.
+    not exist yet. Pinning ``__all__`` alone would pass a module that still
+    defines a deleted verb outside it, so the attribute clauses sit here
+    rather than in a second test that could be deleted on its own.
     """
-    import stompmodel.protocols as protocols
-
     assert protocols.__all__ == [
         "Processable",
         "Diagnosable",
@@ -358,16 +355,58 @@ def test_stage_payload_and_commit_staged_add_no_new_published_name() -> None:
         "Payload",
         "StagedWrite",
         "stage_payload",
-        "commit_staged",
-        "discard_staged",
         "Pipeline",
     ]
+    assert not hasattr(protocols, "commit_staged")
+    assert not hasattr(protocols, "discard_staged")
+
+
+def test_the_surface_pin_catches_a_deleted_verb_restored_as_an_attribute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guilty probe for the attribute clauses: a module-level verb put back
+    without touching ``__all__`` is exactly the breach an equality-only pin
+    would sleep through.
+    """
+    monkeypatch.setattr(
+        protocols, "commit_staged", lambda staged: staged.size, raising=False
+    )
+
+    with pytest.raises(AssertionError):
+        test_the_write_mechanism_publishes_a_value_and_one_way_to_make_it()
+
+
+def test_the_surface_pin_catches_a_deleted_verb_restored_to_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guilty probe for the equality clause: re-publishing either name in
+    ``__all__`` must fail the pin, whether or not the attribute exists."""
+    monkeypatch.setattr(protocols, "__all__", [*protocols.__all__, "discard_staged"])
+
+    with pytest.raises(AssertionError):
+        test_the_write_mechanism_publishes_a_value_and_one_way_to_make_it()
+
+
+def test_the_surface_pin_does_not_fire_on_a_private_helper_or_a_new_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Innocent probe: a private module attribute and a further method on
+    ``StagedWrite`` are both legitimate additions that publish nothing, so
+    the pin must stay quiet. A gate that fires on those is as broken as one
+    that sleeps through a breach.
+    """
+    monkeypatch.setattr(protocols, "_helper", lambda: None, raising=False)
+    monkeypatch.setattr(
+        protocols.StagedWrite, "describe", lambda self: str(self.path), raising=False
+    )
+
+    test_the_write_mechanism_publishes_a_value_and_one_way_to_make_it()
 
 
 def test_a_failed_commit_leaves_the_target_unchanged_and_discards_its_temporary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``commit_staged`` cleans up after its own failed rename, exactly as
+    """``StagedWrite.commit`` cleans up after its own failed rename, exactly as
     the old single-call writer did for one path: the target is untouched
     and no orphaned temporary is left behind.
     """
@@ -381,13 +420,13 @@ def test_a_failed_commit_leaves_the_target_unchanged_and_discards_its_temporary(
     monkeypatch.setattr(os, "replace", _boom)
 
     with pytest.raises(OSError):
-        commit_staged(staged)
+        staged.commit()
 
     assert path.read_bytes() == b"ORIGINAL"
     assert [entry.name for entry in tmp_path.iterdir()] == ["out.bin"]
 
 
-def test_discard_staged_removes_the_temporary_without_touching_the_target(
+def test_discarding_removes_the_temporary_without_touching_the_target(
     tmp_path: Path,
 ) -> None:
     """Abandoning a staged write leaves the target exactly as it was."""
@@ -395,13 +434,13 @@ def test_discard_staged_removes_the_temporary_without_touching_the_target(
     path.write_bytes(b"ORIGINAL")
     staged = stage_payload(path, b"NEVER COMMITTED")
 
-    discard_staged(staged)
+    staged.discard()
 
     assert path.read_bytes() == b"ORIGINAL"
     assert [entry.name for entry in tmp_path.iterdir()] == ["out.bin"]
 
 
-def test_discard_staged_never_raises_when_its_temporary_is_already_gone() -> None:
+def test_discarding_never_raises_when_its_temporary_is_already_gone() -> None:
     """A caller may discard the same staged write twice, or discard after a
     commit already moved the temporary away; neither is an error."""
     staged = StagedWrite(
@@ -410,7 +449,7 @@ def test_discard_staged_never_raises_when_its_temporary_is_already_gone() -> Non
         _tmp=Path("/nonexistent/already-gone.tmp"),
     )
 
-    discard_staged(staged)  # must not raise
+    staged.discard()  # must not raise
 
 
 # --------------------------------------------------------------------------
