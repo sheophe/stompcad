@@ -241,7 +241,10 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
 
     def canonical_hole(ax: int, ay: int, az: int, radius: int) -> tuple[Nanometre, Nanometre, int]:
         point_mm = (ax * tolerance_mm, ay * tolerance_mm, az * tolerance_mm)
-        x_mm, y_mm = frame.basis.to_canonical(point_mm)
+        # The depth is dropped on purpose: this checks where each
+        # cylinder sits on the face, not how far along its own axis the
+        # sampled point lies.
+        x_mm, y_mm, _depth_mm = frame.basis.to_canonical(point_mm)
         return nm_from_mm(x_mm), nm_from_mm(y_mm), radius
 
     # Joining position and radius in one tuple, rather than checking the
