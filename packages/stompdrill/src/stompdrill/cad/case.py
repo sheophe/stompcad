@@ -107,6 +107,21 @@ def select_solid(document: StepDocument, face: CaseFace) -> StepSolid:
     return found[0]
 
 
+def _outward_sign(component: float, reversed_face: bool) -> int:
+    """Which way a face points along the drill axis, as exactly -1 or +1.
+
+    The caller has already established the normal is axis-aligned, so the
+    only information left in ``component`` is its sign; its magnitude is 1
+    to within the same tolerance and carries nothing. Returning an ``int``
+    keeps the raw kernel float out of the grouping key and out of the
+    equality tests that read the result back -- a normal reported as
+    -0.9999999999999993 is the same direction as -1.0, and no key or
+    comparison may treat them as two.
+    """
+    sign = -1 if reversed_face else 1
+    return sign if component > 0.0 else -sign
+
+
 def find_faces(solid: StepSolid, axis: int) -> Faces:
     """Find the drilled plate level along ``axis`` and the level behind it."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
@@ -124,7 +139,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
         solid_bbox[5] - solid_bbox[2],
     )
 
-    planes: list[tuple[float, float, float, Any]] = []
+    planes: list[tuple[float, float, int, Any]] = []
     explorer = TopExp_Explorer(solid.shape, TopAbs_ShapeEnum.TopAbs_FACE)
     while explorer.More():
         face = TopoDS.Face_s(explorer.Current())
@@ -134,8 +149,10 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
             normal = plane.Axis().Direction()
             components = (normal.X(), normal.Y(), normal.Z())
             if abs(abs(components[axis]) - 1.0) < 1e-9:
-                sign = -1.0 if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED else 1.0
-                outward = components[axis] * sign
+                outward = _outward_sign(
+                    components[axis],
+                    face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED,
+                )
                 position = bounding_box_mm(face)[axis]
                 props = GProp_GProps()
                 BRepGProp.SurfaceProperties_s(face, props)
@@ -153,7 +170,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     companion = _nearest_companion_level(levels, inner)
     thickness = abs(inner.position - drilled.position)
     normal = [0.0, 0.0, 0.0]
-    normal[axis] = drilled.outward
+    normal[axis] = float(drilled.outward)
     return Faces(
         inner=_compound(inner.faces + (companion.faces if companion else ())),
         plate_nm=nm_from_mm(thickness),
@@ -177,11 +194,13 @@ class _Level:
 
     position: float
     area: float
-    outward: float
+    #: Exactly -1 or +1. Never a raw kernel component: this is half of the
+    #: grouping key below and is read back by exact equality twice.
+    outward: int
     faces: tuple[Any, ...]
 
 
-def _levels(planes: list[tuple[float, float, float, Any]]) -> list[_Level]:
+def _levels(planes: list[tuple[float, float, int, Any]]) -> list[_Level]:
     """Group same-facing planar candidates into levels by rounded axis position.
 
     Kernel-float noise can make two patches of the same physical plane report
@@ -192,7 +211,7 @@ def _levels(planes: list[tuple[float, float, float, Any]]) -> list[_Level]:
     member the explorer happened to visit first, so it cannot vary with
     traversal order.
     """
-    groups: dict[tuple[int, float], list[tuple[float, float, Any]]] = {}
+    groups: dict[tuple[int, int], list[tuple[float, float, Any]]] = {}
     for area, position, outward, face in planes:
         groups.setdefault((nm_from_mm(position), outward), []).append((area, position, face))
     return [

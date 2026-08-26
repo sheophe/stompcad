@@ -244,6 +244,11 @@ def test_a_centring_mark_runs_from_the_grid_band_past_the_frame():
         assert length == GRID_BAND_WIDTH + CENTRING_MARK_OVERSHOOT
 
 
+def _um(value_mm: float) -> int:
+    """Sheet millimetres as whole micrometres, so a corner match is exact."""
+    return round(value_mm * 1000)
+
+
 def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
     """4.5: four edges, two rectangles each, crossed so the pair actually overlaps."""
     layout = iso_layout()
@@ -268,17 +273,23 @@ def test_trimming_marks_are_two_overlapping_rectangles_at_each_edge():
     # the pairs are found by the sheet corner they touch — one per corner, four
     # in all. Grouping by a common minimum instead would pass for marks that all
     # point the same way, which is the arrangement this checks against.
-    corners: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
+    # Whole micrometres on both sides of every comparison. The box edges are
+    # rounded to 6 dp above while a sheet dimension is not, so matching them
+    # with float equality compares a rounded value against an unrounded one --
+    # and a composite key holding a float is the shape this repository keeps
+    # out of its grouping keys.
+    corners: dict[tuple[int, int], list[tuple[float, float, float, float]]] = {}
     for corner_x, corner_y in (
         (0.0, 0.0),
         (sheet.width, 0.0),
         (0.0, sheet.height),
         (sheet.width, sheet.height),
     ):
-        corners[(corner_x, corner_y)] = [
+        corners[(_um(corner_x), _um(corner_y))] = [
             box
             for box in boxes
-            if corner_x in (box[0], box[2]) and corner_y in (box[1], box[3])
+            if _um(corner_x) in (_um(box[0]), _um(box[2]))
+            and _um(corner_y) in (_um(box[1]), _um(box[3]))
         ]
     assert len(corners) == 4
     assert sum(len(pair) for pair in corners.values()) == 8
