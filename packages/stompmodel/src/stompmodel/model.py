@@ -13,7 +13,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
-from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths
+from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths, _tupled
 from .diagnostics import of_severity as _of_severity
 from .diagnostics import worst_severity as _worst_severity
 from .errors import EmitterError
@@ -333,8 +333,9 @@ class StageRun:
             self,
             "parameters",
             tuple(
-                # JSON sequences arrive as lists despite the declared tuple type.
-                (key, tuple(value) if isinstance(value, list) else value)  # type: ignore[unreachable]
+                # JSON sequences arrive as lists at every depth, so the
+                # normalisation recurses exactly as ``Diagnostic`` does.
+                (key, _tupled(value))
                 for key, value in self.parameters
             ),
         )
