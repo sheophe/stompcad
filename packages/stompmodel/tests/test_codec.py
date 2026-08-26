@@ -621,6 +621,53 @@ def test_diagnostics_round_trip_with_severity_code_message_and_location() -> Non
     assert diagnostics[1]["location_nm"] == [-40_000_000, 18_000_000]
 
 
+def test_a_nested_stage_parameter_round_trips_as_a_nested_diagnostic_payload_does() -> None:
+    """The two payload types normalise to the same depth, or neither is safe.
+
+    ``json.load`` returns a list for every array at every level. ``Diagnostic``
+    always recursed; ``StageRun`` converted only the outer level, so a nested
+    parameter came back holding lists -- unequal, and mutable inside a frozen
+    value. Nothing in ``stompdrill`` records a nested parameter, which is why
+    no suite reached it; ``stompcollider``'s repeatable ``--place`` does.
+    """
+    nested = ((1, 0.0, 0.0, 90.0), (2, 1.0, 2.0, 0.0))
+    data = replace(
+        _fixture_data(),
+        processing=(StageRun("seat", (("place", nested),)),),
+        diagnostics=(Diagnostic.warning("tied", "m", data=(("tied_locations", nested),)),),
+    )
+
+    back = from_document(to_document(data))
+
+    assert back.processing[0].parameters == (("place", nested),)
+    assert back.diagnostics[0].data == (("tied_locations", nested),)
+    assert back == data
+
+
+def test_a_diagnostic_payload_may_name_parts_by_string() -> None:
+    """A finding about two parts carries both, as a tuple of designators.
+
+    ``stompdrill`` identifies a hole by index, so the payload union grew arms
+    for its own shapes and none for a tuple of strings. A second tool names
+    parts by reference designator, and joining them into one string is what
+    forces a reader to split it again.
+    """
+    data = replace(
+        _fixture_data(),
+        diagnostics=(
+            Diagnostic.error(
+                "ambiguous-pairing",
+                "two protrusions within tolerance of one hole",
+                data=(("designators", ("RV3", "SW1")),),
+            ),
+        ),
+    )
+
+    back = from_document(to_document(data))
+
+    assert back.diagnostics[0].data == (("designators", ("RV3", "SW1")),)
+
+
 def test_a_diagnostic_without_a_payload_carries_an_empty_object() -> None:
     """Absent, not omitted: a consumer reads ``data`` on every diagnostic."""
     diagnostics = to_document(_fixture_data())["diagnostics"]
@@ -714,6 +761,18 @@ _SIMPLE_PARAM = st.one_of(
     st.booleans(),
 )
 
+#: The same shapes nested, because a payload value is recursive: a scalar, or
+#: a tuple of payload values to any depth. Drawn recursively rather than as a
+#: fixed pair of levels, so the property reaches depth the code must survive
+#: and not merely the depth someone remembered. A scalar-only strategy is what
+#: let a shallow normalisation in ``StageRun`` sit undetected: the property
+#: could not reach the branch it exists to constrain.
+_PARAM = st.recursive(
+    _SIMPLE_PARAM,
+    lambda children: st.lists(children, max_size=3).map(tuple),
+    max_leaves=6,
+)
+
 
 @st.composite
 def _holes_strategy(draw):
@@ -793,7 +852,7 @@ def _processing_strategy(draw):
         params = ()
         if draw(st.booleans()):
             key = draw(st.sampled_from(("standard", "tolerance", "size_count")))
-            params = ((key, draw(_SIMPLE_PARAM)),)
+            params = ((key, draw(_PARAM)),)
         name = draw(st.sampled_from(("identify-enclosure", "snap-diameters", "snap", "deduplicate")))
         built.append(StageRun(name, params))
     return tuple(built)

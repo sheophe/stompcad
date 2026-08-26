@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from functools import total_ordering
+from typing import TypeAlias
 
 from .units import Nanometre, check_nanometres
 
@@ -27,8 +28,12 @@ __all__ = [
     "exit_for_severity",
 ]
 
-#: Stage parameters may include scalars or tuples; ``_nm`` keys enforce integers.
-ParameterValue = float | int | str | bool | tuple[float, ...]
+#: A payload value is a scalar, or a tuple of payload values to any depth.
+#: Stated recursively because that is the rule the codec actually enforces:
+#: anything JSON can carry, nothing it cannot. ``_nm`` keys enforce integers.
+Scalar = float | int | str | bool
+PayloadValue: TypeAlias = "Scalar | tuple[PayloadValue, ...]"
+ParameterValue: TypeAlias = "PayloadValue"
 
 
 @total_ordering
@@ -89,11 +94,7 @@ class Diagnostic:
     code: str
     message: str
     location_nm: tuple[Nanometre, Nanometre] | None = None
-    #: Scalars, tuples of hole identities, or tuples of locations for
-    #: panel-wide findings.
-    data: tuple[
-        tuple[str, float | int | str | tuple[int, ...] | tuple[tuple[int, int], ...]], ...
-    ] = ()
+    data: tuple[tuple[str, PayloadValue], ...] = ()
 
     def __post_init__(self) -> None:
         """Normalise sequences before validating canonical nanometre lengths.
