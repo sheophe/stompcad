@@ -17,6 +17,15 @@ ROTATED = CoordinateFrame(
 )
 
 
+def _along_w(point: tuple[float, float, float], distance_mm: float) -> tuple[float, float, float]:
+    """``point`` moved ``distance_mm`` off ``ROTATED``'s plane, along ``w``."""
+    return (
+        point[0] + distance_mm * ROTATED.w[0],
+        point[1] + distance_mm * ROTATED.w[1],
+        point[2] + distance_mm * ROTATED.w[2],
+    )
+
+
 def test_to_model_returns_the_origin_for_the_frame_origin() -> None:
     """Canonical (0, 0) is the frame's own origin, in millimetres."""
     assert ROTATED.to_model(Nanometre(0), Nanometre(0)) == (1.0, 2.0, 3.0)
@@ -34,16 +43,45 @@ def test_to_model_walks_v_for_y() -> None:
 
 
 def test_to_canonical_inverts_to_model() -> None:
-    """The round trip returns the coordinates it started from."""
+    """The round trip returns the coordinates it started from, at no depth.
+
+    ``to_model`` places a canonical point on the frame's own plane, so the
+    depth the round trip recovers must be exactly zero.
+    """
     point = ROTATED.to_model(Nanometre(7_000_000), Nanometre(-4_000_000))
 
-    assert ROTATED.to_canonical(point) == (7.0, -4.0)
+    assert ROTATED.to_canonical(point) == (7.0, -4.0, 0.0)
+
+
+def test_to_canonical_reports_the_depth_of_a_point_above_the_plane() -> None:
+    """A point displaced along ``w`` projects to that same displacement.
+
+    Without this the depth could be hardcoded to zero and every on-plane
+    test would still pass. The displacement is neither of the in-plane
+    coordinates, so a projection onto the wrong axis fails here too.
+    """
+    on_plane = ROTATED.to_model(Nanometre(7_000_000), Nanometre(-4_000_000))
+    above = _along_w(on_plane, 2.5)
+
+    assert ROTATED.to_canonical(above) == (7.0, -4.0, 2.5)
+
+
+def test_to_canonical_reports_a_negative_depth_below_the_plane() -> None:
+    """Depth is signed: the opposite side of the plane reads negative.
+
+    Checked apart from the case above, because an unsigned magnitude
+    passes that one and would hide which side of the face a point sits on.
+    """
+    on_plane = ROTATED.to_model(Nanometre(7_000_000), Nanometre(-4_000_000))
+    below = _along_w(on_plane, -2.5)
+
+    assert ROTATED.to_canonical(below) == (7.0, -4.0, -2.5)
 
 
 def test_to_canonical_returns_millimetres_not_nanometres() -> None:
     """The unit is load-bearing: ``region_bbox_nm`` rounds after its own
     minimum and maximum, so this must not round here."""
-    assert ROTATED.to_canonical((1.0, 2.0, 3.5)) == (0.0, 0.5)
+    assert ROTATED.to_canonical((1.0, 2.0, 3.5)) == (0.0, 0.5, 0.0)
 
 
 def test_reframe_restates_a_point_on_another_frame() -> None:

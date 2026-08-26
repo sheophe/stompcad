@@ -118,8 +118,12 @@ class CoordinateFrame:
 
     def to_canonical(
         self, point_mm: tuple[float, float, float]
-    ) -> tuple[Millimetre, Millimetre]:
-        """Project a model point onto this frame's own axes, in millimetres.
+    ) -> tuple[Millimetre, Millimetre, Millimetre]:
+        """Project a model point onto all three of this frame's own axes.
+
+        The third value is the signed depth along ``w``, zero for a point on
+        the frame's plane. Symmetric with ``to_model``, which is already
+        three-dimensional.
 
         Millimetres, not nanometres: ``region_bbox_nm`` projects four corners
         and rounds once after its own minimum and maximum, and rounding here
@@ -129,13 +133,18 @@ class CoordinateFrame:
         relative = tuple(p - o for p, o in zip(point_mm, origin))
         x = sum(r * c for r, c in zip(relative, self.u))
         y = sum(r * c for r, c in zip(relative, self.v))
-        return (Millimetre(x), Millimetre(y))
+        z = sum(r * c for r, c in zip(relative, self.w))
+        return (Millimetre(x), Millimetre(y), Millimetre(z))
 
     def reframe(
         self, x_nm: Nanometre, y_nm: Nanometre, target: CoordinateFrame
     ) -> tuple[Nanometre, Nanometre]:
         """Restate a canonical point registered here in ``target``'s frame."""
-        x_mm, y_mm = target.to_canonical(self.to_model(x_nm, y_nm))
+        # The depth is dropped deliberately, not overlooked: it is the
+        # separation of the two planes, non-zero whenever a box face and its
+        # lid are reframed against each other, and a canonical point is
+        # two-dimensional by definition. Widen this only with its callers.
+        x_mm, y_mm, _depth_mm = target.to_canonical(self.to_model(x_nm, y_nm))
         return nm_from_mm(x_mm), nm_from_mm(y_mm)
 
 
