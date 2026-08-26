@@ -115,7 +115,7 @@ into the leaf:
 
 ```python
 def to_model(self, x_nm, y_nm) -> tuple[Millimetre, Millimetre, Millimetre]
-def to_canonical(self, point_mm) -> tuple[Millimetre, Millimetre]
+def to_canonical(self, point_mm) -> tuple[Millimetre, Millimetre, Millimetre]
 def reframe(self, x_nm, y_nm, target: CoordinateFrame) -> tuple[Nanometre, Nanometre]
 def as_parameters(self) -> tuple[tuple[str, ParameterValue], ...]
 ```
@@ -131,6 +131,14 @@ what a suffix would repeat.
 `float(mm_from_nm(...))` — the same conversion, branded in one place and not the other.
 ADR-0004 says brand at a real conversion, and nanometres to millimetres is one. Callers
 unwrap with `float()` at the OCC boundary, as `_face_point` already does.
+
+**The third value is the depth along `w`, and it arrived after this plan.** As
+extracted, `to_canonical` projected onto `u` and `v` only while `to_model` was already
+three-dimensional, so the pair was asymmetric in arity as well as in unit. The depth is
+signed and is zero for a point on the frame's plane. `reframe` was deliberately left
+two-valued: a canonical point is two-dimensional by definition, and both of its callers
+feed the result straight back into canonical data. The unit question below is a separate
+one and is still open.
 
 **`to_canonical` returns millimetres, and that asymmetry is deliberate here.** In this
 code "canonical" names the frame's own axes, not the unit: `_to_model` takes canonical
