@@ -1,0 +1,180 @@
+"""The canonicalisation boundary: representation only, never selection."""
+
+from __future__ import annotations
+
+from stompcollider.canonicalise import canonicalise
+from stompcollider.model import DockData, Protrusion
+from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace, CaseRegistration
+from stompmodel.units import Nanometre
+
+
+def _axis(raw: RawBoards, case: CaseRegistration) -> tuple[Nanometre, Nanometre]:
+    """Canonicalise, then return the sole board's sole component's axis.
+
+    A thin typed accessor so each test asserts on a concrete tuple rather
+    than narrowing ``Protrusion | None`` inline three times over.
+    """
+    protrusion = canonicalise(raw, case).boards[0].components[0].protrusion
+    assert isinstance(protrusion, Protrusion)
+    return protrusion.axis_xy_nm
+
+
+_IDENTITY = CoordinateFrame(
+    origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+    u=(1.0, 0.0, 0.0),
+    v=(0.0, 1.0, 0.0),
+    w=(0.0, 0.0, 1.0),
+)
+
+
+def _case() -> CaseRegistration:
+    return CaseRegistration(
+        part="1590BB", face=CaseFace.BOX, model="test.stp", frame=FaceFrame(basis=_IDENTITY)
+    )
+
+
+def _raw_with_axis(x_mm: float, y_mm: float) -> RawBoards:
+    component = RawComponent(
+        designator="R1",
+        axis_xy_mm=(x_mm, y_mm),
+        stack=(RawCylinder(radius_mm=1.0, depth_from_tip_min_mm=0.0, depth_from_tip_max_mm=2.0),),
+    )
+    board = RawBoard(
+        corner_a_mm=(0.0, 0.0, 0.0),
+        corner_b_mm=(10.0, 10.0, 2.0),
+        carrier_origin_mm=(0.0, 0.0, 0.0),
+        carrier_u=(1.0, 0.0, 0.0),
+        carrier_v=(0.0, 1.0, 0.0),
+        carrier_w=(0.0, 0.0, 1.0),
+        components=(component,),
+    )
+    return RawBoards(boards=(board,))
+
+
+def _two_boards(*, swapped: bool) -> RawBoards:
+    """Two boards, geometrically ordered opposite to a naive list-index rule.
+
+    ``far`` sits at greater x than ``near`` and must therefore be ordinal 2,
+    but is placed *first* in the unswapped tuple -- an implementation that
+    numbers boards by their position in ``raw.boards`` rather than by
+    geometry would give ``far`` ordinal 1 here. Swapping the tuple must not
+    change the result: this is the ADR-0006 control, built as two different
+    input orders of the same geometry, not two calls on one input.
+    """
+    far = RawBoard(
+        corner_a_mm=(100.0, 0.0, 0.0),
+        corner_b_mm=(110.0, 10.0, 5.0),
+        carrier_origin_mm=(0.0, 0.0, 0.0),
+        carrier_u=(1.0, 0.0, 0.0),
+        carrier_v=(0.0, 1.0, 0.0),
+        carrier_w=(0.0, 0.0, 1.0),
+        components=(RawComponent(designator="R9", axis_xy_mm=None),),
+    )
+    near = RawBoard(
+        corner_a_mm=(0.0, 0.0, 0.0),
+        corner_b_mm=(10.0, 10.0, 5.0),
+        carrier_origin_mm=(0.0, 0.0, 0.0),
+        carrier_u=(1.0, 0.0, 0.0),
+        carrier_v=(0.0, 1.0, 0.0),
+        carrier_w=(0.0, 0.0, 1.0),
+        components=(RawComponent(designator="R1", axis_xy_mm=None),),
+    )
+    boards = (near, far) if swapped else (far, near)
+    return RawBoards(boards=boards)
+
+
+def test_a_measurement_scales_exactly_not_through_binary_float() -> None:
+    """ADR-0003's rule. 0.1 mm has no exact binary form; the canonical value
+    must be 100000 nm and not 99999 or 100001."""
+    assert _axis(_raw_with_axis(0.1, 0.3), _case()) == (Nanometre(100_000), Nanometre(300_000))
+
+
+def test_a_rounding_tie_scales_by_exact_decimal_not_naive_float_multiply() -> None:
+    """0.1/0.3 above happen to agree with naive ``round(x * 1e6)`` -- they
+    are not near a rounding boundary, so they cannot tell the two rules
+    apart. 12.3456785 mm sits exactly on a half-nanometre tie: naive float
+    multiplication gives 12345678 nm, but exact decimal scaling with ties
+    away from zero (ADR-0003, ``nm_from_mm``) gives 12345679 nm. This is the
+    fixture that actually distinguishes the two rules, not just restates
+    one of them."""
+    assert round(12.3456785 * 1_000_000) == 12_345_678
+
+    assert _axis(_raw_with_axis(12.3456785, 0.0), _case()) == (Nanometre(12_345_679), Nanometre(0))
+
+
+def test_canonicalise_selects_nothing() -> None:
+    """The distinction from quantise(): an odd measurement stays odd. If this
+    starts passing with a snapped value, a catalogue has crept in."""
+    assert _axis(_raw_with_axis(3.141593, 2.718282), _case()) == (
+        Nanometre(3_141_593),
+        Nanometre(2_718_282),
+    )
+
+
+def test_boards_are_ordinalled_by_geometry_not_by_input_order() -> None:
+    """ADR-0006. Two raw inputs listing the same boards in opposite orders
+    must produce the same ordinals."""
+    forward = canonicalise(_two_boards(swapped=False), _case())
+    backward = canonicalise(_two_boards(swapped=True), _case())
+    assert [b.ordinal for b in forward.boards] == [b.ordinal for b in backward.boards]
+    assert [b.designators for b in forward.boards] == [b.designators for b in backward.boards]
+    # Pin the actual answer, not just its stability: the nearer board (R1)
+    # is ordinal 1 in both orderings, never the one that happened to be
+    # listed first in ``raw.boards``.
+    assert [b.designators for b in forward.boards] == [("R1",), ("R9",)]
+
+
+def test_a_lone_board_has_no_ordinal_before_one() -> None:
+    """A single board still gets ordinal 1 -- the smallest input a sort can
+    take without a second element to compare it against."""
+    data = canonicalise(_raw_with_axis(1.0, 1.0), _case())
+    assert [b.ordinal for b in data.boards] == [1]
+
+
+def test_every_component_and_every_cylinder_step_survives() -> None:
+    """Multiple components on one board, and multiple cylinders in one
+    stack, must all reach the canonical model -- an implementation that
+    only handles the first of either would still pass a single-element
+    fixture."""
+    board = RawBoard(
+        corner_a_mm=(0.0, 0.0, 0.0),
+        corner_b_mm=(10.0, 10.0, 2.0),
+        carrier_origin_mm=(0.0, 0.0, 0.0),
+        carrier_u=(1.0, 0.0, 0.0),
+        carrier_v=(0.0, 1.0, 0.0),
+        carrier_w=(0.0, 0.0, 1.0),
+        components=(
+            RawComponent(
+                designator="R2",
+                axis_xy_mm=(2.0, 2.0),
+                stack=(
+                    RawCylinder(0.5, 0.0, 1.0),
+                    RawCylinder(1.0, 1.0, 3.0),
+                ),
+            ),
+            RawComponent(designator="R1", axis_xy_mm=(1.0, 1.0), stack=(RawCylinder(0.25, 0.0, 0.5),)),
+            RawComponent(designator="R3", axis_xy_mm=None),
+        ),
+    )
+    data = canonicalise(RawBoards(boards=(board,)), _case())
+    (result,) = data.boards
+    assert result.designators == ("R1", "R2", "R3")
+    assert [c.designator for c in result.components] == ["R1", "R2", "R3"]
+
+    r1, r2, r3 = result.components
+    assert r3.protrusion is None
+    assert r1.protrusion is not None and r2.protrusion is not None
+    assert len(r2.protrusion.profile.steps) == 2
+    assert r2.protrusion.profile.steps == (
+        (Nanometre(500_000), Nanometre(0), Nanometre(1_000_000)),
+        (Nanometre(1_000_000), Nanometre(1_000_000), Nanometre(3_000_000)),
+    )
+
+
+def test_dockdata_carries_the_case_it_was_canonicalised_against() -> None:
+    case = _case()
+    data = canonicalise(_raw_with_axis(1.0, 1.0), case)
+    assert isinstance(data, DockData)
+    assert data.case is case

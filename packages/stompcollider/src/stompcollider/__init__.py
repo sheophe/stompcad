@@ -1,12 +1,17 @@
 """Seats PCB models inside a drilled case and reports where they clash.
 
-Deliberately empty of exports for now: ``Source``, ``canonicalise``,
+The package root exposes the canonicalisation entry point and what it reads,
+so a caller never has to guess a submodule -- see
+``docs/specs/stompcollider-technical.md``'s module layout. ``Source``,
 ``Match``, ``Seat`` and the emitters land here as later tasks add them,
-mirroring ``stompdrill``'s own root -- see
-``docs/specs/stompcollider-technical.md``'s module layout. The values this
-task adds live in ``stompcollider.model``, one name, one home.
+mirroring ``stompdrill``'s own root. The domain values live in
+``stompcollider.model``; the float-millimetre reader types live in
+``stompcollider.raw`` -- one name, one home, each.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .canonicalise import canonicalise
+from .raw import RawBoard, RawBoards, RawComponent, RawCylinder
+
+__all__ = ["canonicalise", "RawBoards", "RawBoard", "RawComponent", "RawCylinder"]

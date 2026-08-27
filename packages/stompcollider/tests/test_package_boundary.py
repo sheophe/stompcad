@@ -125,4 +125,6 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
     """An empty or narrowed walk would pass the test above by finding nothing."""
     scanned = {str(module.relative_to(SOURCE)) for module in modules()}
 
-    assert scanned == {"__init__.py", "designators.py", "errors.py", "model.py"}
+    assert scanned == {
+        "__init__.py", "canonicalise.py", "designators.py", "errors.py", "model.py", "raw.py",
+    }
