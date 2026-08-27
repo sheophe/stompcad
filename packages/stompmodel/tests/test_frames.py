@@ -306,6 +306,36 @@ def test_placement_onto_itself_is_the_identity() -> None:
     assert tuple(round(c, 12) for c in motion.apply_point((1.0, 2.0, 3.0))) == (1.0, 2.0, 3.0)
 
 
+def test_placement_onto_composes_for_two_non_identity_frames() -> None:
+    """The identity-self test above cannot catch an implementation that
+    used only ``target`` and ignored ``self`` entirely: with an identity
+    ``self``, ``R = U_target . U_self^T`` collapses to ``U_target``, so a
+    buggy ``R = U_target`` implementation would pass it too. Neither frame
+    here is the identity, ``self``'s basis is a 60-degree rotation about
+    ``w`` (not an axis flip), and ``target``'s is a distinct axis cycle, so
+    the resulting rotation is not symmetric and cannot be produced by
+    dropping ``self`` from the formula."""
+    root3over2 = 3.0 ** 0.5 / 2.0
+    source = _frame(
+        origin_nm=(1_000_000, 2_000_000, 3_000_000),
+        u=(root3over2, 0.5, 0.0),
+        v=(-0.5, root3over2, 0.0),
+        w=(0.0, 0.0, 1.0),
+    )
+    target = _frame(
+        origin_nm=(5_000_000, -1_000_000, 2_000_000),
+        u=(0.0, 1.0, 0.0),
+        v=(0.0, 0.0, 1.0),
+        w=(1.0, 0.0, 0.0),
+    )
+    motion = source.placement_onto(target)
+    moved_origin = motion.apply_point((1.0, 2.0, 3.0))
+    assert tuple(round(c, 9) for c in moved_origin) == (5.0, -1.0, 2.0)
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.u)) == target.u
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.v)) == target.v
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.w)) == target.w
+
+
 def test_rotated_about_w_keeps_the_normal_and_stays_right_handed() -> None:
     """Both clauses matter: a rotation that flipped w would still be unit."""
     turned = _frame().rotated_about_w(math.pi / 2)
