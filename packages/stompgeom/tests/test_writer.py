@@ -204,6 +204,48 @@ def test_reslot_colours_swaps_content_by_the_shape_id_it_colours() -> None:
     assert b"STYLED_ITEM('color',(#111),#200);" not in reslotted
 
 
+#: A minimal presentation entity of a kind ``_COLOUR_CHAIN`` does not match
+#: -- modelled on the ``CURVE_STYLE``/``DRAUGHTING_PRE_DEFINED_CURVE_FONT``
+#: pair a real board interspersed between surface-colour chains.
+_FOREIGN_ENTITY_BETWEEN_CHAINS = (
+    b"#150 = CURVE_STYLE('',#151,POSITIVE_LENGTH_MEASURE(0.1),#152);\n"
+    b"#151 = DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n"
+    b"#152 = COLOUR_RGB('',0.1,0.1,0.1);\n"
+)
+
+
+def test_a_foreign_entity_between_chains_is_refused() -> None:
+    """This module cannot re-seat an entity that belongs to no chain of its
+    own; its id is exactly as allocator-dependent as a colour chain's, so
+    silently keeping it would make the output non-deterministic again --
+    precisely the class of document Task 8 must go back to refusing.
+    """
+    payload = (
+        _EXTERNAL_STUBS
+        + _CHAIN_COLOURING_500
+        + _FOREIGN_ENTITY_BETWEEN_CHAINS
+        + _CHAIN_COLOURING_200
+    )
+
+    assert writer._foreign_entity_in_gaps(
+        payload, list(writer._COLOUR_CHAIN.finditer(payload))
+    )
+    with pytest.raises(EmitterError, match="foreign entities"):
+        writer._reslot_colours(payload, expected=2)
+
+
+def test_a_clean_gap_between_chains_is_accepted() -> None:
+    """The control beside the probe above: whitespace alone between two
+    chains must not trip the detector, or every ordinary write -- this
+    exact payload, minus the foreign entity -- would be refused too."""
+    payload = _EXTERNAL_STUBS + _CHAIN_COLOURING_500 + _CHAIN_COLOURING_200
+
+    assert not writer._foreign_entity_in_gaps(
+        payload, list(writer._COLOUR_CHAIN.finditer(payload))
+    )
+    writer._reslot_colours(payload, expected=2)  # must not raise
+
+
 def test_reslot_colours_leaves_a_single_chain_unchanged() -> None:
     """Fewer than two chains means nothing to reorder -- the shortcut before
     any renumbering runs at all."""

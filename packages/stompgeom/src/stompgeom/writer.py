@@ -250,6 +250,23 @@ def _check_reslot_integrity(
         )
 
 
+def _foreign_entity_in_gaps(payload: bytes, chains: list[re.Match[bytes]]) -> bool:
+    """Whether a gap between two colour chains holds an entity of its own.
+
+    Observed in practice as curve/edge styling (``CURVE_STYLE``,
+    ``DRAUGHTING_PRE_DEFINED_CURVE_FONT``) physically interspersed in the
+    tail by ``STEPCAFControl_Writer``'s own hash-based ordering -- a
+    presentation subsystem this module does not parse. Such an entity's id
+    is exactly as allocator-dependent as a colour chain's, but this pass
+    has no chain of its own to re-seat it through, so it cannot be made
+    canonical; only whitespace between two chains is safe to leave as is.
+    """
+    return any(
+        re.search(rb"#\d+\s*=", payload[chains[i].end():chains[i + 1].start()])
+        for i in range(len(chains) - 1)
+    )
+
+
 def _reslot_colours(payload: bytes, expected: int) -> bytes:
     """Re-seat every colour chain's content into the id slots content-order picks.
 
@@ -293,6 +310,22 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
         )
     if len(chains) < 2:
         return payload
+
+    # The renumbering below assumes every entity in the region belongs to
+    # some chain it can re-seat; a foreign entity's own id is exactly as
+    # allocator-dependent, but this pass has no way to make it canonical.
+    # Before this task such a document was refused outright (the census
+    # under-counted it); this restores that safe refusal for precisely the
+    # documents this widened census still cannot make deterministic,
+    # rather than silently emitting non-canonical bytes.
+    if _foreign_entity_in_gaps(payload, chains):
+        raise EmitterError(
+            "the colour region contains foreign entities between chains "
+            "-- presentation data (e.g. curve or edge styling) this module "
+            "does not parse -- so the output could not be made canonical; "
+            "refusing to write a STEP file whose bytes would not be "
+            "deterministic across processes"
+        )
 
     ordered = sorted(chains, key=_colour_sort_key)
 
