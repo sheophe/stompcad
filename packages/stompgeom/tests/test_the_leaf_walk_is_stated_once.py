@@ -27,15 +27,22 @@ SOURCE_ROOTS = tuple(
 #: The one module allowed to name these: it is what publishes the walk.
 WALK_HOME = REPO / "packages" / "stompgeom" / "src" / "stompgeom" / "step.py"
 
-#: The file holding the one independent oracle: the writer's colour census
-#: keeps its own walk deliberately (see its docstring), because folding it in
-#: would verify the writer's count with the code that produces it, which this
-#: repository's testing rules forbid. Naming the file is not the exemption --
-#: ``_SANCTIONED`` below names the one function inside it.
+#: The file holding the one independent oracle: a test verifying the
+#: writer's colour count needs a walk that does not share code with the
+#: thing it verifies, which this repository's testing rules forbid. Naming
+#: the file is not the exemption -- ``_SANCTIONED`` below names the one
+#: function inside it.
 ORACLE_HOME = REPO / "packages" / "stompdrill" / "tests" / "test_step_cut.py"
 
-#: The XCAF calls that only ``leaf_labels`` may make: the assembly test, the
-#: component accessor, and the free-shape accessor -- the whole descent.
+#: The writer's own census keeps a third, deliberately independent walk (see
+#: ``_count_colour_assignments``'s own docstring): a sub-shape colour can sit
+#: on an *intermediate* assembly label a leaf-only descent never visits, so
+#: reusing ``leaf_labels`` here would under-count exactly the case Task 8
+#: exists to fix, not merely duplicate it.
+WRITER_HOME = REPO / "packages" / "stompgeom" / "src" / "stompgeom" / "writer.py"
+
+#: The XCAF calls that only a sanctioned walk may make: the assembly test,
+#: the component accessor, and the free-shape accessor.
 _WALK_NAMES = frozenset({"IsAssembly_s", "GetComponents_s", "GetFreeShapes"})
 
 #: The definitions allowed to name the walk, keyed by the file that holds
@@ -46,6 +53,7 @@ _WALK_NAMES = frozenset({"IsAssembly_s", "GetComponents_s", "GetFreeShapes"})
 _SANCTIONED: dict[Path, frozenset[str]] = {
     WALK_HOME: frozenset({"leaf_labels", "_walk_leaves"}),
     ORACLE_HOME: frozenset({"_colours_by_product"}),
+    WRITER_HOME: frozenset({"_count_colour_assignments"}),
 }
 
 
@@ -119,8 +127,8 @@ def test_a_second_walk_in_a_rules_own_home_is_caught() -> None:
 
     Each home's real text with a second descent spliced in beside its owner
     -- in memory, never on disk -- offends even under that home's sanction
-    list. Iterating ``_SANCTIONED`` covers the oracle's exemption too: the
-    wider of the two, over a 29 KB test module in another package.
+    list. Iterating ``_SANCTIONED`` covers every declared home, including
+    the oracle's 29 KB test module in another package.
     """
     breach = (
         "\n\ndef _second_leaf_walk(document):\n"
@@ -171,12 +179,13 @@ def test_the_scan_reaches_every_workspace_member() -> None:
 
 
 def test_the_walk_is_named_only_inside_the_definitions_that_own_it() -> None:
-    """Two producers in the walk's own home, and one declared oracle.
+    """Two producers in the walk's own home, one declared oracle, and one
+    declared, deliberately independent census.
 
-    A third *definition* naming any of these identifiers is a fourth walk:
+    A fourth *definition* naming any of these identifiers is a fifth walk:
     exactly the class of regression the theme's root cause records having
-    already happened once. Anywhere else in either home counts, which is
-    the reach a whole-file exclusion used to give away.
+    already happened once. Anywhere else in any home counts, which is the
+    reach a whole-file exclusion used to give away.
     """
     offenders = {
         str(path): lines

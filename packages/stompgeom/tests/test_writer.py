@@ -90,13 +90,22 @@ def test_normalise_rejoins_a_wrapped_product_entity_onto_one_line() -> None:
 def test_a_colour_chain_count_mismatch_is_refused() -> None:
     """Reordering nothing looks identical to reordering correctly unless the
     count is checked, which is what a kernel upgrade would silently break."""
-    with pytest.raises(EmitterError, match="likely needs updating"):
+    with pytest.raises(EmitterError, match="needs updating"):
         writer._reslot_colours(b"", expected=3)
 
 
-def test_the_mismatch_message_names_this_module() -> None:
-    """The remedy has to point at the pattern that needs the edit."""
-    with pytest.raises(EmitterError, match=r"stompgeom\.writer"):
+def test_the_mismatch_message_names_the_fixable_pattern() -> None:
+    """The remedy has to point at the pattern that needs the edit -- one of
+    two candidate causes now that a route the census does not walk is the
+    other, so the message must still name the fixable symbol either way."""
+    with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN"):
+        writer._reslot_colours(b"", expected=1)
+
+
+def test_the_mismatch_message_names_the_other_candidate_cause_too() -> None:
+    """A widened census can undercount just as easily as ``_COLOUR_CHAIN`` can
+    fall behind a kernel upgrade; the message must not blame only one."""
+    with pytest.raises(EmitterError, match=r"route the census does not walk"):
         writer._reslot_colours(b"", expected=1)
 
 
@@ -104,13 +113,13 @@ def test_the_mismatch_message_puts_each_count_in_its_own_place() -> None:
     """The two counts must land where they came from, not swapped.
 
     A mutation exchanging ``expected`` and ``len(chains)`` in the f-string
-    would read exactly backwards -- "assigns 0 colour(s), but 1 STYLED_ITEM"
-    for this input -- and send a real kernel-upgrade debugging session in
-    the wrong direction. Only pinning both numbers together catches that;
-    the two tests above each check one substring independently and pass
-    under the swap.
+    would read exactly backwards -- "assigns 0 colour(s), but 1 colour
+    chain(s)" for this input -- and send a real kernel-upgrade debugging
+    session in the wrong direction. Only pinning both numbers together
+    catches that; the two tests above each check one substring
+    independently and pass under the swap.
     """
-    with pytest.raises(EmitterError, match=r"assigns 1 colour.*0 STYLED_ITEM"):
+    with pytest.raises(EmitterError, match=r"assigns 1 colour.*0 colour chain"):
         writer._reslot_colours(b"", expected=1)
 
 
@@ -345,3 +354,90 @@ def test_one_colour_chain_is_written_for_each_coloured_leaf(written: bytes) -> N
     did not expect, so a write that produced no chains at all would have
     raised rather than reordered. This pins the two the document assigns."""
     assert len(writer._COLOUR_CHAIN.findall(written)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Sub-shape colours: the census this module was fitted to a two-solid
+# enclosure without.
+# ---------------------------------------------------------------------------
+
+
+def test_a_per_face_coloured_document_is_written_not_refused() -> None:
+    """The census must count what the writer will emit. Counting only leaf
+    solids under-counts a board by orders of magnitude and the guard fires.
+    """
+    from .fixtures.per_face_colours import per_face_coloured_document
+
+    payload = writer.render_step(
+        per_face_coloured_document(),
+        title="probe",
+        timestamp="1970-01-01T00:00:00+00:00",
+        originating_system="test",
+    )
+    assert payload.count(b"STYLED_ITEM") >= 6
+
+
+def test_two_writes_of_one_document_are_byte_identical_across_processes() -> None:
+    """The control _reslot_colours never had, for the fixture this task adds.
+
+    Slot assignment hashes on a TShape POINTER, so two writes inside one
+    process can agree by accident. Only separate interpreters vary the
+    allocator enough to exercise the defect, which is why this shells out.
+    """
+    script = (
+        "from stompgeom.writer import render_step;"
+        "from tests.fixtures.per_face_colours import per_face_coloured_document;"
+        "import hashlib,sys;"
+        "sys.stdout.write(hashlib.sha256(render_step("
+        "per_face_coloured_document(), title='p',"
+        "timestamp='1970-01-01T00:00:00+00:00', originating_system='t')).hexdigest())"
+    )
+    digests = {
+        subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, check=True,
+            cwd=Path(__file__).resolve().parent.parent,
+        ).stdout
+        for _ in range(2)
+    }
+    assert len(digests) == 1
+
+
+#: Repeated enough times that two independent allocations of the same
+#: two-solid document landing in the same slot order by chance is
+#: astronomically unlikely -- fresh in-process allocations swap freely
+#: between the two possible orders -- without the runtime cost of a real
+#: subprocess per try.
+_RESLOT_TRIALS = 20
+
+
+def test_the_byte_identity_control_fails_when_the_reslot_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The GUILTY probe for the cross-process test above.
+
+    ``per_face_coloured_document`` cannot serve here: a single product's own
+    faces always enumerate in shape-id order, already ``_reslot_colours``'s
+    sort order, so it can never disagree with the reslot enough to show it
+    mattered. ``xcaf.build_document()``'s two distinct solids do swap slots
+    freely between fresh in-process allocations, so disabling the reslot
+    must let that freedom reach the file, while leaving it in must pull
+    every allocation back to the one order the shape ids pick.
+    """
+
+    def render(document: Any) -> bytes:
+        return writer.render_step(
+            document, title="p",
+            timestamp="1970-01-01T00:00:00+00:00", originating_system="t",
+        )
+
+    monkeypatch.setattr(writer, "_reslot_colours", lambda payload, expected: payload)
+    disabled = {render(build_document()) for _ in range(_RESLOT_TRIALS)}
+    monkeypatch.undo()
+    enabled = {render(build_document()) for _ in range(_RESLOT_TRIALS)}
+
+    # The claim under test: disabling the reslot lets fresh allocations
+    # disagree; restoring it pulls every one of the same allocations back to
+    # a single order.
+    assert len(disabled) > 1
+    assert len(enabled) == 1

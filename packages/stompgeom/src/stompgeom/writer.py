@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from stompmodel.errors import EmitterError
 
 from .kernel import require_kernel
-from .step import StepLabel, leaf_labels
+from .step import StepLabel
 
 if TYPE_CHECKING:
     # See stompgeom.step's own TYPE_CHECKING block: real OCP names for
@@ -51,22 +51,36 @@ _VOLATILE_ENTITY = re.compile(
 _VOLATILE_VERSION = re.compile(rb"'" + _PRODUCT_NAME.encode() + rb" \d+\.\d+'")
 _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 
-#: One colour presentation, the fixed nine-entity chain STEPCAFControl_Writer
-#: emits per coloured shape: a styled-item wrapper down to the RGB literal.
-#: Each entity but the first refers only to the next; group 1 is the chain's
-#: own starting id, group 2 the ``STYLED_ITEM``'s id, group 3 the id of the
-#: *shape* it colours (an external, stable reference — never renumbered
-#: here), group 4 the closing ``COLOUR_RGB``'s own id, group 5 its literal.
+#: One colour presentation, the chain STEPCAFControl_Writer emits per
+#: coloured shape: an item down to its colour. A whole-solid colour (a
+#: Hammond enclosure's box or lid) gets its own
+#: ``MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION`` wrapper and
+#: its own inline ``COLOUR_RGB``, one item per wrapper -- group 1 is that
+#: wrapper's own id. A sub-shape colour (a board's per-face copper or
+#: silkscreen) shares one wrapper across many items, so the wrapper is only
+#: ever present on the *first* item a given wrapper's list names; every
+#: later sibling item matches with group 1 absent. ``OVER_RIDING_STYLED_ITEM``
+#: additionally names the item it overrides (the trailing ``,#\d+``, dropped
+#: rather than captured -- it is never one of this chain's own ids). Group 2
+#: is the item's own id, group 3 the id of the *shape* it colours (an
+#: external, stable reference — never renumbered here), group 4 the id
+#: ``FILL_AREA_STYLE_COLOUR`` names -- always present, but only *defined*
+#: within this chain, with the literal captured as group 5, when the colour
+#: is this chain's own rather than one written earlier and reused. The
+#: trailing clause backreferences group 4 (``\4``) rather than capturing a
+#: fresh id, which is what proves a following ``COLOUR_RGB`` defines *this*
+#: reference rather than being an unrelated entity that happens to follow a
+#: reused-colour chain with no terminal entity of its own.
 _COLOUR_CHAIN = re.compile(
-    rb"#(\d+) = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION\(.*?\);\s*"
-    rb"#(\d+) = STYLED_ITEM\('color',\(#\d+\),#(\d+)\);\s*"
+    rb"(?:#(\d+) = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION\(.*?\);\s*)?"
+    rb"#(\d+) = (?:STYLED_ITEM|OVER_RIDING_STYLED_ITEM)\('[^']*',\(#\d+\),#(\d+)(?:,\s*#\d+)?\);\s*"
     rb"#\d+ = PRESENTATION_STYLE_ASSIGNMENT\(.*?\);\s*"
     rb"#\d+ = SURFACE_STYLE_USAGE\(.*?\);\s*"
     rb"#\d+ = SURFACE_SIDE_STYLE\(.*?\);\s*"
     rb"#\d+ = SURFACE_STYLE_FILL_AREA\(.*?\);\s*"
     rb"#\d+ = FILL_AREA_STYLE\(.*?\);\s*"
-    rb"#\d+ = FILL_AREA_STYLE_COLOUR\(.*?\);\s*"
-    rb"#(\d+) = COLOUR_RGB\('',([^)]*)\);",
+    rb"#\d+ = FILL_AREA_STYLE_COLOUR\('',#(\d+)\);"
+    rb"(?:\s*#\4 = COLOUR_RGB\('',([^)]*)\);)?",
     re.DOTALL,
 )
 
@@ -82,31 +96,53 @@ _COLOUR_CHAIN = re.compile(
 def _count_colour_assignments(document: TDocStd_Document, replaced_labels: frozenset[str]) -> int:
     """Distinct shapes coloured in ``document``, excluding a replaced solid.
 
-    A replaced solid keeps its ``XCAFDoc_ColorTool`` assignment (``SetShape``
-    does not clear it) but not its written colour, so counting
-    ``replaced_labels`` in would overcount. A component referring to one
-    label twice counts once. Referred-versus-component (see also
-    ``stompdrill.emitters.step.cut_shape``, the same choice on the cutting
-    path): "the shape a component names" is its *referred* label when one
-    exists, else the component itself.
+    A board colours individual faces on *sub-shape* labels a leaf-only
+    census misses, so this walks components and sub-shapes together (no
+    ``ColorTool.GetShapesOfColor`` here, and a face colour is observed
+    beneath an intermediate label, not only a leaf). A replaced solid is
+    excluded, not counted (``SetShape`` keeps the assignment but not the
+    written colour); a label reached twice counts once, resolved to its
+    referred label when one exists.
     """
-    from OCP.TDF import TDF_Label
+    from OCP.TDF import TDF_Label, TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
+    kinds = (
+        XCAFDoc_ColorType.XCAFDoc_ColorSurf,
+        XCAFDoc_ColorType.XCAFDoc_ColorGen,
+        XCAFDoc_ColorType.XCAFDoc_ColorCurv,
+    )
 
     coloured: set[str] = set()
-    for component in leaf_labels(document):
+    seen: set[str] = set()
+
+    def visit(label: TDF_Label) -> None:
         referred = TDF_Label()
-        target = (
-            StepLabel(document, referred)
-            if XCAFDoc_ShapeTool.GetReferredShape_s(component.label, referred)
-            else component
-        )
-        if target.entry in replaced_labels:
-            continue
-        if color_tool.IsSet(target.label, XCAFDoc_ColorType.XCAFDoc_ColorSurf):
-            coloured.add(target.entry)
+        target = referred if XCAFDoc_ShapeTool.GetReferredShape_s(label, referred) else label
+        entry = StepLabel(document, target).entry
+        if entry in seen:
+            return
+        seen.add(entry)
+        if entry in replaced_labels:
+            return
+        if any(color_tool.IsSet(target, kind) for kind in kinds):
+            coloured.add(entry)
+        children = TDF_LabelSequence()
+        XCAFDoc_ShapeTool.GetSubShapes_s(target, children)
+        for index in range(1, children.Length() + 1):
+            visit(children.Value(index))
+        if XCAFDoc_ShapeTool.IsAssembly_s(target):
+            components = TDF_LabelSequence()
+            XCAFDoc_ShapeTool.GetComponents_s(target, components)
+            for index in range(1, components.Length() + 1):
+                visit(components.Value(index))
+
+    free = TDF_LabelSequence()
+    shape_tool.GetFreeShapes(free)
+    for index in range(1, free.Length() + 1):
+        visit(free.Value(index))
     return len(coloured)
 
 
@@ -160,16 +196,27 @@ def _normalise(payload: bytes) -> bytes:
     return _VOLATILE_NAUO_ID.sub(renumber, payload)
 
 
+def _defined_ids(text: bytes) -> list[int]:
+    """Every id ``text`` itself *defines* (``#N = ...``), in file order.
+
+    A chain also *references* external ids -- the shape it colours, a reused
+    colour, an overridden item -- which must never move; those never match
+    ``#N = `` and so are excluded automatically, generalising what a fixed
+    nine-id range used to assume about a chain's own shape.
+    """
+    return [int(found) for found in re.findall(rb"#(\d+) = ", text)]
+
+
 def _reslot_colours(payload: bytes, expected: int) -> bytes:
     """Re-seat each colour chain into the numeric slot content order picks.
 
     ``STEPCAFControl_Writer::WriteColors`` hashes on the ``TShape`` pointer
-    to decide *which* chain goes in *which* fixed nine-id slot at the file's
-    tail — the pointer, not the file, so two writes of the same document
-    permute the slots. The chains themselves, and the ids they occupy, are
-    unaffected: this sorts the chains by the shape id they colour (already
-    a stable, external reference) and writes each into the slot the file's
-    own encounter order assigned, renumbering only that chain's own nine ids.
+    to decide *which* chain goes in *which* slot at the file's tail -- the
+    pointer, not the file, so two writes of the same document permute the
+    slots. The chains and the ids they occupy are unaffected: this sorts
+    them by the shape id each colours, breaking a tie on the colour itself,
+    and writes each into the slot the file's own order assigned, renumbering
+    only its own ids (:func:`_defined_ids`).
     """
     chains = list(_COLOUR_CHAIN.finditer(payload))
     # Checked unconditionally, before the "nothing to reorder" shortcut
@@ -180,9 +227,10 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     if len(chains) != expected:
         raise EmitterError(
             f"the source document assigns {expected} colour(s), but "
-            f"{len(chains)} STYLED_ITEM chain(s) were found in the written "
-            "STEP; _COLOUR_CHAIN in stompgeom.writer likely needs "
-            "updating for this OpenCASCADE version's colour-chain shape"
+            f"{len(chains)} colour chain(s) were found in the written STEP. "
+            "Either this document colours through a route the census does not "
+            "walk, or _COLOUR_CHAIN needs updating for this OpenCASCADE "
+            "version's chain shape"
         )
     if len(chains) < 2:
         return payload
@@ -190,16 +238,21 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     # ``chains`` is already in slot order (ascending file position == ascending
     # id); pairing it against the content-sorted list below re-seats chain i's
     # *content* into slot i's *ids*, whatever order the writer produced them in.
-    ordered = sorted(chains, key=lambda match: (int(match.group(3)), match.group(5)))
+    # The referenced-colour id (group 4) is a stable tie-breaker whether or not
+    # the chain defines its own literal (group 5, absent for a reused colour).
+    ordered = sorted(
+        chains,
+        key=lambda match: (int(match.group(3)), match.group(5) or b"", int(match.group(4))),
+    )
 
     pieces: list[bytes] = []
     cursor = 0
     for slot, content in zip(chains, ordered):
         pieces.append(payload[cursor:slot.start()])
         cursor = slot.end()
-        own_start = int(content.group(1))
-        delta = int(slot.group(1)) - own_start
-        local = set(range(own_start, own_start + 9))
+        local = set(_defined_ids(content.group(0)))
+        own_start = min(local)
+        delta = min(_defined_ids(slot.group(0))) - own_start
 
         def shift(match: re.Match[bytes], delta: int = delta, local: set[int] = local) -> bytes:
             old = int(match.group(1))
