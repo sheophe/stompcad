@@ -124,6 +124,80 @@ flowchart LR
     load -.->|before| panel
 ```
 
+**Amended: the face frame's origin registers the plate's inner surface, not the drilled
+one.** `build_frame` places `basis.origin_nm` on the flat face found opposite the
+drilled one — the side a seated board rests against, never the side the bit enters —
+and `FaceFrame`'s own docstring states this plainly, so a reader with only
+`stompmodel` installed need not guess it from `stompdrill`'s source. This is a stated
+convention rather than a derived one for the same reason the axis correspondence below
+is: nothing about *which* flat face a frame's origin sits on is observable from the
+frame alone, so the choice has to be published, not inferred. The clearance rule is
+unaffected by it: `cad.region.contains` and `clearance_reason` already project a
+canonical point and then overwrite its coordinate along the drill axis with the
+region's own measured plane, so wherever the frame's origin happens to sit along that
+axis has never reached a verdict. The STEP cutter is where the datum is load-bearing —
+its cut must still start at the drilled surface and run through the plate, so it reads
+that position explicitly from the model rather than from the frame's origin, the same
+explicit-plane idiom `cad.region` already uses.
+
+**Amended: the axis correspondence is a stated convention, and the frame that reaches
+both consumers is the checked registration, not a bare re-read of the model.** The
+footprint identification records only *that* the drawn panel is the catalogue footprint
+turned a quarter turn (`EnclosureMatch.rotated`) — nothing relates the panel's own
+canonical axes to the model's independently-chosen ones. `CheckCaseClearance` is the one
+place in the system holding both facts at once — the identified enclosure, known only
+after quantisation, and the loaded model's own frame, known only before it — so it
+reconciles the two once, into a `FaceFrame` restated in the panel's drawn orientation,
+and publishes that frame and the drilled face together as `DrillData.case`, the checked
+registration. `StepEmitter` reads its frame and face from that registration, never from
+`model.frame`/`model.face` directly, and refuses with a typed error when no registration
+is present. The diagram above still holds for the parsed `CaseModel` itself — built once,
+handed to both — but what each consumer classifies or cuts against is the registration's
+frame, not an independent read of the model's.
+
+Both candidate quarter turns are orthonormal, right-handed and preserve the face normal
+`w`; they differ by a half turn in the plane, and nothing in a drill document can decide
+between them — the artwork states only that a turn happened, never which way. The
+direction is therefore a **stated convention**, not a derived value: reconciling a
+rotated panel's frame swaps `u` onto the model's own `v`, and `v` onto the model's own
+negated `u`, leaving `w` and the origin untouched. Where the correspondence cannot be
+established at all — no identified enclosure, or an identified footprint whose two
+dimensions are equal, so the model's own in-plane tie-break
+(`cad.case.build_frame`'s "arbitrarily but deterministically") carries no signal to
+confirm or contradict — the run emits `case-orientation-unverifiable` at WARNING rather
+than guessing a direction, mirroring `case-model-unverified`: both report that the check
+could not run, not a wrong answer, and an error would refuse every square-enclosure user
+the tool serves today.
+
+**Amended (T15): what decides *whether* a quarter turn is needed is the panel's own
+measurement, not `EnclosureMatch.rotated`.** That bit records only that the drawn pair
+matched the catalogue's printed row transposed, and Hammond's printed order is not
+always largest-first — `1590LB` prints 50.55 × 50.60 mm — so it cannot answer which
+model axis canonical *x* falls on. `CheckCaseClearance` compares the two extents of
+`ReferenceOutline.raw`, the measurement quantisation preserves: canonical *x* registers
+on the model's `u` — the axis `build_frame` puts the larger measured span on — exactly
+when the drawn width is the larger drawn extent. *Which way* the turn goes is unchanged
+and remains the stated convention above. Where no enclosure was identified, no outline
+reached the stage, or the two drawn extents are equal, the model's own frame is used
+unchanged.
+
+**What this does not decide.** The extents are compared as drawn, at whatever precision
+the artwork carries, and the decision assumes the model's larger measured in-plane span
+is the same physical dimension the catalogue prints as larger — `_cross_check` sorts
+both footprints descending before comparing and therefore does not check that ranking.
+Where a footprint's two catalogue dimensions differ by less than the 1.5 mm per-axis
+slack the match was made with — in the shipped catalogue `1590LB` alone, at 0.05 mm —
+the turn rests on a difference the identification itself never had to resolve, and no
+diagnostic marks it. **That premise is checked, not assumed, and the check is
+inconclusive rather than confirming it:** a solid fed the catalogue's own asymmetric
+figures (50.55 × 50.60 mm) has `build_frame` put `u` on the 50.60 mm axis, so the
+algorithm itself does what this rule needs. But the real cached `1590LB` model does not
+carry that asymmetry at all — its own box measures both in-plane spans equal to kernel
+precision (50.6 mm each, difference 0.0), so `build_frame`'s own tie-break (the
+lower-indexed free axis), not "the larger span", governs it there, and whether the
+catalogue's 0.05 mm ranking matches the physical casting is unverifiable from the
+supplied model for this one part.
+
 ## Rationale
 
 Precomputing an obstruction map in the helper script was rejected: it keeps `stompdrill`
@@ -144,8 +218,20 @@ and clip. It is kept on the kernel anyway: `BRepClass_FaceClassifier` and
 `BRepExtrema_DistShapeShape` answer containment and clearance exactly against the real
 trimmed face, where hand-rolled code would tessellate the arcs and inherit a resolution
 parameter. If the `stompdrill[step]` requirement proves annoying, a pure-Python `cad`
-backend can be added behind the `CaseModel` protocol later without touching the stage —
-which is most of why the protocol exists rather than a concrete OCP type.
+backend can be added behind the `CaseModel` protocol later without touching the stage.
+
+**Sharpened: `CaseModel` is the kernel-free *clearance* contract; cutting is bound to
+the kernel-backed model and is deliberately not behind a protocol.** A cut needs a live
+kernel document — `cut_shape` reads a `TDocStd_Document` and runs `BRepAlgoAPI_Cut` on
+it — and no pure-Python backend can ever supply one, so a `CuttableCaseModel` protocol
+would have exactly one possible implementation. The escape hatch above is therefore a
+*clearance* adapter, and remains possible at the protocol's declared size; the cutting
+path (`cut_shape`, `StepOptions.model`, `OutputSettings.case_model`,
+`load_case_model`'s return, the CLI's case-model construction) is typed against
+`OcpCaseModel`, the one implementation, instead. `StepEmitter.__init__` refuses a
+clearance-only model with the same typed `EmitterError` it already raises for a missing
+one, naming `--case-model` as the remedy, rather than letting `cut_shape` reach for a
+member `CaseModel` never promised and die with a bare `AttributeError` mid-emit.
 
 **Amended: there is no extra to find annoying.** The kernel arrives with `stompgeom`,
 so the motive above is gone. The escape hatch is not: a pure-Python backend behind the
@@ -195,12 +281,27 @@ rather than hides.
 does not: `emitters/step.py` registers itself, and `import stompdrill` must not pull in
 400 MB of kernel through the package root.
 
+**Amended: `OcpCaseModel` gains that line too.** A root that publishes `load_case_model`
+and withholds the type it returns sends a consumer who follows the signature to an
+`ImportError` whose suggestion — `CaseModel` — is the one value `StepEmitter.__init__`
+refuses. The rule the root now states, and a test now enforces, is the general one:
+every type a root-exported signature names, and that this package itself defines, is
+reachable from the root; `stompmodel`'s values deliberately are not (ADR-0009). The
+kernel promise above is untouched — `stompdrill.cad` already imports `.loader`, so the
+name costs no new import and pulls in no kernel.
+
 `CheckCaseClearance` depends only on the `CaseModel` protocol, never on the OCP
 implementation, so the clearance rule is testable against a hand-built fake
 `CaseModel` — the same move the repository already makes when it tests emitters with
 hand-built `DrillData`. Kernel-backed integration tests once skipped when the extra was
 absent; with the kernel unconditional they no longer can, and the skips are deleted — a
 gate that suppresses the rule it claims to check is not evidence.
+
+**Amended:** the `CaseModel` protocol now also states `model_name`, the identity of the
+supplied file it was built from, resolved by `load_case_model` beside where it already
+resolves `part`. Any second backend this ADR's escape hatch admits behind the protocol
+must name its own source the same way — an identity a first-class member of the
+published drill document now depends on, not a fact only the loader happens to know.
 
 A future enclosure whose drilled face is not flat is out of reach of this rule and
 would need a new decision, not an extension of this one — the flat-face

@@ -20,7 +20,7 @@ from stompdrill.emitters.drawing_svg import DrawingOptions, DrawingSvgEmitter
 from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
 from stompdrill.emitters.json_out import JsonEmitter
 from stompmodel.codec import from_document
-from stompmodel.model import DrillData, Origin, ReferenceOutline
+from stompmodel.model import CaseFace, DrillData, Origin, ReferenceOutline
 from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 from tests.recovery.excellon import read_excellon
@@ -48,15 +48,16 @@ def quantised(value: int, quantum: int) -> int:
 def panel() -> DrillData:
     """Two tools, four holes, numbered out of tuple order.
 
-    The scrambled numbering is load-bearing: an emitter that recomputed a
-    drill number from a list position would agree with a fixture numbered
-    ascending and disagree with this one.
+    The scramble is *within* the ⌀5 block (indices 1, 2 sit in reverse of
+    their tuple order), not only across the two blocks — an emitter that
+    only sorted block boundaries, not hole order within one, would still
+    pass on ⌀7 (already ascending in tuple order) and fail here.
     """
     return make_data(
         at(-20_000_000, 18_000_000, 7_000_000, index=3),
         at(20_000_000, 18_000_000, 7_000_000, index=4),
-        at(-19_000_000, -18_750_000, 5_000_000, index=1),
-        at(19_000_000, -18_750_000, 5_000_000, index=2),
+        at(-19_000_000, -18_750_000, 5_000_000, index=2),
+        at(19_000_000, -18_750_000, 5_000_000, index=1),
         reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000)),
     )
 
@@ -285,7 +286,7 @@ def test_the_json_bytes_preserve_a_drill_number_that_is_not_a_list_position():
 
     rebuilt = from_document(json.loads(JsonEmitter().emit(data)))
 
-    assert [hole.index for hole in rebuilt.holes] == [3, 4, 1, 2]
+    assert [hole.index for hole in rebuilt.holes] == [3, 4, 2, 1]
 
 
 # ---------------------------------------------------------------------------
@@ -303,16 +304,17 @@ def test_every_hole_appears_as_a_cylinder_the_uncut_model_did_not_have(tmp_path)
     from stompdrill.cad import load_case_model
     from stompdrill.emitters.step import StepEmitter, StepOptions
     from stompgeom.step import read_step
+    from tests.conftest import registration_for
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
-    model = load_case_model(model_path, face="box", margin_nm=Nanometre(1_000_000))
+    model = load_case_model(model_path, face=CaseFace.BOX, margin_nm=Nanometre(1_000_000))
     # Two distinct diameters: a count that is right with wrong radii, and
     # radii that are right with a wrong count, must be different defects.
     data = make_data(
         at(0, 0, 6_000_000, index=1),
         at(20_000_000, 0, 8_000_000, index=2),
-    )
+    ).with_case(registration_for(model))
 
     out = tmp_path / "out.stp"
     out.write_bytes(StepEmitter(StepOptions(model=model)).emit(data))

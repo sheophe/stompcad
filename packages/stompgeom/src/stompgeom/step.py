@@ -11,45 +11,115 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from stompmodel.errors import DocumentError
 
 from .kernel import require_kernel
 
+if TYPE_CHECKING:
+    # Real OCP names, for readability only: cadquery-ocp ships no py.typed
+    # marker and this workspace's mypy configurations set
+    # ignore_missing_imports for OCP.*, so these resolve to Any either way
+    # and check nothing beyond what a bare Any already did. See ADR-0008.
+    from OCP.TDF import TDF_Label
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopoDS import TopoDS_Shape
+
 __all__ = [
-    "StepSolid", "StepDocument", "read_step", "bounding_box_mm",
-    "source_timestamp",
+    "StepSolid", "StepDocument", "StepLabel", "read_step", "leaf_labels",
+    "bounding_box_mm", "source_timestamp",
 ]
 
 #: Used when the source file declares no timestamp. Never a clock reading.
 _EPOCH = "1970-01-01T00:00:00+00:00"
 
-_TIMESTAMP_PATTERN = re.compile(r"time_stamp\s*\*?/?\s*'([^']*)'")
+#: A STEP string literal: an unescaped closing quote ends it, and a doubled
+#: quote (``''``) inside represents one literal quote character (ISO 10303-21
+#: §6). The two alternatives cover disjoint cases at every position -- the
+#: next character is a quote or it is not -- so this cannot backtrack: a run
+#: of quotes with no closing call still matches in linear time.
+_STEP_STRING = r"'(?:[^']|'')*'"
+
+#: Zero or more ``/* field_name */`` comment annotations, the way a
+#: conforming ST-Developer file labels a field immediately before its own
+#: value -- never a second copy of the value carried without the field.
+_COMMENT = r"(?:/\*.*?\*/\s*)*"
+
+#: ``FILE_NAME``'s own second positional argument (ISO 10303-21 §6.4.3): the
+#: field the writer actually sets. The name field's comment and value are
+#: matched but not captured; only the time-stamp field's value is.
+_FILE_NAME_PATTERN = re.compile(
+    r"FILE_NAME\s*\(\s*" + _COMMENT + _STEP_STRING + r"\s*,\s*" + _COMMENT
+    + r"(" + _STEP_STRING + r")",
+    re.DOTALL,
+)
+
+#: OCC's own synthesised indirection, written on a component occurrence that
+#: carries no name of its own -- e.g. ``=>[0:1:1:34]``. Matched with
+#: ``fullmatch`` so a genuine name that merely contains brackets, digits or
+#: colons is never mistaken for it; an observed kernel behaviour with no
+#: documented guarantee, so both directions are tested (see test_step.py).
+_OCC_INDIRECTION = re.compile(r"=>\[[0-9:]+\]")
 
 
 def source_timestamp(path: Path) -> str:
-    """The source file's ``/* time_stamp */`` comment marker, or the epoch when absent.
+    """``FILE_NAME``'s own time-stamp field, or the epoch when absent or empty.
 
-    This matches ST-Developer's comment above ``FILE_NAME``, not the
-    ``FILE_NAME`` field itself, so reading back a STEP file this workspace
-    wrote drops provenance to the epoch even though the file carries a real
-    stamp -- this workspace's own writer does not emit that comment.
+    This is the field the writer actually sets (see :mod:`stompgeom.writer`),
+    read positionally rather than through ST-Developer's ``/* time_stamp */``
+    comment convention -- a second producer's labelling for the same field,
+    which this workspace's own writer never emits. A declared but empty field
+    degrades to the epoch too, rather than reporting an empty string.
     Determinism is unaffected: every write from one source still copies the
     same value, whatever it is.
     """
     head = path.read_bytes()[:4096].decode("latin-1")
-    found = _TIMESTAMP_PATTERN.search(head)
-    return found.group(1) if found else _EPOCH
+    found = _FILE_NAME_PATTERN.search(head)
+    if not found:
+        return _EPOCH
+    value = found.group(1)[1:-1].replace("''", "'")
+    return value if value else _EPOCH
+
+
+@dataclass(frozen=True, slots=True)
+class StepLabel:
+    """A label together with the ``TDocStd_Document`` it was drawn from.
+
+    ``document`` keeps ``label`` valid -- that object specifically, since
+    neither the document's ``ShapeTool`` nor its root label does (ADR-0008).
+    ``label`` routinely holds a *referred* label, not a leaf. ``name`` and
+    ``entry`` are computed on access, never stored: they compare unequal by
+    ``==`` (kernel identity), why ``replaced_labels`` is entries. ``label``
+    stays public and raw: the cutting path needs four XCAF verbs this
+    package does not wrap.
+    """
+
+    document: TDocStd_Document
+    label: TDF_Label
+
+    @property
+    def name(self) -> str:
+        """See :func:`_label_name`."""
+        return _label_name(self.label)
+
+    @property
+    def entry(self) -> str:
+        """See :func:`_label_entry`."""
+        return _label_entry(self.label)
 
 
 @dataclass(frozen=True, slots=True)
 class StepSolid:
-    """One product's solid, placed in assembly coordinates and scaled to mm."""
+    """One product's solid, placed in assembly coordinates and scaled to mm.
+
+    ``name`` is empty exactly when nobody named this solid -- see
+    :func:`_label_name`, the one rule that decides that, reached through the
+    :class:`StepLabel` :func:`leaf_labels` hands back.
+    """
 
     name: str
-    shape: Any
-    unit_mm: float
+    shape: TopoDS_Shape
 
 
 @dataclass(frozen=True)
@@ -61,7 +131,7 @@ class StepDocument:
     """
 
     solids: tuple[StepSolid, ...]
-    document: Any
+    document: TDocStd_Document
     timestamp: str = _EPOCH
 
     def named(self, keyword: str) -> tuple[StepSolid, ...]:
@@ -70,7 +140,7 @@ class StepDocument:
         return tuple(s for s in self.solids if wanted in s.name.upper())
 
 
-def bounding_box_mm(shape: Any) -> tuple[float, float, float, float, float, float]:
+def bounding_box_mm(shape: TopoDS_Shape) -> tuple[float, float, float, float, float, float]:
     """``(x0, y0, z0, x1, y1, z1)`` of ``shape`` in millimetres.
 
     ``AddOptimal_s`` rather than plain ``Add_s``: without a precomputed mesh,
@@ -94,11 +164,9 @@ def read_step(path: Path) -> StepDocument:
     from OCP.Interface import Interface_Static
     from OCP.STEPCAFControl import STEPCAFControl_Reader
     from OCP.TCollection import TCollection_ExtendedString
-    from OCP.TDataStd import TDataStd_Name
-    from OCP.TDF import TDF_LabelSequence
     from OCP.TDocStd import TDocStd_Document
     from OCP.XCAFApp import XCAFApp_Application
-    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     if not path.is_file():
         raise DocumentError(f"no model at {path}")
@@ -119,20 +187,43 @@ def read_step(path: Path) -> StepDocument:
     if not reader.Transfer(document):
         raise DocumentError(f"{path} contains no transferable shape")
 
-    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
-    labels = TDF_LabelSequence()
-    tool.GetFreeShapes(labels)
-
     solids: list[StepSolid] = []
-    for index in range(1, labels.Length() + 1):
-        _collect(labels.Value(index), solids, TDataStd_Name)
+    for entry in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
+        if shape.IsNull():
+            continue
+        solids.append(StepSolid(name=entry.name, shape=shape))
     if not solids:
         raise DocumentError(f"{path} contains no solids")
     return StepDocument(tuple(solids), document, source_timestamp(path))
 
 
-def _collect(label: Any, out: list[StepSolid], name_attr: Any) -> None:
-    """Walk one XCAF label, recording leaf solids in document order.
+def leaf_labels(document: TDocStd_Document) -> tuple[StepLabel, ...]:
+    """Every leaf (non-assembly) label under ``document``'s free shapes.
+
+    The one XCAF descent this workspace performs, ``GetFreeShapes`` prologue
+    included, in document order. Each leaf comes back wrapped in a
+    :class:`StepLabel` holding ``document`` itself, with no filtering -- a
+    null-shaped leaf comes back too, since what a leaf is *for* is a
+    call-site decision. Eager, not lazy: a suspended descent holding a
+    kernel handle over a tree a caller then mutates is a hazard this package
+    has already paid for once. Raises nothing; an empty document is ``()``.
+    """
+    from OCP.TDF import TDF_LabelSequence
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    free = TDF_LabelSequence()
+    tool.GetFreeShapes(free)
+
+    leaves: list[TDF_Label] = []
+    for index in range(1, free.Length() + 1):
+        _walk_leaves(free.Value(index), leaves)
+    return tuple(StepLabel(document, label) for label in leaves)
+
+
+def _walk_leaves(label: TDF_Label, out: list[TDF_Label]) -> None:
+    """Append ``label`` if it is a leaf, else recurse into its components.
 
     A component label refers to a shape in the product's own local
     coordinates, plus a placement relative to its parent. ``GetShape_s`` on
@@ -148,18 +239,45 @@ def _collect(label: Any, out: list[StepSolid], name_attr: Any) -> None:
         children = TDF_LabelSequence()
         XCAFDoc_ShapeTool.GetComponents_s(label, children)
         for index in range(1, children.Length() + 1):
-            _collect(children.Value(index), out, name_attr)
+            _walk_leaves(children.Value(index), out)
         return
-
-    shape = XCAFDoc_ShapeTool.GetShape_s(label)
-    if shape.IsNull():
-        return
-    out.append(StepSolid(name=_name_of(label, name_attr), shape=shape, unit_mm=1.0))
+    out.append(label)
 
 
-def _name_of(label: Any, name_attr: Any) -> str:
-    """The product name on ``label``, or an empty string when unnamed."""
-    holder = name_attr()
-    if label.FindAttribute(name_attr.GetID_s(), holder):
-        return str(holder.Get().ToExtString())
-    return ""
+def _label_name(label: TDF_Label) -> str:
+    """The name XCAF recorded for ``label``, or "" when nobody named it.
+
+    OCC synthesises an indirection placeholder such as ``=>[0:1:1:34]`` on a
+    component occurrence that carries no name of its own; that placeholder
+    names nothing, so it reads back as "" like a label with no name attribute
+    at all. ``IsAttribute`` is checked before ``FindAttribute``: this
+    binding's ``FindAttribute`` segfaults on a label with no
+    ``TDataStd_Name`` attribute rather than returning ``False``, so presence
+    is checked first and never inferred from the lookup's return value.
+    """
+    from OCP.TDataStd import TDataStd_Name
+
+    if not label.IsAttribute(TDataStd_Name.GetID_s()):
+        return ""
+    holder = TDataStd_Name()
+    label.FindAttribute(TDataStd_Name.GetID_s(), holder)
+    name = str(holder.Get().ToExtString())
+    return "" if _OCC_INDIRECTION.fullmatch(name) else name
+
+
+def _label_entry(label: TDF_Label) -> str:
+    """A label's document-unique tag path, stable across shape mutation.
+
+    Unlike a shape's own identity, a label's entry string survives
+    ``SetShape``, and unlike the label itself survives being compared with
+    one drawn from a separate kernel call for the same node -- label
+    equality is kernel object identity, not this. A general fact about the
+    label tree, not the writer's alone, which is why it lives here rather
+    than in :mod:`stompgeom.writer`, its original, one-time home.
+    """
+    from OCP.TCollection import TCollection_AsciiString
+    from OCP.TDF import TDF_Tool
+
+    text = TCollection_AsciiString()
+    TDF_Tool.Entry_s(label, text)
+    return text.ToCString()

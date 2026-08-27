@@ -74,6 +74,21 @@ def test_a_footprint_names_every_part_that_shares_it():
     )
 
 
+def test_the_tsv_names_every_row_publishing_length_smaller_than_width():
+    """Catalogue invariant the 1590LB defect exposed: nothing states that a
+    published length is always the larger figure, and one row -- 1590LB --
+    publishes it smaller. Name exactly which rows those are, re-reading the
+    TSV authority rather than the generated module, so a new such row cannot
+    arrive unnoticed and someone must decide what it means.
+    """
+    from tools.build_catalogue import read_drawings
+
+    inverted = {
+        part for part, length_nm, width_nm, _ in read_drawings(DRAWINGS) if length_nm < width_nm
+    }
+    assert inverted == {"1590LB"}
+
+
 def test_the_1590b_is_the_size_its_drawing_prints():
     """The common 1590B has its TSV dimensions."""
     assert (

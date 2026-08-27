@@ -12,6 +12,7 @@ import argparse
 import inspect
 import math
 import sys
+import unicodedata
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,11 +26,18 @@ from stompmodel.diagnostics import (
     exit_for_severity,
 )
 from stompmodel.errors import StompError
-from stompmodel.model import DrillData
-from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, write_payload
+from stompmodel.model import CaseFace, DrillData
+from stompmodel.protocols import (
+    Emitter,
+    Payload,
+    Pipeline,
+    Stage,
+    StagedWrite,
+    stage_payload,
+)
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
-from .cad import CaseModel
+from .cad import OcpCaseModel
 from .emitters import (
     DrawingOptions,
     ExcellonOptions,
@@ -238,15 +246,15 @@ def parse_case(text: str) -> str:
     )
 
 
-_FACES = ("box", "lid")
-
-
-def parse_face(text: str) -> str:
+def parse_face(text: str) -> CaseFace:
     """Normalise the drilled side, rejecting anything else as a usage error."""
-    face = text.strip().lower()
-    if face not in _FACES:
-        raise UsageError(f"--case-face {text!r} must be one of: {', '.join(_FACES)}")
-    return face
+    try:
+        return CaseFace(text.strip().lower())
+    except ValueError:
+        raise UsageError(
+            f"--case-face {text!r} must be one of: "
+            f"{', '.join(face.value for face in CaseFace)}"
+        ) from None
 
 
 def parse_emit(spec: str) -> tuple[str, Path]:
@@ -257,6 +265,53 @@ def parse_emit(spec: str) -> tuple[str, Path]:
             f"--emit expects FORMAT=PATH, got {spec!r}; formats: {', '.join(available())}"
         )
     return (name.strip(), Path(path.strip()))
+
+
+def _target_key(path: Path) -> str:
+    """Reduce a target path to the identity two ``--emit`` specs collide on.
+
+    UAX #15 D145's canonical caseless match of the resolved path, applied
+    unconditionally: whether this host folds letter case or normalisation
+    form is not knowable before a target exists, and ``samefile`` needs
+    both targets to exist already. Folding refuses a pair a preserving
+    volume would have kept apart; not folding lets one requested artefact
+    overwrite another while both are reported written. A comparison key
+    only — the bytes still go to the path the caller named.
+    """
+    resolved = str(path.resolve())
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", resolved).casefold())
+
+
+def _preflight_targets(targets: Sequence[tuple[str, Path]]) -> None:
+    """Validate the target set itself before anything is rendered.
+
+    Two ``--emit`` specs may not name one target under :func:`_target_key`,
+    and an existing target must be a regular file: this command line reads a
+    target's prior bytes before replacing it, and a pipe or character device
+    would never return from that read. The write mechanism's own
+    preconditions are not restated here — ``stage_payload`` enforces them
+    (ADR-0005) before any target is replaced, so an out-of-domain target
+    still withholds the whole set, just after a render. See ADR-0001.
+    """
+    seen: dict[str, tuple[str, Path]] = {}
+    for name, path in targets:
+        key = _target_key(path)
+        earlier = seen.get(key)
+        if earlier is not None:
+            earlier_name, earlier_path = earlier
+            raise UsageError(
+                f"--emit {name}={path}: names the same target as "
+                f"--emit {earlier_name}={earlier_path}; two artefacts cannot "
+                "share one path. Targets are compared ignoring letter case "
+                "and Unicode normalisation form, because a filesystem may "
+                "hold two such spellings as one file"
+            )
+        seen[key] = (name, path)
+        if path.exists() and not path.is_file():
+            raise UsageError(
+                f"--emit {name}={path}: exists and is not a regular file; this "
+                "command line reads a target's prior bytes before replacing it"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +347,7 @@ def _selected_sizes(text: str | None, flag: str) -> tuple[Nanometre, ...] | None
     return tuple(nm_from_mm(size) for size in parse_sizes(text, flag))
 
 
-def build_case_model(args: argparse.Namespace) -> CaseModel | None:
+def build_case_model(args: argparse.Namespace) -> OcpCaseModel | None:
     """Load the supplied case model, or ``None`` when none was given.
 
     ``--case-face`` and ``--case-margin`` are validated whether or not a
@@ -365,7 +420,7 @@ def build_pipeline(args: argparse.Namespace) -> Pipeline[DrillData]:
         RouteHoles(),
         CheckOutlineContainment(),
     ]
-    model = getattr(args, "case_model_object", None)
+    model: OcpCaseModel | None = getattr(args, "case_model_object", None)
     if model is not None:
         stages.append(CheckCaseClearance(model))
     return Pipeline(stages)
@@ -389,7 +444,7 @@ class OutputSettings:
     """Command-line values from which emitter-specific options are built."""
 
     title: str = ""
-    case_model: Any | None = None
+    case_model: OcpCaseModel | None = None
 
 
 #: Keyed by options **class**, never by format name. An emitter whose options
@@ -436,14 +491,24 @@ def _options_for(emitter_cls: type, settings: OutputSettings) -> Any | None:
 
 
 def make_emitter(name: str, settings: OutputSettings) -> Emitter[DrillData]:
-    """Resolve ``name`` through the registry and give it its options."""
+    """Resolve ``name`` through the registry and give it its options.
+
+    A registered emitter is a conforming extension by definition; one whose
+    constructor needs more than this CLI can supply is a usage failure, not an
+    unexpected fault, so only the construction call itself is guarded — an
+    emitter's later ``emit`` step keeps its own tracebacks.
+    """
     emitter_cls = get_emitter(name)  # raises EmitterError for an unknown format
     options = _options_for(emitter_cls, settings)
-    return emitter_cls() if options is None else emitter_cls(options)
+    try:
+        return emitter_cls() if options is None else emitter_cls(options)
+    except TypeError as failure:
+        raise UsageError(f"--emit {name}=...: cannot construct this emitter: {failure}") from failure
 
 
 def settings_from(args: argparse.Namespace) -> OutputSettings:
-    return OutputSettings(title=args.title, case_model=getattr(args, "case_model_object", None))
+    model: OcpCaseModel | None = getattr(args, "case_model_object", None)
+    return OutputSettings(title=args.title, case_model=model)
 
 
 def run_pipeline(
@@ -520,23 +585,47 @@ def format_enclosure(data: DrillData) -> list[str]:
     return lines
 
 
-def format_case(model: CaseModel | None) -> list[str]:
-    """Report the supplied model, the drilled side, and the usable area."""
-    if model is None:
+#: The keys ``CheckCaseClearance.describe`` records the plate and play area
+#: under -- read back here the same way ``_tool_label`` reads ``standard``.
+_PLATE_PARAMETER = "plate_nm"
+_PLAY_AREA_PARAMETER = "play_area_nm"
+
+
+def format_case(data: DrillData) -> list[str]:
+    """Report the supplied model's identity, plate, and play area.
+
+    Identity comes from ``data.case``, the typed registration a case check
+    attaches. Plate and play area come from the clearance stage's own
+    provenance, read through ``StageRun.get`` behind the same ``isinstance``
+    idiom ``_tool_label`` uses for the drill standard: absent or malformed
+    provenance degrades to fewer lines, never an exception -- this is the
+    workspace's only human-facing reader of these facts, so it must not
+    require a live, kernel-backed model to state them.
+    """
+    case = data.case
+    if case is None:
         return []
-    x0, y0, x1, y1 = model.play_area_nm
-    return [
-        "",
-        "CASE MODEL",
-        _field("part", f"{model.part}  ({model.face})"),
-        _field("plate", f"{format_nm(model.plate_nm)} mm"),
-        _field(
-            "play area",
-            f"{format_nm(Nanometre(x1 - x0))} x {format_nm(Nanometre(y1 - y0))} mm"
-            f"  |  x {format_nm(x0)}…{format_nm(x1)}"
-            f"  y {format_nm(y0)}…{format_nm(y1)}",
-        ),
-    ]
+    lines = ["", "CASE MODEL", _field("part", f"{case.part}  ({case.face.value})")]
+    run = data.last_run(CheckCaseClearance.name)
+    plate_nm = None if run is None else run.get(_PLATE_PARAMETER)
+    if isinstance(plate_nm, int):
+        lines.append(_field("plate", f"{format_nm(Nanometre(plate_nm))} mm"))
+    play_area = None if run is None else run.get(_PLAY_AREA_PARAMETER)
+    # Only the length is this guard's own to check: ``StageRun.__post_init__``
+    # already runs ``check_nanometres`` over every element of any ``_nm``-suffixed
+    # tuple (ADR-0004), so a stored ``play_area_nm`` can never carry a non-``int``
+    # element -- only the wrong length, which nothing upstream constrains.
+    if isinstance(play_area, tuple) and len(play_area) == 4:
+        x0, y0, x1, y1 = (Nanometre(int(v)) for v in play_area)
+        lines.append(
+            _field(
+                "play area",
+                f"{format_nm(Nanometre(x1 - x0))} x {format_nm(Nanometre(y1 - y0))} mm"
+                f"  |  x {format_nm(x0)}…{format_nm(x1)}"
+                f"  y {format_nm(y0)}…{format_nm(y1)}",
+            )
+        )
+    return lines
 
 
 def format_holes(data: DrillData) -> list[str]:
@@ -653,8 +742,8 @@ def format_summary(data: DrillData) -> list[str]:
     return ["", ", ".join(parts)]
 
 
-def format_report(data: DrillData, model: CaseModel | None = None) -> str:
-    lines = format_source(data) + format_enclosure(data) + format_case(model) + format_holes(data)
+def format_report(data: DrillData) -> str:
+    lines = format_source(data) + format_enclosure(data) + format_case(data) + format_holes(data)
     lines += format_tools(data)
     lines += format_diagnostics(data)
     return "\n".join(lines)
@@ -699,10 +788,94 @@ def _render(
     return [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
 
 
-def _write(emitter: Emitter[DrillData], path: Path, payload: Payload) -> str:
-    """Report one artefact. The dispatch is ``stompmodel``'s; the sentence is ours."""
-    size = write_payload(path, payload)
-    return f"wrote {path}  ({emitter.name}, {size} bytes)"
+#: One rendered artefact staged for commit: its emitter (for the report
+#: line) beside the value ``stage_payload`` already wrote in full.
+_Staged = tuple[Emitter[DrillData], StagedWrite]
+
+
+def _stage(rendered: Iterable[tuple[Emitter[DrillData], Path, Payload]]) -> list[_Staged]:
+    """Stage every payload through :func:`stompmodel.protocols.stage_payload`.
+
+    No target path is touched here. A failure partway through discards
+    every staged write this call already produced and re-raises, so a write
+    failure on any one artefact leaves every target of the invocation
+    exactly as it was — see ADR-0001. This is the set-level loop composed
+    on top of `stompmodel`'s per-path mechanism; `stompdrill` states no
+    temporary-file mechanism of its own.
+    """
+    staged: list[_Staged] = []
+    try:
+        for emitter, path, payload in rendered:
+            staged.append((emitter, stage_payload(path, payload)))
+    except BaseException:
+        for _, written in staged:
+            written.discard()
+        raise
+    return staged
+
+
+@dataclass(frozen=True, slots=True)
+class _Committed:
+    """One target already swapped to this run's bytes during this loop.
+
+    ``previous`` is the bytes this target held before this run, read
+    before its own commit; ``None`` when the target did not exist before.
+    :func:`_rollback` restores the two cases differently: rewrite one,
+    delete the other.
+    """
+
+    path: Path
+    previous: bytes | None
+
+
+def _rollback(committed: list[_Committed]) -> None:
+    """Undo every target already replaced earlier in this commit loop.
+
+    Restores each target through the same published mechanism every other
+    write in this loop uses — never a filesystem write of its own; see
+    ADR-0005. Never raises: a target this cannot restore is the one
+    residual ADR-0001 names as excluded from the guarantee, and
+    swallowing it here keeps the failure that triggered the rollback the
+    one that propagates.
+    """
+    for done in reversed(committed):
+        try:
+            if done.previous is None:
+                done.path.unlink(missing_ok=True)
+            else:
+                stage_payload(done.path, done.previous).commit()
+        except OSError:
+            pass
+
+
+def _commit(staged: list[_Staged]) -> list[str]:
+    """Replace every target from its already-staged write, in order.
+
+    ``pending`` holds exactly the staged writes not yet committed,
+    including the one currently being attempted; a write leaves it only
+    once its own :meth:`~stompmodel.protocols.StagedWrite.commit` returns. An
+    existing target's prior bytes are read first, so they can be
+    restored. On failure, :func:`_rollback` restores what this loop
+    already replaced, and everything still in ``pending`` is discarded —
+    this is what makes the whole set one transaction, not only each path.
+    """
+    lines: list[str] = []
+    committed: list[_Committed] = []
+    pending = list(staged)
+    try:
+        while pending:
+            emitter, written = pending[0]
+            previous = written.path.read_bytes() if written.path.exists() else None
+            size = written.commit()
+            pending.pop(0)
+            committed.append(_Committed(written.path, previous))
+            lines.append(f"wrote {written.path}  ({emitter.name}, {size} bytes)")
+    except BaseException:
+        _rollback(committed)
+        for _, written in pending:
+            written.discard()
+        raise
+    return lines
 
 
 def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
@@ -714,6 +887,7 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
 
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
+    _preflight_targets(targets)
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
@@ -750,7 +924,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     data = run_pipeline(pipeline, data, trace)
 
-    print(format_report(data, model=args.case_model_object), file=out)
+    print(format_report(data), file=out)
 
     if emitters:
         print(file=out)
@@ -759,8 +933,8 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
             # here, and one of them may legitimately refuse data this broken.
             print("\n".join(_withheld(emitters)), file=out)
         else:
-            for emitter, path, payload in _render(emitters, data):
-                print(_write(emitter, path, payload), file=out)
+            for line in _commit(_stage(_render(emitters, data))):
+                print(line, file=out)
 
     print("\n".join(format_summary(data)), file=out)
     return exit_for_severity(data.worst_severity)

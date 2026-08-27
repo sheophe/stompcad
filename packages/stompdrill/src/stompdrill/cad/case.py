@@ -12,9 +12,11 @@ from typing import Any
 
 from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from ..errors import StompdrillError
+from .base import step_keyword
 
 __all__ = [
     "Faces", "drill_axis", "assembly_spans", "select_solid", "find_faces",
@@ -32,8 +34,6 @@ __all__ = [
 #: match the other's catalogue footprint. 0.05 mm is generous against Hammond's
 #: 0.1 mm publication rounding while staying well inside that 0.40 mm gap.
 _MATCH_TOLERANCE_MM = 0.05
-
-_FACE_KEYWORDS = {"box": "BOX", "lid": "LID"}
 
 #: Below this fraction of a level's own outer-wire area that isn't real
 #: surface (1 - true area / outer-wire area), a level is a candidate plate;
@@ -95,18 +95,31 @@ def assembly_spans(document: StepDocument) -> tuple[float, float, float]:
     return (highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2])
 
 
-def select_solid(document: StepDocument, face: str) -> StepSolid:
+def select_solid(document: StepDocument, face: CaseFace) -> StepSolid:
     """Pick the box or lid solid, by name and then verified by thickness."""
-    keyword = _FACE_KEYWORDS.get(face)
-    if keyword is None:
-        raise StompdrillError(f"unknown case face {face!r}; expected 'box' or 'lid'")
+    keyword = step_keyword(face)
     found = document.named(keyword)
     if len(found) != 1:
         raise StompdrillError(
             f"the model names {len(found)} products containing {keyword!r}; "
-            f"exactly one is needed to drill the {face}"
+            f"exactly one is needed to drill the {face.value}"
         )
     return found[0]
+
+
+def _outward_sign(component: float, reversed_face: bool) -> int:
+    """Which way a face points along the drill axis, as exactly -1 or +1.
+
+    The caller has already established the normal is axis-aligned, so the
+    only information left in ``component`` is its sign; its magnitude is 1
+    to within the same tolerance and carries nothing. Returning an ``int``
+    keeps the raw kernel float out of the grouping key and out of the
+    equality tests that read the result back -- a normal reported as
+    -0.9999999999999993 is the same direction as -1.0, and no key or
+    comparison may treat them as two.
+    """
+    sign = -1 if reversed_face else 1
+    return sign if component > 0.0 else -sign
 
 
 def find_faces(solid: StepSolid, axis: int) -> Faces:
@@ -126,7 +139,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
         solid_bbox[5] - solid_bbox[2],
     )
 
-    planes: list[tuple[float, float, float, Any]] = []
+    planes: list[tuple[float, float, int, Any]] = []
     explorer = TopExp_Explorer(solid.shape, TopAbs_ShapeEnum.TopAbs_FACE)
     while explorer.More():
         face = TopoDS.Face_s(explorer.Current())
@@ -136,8 +149,10 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
             normal = plane.Axis().Direction()
             components = (normal.X(), normal.Y(), normal.Z())
             if abs(abs(components[axis]) - 1.0) < 1e-9:
-                sign = -1.0 if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED else 1.0
-                outward = components[axis] * sign
+                outward = _outward_sign(
+                    components[axis],
+                    face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED,
+                )
                 position = bounding_box_mm(face)[axis]
                 props = GProp_GProps()
                 BRepGProp.SurfaceProperties_s(face, props)
@@ -155,7 +170,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     companion = _nearest_companion_level(levels, inner)
     thickness = abs(inner.position - drilled.position)
     normal = [0.0, 0.0, 0.0]
-    normal[axis] = drilled.outward
+    normal[axis] = float(drilled.outward)
     return Faces(
         inner=_compound(inner.faces + (companion.faces if companion else ())),
         plate_nm=nm_from_mm(thickness),
@@ -179,11 +194,13 @@ class _Level:
 
     position: float
     area: float
-    outward: float
+    #: Exactly -1 or +1. Never a raw kernel component: this is half of the
+    #: grouping key below and is read back by exact equality twice.
+    outward: int
     faces: tuple[Any, ...]
 
 
-def _levels(planes: list[tuple[float, float, float, Any]]) -> list[_Level]:
+def _levels(planes: list[tuple[float, float, int, Any]]) -> list[_Level]:
     """Group same-facing planar candidates into levels by rounded axis position.
 
     Kernel-float noise can make two patches of the same physical plane report
@@ -194,7 +211,7 @@ def _levels(planes: list[tuple[float, float, float, Any]]) -> list[_Level]:
     member the explorer happened to visit first, so it cannot vary with
     traversal order.
     """
-    groups: dict[tuple[int, float], list[tuple[float, float, Any]]] = {}
+    groups: dict[tuple[int, int], list[tuple[float, float, Any]]] = {}
     for area, position, outward, face in planes:
         groups.setdefault((nm_from_mm(position), outward), []).append((area, position, face))
     return [
@@ -272,14 +289,15 @@ def _drilled_level(
 
 
 def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
-    """The largest-area level facing back at ``drilled``.
+    """The largest-area level facing back at ``drilled``; nearest it on a tie.
 
-    A small raised pad or a lettering fragment forms its own level nearer
-    the drilled face than the true floor; picking by total area rather than
-    nearest position is what keeps a pad such as the 1590Y's 25 x 10 mm one
-    from outranking its 84 x 84 mm floor. A level coincident with ``drilled``
-    itself is excluded on top of the opposite-facing filter, so a degenerate
-    zero-thickness plate can never silently win and zero the plate thickness.
+    A raised pad or a lettering fragment forms its own level nearer the
+    drilled face than the true floor, so total area, not nearest position,
+    keeps a pad such as the 1590Y's 25 x 10 mm one from outranking its
+    84 x 84 mm floor. A level coincident with ``drilled`` is excluded too,
+    so a degenerate zero-thickness plate cannot silently zero the plate
+    thickness. Exactly equal areas break towards ``drilled``: a further
+    level reports the metal thicker than it is. Positions are distinct.
     """
     inward = -drilled.outward
     candidates = [
@@ -288,21 +306,27 @@ def _inner_level(levels: list[_Level], drilled: _Level) -> _Level:
     ]
     if not candidates:
         raise StompdrillError("no flat face backs the drilled face")
-    return max(candidates, key=lambda level: level.area)
+    return max(candidates, key=lambda level: (level.area, -abs(level.position - drilled.position)))
 
 
 def _nearest_companion_level(levels: list[_Level], inner: _Level) -> _Level | None:
     """The same-facing level physically closest to ``inner``, if any.
 
-    A raised feature's own flat top is never part of the inner level's own
-    wire boundary -- the hole cut for it is, by construction, exactly
-    coplanar with the level around it -- so the nearest other same-facing
-    level is where ``region.py`` finds the faces that carry its true height.
+    A raised feature's flat top is never part of the inner level's own
+    wire boundary -- the hole cut for it is coplanar with the level around
+    it -- so the nearest other same-facing level is where ``region.py``
+    finds the faces carrying its true height. Equal distances put the two
+    on opposite sides of ``inner``; the proud side (``+inner.outward``)
+    wins, because preferring it can only turn a relief into structure,
+    never hide one, and exactly one side is proud, so the rule is total.
     """
     candidates = [level for level in levels if level.outward == inner.outward and level is not inner]
     if not candidates:
         return None
-    return min(candidates, key=lambda level: abs(level.position - inner.position))
+    return min(
+        candidates,
+        key=lambda level: (abs(level.position - inner.position), -inner.outward * level.position),
+    )
 
 
 def _compound(faces: tuple[Any, ...]) -> Any:
@@ -338,7 +362,7 @@ def build_frame(faces: Faces, axis: int) -> FaceFrame:
     u = _normalise(_cross(tuple(reference), w))
     v = _cross(w, u)
     origin = [0.0, 0.0, 0.0]
-    origin[axis] = faces.drilled_position_mm
+    origin[axis] = faces.inner_position_mm
     return FaceFrame(
         basis=CoordinateFrame(
             origin_nm=(nm_from_mm(origin[0]), nm_from_mm(origin[1]), nm_from_mm(origin[2])),

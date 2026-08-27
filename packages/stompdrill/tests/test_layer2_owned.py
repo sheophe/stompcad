@@ -16,7 +16,7 @@ from stompdrill.emitters.drawing.scene import Circle, Group, Scene
 from stompdrill.emitters.drawing_pdf import DrawingPdfEmitter
 from stompdrill.emitters.drawing_svg import DrawingSvgEmitter
 from stompmodel.codec import to_document
-from stompmodel.model import DrillData, ReferenceOutline
+from stompmodel.model import CaseFace, DrillData, ReferenceOutline
 from stompmodel.units import Nanometre
 from tests.conftest import at, make_data
 
@@ -183,26 +183,24 @@ def test_every_owned_representation_agrees_about_the_same_holes():
 
 
 def _cut_component_shape(document: Any, keyword: str) -> Any:
-    """The cut leaf's shape, found with ``stompgeom.step``'s own traversal.
+    """The cut leaf's shape, found with ``stompgeom.step``'s own published walk.
 
     ``cut_shape`` hands back the XCAF document rather than the shape it
-    touched, so the leaf has to be found again. ``_collect`` is the walk
-    that already does it and ``named`` the keyword rule, so neither is
-    re-typed here -- a second copy of the recursion would keep working
+    touched, so the leaf has to be found again. ``leaf_labels`` is the one
+    walk this workspace performs and ``named`` the keyword rule, so neither
+    is re-typed here -- a second copy of the recursion would keep working
     while diverging from the one the emitter actually uses.
     """
-    from OCP.TDataStd import TDataStd_Name
-    from OCP.TDF import TDF_LabelSequence
-    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
-    from stompgeom.step import StepDocument, StepSolid, _collect
+    from stompgeom.step import StepDocument, StepSolid, leaf_labels
 
-    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
-    labels = TDF_LabelSequence()
-    tool.GetFreeShapes(labels)
     solids: list[StepSolid] = []
-    for index in range(1, labels.Length() + 1):
-        _collect(labels.Value(index), solids, TDataStd_Name)
+    for entry in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
+        if shape.IsNull():
+            continue
+        solids.append(StepSolid(name=entry.name, shape=shape))
 
     found = StepDocument(tuple(solids), document).named(keyword)
     assert found, f"the cut document holds no solid named like {keyword!r}"
@@ -220,14 +218,15 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
     from stompdrill.cad import load_case_model
     from stompdrill.emitters.step import cut_shape
     from stompmodel.units import nm_from_mm
+    from tests.conftest import registration_for
     from tests.hammond import cylinders, require_model
 
     model_path = require_model("1590BB")
-    model = load_case_model(model_path, face="box", margin_nm=Nanometre(1_000_000))
+    model = load_case_model(model_path, face=CaseFace.BOX, margin_nm=Nanometre(1_000_000))
     data = make_data(
         at(0, 0, 6_000_000, index=1),
         at(20_000_000, -15_000_000, 8_000_000, index=2),
-    )
+    ).with_case(registration_for(model))
 
     before = cylinders(model.target_shape)
     document, undo, _touched = cut_shape(model, data)
@@ -242,7 +241,10 @@ def test_the_cut_shapes_new_cylinders_sit_at_the_models_hole_positions():
 
     def canonical_hole(ax: int, ay: int, az: int, radius: int) -> tuple[Nanometre, Nanometre, int]:
         point_mm = (ax * tolerance_mm, ay * tolerance_mm, az * tolerance_mm)
-        x_mm, y_mm = frame.basis.to_canonical(point_mm)
+        # The depth is dropped on purpose: this checks where each
+        # cylinder sits on the face, not how far along its own axis the
+        # sampled point lies.
+        x_mm, y_mm, _depth_mm = frame.basis.to_canonical(point_mm)
         return nm_from_mm(x_mm), nm_from_mm(y_mm), radius
 
     # Joining position and radius in one tuple, rather than checking the

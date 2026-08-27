@@ -8,12 +8,19 @@ for the surviving holes after quantisation.
 from __future__ import annotations
 
 import math
-from decimal import ROUND_HALF_EVEN
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, Hole, RawHole, StageRun
-from stompmodel.units import Millimetre, Nanometre, format_nm, nm_from_mm, scaled_nm
+from stompmodel.units import (
+    Millimetre,
+    Nanometre,
+    check_nanometres,
+    format_nm,
+    nm_from_mm,
+    scaled_nm,
+)
 
 from ..formatting import format_mm
 from ..tolerance import within
@@ -35,6 +42,29 @@ _GRID_PARAMETER: str = "grid_nm"
 #: enough, because nothing here can tell which panel is about to be drawn.)
 MICRON_NM: Nanometre = Nanometre(NM_PER_MICRON)
 
+_HALF: Decimal = Decimal("0.5")
+
+
+def _quotient_over_pitch(mm: Millimetre, grid_nm: Nanometre) -> Decimal:
+    """The measurement's exact position in pitches, unrounded.
+
+    ``SnapPositions`` rounds this to choose a grid point; ``ReviewGridTies``
+    asks whether it already sat on a midpoint. Both read the same exact
+    decimal quotient, per ADR-0003, so neither can disagree with the other
+    about what counts as a tie.
+    """
+    return scaled_nm(mm) / grid_nm
+
+
+def _is_tied_to_pitch(mm: Millimetre, grid_nm: Nanometre) -> bool:
+    """Whether the measurement's exact quotient over the pitch is a half.
+
+    Decided directly from the unrounded measurement — never from a residual
+    against a value already rounded to a whole nanometre, which can land on
+    a half-pitch value the measurement itself does not occupy.
+    """
+    return abs(_quotient_over_pitch(mm, grid_nm)) % 1 == _HALF
+
 
 class SnapPositions:
     """Snap centres to a whole-micron grid, clamped to a 1_000 nm floor.
@@ -47,7 +77,8 @@ class SnapPositions:
     name: ClassVar[str] = "snap"
 
     def __init__(self, grid_nm: Nanometre, warn_over_nm: Nanometre | None = None) -> None:
-        self.requested_grid_nm = _whole("grid_nm", grid_nm)
+        check_nanometres("SnapPositions", grid_nm=grid_nm)
+        self.requested_grid_nm = grid_nm
         clamped_nm = max(self.requested_grid_nm, MICRON_NM)
         # Only the pitch that is actually coarse enough to be used is held to
         # whole microns: a clamped one is not the pitch anything is snapped to,
@@ -130,7 +161,7 @@ class SnapPositions:
 
     def _snap(self, mm: Millimetre) -> Nanometre:
         """Round only the exact grid quotient, choosing half-to-even on ties."""
-        quotient = scaled_nm(mm) / self.grid_nm
+        quotient = _quotient_over_pitch(mm, self.grid_nm)
         multiple = int(quotient.to_integral_value(rounding=ROUND_HALF_EVEN))
         return Nanometre(multiple * self.grid_nm)
 
@@ -163,14 +194,14 @@ class ReviewGridTies:
 
 
 def _is_tied(hole: Hole, grid_nm: Nanometre) -> bool:
-    """Return whether either per-axis residual is exactly half a pitch."""
-    dx_nm, dy_nm, _ = hole.residual_nm
-    return _axis_tied(dx_nm, grid_nm) or _axis_tied(dy_nm, grid_nm)
+    """Return whether either raw axis measurement is exactly half a pitch.
 
-
-def _axis_tied(moved_nm: Nanometre, grid_nm: Nanometre) -> bool:
-    """Test the exact whole-nanometre relation ``2 * abs(move) == pitch``."""
-    return 2 * abs(moved_nm) == grid_nm
+    Asked of ``hole.raw`` -- the preserved measurement ``SnapPositions``
+    quantised from -- and never of a residual against the rounded ``x_nm``/
+    ``y_nm`` it produced, which can land on a midpoint the measurement did
+    not.
+    """
+    return _is_tied_to_pitch(hole.raw.x, grid_nm) or _is_tied_to_pitch(hole.raw.y, grid_nm)
 
 
 def _ambiguous(tied: tuple[tuple[int, int], ...], grid_nm: Nanometre) -> Diagnostic:
@@ -185,16 +216,9 @@ def _ambiguous(tied: tuple[tuple[int, int], ...], grid_nm: Nanometre) -> Diagnos
     )
 
 
-def _whole(name: str, value: Nanometre) -> Nanometre:
-    """Require a plain ``int`` nanometre length, excluding floats and booleans."""
-    if type(value) is not int:
-        raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
-    return value
-
-
 def _threshold(value: Nanometre) -> Nanometre:
     """A warning distance: whole nanometres, and not one no hole can be inside of."""
-    number = _whole("warn_over_nm", value)
-    if number < 0:
+    check_nanometres("SnapPositions", warn_over_nm=value)
+    if value < 0:
         raise ValueError(f"warn_over_nm cannot be a negative distance, got {value!r}")
-    return number
+    return value

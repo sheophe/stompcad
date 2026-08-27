@@ -5,13 +5,17 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
+import os
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
+import stompmodel.protocols as protocols
 from stompdrill import cli
 from stompdrill.emitters.base import available, register_emitter
 from stompdrill.errors import EmptyLayerError, LayerNotFoundError
@@ -217,6 +221,97 @@ def test_emit_dispatches_to_an_emitter_the_cli_has_never_heard_of(
 
 def test_unregistering_the_dummy_leaves_the_registry_as_it_was(clean_registry):
     assert "dummy-test-format" not in available()
+
+
+def test_a_registered_emitter_needing_options_this_cli_cannot_supply_exits_three(
+    clean_registry, fake_source, tmp_path, capsys
+):
+    """The documented "New emitter" recipe, executed to the letter.
+
+    Implement ``Emitter``, decorate with ``register_emitter``, skip the CLI
+    edit because no flags are needed -- and give the options a required,
+    no-default constructor parameter. The CLI cannot supply one, so this is a
+    usage failure (exit 3), not the unhandled ``TypeError`` it used to be.
+    """
+
+    @dataclasses.dataclass(frozen=True, slots=True)
+    class FooOptions:
+        thing: str  # required, no default -- no CLI flags needed per the recipe
+
+    @register_emitter
+    class FooEmitter:
+        name = "foo-needs-options"
+        media_type = "text/plain"
+        extension = ".foo"
+
+        def __init__(self, options: FooOptions) -> None:
+            self.options = options
+
+        def emit(self, data):
+            return self.options.thing.encode()
+
+    fake_source(read())
+    out = tmp_path / "out.foo"
+
+    code = cli.main([str(FIXTURE), "--emit", f"foo-needs-options={out}"])
+
+    assert code == 3
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "foo-needs-options" in err
+
+
+def test_a_registered_emitter_with_defaulted_options_still_emits_normally(
+    clean_registry, fake_source, tmp_path
+):
+    """The recipe's other lawful shape -- a constructor needing nothing -- is
+    unaffected: the fix must not refuse a conforming extension wholesale."""
+
+    @register_emitter
+    class BareEmitter:
+        name = "bare-needs-nothing"
+        media_type = "text/plain"
+        extension = ".bare"
+
+        def __init__(self):
+            pass
+
+        def emit(self, data):
+            return b"bare\n"
+
+    fake_source(read())
+    out = tmp_path / "out.bare"
+
+    code = cli.main([str(FIXTURE), "--emit", f"bare-needs-nothing={out}"])
+
+    assert code == 0
+    assert out.read_bytes() == b"bare\n"
+
+
+def test_an_unrelated_typeerror_from_an_emitters_own_emit_step_still_propagates(
+    clean_registry, fake_source, tmp_path
+):
+    """Proves the narrowness: only construction is guarded. A ``TypeError``
+    raised later, from ``emit`` itself, is a genuinely unexpected fault and
+    must keep its traceback rather than being reclassified as usage error 3."""
+
+    @register_emitter
+    class BrokenEmitEmitter:
+        name = "broken-emit"
+        media_type = "text/plain"
+        extension = ".broken"
+
+        def __init__(self):
+            pass
+
+        def emit(self, data):
+            raise TypeError("unrelated fault inside emit, not construction")
+
+    fake_source(read())
+    out = tmp_path / "out.broken"
+
+    with pytest.raises(TypeError, match="unrelated fault inside emit"):
+        cli.main([str(FIXTURE), "--emit", f"broken-emit={out}"])
 
 
 def _docstring_constants(tree: ast.AST) -> set[int]:
@@ -919,6 +1014,683 @@ def test_io_failure_is_exit_three(fake_source, tmp_path, capsys):
     assert "Traceback" not in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------------------
+# one invocation, one transaction (ticket 22): a write-time IO failure at any
+# target withholds every artefact of this invocation, not only the ones
+# after the failure -- and never disturbs an artefact a previous, successful
+# invocation already left at one of these same paths.
+# ---------------------------------------------------------------------------
+
+
+def _sabotage_write(monkeypatch, target: Path) -> None:
+    """Make writing ``target``'s own staged temporary raise ``OSError``.
+
+    Every other path's temporary is written normally, so this isolates the
+    failure to exactly one target regardless of its position in ``--emit``.
+    """
+    marker = f".{target.name}."
+    original_write_bytes = Path.write_bytes
+
+    def write_bytes(self: Path, data: bytes) -> int:
+        if self.parent == target.parent and self.name.startswith(marker):
+            raise OSError(f"simulated write failure for {target}")
+        return original_write_bytes(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", write_bytes)
+
+
+@pytest.mark.parametrize("position", ["first", "middle", "last"])
+def test_a_write_failure_at_any_position_leaves_no_artefact_of_this_run(
+    fake_source, tmp_path, capsys, monkeypatch, position
+):
+    """F3-04: the theme's class criterion, not just its reproduction.
+
+    An IO failure writing one target must withhold every target of this
+    invocation -- whichever position it happens to be at -- because the
+    document's "any error withholds every requested artefact" rule is a
+    fact about the whole invocation, not only about rendering.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    c = tmp_path / "c.svg"
+    targets = {"first": a, "middle": b, "last": c}
+    _sabotage_write(monkeypatch, targets[position])
+
+    exit_code = cli.main(
+        [
+            str(FIXTURE),
+            "--emit",
+            f"json={a}",
+            "--emit",
+            f"excellon={b}",
+            "--emit",
+            f"drawing-svg={c}",
+        ]
+    )
+
+    assert exit_code == 3
+    assert not a.exists(), "an earlier target survived a run that failed later"
+    assert not b.exists()
+    assert not c.exists(), "a later target was written before the failure was even reached"
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
+    fake_source, tmp_path, capsys, monkeypatch
+):
+    """The dangerous form: a stale artefact is worse than a missing one.
+
+    With every target already holding a previous, successful run's bytes,
+    a failed re-run must leave every one of them exactly as that previous
+    run left it -- never this run's bytes, and never deleted outright.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    c = tmp_path / "c.svg"
+    argv = [
+        str(FIXTURE),
+        "--emit",
+        f"json={a}",
+        "--emit",
+        f"excellon={b}",
+        "--emit",
+        f"drawing-svg={c}",
+    ]
+
+    assert cli.main(argv) == 0
+    previous = {path: path.read_bytes() for path in (a, b, c)}
+
+    # A different panel, so this run's bytes would visibly differ from the
+    # previous run's if any of them reached disk.
+    fake_source(
+        read(
+            holes=(RawHole(Millimetre(-10.0), Millimetre(10.0), Millimetre(5.0)),)
+        )
+    )
+    _sabotage_write(monkeypatch, b)
+
+    assert cli.main(argv) == 3
+
+    for path in (a, b, c):
+        assert path.exists(), f"{path} was deleted outright by the failed run"
+        assert path.read_bytes() == previous[path], (
+            f"{path} was replaced by the failed run's bytes instead of being "
+            "left exactly as the previous run left it"
+        )
+    assert "Traceback" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# ticket 29: the requested --emit target set is validated once, as a set,
+# before anything is rendered -- a duplicate target or an existing target
+# that is not a regular file is a usage error caught up front. Ticket 35:
+# every other precondition a target must satisfy is the write mechanism's
+# own (ADR-0005, enforced by stage_payload), not restated here, so it
+# surfaces during staging instead -- still a clean usage error with
+# nothing on disk, just after a render rather than before one. A
+# commit-phase failure rolls back every target this same invocation had
+# already replaced, not only the ones still unattempted. Ticket 40: the
+# target set is compared under a case- and normalisation-folded key,
+# because a filesystem may unify two spellings this command line would
+# otherwise report as two artefacts.
+# ---------------------------------------------------------------------------
+
+
+def test_two_emit_specs_naming_one_path_are_a_usage_error(fake_source, tmp_path, capsys):
+    """F2-02(b): two artefacts cannot share one path -- caught before rendering."""
+    fake_source(read())
+    out = tmp_path / "out.x"
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"json={out}", "--emit", f"excellon={out}"])
+
+    assert exit_code == 3
+    assert not out.exists(), "a rejected invocation must not write the colliding path"
+    err = capsys.readouterr().err
+    assert str(out) in err
+    assert "Traceback" not in err
+
+
+def test_two_emit_targets_differing_only_in_case_are_a_usage_error(
+    fake_source, tmp_path, capsys
+):
+    """The confirmed defect: on a case-insensitive volume these name one
+    file, so the run printed a "wrote" line for an artefact the next
+    commit then destroyed, and exited 1 rather than 3. The refusal is
+    unconditional, so this also fails on a case-sensitive volume if the
+    fold is dropped."""
+    fake_source(read())
+    lower = tmp_path / "out.json"
+    upper = tmp_path / "OUT.json"
+
+    exit_code = cli.main(
+        [str(FIXTURE), "--emit", f"json={lower}", "--emit", f"drawing-svg={upper}"]
+    )
+
+    assert exit_code == 3
+    assert not lower.exists() and not upper.exists()
+    err = capsys.readouterr().err
+    assert str(lower) in err and str(upper) in err
+    assert "Traceback" not in err
+
+
+def test_two_emit_targets_differing_only_in_normalisation_form_are_a_usage_error(
+    fake_source, tmp_path, capsys
+):
+    """Case is not the only folding this repository's own APFS volume
+    applies: NFC and NFD spellings of one name are two distinct Python
+    strings and one file on disk. A ``casefold``-only repair passes the
+    probe above and leaves this one destroying an artefact."""
+    fake_source(read())
+    nfc = tmp_path / unicodedata.normalize("NFC", "café.json")
+    nfd = tmp_path / unicodedata.normalize("NFD", "café.json")
+    # Fixture control: a probe that can pass by finding nothing is not
+    # evidence. Were these already one string there would be no collision
+    # to refuse and every assertion below would be vacuous.
+    assert str(nfc) != str(nfd)
+
+    exit_code = cli.main(
+        [str(FIXTURE), "--emit", f"json={nfc}", "--emit", f"drawing-svg={nfd}"]
+    )
+
+    assert exit_code == 3
+    assert not nfc.exists() and not nfd.exists()
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+
+
+def test_two_emit_targets_reaching_one_file_through_a_symlink_are_a_usage_error(
+    fake_source, tmp_path, capsys
+):
+    """The folds above are only half of :func:`cli._target_key`; the other
+    half is ``Path.resolve``. Two spellings that fold apart still name one
+    file when a directory on the way is a symlink, and dropping
+    ``.resolve()`` leaves every other target-key probe in this module
+    green -- so without this one the resolution half is unpoliced."""
+    fake_source(read())
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    direct = real / "out.json"
+    through_link = link / "out.json"
+    # Fixture control: the collision must be real and not already folded
+    # away, or every assertion below passes by finding nothing.
+    assert str(direct) != str(through_link)
+    assert direct.resolve() == through_link.resolve()
+
+    exit_code = cli.main(
+        [
+            str(FIXTURE),
+            "--emit",
+            f"json={direct}",
+            "--emit",
+            f"drawing-svg={through_link}",
+        ]
+    )
+
+    assert exit_code == 3
+    assert not direct.exists() and not through_link.exists()
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+
+
+def test_two_ordinary_targets_one_character_apart_are_both_written(
+    fake_source, tmp_path
+):
+    """A pair as close as two targets can be without folding -- one ASCII
+    digit apart -- must still produce two artefacts. A fold that unified
+    more than case and normalisation form, or a pre-flight that refused a
+    repeated stem, fails here."""
+    fake_source(read())
+    a = tmp_path / "out-1.json"
+    b = tmp_path / "out-2.json"
+
+    assert cli.main(
+        [str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"]
+    ) == 0
+    assert a.is_file() and b.is_file()
+    assert a.read_bytes() != b.read_bytes()
+
+
+def test_case_distinct_basenames_in_distinct_directories_are_both_written(
+    fake_source, tmp_path
+):
+    """A fold applied to the basename alone would refuse this pair, which
+    names two genuinely different files on every filesystem."""
+    fake_source(read())
+    left = tmp_path / "d1"
+    right = tmp_path / "d2"
+    left.mkdir()
+    right.mkdir()
+    a = left / "out.json"
+    b = right / "OUT.json"
+
+    assert cli.main(
+        [str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"]
+    ) == 0
+    assert a.is_file() and b.is_file()
+    assert a.read_bytes() != b.read_bytes()
+
+
+def test_the_comparison_key_never_becomes_the_written_path(fake_source, tmp_path):
+    """The fold decides only whether two targets collide. The bytes go to
+    the spelling the caller typed: an upper-case target is created
+    upper-case, not lower-cased into the comparison key. This bites on a
+    case-insensitive volume too, because APFS is case- and
+    normalisation-preserving -- the directory entry records the spelling
+    the file was created with."""
+    fake_source(read())
+    target = tmp_path / "OUT.JSON"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={target}"]) == 0
+    assert "OUT.JSON" in os.listdir(tmp_path)
+    assert json.loads(target.read_text())
+
+
+def test_a_directory_at_one_target_withholds_the_whole_set(fake_source, tmp_path, capsys):
+    """F2-02(a)/F3-03: a directory at one target must not let an earlier,
+    otherwise-ordinary target commit first -- the whole set is validated
+    before any of it is rendered, so nothing reaches disk at all."""
+    fake_source(read())
+    a = tmp_path / "a.json"
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={outdir}"])
+
+    assert exit_code == 3
+    assert not a.exists(), (
+        "a.json was committed even though this invocation overall failed -- the "
+        "whole target set must be validated before anything is rendered"
+    )
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_the_target_set_is_checked_before_the_panel_is_even_opened(tmp_path, capsys):
+    """Mirrors test_the_case_is_checked_before_the_file_is_even_opened: a
+    colliding --emit pair is reported without a PDF parse being attempted."""
+    dup = tmp_path / "dup.x"
+
+    exit_code = cli.main(["/no/such/panel.ai", "--emit", f"json={dup}", "--emit", f"excellon={dup}"])
+
+    assert exit_code == 3
+    assert str(dup) in capsys.readouterr().err
+
+
+def test_an_ordinary_writable_target_still_passes_the_domain_check(fake_source, tmp_path):
+    """Control for the two domain-boundary tests below: an everyday target
+    in a writable directory is unaffected by the new pre-flight."""
+    fake_source(read())
+    target = tmp_path / "out.json"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={target}"]) == 0
+    assert target.exists()
+
+
+def test_a_target_whose_parent_is_not_writable_is_rejected_before_committing(
+    fake_source, tmp_path, capsys
+):
+    """The target-domain decision (ADR-0005): a target whose parent
+    directory cannot accept a new file is refused by ``stage_payload``
+    itself, not restated in the pre-flight (ticket 35). The invocation
+    still withholds the whole set with a clean usage error and nothing
+    on disk -- it now costs a render first, which the pre-flight's own
+    docstring states rather than hides."""
+    fake_source(read())
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    if os.access(locked, os.W_OK):
+        locked.chmod(0o700)
+        pytest.skip("this account can write into a mode-0500 directory")
+    target = locked / "out.json"
+
+    try:
+        exit_code = cli.main([str(FIXTURE), "--emit", f"json={target}"])
+    finally:
+        locked.chmod(0o700)
+
+    assert exit_code == 3
+    assert not target.exists()
+    assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes on this platform")
+def test_a_fifo_target_is_refused_by_the_preflight_without_being_opened(tmp_path, capsys):
+    """Ticket 35: an existing target that is not a regular file -- a named
+    pipe here -- is refused by ``_preflight_targets`` itself, by a raise,
+    not a wait. ADR-0005 admits a FIFO to the write mechanism's own
+    domain, but this command line's commit loop reads a target's prior
+    bytes before replacing it, and nothing is writing to the other end of
+    this pipe -- so a regression that dropped the check would hang this
+    test rather than merely fail it. The input path does not exist, which
+    proves the refusal happens before the panel is even opened, matching
+    test_the_target_set_is_checked_before_the_panel_is_even_opened."""
+    fifo = tmp_path / "out.drl"
+    os.mkfifo(fifo)
+
+    exit_code = cli.main(["/no/such/panel.ai", "--emit", f"excellon={fifo}"])
+
+    assert exit_code == 3
+    assert str(fifo) in capsys.readouterr().err
+
+
+_DEV_NULL = Path("/dev/null")
+
+
+def _dev_is_locked_down() -> bool:
+    """True when /dev refuses a new sibling file for an unprivileged user --
+    the precondition the narrowed-domain reproduction below needs."""
+    probe = _DEV_NULL.with_name(".ticket29_dev_probe.tmp")
+    try:
+        probe.write_bytes(b"x")
+    except OSError:
+        return True
+    else:
+        probe.unlink()
+        return False
+
+
+@pytest.mark.skipif(not _DEV_NULL.exists(), reason="no /dev/null on this platform")
+@pytest.mark.skipif(
+    not _dev_is_locked_down(),
+    reason="this account can create files directly in /dev -- narrowing precondition absent",
+)
+def test_dev_null_is_a_clean_usage_error_before_anything_renders(fake_source, capsys):
+    """F3-02's transaction half: /dev's own directory cannot accept a
+    sibling temporary, so /dev/null is refused by the pre-flight -- a
+    clean usage error before rendering, not the mid-transaction
+    PermissionError the mechanism silently narrowed to. The ability to
+    write a device or pipe target itself is not restored by this ticket;
+    see the target-domain paragraph this ticket adds to ADR-0005."""
+    fake_source(read())
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"excellon={_DEV_NULL}"])
+
+    assert exit_code == 3
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
+    fake_source, tmp_path, monkeypatch, capsys
+):
+    """F6-01: a failure part-way through the commit loop -- after an
+    earlier target has already been swapped to this run's bytes -- must
+    restore that earlier target too, not merely discard the ones still
+    unattempted. Sabotages the *second* call to ``os.replace`` (the
+    commit loop's own primitive), a distinct failure point from the
+    staging-write sabotage the tests above this section already cover.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.svg"
+    a.write_text("OLD-A")
+    b.write_text("OLD-B")
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def sabotage_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("simulated commit-phase failure on the 2nd target")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", sabotage_replace)
+
+    exit_code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"drawing-svg={b}"])
+
+    assert exit_code == 3
+    assert a.read_bytes() == b"OLD-A", (
+        "target a should have been rolled back to what the previous run left, "
+        "but its os.replace (call #1) had already landed this run's new bytes"
+    )
+    assert b.read_bytes() == b"OLD-B"
+    assert "Traceback" not in capsys.readouterr().err
+
+
+class _SimulatedFailure(Exception):
+    """Marks a failure this test injects, distinct from a real OSError."""
+
+
+@pytest.mark.parametrize(
+    ("position", "kind"),
+    [
+        (position, kind)
+        for position in ("first", "middle", "last")
+        for kind in ("staging", "the pre-commit read", "the commit")
+    ],
+)
+def test_every_position_and_failure_kind_leaves_no_temporary_behind(
+    position: str, kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Criterion 1 (ticket 35): the leak is closed at every position and
+    every failure kind. Three real targets, seeded with distinct prior
+    bytes so "restored" is distinguishable from "never written", swept
+    across {first, middle, last} x {staging fails, the pre-commit read
+    fails, the commit fails}. After the raise, the directory holds
+    exactly the three target names -- no temporary of any shape -- and
+    every target holds its seeded prior bytes. Supersedes the falsify
+    suite's F2-01/F3-01 leak reproductions; see report-35 for both
+    falsifiers this test was run against.
+    """
+    index = {"first": 0, "middle": 1, "last": 2}[position]
+    names = ["a.json", "b.drl", "c.svg"]
+    prior = [b"OLD-A", b"OLD-B", b"OLD-C"]
+    new_text = ["NEW-A", "NEW-B", "NEW-C"]
+    targets = [tmp_path / name for name in names]
+    for target, data in zip(targets, prior):
+        target.write_bytes(data)
+
+    class _FakeEmitter:
+        name: ClassVar[str] = "fake"
+        media_type: ClassVar[str] = "text/plain"
+        extension: ClassVar[str] = "txt"
+
+        def emit(self, data: DrillData) -> protocols.Payload:
+            raise NotImplementedError("this fake never renders; payloads are supplied directly")
+
+    rendered: list[tuple[cli.Emitter[DrillData], Path, protocols.Payload]] = [
+        (_FakeEmitter(), target, new_text[i]) for i, target in enumerate(targets)
+    ]
+    failing = targets[index]
+
+    if kind == "staging":
+        real_stage = cli.stage_payload
+
+        def fake_stage(path: Path, payload: protocols.Payload) -> protocols.StagedWrite:
+            if path == failing:
+                raise _SimulatedFailure("staging")
+            return real_stage(path, payload)
+
+        monkeypatch.setattr(cli, "stage_payload", fake_stage)
+        with pytest.raises(_SimulatedFailure):
+            cli._stage(rendered)
+    else:
+        staged = cli._stage(rendered)
+        if kind == "the pre-commit read":
+            real_read_bytes = Path.read_bytes
+
+            def fake_read_bytes(self: Path, *args: object, **kwargs: object) -> bytes:
+                if self == failing:
+                    raise _SimulatedFailure("read")
+                return real_read_bytes(self, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+        else:
+            real_commit = protocols.StagedWrite.commit
+
+            def fake_commit(self: protocols.StagedWrite) -> int:
+                if self.path == failing:
+                    raise _SimulatedFailure("commit")
+                return real_commit(self)
+
+            monkeypatch.setattr(protocols.StagedWrite, "commit", fake_commit)
+
+        with pytest.raises(_SimulatedFailure):
+            cli._commit(staged)
+
+    # Undo the patches before inspecting the result: the assertions below
+    # read the same targets and must see the real filesystem, not the
+    # injected failure.
+    monkeypatch.undo()
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == names, (
+        f"a temporary survived the {kind!r} failure at the {position} position"
+    )
+    for target, data in zip(targets, prior):
+        assert target.read_bytes() == data, (
+            f"{target} was not restored to its seeded prior bytes after the "
+            f"{kind!r} failure at the {position} position"
+        )
+
+
+def test_re_running_over_existing_targets_leaves_no_backup_files_behind(fake_source, tmp_path):
+    """A normal successful re-run over its own previous outputs must leave
+    nothing behind beyond the requested target itself -- the backup this
+    loop makes while committing is cleaned up once the whole set succeeds."""
+    fake_source(read())
+    a = tmp_path / "a.json"
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={a}"]) == 0
+    first = a.read_bytes()
+
+    assert cli.main([str(FIXTURE), "--emit", f"json={a}"]) == 0
+
+    assert a.read_bytes() == first
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.json"], (
+        "a successful commit over an existing target left a stray file behind"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ticket 26: the CLI writes an artefact's bytes through the one published
+# mechanism (stompmodel.protocols.stage_payload / StagedWrite.commit /
+# StagedWrite.discard), never by re-implementing it. Naming each function's
+# production caller directly, rather than only its observable effect, is
+# what F1-01/F2-01/F3-04/F5-01 asked for and what criterion 2 demands.
+# ---------------------------------------------------------------------------
+
+
+def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
+    """Control: prove the spy mechanism the next test relies on actually
+    catches a call, before trusting it to prove an absence."""
+    calls: list[str] = []
+    original_stage = protocols.stage_payload
+    original_commit = protocols.StagedWrite.commit
+
+    def spy_stage(path, payload):
+        calls.append("stage")
+        return original_stage(path, payload)
+
+    def spy_commit(staged):
+        calls.append("commit")
+        return original_commit(staged)
+
+    target = tmp_path / "control.bin"
+    written = spy_commit(spy_stage(target, b"hello"))
+
+    assert calls == ["stage", "commit"]
+    assert written == 5
+    assert target.read_bytes() == b"hello"
+
+
+def test_the_cli_write_path_calls_stage_payload_then_staged_write_commit(fake_source, tmp_path, monkeypatch):
+    """F1-01/F2-01/F3-04/F5-01, migrated: a full ``--emit`` run must call the
+    published mechanism, not re-implement it (``write_payload`` no longer
+    exists; the design verdict deletes it outright). The two halves are
+    patched at different seams for one reason: ``cli.py`` holds its own
+    module reference to ``stage_payload``, and reaches the commit verb only
+    through the value staging handed it, so the class attribute is the only
+    reference the CLI actually resolves through.
+    """
+    fake_source(read())
+    calls: list[str] = []
+    original_stage = cli.stage_payload
+    original_commit = protocols.StagedWrite.commit
+
+    def spy_stage(path, payload):
+        calls.append(("stage", path))
+        return original_stage(path, payload)
+
+    def spy_commit(staged):
+        calls.append(("commit", staged.path))
+        return original_commit(staged)
+
+    monkeypatch.setattr(cli, "stage_payload", spy_stage)
+    monkeypatch.setattr(protocols.StagedWrite, "commit", spy_commit)
+
+    out = tmp_path / "out.json"
+    code = cli.main([str(FIXTURE), "--emit", f"json={out}"])
+
+    assert code in (0, 1)
+    assert out.exists() and out.read_text(encoding="utf-8").strip() != ""
+    assert calls == [("stage", out), ("commit", out)], (
+        "the CLI's write path did not call stompmodel.protocols.stage_payload "
+        f"then StagedWrite.commit, in that order, for {out}: saw {calls}"
+    )
+
+
+def test_a_write_failure_calls_discard_on_every_temporary_it_abandons(
+    fake_source, tmp_path, monkeypatch
+):
+    """``StagedWrite.discard``'s production caller, named directly: a
+    failure at one target must discard every *other* staged write through
+    the published verb, not through a caller-local ``tmp.unlink``. Patched
+    on the class for the same reason as the test above: the CLI reaches the
+    verb only through the value staging handed it.
+    """
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    discarded: list[Path] = []
+    original_discard = protocols.StagedWrite.discard
+
+    def spy_discard(staged):
+        discarded.append(staged.path)
+        original_discard(staged)
+
+    monkeypatch.setattr(protocols.StagedWrite, "discard", spy_discard)
+    _sabotage_write(monkeypatch, b)
+
+    code = cli.main([str(FIXTURE), "--emit", f"json={a}", "--emit", f"excellon={b}"])
+
+    assert code == 3
+    assert not a.exists() and not b.exists()
+    # ``a`` staged successfully and was then discarded when ``b``'s own
+    # staging failed; ``b`` never reached ``StagedWrite.discard`` because
+    # it never produced a ``StagedWrite`` to discard in the first place.
+    assert discarded == [a]
+
+
+def test_a_successful_runs_report_lines_stay_in_emit_order(fake_source, tmp_path, capsys):
+    """A successful run's per-artefact sentences print in ``--emit`` order."""
+    fake_source(read())
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.drl"
+    c = tmp_path / "c.svg"
+
+    assert (
+        cli.main(
+            [
+                str(FIXTURE),
+                "--emit",
+                f"json={a}",
+                "--emit",
+                f"excellon={b}",
+                "--emit",
+                f"drawing-svg={c}",
+            ]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    assert out.index(str(a)) < out.index(str(b)) < out.index(str(c))
+
+
 def test_missing_input_file_is_exit_three(tmp_path, capsys):
     missing = tmp_path / "nope.ai"
     assert cli.main([str(missing)]) == 3
@@ -1280,7 +2052,7 @@ def test_the_traced_path_folds_through_the_same_pipeline_as_the_plain_one():
 
     assert traced.processing == plain.processing
     assert [run.name for run in traced.processing] == [stage.name for stage in pipeline]
-    assert traced.last_run("route").get("key") == "default"
+    assert traced.last_run("route") is not None
 
 
 def test_the_grid_reaches_the_drawing_through_the_quantiser_not_the_options(
@@ -1680,9 +2452,10 @@ def test_the_two_empty_layer_causes_do_not_read_alike():
 
 def test_case_face_accepts_only_box_or_lid():
     from stompdrill.cli import UsageError, parse_face
+    from stompmodel.model import CaseFace
 
-    assert parse_face("box") == "box"
-    assert parse_face("LID") == "lid"
+    assert parse_face("box") is CaseFace.BOX
+    assert parse_face("LID") is CaseFace.LID
     with pytest.raises(UsageError, match="box"):
         parse_face("flange")
 
@@ -1773,15 +2546,249 @@ def test_a_hole_outside_the_outline_exits_one_and_still_writes_the_artefact(
     assert target.exists()
 
 
-def test_the_report_names_the_model_face_and_play_area():
-    from stompdrill.cli import format_case
-    from tests.test_clearance import FakeCase
+def _case_checked_document():
+    """A ``DrillData`` carrying the two carriers a real ``--case-model`` run
+    produces: the typed ``CaseRegistration`` and the clearance stage's own
+    ``StageRun`` provenance -- not a stand-in that shares field names by
+    construction.
+    """
+    from stompdrill.pipeline import CheckCaseClearance
+    from tests.conftest import FakeCase, at, make_data
 
-    lines = "\n".join(format_case(FakeCase()))
+    stage = CheckCaseClearance(FakeCase())
+    data = stage.apply(
+        make_data(
+            at(-1_000_000, 2_000_000, 5_000_000, index=1),
+            at(3_000_000, -4_000_000, 4_000_000, index=2),
+        )
+    )
+    return data.with_processing(stage.describe())
+
+
+def test_the_report_names_the_model_face_and_play_area():
+    """``format_case`` reads identity from ``.case`` and plate/play area from
+    the clearance stage's own provenance -- the two carriers a real run
+    produces -- rather than a live ``CaseModel`` handle.
+    """
+    from stompdrill.cli import format_case
+
+    lines = "\n".join(format_case(_case_checked_document()))
 
     assert "CASE MODEL" in lines
     assert "1590BB" in lines
     assert "box" in lines
+    assert "plate" in lines
+    assert "play area" in lines
+
+
+def test_report_is_byte_identical_after_a_codec_round_trip_with_a_case():
+    """The report the live pipeline result prints and the report a document
+    round-tripped through the codec prints must agree byte for byte -- the
+    behaviour lock cannot see this, since it excludes standard output, so
+    this equality is what protects a report regression instead.
+    """
+    from stompdrill.cli import format_report
+    from stompmodel.codec import from_document, to_document
+
+    live = _case_checked_document()
+    restored = from_document(to_document(live))
+
+    live_report = format_report(live)
+    restored_report = format_report(restored)
+
+    assert live_report == restored_report
+    assert "CASE MODEL" in live_report
+    assert "1590BB" in live_report
+
+
+def test_the_report_states_the_rotated_panels_reframed_play_area():
+    """A rotated panel's play area line states the frame ``apply()`` actually
+    checked holes against -- the clearance stage's own reframed provenance
+    (ADR-0007, ticket 19) -- not the live model's permanently unrotated
+    ``play_area_nm``. The two genuinely disagree for a rotated panel; per
+    progress.md Phase 7 ruling R1, a changed line here is ticket 19 finally
+    reaching the report, not this ticket regressing it. Fix-round-1 finding:
+    the byte-identical round-trip test above never exercised a rotated panel
+    (``_case_checked_document`` supplies no enclosure, so ``apply()`` takes
+    the identity fast path), so nothing pinned this number before now.
+    """
+    from stompdrill.cli import format_case
+    from stompdrill.pipeline import CheckCaseClearance
+    from tests.conftest import FakeCase, at, make_data
+
+    model = FakeCase()  # play_area_nm = (-50mm, -40mm, 50mm, 40mm)
+    rotated = EnclosureMatch(
+        family="Hammond 1590",
+        length_nm=Nanometre(94_000_000),
+        width_nm=Nanometre(119_500_000),
+        candidates=(model.part,),
+        selected_part=model.part,
+        rotated=True,
+    )
+    stage = CheckCaseClearance(model)
+    data = stage.apply(
+        make_data(
+            at(0, 0, 5_000_000, index=1),
+            reference=ReferenceOutline(Nanometre(94_000_000), Nanometre(119_500_000)),
+        ).with_enclosure(rotated)
+    )
+    data = data.with_processing(stage.describe())
+
+    lines = "\n".join(format_case(data))
+
+    # The reframed rectangle swaps axes relative to the model's own, still
+    # unrotated ``model.play_area_nm``: 80 x 100 mm (x -40..40, y -50..50),
+    # not the model's native 100 x 80 mm (x -50..50, y -40..40).
+    assert model.play_area_nm == (
+        Nanometre(-50_000_000),
+        Nanometre(-40_000_000),
+        Nanometre(50_000_000),
+        Nanometre(40_000_000),
+    )
+    assert "80.000 x 100.000 mm" in lines
+    assert "x -40.000…40.000" in lines
+    assert "y -50.000…50.000" in lines
+    # The falsified claim: the live model's own, unrotated rectangle must not
+    # appear -- that would mean the report went back to the live handle.
+    assert "100.000 x 80.000 mm" not in lines
+    assert "x -50.000…50.000" not in lines
+
+
+def test_format_report_reads_the_case_from_a_registration_alone():
+    """A ``DrillData`` carrying only ``.case``, with no clearance provenance at
+    all (e.g. hand-built, or a document from a tool that never ran the
+    clearance stage), still states identity -- it must not require the live
+    ``CaseModel`` handle ``format_report`` no longer accepts.
+
+    Reproduces .scratch/architecture-review/falsify/tests/test_f2_02_case_report_from_data.py.
+    """
+    from stompdrill.cli import format_report
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registration = CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face)
+    data = DrillData().with_case(registration)
+
+    report = format_report(data)
+
+    assert "CASE MODEL" in report
+
+
+def test_format_report_states_the_case_a_restored_document_carries():
+    """A document round-tripped through the codec, carrying a registration
+    but no clearance provenance (the shape a second tool receives, per
+    ADR-0009), still states identity and never raises -- it degrades to
+    fewer lines, not an exception.
+
+    Reproduces .scratch/architecture-review/falsify/tests/test_f2_02_case_report_blind.py.
+    """
+    from stompdrill.cli import format_report
+    from stompmodel.codec import from_document, to_document
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registered = DrillData().with_case(CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face))
+    data = from_document(to_document(registered))
+
+    assert data.case is not None
+    assert data.case.part == "1590BB"
+
+    report = format_report(data)
+
+    assert "CASE MODEL" in report
+    assert "1590BB" in report
+    # Identity only: no clearance stage ran, so there is no plate or play
+    # area to state.
+    assert "plate" not in report
+    assert "play area" not in report
+
+
+def test_case_plate_guard_ignores_a_value_of_the_wrong_shape():
+    """``plate_nm`` is checked elementwise by ``StageRun``'s whole-nanometre
+    guard (ADR-0004), which only inspects a *tuple* value's own elements --
+    so a tuple where a scalar is expected is legitimately constructible, and
+    ``format_case``'s own guard, not the type, must be what rejects it.
+    """
+    from stompdrill.cli import format_case
+    from stompdrill.pipeline import CheckCaseClearance
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registration = CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face)
+    run = StageRun(
+        CheckCaseClearance.name,
+        (
+            ("plate_nm", (2_250_000,)),
+            ("play_area_nm", (-50_000_000, -40_000_000, 50_000_000, 40_000_000)),
+        ),
+    )
+    data = DrillData(case=registration, processing=(run,))
+
+    lines = "\n".join(format_case(data))
+
+    assert "CASE MODEL" in lines
+    assert "plate" not in lines
+    assert "play area" in lines
+
+
+def test_case_play_area_guard_ignores_a_value_of_the_wrong_shape():
+    """A ``play_area_nm`` of the wrong length passes ``StageRun``'s
+    elementwise nanometre check (every element is still a whole nanometre)
+    but is the wrong shape to unpack as four corners, and only
+    ``format_case``'s own guard catches that.
+    """
+    from stompdrill.cli import format_case
+    from stompdrill.pipeline import CheckCaseClearance
+    from stompmodel.frames import CoordinateFrame, FaceFrame
+    from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    registration = CaseRegistration("1590BB", CaseFace.BOX, "1590BB.stp", face)
+    run = StageRun(
+        CheckCaseClearance.name,
+        (
+            ("plate_nm", 2_250_000),
+            ("play_area_nm", (-50_000_000, -40_000_000, 50_000_000)),
+        ),
+    )
+    data = DrillData(case=registration, processing=(run,))
+
+    lines = "\n".join(format_case(data))
+
+    assert "CASE MODEL" in lines
+    assert "plate" in lines
+    assert "play area" not in lines
 
 
 # ---------------------------------------------------------------------------
@@ -1881,3 +2888,68 @@ def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, cap
 
     assert code == 2
     assert "hole-through-boss" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# F3-03 / T21 -- a diameter that moves far is reported, and still drilled
+# ---------------------------------------------------------------------------
+
+
+def _panel_with_one_hole(tmp_path: Path, name: str, diameter_mm: float) -> Path:
+    """A real 1590B backplate (CLAUDE.md) with one centred drill circle.
+
+    112.40 x 60.50 mm is within tolerance of both 1590B/1590B2 and 1590BS,
+    hence the explicit ``--case`` every caller of this helper must pass.
+    """
+    width, height = _pt_from_mm(112.40), _pt_from_mm(60.50)
+    return build_pdf(
+        tmp_path / name,
+        {
+            "Background": f"0 0 {width} {height} re S",
+            "Drill": circle_ops(width / 2, height / 2, _pt_from_mm(diameter_mm) / 2),
+        },
+        media=(0, 0, width + 20, height + 20),
+    )
+
+
+def test_imperial_hardware_under_the_default_metric_standard_is_reported_not_silent(tmp_path):
+    """A 7/8" (22.225 mm) hole drilled 22.0 mm under the default metric standard.
+
+    Before F3-03/T21: exit 0, an empty ``diagnostics`` array, and a hole cut
+    0.225 mm undersize with nothing anywhere stating it moved. That silence
+    was the defect -- see ``.scratch/architecture-review/issues/
+    36-the-tool-says-how-far-it-moved-the-diameter.md``.
+    """
+    panel = _panel_with_one_hole(tmp_path, "pedal.ai", 22.225)
+    out_json = tmp_path / "out.json"
+
+    exit_code = cli.main([str(panel), "--case", "1590B", "--emit", f"json={out_json}"])
+
+    doc = json.loads(out_json.read_text())
+    diagnostics = doc["diagnostics"]
+    hole = doc["holes"][0]
+
+    # The hole is still drilled: still one hole, still numbered, still the
+    # nearest stocked size -- a reported hole is not a rejected one.
+    assert exit_code == 1, "a departure this loud is a warning, not a clean exit"
+    assert hole["diameter_nm"] == 22_000_000
+    assert hole["index"] == 1
+    assert abs(hole["raw"]["diameter"] - 22.225) < 1e-6
+
+    assert [d["code"] for d in diagnostics] == ["off-size"]
+    finding = diagnostics[0]
+    assert finding["severity"] == "warning"
+    assert finding["data"]["moved_nm"] == -225_000, "undersize is negative"
+
+
+def test_the_reported_hole_still_reaches_the_toolpath(tmp_path):
+    """The warned hole is cut: it is one of the tool definitions in the drill file."""
+    panel = _panel_with_one_hole(tmp_path, "pedal2.ai", 22.225)
+    drl = tmp_path / "out.drl"
+
+    exit_code = cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={drl}"])
+
+    assert exit_code == 1
+    lines = drl.read_text().splitlines()
+    assert "T1C22.000" in lines, "the drilled 22.0 mm bit has a tool definition"
+    assert lines.count("T1") == 1, "the one hole reaches the toolpath under that tool"

@@ -54,6 +54,24 @@ def test_a_missing_kernel_surfaces_as_an_emitter_error(monkeypatch):
         StepEmitter(StepOptions(model=FakeCase()))
 
 
+def test_a_case_model_satisfying_only_the_clearance_protocol_is_refused_at_construction():
+    """The cutting path is typed against ``OcpCaseModel``, not ``CaseModel``.
+
+    A fake that satisfies every clearance member but carries no live kernel
+    document must be refused here, at construction -- never by reaching
+    ``cut_shape`` and dying mid-emit on an undeclared ``model.document``.
+    """
+    from stompdrill.cad import CaseModel
+    from stompdrill.emitters.step import StepEmitter, StepOptions
+    from tests.conftest import FakeCase
+
+    fake = FakeCase()
+    assert isinstance(fake, CaseModel)  # satisfies every declared clearance member
+
+    with pytest.raises(EmitterError, match="kernel-backed case model"):
+        StepEmitter(StepOptions(model=fake))
+
+
 def test_the_emitter_module_imports_without_the_kernel():
     """emitters/__init__ imports every emitter; this one must not need OCP."""
     import subprocess

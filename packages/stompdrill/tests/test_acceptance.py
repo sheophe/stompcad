@@ -18,7 +18,7 @@ import pytest
 
 from stompdrill import cli
 from stompmodel.units import Nanometre
-from tests.conftest import FakeCase, at, build_pdf, circle_ops, make_data
+from tests.conftest import FakeCase, at, build_pdf, circle_ops, make_data, registration_for
 from tests.hammond import BB_PROBES, require_model
 
 __all__: list[str] = []
@@ -203,6 +203,46 @@ def test_a_declared_case_with_no_outline_to_check_it_against_reaches_exit_two(tm
     assert cli.main([str(panel), "--case", "1590B"]) == 2
 
 
+def _stub_ocp_case_model(*, document=None):
+    """An ``OcpCaseModel`` standing in for a real parse, kernel-free geometry.
+
+    ``StepEmitter`` now refuses any model that is not ``isinstance``
+    ``OcpCaseModel`` at construction, so a bare ``FakeCase`` -- which
+    satisfies only the clearance protocol -- can no longer stand in for one
+    here. ``classify`` is overridden to the same plain bounds check
+    ``FakeCase`` used, since no real kernel region is available; the
+    footprint and play area mirror ``FakeCase``'s so a fixture built
+    against it behaves the same way.
+    """
+    from stompdrill.cad import Rejection
+    from stompdrill.cad.loader import OcpCaseModel
+
+    class _Stub(OcpCaseModel):
+        __slots__ = ()
+
+        def classify(self, x_nm, y_nm, radius_nm):
+            x0, y0, x1, y1 = self.play_area_nm
+            if not (x0 <= x_nm - radius_nm and x_nm + radius_nm <= x1):
+                return Rejection.OFF_FACE
+            if not (y0 <= y_nm - radius_nm and y_nm + radius_nm <= y1):
+                return Rejection.OFF_FACE
+            return None
+
+    return _Stub(
+        part=FakeCase.part, face=FakeCase.face, model_name=FakeCase.model_name,
+        footprint_nm=FakeCase.footprint_nm, plate_nm=FakeCase.plate_nm,
+        play_area_nm=(
+            Nanometre(-50_000_000), Nanometre(-40_000_000),
+            Nanometre(50_000_000), Nanometre(40_000_000),
+        ),
+        frame=FakeCase.frame, margin_nm=Nanometre(1_000_000), axis=1,
+        own_region=None, own_frame=FakeCase.frame,
+        box_region=None, box_frame=None,
+        drilled_position_mm=0.0, inner_position_mm=0.0,
+        document=document, target_shape=None, document_timestamp="",
+    )
+
+
 def test_the_case_model_is_parsed_once_however_many_consumers_want_it(tmp_path, monkeypatch):
     """The clearance stage and the STEP emitter both need it. Parsing twice
     is not only slow: two parses are two chances to disagree, and every
@@ -217,7 +257,7 @@ def test_the_case_model_is_parsed_once_however_many_consumers_want_it(tmp_path, 
 
     def counting_load(path, *, face, margin_nm, part):
         calls.append(path)
-        return FakeCase()
+        return _stub_ocp_case_model()
 
     monkeypatch.setattr("stompdrill.cad.load_case_model", counting_load)
 
@@ -299,9 +339,8 @@ def test_the_step_emitter_refuses_data_that_was_never_routed():
     document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
     app.InitDocument(document)
 
-    model = FakeCase()
-    model.document = document
-    unrouted = make_data(at(0, 0))
+    model = _stub_ocp_case_model(document=document)
+    unrouted = make_data(at(0, 0)).with_case(registration_for(model))
 
     with pytest.raises(EmitterError, match="no artifact can state a sequence"):
         StepEmitter(StepOptions(model=model)).emit(unrouted)

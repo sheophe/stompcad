@@ -66,6 +66,12 @@ cd packages/stompgeom && uv run --no-sync mypy
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
 
+# Behaviour lock: whole artefacts from two panels, hashed. Capture before a change
+# that must move no artefact byte, then run again after. It is not a gate on HEAD
+# and no reference is committed; panel A needs the 1590B model cached. See ADR-0011
+# for what a green run does not reach.
+bash tools/verify-lock.sh
+
 # Mutation survey, per package -- there is no workspace-wide run
 (cd packages/stompmodel && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
   && ../../.venv/bin/mutmut results)
@@ -104,6 +110,18 @@ size, or a part number in no catalogue is a usage error rather than a diagnostic
 `--emit` formats come from the registry: `drawing-pdf`, `drawing-svg`, `excellon`,
 `json`, `step`.
 
+The requested `--emit` targets are validated once, as a set, before anything is
+rendered: two targets may not reach one file, compared as a case- and
+normalisation-folded key over each target's *resolved* path, because a filesystem may
+hold two such spellings, or two paths joined by a symlink, as one file; and every
+target that already exists must be a regular file. The write
+mechanism's own preconditions are not restated there — it enforces and reports them
+itself; see
+[ADR-0005](docs/adr/0005-binary-emitter-payloads.md) and
+[ADR-0001](docs/adr/0001-pipeline-and-emitter-adapters.md). A run that fails this
+check, or fails while writing, writes none of its requested artefacts and leaves
+every existing target exactly as it was, modulo the one named exclusion.
+
 `drawing-pdf` writes an ISO 5457 sheet at 1:1, choosing the smallest of A4 portrait, A3,
 A2, A1 and A0 landscape that holds the panel. ISO 5457 §4.1 fixes the orientation of each
 size, so there is no orientation to choose.
@@ -112,8 +130,8 @@ Exit codes are a contract: `0` clean, `1` warnings present, `2` errors, `3` usag
 failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `unverifiable-enclosure`, `unmatched-enclosure`, `wrong-enclosure`, `hole-off-face`,
 `hole-through-boss`, `hole-obstructed` and `wrong-case-model`. `grid-too-fine`,
-`grid-ambiguous`, `hole-outside-outline` and `nesting-truncated` are warnings and reach
-exit 1.
+`grid-ambiguous`, `hole-outside-outline`, `nesting-truncated`,
+`case-orientation-unverifiable` and `off-size` are warnings and reach exit 1.
 
 `packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2`
 (112.40 × 60.50) and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it
@@ -147,6 +165,23 @@ The accepted architecture is defined by:
   model package and the workspace's dependency order.
 - [ADR-0010](docs/adr/0010-the-stomp-prefix.md): the `stomp` prefix every package
   carries.
+- [ADR-0011](docs/adr/0011-behaviour-lock-and-its-blind-spots.md): the behaviour
+  lock, its uncommitted reference, and what a green run does not prove.
+
+`stompmodel` publishes the guards a measurement's unit must satisfy — `check_millimetres`
+and `check_nanometres` — beside the newtypes they check, and the diagnostics vocabulary a
+second tool's value type interoperates through: `Diagnosable`, and the plain-tuple
+`of_severity`/`worst_severity` reductions beside `Diagnostic`. The `DrillData` JSON codec is
+versioned; the document is at version 6, whose `CaseRegistration` member carries the
+resolved part, drilled face, supplied model's file name and cutting frame as one typed fact
+rather than four — see [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md).
+`stompgeom` owns the kernel layer on both sides it currently touches: reading, where
+`stompgeom.step` publishes the one rule for what XCAF recorded as a label's name,
+distinguishing an unnamed label from OCC's own synthesised placeholder; and writing, where
+`stompgeom.writer.render_step` is the one serialising entry point and returns the finished
+STEP payload rather than a path. Assembling a document from placed, named, coloured solids
+("build") is deliberately not yet owned — see
+[ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md).
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those
@@ -217,7 +252,20 @@ CLI.
   `/Resources/Properties` -> `/MCn`. Only top-level layers are recoverable.
 - Paths with neither fill nor stroke are absent from the stream, which is why
   `EmptyLayerError` names the remedy: give the drill circles a stroke.
-- `W` and `W*` establish clipping boundaries; `n`, not `W`, makes a path invisible.
+- `W` and `W*` mark a clipping path but are not tracked as a clip region; `n`, not `W`,
+  makes a path invisible.
+- The page's own crop box — its media box when none is declared (ISO 32000-1 §14.11.2) —
+  and every Form XObject's declared `/BBox` (ISO 32000-1 §8.10.2) are each an
+  unconditional clip, carried through the walk as **one** inherited region rather than
+  two policies: entering a form intersects its box, mapped through the form's own
+  `/Matrix` and the current matrix, into the region inherited from the page and every
+  enclosing form. Nested forms intersect cumulatively; no unconditional box is exempt
+  because no test named it.
+- The culling decision is taken on the quantity the recovered feature actually is. A
+  recognised circle is judged by its **centre** — a hole is point-like, so a circle
+  painting only a thin crescent inside the clip is not a hole, however far its bounding
+  box reaches into it. Any other feature, an outline candidate among them, is judged by
+  its **extent**, so a path merely straddling the region's edge is kept.
 - Circle recognition validates four cubic Beziers by equal anchor radii and kappa
   consistency around their centroid, so it remains rotation-invariant.
 - Apply every `cm` current transformation matrix, including a Form XObject's `/Matrix`.
@@ -234,17 +282,27 @@ CLI.
 - **New emitter:** implement `stompmodel`'s `Emitter` protocol, decorate with
   `@register_emitter`, add one import in `emitters/__init__.py`. The CLI resolves
   `--emit FORMAT=PATH` through the registry and never names a format. An emitter needing
-  its own CLI flags still requires a `cli.py` edit. A binary emitter writes its payload
-  through `stompmodel.protocols.write_payload(path, payload) -> int`, which is where the
-  bytes are written and counted; the CLI keeps only the sentence it prints from that count
-  — see [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
+  its own CLI flags still requires a `cli.py` edit. A registered emitter whose constructor
+  needs something this CLI cannot supply is refused as a usage failure (exit 3, no
+  artefact written) rather than crashing; only construction is guarded, so a fault raised
+  later from the emitter's own `emit` step keeps its traceback. An emitter returns its
+  payload and never writes it. The command line stages every requested artefact through
+  `stompmodel.protocols.stage_payload`, then commits each through the `StagedWrite.commit`
+  that staging handed back, which is where the bytes reach a path and are counted; the CLI
+  keeps only the sentence it prints from that count — see
+  [ADR-0005](docs/adr/0005-binary-emitter-payloads.md). A drawing backend exposes
   `render(scene, title)`, the same seam `drawing_svg` and `drawing_pdf` serialise a
   `Scene` through.
 - **New stage:** implement `stompmodel`'s `Stage` protocol including `describe()`, then
   insert it in `cli.build_pipeline`. Order is the one thing a stage cannot self-declare,
   so `build_pipeline` is the integration point by design.
 - **New source:** implement `stompdrill`'s own `Source` protocol, returning
-  `RawDrillData`. There is no source registry.
+  `RawDrillData`. This is a library caller's extension point, not the CLI's: `stompdrill`'s
+  command line always reads Illustrator artwork through `AiPdfSource`, and no flag selects
+  another one. That is deliberate, not an omission — wiring a selection flag ahead of a real
+  second source would be speculative generality, so a reader who finds this recipe
+  unreachable from the CLI should treat this sentence as the answer, not as a gap to close.
+  There is no source registry.
 - **A new stage or source also gets one line in
   `packages/stompdrill/src/stompdrill/__init__.py`.** A new emitter does not — it has a
   registry, and is resolved through `stompdrill.emitters.get_emitter`. The root exports
@@ -287,6 +345,13 @@ CLI.
 - Break accidental equality in fixtures: number routed holes out of tuple order, so a test
   only passes an emitter that reads the number through `DrillData.numbered()` rather than
   recomputing one from list position.
+- The fixture rule above is a special case of a general one: a verification instrument that
+  can pass by finding nothing — a structural gate scanning for a restated rule, an ordering
+  guard whose fixture never exercises the order it claims to police, a property that never
+  reaches the branch it means to constrain — is not evidence until a control shows it, by a
+  deliberate breach of the rule it enforces, actually failing. Write that control beside the
+  instrument, in the same suite, run by the same command; a report that a control was run by
+  hand is not the control.
 - Preserve property tests for snapping (onto the grid, within half a pitch, and
   idempotent) and tool stability under hole reordering — not deduplication idempotence,
   which exact integer equality makes structurally unfalsifiable.

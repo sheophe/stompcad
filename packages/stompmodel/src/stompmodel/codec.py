@@ -9,12 +9,15 @@ written elsewhere is how the two come to disagree about it. See ADR-0009.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .diagnostics import Diagnostic, Severity
 from .errors import DocumentError
+from .frames import CoordinateFrame, FaceFrame
 from .model import (
+    CaseFace,
+    CaseRegistration,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -29,7 +32,7 @@ from .units import Millimetre, Nanometre
 __all__ = ["FORMAT", "VERSION", "to_document", "from_document"]
 
 FORMAT = "stompcad-drill-data"
-VERSION = 5
+VERSION = 6
 
 #: The frame every document is written in, stated by the writer and checked by
 #: the reader. Named once, because a reader checking a second copy of these
@@ -67,6 +70,7 @@ def to_document(data: DrillData) -> dict[str, Any]:
         "diagnostics": [_diagnostic(d) for d in data.diagnostics],
         "processing": [_stage_run(r) for r in data.processing],
         "enclosure": _enclosure(data.enclosure),
+        "case": _case(data.case),
     }
 
 
@@ -154,6 +158,29 @@ def _enclosure(match: EnclosureMatch | None) -> dict[str, Any] | None:
     }
 
 
+def _case(case: CaseRegistration | None) -> dict[str, Any] | None:
+    """Emit the registration, or ``null`` when no model was supplied."""
+    if case is None:
+        return None
+    return {
+        "part": case.part,
+        "face": case.face.value,
+        "model": case.model,
+        "frame": _frame(case.frame),
+    }
+
+
+def _frame(frame: FaceFrame) -> dict[str, Any]:
+    """Emit a face frame's basis as a nested object."""
+    basis = frame.basis
+    return {
+        "origin_nm": list(basis.origin_nm),
+        "u": list(basis.u),
+        "v": list(basis.v),
+        "w": list(basis.w),
+    }
+
+
 def from_document(document: Mapping[str, Any]) -> DrillData:
     """Rebuild ``DrillData`` from a document ``to_document`` produced.
 
@@ -181,12 +208,13 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
     # these for its own reasons is re-attributed but not erased.
     try:
         return DrillData(
-            holes=tuple(_read_hole(h) for h in document["holes"]),
+            holes=_read_holes(document["holes"]),
             reference=_read_reference(document["reference"]),
             diagnostics=tuple(_read_diagnostic(d) for d in document["diagnostics"]),
             source=_read_source(document["source"]),
             processing=tuple(_read_stage_run(r) for r in document["processing"]),
             enclosure=_read_enclosure(document["enclosure"]),
+            case=_read_case(document["case"]),
         )
     except KeyError as missing:
         raise DocumentError(f"{FORMAT} document has no {missing.args[0]!r}") from missing
@@ -217,6 +245,32 @@ def _read_reference(payload: Mapping[str, Any] | None) -> ReferenceOutline | Non
             Millimetre(payload["raw"]["width"]), Millimetre(payload["raw"]["height"])
         ),
     )
+
+
+def _read_holes(payload: Iterable[Mapping[str, Any]]) -> tuple[Hole, ...]:
+    """Restore every hole, refusing a numbering no routing stage could produce.
+
+    ``Hole`` refuses a number below 1; the set is what it cannot see. A
+    repeat or a gap balloons two holes with one number and makes a report
+    of holes by number meaningless. Three facts compose the rule -- none
+    below 1, none repeated, none above the count -- and together they admit
+    only ``1…n``. See ADR-0006.
+    """
+    holes = tuple(_read_hole(h) for h in payload)
+    count = len(holes)
+    seen: set[int] = set()
+    for hole in holes:
+        number = hole.index
+        if number is None:
+            raise DocumentError(f"{FORMAT} has a hole with no drill number")
+        if number in seen:
+            raise DocumentError(f"{FORMAT} hole number {number} is used twice")
+        if number > count:
+            raise DocumentError(
+                f"{FORMAT} hole number {number} is above {count}, the hole count"
+            )
+        seen.add(number)
+    return holes
 
 
 def _read_hole(payload: Mapping[str, Any]) -> Hole:
@@ -277,4 +331,34 @@ def _read_enclosure(payload: Mapping[str, Any] | None) -> EnclosureMatch | None:
         candidates=tuple(payload["candidates"]),
         rotated=payload["rotated"],
         selected_part=payload["selected_part"],
+    )
+
+
+def _read_case(payload: Mapping[str, Any] | None) -> CaseRegistration | None:
+    """Restore the registration, or ``None`` when no model was supplied."""
+    if payload is None:
+        return None
+    return CaseRegistration(
+        part=payload["part"],
+        face=CaseFace(payload["face"]),
+        model=payload["model"],
+        frame=_read_frame(payload["frame"]),
+    )
+
+
+def _read_frame(payload: Mapping[str, Any]) -> FaceFrame:
+    """Restore a face frame, each vector handed whole to the frame's own guard.
+
+    ``origin_nm`` is passed like ``u``, ``v`` and ``w`` rather than indexed:
+    indexing would truncate a long vector into a frame no writer stated, and
+    report a short one as an error naming no field. ``CoordinateFrame`` owns
+    the three-component rule and the origin's whole-nanometre check.
+    """
+    return FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=tuple(payload["origin_nm"]),
+            u=tuple(payload["u"]),
+            v=tuple(payload["v"]),
+            w=tuple(payload["w"]),
+        )
     )

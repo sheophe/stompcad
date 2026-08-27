@@ -12,7 +12,7 @@ from stompdrill.cad import Rejection
 from stompdrill.emitters import base
 from stompdrill.geometry import KAPPA
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import DrillData, Hole, ReferenceOutline, SourceInfo
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, ReferenceOutline, SourceInfo
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
@@ -25,6 +25,7 @@ __all__ = [
     "make_data",
     "positions",
     "circle_ops",
+    "registration_for",
     "self_nesting_form",
     "image_ending_form",
     "build_pdf",
@@ -91,6 +92,17 @@ def codes(data: DrillData) -> list[str]:
     return [d.code for d in data.diagnostics]
 
 
+def registration_for(model) -> CaseRegistration:
+    """A ``CaseRegistration`` naming ``model`` verbatim.
+
+    For a test that drives ``cut_shape``/``StepEmitter.emit`` directly,
+    without first running ``CheckCaseClearance`` -- the cutter now reads its
+    frame and face from ``DrillData.case``, never from the model, so a test
+    exercising it must attach one itself.
+    """
+    return CaseRegistration(model.part, model.face, model.model_name, model.frame)
+
+
 def positions(data: DrillData) -> list[tuple[Nanometre, Nanometre]]:
     return [(h.x_nm, h.y_nm) for h in data.holes]
 
@@ -131,7 +143,9 @@ def build_pdf(
     layers: dict[str, str],
     *,
     media: tuple[float, float, float, float] = (0, 0, 400, 400),
+    crop: tuple[float, float, float, float] | None = None,
     form: tuple[list[float], str] | None = None,
+    form_bbox: tuple[float, float, float, float] = (0, 0, 10000, 10000),
     form_properties: dict[str, str] | None = None,
     image: bool = False,
     extra: str = "",
@@ -139,6 +153,9 @@ def build_pdf(
     """Write a one-page PDF whose layers are OCGs, like a native ``.ai`` save.
 
     Forms only receive resources when requested, keeping lookup and fallback distinct.
+    ``crop`` states a ``/CropBox`` narrower than ``media``, so a test can make
+    the page's own box bite exactly as ``form_bbox`` already lets a form's box
+    bite; omitted, the page carries no ``/CropBox`` and its media box governs.
     """
     pdf = pikepdf.new()
     ocgs = []
@@ -161,7 +178,7 @@ def build_pdf(
         stream = pdf.make_stream(form_content.encode())
         stream.Type = Name.XObject
         stream.Subtype = Name.Form
-        stream.BBox = Array([0, 0, 10000, 10000])
+        stream.BBox = Array(list(form_bbox))
         stream.Matrix = Array(list(matrix))
         if form_properties is not None:
             own = Dictionary()
@@ -181,16 +198,15 @@ def build_pdf(
         table.Im0 = pdf.make_indirect(picture)
         resources.XObject = table
 
-    page = pikepdf.Page(
-        pdf.make_indirect(
-            Dictionary(
-                Type=Name.Page,
-                MediaBox=Array(list(media)),
-                Resources=resources,
-                Contents=pdf.make_indirect(pdf.make_stream(("\n".join(body) + extra).encode())),
-            )
-        )
+    page_dict = Dictionary(
+        Type=Name.Page,
+        MediaBox=Array(list(media)),
+        Resources=resources,
+        Contents=pdf.make_indirect(pdf.make_stream(("\n".join(body) + extra).encode())),
     )
+    if crop is not None:
+        page_dict.CropBox = Array(list(crop))
+    page = pikepdf.Page(pdf.make_indirect(page_dict))
     pdf.pages.append(page)
     pdf.save(path)
     return path
@@ -204,7 +220,8 @@ class FakeCase:
     """
 
     part = "1590BB"
-    face = "box"
+    face = CaseFace.BOX
+    model_name = "1590BB.stp"
     footprint_nm = (Nanometre(119_500_000), Nanometre(94_000_000))
     plate_nm = Nanometre(2_250_000)
     frame = FaceFrame(

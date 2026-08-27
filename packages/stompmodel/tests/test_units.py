@@ -11,8 +11,8 @@ from stompmodel import units
 from stompmodel.units import (
     NM_PER_MM,
     Nanometre,
-    _check_nanometres,
     check_millimetres,
+    check_nanometres,
     format_nm,
     mm_from_nm,
     nm_from_mm,
@@ -124,26 +124,44 @@ class TestScaledNm:
 class TestTheNanometreGuard:
     """What keeps a nominal length whole, checked where it is defined."""
 
+    def test_the_nanometre_guard_is_exported(self) -> None:
+        """``stompdrill`` applies this guard from several places outside the
+        model, the same reason ``check_millimetres`` is public; a shared rule
+        renamed private would break every one of those callers with nothing
+        saying so."""
+        assert "check_nanometres" in units.__all__
+
     def test_a_float_is_not_a_length(self) -> None:
         """Rounding belongs at the unit boundary, so a float never reaches a
         nominal field: one that did would print a coordinate no drill can hit."""
         with pytest.raises(TypeError, match="whole number of nanometres"):
-            _check_nanometres("Owner", x_nm=7_000_000.5)
+            check_nanometres("Owner", x_nm=7_000_000.5)
 
     def test_a_bool_is_not_a_length(self) -> None:
         """``isinstance(True, int)`` is true, which is why the guard compares
         the type exactly. ``True`` would otherwise be a hole one nanometre out."""
         with pytest.raises(TypeError, match="whole number of nanometres"):
-            _check_nanometres("Owner", x_nm=True)
+            check_nanometres("Owner", x_nm=True)
+
+    def test_a_str_is_not_a_length(self) -> None:
+        """A digit string is not the integer it looks like."""
+        with pytest.raises(TypeError, match="whole number of nanometres"):
+            check_nanometres("Owner", x_nm="7000000")
+
+    def test_a_decimal_is_not_a_length(self) -> None:
+        """``Decimal`` is the model's own scaling type, and still not an
+        ``int``: a canonical length has already crossed the unit boundary."""
+        with pytest.raises(TypeError, match="whole number of nanometres"):
+            check_nanometres("Owner", x_nm=Decimal(7_000_000))
 
     def test_the_refusal_names_the_owner_and_the_field(self) -> None:
         """One guard serves every value object, so the message is the only
         thing that says which field went wrong."""
         with pytest.raises(TypeError, match=r"Owner\.x_nm"):
-            _check_nanometres("Owner", x_nm=7_000_000.5)
+            check_nanometres("Owner", x_nm=7_000_000.5)
 
     def test_whole_nanometres_pass_including_zero_and_negatives(self) -> None:
-        _check_nanometres("Owner", x_nm=7_000_000, y_nm=0, z_nm=-40_000_000)
+        check_nanometres("Owner", x_nm=7_000_000, y_nm=0, z_nm=-40_000_000)
 
 
 class TestTheMillimetreGuardIsPartOfTheSharedSurface:

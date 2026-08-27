@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, check_nanometres
 
 __all__ = ["Enclosure", "HAMMOND_1590", "footprints"]
 
@@ -30,16 +30,16 @@ class Enclosure:
     def __post_init__(self) -> None:
         """Require each dimension to be a plain integer number of nanometres.
 
-        ``type`` rejects both floats and ``bool``, an ``int`` subclass, so values
-        cannot bypass the unit boundary before a footprint is matched or printed.
+        The published guard rejects both floats and ``bool``, an ``int``
+        subclass, so values cannot bypass the unit boundary before a footprint
+        is matched or printed.
         """
-        for name in ("length_nm", "width_nm", "height_nm"):
-            value = getattr(self, name)
-            if type(value) is not int:
-                raise TypeError(
-                    f"Enclosure.{name} must be a whole number of nanometres, "
-                    f"not {value!r}"
-                )
+        check_nanometres(
+            "Enclosure",
+            length_nm=self.length_nm,
+            width_nm=self.width_nm,
+            height_nm=self.height_nm,
+        )
 
     @property
     def footprint(self) -> tuple[Nanometre, Nanometre]:

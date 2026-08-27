@@ -4,9 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from stompdrill.cad.case import Faces, build_frame, drill_axis, find_faces, select_solid
+from stompdrill.cad.case import (
+    Faces,
+    _inner_level,
+    _Level,
+    _nearest_companion_level,
+    build_frame,
+    drill_axis,
+    find_faces,
+    select_solid,
+)
 from stompgeom.step import read_step
-from stompmodel.units import Nanometre
+from stompmodel.model import CaseFace
+from stompmodel.units import Nanometre, mm_from_nm
 from tests.hammond import MODELS
 
 pytestmark = pytest.mark.hammond
@@ -44,31 +54,24 @@ def test_a_footprint_matching_nothing_is_rejected(document):
 
 
 def test_the_box_and_lid_are_selected_by_name(document):
-    assert "BOX" in select_solid(document, "box").name.upper()
-    assert "LID" in select_solid(document, "lid").name.upper()
+    assert "BOX" in select_solid(document, CaseFace.BOX).name.upper()
+    assert "LID" in select_solid(document, CaseFace.LID).name.upper()
 
 
 def test_the_selected_lid_is_the_thinner_solid(document):
     from stompgeom.step import bounding_box_mm
 
     axis = drill_axis(document, FOOTPRINT)
-    box = bounding_box_mm(select_solid(document, "box").shape)
-    lid = bounding_box_mm(select_solid(document, "lid").shape)
+    box = bounding_box_mm(select_solid(document, CaseFace.BOX).shape)
+    lid = bounding_box_mm(select_solid(document, CaseFace.LID).shape)
 
     assert (lid[axis + 3] - lid[axis]) < (box[axis + 3] - box[axis])
-
-
-def test_an_unknown_face_name_is_rejected(document):
-    from stompdrill.errors import StompdrillError
-
-    with pytest.raises(StompdrillError):
-        select_solid(document, "flange")
 
 
 def test_the_box_plate_thickness_is_measured_from_the_two_faces(document):
     axis = drill_axis(document, FOOTPRINT)
 
-    faces = find_faces(select_solid(document, "box"), axis)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
 
     assert faces.plate_nm == 2_250_000
 
@@ -76,7 +79,7 @@ def test_the_box_plate_thickness_is_measured_from_the_two_faces(document):
 def test_the_lid_plate_thickness_is_measured_from_the_two_faces(document):
     axis = drill_axis(document, FOOTPRINT)
 
-    faces = find_faces(select_solid(document, "lid"), axis)
+    faces = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert faces.plate_nm == 2_000_000
 
@@ -84,7 +87,7 @@ def test_the_lid_plate_thickness_is_measured_from_the_two_faces(document):
 def test_the_outward_normal_points_away_from_the_solid(document):
     """same_sense, not the surface normal, decides which way is out."""
     axis = drill_axis(document, FOOTPRINT)
-    box = select_solid(document, "box")
+    box = select_solid(document, CaseFace.BOX)
     faces = find_faces(box, axis)
 
     from stompgeom.step import bounding_box_mm
@@ -98,15 +101,15 @@ def test_the_outward_normal_points_away_from_the_solid(document):
 def test_the_box_and_lid_face_in_opposite_directions(document):
     axis = drill_axis(document, FOOTPRINT)
 
-    box = find_faces(select_solid(document, "box"), axis)
-    lid = find_faces(select_solid(document, "lid"), axis)
+    box = find_faces(select_solid(document, CaseFace.BOX), axis)
+    lid = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert box.outward[axis] == -lid.outward[axis]
 
 
 def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
     axis = drill_axis(document, FOOTPRINT)
-    faces = find_faces(select_solid(document, "box"), axis)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
 
     frame = build_frame(faces, axis)
     u, v, w = frame.basis.u, frame.basis.v, frame.basis.w
@@ -119,9 +122,26 @@ def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
     assert pytest.approx(cross, abs=1e-9) == w
 
 
+def test_the_frame_origin_registers_the_inner_surface_not_the_drilled_one(document):
+    """docs/specs/stompcollider-technical.md's Seating-depth section measures
+    seating travel "against the inner surface of the drilled plate, which the
+    face frame registers". Compare the frame's own origin against the two
+    surface positions ``find_faces`` already measured, rather than
+    re-deriving a number from the code under test (ticket 20, AC1).
+    """
+    axis = drill_axis(document, FOOTPRINT)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
+
+    frame = build_frame(faces, axis)
+
+    assert faces.inner_position_mm != pytest.approx(faces.drilled_position_mm)
+    origin_mm = mm_from_nm(frame.basis.origin_nm[axis])
+    assert origin_mm == pytest.approx(faces.inner_position_mm)
+
+
 def test_the_frame_is_orthonormal(document):
     axis = drill_axis(document, FOOTPRINT)
-    frame = build_frame(find_faces(select_solid(document, "box"), axis), axis)
+    frame = build_frame(find_faces(select_solid(document, CaseFace.BOX), axis), axis)
 
     for a in (frame.basis.u, frame.basis.v, frame.basis.w):
         assert pytest.approx(sum(c * c for c in a), abs=1e-9) == 1.0
@@ -137,8 +157,8 @@ def _frame_for(request, part: str) -> tuple[int, Faces, Faces]:
         Nanometre(round(model.footprint_mm[1] * 1_000_000)),
     )
     axis = drill_axis(document, footprint)
-    box = find_faces(select_solid(document, "box"), axis)
-    lid = find_faces(select_solid(document, "lid"), axis)
+    box = find_faces(select_solid(document, CaseFace.BOX), axis)
+    lid = find_faces(select_solid(document, CaseFace.LID), axis)
     return axis, box, lid
 
 
@@ -207,9 +227,143 @@ def test_the_plate_thickness_is_correct_for_every_catalogued_model(request, part
     )
 
     axis = drill_axis(document, footprint)
-    box = find_faces(select_solid(document, "box"), axis)
-    lid = find_faces(select_solid(document, "lid"), axis)
+    box = find_faces(select_solid(document, CaseFace.BOX), axis)
+    lid = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert box.plate_nm == round(model.box_plate_mm * 1_000_000)
     assert lid.plate_nm == round(model.lid_plate_mm * 1_000_000)
     assert box.outward[axis] == -lid.outward[axis]
+
+
+@pytest.mark.parametrize("part", sorted(MODELS))
+def test_the_published_frames_normal_points_away_from_the_solid(request, part):
+    """Ticket 27, AC2/AC3: stompmodel.frames.FaceFrame now states that its
+    third axis is the outward normal. This checks that stated convention
+    against the value ``build_frame`` actually publishes (``frame.basis.w``),
+    for every catalogued model and both faces -- not against ``Faces.outward``,
+    which ``test_the_outward_normal_points_away_from_the_solid`` above already
+    covers and which is not evidence for the published frame's own sense.
+    """
+    from stompgeom.step import bounding_box_mm
+
+    model = MODELS[part]
+    document = read_step(request.getfixturevalue(_FIXTURE_OF[part]))
+    footprint = (
+        Nanometre(round(model.footprint_mm[0] * 1_000_000)),
+        Nanometre(round(model.footprint_mm[1] * 1_000_000)),
+    )
+    axis = drill_axis(document, footprint)
+
+    for case_face in (CaseFace.BOX, CaseFace.LID):
+        solid = select_solid(document, case_face)
+        faces = find_faces(solid, axis)
+        frame = build_frame(faces, axis)
+
+        bbox = bounding_box_mm(solid.shape)
+        centre = (bbox[axis] + bbox[axis + 3]) / 2
+
+        assert (faces.drilled_position_mm - centre) * frame.basis.w[axis] > 0
+
+
+def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
+    """ADR-0007's narrowing paragraph (T15): whether ``build_frame``'s axis
+    choice for this fix's one reachable part agrees with the catalogue's
+    stated 50.55 x 50.60 mm asymmetry cannot be checked against the real
+    supplied model. Its own box measures both in-plane spans EQUAL to
+    kernel precision, so ``build_frame``'s own tie-break (the lower-indexed
+    free axis) -- not "the larger span" -- governs it there. Executed, not
+    assumed: this is what the ADR's narrowing paragraph reports, rather than
+    a premise nothing checked. Requires a pre-fetched model (``python
+    tools/fetch_case_model.py 1590LB``); skipped, not failed, if absent.
+    """
+    from tools.fetch_case_model import cache_dir
+
+    path = cache_dir() / "1590LB.stp"
+    if not path.is_file():
+        pytest.skip("1590LB not cached; run `python tools/fetch_case_model.py 1590LB`")
+
+    document = read_step(path)
+    box = select_solid(document, CaseFace.BOX)
+    # 1590LB, like every other cached Hammond model, is assembled Y-up
+    # (axis 1 is the drill axis); the catalogue's own 0.05 mm asymmetry is
+    # too fine for ``drill_axis``'s 0.05 mm match tolerance to resolve at
+    # float precision, so the axis is stated directly rather than derived.
+    faces = find_faces(box, axis=1)
+
+    free = [index for index in range(3) if index != 1]
+    spans = [faces.footprint_mm[index] for index in free]
+    assert spans[0] == pytest.approx(spans[1], abs=1e-6)
+
+
+def _level(position: float, area: float, outward: int, name: str) -> _Level:
+    """One synthetic level, identified by the single name in its ``faces``."""
+    return _Level(position=position, area=area, outward=outward, faces=(name,))
+
+
+def test_the_inner_level_breaks_an_exact_area_tie_towards_the_drilled_face():
+    """ADR-0006 binds every selection rule, not only routing's: an exact tie
+    on the primary key must still name a winner from the candidates' own
+    geometry rather than from the order the kernel enumerated them. The
+    level that backs the drilled face is the first one behind it.
+    """
+    drilled = _level(0.0, 100.0, 1, "D")
+    near = _level(-3.0, 50.0, -1, "A")
+    far = _level(-7.0, 50.0, -1, "B")
+    # The control: without exactly equal areas the permutation assertions
+    # below would pass by never reaching the tie-break at all.
+    assert near.area == far.area
+
+    assert _inner_level([near, far], drilled).faces == ("A",)
+    assert _inner_level([far, near], drilled).faces == ("A",)
+
+
+def test_the_inner_level_tie_break_never_outranks_a_real_area_difference():
+    """The innocent probe: the secondary key is a tie-break, not a co-primary.
+
+    ``near`` wins the secondary key and loses the primary one, so a
+    ``(position, area)`` ranking would elect it. Aggregate area must still
+    decide, in either arrival order.
+    """
+    drilled = _level(0.0, 100.0, 1, "D")
+    near = _level(-3.0, 10.0, -1, "A")
+    far = _level(-7.0, 50.0, -1, "B")
+    assert near.area != far.area
+
+    assert _inner_level([near, far], drilled).faces == ("B",)
+    assert _inner_level([far, near], drilled).faces == ("B",)
+
+
+def test_the_nearest_companion_breaks_an_exact_distance_tie_towards_the_proud_side():
+    """Equal distances put the two candidates on opposite sides of ``inner``,
+    and exactly one of those sides is the proud one (``+inner.outward``),
+    so the rule is total on the candidates' own geometry. Positions mirror
+    the real 1590BB: its floor sits at -27.75 facing ``+``, its drilled
+    face at -30.0, and its 0.5 mm cast lettering at -27.25 -- so the proud
+    side is the one *away* from the drilled face. Preferring it can only
+    turn a would-be relief into structure; the other side reports a boss
+    as a negative height and lets a hole through it.
+    """
+    inner = _level(-27.75, 100.0, 1, "I")
+    proud = _level(-27.25, 10.0, 1, "P")
+    receding = _level(-28.25, 10.0, 1, "Q")
+    # The control: the two distances are exactly, not approximately, equal.
+    assert abs(proud.position - inner.position) == abs(receding.position - inner.position)
+
+    assert _nearest_companion_level([proud, receding], inner).faces == ("P",)
+    assert _nearest_companion_level([receding, proud], inner).faces == ("P",)
+
+
+def test_the_nearest_companion_tie_break_never_outranks_a_real_distance():
+    """The innocent probe: distance still decides when there is no tie.
+
+    ``receding`` sits on the side the tie-break disfavours and is nearer;
+    a ranking that consulted the side first would elect the further
+    ``proud`` instead.
+    """
+    inner = _level(-27.75, 100.0, 1, "I")
+    receding = _level(-28.25, 10.0, 1, "Q")
+    proud = _level(-26.75, 10.0, 1, "P")
+    assert abs(receding.position - inner.position) != abs(proud.position - inner.position)
+
+    assert _nearest_companion_level([receding, proud], inner).faces == ("Q",)
+    assert _nearest_companion_level([proud, receding], inner).faces == ("Q",)

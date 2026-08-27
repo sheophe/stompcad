@@ -2,31 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, ClassVar
+from collections.abc import Sequence
+from typing import ClassVar
 
 from stompmodel.model import DrillData, Hole, StageRun
-
-if TYPE_CHECKING:
-    # ``sorted`` needs a key whose result can be compared with ``<``. Spelling
-    # that as ``object`` types the parameter by what a key *is* rather than by
-    # what this stage does with it, and ``RouteHoles(key=lambda h: h)`` then
-    # type-checks cleanly and raises TypeError on a real panel. _typeshed is
-    # not importable at runtime, which is why the import is guarded.
-    from _typeshed import SupportsRichComparison
 
 __all__ = ["RouteHoles"]
 
 
 def _total_order(hole: Hole) -> tuple[int, int, float, float, float]:
-    """Reading order, then the measurement, so no two holes can tie.
+    """Reading order, then ``Hole.tie_break``, so no two holes can tie.
 
     Nominal position ties for two holes at one point, and ``min``
     would then keep whichever arrived first — input order deciding an answer
-    that must be geometric. The measurement that produced each hole breaks it.
-    Two holes equal in both are interchangeable, so no output distinguishes them.
+    that must be geometric. The reading-order prefix is this stage's own
+    policy; the tie-break it composes after is published beside ``Hole``,
+    the one implementation ADR-0006 pins.
     """
-    return (-hole.y_nm, hole.x_nm, hole.raw.x, hole.raw.y, hole.raw.diameter)
+    return (-hole.y_nm, hole.x_nm, *hole.tie_break)
 
 
 def _distance_sq(a: Hole, b: Hole) -> int:
@@ -100,28 +93,20 @@ def _routed(holes: Sequence[Hole]) -> list[Hole]:
 class RouteHoles:
     """Plan the drilling sequence and number the holes along it.
 
-    By default: one contiguous block per diameter, blocks ascending by size,
-    each routed by nearest-neighbour then 2-opt on its own. A supplied ``key``
-    replaces all of that with a flat ordering, so it can break tool contiguity.
+    One contiguous block per diameter, blocks ascending by size, each routed
+    by nearest-neighbour then 2-opt on its own. There is no ordering
+    argument: an ordering that determines every hole number while reducing to
+    a name in provenance is a knob a consumer can be silently out of step
+    with (ADR-0006). This always routes by the documented rule.
     """
 
     name: ClassVar[str] = "route"
 
-    def __init__(self, key: Callable[[Hole], SupportsRichComparison] | None = None) -> None:
-        self.key = key
-
     def describe(self) -> StageRun:
-        """Record ``default`` or the effective key callable's name."""
-        if self.key is None:
-            key = "default"
-        else:
-            key = getattr(self.key, "__name__", type(self.key).__name__)
-        return StageRun(self.name, (("key", key),))
+        return StageRun(self.name, ())
 
     def apply(self, data: DrillData) -> DrillData:
-        ordered = (
-            _routed(data.holes) if self.key is None else sorted(data.holes, key=self.key)
-        )
+        ordered = _routed(data.holes)
         return data.with_holes(
             hole.with_number(number) for number, hole in enumerate(ordered, start=1)
         )

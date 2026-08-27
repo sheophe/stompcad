@@ -12,7 +12,10 @@ from hypothesis import strategies as st
 from stompmodel.codec import FORMAT, VERSION, from_document, to_document
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import DocumentError
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    CaseFace,
+    CaseRegistration,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -60,6 +63,18 @@ def _at(x_nm: int, y_nm: int, diameter_nm: int = 7 * MM, *, index: int | None = 
     return hole if index is None else hole.with_number(index)
 
 
+_FRAME = FaceFrame(
+    basis=CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+        u=(1.0, 0.0, 0.0),
+        v=(0.0, -1.0, 0.0),
+        w=(0.0, 0.0, -1.0),
+    )
+)
+
+_REGISTRATION = CaseRegistration(part="1590BB", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
+
+
 def _make_data(*given: Hole) -> DrillData:
     """Build ``DrillData`` with fixed source provenance."""
     return DrillData(holes=tuple(given), source=SourceInfo(path="panel.ai", drill_layer="Drill"))
@@ -68,6 +83,9 @@ def _make_data(*given: Hole) -> DrillData:
 def _fixture_data() -> DrillData:
     """A DrillData exercising every field: nominal-vs-raw drift, a reference outline, one
     diagnostic of each severity, full source info, and the stages that produced it.
+
+    Numbered 2 then 1, out of tuple order: a codec that recomputed a number from list
+    position would give 1 then 2.
     """
     given = (
         Hole(
@@ -75,7 +93,7 @@ def _fixture_data() -> DrillData:
             y_nm=Nanometre(18_000_000),
             diameter_nm=Nanometre(7_000_000),
             raw=RawHole(Millimetre(-39.9906), Millimetre(18.0021), Millimetre(6.9998)),
-            index=4,
+            index=2,
         ),
         Hole(
             x_nm=Nanometre(-19_000_000),
@@ -148,6 +166,11 @@ def _fixture_data() -> DrillData:
     )
 
 
+def _case_fixture_data() -> DrillData:
+    """A run made against a supplied case model."""
+    return replace(_fixture_data(), case=_REGISTRATION)
+
+
 def _rotated_fixture_data() -> DrillData:
     """A portrait panel, no case declared, and a catalogue this build cannot emit."""
     return replace(
@@ -214,6 +237,7 @@ def test_top_level_key_order_is_stable_and_documented() -> None:
         "diagnostics",
         "processing",
         "enclosure",
+        "case",
     ]
 
 
@@ -222,7 +246,7 @@ def test_document_declares_its_format_and_canonical_frame() -> None:
     document = to_document(_fixture_data())
 
     assert document["format"] == "stompcad-drill-data"
-    assert document["version"] == 5
+    assert document["version"] == 6
     assert document["units"] == "nm"
     assert document["origin"] == "centre"
 
@@ -371,6 +395,103 @@ def test_unmatched_enclosure_is_null_not_omitted() -> None:
 
 
 # --------------------------------------------------------------------------
+# the case registration
+# --------------------------------------------------------------------------
+
+
+def test_no_case_registration_is_null_not_omitted() -> None:
+    """No supplied model is a value a consumer reads, not a key it has to test for."""
+    document = to_document(_fixture_data())
+
+    assert "case" in document
+    assert document["case"] is None
+
+
+def test_a_case_registration_names_exactly_the_four_facts() -> None:
+    """The keys are named as the member names are named -- no more, no fewer."""
+    case = to_document(_case_fixture_data())["case"]
+
+    assert list(case) == ["part", "face", "model", "frame"]
+    assert case["part"] == "1590BB"
+    assert case["face"] == "box"
+    assert case["model"] == "1590BB.stp"
+
+
+def test_a_case_registrations_frame_is_a_nested_object() -> None:
+    frame = to_document(_case_fixture_data())["case"]["frame"]
+
+    assert list(frame) == ["origin_nm", "u", "v", "w"]
+    assert frame["origin_nm"] == [0, 0, -30_000_000]
+    assert frame["u"] == [1.0, 0.0, 0.0]
+    assert frame["v"] == [0.0, -1.0, 0.0]
+    assert frame["w"] == [0.0, 0.0, -1.0]
+
+
+def test_a_case_registration_round_trips_to_an_equal_value_frame_included() -> None:
+    document = to_document(_case_fixture_data())
+
+    rebuilt = from_document(document)
+
+    assert rebuilt.case == _REGISTRATION
+
+
+def test_a_document_without_a_case_model_round_trips_with_the_member_absent() -> None:
+    document = to_document(_fixture_data())
+
+    rebuilt = from_document(document)
+
+    assert rebuilt.case is None
+
+
+def test_a_case_registration_with_a_face_outside_the_vocabulary_is_refused() -> None:
+    """Restored by constructing the type: ``CaseFace``'s own ``ValueError``
+    escapes into the codec's malformed-document handler, exactly as any
+    other constructor guard does."""
+    document = to_document(_case_fixture_data())
+    document["case"]["face"] = "top"
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_float_frame_origin_is_refused() -> None:
+    """The frame's own guard is what catches this, exactly as a malformed
+    hole coordinate is caught by ``Hole``'s -- see the sibling assertion in
+    the malformed-document section below."""
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [1.5, 0.0, -30_000_000]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_short_basis_vector_is_refused() -> None:
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["u"] = [1.0, 0.0]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_degenerate_basis_is_refused() -> None:
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["u"] = [0.0, 0.0, 0.0]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+def test_a_case_registration_with_a_left_handed_basis_is_refused() -> None:
+    """Orthonormal, but mirrored -- the shape a bare-float codec would have
+    let straight through and every downstream hole with it."""
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["w"] = [0.0, 0.0, 1.0]
+
+    with pytest.raises(DocumentError, match="is malformed"):
+        from_document(document)
+
+
+# --------------------------------------------------------------------------
 # holes
 # --------------------------------------------------------------------------
 
@@ -500,6 +621,53 @@ def test_diagnostics_round_trip_with_severity_code_message_and_location() -> Non
     assert diagnostics[1]["location_nm"] == [-40_000_000, 18_000_000]
 
 
+def test_a_nested_stage_parameter_round_trips_as_a_nested_diagnostic_payload_does() -> None:
+    """The two payload types normalise to the same depth, or neither is safe.
+
+    ``json.load`` returns a list for every array at every level. ``Diagnostic``
+    always recursed; ``StageRun`` converted only the outer level, so a nested
+    parameter came back holding lists -- unequal, and mutable inside a frozen
+    value. Nothing in ``stompdrill`` records a nested parameter, which is why
+    no suite reached it; ``stompcollider``'s repeatable ``--place`` does.
+    """
+    nested = ((1, 0.0, 0.0, 90.0), (2, 1.0, 2.0, 0.0))
+    data = replace(
+        _fixture_data(),
+        processing=(StageRun("seat", (("place", nested),)),),
+        diagnostics=(Diagnostic.warning("tied", "m", data=(("tied_locations", nested),)),),
+    )
+
+    back = from_document(to_document(data))
+
+    assert back.processing[0].parameters == (("place", nested),)
+    assert back.diagnostics[0].data == (("tied_locations", nested),)
+    assert back == data
+
+
+def test_a_diagnostic_payload_may_name_parts_by_string() -> None:
+    """A finding about two parts carries both, as a tuple of designators.
+
+    ``stompdrill`` identifies a hole by index, so the payload union grew arms
+    for its own shapes and none for a tuple of strings. A second tool names
+    parts by reference designator, and joining them into one string is what
+    forces a reader to split it again.
+    """
+    data = replace(
+        _fixture_data(),
+        diagnostics=(
+            Diagnostic.error(
+                "ambiguous-pairing",
+                "two protrusions within tolerance of one hole",
+                data=(("designators", ("RV3", "SW1")),),
+            ),
+        ),
+    )
+
+    back = from_document(to_document(data))
+
+    assert back.diagnostics[0].data == (("designators", ("RV3", "SW1")),)
+
+
 def test_a_diagnostic_without_a_payload_carries_an_empty_object() -> None:
     """Absent, not omitted: a consumer reads ``data`` on every diagnostic."""
     diagnostics = to_document(_fixture_data())["diagnostics"]
@@ -593,6 +761,18 @@ _SIMPLE_PARAM = st.one_of(
     st.booleans(),
 )
 
+#: The same shapes nested, because a payload value is recursive: a scalar, or
+#: a tuple of payload values to any depth. Drawn recursively rather than as a
+#: fixed pair of levels, so the property reaches depth the code must survive
+#: and not merely the depth someone remembered. A scalar-only strategy is what
+#: let a shallow normalisation in ``StageRun`` sit undetected: the property
+#: could not reach the branch it exists to constrain.
+_PARAM = st.recursive(
+    _SIMPLE_PARAM,
+    lambda children: st.lists(children, max_size=3).map(tuple),
+    max_leaves=6,
+)
+
 
 @st.composite
 def _holes_strategy(draw):
@@ -672,7 +852,7 @@ def _processing_strategy(draw):
         params = ()
         if draw(st.booleans()):
             key = draw(st.sampled_from(("standard", "tolerance", "size_count")))
-            params = ((key, draw(_SIMPLE_PARAM)),)
+            params = ((key, draw(_PARAM)),)
         name = draw(st.sampled_from(("identify-enclosure", "snap-diameters", "snap", "deduplicate")))
         built.append(StageRun(name, params))
     return tuple(built)
@@ -799,6 +979,18 @@ def test_a_document_of_an_unknown_version_is_refused() -> None:
         from_document(document)
 
 
+def test_a_document_at_the_previous_version_is_refused_before_the_new_key_is_read() -> None:
+    """The previous version has no ``case`` key at all; the guard must refuse
+    the document on its version before any reader reaches for a key that was
+    never there -- the new key adds no failure path."""
+    document = to_document(_data())
+    document["version"] = VERSION - 1
+    del document["case"]
+
+    with pytest.raises(DocumentError, match=f"version {VERSION - 1}, expected {VERSION}"):
+        from_document(document)
+
+
 def test_a_document_missing_a_section_is_refused_by_name() -> None:
     """A document this reader cannot read is one kind of failure, not two.
 
@@ -841,6 +1033,65 @@ def test_a_document_whose_location_is_long_is_refused_rather_than_truncated() ->
 
     with pytest.raises(DocumentError, match="location_nm has 3 value"):
         from_document(document)
+
+
+def test_a_document_whose_frame_origin_is_long_is_refused_rather_than_truncated() -> None:
+    """A fourth value would be discarded, restoring a frame no writer stated.
+
+    ``CoordinateFrame`` states the three-component rule for all four of its
+    vectors, so the origin reaches it whole rather than indexed to three.
+    """
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [0, 0, -30_000_000, 999]
+
+    with pytest.raises(DocumentError, match="origin_nm must have exactly three components, not 4"):
+        from_document(document)
+
+
+def test_a_document_whose_frame_origin_is_short_is_refused_by_name_not_by_index_error() -> None:
+    """Indexing reported a short origin as ``list index out of range``, which
+    names neither the field nor the count it wanted. The second assertion
+    fails any repair that merely widens the blanket handler.
+    """
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [0, 0]
+
+    with pytest.raises(DocumentError) as excinfo:
+        from_document(document)
+
+    assert "origin_nm must have exactly three components, not 2" in str(excinfo.value)
+    assert "index out of range" not in str(excinfo.value)
+
+
+def test_a_document_whose_frame_origin_is_fractional_is_still_refused() -> None:
+    """The dropped ``Nanometre`` wrapper was a no-op brand; the load-bearing
+    guard is ``check_nanometres`` inside the frame, and it is still reached."""
+    document = to_document(_case_fixture_data())
+    document["case"]["frame"]["origin_nm"] = [0, 0, 3.5]
+
+    with pytest.raises(DocumentError, match="whole number of nanometres"):
+        from_document(document)
+
+
+def test_a_frame_origin_the_module_fixture_did_not_state_still_round_trips() -> None:
+    """The guard counts components; it does not recognise a known origin.
+
+    An off-by-one in that count would refuse this legitimate document, so
+    this is the origin gate's innocent probe.
+    """
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(11_000_000), Nanometre(-7_000_000), Nanometre(2_500_000)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, -1.0, 0.0),
+            w=(0.0, 0.0, -1.0),
+        )
+    )
+    registration = CaseRegistration(part="1590B", face=CaseFace.LID, model="1590B.stp", frame=frame)
+
+    rebuilt = from_document(to_document(replace(_fixture_data(), case=registration)))
+
+    assert rebuilt.case == registration
 
 
 def test_a_document_naming_an_unknown_severity_is_refused() -> None:
@@ -900,6 +1151,76 @@ def test_a_document_numbering_a_hole_from_zero_is_refused() -> None:
 
     with pytest.raises(DocumentError, match="numbered from 1"):
         from_document(document)
+
+
+def test_a_document_that_numbers_two_holes_alike_is_refused() -> None:
+    """Two balloons printing one number is a corrupt drawing, not a curiosity."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = 2
+    document["holes"][1]["index"] = 2
+
+    with pytest.raises(DocumentError, match="hole number 2 is used twice"):
+        from_document(document)
+
+
+def test_a_document_whose_hole_numbers_leave_a_gap_is_refused() -> None:
+    """A gap makes a report of holes by number meaningless: the missing
+    number belongs to no hole, so nothing can be said about it."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = 1
+    document["holes"][1]["index"] = 3
+
+    with pytest.raises(DocumentError, match="hole number 3 is above 2, the hole count"):
+        from_document(document)
+
+
+def test_a_document_whose_hole_carries_no_drill_number_is_refused() -> None:
+    """``_read_hole`` takes whatever ``index`` says, so a literal ``null``
+    restores an unrouted hole no conforming writer could have emitted."""
+    document = to_document(_data())
+    document["holes"][0]["index"] = None
+
+    with pytest.raises(DocumentError, match="has a hole with no drill number"):
+        from_document(document)
+
+
+def test_a_document_numbering_its_holes_out_of_tuple_order_round_trips_unchanged() -> None:
+    """The rule is over the set, not over each hole's position.
+
+    A reader that demanded number equal position would pass every refusal
+    above and reject this, which is what a routing stage really emits for a
+    panel whose drill order is not its tuple order.
+    """
+    original = _make_data(
+        _at(0, 0, index=3),
+        _at(10 * MM, 0, index=1),
+        _at(20 * MM, 0, index=2),
+    )
+
+    rebuilt = from_document(to_document(original))
+
+    assert [h.index for h in rebuilt.holes] == [3, 1, 2]
+    assert rebuilt == original
+
+
+def test_a_one_hole_document_numbered_one_is_read_back() -> None:
+    """The ``count == 1`` boundary, where both set comparisons are quiet."""
+    original = _make_data(_at(0, 0, index=1))
+
+    rebuilt = from_document(to_document(original))
+
+    assert [h.index for h in rebuilt.holes] == [1]
+    assert rebuilt == original
+
+
+def test_a_document_with_no_holes_is_accepted() -> None:
+    """The empty boundary: no hole can breach a rule about hole numbers."""
+    original = _make_data()
+
+    rebuilt = from_document(to_document(original))
+
+    assert rebuilt.holes == ()
+    assert rebuilt == original
 
 
 def test_a_refused_document_keeps_the_failure_it_was_refused_for() -> None:

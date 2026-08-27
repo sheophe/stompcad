@@ -13,13 +13,16 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
-from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths
+from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_lengths, _tupled
+from .diagnostics import of_severity as _of_severity
+from .diagnostics import worst_severity as _worst_severity
 from .errors import EmitterError
+from .frames import FaceFrame
 from .units import (
     Millimetre,
     Nanometre,
-    _check_nanometres,
     check_millimetres,
+    check_nanometres,
     mm_from_nm,
     nm_from_mm,
 )
@@ -31,6 +34,8 @@ __all__ = [
     "RawOutline",
     "ReferenceOutline",
     "EnclosureMatch",
+    "CaseFace",
+    "CaseRegistration",
     "SourceInfo",
     "StageRun",
     "DrillData",
@@ -81,7 +86,7 @@ class Hole:
     index: int | None = None
 
     def __post_init__(self) -> None:
-        _check_nanometres(
+        check_nanometres(
             "Hole", x_nm=self.x_nm, y_nm=self.y_nm, diameter_nm=self.diameter_nm
         )
         if self.index is not None and self.index < 1:
@@ -125,12 +130,24 @@ class Hole:
         Deltas are validated before addition so arithmetic cannot coerce a
         boolean into an apparently valid integer coordinate.
         """
-        _check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
+        check_nanometres("Hole.translated", dx_nm=dx_nm, dy_nm=dy_nm)
         return replace(
             self,
             x_nm=Nanometre(self.x_nm + dx_nm),
             y_nm=Nanometre(self.y_nm + dy_nm),
         )
+
+    @property
+    def tie_break(self) -> tuple[Millimetre, Millimetre, Millimetre]:
+        """An arbitrary but total order over the measurement this hole came from.
+
+        A tie-break, not a ranking: a caller composes it *after* the term it
+        wants, once nominal geometry has already tied. If two holes tie here
+        too, every field a caller can observe already agrees, so the pick
+        between them is unconstrained. The sole implementation of the
+        raw-measurement rule — see ADR-0006.
+        """
+        return (self.raw.x, self.raw.y, self.raw.diameter)
 
     @property
     def residual_nm(self) -> tuple[Nanometre, Nanometre, Nanometre]:
@@ -176,7 +193,7 @@ class ReferenceOutline:
     raw: RawOutline = _MEASUREMENT_IS_NOMINAL
 
     def __post_init__(self) -> None:
-        _check_nanometres(
+        check_nanometres(
             "ReferenceOutline",
             width_nm=self.width_nm,
             height_nm=self.height_nm,
@@ -241,13 +258,50 @@ class EnclosureMatch:
         A bare string is rejected before tuple conversion can split it into
         single-character designators.
         """
-        _check_nanometres(
+        check_nanometres(
             "EnclosureMatch", length_nm=self.length_nm, width_nm=self.width_nm
         )
         # Runtime callers may supply values outside the declared tuple type.
         if isinstance(self.candidates, str):  # type: ignore[unreachable]
             raise TypeError("candidates must be a sequence of designators, not a single string")
         object.__setattr__(self, "candidates", tuple(self.candidates))
+
+
+class CaseFace(Enum):
+    """Which side of a Hammond box a document was drilled against.
+
+    The only two legal values, published once so no reader re-spells them:
+    a mapping from a face to anything else is keyed on this type, and a
+    face outside it is a construction failure, never a silent default.
+    """
+
+    BOX = "box"
+    LID = "lid"
+
+
+@dataclass(frozen=True, slots=True)
+class CaseRegistration:
+    """The supplied case model a document's holes were decided against.
+
+    ``part`` is *resolved*, not verified: the operator's ``--case`` when
+    typed, otherwise the model's own product name. Nothing compares a
+    declared designator against the model's own product name -- ``part`` is
+    a different fact from ``EnclosureMatch.selected_part``.
+
+    ``model`` is the file's name, not its path. Nesting ``frame`` here is a
+    bet that holds only while a supplied model always has a frame.
+    """
+
+    part: str
+    face: CaseFace
+    model: str
+    frame: FaceFrame
+
+    def __post_init__(self) -> None:
+        if not self.part or not self.model:
+            raise ValueError(
+                "a case registration names a part, a face and the model file it came from"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,8 +333,9 @@ class StageRun:
             self,
             "parameters",
             tuple(
-                # JSON sequences arrive as lists despite the declared tuple type.
-                (key, tuple(value) if isinstance(value, list) else value)  # type: ignore[unreachable]
+                # JSON sequences arrive as lists at every depth, so the
+                # normalisation recurses exactly as ``Diagnostic`` does.
+                (key, _tupled(value))
                 for key, value in self.parameters
             ),
         )
@@ -304,6 +359,7 @@ class DrillData:
     source: SourceInfo = field(default_factory=SourceInfo)
     processing: tuple[StageRun, ...] = ()
     enclosure: EnclosureMatch | None = None
+    case: CaseRegistration | None = None
 
     # -- transforms ------------------------------------------------------
     def with_holes(self, holes: Iterable[Hole]) -> DrillData:
@@ -324,6 +380,10 @@ class DrillData:
         """Replace the panel's current enclosure match."""
         return replace(self, enclosure=match)
 
+    def with_case(self, case: CaseRegistration) -> DrillData:
+        """Record the supplied case model this data was decided against."""
+        return replace(self, case=case)
+
     def with_origin(self, origin: Origin) -> DrillData:
         """Translate every hole into the requested frame.
 
@@ -342,7 +402,14 @@ class DrillData:
 
     # -- derived ---------------------------------------------------------
     def numbered(self) -> tuple[tuple[int, Hole], ...]:
-        """Every hole with its drill number, or raise if routing never ran."""
+        """Every hole with its drill number, or raise if routing never ran.
+
+        The numbers are read, not audited: that they form ``1…n`` is the
+        routing stage's guarantee and the document reader's, never this
+        accessor's. Any positive number is accepted, which is what lets a
+        fixture number a lone hole 4 and so tell an emitter that read the
+        model from one that counted the list. See ADR-0006.
+        """
         pairs: list[tuple[int, Hole]] = []
         for hole in self.holes:
             if hole.index is None:
@@ -368,14 +435,17 @@ class DrillData:
     def rows(self) -> list[tuple[Nanometre, list[Hole]]]:
         """Holes grouped by Y, rows from the top down, each row left to right.
 
-        Exact nanometre equality groups rows; ordering supports top-down layout
-        and left-to-right chain dimensions.
+        Exact nanometre equality groups rows. Within a row, ``Hole.tie_break``
+        breaks a tie on nominal X, so two holes sharing one nominal point come
+        back in the same order regardless of arrival — see ADR-0006. This is
+        a different question from routing's reading order, and deliberately
+        not folded into it: one groups, the other sorts.
         """
         buckets: dict[Nanometre, list[Hole]] = {}
         for hole in self.holes:
             buckets.setdefault(hole.y_nm, []).append(hole)
         return [
-            (y_nm, sorted(hs, key=lambda h: h.x_nm))
+            (y_nm, sorted(hs, key=lambda h: (h.x_nm, *h.tie_break)))
             for y_nm, hs in sorted(buckets.items(), reverse=True)
         ]
 
@@ -387,8 +457,10 @@ class DrillData:
         return None
 
     def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
-        return tuple(d for d in self.diagnostics if d.severity is severity)
+        """Delegate to the published reduction so there is one implementation."""
+        return _of_severity(self.diagnostics, severity)
 
     @property
     def worst_severity(self) -> Severity | None:
-        return max((d.severity for d in self.diagnostics), default=None)
+        """Delegate to the published reduction so there is one implementation."""
+        return _worst_severity(self.diagnostics)

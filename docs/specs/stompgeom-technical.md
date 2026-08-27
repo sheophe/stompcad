@@ -1,5 +1,9 @@
 # `stompgeom`: the workspace's kernel layer
 
+**Status:** executed. Plan 2 landed as `stompgeom`. Amended since, where later
+decisions overtook what this plan set out to do; each amendment says so in place. Where
+this document and an ADR disagree the ADR governs, by `CLAUDE.md`'s documentation rules.
+
 **Spec:** `docs/specs/stompcollider-technical.md` — this is **plan 2 of 3** from its
 "Order of work". Plan 1 extracted `stompmodel`; plan 3 builds `stompcollider`.
 
@@ -22,8 +26,12 @@ a contradiction — and settles the package layout that follows.
 
 **`levels()` is not in this plan.** ADR-0009 places it in `stompgeom` and that is where
 it ends up, but the spec's "Order of work" defers it to plan 3 deliberately:
-`find_faces` returns a case-shaped plate with an inner level, a position and a
-thickness, where carrier-plane detection wants levels and holedness. Cutting that seam
+`find_faces` returns an inner compound, a plate thickness, an outward normal, a
+drilled and an inner position, and a footprint span. Two of those are case-shaped — the
+footprint span, and the thickness measured against a catalogue — where carrier-plane
+detection wants levels and holedness. The outward normal is not case-shaped, and is the
+same quantity the collider calls a carrier normal, so the overlap is larger than a
+plate-and-thickness reading of this sentence suggests. Cutting that seam
 now would mean designing an interface with no second consumer in the room — the exact
 failure ADR-0008 exists to avoid. So plan 2 lands `stompgeom` as a *format* layer that
 plan 3 thickens into an *operations* layer.
@@ -47,7 +55,15 @@ A `stompmodel` dataclass cannot carry a typed member defined in `stompgeom` with
 `stompmodel` importing it, which is a cycle in a graph the ADR calls linear and acyclic.
 
 **Decision: `CoordinateFrame` and `FaceFrame` are defined in `stompmodel`,** in a new
-`frames.py`. `stompgeom` keeps the kernel-side operations that *build* one.
+`frames.py`. `stompgeom` keeps the kernel-side reading and writing; frame
+*construction* stays in `stompdrill`.
+
+**Amended.** This sentence first read that `stompgeom` keeps the operations that build
+one. That was wrong when written: `build_frame` picks its `u` axis from footprint spans,
+which is enclosure reasoning, and ADR-0009 rules on it pre-emptively — "Frame
+*construction* is not here and is not coming ... A reader looking here for a frame
+builder will not find one". This document's own inventory under "What does not move"
+always agreed with the ADR; only this line did not.
 
 **Why.** The frame value needs no kernel: it is a frozen, slotted dataclass of
 `Nanometre` and float triples. What needs the kernel is `build_frame`, which reads OCC
@@ -100,10 +116,19 @@ hand. The wrapping is meant to be visible at the call site.
 The churn this costs is small, because of decision 3: most call sites stop touching the
 basis at all.
 
-**No `__post_init__` validation.** Right-handedness and unit length are not checked.
-Nothing validates today, hand-built frames are fixtures across several test modules,
-and adding a check is new behaviour in a plan whose test is that nothing observable
-changes. `build_frame`'s existing degenerate-frame guard stays where it is.
+**No `__post_init__` validation** *as extracted*: right-handedness and unit length
+were not checked, because adding a check is new behaviour in a plan whose test is that
+nothing observable changes. `build_frame`'s existing degenerate-frame guard stayed where
+it is.
+
+**Amended.** `CoordinateFrame.__post_init__` now validates, under its own measurement:
+component count, whole-nanometre origins through `check_nanometres`, finiteness, unit
+length to a stated tolerance, pairwise orthogonality, and that `w` equals `u × v`. Each
+raises `ValueError` at construction. The consequence for a caller building a frame from
+measured geometry — a carrier plane read off a board, say — is that a basis which misses
+orthonormality by more than the tolerance raises rather than propagating: normalise
+before constructing. ADR-0004 records the rule and `frames.py` records where the
+tolerance was measured.
 
 ### 3. The transform arithmetic belongs to the value
 
@@ -115,9 +140,8 @@ into the leaf:
 
 ```python
 def to_model(self, x_nm, y_nm) -> tuple[Millimetre, Millimetre, Millimetre]
-def to_canonical(self, point_mm) -> tuple[Millimetre, Millimetre]
+def to_canonical(self, point_mm) -> tuple[Millimetre, Millimetre, Millimetre]
 def reframe(self, x_nm, y_nm, target: CoordinateFrame) -> tuple[Nanometre, Nanometre]
-def as_parameters(self) -> tuple[tuple[str, ParameterValue], ...]
 ```
 
 **The names keep the existing function names.** `to_model` and `to_canonical` are
@@ -131,6 +155,14 @@ what a suffix would repeat.
 `float(mm_from_nm(...))` — the same conversion, branded in one place and not the other.
 ADR-0004 says brand at a real conversion, and nanometres to millimetres is one. Callers
 unwrap with `float()` at the OCC boundary, as `_face_point` already does.
+
+**The third value is the depth along `w`, and it arrived after this plan.** As
+extracted, `to_canonical` projected onto `u` and `v` only while `to_model` was already
+three-dimensional, so the pair was asymmetric in arity as well as in unit. The depth is
+signed and is zero for a point on the frame's plane. `reframe` was deliberately left
+two-valued: a canonical point is two-dimensional by definition, and both of its callers
+feed the result straight back into canonical data. The unit question below is a separate
+one and is still open.
 
 **`to_canonical` returns millimetres, and that asymmetry is deliberate here.** In this
 code "canonical" names the frame's own axes, not the unit: `_to_model` takes canonical
@@ -153,8 +185,15 @@ latter in `stompdrill`.
 | --- | --- | --- |
 | `kernel.py` | `KernelUnavailable`, `require_kernel()` | `cad/step.py`, `cad/base.py` |
 | `errors.py` | `StompgeomError(StompError)` | new |
-| `step.py` | `StepSolid`, `StepDocument`, `read_step`, `bounding_box_mm`, `source_timestamp` | `cad/step.py` entire |
-| `writer.py` | `write_step()` and its normalisation | `emitters/step.py`, lower half |
+| `step.py` | `StepSolid`, `StepDocument`, `StepLabel`, `read_step`, `leaf_labels`, `bounding_box_mm`, `source_timestamp`, and the XCAF label helpers | `cad/step.py` entire |
+| `writer.py` | `render_step()` and its normalisation | `emitters/step.py`, lower half |
+
+`StepLabel` and `leaf_labels` are the workspace's one XCAF leaf descent and the wrapper
+that carries the document a label was drawn from. ADR-0008 argues both, and states the
+wrapper's guarantee in its narrow form: the published surface offers no route that hands
+out an already-dangling label, not that a consumer cannot construct one — keeping the raw
+handle and dropping the `StepLabel` still can. A consumer that must walk a STEP document
+calls these rather than writing a second walk.
 
 `require_kernel` is defined twice today — once in `cad/step.py` and again in
 `emitters/step.py` as a test indirection. The extraction leaves one.
@@ -171,21 +210,27 @@ incidental churn.
 
 `emitters/step.py` does two jobs. The format layer moves; the cutter stays.
 
-**Moves to `stompgeom.writer`:** `write_step` (today's `_write`), `_normalise`,
-`_reslot_colours`, `_count_colour_assignments`, `_silence_stdout`, the XCAF label
-helpers, and the volatile-entity and colour-chain patterns.
+**Moves to `stompgeom.writer`:** `render_step` (today's `_write`), `_normalise`,
+`_reslot_colours`, `_count_colour_assignments`, `_silence_stdout`, and the
+volatile-entity and colour-chain patterns. The XCAF label helpers land in `step.py`
+beside the reader that uses them, not here.
 
-**Stays in `stompdrill`:** `StepOptions`, `StepEmitter`, `cut_shape`, `_cut_component`,
-`_cut_leaf`, `_drill_compound`, `_face_point`. These read `DrillData` and decide what to
+**Stays in `stompdrill`:** `StepOptions`, `StepEmitter`, `cut_shape`, `_cut_leaf`,
+`_drill_compound`, `_face_point`. These read `DrillData` and decide what to
 cut, which is drilling.
 
 ```python
-def write_step(document, path, *, title: str, timestamp: str,
-               originating_system: str,
-               replaced_labels: frozenset[str] = frozenset()) -> None
+def render_step(document, *, title: str, timestamp: str,
+                originating_system: str,
+                replaced_labels: frozenset[str] = frozenset()) -> bytes
 ```
 
-**All identity is injected, never defaulted.** Were `write_step` to keep today's
+**Amended: it returns bytes and takes no path.** As planned this was
+`write_step(document, path, ...) -> None`. ADR-0005 makes an emitter return its payload
+and never write it, so the shipped entry point renders and returns; the command line
+stages and commits. Read as first written, this block inverted that contract.
+
+**All identity is injected, never defaulted.** Were `render_step` to keep today's
 hardcoded header strings, a `stompcollider` assembly written through it would stamp
 `ORIGINATING_SYSTEM` with `stompdrill`'s name — provenance from a tool that never
 touched it. ADR-0009 already ruled on this pattern when it stopped

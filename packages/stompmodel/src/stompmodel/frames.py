@@ -8,12 +8,44 @@ ADR-0009.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
-from .diagnostics import ParameterValue
-from .units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
+from .units import Millimetre, Nanometre, check_nanometres, mm_from_nm, nm_from_mm
 
 __all__ = ["CoordinateFrame", "FaceFrame"]
+
+#: One coordinate frame's origin plus each of its three basis vectors.
+_COMPONENTS = 3
+
+#: Orthonormality and right-handedness tolerance for a frame's basis.
+#: Measured directly against the four catalogued Hammond models' box and lid
+#: faces (1590BB, 1590B, 1590A, 1590Y -- eight frames in all, built by
+#: ``stompdrill.cad.case.build_frame`` from real kernel face normals): every
+#: unit-length, orthogonality and right-handedness deviation measured exactly
+#: 0.0, because each face normal ``stompgeom`` reports for these enclosures is
+#: already axis-aligned, so normalising and cross-multiplying it introduces no
+#: rounding at all. This sits at float-epsilon scale above that measured
+#: figure -- headroom for a future model whose face is not axis-aligned,
+#: where normalising a kernel-reported direction can drift by a few ULPs --
+#: and matches the tolerance `stompdrill`'s own kernel tests already assert
+#: for these same frames (``test_cad_case.py::test_the_frame_is_orthonormal``,
+#: ``::test_the_frame_basis_is_right_handed_about_the_outward_normal``).
+_BASIS_TOLERANCE = 1e-9
+
+
+def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,12 +54,55 @@ class CoordinateFrame:
 
     Carries no meaning about what it registers -- that is the point. The
     meaning is added by wrapping, not by a field here.
+
+    Validated at construction like every other canonical value the document
+    carries: whole-nanometre origin, three finite components each, an
+    orthonormal and right-handed basis -- see ADR-0004.
     """
 
     origin_nm: tuple[Nanometre, Nanometre, Nanometre]
     u: tuple[float, float, float]
     v: tuple[float, float, float]
     w: tuple[float, float, float]
+
+    def __post_init__(self) -> None:
+        for name, vector in (
+            ("origin_nm", self.origin_nm),
+            ("u", self.u),
+            ("v", self.v),
+            ("w", self.w),
+        ):
+            if len(vector) != _COMPONENTS:
+                raise ValueError(
+                    f"CoordinateFrame.{name} must have exactly three components, "
+                    f"not {len(vector)}"
+                )
+        check_nanometres(
+            "CoordinateFrame",
+            **{f"origin_nm[{i}]": value for i, value in enumerate(self.origin_nm)},
+        )
+        for name, vector in (("u", self.u), ("v", self.v), ("w", self.w)):
+            if not all(isinstance(c, (int, float)) and math.isfinite(c) for c in vector):
+                raise ValueError(f"CoordinateFrame.{name} must be finite, not {vector!r}")
+        for name, vector in (("u", self.u), ("v", self.v), ("w", self.w)):
+            length = math.sqrt(_dot(vector, vector))
+            if abs(length - 1.0) > _BASIS_TOLERANCE:
+                raise ValueError(
+                    f"CoordinateFrame.{name} must be unit length, not {vector!r} "
+                    f"(length {length!r})"
+                )
+        for first, second in (("u", "v"), ("u", "w"), ("v", "w")):
+            if abs(_dot(getattr(self, first), getattr(self, second))) > _BASIS_TOLERANCE:
+                raise ValueError(
+                    f"CoordinateFrame.{first} and CoordinateFrame.{second} "
+                    "must be orthogonal"
+                )
+        cross = _cross(self.u, self.v)
+        if any(abs(c - w) > _BASIS_TOLERANCE for c, w in zip(cross, self.w)):
+            raise ValueError(
+                "CoordinateFrame.w must equal u cross v, a right-handed basis, "
+                f"not {self.w!r}"
+            )
 
     def to_model(
         self, x_nm: Nanometre, y_nm: Nanometre
@@ -43,8 +118,12 @@ class CoordinateFrame:
 
     def to_canonical(
         self, point_mm: tuple[float, float, float]
-    ) -> tuple[Millimetre, Millimetre]:
-        """Project a model point onto this frame's own axes, in millimetres.
+    ) -> tuple[Millimetre, Millimetre, Millimetre]:
+        """Project a model point onto all three of this frame's own axes.
+
+        The third value is the signed depth along ``w``, zero for a point on
+        the frame's plane. Symmetric with ``to_model``, which is already
+        three-dimensional.
 
         Millimetres, not nanometres: ``region_bbox_nm`` projects four corners
         and rounds once after its own minimum and maximum, and rounding here
@@ -54,32 +133,34 @@ class CoordinateFrame:
         relative = tuple(p - o for p, o in zip(point_mm, origin))
         x = sum(r * c for r, c in zip(relative, self.u))
         y = sum(r * c for r, c in zip(relative, self.v))
-        return (Millimetre(x), Millimetre(y))
+        z = sum(r * c for r, c in zip(relative, self.w))
+        return (Millimetre(x), Millimetre(y), Millimetre(z))
 
     def reframe(
         self, x_nm: Nanometre, y_nm: Nanometre, target: CoordinateFrame
     ) -> tuple[Nanometre, Nanometre]:
         """Restate a canonical point registered here in ``target``'s frame."""
-        x_mm, y_mm = target.to_canonical(self.to_model(x_nm, y_nm))
+        # The depth is dropped deliberately, not overlooked: it is the
+        # separation of the two planes, non-zero whenever a box face and its
+        # lid are reframed against each other, and a canonical point is
+        # two-dimensional by definition. Widen this only with its callers.
+        x_mm, y_mm, _depth_mm = target.to_canonical(self.to_model(x_nm, y_nm))
         return nm_from_mm(x_mm), nm_from_mm(y_mm)
-
-    def as_parameters(self) -> tuple[tuple[str, ParameterValue], ...]:
-        """Flatten to ``StageRun``-safe scalars and float tuples."""
-        return (
-            ("frame_origin_nm", tuple(self.origin_nm)),
-            ("frame_u", self.u),
-            ("frame_v", self.v),
-            ("frame_w", self.w),
-        )
 
 
 @dataclass(frozen=True, slots=True)
 class FaceFrame:
     """A face's registration: a frame whose third axis is that face's normal.
 
-    Composes rather than extends. A subclass would pass wherever a bare
-    ``CoordinateFrame`` is wanted, which is exactly the universal-wrapped-in-a-
-    meaning leak ADR-0008 names as this boundary's standing risk.
+    ``basis.origin_nm`` sits on the **inner** surface -- never the side the
+    bit enters; see ADR-0007. ``basis.w``'s sense is unrelated to that datum
+    and is a *stated* convention, not derivable: it is the **outward**
+    normal, away from the material and out of the enclosure. Both senses
+    satisfy ``CoordinateFrame``'s own checks equally, so no validator can
+    recover it -- see ADR-0009.
+
+    Composes rather than extends -- a subclass would pass wherever a bare
+    ``CoordinateFrame`` is wanted, the leak ADR-0008 names as this risk.
     """
 
     basis: CoordinateFrame

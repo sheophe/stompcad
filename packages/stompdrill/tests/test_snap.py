@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+from decimal import Decimal
 
 import pytest
 from hypothesis import given, settings
@@ -12,7 +13,7 @@ from hypothesis import strategies as st
 from stompdrill.pipeline import ReviewGridTies, SnapPositions
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, Hole, RawHole, StageRun
-from stompmodel.units import Millimetre, Nanometre, nm_from_mm
+from stompmodel.units import Millimetre, Nanometre, nm_from_mm, scaled_nm
 
 
 def raw(x: float, y: float, *, diameter: float = 7.0) -> RawHole:
@@ -307,7 +308,7 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
         "grid", [float("nan"), float("inf"), float("-inf"), 0.25, 250_000.0, True]
     )
     def test_a_grid_that_is_not_an_int_is_refused_at_construction(self, grid):
-        with pytest.raises(TypeError, match=r"^grid_nm"):
+        with pytest.raises(TypeError, match=r"grid_nm"):
             SnapPositions(grid)
 
     @pytest.mark.parametrize(
@@ -315,7 +316,7 @@ class TestSnapPositionsRefusesAGridThatIsNotAWholeNumber:
     )
     def test_a_warning_threshold_that_is_not_an_int_is_refused_too(self, warn_over):
         """``--grid-warn=nan`` warns about every hole, including the still ones."""
-        with pytest.raises(TypeError, match=r"^warn_over_nm"):
+        with pytest.raises(TypeError, match=r"warn_over_nm"):
             SnapPositions(Nanometre(250_000), warn_over_nm=warn_over)
 
     def test_a_negative_warning_threshold_is_refused(self):
@@ -361,10 +362,30 @@ class TestReviewGridTies:
         ]
 
     def test_a_hole_already_on_a_grid_point_is_not_tied(self):
-        """Residual zero, and ``2 * 0 == grid_nm`` is false for any real pitch."""
+        """Neither axis's exact quotient over the pitch has a fractional half."""
         stage = SnapPositions(Nanometre(250_000))
 
         assert reviewed(stage, raw(-0.25, 0.5), raw(0.75, -1.0)) == ()
+
+    def test_a_measurement_a_fraction_short_of_the_midpoint_is_not_reported_tied(self):
+        """F3-03: the tie decision must come from the exact quotient, never from
+        a residual against a measurement already rounded to a whole nanometre.
+
+        0.1249995 mm is 0.5 nm *below* the ``--grid 0.25`` midpoint -- its exact
+        quotient over the pitch is unambiguously short of one half -- yet
+        rounding it to a whole nanometre first and comparing that against the
+        snapped centre lands exactly on the half-pitch residual. Reporting a
+        tie here promoted a clean run to exit 1 and told the operator to
+        redraw correct artwork.
+        """
+        grid_nm = Nanometre(250_000)
+        measurement = raw(0.1249995, 0.0)
+
+        quotient = scaled_nm(measurement.x) / grid_nm
+        assert quotient != Decimal("0.5"), "fixture must not be an actual tie"
+        assert quotient < Decimal("0.5"), "fixture must be short of the midpoint"
+
+        assert reviewed(SnapPositions(grid_nm), measurement) == ()
 
     def test_one_tie_among_many_is_enough_and_none_stays_quiet(self):
         """A single tie is a hole placed by a rule rather than by the artwork."""

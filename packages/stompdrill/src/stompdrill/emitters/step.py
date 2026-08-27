@@ -15,11 +15,14 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompgeom import kernel
-from stompgeom.writer import label_entry, label_name, write_step
+from stompgeom.step import StepLabel, leaf_labels
+from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
+from stompmodel.frames import FaceFrame
 from stompmodel.model import DrillData
 from stompmodel.units import mm_from_nm
 
+from ..cad import OcpCaseModel, step_keyword
 from .base import register_emitter
 
 __all__ = ["StepOptions", "StepEmitter", "cut_shape"]
@@ -35,7 +38,7 @@ _ORIGINATING_SYSTEM = f"stompdrill {_VERSION}"
 class StepOptions:
     """The supplied case model to cut, and the title recorded in the header."""
 
-    model: Any | None = None
+    model: OcpCaseModel | None = None
     title: str = ""
 
 
@@ -55,6 +58,11 @@ class StepEmitter:
             kernel.require_kernel()
         except kernel.KernelUnavailable as failure:
             raise EmitterError(str(failure)) from failure
+        if not isinstance(self.options.model, OcpCaseModel):
+            raise EmitterError(
+                "the step emitter needs a kernel-backed case model from --case-model; "
+                "a clearance-only model cannot be cut"
+            )
 
     def emit(self, data: DrillData) -> bytes:
         """Cut every numbered hole, write STEP, then undo the cut in place.
@@ -63,55 +71,53 @@ class StepEmitter:
         ``emit`` on the same instance sees the pristine geometry again: this
         emitter only translates and serialises, it does not own state.
         """
-        import tempfile
-        from pathlib import Path
-
         model = self.options.model
         assert model is not None, "__init__ already refused a missing model"
         document, undo, touched = cut_shape(model, data)
         try:
-            with tempfile.TemporaryDirectory() as scratch:
-                target = Path(scratch) / "out.stp"
-                write_step(
-                    document,
-                    target,
-                    title=self.options.title or "stompdrill",
-                    timestamp=model.document_timestamp,
-                    originating_system=_ORIGINATING_SYSTEM,
-                    replaced_labels=touched,
-                )
-                return target.read_bytes()
+            return render_step(
+                document,
+                title=self.options.title or "stompdrill",
+                timestamp=model.document_timestamp,
+                originating_system=_ORIGINATING_SYSTEM,
+                replaced_labels=touched,
+            )
         finally:
             undo()
 
 
-def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None], frozenset[str]]:
+def cut_shape(
+    model: OcpCaseModel, data: DrillData
+) -> tuple[Any, Callable[[], None], frozenset[str]]:
     """Replace the drilled solid in the model's document with a cut copy.
 
-    The solid is located by product-name keyword, walking the assembly tree
-    the way ``select_solid`` does — not by ``IsSame`` against
-    ``target_shape``, whose location may differ from the one carried by the
-    document's own label. Returns the mutated document, an ``undo`` closure
-    that restores every changed label to its pre-cut shape, and the entry
-    strings of the labels it changed: ``write_step`` needs these, since a
-    replaced label does not keep its colour in the written STEP.
+    Located by product-name keyword over ``stompgeom``'s published leaf
+    walk, first match in document order — a name-matching leaf with no
+    shape is stepped over, never treated as the cut. Returns the mutated
+    document, an ``undo`` closure restoring every changed label, and the
+    entry strings ``render_step`` needs. The face and frame are read from
+    ``data.case``, already reconciled by ``CheckCaseClearance``, not
+    re-derived from ``model``.
     """
-    from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
+    if data.case is None:
+        raise EmitterError(
+            "the step emitter needs a checked case registration; run "
+            "CheckCaseClearance before emitting"
+        )
     document = model.document
     tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     tools = _drill_compound(model, data)
     if tools is None:
         return document, lambda: None, frozenset()
 
-    keyword = "BOX" if model.face == "box" else "LID"
+    keyword = step_keyword(data.case.face)
     originals: list[tuple[Any, Any]] = []
-    free = TDF_LabelSequence()
-    tool.GetFreeShapes(free)
     cut_any = any(
-        _cut_component(tool, free.Value(index), keyword, tools, originals)
-        for index in range(1, free.Length() + 1)
+        _cut_leaf(tool, entry.label, tools, originals)
+        for entry in leaf_labels(document)
+        if keyword in entry.name.upper()
     )
     if not cut_any:
         raise EmitterError(f"no component named {keyword!r} was found to cut")
@@ -126,27 +132,17 @@ def cut_shape(model: Any, data: DrillData) -> tuple[Any, Callable[[], None], fro
             tool.SetShape(referred, original)
         tool.UpdateAssemblies()
 
-    touched = frozenset(label_entry(referred) for referred, _ in originals)
+    # Entries come from the *referred* label, never the component -- the
+    # same choice stompgeom.writer._count_colour_assignments makes for the
+    # colour census, which names this site back. `originals` already holds
+    # the referred label `_cut_leaf` wrote through (see its own docstring);
+    # rewrap it in the document it was drawn from, `document` itself, before
+    # reading its entry -- the invisible step named in this ticket's "single
+    # biggest risk": a rewrap taken from the wrong label, or from no
+    # document at all, type-checks either way and only this artefact's
+    # bytes would show it.
+    touched = frozenset(StepLabel(document, referred).entry for referred, _ in originals)
     return document, undo, touched
-
-
-def _cut_component(
-    tool: Any, label: Any, keyword: str, tools: Any, originals: list[tuple[Any, Any]]
-) -> bool:
-    """Recurse into an assembly; cut the first ``keyword``-matching leaf."""
-    from OCP.TDF import TDF_LabelSequence
-    from OCP.XCAFDoc import XCAFDoc_ShapeTool
-
-    if XCAFDoc_ShapeTool.IsAssembly_s(label):
-        children = TDF_LabelSequence()
-        XCAFDoc_ShapeTool.GetComponents_s(label, children)
-        return any(
-            _cut_component(tool, children.Value(index), keyword, tools, originals)
-            for index in range(1, children.Length() + 1)
-        )
-    if keyword not in label_name(label).upper():
-        return False
-    return _cut_leaf(tool, label, tools, originals)
 
 
 def _cut_leaf(
@@ -155,17 +151,23 @@ def _cut_leaf(
     """Cut one placed leaf shape and write the result back through its label.
 
     A component label is a reference: its own ``GetShape_s`` bakes in the
-    assembly placement, but ``SetShape`` only accepts the *referred* label's
-    own, unplaced geometry. The cut runs in the placed (world) frame, where
-    ``tools`` was built, then the component's own location is undone before
-    the result is written back — otherwise the placement would apply twice.
+    placement, but ``SetShape`` only accepts the *referred* label's own,
+    unplaced geometry -- undone before the result is written back.
+    Referred-versus-component (see also
+    ``stompgeom.writer._count_colour_assignments``, the same choice on the
+    colour census): ``originals`` records the *referred* label, never the
+    component -- what ``cut_shape`` reads ``touched`` from.
     """
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     from OCP.TDF import TDF_Label
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     placed = XCAFDoc_ShapeTool.GetShape_s(label)
-    if placed.IsNull():  # pragma: no cover - a label matched by name always carries a shape
+    if placed.IsNull():
+        # A name match carries no guarantee of a shape: two leaves can share
+        # a keyword while only one holds geometry. ``cut_shape`` steps over
+        # this leaf and tries the next match; see
+        # ``test_cut_shape_steps_over_a_null_shaped_leaf_and_cuts_the_next_match``.
         return False
     cut = BRepAlgoAPI_Cut(placed, tools)
     cut.Build()
@@ -190,7 +192,7 @@ def _cut_leaf(
     return True
 
 
-def _drill_compound(model: Any, data: DrillData) -> Any | None:
+def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     """One compound of bounded cylinders, sorted into drill-number order.
 
     ``data.numbered()`` pairs each hole with its ``Hole.index`` but yields
@@ -206,29 +208,44 @@ def _drill_compound(model: Any, data: DrillData) -> Any | None:
     holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
         return None
+    assert data.case is not None, "cut_shape already refused a missing registration"
+    frame = data.case.frame
 
     # Bounded by the two levels the clearance check already found, plus a
     # little either side. An unbounded cylinder would punch the far wall too.
     overshoot = 1.0
     depth = abs(model.inner_position_mm - model.drilled_position_mm) + 2 * overshoot
-    direction = tuple(-component for component in model.frame.basis.w)
+    direction = tuple(-component for component in frame.basis.w)
 
     compound = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(compound)
     for _, hole in holes:
-        start = _face_point(model, hole, overshoot)
+        start = _face_point(model, frame, hole, overshoot)
         axis = gp_Ax2(gp_Pnt(*start), gp_Dir(*direction))
         radius = float(mm_from_nm(hole.diameter_nm)) / 2
         builder.Add(compound, BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
     return compound
 
 
-def _face_point(model: Any, hole: Any, overshoot: float) -> tuple[float, float, float]:
-    """The cylinder's start, ``overshoot`` mm outside the drilled face."""
-    frame = model.frame.basis
-    x, y, z = frame.to_model(hole.x_nm, hole.y_nm)
-    return tuple(
-        float(value) + overshoot * frame.w[i]
-        for i, value in enumerate((x, y, z))
+def _face_point(
+    model: OcpCaseModel, frame: FaceFrame, hole: Any, overshoot: float
+) -> tuple[float, float, float]:
+    """The cylinder's start, ``overshoot`` mm outside the drilled face.
+
+    ``frame`` is the published registration's frame, already reconciled with
+    the panel's drawn orientation -- see ``pipeline.clearance``. Its origin
+    registers the plate's *inner* surface (see ``FaceFrame``), so the drilled
+    (outer) surface the cut must start from is read explicitly from the
+    model, the same idiom ``cad.region`` already uses for its own plane
+    coordinate, rather than trusted to fall out of the frame's own origin.
+    """
+    basis = frame.basis
+    point: list[float] = list(basis.to_model(hole.x_nm, hole.y_nm))
+    point[model.axis] = model.drilled_position_mm
+    wx, wy, wz = basis.w
+    return (
+        point[0] + overshoot * wx,
+        point[1] + overshoot * wy,
+        point[2] + overshoot * wz,
     )

@@ -11,9 +11,10 @@ from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from stompmodel.frames import FaceFrame
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre
 
-__all__ = ["Rejection", "CaseModel"]
+__all__ = ["Rejection", "CaseModel", "step_keyword"]
 
 
 class Rejection(Enum):
@@ -26,17 +27,25 @@ class Rejection(Enum):
 
 @runtime_checkable
 class CaseModel(Protocol):
-    """A supplied enclosure, reduced to what clearance and cutting need.
+    """The kernel-free clearance contract: what ``CheckCaseClearance`` needs.
 
-    Declared as read-only properties, not plain attributes: a frozen,
-    slotted implementation's fields are themselves read-only, and mypy
-    only matches a Protocol's structural members when settability agrees.
+    Cutting needs a live kernel document and is typed against the
+    kernel-backed model directly, never against this protocol — see
+    ADR-0007. Declared as read-only properties, not plain attributes: a
+    frozen, slotted implementation's fields are themselves read-only, and
+    mypy only matches a Protocol's structural members when settability
+    agrees.
     """
 
     @property
     def part(self) -> str: ...
     @property
-    def face(self) -> str: ...
+    def face(self) -> CaseFace: ...
+    @property
+    def model_name(self) -> str:
+        """The supplied model file's name, e.g. ``"1590BB.stp"`` -- a name,
+        not a path, not a checksum."""
+        ...
     @property
     def footprint_nm(self) -> tuple[Nanometre, Nanometre]: ...
     @property
@@ -53,3 +62,16 @@ class CaseModel(Protocol):
     def classify(
         self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre
     ) -> Rejection | None: ...
+
+
+#: The upper-cased product-name substring each face's solid is found by.
+#: Published once, here, because this is the only module both the solid
+#: selector and the STEP emitter can reach without importing the kernel --
+#: keyed on the closed enumeration so a face with no entry raises rather
+#: than falling through to a default.
+_STEP_KEYWORD: dict[CaseFace, str] = {CaseFace.BOX: "BOX", CaseFace.LID: "LID"}
+
+
+def step_keyword(face: CaseFace) -> str:
+    """The upper-cased product-name substring this face's solid is found by."""
+    return _STEP_KEYWORD[face]

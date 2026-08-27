@@ -8,7 +8,8 @@ from stompdrill.cad.case import build_frame, drill_axis, find_faces, select_soli
 from stompdrill.cad.region import build_region, classify_bounds, contains, region_bbox_nm
 from stompgeom.step import read_step
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.units import Nanometre
+from stompmodel.model import CaseFace
+from stompmodel.units import Nanometre, nm_from_mm
 
 pytestmark = pytest.mark.hammond
 
@@ -25,7 +26,7 @@ def nm(value_mm: float) -> Nanometre:
 def box(hammond_bb):
     document = read_step(hammond_bb)
     axis = drill_axis(document, FOOTPRINT)
-    faces = find_faces(select_solid(document, "box"), axis)
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
     return axis, faces, build_frame(faces, axis)
 
 
@@ -143,7 +144,7 @@ def test_region_bbox_nm_transforms_through_the_frame_not_kernel_axes():
     frame = FaceFrame(
         basis=CoordinateFrame(
             origin_nm=(nm(50.0), Nanometre(0), Nanometre(0)),
-            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, 1.0, 0.0),
+            u=(1.0, 0.0, 0.0), v=(0.0, 0.0, 1.0), w=(0.0, -1.0, 0.0),
         )
     )
 
@@ -239,14 +240,14 @@ def test_floor_face_rejects_a_compound_with_no_planar_face():
 def bb_box(hammond_bb):
     from stompdrill.cad import load_case_model
 
-    return load_case_model(hammond_bb, face="box", margin_nm=Nanometre(1 * MM))
+    return load_case_model(hammond_bb, face=CaseFace.BOX, margin_nm=Nanometre(1 * MM))
 
 
 @pytest.fixture(scope="module")
 def bb_lid(hammond_bb):
     from stompdrill.cad import load_case_model
 
-    return load_case_model(hammond_bb, face="lid", margin_nm=Nanometre(1 * MM))
+    return load_case_model(hammond_bb, face=CaseFace.LID, margin_nm=Nanometre(1 * MM))
 
 
 def test_the_loaded_model_satisfies_the_protocol(bb_box):
@@ -392,3 +393,192 @@ def test_the_rejection_code_does_not_change_with_drill_size(bb_box):
     boss_x, boss_y = BB_PROBES["boss"]
     boss_codes = {bb_box.classify(nm(boss_x), nm(boss_y), nm(r)) for r in radii_mm}
     assert boss_codes == {Rejection.THROUGH_BOSS}
+
+
+#: The synthetic geometry below lies in the kernel's x-z plane, so the axis
+#: normal to it is y and the two in-plane axes are x and z -- the same
+#: arrangement every cached Hammond model happens to use.
+TIE_AXIS = 1
+TIE_IN_PLANE = [0, 2]
+#: The drilled face's own outward normal along ``TIE_AXIS``; matches
+#: ``tests/test_cad_region_synthetic.py``'s own convention.
+TIE_OUTWARD = -1.0
+
+
+def _rectangle_wire(y: float, corners):
+    """A closed polygon wire at height ``y``, from ``(x, z)`` corners."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+
+    polygon = BRepBuilderAPI_MakePolygon()
+    for x, z in corners:
+        polygon.Add(gp_Pnt(x, y, z))
+    polygon.Close()
+    return polygon.Wire()
+
+
+def _rectangle_face(y: float, corners):
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+
+    return BRepBuilderAPI_MakeFace(_rectangle_wire(y, corners)).Face()
+
+
+def _square_corners(x0: float, z0: float, side: float):
+    return [(x0, z0), (x0 + side, z0), (x0 + side, z0 + side), (x0, z0 + side)]
+
+
+def _tie_compound(*faces):
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    for face in faces:
+        builder.Add(compound, face)
+    return compound
+
+
+def _bounding_box(face) -> tuple[int, ...]:
+    """``_floor_face``'s own secondary key: the box in whole nanometres."""
+    from stompgeom.step import bounding_box_mm
+
+    return tuple(nm_from_mm(value) for value in bounding_box_mm(face))
+
+
+def _face_area(face) -> float:
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(face, props)
+    return props.Mass()
+
+
+def _footprint_gap(wire, companion) -> float:
+    """``_proud_mm``'s own in-plane gap, restated so a tie can be asserted."""
+    from stompgeom.step import bounding_box_mm
+
+    box, other = bounding_box_mm(wire), bounding_box_mm(companion)
+    return sum(
+        abs(box[index] - other[index]) + abs(box[index + 3] - other[index + 3])
+        for index in TIE_IN_PLANE
+    )
+
+
+def test_the_floor_face_breaks_an_exact_area_tie_on_the_rounded_bounding_box():
+    """ADR-0006 binds every selection rule: two congruent faces must not be
+    separated by the order the kernel enumerated the compound. The stated
+    rule ranks the whole-nanometre bounding box, greatest first, so the
+    face further along x wins whichever order it was added in.
+    """
+    from stompdrill.cad.region import _floor_face
+
+    low = _rectangle_face(0.0, _square_corners(0.0, 0.0, 10.0))
+    high = _rectangle_face(0.0, _square_corners(20.0, 0.0, 10.0))
+    # The control: a translated copy is congruent to the last bit, so this
+    # really is the exact tie the secondary key exists for.
+    assert _face_area(low) == _face_area(high)
+
+    assert _floor_face(_tie_compound(low, high)).IsSame(high)
+    assert _floor_face(_tie_compound(high, low)).IsSame(high)
+
+
+def test_the_floor_face_tie_break_reads_whole_nanometres_not_kernel_floats():
+    """The stated rule ranks the bounding box *in whole nanometres*, for the
+    reason ``case._levels`` already gives: a difference below a nanometre
+    is kernel-float noise, not geometry, and letting it decide would put
+    the winner back where the tie-break exists to take it from. ``noise``
+    leads on raw floats by half a nanometre; ``real`` leads once both are
+    rounded, by a difference a machinist could measure.
+    """
+    from stompdrill.cad.region import _floor_face
+    from stompgeom.step import bounding_box_mm
+
+    noise = _rectangle_face(0.0, _square_corners(2**-31, 0.0, 10.0))
+    real = _rectangle_face(0.0, _square_corners(0.0, 2**-10, 10.0))
+    # The controls: an exact area tie, so the box decides; and ``noise``
+    # really does win on raw floats, so the rounding is what is under test.
+    assert _face_area(noise) == _face_area(real)
+    assert tuple(bounding_box_mm(noise)) > tuple(bounding_box_mm(real))
+    assert _bounding_box(noise) < _bounding_box(real)
+
+    assert _floor_face(_tie_compound(noise, real)).IsSame(real)
+    assert _floor_face(_tie_compound(real, noise)).IsSame(real)
+
+
+def test_the_floor_face_tie_break_compares_minima_before_maxima():
+    """The stated coordinate order is ``bounding_box_mm``'s own -- the three
+    minima, then the three maxima. ``low`` leads on ``x_min`` and trails on
+    ``z_max``, so reading the box in any other order would elect ``high``
+    instead; naming the order is what makes the rule a stated one.
+    """
+    from stompdrill.cad.region import _floor_face
+
+    low = _rectangle_face(0.0, _square_corners(5.0, 0.0, 10.0))
+    high = _rectangle_face(0.0, _square_corners(0.0, 5.0, 10.0))
+    # The controls: an exact area tie, and a box pair the reversed order
+    # really would decide the other way.
+    assert _face_area(low) == _face_area(high)
+    assert tuple(reversed(_bounding_box(low))) < tuple(reversed(_bounding_box(high)))
+
+    assert _floor_face(_tie_compound(low, high)).IsSame(low)
+    assert _floor_face(_tie_compound(high, low)).IsSame(low)
+
+
+def test_the_floor_face_tie_break_never_outranks_a_real_area_difference():
+    """The innocent probe: ``small`` wins the bounding-box key and loses on
+    area, so a ranking that consulted the box first would elect it. Single
+    face area must still decide, in either arrival order.
+    """
+    from stompdrill.cad.region import _floor_face
+
+    large = _rectangle_face(0.0, _square_corners(0.0, 0.0, 30.0))
+    small = _rectangle_face(0.0, _square_corners(50.0, 0.0, 10.0))
+    assert _face_area(large) > _face_area(small)
+
+    assert _floor_face(_tie_compound(large, small)).IsSame(large)
+    assert _floor_face(_tie_compound(small, large)).IsSame(large)
+
+
+def test_the_proud_reading_breaks_an_exact_gap_tie_on_the_most_proud_companion():
+    """``_proud_mm`` returns a number, so order-independence of that number
+    is the whole requirement. Two companions sharing one footprint tie on
+    the gap exactly; the most proud reading is the conservative one and is
+    what both arrival orders must return.
+    """
+    from stompdrill.cad.region import _proud_mm
+
+    corners = _square_corners(5.0, 0.0, 10.0)
+    wire = _rectangle_wire(0.0, corners)
+    proud = _rectangle_face(2.5, corners)
+    receding = _rectangle_face(-1.0, corners)
+    # The control: identical in-plane footprints, so the gaps are exactly equal.
+    assert _footprint_gap(wire, proud) == _footprint_gap(wire, receding)
+
+    first = _proud_mm(wire, [proud, receding], 0.0, TIE_AXIS, TIE_IN_PLANE, TIE_OUTWARD)
+    second = _proud_mm(wire, [receding, proud], 0.0, TIE_AXIS, TIE_IN_PLANE, TIE_OUTWARD)
+
+    assert first == second == 2.5
+
+
+def test_the_proud_reading_tie_break_never_outranks_a_real_gap_difference():
+    """The innocent probe: the footprint gap still decides when there is no
+    tie, and the unmatched-companion ``inf`` path is untouched.
+    """
+    from stompdrill.cad.region import _proud_mm
+
+    corners = _square_corners(5.0, 0.0, 10.0)
+    wire = _rectangle_wire(0.0, corners)
+    matched = _rectangle_face(-1.0, corners)
+    far_but_proud = _rectangle_face(5.0, _square_corners(30.0, 0.0, 10.0))
+    assert _footprint_gap(wire, matched) < _footprint_gap(wire, far_but_proud)
+
+    both = _proud_mm(wire, [matched, far_but_proud], 0.0, TIE_AXIS, TIE_IN_PLANE, TIE_OUTWARD)
+    swapped = _proud_mm(wire, [far_but_proud, matched], 0.0, TIE_AXIS, TIE_IN_PLANE, TIE_OUTWARD)
+    assert both == swapped == -1.0
+
+    unmatched = _proud_mm(wire, [far_but_proud], 0.0, TIE_AXIS, TIE_IN_PLANE, TIE_OUTWARD)
+    none_at_all = _proud_mm(wire, [], 0.0, TIE_AXIS, TIE_IN_PLANE, TIE_OUTWARD)
+    assert unmatched == float("inf")
+    assert none_at_all == float("inf")

@@ -11,7 +11,7 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, Hole, ReferenceOutline, StageRun
-from stompmodel.units import Nanometre, format_nm
+from stompmodel.units import Nanometre, check_nanometres, format_nm
 
 from ..tolerance import within
 
@@ -32,11 +32,14 @@ class CheckReferenceSize:
         expected_nm: tuple[Nanometre, Nanometre],
         tolerance_nm: Nanometre = Nanometre(50_000),
     ) -> None:
-        self.expected_nm = (
-            _whole_nanometres("expected width", expected_nm[0]),
-            _whole_nanometres("expected height", expected_nm[1]),
+        check_nanometres(
+            "CheckReferenceSize",
+            expected_width_nm=expected_nm[0],
+            expected_height_nm=expected_nm[1],
+            tolerance_nm=tolerance_nm,
         )
-        self.tolerance_nm = _whole_nanometres("tolerance", tolerance_nm)
+        self.expected_nm = expected_nm
+        self.tolerance_nm = tolerance_nm
 
     def describe(self) -> StageRun:
         """Record expected width, expected height and tolerance as scalars."""
@@ -136,13 +139,6 @@ class CheckOutlineContainment:
             if over_x > 0 or over_y > 0:
                 findings.append(_outside(hole, outline, over_x, over_y))
         return data.with_diagnostics(*findings)
-
-
-def _whole_nanometres(name: str, value: Nanometre) -> Nanometre:
-    """Require a plain ``int`` nanometre length, excluding floats and booleans."""
-    if type(value) is not int:
-        raise TypeError(f"{name} must be a whole number of nanometres, not {value!r}")
-    return value
 
 
 def _signed_mm(nm: Nanometre) -> str:

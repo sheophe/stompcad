@@ -23,6 +23,7 @@ __all__ = [
     "mm_from_nm",
     "format_nm",
     "check_millimetres",
+    "check_nanometres",
 ]
 
 #: The canonical model unit. Every nominal length is one of these.
@@ -75,11 +76,14 @@ def format_nm(nm: Nanometre, decimals: int = 3) -> str:
     return str(value)
 
 
-def _check_nanometres(owner: str, **lengths: object) -> None:
+def check_nanometres(owner: str, **lengths: object) -> None:
     """Refuse anything but a plain ``int`` for a length.
 
     Exact type checks reject booleans as well as floats; conversion and rounding
-    belong at the unit boundary.
+    belong at the unit boundary. Public for the same reason
+    ``check_millimetres`` is: several `stompdrill` quantisers and stages apply
+    this guard outside the model, and a shared rule renamed private would break
+    every one of those callers with no ``__all__``, ruff or mypy saying so.
     """
     for name, value in lengths.items():
         if type(value) is not int:

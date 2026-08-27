@@ -224,40 +224,44 @@ the second is invisible without one.
 
 ### The routing repair
 
-`_two_opt` (`route.py:71-74`) scores each candidate reversal by rebuilding the
-route and rescoring it end to end, when a 2-opt reversal changes exactly two
-edges and is scorable in O(1). Line 74 is 97% of per-candidate cost and 99.96%
-of candidates are rejected after paying it. Measured growth is Θ(n³) per
-improvement sweep, with the sweep count data-dependent at 1–5 rather than
-scaling with n; cost is cubic **per tool block**, and blocks partition n.
+`_two_opt` used to score each candidate reversal by rebuilding the route and
+rescoring it end to end, when a 2-opt reversal changes exactly two edges and
+is scorable in O(1) instead. The recomputation was 97% of per-candidate cost,
+and 99.96% of candidates were rejected after paying it. Measured growth was
+Θ(n³) per improvement sweep, with the sweep count data-dependent at 1–5
+rather than scaling with n; cost was cubic **per tool block**, and blocks
+partition n.
 
-Not live — a 30-hole panel routes in 0.3 ms — but the repair is roughly ten
-lines and takes Θ(P·n³) to Θ(P·n²). A prototype produced 96/96 identical routes
-and byte-identical artefacts.
+Not live — a 30-hole panel routes in 0.3 ms — but the repair was worth
+landing: roughly ten lines, taking the cost from Θ(P·n³) to Θ(P·n²). A
+prototype produced 96/96 identical routes and byte-identical artefacts
+before it shipped, scoring each reversal by the four-term edge delta instead.
 
-Three things constrain it:
+Three things constrained it:
 
 - **ADR-0006 pins the algorithm**, not only the output: first improving
-  reversal, fixed start, sweeping i&lt;j. An O(1) edge delta preserves all three
-  and needs no amendment. Best-improvement or neighbour-list pruning would
-  change the algorithm and must amend the ADR first.
-- **Bit-exact reproduction has a weak float dependency.** Summing four terms is
-  not guaranteed to compare identically to summing n square roots at a tie.
-  Determinism itself does not depend on this — it comes from `_total_order` —
-  but today's exact routes might. Unanimous across the prototype's testing, not
-  provable by inspection, which is why the repair lands after the golden and the
-  invariance tests exist. Measured, not proved: 86 synthetic blocks in total —
-  the implementer's 32 up to n=90, plus 54 more across nine sizes up to n=140
-  with six seeds each — compared hole by hole before and after, and both
-  fixture panels byte-identical across all four formats; no route moved
-  anywhere in that evidence. The risk stands unfalsified, not eliminated.
-- **No existing test routes more than six holes.** The repair adds one at a
-  realistic panel size.
+  reversal, fixed start, sweeping i&lt;j. The O(1) edge delta preserves all
+  three and needed no amendment. Best-improvement or neighbour-list pruning
+  would have changed the algorithm and would have needed the ADR amended
+  first.
+- **Bit-exact reproduction has a weak float dependency.** Summing four terms
+  is not guaranteed to compare identically to summing n square roots at a
+  tie. Determinism itself does not depend on this — it comes from
+  `_total_order` — but the exact routes might. Unanimous across the
+  prototype's testing, not provable by inspection, which is why the repair
+  landed after the golden and the invariance tests already existed. Measured,
+  not proved: 86 synthetic blocks in total — the implementer's 32 up to
+  n=90, plus 54 more across nine sizes up to n=140 with six seeds each —
+  compared hole by hole before and after, and both fixture panels
+  byte-identical across all four formats; no route moved anywhere in that
+  evidence. The risk stood unfalsified, not eliminated.
+- **No existing test routed more than six holes** before the repair; it
+  added one at a realistic panel size.
 
-The comment at `route.py:67-69` is corrected with it. Commit `ba44744` hoisted a
-loop-invariant length, halved the constant, left the exponent, and left a comment
-that reads as though the recomputation was dealt with — the artefact most likely
-to stop the next reader from looking.
+A comment that had come to read as though the recomputation was already
+dealt with — left behind by an earlier change that hoisted a loop-invariant
+length and halved the constant without removing the recomputation itself —
+was corrected in the same change that replaced the recomputation outright.
 
 **Domain-edge preconditions.** `nm_from_mm` raises `decimal.InvalidOperation`
 around 1e22, and `route.py`'s `_leg` raises `OverflowError` on absurd

@@ -45,6 +45,11 @@ _NO_PAINT_OPS = frozenset({"n"})
 #: Overridable with ``--form-depth``; reaching it is reported, never fatal.
 DEFAULT_FORM_DEPTH = 12
 
+#: A clip region in page space: ``(x0, y0, x1, y1)``. ``x0 > x1`` or ``y0 > y1``
+#: is a valid, deliberately empty rectangle -- the intersection of two boxes
+#: that do not overlap -- and culls everything, not just what falls in the gap.
+_Rect = tuple[float, float, float, float]
+
 
 @dataclass(frozen=True, slots=True)
 class _LayerPath:
@@ -267,12 +272,17 @@ def _walk_page(page: pikepdf.Page, max_depth: int) -> tuple[list[_LayerPath], bo
     """Painted, non-clipping subpaths in page space, and whether nesting was cut.
 
     Page space is PDF points from the ``/MediaBox`` lower-left corner; the base
-    CTM removes a non-zero box offset.
+    CTM removes a non-zero box offset. The page's own crop box -- its media box
+    when none is declared (ISO 32000-1 14.11.2) -- is exactly as unconditional
+    a clip as a Form XObject's ``/BBox``, so it seeds the walk's one inherited
+    clip region rather than leaving the top level unbounded.
     """
     box = [float(v) for v in page.MediaBox]
     base: Matrix = (1.0, 0.0, 0.0, 1.0, -box[0], -box[1])
+    crop = [float(v) for v in page.cropbox]
+    page_clip: _Rect = (crop[0] - box[0], crop[1] - box[1], crop[2] - box[0], crop[3] - box[1])
     out: list[_LayerPath] = []
-    truncated = _walk(page, page.get("/Resources"), base, (), out, 0, max_depth)
+    truncated = _walk(page, page.get("/Resources"), base, page_clip, (), out, 0, max_depth)
     return out, truncated
 
 
@@ -280,6 +290,7 @@ def _walk(
     source,
     resources,
     ctm: Matrix,
+    clip: _Rect | None,
     marks: tuple[frozenset[str], ...],
     out: list[_LayerPath],
     depth: int,
@@ -288,8 +299,12 @@ def _walk(
     """Interpret one content stream, appending to ``out``.
 
     ``marks`` is inherited by nested forms, but each stream may close only the
-    marked-content entries it opened. Returns whether a form went unread for
-    want of depth, here or anywhere below.
+    marked-content entries it opened. ``clip`` is the one region carried
+    through the walk -- the page's own crop box intersected with every
+    enclosing form's ``/BBox`` -- in page space; ``None`` means unbounded, which
+    a top-level call never passes since the page always supplies its own box.
+    Returns whether a form went unread for want of depth, here or anywhere
+    below.
     """
     truncated = False
     stack: list[Matrix] = []
@@ -336,6 +351,19 @@ def _walk(
                 continue
             layers = frozenset().union(*marks) if marks else frozenset()
             for path in painted:
+                # ``clip`` is unconditional (ISO 32000-1 8.10.2, 14.11.2), but
+                # the quantity it is tested against depends on what the path
+                # recognises as. A hole is point-like: a circle painting only
+                # a thin crescent inside the clip is not a hole, so it is
+                # judged by its centre. Anything else -- an outline candidate
+                # among them -- is judged by its extent, so a path merely
+                # straddling the clip's edge is kept.
+                circle = fit_circle(path)
+                if circle is not None:
+                    if _centre_outside(circle.cx, circle.cy, clip):
+                        continue
+                elif _entirely_outside(path.bbox, clip):
+                    continue
                 out.append(_LayerPath(layers=layers, path=path))
 
         # -- forms
@@ -353,10 +381,17 @@ def _walk(
             inner = builder.ctm
             if matrix is not None:
                 inner = multiply(_as_matrix(matrix), inner)
+            # The declared /BBox clips in page space, so it is mapped through
+            # the same matrix -- the form's own, then the CTM at this ``Do``
+            # -- that maps the form's content, then intersected with whatever
+            # clip this form was itself entered under.
+            bbox = _numbers(form.get("/BBox"), 4)
+            inner_clip = clip if bbox is None else _intersect(clip, _bbox_rect(bbox, inner))
             truncated |= _walk(
                 form,
                 form.get("/Resources", resources),
                 inner,
+                inner_clip,
                 marks,
                 out,
                 depth + 1,
@@ -508,21 +543,15 @@ def _empty_layer(
 ) -> EmptyLayerError:
     """The right ``EmptyLayerError`` for why ``layer`` yielded no circle.
 
-    A positive count means every path failed the circle predicate. Zero paths
-    means no painted artwork reached the stream -- unless nesting was cut
-    first, in which case that, not a missing stroke, is named as the cause.
+    ``path_count`` always reaches the constructor, so the published attribute
+    and the composed message agree on every real path. Truncation is a fact
+    only this reader holds -- the constructor cannot compose a sentence about
+    a nesting depth it never sees -- so that one sentence is stated here
+    directly rather than adding a parameter the constructor would carry for a
+    single caller.
     """
-    error = EmptyLayerError(layer)
-    if path_count:
-        error.args = (
-            (
-                f"layer {layer!r} has {path_count} path(s) but none of them is a circle. "
-                "Only true circles are drillable: four cubic Beziers, equal radii, "
-                "kappa-consistent controls. Rounded rectangles, ellipses, compound "
-                "shapes and stray marks all read as non-circular here."
-            ),
-        )
-    elif truncated_at is not None:
+    error = EmptyLayerError(layer, path_count)
+    if not path_count and truncated_at is not None:
         error.args = (
             (
                 f"layer {layer!r} contained no drillable geometry, but reading "
@@ -539,22 +568,89 @@ def _as_matrix(values: Sequence[float]) -> Matrix:
     return (a, b, c, d, e, f)
 
 
+def _bbox_rect(bbox: Sequence[float], matrix: Matrix) -> _Rect:
+    """Bound ``bbox``'s four corners after ``matrix``, not just two opposite ones.
+
+    ``matrix`` may rotate or skew, so the mapped corners need not stay a
+    rectangle; their axis-aligned bounds are what a rectangular clip can hold.
+    """
+    llx, lly, urx, ury = bbox
+    corners = (
+        transform(matrix, llx, lly),
+        transform(matrix, urx, lly),
+        transform(matrix, urx, ury),
+        transform(matrix, llx, ury),
+    )
+    xs = [p[0] for p in corners]
+    ys = [p[1] for p in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _intersect(a: _Rect | None, b: _Rect) -> _Rect:
+    """Intersect two page-space clips; ``None`` is unbounded, not empty."""
+    if a is None:
+        return b
+    return (max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3]))
+
+
+def _entirely_outside(bbox: tuple[float, float, float, float], clip: _Rect | None) -> bool:
+    """Whether ``bbox`` shares no extent with ``clip``; ``None`` never culls.
+
+    For a non-circular path only: an outline candidate genuinely is an extent,
+    so straddling the clip's edge keeps it. A recognised circle is judged by
+    ``_centre_outside`` instead -- see its docstring for why.
+
+    An empty ``clip`` (``x0 > x1`` or ``y0 > y1``, from two boxes that do not
+    overlap) culls every bbox outright rather than relying on the ordinary
+    disjoint test, which a degenerate interval can fool.
+    """
+    if clip is None:
+        return False
+    cx0, cy0, cx1, cy1 = clip
+    if cx0 > cx1 or cy0 > cy1:
+        return True
+    x0, y0, x1, y1 = bbox
+    return x1 < cx0 or x0 > cx1 or y1 < cy0 or y0 > cy1
+
+
+def _centre_outside(cx: float, cy: float, clip: _Rect | None) -> bool:
+    """Whether a recovered circle's centre lies outside ``clip``.
+
+    A hole is point-like: an extent test would keep a circle painting only a
+    thin crescent inside the clip, mostly outside it, as long as any sliver
+    overlaps. ``None`` never culls; a degenerate empty ``clip`` always does,
+    matching ``_entirely_outside``.
+    """
+    if clip is None:
+        return False
+    cx0, cy0, cx1, cy1 = clip
+    if cx0 > cx1 or cy0 > cy1:
+        return True
+    return cx < cx0 or cx > cx1 or cy < cy0 or cy > cy1
+
+
 def _largest_non_circular(
     paths: Iterable[SubPath],
 ) -> tuple[float, float, float, float] | None:
     """Return the largest-area non-circular path's bounds, or ``None``.
 
-    Circles cannot define the panel; area prevents a long thin path from winning.
+    Total on geometry, never on arrival (ADR-0006): greatest bounding-box area
+    wins; a tie breaks on the box's own bounds, compared leftmost (smallest
+    ``x0``), then bottommost (smallest ``y0``), then rightmost (largest
+    ``x1``), then topmost (largest ``y1``). Two boxes surviving all four are
+    the same rectangle, so no candidate can win only by appearing first in the
+    content stream. Circles cannot define the panel.
     """
-    best: tuple[float, float, float, float] | None = None
-    best_area = 0.0
+    best_key: tuple[float, float, float, float, float] | None = None
+    best_bbox: tuple[float, float, float, float] | None = None
     for path in paths:
         if fit_circle(path) is not None:
             continue
         # every emitted subpath begins with a MoveTo, so bbox always has anchors
         x0, y0, x1, y1 = path.bbox
         area = (x1 - x0) * (y1 - y0)
-        if area > best_area:
-            best_area = area
-            best = (x0, y0, x1, y1)
-    return best
+        key = (area, -x0, -y0, x1, y1)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_bbox = (x0, y0, x1, y1)
+    return best_bbox

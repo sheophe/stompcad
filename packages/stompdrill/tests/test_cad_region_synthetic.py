@@ -15,13 +15,15 @@ from stompdrill.cad import Rejection
 from stompdrill.cad.loader import OcpCaseModel
 from stompdrill.cad.region import build_region, classify_bounds, contains
 from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre
 
 AXIS = 1
 MM = 1_000_000
 #: The floor faces built below face -y (towards more negative y), matching
-#: ``Faces.outward``'s convention: a companion nearer that direction than
-#: the floor is proud, one further away recedes.
+#: ``Faces.outward``'s convention: a companion set the other way from the
+#: floor -- away from the drilled face, into the cavity -- stands proud, one
+#: displaced towards that direction recedes.
 OUTWARD = -1.0
 
 
@@ -29,15 +31,20 @@ def nm(value_mm: float) -> Nanometre:
     return Nanometre(round(value_mm * MM))
 
 
-def _rectangle(y: float, corners):
+def _polyline(points, close: bool = True):
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
     from OCP.gp import gp_Pnt
 
     polygon = BRepBuilderAPI_MakePolygon()
-    for x, z in corners:
-        polygon.Add(gp_Pnt(x, y, z))
-    polygon.Close()
+    for point in points:
+        polygon.Add(gp_Pnt(*point))
+    if close:
+        polygon.Close()
     return polygon.Wire()
+
+
+def _rectangle(y: float, corners):
+    return _polyline([(x, y, z) for x, z in corners])
 
 
 def _floor_with_companion(companion_y: float):
@@ -129,7 +136,7 @@ def test_obstructed_is_reachable_with_a_genuine_raised_boss():
     box_region = build_region(box_face, AXIS, OUTWARD)
 
     model = OcpCaseModel(
-        part="synthetic", face="lid",
+        part="synthetic", face=CaseFace.LID, model_name="synthetic.stp",
         footprint_nm=(nm(100.0), nm(100.0)), plate_nm=nm(2.0),
         play_area_nm=(nm(-50.0), nm(-50.0), nm(50.0), nm(50.0)),
         frame=own_frame, margin_nm=Nanometre(0), axis=AXIS,
@@ -178,7 +185,7 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
     box_region = build_region(box_face, AXIS, OUTWARD)
 
     model = OcpCaseModel(
-        part="synthetic", face="lid",
+        part="synthetic", face=CaseFace.LID, model_name="synthetic.stp",
         footprint_nm=(nm(100.0), nm(100.0)), plate_nm=nm(2.0),
         play_area_nm=(nm(-50.0), nm(-50.0), nm(50.0), nm(50.0)),
         frame=own_frame, margin_nm=Nanometre(0), axis=AXIS,
@@ -197,3 +204,68 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
 
     assert over_boss is Rejection.OBSTRUCTED
     assert clear_metal is None
+
+
+def _hostile_wires(region):
+    """Wires that cannot sensibly bound a hole in the 100 x 100 mm floor.
+
+    Each breaks a different precondition ``BRepBuilderAPI_MakeFace.Add``
+    might plausibly have checked: closure, planarity, coplanarity with the
+    face's own surface, non-self-intersection, containment within the outer
+    boundary, and non-degeneracy. A null wire is excluded deliberately -- it
+    segfaults the kernel outright rather than reporting anything, and
+    ``classify_bounds`` only ever yields wires read off a real face.
+    """
+    from OCP.ShapeAnalysis import ShapeAnalysis
+
+    return {
+        "open, unclosed polyline": _polyline(
+            [(-20.0, 0.0, -20.0), (-10.0, 0.0, -20.0), (-10.0, 0.0, -10.0)], close=False),
+        "self-intersecting figure-eight": _rectangle(
+            0.0, [(-40.0, -40.0), (-20.0, -20.0), (-40.0, -20.0), (-20.0, -40.0)]),
+        "closed, but on a parallel plane 25 mm off the face": _rectangle(
+            25.0, [(-40.0, 20.0), (-30.0, 20.0), (-30.0, 30.0), (-40.0, 30.0)]),
+        "on a plane perpendicular to the face": _polyline(
+            [(-40.0, 0.0, -40.0), (-30.0, 0.0, -40.0),
+             (-30.0, 10.0, -40.0), (-40.0, 10.0, -40.0)]),
+        "non-planar skew quadrilateral": _polyline(
+            [(-40.0, 0.0, 30.0), (-30.0, 0.0, 30.0),
+             (-30.0, 5.0, 40.0), (-40.0, -5.0, 40.0)]),
+        "wholly outside the outer boundary": _rectangle(
+            0.0, [(200.0, 200.0), (210.0, 200.0), (210.0, 210.0), (200.0, 210.0)]),
+        "enclosing the whole outer boundary": _rectangle(
+            0.0, [(-200.0, -200.0), (200.0, -200.0), (200.0, 200.0), (-200.0, 200.0)]),
+        "straddling the outer boundary": _rectangle(
+            0.0, [(40.0, -5.0), (60.0, -5.0), (60.0, 5.0), (40.0, 5.0)]),
+        "degenerate two-point wire enclosing no area": _polyline(
+            [(-45.0, 0.0, -45.0), (-35.0, 0.0, -45.0)]),
+        "the region's own outer wire, added a second time": ShapeAnalysis.OuterWire_s(region),
+    }
+
+
+def test_add_reports_done_for_every_hostile_wire():
+    """``build_region`` cannot detect a structure wire the kernel refused.
+
+    Its subtraction loop carries no guard because there is nothing to guard
+    on: ``Add`` sets ``FaceDone`` unconditionally. Reversing that decision --
+    restoring ``if adder.IsDone():`` as a live check -- needs this to fail
+    for at least one wire below. The builder's state *before* ``Add`` is
+    asserted too, so the test cannot pass by finding a flag that is simply
+    always true: it is false until ``Add`` forces it.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.TopoDS import TopoDS
+
+    region = build_region(_floor_with_companion(3.0), AXIS, OUTWARD)
+    hostile = _hostile_wires(region)
+    assert len(hostile) >= 9, "too few hostile wires to call this evidence"
+
+    before, after = {}, {}
+    for name, wire in hostile.items():
+        adder = BRepBuilderAPI_MakeFace(region)
+        before[name] = adder.IsDone()
+        adder.Add(TopoDS.Wire_s(wire.Reversed()))
+        after[name] = adder.IsDone()
+
+    assert before == dict.fromkeys(hostile, False)
+    assert after == dict.fromkeys(hostile, True)

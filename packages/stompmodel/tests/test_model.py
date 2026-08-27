@@ -8,7 +8,10 @@ import pytest
 
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import EmitterError
+from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    CaseFace,
+    CaseRegistration,
     DrillData,
     EnclosureMatch,
     Hole,
@@ -262,6 +265,22 @@ def test_the_refusal_names_the_remedy_without_naming_a_class() -> None:
     ))
     with pytest.raises(EmitterError, match="compose a routing stage before emitting"):
         data.numbered()
+
+
+def test_numbered_reads_the_numbers_it_is_given_without_auditing_the_set() -> None:
+    """ADR-0006's fifth amendment: ``1…n`` is established by the routing stage
+    and enforced by ``stompmodel.codec.from_document``, never by this
+    accessor. Any positive number is accepted here on purpose, which is what
+    lets a fixture number a lone hole out of range and so tell an emitter that
+    read the model from one that counted the list. Moving the rule into this
+    accessor deletes that instrument, so this test fails if anyone does.
+    """
+    data = DrillData(holes=(
+        Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000)).with_number(4),
+        Hole.from_measurement(Nanometre(10_000_000), Nanometre(0), Nanometre(7_000_000)).with_number(9),
+    ))
+
+    assert [number for number, _ in data.numbered()] == [4, 9]
 
 
 def test_the_residual_is_the_nominal_position_less_the_measured_one() -> None:
@@ -656,6 +675,94 @@ def test_the_enclosure_survives_the_other_transforms() -> None:
 
 
 # --------------------------------------------------------------------------
+# CaseRegistration: what a supplied model was decided against
+# --------------------------------------------------------------------------
+
+_FRAME = FaceFrame(
+    basis=CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(-30_000_000)),
+        u=(1.0, 0.0, 0.0),
+        v=(0.0, -1.0, 0.0),
+        w=(0.0, 0.0, -1.0),
+    )
+)
+
+_REGISTRATION = CaseRegistration(part="1590BB", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
+
+
+def test_a_registration_names_the_part_the_face_the_model_and_the_frame() -> None:
+    assert _REGISTRATION.part == "1590BB"
+    assert _REGISTRATION.face is CaseFace.BOX
+    assert _REGISTRATION.model == "1590BB.stp"
+    assert _REGISTRATION.frame is _FRAME
+
+
+def test_an_empty_part_is_refused() -> None:
+    with pytest.raises(ValueError):
+        CaseRegistration(part="", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
+
+
+def test_an_empty_model_name_is_refused() -> None:
+    with pytest.raises(ValueError):
+        CaseRegistration(part="1590BB", face=CaseFace.BOX, model="", frame=_FRAME)
+
+
+def test_case_face_has_exactly_two_legal_members() -> None:
+    """The published vocabulary, closed: this is the whole of it."""
+    assert {member.value for member in CaseFace} == {"box", "lid"}
+
+
+def test_a_case_face_member_is_never_falsy() -> None:
+    """The registration's guard can drop the face clause because of this."""
+    assert bool(CaseFace.BOX) and bool(CaseFace.LID)
+
+
+def test_a_value_outside_the_vocabulary_is_refused_by_the_enum_itself() -> None:
+    with pytest.raises(ValueError):
+        CaseFace("top")
+
+
+def test_the_registration_is_frozen_and_slotted() -> None:
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        _REGISTRATION.part = "1590BBS"  # type: ignore[misc]
+    assert not hasattr(_REGISTRATION, "__dict__")
+
+
+# --------------------------------------------------------------------------
+# DrillData carries the case registration
+# --------------------------------------------------------------------------
+
+
+def test_drill_data_starts_with_no_case_registration() -> None:
+    """Absent, not guessed: no case model was supplied to this run."""
+    assert DrillData().case is None
+
+
+def test_with_case_returns_a_new_instance_and_leaves_the_original_alone() -> None:
+    data = DrillData()
+    registered = data.with_case(_REGISTRATION)
+    assert registered is not data
+    assert registered.case is _REGISTRATION
+    assert data.case is None
+
+
+def test_with_case_keeps_everything_else_the_pipeline_has_accumulated() -> None:
+    data = DrillData(
+        holes=(Hole.from_measurement(Nanometre(7_000_000), Nanometre(-3_000_000), Nanometre(12_000_000)).with_number(4),),
+        reference=ReferenceOutline.from_measurement(Nanometre(113_000_000), Nanometre(60_000_000)),
+        diagnostics=(Diagnostic.warning("off-grid", "hole 4 is off grid"),),
+        source=SourceInfo(path="tar.ai"),
+        processing=(StageRun("snap", (("grid_nm", 500_000),)),),
+    )
+    registered = data.with_case(_REGISTRATION)
+    assert registered.holes == data.holes
+    assert registered.reference == data.reference
+    assert registered.diagnostics == data.diagnostics
+    assert registered.source == data.source
+    assert registered.processing == data.processing
+
+
+# --------------------------------------------------------------------------
 # moving the frame
 # --------------------------------------------------------------------------
 
@@ -915,3 +1022,30 @@ def test_two_holes_half_a_millimetre_apart_are_two_rows() -> None:
     )
 
     assert [y for y, _ in panel.rows()] == [18_000_000, 17_500_000]
+
+
+def test_two_holes_tied_on_nominal_x_come_back_in_the_same_order_either_way() -> None:
+    """Ticket 15, AC2: nominal X alone ties for two holes sharing one point,
+    grouped into a row by different diameter. ``sorted`` is stable, so
+    without ``Hole.tie_break`` the survivor of the tie would be whichever one
+    arrived first -- an ADR-0006 violation latent inside the type that
+    publishes it. Same raw measurement placed on each of a pair of nominally
+    identical positions, so the winner is decided by geometry, not diameter.
+    """
+
+    def hole(diameter_nm: int, raw_x: float, number: int) -> Hole:
+        return Hole(
+            Nanometre(0),
+            Nanometre(18_000_000),
+            Nanometre(diameter_nm),
+            raw=RawHole(Millimetre(raw_x), Millimetre(18.0), Millimetre(0.0)),
+        ).with_number(number)
+
+    smaller_raw = hole(3_000_000, 0.0001, 1)
+    larger_raw = hole(4_000_000, 0.0002, 2)
+
+    forward = DrillData(holes=(smaller_raw, larger_raw)).rows()
+    backward = DrillData(holes=(larger_raw, smaller_raw)).rows()
+
+    order = lambda rows: [h.diameter_nm for _, holes in rows for h in holes]  # noqa: E731
+    assert order(forward) == order(backward) == [3_000_000, 4_000_000]

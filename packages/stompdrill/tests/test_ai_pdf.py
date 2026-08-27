@@ -405,6 +405,44 @@ def test_drill_layer_with_paths_but_no_circles_says_so(tmp_path):
     assert "1 path" in message
     assert "circle" in message
     assert "stroke" not in message
+    assert exc.value.path_count == 1, (
+        "the message names 1 path but the published attribute a library "
+        "consumer branches on says otherwise"
+    )
+
+
+def test_reader_reports_the_real_path_count_it_names_in_its_own_message(tmp_path):
+    """The message says '5 path(s)'; ``error.path_count`` must say the same
+    thing a consumer branching on the published attribute would read.
+
+    ``_empty_layer`` is the only production caller of ``EmptyLayerError``; this
+    drives it end to end rather than constructing the error directly, which is
+    the path the bug lived on.
+    """
+    pdf = build_pdf(
+        tmp_path / "five_non_circles.pdf",
+        {
+            "Background": "10 10 100 50 re f",
+            "Drill": (
+                "0 0 400 400 re W n "
+                "10 10 m 20 20 l S "
+                "30 30 m 40 40 l S "
+                "50 50 m 60 60 l S "
+                "70 70 m 80 80 l S "
+                "90 90 m 100 100 l S"
+            ),
+        },
+    )
+    with pytest.raises(EmptyLayerError) as exc:
+        AiPdfSource(pdf).read()
+    message = str(exc.value)
+    assert "5 path" in message
+    assert exc.value.path_count == 5, (
+        f"message names 5 paths but error.path_count == {exc.value.path_count}; "
+        "a library consumer branching on the published attribute "
+        "(`if e.path_count: ...`) takes the wrong branch because _empty_layer "
+        "never passed the real count to the EmptyLayerError constructor"
+    )
 
 
 def test_a_layer_present_but_undrawn_blames_the_missing_paint(tmp_path):
@@ -622,6 +660,247 @@ def test_a_do_without_any_xobject_resource_is_ignored(tmp_path):
     assert len(AiPdfSource(pdf).read().holes) == 1
 
 
+def test_geometry_entirely_outside_a_forms_bbox_is_not_a_hole(tmp_path):
+    """ISO 32000-1 8.10.2: a Form XObject's /BBox is an unconditional clip.
+
+    A circle drawn well outside its form's declared box is invisible to any
+    conforming viewer, including Illustrator, and must not become a hole."""
+    pdf = build_pdf(
+        tmp_path / "bbox-outside.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 0, 0], circle_ops(150.0, 150.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_the_same_geometry_inside_a_genuine_bbox_is_still_a_hole(tmp_path):
+    """Control for the previous test: the clip, not the geometry, is what differs."""
+    pdf = build_pdf(
+        tmp_path / "bbox-inside.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 0, 0], circle_ops(150.0, 150.0, 6.0)),
+        form_bbox=(0, 0, 400, 400),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_circle_straddling_the_bbox_edge_is_kept(tmp_path):
+    """Only an extent entirely outside the clip is culled -- straddling is not."""
+    pdf = build_pdf(
+        tmp_path / "bbox-straddle.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        # centred on (20, 10), radius 6: the circle's bbox runs x 14..26,
+        # crossing the box's right edge at x=20.
+        form=([1, 0, 0, 1, 0, 0], circle_ops(20.0, 10.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_bbox_clips_in_page_space_not_form_space(tmp_path):
+    """Both the form's own /Matrix and the CTM at the ``Do`` map the box.
+
+    The form's content is drawn far outside a box that looks generous in its
+    own, untransformed coordinates -- only correctly mapping the box into page
+    space culls it."""
+    pdf = build_pdf(
+        tmp_path / "bbox-matrix.pdf",
+        {
+            "Background": "0 0 400 400 re f",
+            "Drill": "q 1 0 0 1 100 0 cm /Fm0 Do Q",
+        },
+        form=([1, 0, 0, 1, 0, 100], circle_ops(150.0, 150.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_a_bbox_mapped_into_page_space_still_admits_its_own_content(tmp_path):
+    """Control for the previous test: content the mapped box genuinely contains."""
+    pdf = build_pdf(
+        tmp_path / "bbox-matrix-control.pdf",
+        {
+            "Background": "0 0 400 400 re f",
+            "Drill": "q 1 0 0 1 100 0 cm /Fm0 Do Q",
+        },
+        # box (0,0,20,20) maps, through matrix then CTM, to (100,100)-(120,120)
+        # in page space; the circle at form-local (10, 10) maps to (110, 110).
+        form=([1, 0, 0, 1, 0, 100], circle_ops(10.0, 10.0, 6.0)),
+        form_bbox=(0, 0, 20, 20),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_nested_forms_intersect_their_clips_cumulatively(tmp_path):
+    """A generous inner /BBox does not override a stricter box inherited from
+    outside it -- nested clips intersect, they do not reset."""
+    pdf = pikepdf.new()
+    ocgs = []
+    properties = pikepdf.Dictionary()
+    body = []
+    for i, (name, content) in enumerate(
+        {"Drill": "/Fm0 Do", "Background": "0 0 400 400 re f"}.items()
+    ):
+        ocg = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=pikepdf.String(name)))
+        ocgs.append(ocg)
+        properties[f"/MC{i}"] = ocg
+        body.append(f"/OC /MC{i} BDC {content} EMC")
+    pdf.Root.OCProperties = pdf.make_indirect(
+        pikepdf.Dictionary(
+            OCGs=pikepdf.Array(ocgs),
+            D=pikepdf.Dictionary(Order=pikepdf.Array(ocgs), ON=pikepdf.Array(ocgs)),
+        )
+    )
+
+    # Inner form's own box is generous enough to admit the circle on its own.
+    inner = pdf.make_stream(circle_ops(150.0, 150.0, 6.0).encode())
+    inner.Type = pikepdf.Name.XObject
+    inner.Subtype = pikepdf.Name.Form
+    inner.BBox = pikepdf.Array([0, 0, 300, 300])
+    inner.Matrix = pikepdf.Array([1, 0, 0, 1, 0, 0])
+
+    # Outer form's box is tiny, and encloses the inner form's invocation.
+    outer = pdf.make_stream(b"/Fm1 Do")
+    outer.Type = pikepdf.Name.XObject
+    outer.Subtype = pikepdf.Name.Form
+    outer.BBox = pikepdf.Array([0, 0, 20, 20])
+    outer.Matrix = pikepdf.Array([1, 0, 0, 1, 0, 0])
+    outer.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm1=pdf.make_indirect(inner)))
+
+    resources = pikepdf.Dictionary(
+        Properties=properties, XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(outer))
+    )
+    pdf.pages.append(
+        pikepdf.Page(
+            pdf.make_indirect(
+                pikepdf.Dictionary(
+                    Type=pikepdf.Name.Page,
+                    MediaBox=pikepdf.Array([0, 0, 400, 400]),
+                    Resources=resources,
+                    Contents=pdf.make_indirect(pdf.make_stream("\n".join(body).encode())),
+                )
+            )
+        )
+    )
+    path = tmp_path / "bbox-nested.pdf"
+    pdf.save(path)
+
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(path).read()
+
+
+def test_a_pasteboard_circle_outside_the_media_box_is_not_a_hole(tmp_path):
+    """F3-01: the page's own box clips exactly as unconditionally as a form's.
+
+    A native Illustrator save keeps pasteboard artwork in the content stream,
+    so a spare circle parked outside /MediaBox must not surface as a hole."""
+    pdf = build_pdf(
+        tmp_path / "media.ai",
+        {
+            "Drill": circle_ops(50, 50, 5) + " " + circle_ops(900, 900, 5),
+            "Background": "10 10 180 80 re S",
+        },
+        media=(0, 0, 200, 100),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_the_same_pasteboard_circle_is_the_only_thing_on_an_otherwise_bare_layer(tmp_path):
+    """Control: with nothing else drillable, culling it raises the same
+    empty-layer error a genuinely bare layer would -- naming the same remedy."""
+    pdf = build_pdf(
+        tmp_path / "media-empty.ai",
+        {"Drill": circle_ops(900, 900, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+    )
+    with pytest.raises(EmptyLayerError) as excinfo:
+        AiPdfSource(pdf).read()
+    assert "stroke" in str(excinfo.value)
+
+
+def test_a_crop_box_narrower_than_the_media_box_bites(tmp_path):
+    """The crop box, where present, is what clips -- proving the media box is
+    only the default, not the rule."""
+    pdf = build_pdf(
+        tmp_path / "crop.ai",
+        {"Drill": circle_ops(150, 50, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+        crop=(0, 0, 100, 100),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_the_same_circle_inside_the_crop_box_is_still_a_hole(tmp_path):
+    """Control for the previous test: the crop box, not the geometry, differs."""
+    pdf = build_pdf(
+        tmp_path / "crop-control.ai",
+        {"Drill": circle_ops(50, 50, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+        crop=(0, 0, 100, 100),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_circle_centred_outside_the_page_clip_is_not_a_hole_even_straddling_it(tmp_path):
+    """F3-02, at page level: a hole is a point-like feature. A Ø40pt circle
+    centred just past the crop edge paints only a thin crescent inside it and
+    must not be recovered at all, let alone at its full diameter."""
+    pdf = build_pdf(
+        tmp_path / "centre-cull.ai",
+        {"Drill": circle_ops(118, 50, 20), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 400, 400),
+        crop=(0, 0, 100, 400),
+    )
+    with pytest.raises(EmptyLayerError):
+        AiPdfSource(pdf).read()
+
+
+def test_a_circle_centred_inside_the_page_clip_is_kept_even_where_clipped(tmp_path):
+    """The other clause of the same rule: a centre inside the clip keeps the
+    hole even though part of the circle is clipped away."""
+    pdf = build_pdf(
+        tmp_path / "centre-keep.ai",
+        {"Drill": circle_ops(90, 50, 20), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 400, 400),
+        crop=(0, 0, 100, 400),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_a_circle_centred_outside_a_forms_bbox_paints_only_a_crescent(tmp_path):
+    """F3-02: the centre rule applies under a form's box exactly as under the
+    page's. The form's /BBox ends at x=100; a Ø40pt circle centred at x=118
+    paints only a thin crescent and must not be recovered at all."""
+    body = circle_ops(118, 50, 20) + " " + circle_ops(50, 50, 5)
+    pdf = build_pdf(
+        tmp_path / "bbox-centre.pdf",
+        {"Background": "0 0 400 400 re f", "Drill": "/Fm0 Do"},
+        form=([1, 0, 0, 1, 0, 0], body),
+        form_bbox=(0, 0, 100, 400),
+    )
+    assert len(AiPdfSource(pdf).read().holes) == 1
+
+
+def test_the_reference_outline_is_still_judged_by_extent_under_the_page_clip(tmp_path):
+    """The class criterion's other half: an outline candidate is judged by its
+    extent, not a centre, even under the page's own clip -- unchanged from the
+    wave-1 form-box rule, now reachable at the page level too."""
+    pdf = build_pdf(
+        tmp_path / "outline-extent.ai",
+        {"Drill": circle_ops(50, 50, 5), "Background": "10 10 180 80 re S"},
+        media=(0, 0, 200, 100),
+        crop=(0, 0, 100, 100),
+    )
+    data = AiPdfSource(pdf).read()
+    # The reference rectangle straddles the crop edge (extent 10..190) but is
+    # kept as the outline: only a wholly outside extent would be culled.
+    assert data.reference is not None
+
+
 def test_a_placed_image_is_not_walked_as_a_content_stream(tmp_path):
     """Illustrator files carry linked images; only Form XObjects hold paths."""
     pdf = build_pdf(
@@ -805,6 +1084,119 @@ def test_circles_on_the_reference_layer_are_not_the_outline(tmp_path):
     assert reference.width == pytest.approx(100.0, abs=TOL_MM)
 
 
+# ---------------------------------------------------------------------------
+# F3-01: the reference outline tie-break is total on geometry (ADR-0006)
+# ---------------------------------------------------------------------------
+
+
+def test_reference_outline_independent_of_content_stream_order(tmp_path):
+    """Two equal-area non-circular candidates yield the same outline, centre
+    and hole position regardless of which is drawn first.
+
+    Moved from the falsifier at
+    ``.scratch/architecture-review/falsify/tests/test_f3_01_reference_outline_order.py``,
+    which failed before ``_largest_non_circular`` gained a geometric tie-break.
+    """
+    a_rect = "0 0 200 100 re S"
+    b_rect = "250 250 100 200 re S"  # same anchor-bbox area as A, transposed
+
+    results = {}
+    for label, background in (
+        ("A-then-B", f"{a_rect} {b_rect}"),
+        ("B-then-A", f"{b_rect} {a_rect}"),
+    ):
+        pdf = build_pdf(
+            tmp_path / f"{label}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        raw = AiPdfSource(pdf).read()
+        results[label] = (raw.reference, raw.centre, raw.holes[0])
+
+    first, second = results["A-then-B"], results["B-then-A"]
+    assert first == second, (
+        "reference outline, centre and hole position must be a function of "
+        f"geometry alone, not traversal order; got {first!r} vs {second!r}"
+    )
+
+
+def test_the_tie_break_is_geometric_not_positional(tmp_path):
+    """Swapping the tied pair's content-stream order changes nothing; moving
+    one candidate's own bound past the other's changes the winner exactly as
+    the stated rule predicts (leftmost, then bottommost, then rightmost, then
+    topmost bound -- see ``_largest_non_circular``'s docstring).
+    """
+    a_rect = "0 0 200 100 re S"  # bounds (0, 0, 200, 100); smaller x0 than B
+    b_rect = "250 250 100 200 re S"  # bounds (250, 250, 350, 450)
+
+    for index, background in enumerate((f"{a_rect} {b_rect}", f"{b_rect} {a_rect}")):
+        pdf = build_pdf(
+            tmp_path / f"order{index}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        reference = AiPdfSource(pdf).read().reference
+        assert reference is not None
+        assert reference.width == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+
+    # Move A's x0 past B's: B now holds the smaller x0 and must win instead.
+    moved_a = "260 0 200 100 re S"  # bounds (260, 0, 460, 100)
+    pdf = build_pdf(
+        tmp_path / "moved.pdf",
+        {"Drill": circle_ops(60, 40, 5), "Background": f"{moved_a} {b_rect}"},
+        media=(0, 0, 600, 500),
+    )
+    reference = AiPdfSource(pdf).read().reference
+    assert reference is not None
+    assert reference.width == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+    assert reference.height == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+
+
+def test_the_second_tie_break_clause_is_load_bearing(tmp_path):
+    """Area and ``x0`` tie; only ``y0`` separates the pair -- the bottommost
+    (smaller ``y0``) must win, in either content-stream order.
+
+    ``bottommost`` and ``higher`` are also built to disagree on ``x1`` (100
+    vs. 200): if the ``y0`` comparison were dropped or reordered, the next
+    clause (``x1``) would pick ``higher`` instead, so this fixture -- unlike
+    one where the two candidates happen to tie or agree on ``x1`` too --
+    actually catches a mutant that skips the ``y0`` term.
+    """
+    bottommost = "0 0 100 200 re S"  # bounds (0, 0, 100, 200); area 20000
+    higher = "0 5 200 100 re S"  # bounds (0, 5, 200, 105); same area, x0; larger x1
+
+    for index, background in enumerate((f"{bottommost} {higher}", f"{higher} {bottommost}")):
+        pdf = build_pdf(
+            tmp_path / f"y0-{index}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        reference = AiPdfSource(pdf).read().reference
+        assert reference is not None
+        assert reference.width == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+
+
+def test_the_third_tie_break_clause_is_load_bearing(tmp_path):
+    """Area, ``x0`` and ``y0`` tie; only ``x1`` separates the pair -- the
+    rightmost (larger ``x1``) must win, in either content-stream order.
+    """
+    narrower = "0 0 100 200 re S"  # bounds (0, 0, 100, 200); area 20000
+    wider = "0 0 200 100 re S"  # bounds (0, 0, 200, 100); same area, x0, y0
+
+    for index, background in enumerate((f"{narrower} {wider}", f"{wider} {narrower}")):
+        pdf = build_pdf(
+            tmp_path / f"x1-{index}.pdf",
+            {"Drill": circle_ops(60, 40, 5), "Background": background},
+            media=(0, 0, 400, 500),
+        )
+        reference = AiPdfSource(pdf).read().reference
+        assert reference is not None
+        assert reference.width == pytest.approx(mm_from_pt(200.0), abs=TOL_MM)
+        assert reference.height == pytest.approx(mm_from_pt(100.0), abs=TOL_MM)
+
+
 def test_the_source_rounds_nothing(data):
     """The source preserves the measured outline without rounding.
 
@@ -977,6 +1369,10 @@ def test_no_circles_because_of_truncation_names_the_depth(tmp_path):
     assert "Form XObject" in message, "the message did not name the refused construct"
     assert "depth" in message, "the message did not name the limit that was hit"
     assert "give the drill circles a stroke" not in message
+    assert excinfo.value.path_count == 0, (
+        "no drill path was actually read before nesting was cut short, so the "
+        "published attribute must agree with that, not merely with the message"
+    )
 
 
 @pytest.mark.parametrize("bad", [0, -1, 1.5, True])

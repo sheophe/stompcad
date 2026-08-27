@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from stompmodel.model import CaseFace
+
 pytestmark = pytest.mark.hammond
 
 MM = 1_000_000
@@ -26,18 +28,20 @@ def _model_path():
     return require_model("1590BB")
 
 
-def _model(face: str = "box"):
+def _model(face: CaseFace = CaseFace.BOX):
     from stompdrill.cad import load_case_model
     from stompmodel.units import Nanometre
 
     return load_case_model(_model_path(), face=face, margin_nm=Nanometre(1 * MM))
 
 
-def _emit(*holes, face="box", model=None):
+def _emit(*holes, face=CaseFace.BOX, model=None):
     from stompdrill.emitters.step import StepEmitter, StepOptions
-    from tests.conftest import make_data
+    from tests.conftest import make_data, registration_for
 
-    return StepEmitter(StepOptions(model=model or _model(face))).emit(make_data(*holes))
+    resolved = model or _model(face)
+    data = make_data(*holes).with_case(registration_for(resolved))
+    return StepEmitter(StepOptions(model=resolved)).emit(data)
 
 
 def _reload(payload: bytes, tmp_path: Path):
@@ -46,6 +50,28 @@ def _reload(payload: bytes, tmp_path: Path):
     target = tmp_path / "out.stp"
     target.write_bytes(payload)
     return read_step(target)
+
+
+def test_emit_touches_no_temporary_directory():
+    """``render_step`` already holds the finished bytes; ``emit`` must return
+    them directly rather than bridging with a temp-file round trip."""
+    import tempfile
+
+    from tests.conftest import at
+
+    calls: list[int] = []
+    real = tempfile.TemporaryDirectory
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(tempfile, "TemporaryDirectory", spy)
+        payload = _emit(at(0, 0, 6 * MM, index=1))
+
+    assert isinstance(payload, bytes)
+    assert calls == []
 
 
 def _volume(shape) -> float:
@@ -190,8 +216,12 @@ def test_the_hole_lands_at_the_canonical_position_not_its_mirror(tmp_path):
     depth_mm = (model.plate_nm / 1_000_000) / 2  # mid-plate: solidly inside real material
 
     def classify(x_mm: float, y_mm: float):
+        # ``origin`` sits on the plate's inner surface (see ``FaceFrame``), so
+        # mid-plate is reached by moving *outward*, towards the drilled
+        # surface, by half the plate thickness -- the opposite sign from a
+        # drilled-surface origin.
         point = tuple(
-            origin[i] + x_mm * frame.u[i] + y_mm * frame.v[i] - depth_mm * frame.w[i]
+            origin[i] + x_mm * frame.u[i] + y_mm * frame.v[i] + depth_mm * frame.w[i]
             for i in range(3)
         )
         return BRepClass3d_SolidClassifier(box.shape, gp_Pnt(*point), 1e-6).State()
@@ -247,7 +277,7 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
 
     before = {s.name: _volume(s.shape) for s in read_step(_model_path()).solids}
     after = {s.name: _volume(s.shape)
-             for s in _reload(_emit(at(0, 0, 6 * MM, index=1), face="lid"), tmp_path).solids}
+             for s in _reload(_emit(at(0, 0, 6 * MM, index=1), face=CaseFace.LID), tmp_path).solids}
 
     for name, volume in before.items():
         if "LID" in name.upper():
@@ -256,25 +286,59 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
             assert after[name] == pytest.approx(volume, abs=0.05)
 
 
-def test_no_matching_component_is_an_emitter_error():
-    """``label_name`` never matching anything is the same failure a
-    renamed or mis-supplied model would produce — worth a named diagnostic,
-    not a silent no-op."""
-    from stompdrill.emitters import step as step_module
-    from stompmodel.errors import EmitterError
-    from tests.conftest import at, make_data
+def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
+    """F2-04: ``cut_shape``'s face-to-keyword mapping used to be
+    ``"BOX" if model.face == "box" else "LID"`` -- total over every string
+    that is not exactly ``"box"`` -- where ``select_solid``'s was partial and
+    raised. A library caller who builds a kernel-backed model directly
+    (unreachable from the CLI, which validates first) used to see a face
+    outside the vocabulary silently drilled as the lid. Both consumers now
+    read the same published lookup and refuse it alike.
+    """
+    import dataclasses
 
-    def never_named(label: object) -> str:
-        return ""
+    from stompdrill.cad.case import select_solid
+    from stompdrill.emitters import step as step_module
+    from tests.conftest import at, make_data, registration_for
 
     model = _model()
-    original = step_module.label_name
-    step_module.label_name = never_named
-    try:
-        with pytest.raises(EmitterError, match="no component named"):
-            step_module.cut_shape(model, make_data(at(0, 0, 6 * MM, index=1)))
-    finally:
-        step_module.label_name = original
+    document = model.document
+
+    # Control: the selector already refuses an unrecognised face.
+    with pytest.raises(KeyError):
+        select_solid(document, "top")
+
+    # A library caller bypassing the type -- CaseFace's own value is never
+    # constructible from "top", so this simulates the one way the vocabulary
+    # can still be violated at runtime. The cutter now reads the face from
+    # the registration, so that is where the bypassed value must sit.
+    top_model = dataclasses.replace(model, face="top")
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(top_model))
+    with pytest.raises(KeyError):
+        step_module.cut_shape(top_model, data)
+
+
+def test_no_matching_component_is_an_emitter_error(monkeypatch):
+    """A label's name never matching anything is the same failure a
+    renamed or mis-supplied model would produce — worth a named diagnostic,
+    not a silent no-op. Monkeypatched through ``StepLabel.name`` itself
+    (the public surface every caller reads through), not through a private
+    free function this ticket deleted."""
+    from stompdrill.emitters import step as step_module
+    from stompgeom.step import StepLabel
+    from stompmodel.errors import EmitterError
+    from tests.conftest import at, make_data, registration_for
+
+    # Built (and its solids named) before the patch: load_case_model's own
+    # select_solid must still see real names, so only cut_shape's later,
+    # fresh kernel walk is affected.
+    model = _model()
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
+
+    monkeypatch.setattr(StepLabel, "name", property(lambda self: ""))
+
+    with pytest.raises(EmitterError, match="no component named"):
+        step_module.cut_shape(model, data)
 
 
 def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
@@ -283,12 +347,14 @@ def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
 
     from stompdrill.emitters import step as step_module
     from stompmodel.errors import EmitterError
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     monkeypatch.setattr(BRepAlgoAPI_Cut, "IsDone", lambda self: False)
 
+    model = _model()
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
     with pytest.raises(EmitterError, match="boolean cut failed"):
-        step_module.cut_shape(_model(), make_data(at(0, 0, 6 * MM, index=1)))
+        step_module.cut_shape(model, data)
 
 
 def test_five_emits_in_one_process_are_byte_identical():
@@ -353,14 +419,16 @@ def test_the_same_input_gives_the_same_bytes_across_fresh_processes(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompmodel.model import DrillData, Hole
+        from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole
         from stompmodel.units import Nanometre
 
-        model = load_case_model(Path({str(model_path)!r}), face="box",
+        model = load_case_model(Path({str(model_path)!r}), face=CaseFace.BOX,
                                  margin_nm=Nanometre(1_000_000))
         hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
                                      Nanometre(6_000_000)).with_number(1)
-        payload = StepEmitter(StepOptions(model=model)).emit(DrillData(holes=(hole,)))
+        registration = CaseRegistration(model.part, model.face, model.model_name, model.frame)
+        data = DrillData(holes=(hole,)).with_case(registration)
+        payload = StepEmitter(StepOptions(model=model)).emit(data)
         sys.stdout.buffer.write(payload)
         """
     )
@@ -393,7 +461,7 @@ def test_the_written_header_carries_the_constants_originating_system():
     """The plumbing from the constant to the file, not just the formula.
 
     ``_ORIGINATING_SYSTEM`` reading correctly proves nothing about the call
-    site at ``emit`` actually passing it through to ``write_step`` -- a
+    site at ``emit`` actually passing it through to ``render_step`` -- a
     stray ``self.options.title`` there would still satisfy a test that only
     recomputes the constant. Reading it back out of the written bytes,
     against the constant rather than a hardcoded string, is what closes
@@ -453,14 +521,19 @@ def test_drill_compound_builds_children_in_index_order_not_tuple_order():
     the second assertion's child order reverses.
     """
     from stompdrill.emitters import step as step_module
-    from tests.conftest import at, make_data
+    from tests.conftest import at, make_data, registration_for
 
     model = _model()
     a = at(0, 0, 6 * MM, index=1)
     b = at(8 * MM, 0, 6 * MM, index=2)
+    registration = registration_for(model)
 
-    forward = _cylinder_centres(step_module._drill_compound(model, make_data(a, b)))
-    backward = _cylinder_centres(step_module._drill_compound(model, make_data(b, a)))
+    forward = _cylinder_centres(
+        step_module._drill_compound(model, make_data(a, b).with_case(registration))
+    )
+    backward = _cylinder_centres(
+        step_module._drill_compound(model, make_data(b, a).with_case(registration))
+    )
 
     assert forward == [(0.0, -28.875, -0.0), (8.0, -28.875, -0.0)]
     assert forward == backward
@@ -514,7 +587,14 @@ def test_the_wrapper_products_name_is_the_one_the_writer_set():
 
 
 def _colours_by_product(document) -> dict:
-    """Every coloured product name in a document, deduplicated by referred label."""
+    """Every coloured product name in a document, deduplicated by referred label.
+
+    Deliberately independent of ``stompgeom.step.leaf_labels`` (see
+    ``test_the_leaf_walk_is_stated_once.py``'s named allow-list entry for
+    this function): folding it in would verify the writer's colour count
+    with the code that produces it, which this repository's testing rules
+    forbid.
+    """
     from OCP.Quantity import Quantity_Color
     from OCP.TDataStd import TDataStd_Name
     from OCP.TDF import TDF_Label, TDF_LabelSequence
@@ -524,12 +604,16 @@ def _colours_by_product(document) -> dict:
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
 
     def name_of(label):
+        # Guarded like stompgeom.step.label_name: this binding's
+        # FindAttribute segfaults on a label with no TDataStd_Name rather
+        # than returning False, so presence is checked first.
+        if not label.IsAttribute(TDataStd_Name.GetID_s()):
+            return ""
         holder = TDataStd_Name()
-        if label.FindAttribute(TDataStd_Name.GetID_s(), holder):
-            return str(holder.Get().ToExtString())
-        return ""
+        label.FindAttribute(TDataStd_Name.GetID_s(), holder)
+        return str(holder.Get().ToExtString())
 
-    def leaves(label, out):
+    def leaves(label, out):  # allow-listed walk, see this function's own docstring
         if XCAFDoc_ShapeTool.IsAssembly_s(label):
             children = TDF_LabelSequence()
             XCAFDoc_ShapeTool.GetComponents_s(label, children)
@@ -608,14 +692,16 @@ def test_two_emissions_describe_the_same_model(tmp_path):
         from pathlib import Path
         from stompdrill.cad import load_case_model
         from stompdrill.emitters.step import StepEmitter, StepOptions
-        from stompmodel.model import DrillData, Hole
+        from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole
         from stompmodel.units import Nanometre
 
-        model = load_case_model(Path({str(model_path)!r}), face="box",
+        model = load_case_model(Path({str(model_path)!r}), face=CaseFace.BOX,
                                  margin_nm=Nanometre(1_000_000))
         hole = Hole.from_measurement(Nanometre(0), Nanometre(0),
                                      Nanometre(6_000_000)).with_number(1)
-        payload = StepEmitter(StepOptions(model=model)).emit(DrillData(holes=(hole,)))
+        registration = CaseRegistration(model.part, model.face, model.model_name, model.frame)
+        data = DrillData(holes=(hole,)).with_case(registration)
+        payload = StepEmitter(StepOptions(model=model)).emit(data)
         sys.stdout.buffer.write(payload)
         """
     )

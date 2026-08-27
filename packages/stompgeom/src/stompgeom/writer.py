@@ -1,6 +1,6 @@
 """Three OCC process-global effects — a translator product-name suffix, the
 assembly usage occurrence ids, and which numeric slot each colour is written
-into — are not controllable through any exposed API, so ``write_step``
+into — are not controllable through any exposed API, so ``render_step``
 normalises the written bytes afterwards instead.
 """
 
@@ -10,15 +10,23 @@ import contextlib
 import itertools
 import os
 import re
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from stompmodel.errors import EmitterError
 
 from .kernel import require_kernel
+from .step import StepLabel, leaf_labels
 
-__all__ = ["write_step", "label_entry", "label_name"]
+if TYPE_CHECKING:
+    # See stompgeom.step's own TYPE_CHECKING block: real OCP names for
+    # readability only, resolved to Any either way by this workspace's
+    # mypy configuration. See ADR-0008.
+    from OCP.TDocStd import TDocStd_Document
+
+__all__ = ["render_step"]
 
 #: The translator's auto-generated wrapper product. Set at write time, and the
 #: volatile counter it appends is erased afterwards. All three uses -- the
@@ -63,33 +71,6 @@ _COLOUR_CHAIN = re.compile(
 )
 
 
-def label_name(label: Any) -> str:
-    """The product name recorded on ``label``, or empty when unnamed."""
-    from OCP.TDataStd import TDataStd_Name
-
-    holder = TDataStd_Name()
-    if label.FindAttribute(TDataStd_Name.GetID_s(), holder):
-        return str(holder.Get().ToExtString())
-    return ""  # pragma: no cover - every label this kernel returns to us is named;
-    # a hand-built label with no attributes at all crashes this OCP binding's own
-    # FindAttribute before reaching this line, so no test can safely construct one
-
-
-def label_entry(label: Any) -> str:
-    """A label's document-unique tag path, stable across shape mutation.
-
-    Unlike a shape's own identity, a label's entry string survives
-    ``SetShape``: it is what lets ``_count_colour_assignments`` recognise
-    "the same label" before and after a caller replaces its geometry.
-    """
-    from OCP.TCollection import TCollection_AsciiString
-    from OCP.TDF import TDF_Tool
-
-    text = TCollection_AsciiString()
-    TDF_Tool.Entry_s(label, text)
-    return text.ToCString()
-
-
 # Re-establishing the cut solid's own colour was tried and abandoned: neither
 # re-linking the referred label to its original XCAFDoc_ColorTool colour
 # label nor re-setting the RGB value directly, at solid, component, or
@@ -98,48 +79,34 @@ def label_entry(label: Any) -> str:
 # keeps its colour, so the mechanism is sound; STEPCAFControl_Writer simply
 # does not serialise colour for a shape it had to replace. No further
 # in-kernel route is exposed through this binding to force it.
-def _count_colour_assignments(document: Any, replaced_labels: frozenset[str]) -> int:
+def _count_colour_assignments(document: TDocStd_Document, replaced_labels: frozenset[str]) -> int:
     """Distinct shapes coloured in ``document``, excluding a replaced solid.
 
     A replaced solid keeps its ``XCAFDoc_ColorTool`` assignment (``SetShape``
     does not clear it) but not its written colour, so counting
-    ``replaced_labels`` labels in would overcount against what the writer
-    actually produces. Excluding them is what makes this agree with the real
-    output rather than approximate it. A component referring to one label
-    twice (four screw instances, one product) counts once, matching one
-    written chain.
+    ``replaced_labels`` in would overcount. A component referring to one
+    label twice counts once. Referred-versus-component (see also
+    ``stompdrill.emitters.step.cut_shape``, the same choice on the cutting
+    path): "the shape a component names" is its *referred* label when one
+    exists, else the component itself.
     """
-    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.TDF import TDF_Label
     from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
-    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     color_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
 
-    def leaves(label: Any, out: list[Any]) -> None:
-        if XCAFDoc_ShapeTool.IsAssembly_s(label):
-            children = TDF_LabelSequence()
-            XCAFDoc_ShapeTool.GetComponents_s(label, children)
-            for index in range(1, children.Length() + 1):
-                leaves(children.Value(index), out)
-        else:
-            out.append(label)
-
-    free = TDF_LabelSequence()
-    shape_tool.GetFreeShapes(free)
-    components: list[Any] = []
-    for index in range(1, free.Length() + 1):
-        leaves(free.Value(index), components)
-
     coloured: set[str] = set()
-    for component in components:
+    for component in leaf_labels(document):
         referred = TDF_Label()
-        target = referred if XCAFDoc_ShapeTool.GetReferredShape_s(component, referred) \
+        target = (
+            StepLabel(document, referred)
+            if XCAFDoc_ShapeTool.GetReferredShape_s(component.label, referred)
             else component
-        entry = label_entry(target)
-        if entry in replaced_labels:
+        )
+        if target.entry in replaced_labels:
             continue
-        if color_tool.IsSet(target, XCAFDoc_ColorType.XCAFDoc_ColorSurf):
-            coloured.add(entry)
+        if color_tool.IsSet(target.label, XCAFDoc_ColorType.XCAFDoc_ColorSurf):
+            coloured.add(target.entry)
     return len(coloured)
 
 
@@ -169,7 +136,7 @@ def _silence_stdout() -> Iterator[None]:
 # only substitutes the wrapper product's *prefix*, never the "<counter>.1"
 # suffix appended after it, and the NAUO counter has no exposed key at all.
 # Post-processing the written bytes is not a workaround pending a better
-# fix; it is the only route this kernel's bindings leave open. (``write_step``
+# fix; it is the only route this kernel's bindings leave open. (``render_step``
 # does call ``Init_s()`` below, but for an unrelated reason — it defines the
 # ``Interface_Static`` keys so those settings take effect at all — and it
 # still does nothing for the counters below.)
@@ -243,16 +210,21 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     return b"".join(pieces)
 
 
-def write_step(
-    document: Any,
-    path: Path,
+def render_step(
+    document: TDocStd_Document,
     *,
     title: str,
     timestamp: str,
     originating_system: str,
     replaced_labels: frozenset[str] = frozenset(),
-) -> None:
-    """Write the XCAF document with a header that carries no clock reading."""
+) -> bytes:
+    """Render the XCAF document to STEP bytes, with a header carrying no clock reading.
+
+    OCC's writer exposes no in-memory target, only a path, so this aims it at
+    a scratch file the caller never sees and returns the finished bytes
+    instead of a location -- the scratch file is an implementation detail of
+    a path-only kernel API, not part of this function's contract.
+    """
     require_kernel()
 
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
@@ -277,14 +249,20 @@ def write_step(
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
     expected = _count_colour_assignments(document, replaced_labels)
-    with _silence_stdout():
-        writer.Transfer(document)
+    descriptor, scratch = tempfile.mkstemp(suffix=".stp")
+    os.close(descriptor)
+    scratch_path = Path(scratch)
+    try:
+        with _silence_stdout():
+            writer.Transfer(document)
 
-        header = APIHeaderSection_MakeHeader(session.Model())
-        header.SetName(TCollection_HAsciiString(title))
-        header.SetTimeStamp(TCollection_HAsciiString(timestamp))
-        header.SetAuthorValue(1, TCollection_HAsciiString(""))
-        header.SetOriginatingSystem(TCollection_HAsciiString(originating_system))
-        writer.Write(str(path))
-    payload = _normalise(path.read_bytes())
-    path.write_bytes(_reslot_colours(payload, expected))
+            header = APIHeaderSection_MakeHeader(session.Model())
+            header.SetName(TCollection_HAsciiString(title))
+            header.SetTimeStamp(TCollection_HAsciiString(timestamp))
+            header.SetAuthorValue(1, TCollection_HAsciiString(""))
+            header.SetOriginatingSystem(TCollection_HAsciiString(originating_system))
+            writer.Write(str(scratch_path))
+        payload = _normalise(scratch_path.read_bytes())
+        return _reslot_colours(payload, expected)
+    finally:
+        scratch_path.unlink(missing_ok=True)

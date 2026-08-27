@@ -8,13 +8,27 @@ ADR-0001's consistency argument bites. See ADR-0009.
 
 from __future__ import annotations
 
+import errno
+import os
+import uuid
 from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
 
+from .diagnostics import Diagnostic, Severity
 from .model import StageRun
 
-__all__ = ["Processable", "Stage", "Emitter", "Payload", "write_payload", "Pipeline"]
+__all__ = [
+    "Processable",
+    "Diagnosable",
+    "Stage",
+    "Emitter",
+    "Payload",
+    "StagedWrite",
+    "stage_payload",
+    "Pipeline",
+]
 
 
 #: Binds ``with_processing`` to the caller's own type. A protocol naming
@@ -28,6 +42,27 @@ class Processable(Protocol):
     """A value a pipeline can fold over: it can record the stages it survived."""
 
     def with_processing(self: SelfT, *runs: StageRun) -> SelfT: ...
+
+
+@runtime_checkable
+class Diagnosable(Protocol):
+    """A value that carries findings and reduces them by severity.
+
+    Separate from ``Processable`` on purpose: most stage- and emitter-bound
+    values carry no diagnostics of their own, and folding this vocabulary
+    into ``Processable`` would make every one of them carry it. A second
+    tool's value type implements this to reach the shared exit-code
+    reduction with no tool-specific glue. See ADR-0009.
+    """
+
+    diagnostics: tuple[Diagnostic, ...]
+
+    def with_diagnostics(self: SelfT, *diagnostics: Diagnostic) -> SelfT: ...
+
+    def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]: ...
+
+    @property
+    def worst_severity(self) -> Severity | None: ...
 
 
 #: Invariant: a stage both consumes and produces the value it folds over.
@@ -57,24 +92,77 @@ class Stage(Protocol[T]):
 Payload = str | bytes
 
 
-def write_payload(path: Path, payload: Payload) -> int:
-    """Write ``payload``, letting its own type choose the mode.
+@dataclass(frozen=True, slots=True)
+class StagedWrite:
+    """One payload already written in full to a temporary beside its target.
 
-    Returns the encoded byte count, which is the number both tools report
-    and ``stompcad`` reduces over. A second copy of this branch is a second
-    counting convention, which is the drift ADR-0005's consequence forbids.
+    Produced only by :func:`stage_payload`; never built by hand. ``path`` is
+    the target :meth:`commit` will replace and ``size`` is the encoded byte
+    count both tools report -- the two facts a caller's report line needs.
+    Exactly one of :meth:`commit` and :meth:`discard` is owed on every value
+    handed out; the temporary is not a caller's business, so neither verb
+    names it and neither is reachable without the value it applies to.
     """
-    if isinstance(payload, bytes):
-        path.write_bytes(payload)
-        return len(payload)
-    encoded = payload.encode("utf-8")
-    # newline="\n" disables universal-newline translation, which otherwise
-    # rewrites "\n" to os.linesep and makes the returned count -- the
-    # untranslated encoding length -- wrong on a platform where the two
-    # differ. On POSIX os.linesep is already "\n", so no artefact byte
-    # changes here; this makes the contract true everywhere, not just here.
-    path.write_text(payload, encoding="utf-8", newline="\n")
-    return len(encoded)
+
+    path: Path
+    size: int
+    _tmp: Path
+
+    def commit(self) -> int:
+        """Replace :attr:`path` from its temporary. Returns :attr:`size`.
+
+        Atomic: afterwards :attr:`path` holds either the complete payload
+        or exactly what it held before, and the temporary survives neither
+        outcome. The count is the one :func:`stage_payload` already
+        computed, returned unchanged -- a second derivation of it is the
+        drift ADR-0005's consequence forbids.
+        """
+        try:
+            os.replace(self._tmp, self.path)
+        except BaseException:
+            self._tmp.unlink(missing_ok=True)
+            raise
+        return self.size
+
+    def discard(self) -> None:
+        """Abandon a staged write without touching its target. Never raises."""
+        self._tmp.unlink(missing_ok=True)
+
+
+def stage_payload(path: Path, payload: Payload) -> StagedWrite:
+    """Encode ``payload`` and write it in full to a fresh temporary beside ``path``.
+
+    ``path`` itself is never touched here. A directory target is refused
+    before any temporary exists, rather than deferred to a later rename
+    failure. Every other precondition is the filesystem's own answer to the
+    write below; on failure the temporary is unlinked and the raised
+    exception is corrected to name ``path``, never the temporary.
+    """
+    # Encoding first means one write path serves both payload types, and it
+    # is what makes the "untranslated encoded length" contract exact: bytes
+    # written this way are never subject to newline translation, on any
+    # platform, so there is no "\n"-vs-os.linesep case to reason about.
+    data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
+    if path.is_dir():
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(path))
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_bytes(data)
+    except OSError as failure:
+        # Cleanup is best-effort here: the same broken parent that failed
+        # the write (not a directory, say) fails the unlink identically,
+        # and that second failure must not displace the first -- the one
+        # ``failure`` below is corrected to report.
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        failure.filename = str(path)
+        raise
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return StagedWrite(path=path, size=len(data), _tmp=tmp)
 
 
 @runtime_checkable

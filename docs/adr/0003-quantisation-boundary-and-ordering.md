@@ -72,6 +72,14 @@ the principal invariant is that every canonical length is an integer nanometre a
 selected value belongs to its governing answer set; artifact representations must be
 derived from those canonical values.
 
+An answer selected at the quantisation boundary is carried forward, not re-derived
+downstream from the measurement. Where a later stage must ask the same question the
+boundary already answered, it asks through the same rule, evaluated against the
+preserved measurement — never against a difference computed from a value the boundary
+has already rounded to a canonical length. A rounded difference can land on an answer
+the unrounded measurement did not occupy, and a second implementation of one rule is how
+two stages come to disagree about the same input.
+
 ## Rationale
 
 Exact decimal scaling preserves the measurement's ordering relative to neighbouring

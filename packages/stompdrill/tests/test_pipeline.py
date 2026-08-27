@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
+import itertools
 import random
+import typing
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from stompdrill.cad import CaseModel, OcpCaseModel, load_case_model
+from stompdrill.enclosures import Enclosure
 from stompdrill.pipeline import (
     DEFAULT_STANDARD,
     DRILL_STANDARDS,
@@ -26,10 +33,18 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import DrillData, RawHole, RawOutline, ReferenceOutline, SourceInfo, StageRun
+from stompmodel.model import (
+    DrillData,
+    Hole,
+    RawHole,
+    RawOutline,
+    ReferenceOutline,
+    SourceInfo,
+    StageRun,
+)
 from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
-from tests.conftest import FakeCase, at, codes, diameters, holes, make_data, positions
+from tests.conftest import FakeCase, at, codes, holes, make_data, positions
 
 # --------------------------------------------------------------------------
 # helpers
@@ -155,11 +170,80 @@ class TestDeduplicate:
         out = Deduplicate().apply(data)
         assert len(out.holes) == 1
 
-    def test_keeps_the_first_hole_in_input_order(self):
+    def test_the_survivor_does_not_depend_on_arrival_order(self):
+        """Nominal position and diameter already tie for a coincident pair,
+        and here so does the raw measurement built from them, so every field
+        a caller can observe already agrees: which arrives first must not
+        change what a consumer sees (ADR-0006 -- geometry alone, never
+        arrival, decides).
+        """
         first = at(-40_000_000, 18_000_000, 7_000_000, index=4)
         second = at(-40_000_000, 18_000_000, 7_000_000, index=1)
-        out = Deduplicate().apply(make_data(first, second))
-        assert out.holes == (first,)
+
+        forward = Deduplicate().apply(make_data(first, second)).holes[0]
+        backward = Deduplicate().apply(make_data(second, first)).holes[0]
+
+        observable = lambda h: (h.x_nm, h.y_nm, h.diameter_nm, h.raw)  # noqa: E731
+        assert observable(forward) == observable(backward)
+
+    def test_the_survivor_of_a_genuine_measurement_tie_break_is_geometric(self):
+        """When the raw measurement differs -- the residual two circles that
+        quantised to the same nominal point actually carry -- the smaller
+        ``raw.x`` wins, whichever order the duplicates arrive in.
+        """
+        smaller_raw = dataclasses.replace(
+            at(-40_000_000, 18_000_000, 7_000_000, index=4),
+            raw=RawHole(Millimetre(-40.0004), Millimetre(18.0), Millimetre(7.0)),
+        )
+        larger_raw = dataclasses.replace(
+            at(-40_000_000, 18_000_000, 7_000_000, index=1),
+            raw=RawHole(Millimetre(-40.0002), Millimetre(18.0), Millimetre(7.0)),
+        )
+
+        forward = Deduplicate().apply(make_data(smaller_raw, larger_raw)).holes
+        backward = Deduplicate().apply(make_data(larger_raw, smaller_raw)).holes
+
+        assert forward == (smaller_raw,)
+        assert backward == (smaller_raw,)
+
+    def test_the_second_measurement_clause_is_load_bearing(self):
+        """``raw.x`` ties; only ``raw.y`` separates the pair -- the smaller
+        ``raw.y`` must win, whichever order the duplicates arrive in.
+        """
+        smaller_y = dataclasses.replace(
+            at(0, 0, 7_000_000, index=1),
+            raw=RawHole(Millimetre(0.0001), Millimetre(-0.0002), Millimetre(7.0)),
+        )
+        larger_y = dataclasses.replace(
+            at(0, 0, 7_000_000, index=2),
+            raw=RawHole(Millimetre(0.0001), Millimetre(0.0003), Millimetre(7.0)),
+        )
+
+        forward = Deduplicate().apply(make_data(smaller_y, larger_y)).holes
+        backward = Deduplicate().apply(make_data(larger_y, smaller_y)).holes
+
+        assert forward == (smaller_y,)
+        assert backward == (smaller_y,)
+
+    def test_the_third_measurement_clause_is_load_bearing(self):
+        """``raw.x`` and ``raw.y`` tie; only ``raw.diameter`` separates the
+        pair -- two circles that quantised to the same nominal diameter can
+        still carry different residuals, and the smaller wins.
+        """
+        smaller_diameter = dataclasses.replace(
+            at(0, 0, 7_000_000, index=1),
+            raw=RawHole(Millimetre(0.0001), Millimetre(0.0002), Millimetre(6.9998)),
+        )
+        larger_diameter = dataclasses.replace(
+            at(0, 0, 7_000_000, index=2),
+            raw=RawHole(Millimetre(0.0001), Millimetre(0.0002), Millimetre(7.0002)),
+        )
+
+        forward = Deduplicate().apply(make_data(smaller_diameter, larger_diameter)).holes
+        backward = Deduplicate().apply(make_data(larger_diameter, smaller_diameter)).holes
+
+        assert forward == (smaller_diameter,)
+        assert backward == (smaller_diameter,)
 
     def test_emits_one_warning_per_collapsed_group(self):
         data = make_data(
@@ -335,6 +419,27 @@ class TestDeduplicate:
         survivors = Deduplicate().apply(data).holes
 
         assert len(survivors) == 2
+
+    def test_the_survivor_is_stable_under_every_permutation_of_a_coincident_group(self):
+        """AC3: unsorted input, no prior stage -- the bare stage's own rule,
+        not a sort performed elsewhere, must pick the same survivor whichever
+        order a coincident group of more than two arrives in.
+        """
+
+        def hole(raw_x: float, raw_y: float, index: int) -> Hole:
+            return dataclasses.replace(
+                at(0, 0, 7_000_000, index=index),
+                raw=RawHole(Millimetre(raw_x), Millimetre(raw_y), Millimetre(7.0)),
+            )
+
+        group = [hole(0.0002, 0.0, 1), hole(-0.0001, 0.0003, 2), hole(0.0001, -0.0002, 3)]
+
+        survivors = {
+            Deduplicate().apply(make_data(*permutation)).holes
+            for permutation in itertools.permutations(group)
+        }
+
+        assert len(survivors) == 1
 
 
 def test_a_collapsed_pair_reports_one_hole_dropped() -> None:
@@ -589,15 +694,6 @@ class TestRouteHoles:
             (-20_000_000, 18_000_000),
         ]
 
-    def test_accepts_a_custom_key(self):
-        data = make_data(
-            at(0, 0, 7_000_000, index=4),
-            at(10_000_000, 0, 3_200_000, index=1),
-            at(-10_000_000, 0, 5_000_000, index=9),
-        )
-        out = RouteHoles(key=lambda h: h.diameter_nm).apply(data)
-        assert diameters(out) == [3_200_000, 5_000_000, 7_000_000]
-
     def test_is_deterministic_under_input_permutation(self):
         given = [
             at(-40_000_000, 18_000_000, index=4),
@@ -663,29 +759,39 @@ class TestPipelineComposition:
         assert codes(out) == ["a", "b", "c"]
 
     def test_stage_order_is_observable(self):
-        """Sorting before deduplicating keeps a different hole.
+        """Whether two holes coincide can depend on which stage ran first.
 
-        Both candidates share one quantised position, so ``RouteHoles``
-        renumbers whichever survives to 1 regardless of stage order — the raw
-        measurement, which renumbering never touches, is what still tells
-        them apart.
+        ``WidenToMatch`` grows every hole's diameter to the first hole's;
+        running it before ``Deduplicate`` makes the pair coincide and
+        collapses to one hole, and running it after leaves both distinct.
+        This is stage order, a property of ``Pipeline`` composing stages
+        left to right -- not the hole-arrival order ADR-0006 forbids any
+        stage from consulting, which is a property of one stage's input.
         """
-        hole_a = at(10_000_000, 5_000_000, 7_000_000, index=7)
-        hole_b = at(10_000_000, 5_000_000, 7_000_000, index=1)
-        hole_a = dataclasses.replace(
-            hole_a, raw=dataclasses.replace(hole_a.raw, x=Millimetre(10.0007))
-        )
-        hole_b = dataclasses.replace(
-            hole_b, raw=dataclasses.replace(hole_b.raw, x=Millimetre(9.9993))
-        )
+        hole_a = at(10_000_000, 5_000_000, 7_000_000, index=1)
+        hole_b = at(10_000_000, 5_000_000, 5_000_000, index=2)
+
+        class WidenToMatch:
+            """Grows every hole's diameter to the first hole's, witnessing
+            stage order rather than anything about ``Deduplicate`` itself."""
+
+            name = "widen-to-match"
+
+            def apply(self, data: DrillData) -> DrillData:
+                target = data.holes[0].diameter_nm
+                return data.with_holes(hole.with_diameter(target) for hole in data.holes)
+
+            def describe(self) -> StageRun:
+                return StageRun(self.name)
+
         data = make_data(hole_a, hole_b)
-        dedupe, sort = Deduplicate(), RouteHoles(key=lambda h: h.index)
+        widen, dedupe = WidenToMatch(), Deduplicate()
 
-        dedupe_first = Pipeline([dedupe, sort]).run(data)
-        sort_first = Pipeline([sort, dedupe]).run(data)
+        widen_first = Pipeline([widen, dedupe]).run(data)
+        dedupe_first = Pipeline([dedupe, widen]).run(data)
 
-        assert [h.raw.x for h in dedupe_first.holes] == [hole_a.raw.x]
-        assert [h.raw.x for h in sort_first.holes] == [hole_b.raw.x]
+        assert len(widen_first.holes) == 1
+        assert len(dedupe_first.holes) == 2
 
     def test_the_phase_and_the_pipeline_compose_into_one_tool_for_a_noisy_row(self):
         """The library flow, end to end, on the shape of panel it meets."""
@@ -811,12 +917,9 @@ class TestDescribe:
         assert run.name == "deduplicate"
         assert run.parameters == ()
 
-    def test_sort_names_its_key_function(self):
-        def by_diameter(hole):
-            return hole.diameter_nm
-
-        assert RouteHoles().describe().get("key") == "default"
-        assert RouteHoles(key=by_diameter).describe().get("key") == "by_diameter"
+    def test_route_has_no_ordering_knob_to_report(self):
+        """No ``key`` argument exists, so there is nothing to name."""
+        assert RouteHoles().describe().parameters == ()
 
 
 class TestPipelineRecordsProvenance:
@@ -825,7 +928,7 @@ class TestPipelineRecordsProvenance:
         after = Pipeline([Deduplicate(), RouteHoles()]).run(data)
 
         assert [r.name for r in after.processing] == ["deduplicate", "route"]
-        assert after.last_run("route").get("key") == "default"
+        assert after.last_run("route").parameters == ()
 
     def test_a_stage_that_changed_nothing_still_records_that_it_ran(self):
         """An empty diagnostics list cannot tell a consumer whether a panel had
@@ -924,3 +1027,94 @@ def test_the_generative_bands_stay_in_the_subpackage():
 
     assert not hasattr(stompdrill, "METRIC_BANDS")
     assert not hasattr(stompdrill, "FRACTIONAL_SIXTY_FOURTHS")
+
+
+# --------------------------------------------------------------------------
+# What a root-exported signature obliges the root to publish
+# --------------------------------------------------------------------------
+
+
+def _unreachable_signature_types(namespace: Any, package: str) -> tuple[tuple[str, str, str], ...]:
+    """Types a root's own signatures name but its own root does not publish.
+
+    Only leaves ``package`` itself defines are judged: the standard library's
+    and another member's are deliberately not republished (ADR-0009).
+    ``typing.get_args`` unwraps before the class test, and that order is
+    load-bearing -- ``isinstance(list[int], type)`` is true, so a class-first
+    walk would stop at a parameterised generic and see nothing inside it.
+    Nothing is caught: an annotation that will not resolve must raise here
+    rather than be stepped over.
+    """
+    violations: set[tuple[str, str, str]] = set()
+    for exported in namespace.__all__:
+        obj = getattr(namespace, exported)
+        target = obj.__init__ if inspect.isclass(obj) else obj
+        if not callable(target):
+            continue
+        work = list(typing.get_type_hints(target).items())
+        while work:
+            position, annotation = work.pop()
+            arguments = typing.get_args(annotation)
+            if arguments:
+                work.extend((position, argument) for argument in arguments)
+                continue
+            if not inspect.isclass(annotation):
+                continue
+            if annotation.__module__.split(".")[0] != package:
+                continue
+            name = annotation.__name__
+            if getattr(namespace, name, None) is not annotation or name not in namespace.__all__:
+                violations.add((exported, position, name))
+    return tuple(sorted(violations))
+
+
+def test_every_type_a_root_signature_names_is_reachable_from_the_root():
+    """A caller who follows a root signature must not have to guess a submodule."""
+    import stompdrill
+
+    assert _unreachable_signature_types(stompdrill, "stompdrill") == ()
+    assert stompdrill.OcpCaseModel is OcpCaseModel
+
+
+def test_the_gate_fails_when_the_root_binds_the_name_to_the_wrong_type():
+    """Guilty probe: the near miss the real ImportError suggested."""
+    stand_in = SimpleNamespace(
+        load_case_model=load_case_model,
+        OcpCaseModel=CaseModel,
+        __all__=["OcpCaseModel", "load_case_model"],
+    )
+
+    assert _unreachable_signature_types(stand_in, "stompdrill") == (
+        ("load_case_model", "return", "OcpCaseModel"),
+    )
+
+
+def test_the_gate_fails_when_the_type_is_bound_but_left_out_of_all():
+    """Guilty probe: reachable by luck is not published."""
+    stand_in = SimpleNamespace(
+        load_case_model=load_case_model,
+        OcpCaseModel=OcpCaseModel,
+        __all__=["load_case_model"],
+    )
+
+    assert _unreachable_signature_types(stand_in, "stompdrill") == (
+        ("load_case_model", "return", "OcpCaseModel"),
+    )
+
+
+def test_the_gate_is_silent_on_a_legitimate_root():
+    """Innocent probe: a root that publishes what it names, plus one more export.
+
+    ``load_case_model`` also names ``Path``, ``CaseFace`` and ``Nanometre``,
+    and none of the three is a violation: the first is the standard
+    library's and the other two are ``stompmodel``'s, which this root
+    deliberately does not republish (ADR-0009).
+    """
+    stand_in = SimpleNamespace(
+        load_case_model=load_case_model,
+        OcpCaseModel=OcpCaseModel,
+        Enclosure=Enclosure,
+        __all__=["load_case_model", "OcpCaseModel", "Enclosure"],
+    )
+
+    assert _unreachable_signature_types(stand_in, "stompdrill") == ()

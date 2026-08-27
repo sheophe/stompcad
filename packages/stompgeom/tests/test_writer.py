@@ -17,6 +17,20 @@ from stompmodel.errors import EmitterError
 from .xcaf import build_document
 
 
+def test_the_writer_no_longer_defines_its_own_name_rule() -> None:
+    """One name rule lives in ``stompgeom.step``; a duplicate here would let
+    the reader and the writer disagree about what a name is."""
+    assert not hasattr(writer, "label_name")
+    assert "label_name" not in writer.__all__
+
+
+def test_write_step_is_gone_not_kept_as_a_wrapper() -> None:
+    """Its only production caller stops needing it once ``render_step``
+    returns bytes directly; a wrapper with no callers concentrates nothing."""
+    assert not hasattr(writer, "write_step")
+    assert "write_step" not in writer.__all__
+
+
 def test_the_wrapper_product_name_is_the_workspace_not_a_package() -> None:
     """It is load-bearing, not cosmetic: ``_normalise`` strips the volatile
     counter appended to exactly this prefix, so the setter, the pattern and
@@ -24,10 +38,10 @@ def test_the_wrapper_product_name_is_the_workspace_not_a_package() -> None:
     assert writer._PRODUCT_NAME == "stompcad"
 
 
-def test_write_step_defaults_no_identity() -> None:
+def test_render_step_defaults_no_identity() -> None:
     """A default here would give a second consumer's assembly provenance
     from a tool that never touched it -- the whole reason this moved."""
-    parameters = inspect.signature(writer.write_step).parameters
+    parameters = inspect.signature(writer.render_step).parameters
 
     assert parameters["title"].default is inspect.Parameter.empty
     assert parameters["originating_system"].default is inspect.Parameter.empty
@@ -198,16 +212,14 @@ _FILE_NAME = re.compile(
 _NAUO_ID = re.compile(rb"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)'")
 
 
-def _write(document: Any, path: Path) -> bytes:
-    """Write ``document`` with this module's supplied identity, and read it back."""
-    writer.write_step(
+def _write(document: Any) -> bytes:
+    """Render ``document`` with this module's supplied identity."""
+    return writer.render_step(
         document,
-        path,
         title=_TITLE,
         timestamp=_TIMESTAMP,
         originating_system=_ORIGINATING_SYSTEM,
     )
-    return path.read_bytes()
 
 
 def _header(payload: bytes) -> re.Match[bytes]:
@@ -218,17 +230,19 @@ def _header(payload: bytes) -> re.Match[bytes]:
 
 
 @pytest.fixture(scope="module")
-def written_twice(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, bytes]:
-    """One in-memory document written twice into one process.
+def written_twice() -> tuple[bytes, bytes]:
+    """One in-memory document rendered twice into one process.
 
-    Both counters this module erases are process-global, so a *first* write
-    in a fresh interpreter carries a clean product name and occurrence ids of
-    one whether or not ``_normalise`` ran at all. Reading the second write is
-    what makes the assertions below fail when the normalisation is removed.
+    Each call picks its own scratch path internally, so comparing the two
+    payloads proves that path -- caller-supplied or otherwise -- never
+    reaches the bytes. Both counters this module erases are process-global,
+    so a *first* write in a fresh interpreter carries a clean product name
+    and occurrence ids of one whether or not ``_normalise`` ran at all.
+    Reading the second write is what makes the assertions below fail when
+    the normalisation is removed.
     """
-    scratch = tmp_path_factory.mktemp("written")
     document = build_document()
-    return _write(document, scratch / "first.stp"), _write(document, scratch / "second.stp")
+    return _write(document), _write(document)
 
 
 @pytest.fixture(scope="module")
@@ -252,27 +266,22 @@ def test_two_writes_of_one_document_are_byte_identical(
 
 
 def test_the_first_write_in_a_fresh_process_already_carries_the_product_name() -> None:
-    """``STEPControl_Controller.Init_s()`` at ``writer.py:268`` defines the
+    """``STEPControl_Controller.Init_s()`` in ``render_step`` defines the
     ``Interface_Static`` keys the two ``SetCVal_s`` calls below it rely on;
     without it a *first* write in a virgin process silently keeps OCC's own
     defaults. Every other test in this module runs after ``test_step.py``
     has already read a (deliberately invalid) STEP file, which defines those
     keys as a side effect and hides the bug even with ``Init_s()`` removed --
-    see the module docstring notes on ``writer.py:268`` for the full story.
+    see the module docstring notes near ``Init_s()`` for the full story.
     A fresh interpreter, which has read nothing, is the only way to catch it.
     """
     script = (
-        "from pathlib import Path\n"
-        "import tempfile\n"
         "from tests.xcaf import build_document\n"
-        "from stompgeom.writer import write_step\n"
-        "with tempfile.TemporaryDirectory() as d:\n"
-        "    path = Path(d) / 'out.stp'\n"
-        "    write_step(build_document(), path, title='t',\n"
-        "        timestamp='2020-01-01T00:00:00', originating_system='sys')\n"
-        "    data = path.read_bytes()\n"
-        "    assert b\"PRODUCT('stompcad','stompcad'\" in data, 'missing configured name'\n"
-        "    assert b\"PRODUCT('Open CASCADE\" not in data, 'kept OCC default name'\n"
+        "from stompgeom.writer import render_step\n"
+        "data = render_step(build_document(), title='t',\n"
+        "    timestamp='2020-01-01T00:00:00', originating_system='sys')\n"
+        "assert b\"PRODUCT('stompcad','stompcad'\" in data, 'missing configured name'\n"
+        "assert b\"PRODUCT('Open CASCADE\" not in data, 'kept OCC default name'\n"
         "print('OK')\n"
     )
     result = subprocess.run(

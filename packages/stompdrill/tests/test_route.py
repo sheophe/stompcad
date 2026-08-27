@@ -153,15 +153,19 @@ def test_two_opt_reaches_the_optimum_nearest_neighbour_misses():
     assert length(path) == pytest.approx(best), f"2-opt left a crossing: {path}"
 
 
-def test_a_custom_key_orders_and_numbers_without_grouping():
-    out = RouteHoles(key=lambda h: -h.diameter_nm).apply(
-        panel(
-            at(0, 0, 3_000_000, index=4),
-            at(10_000_000, 0, 7_000_000, index=1),
-        )
-    )
-    assert [h.diameter_nm for h in out.holes] == [7_000_000, 3_000_000]
-    assert [h.index for h in out.holes] == [1, 2]
+def test_an_ordering_argument_is_refused():
+    """There is no ordering knob: an ordering that determines every hole
+    number while reducing to a name in provenance (``"<lambda>"``, identical
+    for two opposite orderings) is a knob a consumer can be silently out of
+    step with. Provenance can never be out of step with the ordering that
+    produced the numbers, because there is no ordering left to choose.
+    """
+    with pytest.raises(TypeError):
+        RouteHoles(key=lambda h: h.x_nm)
+
+
+def test_the_route_stages_provenance_carries_no_ordering_entry():
+    assert RouteHoles().describe().parameters == ()
 
 
 def test_a_separation_no_panel_could_have_raises_rather_than_saturating():

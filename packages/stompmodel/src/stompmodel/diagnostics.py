@@ -11,13 +11,16 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from functools import total_ordering
+from typing import TypeAlias
 
-from .units import Nanometre, _check_nanometres
+from .units import Nanometre, check_nanometres
 
 __all__ = [
     "Severity",
     "ParameterValue",
     "Diagnostic",
+    "of_severity",
+    "worst_severity",
     "EXIT_CLEAN",
     "EXIT_WARNINGS",
     "EXIT_ERRORS",
@@ -25,8 +28,12 @@ __all__ = [
     "exit_for_severity",
 ]
 
-#: Stage parameters may include scalars or tuples; ``_nm`` keys enforce integers.
-ParameterValue = float | int | str | bool | tuple[float, ...]
+#: A payload value is a scalar, or a tuple of payload values to any depth.
+#: Stated recursively because that is the rule the codec actually enforces:
+#: anything JSON can carry, nothing it cannot. ``_nm`` keys enforce integers.
+Scalar = float | int | str | bool
+PayloadValue: TypeAlias = "Scalar | tuple[PayloadValue, ...]"
+ParameterValue: TypeAlias = "PayloadValue"
 
 
 @total_ordering
@@ -71,9 +78,9 @@ def _check_payload_lengths(owner: str, items: Iterable[tuple[str, object]]) -> N
             continue
         if isinstance(value, tuple):
             for position, element in enumerate(value):
-                _check_nanometres(owner, **{f"{key}[{position}]": element})
+                check_nanometres(owner, **{f"{key}[{position}]": element})
         else:
-            _check_nanometres(owner, **{key: value})
+            check_nanometres(owner, **{key: value})
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,11 +94,7 @@ class Diagnostic:
     code: str
     message: str
     location_nm: tuple[Nanometre, Nanometre] | None = None
-    #: Scalars, tuples of hole identities, or tuples of locations for
-    #: panel-wide findings.
-    data: tuple[
-        tuple[str, float | int | str | tuple[int, ...] | tuple[tuple[int, int], ...]], ...
-    ] = ()
+    data: tuple[tuple[str, PayloadValue], ...] = ()
 
     def __post_init__(self) -> None:
         """Normalise sequences before validating canonical nanometre lengths.
@@ -104,7 +107,7 @@ class Diagnostic:
         if self.location_nm is not None:
             x_nm, y_nm = self.location_nm
             object.__setattr__(self, "location_nm", (x_nm, y_nm))
-            _check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
+            check_nanometres("Diagnostic", location_x_nm=x_nm, location_y_nm=y_nm)
         object.__setattr__(
             self,
             "data",
@@ -130,6 +133,28 @@ class Diagnostic:
             if k == key:
                 return v
         return default
+
+
+def of_severity(
+    diagnostics: Iterable[Diagnostic], severity: Severity
+) -> tuple[Diagnostic, ...]:
+    """Every diagnostic in ``diagnostics`` at exactly ``severity``.
+
+    Published beside ``Diagnostic`` rather than left as a method on one
+    value type, so a second tool's diagnostics carrier gets the same
+    selection by delegating to this rather than copying it. See ADR-0009.
+    """
+    return tuple(d for d in diagnostics if d.severity is severity)
+
+
+def worst_severity(diagnostics: Iterable[Diagnostic]) -> Severity | None:
+    """The most severe entry in ``diagnostics``, or ``None`` when there are none.
+
+    ``None`` is what ``exit_for_severity`` already treats as "no finding at
+    all", so a value with no diagnostics reaches the same clean exit as one
+    that was never checked.
+    """
+    return max((d.severity for d in diagnostics), default=None)
 
 
 #: The workspace's exit-code contract. Shared, because stompcad reduces

@@ -30,10 +30,64 @@ the resulting document and may perform presentation-only transformations such as
 coordinate-frame, or textual formatting. They do not quantise, deduplicate, classify,
 sort, or otherwise re-derive shared facts.
 
-An invocation selects one to five emitters through repeatable
-`--emit FORMAT=PATH` arguments. Emitter payloads may be text or bytes; see ADR-0005.
+An invocation selects any number of emitters, none included, through repeatable
+`--emit FORMAT=PATH` arguments; one format may be named more than once, so the count
+of requested artefacts is not bounded by the count of registered formats. Emitter
+payloads may be text or bytes; see ADR-0005.
 The processing blocks, aggregate boundaries, and typed transfers are shown in ADR-0001,
 Figure 1.
+
+One invocation's artefacts are one transaction: the command line writes every
+requested artefact or none of them. Before anything is rendered, the requested target
+set is validated once, as a set: no two targets may reach one file, and every target
+that already exists must be a regular file, because this command line reads a
+target's prior bytes before replacing it and a named pipe or character device would
+never return from that read. Reaching one file is decided on a comparison key rather
+than on the spelling the caller typed: each target's resolved path, canonically
+caseless-matched in the sense of UAX #15 D145. Resolving first refuses two spellings
+that reach one file through a symlink or a relative prefix; folding case and
+normalisation form refuses a pair that a volume unifying either would hold as one
+file, and it is applied unconditionally, because whether this host folds is not
+knowable before a target exists and `samefile` needs both targets to exist already.
+The key decides collisions and nothing else — the bytes still go to the path the
+caller named. `stompdrill.cli`'s `_target_key` and `_preflight_targets` are where
+this is enforced. The write mechanism's own preconditions are **not
+restated here** — ADR-0005 states them and `stage_payload` enforces them itself, and
+it runs before any target is replaced, so a target outside its domain still
+withholds the whole set; it costs a render first, and that price is stated rather
+than hidden. This pre-flight is not a guarantee that the commit will succeed. An
+ERROR diagnostic withholds all of them before rendering begins, as already stated
+above. Past both gates, every payload is rendered before any target path is touched;
+the command line then stages every rendered payload to a temporary beside its own
+target, and only once every one of those writes has succeeded does it replace each
+target from its temporary — reading a target's own prior bytes first, whenever the
+target already exists, so they can be put back. A failure anywhere in rendering,
+staging, or committing — an emitter's own fault, the operating system refusing a
+write, or a later target's replace failing after an earlier one has already
+succeeded — unwinds whatever this invocation had staged or already replaced and
+leaves every target exactly as it was before the run, whether that is absent or
+holding a previous invocation's artefact. Restoring an already-replaced target that
+held bytes before the run uses the same `stage_payload`/`StagedWrite.commit` mechanism
+as every other write in the loop, never a write path of its own: the command line
+states no write path `stompmodel.protocols` does not already publish. A target that
+did not exist before the run is restored by removing it, which is a deletion rather
+than a write and is the one filesystem call this bookkeeping makes directly.
+
+This guarantee carries one named exclusion: restoring a target already replaced
+depends on the bytes read from it before its own commit still describing what a
+correct restoration should write back — true unless another process changes that
+same target between the read and the rollback that later reaches for it, or the
+restoring write itself fails for a reason the pre-flight could not have seen. Either
+leaves that one target holding this run's bytes rather than restored, and the
+failure that triggered the rollback is what propagates rather than a second one
+about the failed restoration. Closing that race needs a lock this command line does
+not take, which is a durability question this document leaves out alongside fsync
+and power loss.
+
+ADR-0005 gives `stage_payload`/`StagedWrite.commit` the matching guarantee for one path in
+isolation; this is the set-level rule built on top of it, and it stays the command
+line's own for as long as `stompdrill` is the only caller composing a set of several
+artefact paths for one invocation.
 
 Emitter registration is extensible: a format maps to an emitter without changing the
 processing contract. The CLI explicitly composes the ordered post-quantisation stages;
@@ -70,7 +124,7 @@ flowchart LR
     drawing_pdf["DrawingPdfEmitter"]
     json["JsonEmitter"]
     step["StepEmitter"]
-    selected{"--emit FORMAT=PATH<br/>argument (one to five)"}
+    selected{"--emit FORMAT=PATH<br/>argument (repeatable)"}
 
     source -->|RawDrillData| quantise
     quantise -->|DrillData| dedupe
@@ -107,3 +161,33 @@ Processing changes must occur before emission and update the canonical document.
 extra separation between quantisation, independent pipeline stages, and emitters is a
 deliberate cost: callers and maintainers must preserve the typed flow and must not move
 domain decisions into format-specific code.
+
+Staging every artefact before committing any of them costs one extra temporary file per
+target, briefly present beside it until the whole set commits. That is the deliberate
+price of never leaving a previous invocation's artefact replaced by only part of this
+one's. The set-level rule is composed from `stompmodel`'s per-path mechanism rather than
+restating it: the command line calls `stage_payload` for every requested target, then
+`StagedWrite.commit` for each in turn, and `StagedWrite.discard` for whatever it abandons; reading
+a target's prior bytes before its own commit, and restoring them through that same
+`stage_payload`/`StagedWrite.commit` pair on a later failure, is the command line's own
+bookkeeping around that mechanism, never a second write path beside it. `stompdrill`
+states no temporary-file mechanism of its own. The set commits in the order its targets
+were requested; when one target's own read or commit fails, or an earlier target's
+commit fails, every target already committed in the same loop is restored to what it
+held before this run, and every other staged write — the one whose own read or commit
+just failed, and every one not yet reached — is discarded through `StagedWrite.discard`,
+never left as a temporary. This is a stated invariant, not an index into the target
+list: the loop tracks the set of staged writes not yet committed, which includes the
+one currently being attempted, and a write leaves that set only once its own commit has
+returned — both stated above and enforced by tickets 29 and 35.
+
+Whatever this invocation leaves behind is one of two states per target and nothing
+else: this run's artefact, or exactly the bytes that target held before the run. **No
+temporary this invocation created survives it, on any path — committed, rolled back, or
+failed.** This is a claim about a *path*, not about a file: `StagedWrite.commit` replaces
+the name, so a target that was a symlink or a named pipe is afterwards a regular file
+(see ADR-0005). The set is not atomic against another process and it is not durable
+against power loss; those, and the one named exclusion above — unchanged, not upgraded
+— are outside the guarantee. The opening claim above, that one invocation's artefacts
+are one transaction, now holds of the code as shipped exactly to that extent, and no
+further.

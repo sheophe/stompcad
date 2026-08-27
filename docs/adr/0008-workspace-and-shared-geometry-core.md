@@ -43,7 +43,11 @@ user-facing tool. It holds four packages:
 
 Each package must install and pass its own tests **alone**. `stompdrill` stays
 usable without a collision engine, and `stompcollider` without an Illustrator
-parser.
+parser. This extends to a structural rule a member owns, not only to its
+distribution's runtime dependencies: the gate enforcing that rule is run by
+the *owning* member's own documented command, never by a consumer's, so a
+breach of the rule inside the owner's own source fails the owner's own suite
+without any other member's tests having to run at all.
 
 `stompcad` consumes `stompdrill` and `stompcollider` as **libraries**, not subprocesses.
 
@@ -100,6 +104,129 @@ existing numbering for decisions that span the workspace.
 primitives that move. Every artefact `stompdrill` emits must be byte-identical
 across the move; its suite is the instrument that proves it, and the extraction
 is not complete until it does.
+
+On the reading side, `stompgeom` now owns a document it can **read and enumerate
+faithfully**: `stompgeom.step` publishes the one rule for what XCAF recorded as a
+label's name, distinguishing "nobody named this" from "the kernel synthesised an
+indirection" — OCC's own placeholder for an unnamed component occurrence, which
+names nothing and reads back as empty like any other unnamed label. That rule has
+exactly one implementation; a caller reading a label's name, in `stompdrill` or a
+future consumer, goes through it rather than keeping a private copy that could
+drift from the reader's own.
+
+The reading side must also be **closed under its own round trip**: every value
+this layer writes into a document or a file is read back from the field it was
+actually written to, never from a second producer's labelling convention for
+that field, and a reader added for a field the writer sets arrives with the
+round trip that proves it. The timestamp was the counter-example that forced
+this paragraph: `stompgeom.writer.render_step` sets the timestamp into
+`FILE_NAME`'s own field, but `stompgeom.step.source_timestamp` matched only
+ST-Developer's `/* time_stamp */` comment annotation — a different producer's
+label for that field, which this workspace's own writer never emits — so a
+file this layer had just written read its own timestamp back as the epoch
+sentinel. The fix is one rule reading one field, positionally, tolerant of a
+conforming file's comment annotations and of the field's own quoted-quote
+escaping; the comment-only pattern is deleted rather than kept as a second,
+narrower reader for the same field, because two readers for one written field
+is this defect's exact shape.
+
+The document's **traversal** is owned on the same terms as its names:
+`stompgeom.step` publishes the one walk from a document to its leaf labels,
+`GetFreeShapes` prologue included, and a caller that must act on a leaf — read
+it, colour it, cut it — goes through that walk rather than re-deriving it. A
+consumer that can only reach `stompgeom`'s own enumeration through a private
+name is evidence that a rule is owned in the wrong place, not that the
+consumer was impolite.
+
+The traversal's own labels were bare kernel handles too, alongside
+`StepSolid.shape` and `StepDocument.document` — **seven published names, and
+not one debt.** A shape is independently reference-counted and measures
+identically whether or not the document that produced it is still held; a
+document is the anchor and cannot dangle by being held. Only a label points
+into a document's own label tree, and only a label dangles — **silently**: a
+label drawn from a released document still answers not-null, and reports the
+document's own root entry and a null shape rather than faulting. Wrapping the
+shape or the document would buy nothing and would weaken the honest sentence
+that they owe nothing to a caller's discipline.
+
+`stompgeom.step` now publishes no bare label: one reaches a caller only
+inside `StepLabel`, which holds the `TDocStd_Document` it was drawn from —
+that object specifically, since neither the document's own `ShapeTool` nor
+its own root label (`document.Main()`) keeps a label valid — and which
+answers its own name and its own entry string, computed on access rather
+than cached. Two labels drawn for one node by separate kernel calls compare
+unequal by `==` (kernel object identity, not `IsEqual`) even though their
+entry strings agree and `IsEqual` answers true; this is why "the same label"
+is tested and carried as an entry string, not as a set of owned labels, in
+the one place a caller still needs it — `stompgeom.writer.render_step`'s
+`replaced_labels` parameter, unchanged in shape by this ticket.
+
+The other six kernel-typed names keep their bare kernel handle, now spelled
+with its real OCP type under a `TYPE_CHECKING` guard for readability.
+**This spelling documents intent and checks nothing:** `cadquery-ocp` ships
+no `py.typed` marker and both this workspace's mypy configurations already
+set `ignore_missing_imports` for `OCP.*`, so removing that override would
+make the gate red at the import for zero additional checking, and nobody
+should "fix" that later expecting it to buy safety.
+
+None of this is a claim that `stompgeom` owns kernel lifetimes in general —
+it owns a label's, by design — or that no `Any` crosses this boundary (the
+raw handle field, `StepSolid.shape` and `bounding_box_mm`'s parameter stay
+`Any` to mypy, honestly), or that the kernel handles generally are now
+type-checked (exactly one value is), or that a caller can no longer
+construct a dangling reference (one who keeps the raw handle and drops
+`StepLabel` still can). The true claim is narrower: **the *published
+surface* offers no route that hands out a label already dangling.**
+`StepLabel.label` stays a public, raw field for the same reason the ADR's
+build verb stays deferred — the cutting path needs four XCAF verbs this
+package does not yet wrap, and a private field plus a reach-in would be the
+same convention, unnamed, plus a lie about encapsulation.
+
+**A rule a member owns is enforced by that member's own tests, not by
+whichever member's suite happened to notice the duplication first.** Five
+structural gates enforce "this rule is stated once" — the whole-nanometre
+guard, the case-face vocabulary, this section's own XCAF leaf descent,
+ADR-0006's raw-measurement tie-break, and ADR-0005's atomic-write mechanism
+— and each now lives in the suite of the package that owns the rule it
+polices: four in `stompmodel`'s own suite, one (the leaf descent) in
+`stompgeom`'s. A gate may read a sibling's source as text to reach a rule's
+every possible violator; it may never *import* a package above its own,
+which is why a gate homed in `stompmodel` resolves `stompgeom` and
+`stompdrill` by reading their files rather than importing them. Every gate
+derives the packages it scans from one shared statement,
+`tools.workspace_membership.member_package_dirs` — a directory under
+`packages/` shipping its own `src` — so a package this workspace gains later
+is scanned by every existing gate with no edit to any of them.
+
+**The claim above binds a gate's reach control too, not only its scan.**
+Deriving the scan from `member_package_dirs` is not enough on its own: each
+gate's reach control — the assertion that the scan reached something it
+could have missed, rather than nothing — must itself avoid naming the
+member set, or the scan is variable while the instrument that proves it
+reached anything is not. Each gate's reach control instead checks two
+properties: every member the scan discovered really ships the `src` it
+claims to, and the scan's own roots cover every `src` (and, where the
+gate's reach includes it, `tests`) directory an independent walk of
+`packages/` finds — `tools.workspace_membership.member_area_roots`, which
+never calls `member_package_dirs` and so can disagree with it if that
+function's own discovery narrows. The ownership-gate convention test
+(`packages/stompdrill/tests/test_ownership_gate_convention.py`) carries the
+same discipline one level up: it finds the gate family itself by the
+reach-control marker every gate defines, not by a literal list of gate
+files, and runs a matched pair of probe packages — one breaching every
+rule the family polices, one breaching none — so its own coverage of "every
+gate" cannot silently narrow either. A package or a gate this workspace
+gains later needs no edit to any existing gate or to this convention test.
+`stompgeom` now owns a document it can **render to bytes**:
+`stompgeom.writer.render_step` is the one serialising entry point, returning the
+finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
+along the way is an implementation detail forced by that kernel's own path-only API, not
+part of this function's contract. The fourth verb, **build** — assembling a document
+from placed, named, coloured solids — is deliberately **not yet owned**. ADR-0008's own
+rule is why: the interface grows when a real second consumer arrives, and today the only
+caller of that shape is a test fixture. The builder is expected, not omitted: plan 3's
+first geometry ticket promotes that fixture's construction into `stompgeom` once
+`stompcollider` gives it a real caller to be designed against.
 
 The risk carried is that `stompgeom` accumulates whatever is convenient rather than
 what is universal. `Frame` is the live example: it is a rigid transform, which
