@@ -7,16 +7,16 @@ import pytest
 from stompdrill.cad.case import (
     Faces,
     _inner_level,
-    _Level,
     _nearest_companion_level,
     build_frame,
     drill_axis,
     find_faces,
     select_solid,
 )
+from stompgeom.levels import Level
 from stompgeom.step import read_step
 from stompmodel.model import CaseFace
-from stompmodel.units import Nanometre, mm_from_nm
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 from tests.hammond import MODELS
 
 pytestmark = pytest.mark.hammond
@@ -105,6 +105,19 @@ def test_the_box_and_lid_face_in_opposite_directions(document):
     lid = find_faces(select_solid(document, CaseFace.LID), axis)
 
     assert box.outward[axis] == -lid.outward[axis]
+
+
+def test_the_outward_normal_a_frame_is_built_from_is_exactly_unit(document):
+    """``Faces.outward`` reaches ``build_frame`` as the ``w`` basis vector, and
+    ``CoordinateFrame`` checks unit length only to 1e-9 -- far coarser than the
+    drift a raw kernel component carries, so the guard could not catch it. The
+    value must be exact at the source and reach here untouched.
+    """
+    axis = drill_axis(document, FOOTPRINT)
+
+    faces = find_faces(select_solid(document, CaseFace.BOX), axis)
+
+    assert abs(sum(c * c for c in faces.outward) - 1.0) < 1e-15
 
 
 def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
@@ -295,9 +308,19 @@ def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
     assert spans[0] == pytest.approx(spans[1], abs=1e-6)
 
 
-def _level(position: float, area: float, outward: int, name: str) -> _Level:
-    """One synthetic level, identified by the single name in its ``faces``."""
-    return _Level(position=position, area=area, outward=outward, faces=(name,))
+def _level(position: float, area: float, outward: int, name: str) -> Level:
+    """One synthetic z-axis level, identified by the single name in its ``faces``.
+
+    Stated as the kernel position both selection rules used to read, and
+    converted here, so the fixtures below still say where each level sits
+    rather than restating ``Level``'s signed-offset convention twice.
+    """
+    return Level(
+        direction=(0.0, 0.0, float(outward)),
+        offset_nm=Nanometre(nm_from_mm(position) * outward),
+        area_mm2=area,
+        faces=(name,),
+    )
 
 
 def test_the_inner_level_breaks_an_exact_area_tie_towards_the_drilled_face():
@@ -311,7 +334,7 @@ def test_the_inner_level_breaks_an_exact_area_tie_towards_the_drilled_face():
     far = _level(-7.0, 50.0, -1, "B")
     # The control: without exactly equal areas the permutation assertions
     # below would pass by never reaching the tie-break at all.
-    assert near.area == far.area
+    assert near.area_mm2 == far.area_mm2
 
     assert _inner_level([near, far], drilled).faces == ("A",)
     assert _inner_level([far, near], drilled).faces == ("A",)
@@ -327,7 +350,7 @@ def test_the_inner_level_tie_break_never_outranks_a_real_area_difference():
     drilled = _level(0.0, 100.0, 1, "D")
     near = _level(-3.0, 10.0, -1, "A")
     far = _level(-7.0, 50.0, -1, "B")
-    assert near.area != far.area
+    assert near.area_mm2 != far.area_mm2
 
     assert _inner_level([near, far], drilled).faces == ("B",)
     assert _inner_level([far, near], drilled).faces == ("B",)
@@ -347,7 +370,7 @@ def test_the_nearest_companion_breaks_an_exact_distance_tie_towards_the_proud_si
     proud = _level(-27.25, 10.0, 1, "P")
     receding = _level(-28.25, 10.0, 1, "Q")
     # The control: the two distances are exactly, not approximately, equal.
-    assert abs(proud.position - inner.position) == abs(receding.position - inner.position)
+    assert abs(proud.offset_nm - inner.offset_nm) == abs(receding.offset_nm - inner.offset_nm)
 
     assert _nearest_companion_level([proud, receding], inner).faces == ("P",)
     assert _nearest_companion_level([receding, proud], inner).faces == ("P",)
@@ -363,7 +386,7 @@ def test_the_nearest_companion_tie_break_never_outranks_a_real_distance():
     inner = _level(-27.75, 100.0, 1, "I")
     receding = _level(-28.25, 10.0, 1, "Q")
     proud = _level(-26.75, 10.0, 1, "P")
-    assert abs(receding.position - inner.position) != abs(proud.position - inner.position)
+    assert abs(receding.offset_nm - inner.offset_nm) != abs(proud.offset_nm - inner.offset_nm)
 
     assert _nearest_companion_level([receding, proud], inner).faces == ("Q",)
     assert _nearest_companion_level([proud, receding], inner).faces == ("Q",)
