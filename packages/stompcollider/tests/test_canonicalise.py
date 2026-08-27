@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from stompcollider.canonicalise import canonicalise
 from stompcollider.model import DockData, Protrusion
 from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder
@@ -178,3 +180,70 @@ def test_dockdata_carries_the_case_it_was_canonicalised_against() -> None:
     data = canonicalise(_raw_with_axis(1.0, 1.0), case)
     assert isinstance(data, DockData)
     assert data.case is case
+
+
+def _rotated_case() -> CaseRegistration:
+    """A face frame turned -45 degrees about its own normal.
+
+    Under the identity frame every other test in this module uses,
+    projecting a bounding box's two raw extreme corners happens to agree
+    with projecting all eight -- the rotation here is what makes them
+    disagree, so a fixture built on it is the only way to exercise the
+    eight-corner enumeration ``_sort_key`` actually performs.
+    """
+    theta = -math.pi / 4
+    cos, sin = math.cos(theta), math.sin(theta)
+    basis = CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        u=(cos, sin, 0.0),
+        v=(-sin, cos, 0.0),
+        w=(0.0, 0.0, 1.0),
+    )
+    return CaseRegistration(
+        part="1590BB", face=CaseFace.BOX, model="test.stp", frame=FaceFrame(basis=basis)
+    )
+
+
+def _tied_boards() -> RawBoards:
+    """Two boards whose bounding boxes tie exactly on the sort key's leading
+    three fields under ``_rotated_case()``, but differ in footprint.
+
+    ``narrow`` is a 10x1 mm rectangle at the origin. ``wide`` is a 10x2 mm
+    rectangle translated by (0.5, -0.5) mm -- chosen so that, once every one
+    of its eight bounding-box corners is projected through the rotated
+    frame, its least x and least y exactly match ``narrow``'s. Neither
+    board's tying corner is one of its own two *raw* extreme corners: it
+    only appears once the box's other six corners are generated and
+    projected too. With the position genuinely tied, only the
+    ``-footprint_nm2`` term can order them, and ``wide``'s footprint is the
+    larger one, so it must be ordinal 1.
+    """
+    narrow = RawBoard(
+        corner_a_mm=(0.0, 0.0, 0.0),
+        corner_b_mm=(10.0, 1.0, 2.0),
+        carrier_origin_mm=(0.0, 0.0, 0.0),
+        carrier_u=(1.0, 0.0, 0.0),
+        carrier_v=(0.0, 1.0, 0.0),
+        carrier_w=(0.0, 0.0, 1.0),
+        components=(RawComponent(designator="R_NARROW", axis_xy_mm=None),),
+    )
+    wide = RawBoard(
+        corner_a_mm=(0.5, -0.5, 0.0),
+        corner_b_mm=(10.5, 1.5, 2.0),
+        carrier_origin_mm=(0.0, 0.0, 0.0),
+        carrier_u=(1.0, 0.0, 0.0),
+        carrier_v=(0.0, 1.0, 0.0),
+        carrier_w=(0.0, 0.0, 1.0),
+        components=(RawComponent(designator="R_WIDE", axis_xy_mm=None),),
+    )
+    return RawBoards(boards=(narrow, wide))
+
+
+def test_a_genuine_position_tie_breaks_on_footprint() -> None:
+    """Both boards project to the same (min_x_nm, min_y_nm, min_z_nm) under
+    the rotated frame -- confirmed by hand and in the fix report -- so only
+    the footprint tie-break can separate them, and only the full
+    eight-corner projection can discover that they are tied at all. The
+    wider board must win ordinal 1."""
+    data = canonicalise(_tied_boards(), _rotated_case())
+    assert [b.designators for b in data.boards] == [("R_WIDE",), ("R_NARROW",)]

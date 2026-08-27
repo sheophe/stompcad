@@ -14,4 +14,4 @@ from __future__ import annotations
 from .canonicalise import canonicalise
 from .raw import RawBoard, RawBoards, RawComponent, RawCylinder
 
-__all__ = ["canonicalise", "RawBoards", "RawBoard", "RawComponent", "RawCylinder"]
+__all__ = ["canonicalise", "RawCylinder", "RawComponent", "RawBoard", "RawBoards"]

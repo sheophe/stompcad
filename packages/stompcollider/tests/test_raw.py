@@ -50,3 +50,39 @@ def test_a_board_needs_at_least_one_component() -> None:
 def test_a_boards_scan_needs_at_least_one_board() -> None:
     with pytest.raises(ValueError, match="at least one board"):
         RawBoards(boards=())
+
+
+def test_a_cylinder_radius_must_be_finite_millimetres() -> None:
+    with pytest.raises(TypeError):
+        RawCylinder(radius_mm=1, depth_from_tip_min_mm=0.0, depth_from_tip_max_mm=1.0)
+
+
+def test_a_cylinder_depth_must_be_finite_millimetres() -> None:
+    with pytest.raises(TypeError):
+        RawCylinder(radius_mm=1.0, depth_from_tip_min_mm=0, depth_from_tip_max_mm=1.0)
+
+
+def test_a_board_corner_must_be_finite_millimetres() -> None:
+    with pytest.raises(TypeError):
+        RawBoard(
+            corner_a_mm=(0, 0.0, 0.0),
+            corner_b_mm=(1.0, 1.0, 1.0),
+            carrier_origin_mm=(0.0, 0.0, 0.0),
+            carrier_u=(1.0, 0.0, 0.0),
+            carrier_v=(0.0, 1.0, 0.0),
+            carrier_w=(0.0, 0.0, 1.0),
+            components=(RawComponent(designator="R1", axis_xy_mm=None),),
+        )
+
+
+def test_a_board_carrier_origin_must_be_finite_millimetres() -> None:
+    with pytest.raises(TypeError):
+        RawBoard(
+            corner_a_mm=(0.0, 0.0, 0.0),
+            corner_b_mm=(1.0, 1.0, 1.0),
+            carrier_origin_mm=(0, 0.0, 0.0),
+            carrier_u=(1.0, 0.0, 0.0),
+            carrier_v=(0.0, 1.0, 0.0),
+            carrier_w=(0.0, 0.0, 1.0),
+            components=(RawComponent(designator="R1", axis_xy_mm=None),),
+        )
