@@ -83,11 +83,12 @@ def solid_colour(document: TDocStd_Document, solid: Any) -> tuple[float, float, 
     """``solid``'s own surface colour in ``document``, or ``None`` if it has none.
 
     The published reading half of ``build_document``'s colouring, named
-    explicitly rather than left as "whichever half of the round trip a
-    caller happens to reach for" -- see ``stompcollider-technical.md:598-602``.
-    Reads by shape, not by label: a :class:`stompgeom.step.StepSolid` carries
-    a shape and nothing else, and ``XCAFDoc_ColorTool`` resolves one straight
-    back to the label that shape was assigned under.
+    explicitly rather than left implicit -- see
+    ``stompcollider-technical.md:598-602``. Reads by shape, not by label:
+    ``XCAFDoc_ColorTool`` resolves a shape straight back to the label it was
+    assigned under. ``solid`` is anything with a ``.shape`` -- a
+    :class:`stompgeom.step.StepSolid`, never a raw ``TDF_Label`` -- despite
+    the brief's paraphrase naming this parameter "label".
     """
     require_kernel()
     from OCP.Quantity import Quantity_Color

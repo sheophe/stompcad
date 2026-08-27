@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from stompgeom.build import PlacedSolid, build_document, solid_colour
-from stompgeom.step import bounding_box_mm, read_step_document
+from stompgeom.step import bounding_box_mm, read_step, read_step_document
 from stompgeom.writer import render_step
 from stompmodel.frames import RigidTransform
 
@@ -128,5 +129,57 @@ def test_a_colour_shared_by_several_solids_reads_back_on_each() -> None:
     assert len(solids) == 3
     for solid in solids:
         got = solid_colour(document, solid)
+        assert got is not None
+        assert all(round(g - w, 6) == 0 for g, w in zip(got, _RED))
+
+
+def test_distinct_colours_survive_a_render_and_reread_round_trip(tmp_path: Path) -> None:
+    """Every colour assertion above reads the same in-memory ``document``
+    ``build_document`` produced -- ``solid_colour`` returns the identical
+    value whether or not ``render_step`` ever ran, so those prove
+    ``build_document`` and ``solid_colour`` agree with each other and
+    nothing about the write path. This is the one that reaches a *written*
+    colour: render, write bytes to a real file, read a fresh document back
+    through ``read_step``, and check the colour there -- exercising
+    ``writer``'s gamma-encoded ``COLOUR_RGB`` and its reslot together, the
+    way Task 21's caller will."""
+    document = build_document([
+        PlacedSolid(_box(1, 1, 1), "A", _RED, None),
+        PlacedSolid(_box(2, 2, 2), "B", _GREEN, None),
+    ])
+    payload = render_step(
+        document, title="t", timestamp="1970-01-01T00:00:00+00:00", originating_system="t"
+    )
+    path = tmp_path / "distinct.stp"
+    path.write_bytes(payload)
+
+    reread = read_step(path)
+    by_name = {solid.name: solid for solid in reread.solids}
+    for name, wanted in (("A", _RED), ("B", _GREEN)):
+        got = solid_colour(reread.document, by_name[name])
+        assert got is not None
+        assert all(round(g - w, 6) == 0 for g, w in zip(got, wanted))
+
+
+def test_a_shared_colour_survives_a_render_and_reread_round_trip(tmp_path: Path) -> None:
+    """The shared-colour case, through the same real round trip: Task 8's
+    canonicalisation of which chain of a repeated colour defines it is
+    exactly the code path a lost or scrambled colour would hide in, and the
+    in-memory tests above cannot reach it at all."""
+    document = build_document([
+        PlacedSolid(_box(1, 1, 1), "P0", _RED, None),
+        PlacedSolid(_box(2, 2, 2), "P1", _RED, None),
+        PlacedSolid(_box(3, 3, 3), "P2", _RED, None),
+    ])
+    payload = render_step(
+        document, title="t", timestamp="1970-01-01T00:00:00+00:00", originating_system="t"
+    )
+    path = tmp_path / "shared.stp"
+    path.write_bytes(payload)
+
+    reread = read_step(path)
+    assert len(reread.solids) == 3
+    for solid in reread.solids:
+        got = solid_colour(reread.document, solid)
         assert got is not None
         assert all(round(g - w, 6) == 0 for g, w in zip(got, _RED))
