@@ -1,7 +1,8 @@
-"""Three OCC process-global effects — a translator product-name suffix, the
-assembly usage occurrence ids, and which numeric slot each colour is written
-into — are not controllable through any exposed API, so ``render_step``
-normalises the written bytes afterwards instead.
+"""Four OCC process-global effects — a translator product-name suffix, the
+assembly usage occurrence ids, which numeric slot each colour is written
+into, and which chain of a shared colour carries its inline definition —
+are not controllable through any exposed API, so ``render_step`` normalises
+the written bytes afterwards instead.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import os
 import re
 import tempfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -211,15 +213,94 @@ def _defined_ids(text: bytes) -> list[int]:
     return [int(found) for found in re.findall(rb"#(\d+) = ", text)]
 
 
-def _colour_sort_key(match: re.Match[bytes]) -> tuple[int, bytes, int]:
-    """The shape a chain colours, its literal if own, and its colour id.
+@dataclass(frozen=True, slots=True)
+class _ColourChain:
+    """One matched colour chain, split at the colour it may define.
 
-    The literal (absent, ``b""``, for a reused colour) and the referenced
-    colour id are both stable, external facts about the chain's content,
-    unaffected by which ids get reassigned -- unlike an id, neither is a
-    float, so this stays a legal dict/set-free sort key across processes.
+    ``head`` runs to the ``FILL_AREA_STYLE_COLOUR`` naming the colour;
+    ``definition`` is the trailing ``COLOUR_RGB`` when this chain is the one
+    the kernel happened to define that colour in, and empty when the chain
+    reuses a definition another one carries. ``shape`` and ``colour`` are
+    the ids it refers to, ``literal`` its own RGB text when it has one.
     """
-    return (int(match.group(3)), match.group(5) or b"", int(match.group(4)))
+
+    head: bytes
+    definition: bytes
+    shape: int
+    colour: int
+    literal: bytes
+
+
+def _parse_colour_chain(match: re.Match[bytes]) -> _ColourChain:
+    """Split one matched chain into its head and the colour it may define.
+
+    The whitespace between the two travels with the definition, so a chain
+    that loses ownership loses the separator too and one that gains it
+    gains the separator the kernel itself wrote there.
+    """
+    text = match.group(0)
+    if match.group(5) is None:
+        return _ColourChain(text, b"", int(match.group(3)), int(match.group(4)), b"")
+    head = text[: text.rindex(b"#" + match.group(4) + b" = COLOUR_RGB")].rstrip()
+    return _ColourChain(
+        head,
+        text[len(head) :],
+        int(match.group(3)),
+        int(match.group(4)),
+        match.group(5),
+    )
+
+
+def _signature(head: bytes) -> bytes:
+    """One chain's head with every id and every line break flattened away.
+
+    The last-resort tiebreak between two chains colouring one shape in one
+    colour: their ids, and the column the writer wrapped a line at, are
+    exactly what varies between processes, so what is left once both are
+    gone is the only part of a chain an order may be taken on.
+    """
+    return re.sub(rb"\s+", b" ", re.sub(rb"#\d+", b"#", head))
+
+
+def _colour_sort_key(chain: _ColourChain, literals: dict[int, bytes]) -> tuple[int, bytes, bytes]:
+    """The shape a chain colours, the colour it resolves to, and its content.
+
+    Every part is a fact the source document fixes, so two processes agree
+    on it: the shape id is external to the region and stable, the resolved
+    literal is the same whichever chain defined it, and the signature holds
+    no id at all. None is a float, so this is a legal dict and set key.
+    """
+    return (chain.shape, literals[chain.colour], _signature(chain.head))
+
+
+def _canonicalise_ownership(
+    ordered: list[_ColourChain], literals: dict[int, bytes]
+) -> list[bytes]:
+    """Rebuild each chain so the first one using a colour is the one defining it.
+
+    ``STEPCAFControl_Writer`` gives the inline ``COLOUR_RGB`` to whichever
+    chain sharing that colour it writes first, which permutes between
+    processes along with the slots themselves -- so renumbering alone
+    cannot settle it, the chains' own structure differs. Moving each
+    definition to the first chain in content order that uses it permutes
+    ownership among the chains rather than adding or dropping a definition,
+    leaving the region's entity population as the kernel wrote it.
+    """
+    definition: dict[bytes, bytes] = {}
+    colour: dict[bytes, bytes] = {}
+    owner: dict[bytes, int] = {}
+    for index, chain in enumerate(ordered):
+        literal = literals[chain.colour]
+        owner.setdefault(literal, index)
+        if chain.literal and literal not in definition:
+            definition[literal] = chain.definition
+            colour[literal] = str(chain.colour).encode("ascii")
+    texts: list[bytes] = []
+    for index, chain in enumerate(ordered):
+        literal = literals[chain.colour]
+        head = chain.head[: chain.head.rindex(b"#")] + b"#" + colour[literal] + b");"
+        texts.append(head + definition[literal] if owner[literal] == index else head)
+    return texts
 
 
 def _check_reslot_integrity(
@@ -271,11 +352,12 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     """Re-seat every colour chain's content into the id slots content-order picks.
 
     ``STEPCAFControl_Writer::WriteColors`` hashes on the ``TShape`` pointer
-    to decide *which* chain goes in *which* slot at the file's tail -- the
-    pointer, not the file, so two writes of the same document permute the
-    slots. See the comment below for why this renumbers through one global
-    id map rather than a per-chain delta, and why the renumbered chains are
-    also physically reassembled rather than merely renumbered in place.
+    to decide which chain goes in which slot at the file's tail, and which
+    chain of a shared colour carries that colour's inline definition -- the
+    pointer, not the file, so two writes of one document permute both.
+    Ownership is settled by content first, then the chains are renumbered
+    through one global id map and physically reassembled; see the comment
+    below for why no one of those three steps is enough on its own.
     """
     # A per-chain delta (this function's own history) assumed every chain
     # owned the same count of contiguous ids and referenced no id another
@@ -327,27 +409,51 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
             "deterministic across processes"
         )
 
-    ordered = sorted(chains, key=_colour_sort_key)
+    parsed = [_parse_colour_chain(chain) for chain in chains]
+    literals = {chain.colour: chain.literal for chain in parsed if chain.literal}
+    # A chain naming a colour no chain defines -- a pre-defined STEP colour,
+    # or one written outside this region -- has no definition this pass can
+    # move, so its ownership cannot be settled by content the way the loop
+    # below settles a shared COLOUR_RGB's. Refused for the same reason a
+    # foreign entity between chains is, rather than written non-canonically.
+    if any(chain.colour not in literals for chain in parsed):
+        raise EmitterError(
+            "a colour chain names a colour defined nowhere among the chains "
+            "-- a pre-defined STEP colour, or one written outside the colour "
+            "region -- so which chain owns it could not be made canonical; "
+            "refusing to write a STEP file whose bytes would not be "
+            "deterministic across processes"
+        )
+
+    ordered = sorted(parsed, key=lambda chain: _colour_sort_key(chain, literals))
+    texts = _canonicalise_ownership(ordered, literals)
 
     # The pool is every id any chain defines, concatenated in slot (file)
     # order -- already ascending, since chains are non-overlapping matches
     # found in file order and ids only increase through the file. Handing
     # its entries out to chains in content order, one chain's own count at
     # a time, is a bijection: the pool's total length is exactly the sum of
-    # what every chain consumes.
+    # what every chain consumes, since ownership was permuted rather than
+    # inserted or dropped. The guard below is what proves that of the run.
     pool = [id_ for chain in chains for id_ in _defined_ids(chain.group(0))]
     id_map: dict[int, int] = {}
     cursor = 0
-    for chain in ordered:
-        own = _defined_ids(chain.group(0))
+    for text in texts:
+        own = _defined_ids(text)
         id_map.update(zip(own, pool[cursor:cursor + len(own)]))
         cursor += len(own)
+    if cursor != len(pool):
+        raise EmitterError(
+            f"canonicalising colour ownership left {cursor} entity id(s) "
+            f"where the written region has {len(pool)}; a definition was "
+            "added or dropped rather than moved, so refusing to write"
+        )
 
     def remap(match: re.Match[bytes]) -> bytes:
         old = int(match.group(1))
         return b"#" + str(id_map.get(old, old)).encode("ascii")
 
-    renumbered = [re.sub(rb"#(\d+)", remap, chain.group(0)) for chain in ordered]
+    renumbered = [re.sub(rb"#(\d+)", remap, text) for text in texts]
     gaps = [payload[chains[i].end():chains[i + 1].start()] for i in range(len(chains) - 1)]
 
     region_pieces: list[bytes] = []
@@ -372,10 +478,13 @@ def render_step(
 ) -> bytes:
     """Render the XCAF document to STEP bytes, with a header carrying no clock reading.
 
-    OCC's writer exposes no in-memory target, only a path, so this aims it at
-    a scratch file the caller never sees and returns the finished bytes
-    instead of a location -- the scratch file is an implementation detail of
-    a path-only kernel API, not part of this function's contract.
+    Two renders of one document agree byte for byte, in one process or
+    across several: the header reads no clock, ``_normalise`` erases OCC's
+    process-global counters, and ``_reslot_colours`` re-seats the colour
+    region by content down to which chain of a shared colour defines it.
+    A colour region this module cannot make canonical is refused, never
+    written. OCC's writer exposes no in-memory target, only a path, so this
+    aims at a scratch file the caller never sees and returns the bytes.
     """
     require_kernel()
 

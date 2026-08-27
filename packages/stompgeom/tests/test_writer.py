@@ -331,6 +331,157 @@ def test_reslot_colours_does_not_dangle_a_reused_colour_across_a_reorder() -> No
     ) in reslotted
 
 
+#: One colour shared by two chains, written the two ways the kernel
+#: alternates between: the payloads differ only in which chain carries the
+#: inline ``COLOUR_RGB`` and in the slot order that goes with it, since
+#: ``STEPCAFControl_Writer`` hands the definition to whichever chain of a
+#: shared colour it writes first. Measured on a five-solid document whose
+#: solids all share one colour: six fresh interpreters produced four
+#: distinct files, differing in nothing else. Both must reslot to one
+#: answer, which is true only once ownership is decided by content.
+_SHARED_COLOUR_OWNED_BY_500 = (
+    b"#100 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#101),#999);\n"
+    b"#101 = STYLED_ITEM('color',(#102),#500);\n"
+    b"#102 = PRESENTATION_STYLE_ASSIGNMENT((#103));\n"
+    b"#103 = SURFACE_STYLE_USAGE(.BOTH.,#104);\n"
+    b"#104 = SURFACE_SIDE_STYLE('',(#105));\n"
+    b"#105 = SURFACE_STYLE_FILL_AREA(#106);\n"
+    b"#106 = FILL_AREA_STYLE('',(#107));\n"
+    b"#107 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+    b"#108 = COLOUR_RGB('',1.,0.,0.);\n"
+    b"#109 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#110),#998);\n"
+    b"#110 = STYLED_ITEM('color',(#111),#200);\n"
+    b"#111 = PRESENTATION_STYLE_ASSIGNMENT((#112));\n"
+    b"#112 = SURFACE_STYLE_USAGE(.BOTH.,#113);\n"
+    b"#113 = SURFACE_SIDE_STYLE('',(#114));\n"
+    b"#114 = SURFACE_STYLE_FILL_AREA(#115);\n"
+    b"#115 = FILL_AREA_STYLE('',(#116));\n"
+    b"#116 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+)
+_SHARED_COLOUR_OWNED_BY_200 = (
+    b"#100 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#101),#998);\n"
+    b"#101 = STYLED_ITEM('color',(#102),#200);\n"
+    b"#102 = PRESENTATION_STYLE_ASSIGNMENT((#103));\n"
+    b"#103 = SURFACE_STYLE_USAGE(.BOTH.,#104);\n"
+    b"#104 = SURFACE_SIDE_STYLE('',(#105));\n"
+    b"#105 = SURFACE_STYLE_FILL_AREA(#106);\n"
+    b"#106 = FILL_AREA_STYLE('',(#107));\n"
+    b"#107 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+    b"#108 = COLOUR_RGB('',1.,0.,0.);\n"
+    b"#109 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#110),#999);\n"
+    b"#110 = STYLED_ITEM('color',(#111),#500);\n"
+    b"#111 = PRESENTATION_STYLE_ASSIGNMENT((#112));\n"
+    b"#112 = SURFACE_STYLE_USAGE(.BOTH.,#113);\n"
+    b"#113 = SURFACE_SIDE_STYLE('',(#114));\n"
+    b"#114 = SURFACE_STYLE_FILL_AREA(#115);\n"
+    b"#115 = FILL_AREA_STYLE('',(#116));\n"
+    b"#116 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+)
+
+
+def test_which_chain_of_a_shared_colour_defines_it_is_settled_by_content() -> None:
+    """Two chains sharing a colour must not depend on the kernel's choice.
+
+    Renumbering alone cannot reach this: the chains' own *structure*
+    differs between the two payloads, one carrying a definition the other
+    only references, so the id map derived from them differs too. Moving
+    the definition onto the chain content order puts first is what makes
+    the two collapse onto one answer.
+    """
+    first = _EXTERNAL_STUBS + _SHARED_COLOUR_OWNED_BY_500
+    second = _EXTERNAL_STUBS + _SHARED_COLOUR_OWNED_BY_200
+
+    # Grounding: an identity claim over two equal -- or two unmatched --
+    # payloads would hold whatever _reslot_colours did with them.
+    assert first != second
+    assert len(list(writer._COLOUR_CHAIN.finditer(first))) == 2
+    assert len(list(writer._COLOUR_CHAIN.finditer(second))) == 2
+
+    reslotted = writer._reslot_colours(first, expected=2)
+
+    assert reslotted == writer._reslot_colours(second, expected=2)
+    # The definition landed on the chain colouring the lower shape id --
+    # the first in content order -- and there is still exactly one of it.
+    assert b"#101 = STYLED_ITEM('color',(#102),#200);" in reslotted
+    assert (
+        b"#107 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+        b"#108 = COLOUR_RGB('',1.,0.,0.);"
+    ) in reslotted
+    assert reslotted.count(b"COLOUR_RGB") == 1
+
+
+#: Two chains defining one RGB literal at two different ids -- a shape
+#: ``STEPCAFControl_Writer`` never writes, since it defines a colour once
+#: and reuses it. Canonical ownership cannot express it: moving the
+#: definition to the first chain in content order leaves the second's own
+#: definition owning nothing, dropping an entity the region held.
+_TWO_DEFINITIONS_OF_ONE_COLOUR = _CHAIN_COLOURING_500 + _CHAIN_COLOURING_200.replace(
+    b"COLOUR_RGB('',0.,1.,0.)", b"COLOUR_RGB('',1.,0.,0.)"
+)
+
+
+def test_two_definitions_of_one_colour_are_refused_not_silently_merged() -> None:
+    """Ownership is permuted among the chains, never added to or dropped.
+
+    The guard is what proves that of the run rather than of the argument:
+    a merge would look like a successful canonicalisation while quietly
+    emitting one entity fewer than the kernel wrote.
+    """
+    payload = _EXTERNAL_STUBS + _TWO_DEFINITIONS_OF_ONE_COLOUR
+
+    assert payload.count(b"COLOUR_RGB('',1.,0.,0.)") == 2
+    with pytest.raises(EmitterError, match="added or dropped rather than moved"):
+        writer._reslot_colours(payload, expected=2)
+
+    # The control beside the probe: the same two chains with two *different*
+    # literals -- one definition each -- must still be accepted, or every
+    # ordinary write would be refused too.
+    writer._reslot_colours(
+        _EXTERNAL_STUBS + _CHAIN_COLOURING_500 + _CHAIN_COLOURING_200, expected=2
+    )
+
+
+#: A colour living outside every chain, as a pre-defined STEP colour does.
+#: Both chains below name it and neither defines it, so there is nothing
+#: for content order to hand ownership of.
+_PRE_DEFINED_COLOUR = b"#900 = DRAUGHTING_PRE_DEFINED_COLOUR('red');\n"
+_CHAIN_NAMING_AN_EXTERNAL_COLOUR_500 = _CHAIN_COLOURING_500.replace(
+    b"#107 = FILL_AREA_STYLE_COLOUR('',#108);\n#108 = COLOUR_RGB('',1.,0.,0.);\n",
+    b"#107 = FILL_AREA_STYLE_COLOUR('',#900);\n",
+)
+_CHAIN_NAMING_AN_EXTERNAL_COLOUR_200 = _CHAIN_COLOURING_200.replace(
+    b"#116 = FILL_AREA_STYLE_COLOUR('',#117);\n#117 = COLOUR_RGB('',0.,1.,0.);\n",
+    b"#116 = FILL_AREA_STYLE_COLOUR('',#900);\n",
+)
+
+
+def test_a_colour_defined_outside_every_chain_is_refused() -> None:
+    """No definition to move means no ownership to settle by content.
+
+    Such a chain's colour reference is as allocator-dependent as any other
+    id in the region, and this pass has no chain of its own to re-seat it
+    through -- the same reason a foreign entity between two chains is
+    refused rather than copied through non-canonically.
+    """
+    payload = (
+        _EXTERNAL_STUBS
+        + _PRE_DEFINED_COLOUR
+        + _CHAIN_NAMING_AN_EXTERNAL_COLOUR_500
+        + _CHAIN_NAMING_AN_EXTERNAL_COLOUR_200
+    )
+
+    assert len(list(writer._COLOUR_CHAIN.finditer(payload))) == 2
+    assert b"COLOUR_RGB" not in payload
+    with pytest.raises(EmitterError, match="defined nowhere among the chains"):
+        writer._reslot_colours(payload, expected=2)
+
+    # The control beside the probe: the same two chains, each with its own
+    # inline definition, must still be accepted.
+    writer._reslot_colours(
+        _EXTERNAL_STUBS + _CHAIN_COLOURING_500 + _CHAIN_COLOURING_200, expected=2
+    )
+
+
 def test_check_reslot_integrity_refuses_a_duplicated_definition() -> None:
     """The GUILTY probe for the duplicate-id branch: reached by no other
     test, so this module's own suite is the only thing that exercises it.
@@ -631,3 +782,49 @@ def test_the_byte_identity_control_fails_when_the_reslot_is_disabled(
     # a single order.
     assert len(disabled) > 1
     assert len(enabled) == 1
+
+
+#: Shelled out, printing three facts about one render: its digest, and the
+#: two counts that ground the digest comparison. ``render_step`` is reached
+#: through a fresh interpreter because the choice under test is made from a
+#: ``TShape`` pointer, which only a separate process reallocates.
+_REPEATED_COLOUR_PROBE = (
+    "import hashlib, sys;"
+    "from stompgeom.writer import render_step;"
+    "from tests.fixtures.repeated_colour import repeated_colour_document;"
+    "payload = render_step(repeated_colour_document(), title='p',"
+    " timestamp='1970-01-01T00:00:00+00:00', originating_system='t');"
+    "sys.stdout.write('%s %d %d' % (hashlib.sha256(payload).hexdigest(),"
+    " payload.count(b'STYLED_ITEM'), payload.count(b'COLOUR_RGB')))"
+)
+
+#: Enough launches to see the disagreement: six of them produced four
+#: distinct digests before ownership was settled by content, so three
+#: agreeing is already strong evidence -- and the hand-built pair in
+#: ``test_which_chain_of_a_shared_colour_defines_it_is_settled_by_content``
+#: is the falsifiable control this test leans on, since a subprocess
+#: cannot be monkeypatched from here.
+_REPEATED_COLOUR_LAUNCHES = 3
+
+
+def test_shapes_sharing_one_colour_render_identically_across_processes() -> None:
+    """The guarantee ``render_step``'s docstring states, measured end to end.
+
+    Five solids sharing one RGB value make the kernel choose which of the
+    five chains defines it inline; that choice comes from a pointer, so it
+    varies between processes and takes the chains' own structure with it.
+    """
+    reports = [
+        subprocess.run(
+            [sys.executable, "-c", _REPEATED_COLOUR_PROBE],
+            capture_output=True, text=True, check=True,
+            cwd=Path(__file__).resolve().parent.parent,
+        ).stdout.split()
+        for _ in range(_REPEATED_COLOUR_LAUNCHES)
+    ]
+
+    assert len({report[0] for report in reports}) == 1
+    # Grounding: agreement over a document that never exercised the choice
+    # would prove nothing. Five styled items sharing one COLOUR_RGB is what
+    # makes four of the five chains reference a definition they do not own.
+    assert all(report[1:] == ["5", "1"] for report in reports)
