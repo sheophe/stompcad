@@ -55,6 +55,86 @@ def test_compound_accepts_a_generator() -> None:
     assert len(_members(compound(_box(n, n, n) for n in (1, 2)))) == 2
 
 
+def _centre(shape: Any) -> tuple[float, float, float]:
+    from stompgeom.step import bounding_box_mm
+
+    box = bounding_box_mm(shape)
+    return tuple((box[i] + box[i + 3]) / 2 for i in range(3))  # type: ignore[return-value]
+
+
+def test_placed_moves_the_shape() -> None:
+    from stompgeom.shapes import placed
+    from stompmodel.frames import RigidTransform
+
+    identity = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    moved = placed(_box(2, 2, 2), RigidTransform(identity, (10.0, 0.0, 0.0)))
+    assert round(_centre(moved)[0], 9) == 11.0
+
+
+def test_placed_rotates_as_well_as_translates() -> None:
+    """A translation-only implementation passes the test above and fails this."""
+    from stompgeom.shapes import placed
+    from stompmodel.frames import RigidTransform
+
+    quarter_turn = ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    moved = placed(_box(4, 2, 2), RigidTransform(quarter_turn, (0.0, 0.0, 0.0)))
+    from stompgeom.step import bounding_box_mm
+
+    box = bounding_box_mm(moved)
+    assert round(box[4] - box[1], 9) == 4.0     # the long axis is now y
+
+
+def test_placed_leaves_the_original_alone() -> None:
+    """Value semantics: the workspace's transforms return replacements."""
+    from stompgeom.shapes import placed
+    from stompmodel.frames import RigidTransform
+
+    identity = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    original = _box(2, 2, 2)
+    placed(original, RigidTransform(identity, (10.0, 0.0, 0.0)))
+    assert round(_centre(original)[0], 9) == 1.0
+
+
+def test_placed_returns_a_location_not_a_rebuild() -> None:
+    """A location moves the placement, not the geometry underneath it.
+
+    This is the test the brief warns is missing from the obvious version: a
+    ``BRepBuilderAPI_Transform`` result also passes the two tests above, but
+    it carries an identity ``TopLoc_Location`` because it baked the motion
+    into fresh vertices instead. Only a genuine ``TopoDS_Shape.Moved`` result
+    carries the motion in its location.
+    """
+    from stompgeom.shapes import placed
+    from stompmodel.frames import RigidTransform
+
+    identity = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    moved = placed(_box(2, 2, 2), RigidTransform(identity, (10.0, 0.0, 0.0)))
+
+    location = moved.Location()
+    assert not location.IsIdentity()
+
+    translation = location.Transformation().TranslationPart()
+    assert round(translation.X(), 9) == 10.0
+    assert round(translation.Y(), 9) == 0.0
+    assert round(translation.Z(), 9) == 0.0
+
+
+def test_placed_shares_the_original_topology() -> None:
+    """A located copy is a partner of its original; a rebuild is not.
+
+    ``TopoDS_Shape.IsPartner`` compares the underlying ``TShape``, which a
+    location shares and a ``BRepBuilderAPI_Transform`` rebuild does not.
+    """
+    from stompgeom.shapes import placed
+    from stompmodel.frames import RigidTransform
+
+    identity = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    original = _box(2, 2, 2)
+    moved = placed(original, RigidTransform(identity, (10.0, 0.0, 0.0)))
+
+    assert moved.IsPartner(original)
+
+
 def test_compound_preserves_the_order_shapes_were_given() -> None:
     """The member sequence must match the input sequence, not just its set.
 

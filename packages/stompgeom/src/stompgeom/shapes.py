@@ -9,9 +9,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from stompmodel.frames import RigidTransform
+
 from .kernel import require_kernel
 
-__all__ = ["compound"]
+__all__ = ["compound", "placed"]
 
 
 def compound(shapes: Iterable[Any]) -> Any:
@@ -31,3 +33,24 @@ def compound(shapes: Iterable[Any]) -> Any:
     for shape in shapes:
         builder.Add(built, shape)
     return built
+
+
+def placed(shape: Any, motion: RigidTransform) -> Any:
+    """A located copy of ``shape`` under ``motion``.
+
+    A ``TopLoc_Location`` rather than a rebuilt transform: locating
+    rebuilds no geometry, so the writer still sees the original topology
+    and the names and colours attached to it survive the placement.
+    """
+    require_kernel()
+    from OCP.gp import gp_Trsf
+    from OCP.TopLoc import TopLoc_Location
+
+    trsf = gp_Trsf()
+    rows = motion.rotation
+    trsf.SetValues(
+        rows[0][0], rows[0][1], rows[0][2], motion.translation_mm[0],
+        rows[1][0], rows[1][1], rows[1][2], motion.translation_mm[1],
+        rows[2][0], rows[2][1], rows[2][2], motion.translation_mm[2],
+    )
+    return shape.Moved(TopLoc_Location(trsf))
