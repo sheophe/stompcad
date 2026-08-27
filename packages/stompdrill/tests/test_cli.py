@@ -1203,9 +1203,9 @@ def test_two_emit_targets_differing_only_in_normalisation_form_are_a_usage_error
 def test_two_emit_targets_reaching_one_file_through_a_symlink_are_a_usage_error(
     fake_source, tmp_path, capsys
 ):
-    """The folds above are only half of :func:`cli._target_key`; the other
-    half is ``Path.resolve``. Two spellings that fold apart still name one
-    file when a directory on the way is a symlink, and dropping
+    """The folds above are only half of :func:`stompmodel.protocols.target_key`;
+    the other half is ``Path.resolve``. Two spellings that fold apart still
+    name one file when a directory on the way is a symlink, and dropping
     ``.resolve()`` leaves every other target-key probe in this module
     green -- so without this one the resolution half is unpoliced."""
     fake_source(read())
@@ -1360,7 +1360,7 @@ def test_a_target_whose_parent_is_not_writable_is_rejected_before_committing(
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes on this platform")
 def test_a_fifo_target_is_refused_by_the_preflight_without_being_opened(tmp_path, capsys):
     """Ticket 35: an existing target that is not a regular file -- a named
-    pipe here -- is refused by ``_preflight_targets`` itself, by a raise,
+    pipe here -- is refused by ``check_target_set`` itself, by a raise,
     not a wait. ADR-0005 admits a FIFO to the write mechanism's own
     domain, but this command line's commit loop reads a target's prior
     bytes before replacing it, and nothing is writing to the other end of

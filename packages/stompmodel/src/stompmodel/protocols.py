@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import errno
 import os
+import unicodedata
 import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ __all__ = [
     "Payload",
     "StagedWrite",
     "stage_payload",
+    "target_key",
+    "check_target_set",
     "Pipeline",
 ]
 
@@ -163,6 +166,35 @@ def stage_payload(path: Path, payload: Payload) -> StagedWrite:
         tmp.unlink(missing_ok=True)
         raise
     return StagedWrite(path=path, size=len(data), _tmp=tmp)
+
+
+def target_key(path: Path) -> str:
+    """A key under which two spellings of one file compare equal.
+
+    Resolved first: a filesystem may hold two spellings, or two paths joined
+    by a symlink, as one file. Folded twice because casefolding can itself
+    denormalise -- see ADR-0005.
+    """
+    resolved = str(path.resolve())
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", resolved).casefold())
+
+
+def check_target_set(paths: Sequence[Path]) -> None:
+    """Refuse a set two of whose members would reach one file.
+
+    Raises ``ValueError``; the caller owns what that means for its own exit
+    code, because this package cannot see a command line.
+    """
+    seen: dict[str, Path] = {}
+    for path in paths:
+        key = target_key(path)
+        if key in seen:
+            raise ValueError(
+                f"{path} and {seen[key]} name one file; each artefact needs its own"
+            )
+        seen[key] = path
+        if path.exists() and not path.is_file():
+            raise ValueError(f"{path} exists and is not a regular file")
 
 
 @runtime_checkable

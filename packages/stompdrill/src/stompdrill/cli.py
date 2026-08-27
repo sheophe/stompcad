@@ -12,7 +12,6 @@ import argparse
 import inspect
 import math
 import sys
-import unicodedata
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +32,7 @@ from stompmodel.protocols import (
     Pipeline,
     Stage,
     StagedWrite,
+    check_target_set,
     stage_payload,
 )
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
@@ -265,53 +265,6 @@ def parse_emit(spec: str) -> tuple[str, Path]:
             f"--emit expects FORMAT=PATH, got {spec!r}; formats: {', '.join(available())}"
         )
     return (name.strip(), Path(path.strip()))
-
-
-def _target_key(path: Path) -> str:
-    """Reduce a target path to the identity two ``--emit`` specs collide on.
-
-    UAX #15 D145's canonical caseless match of the resolved path, applied
-    unconditionally: whether this host folds letter case or normalisation
-    form is not knowable before a target exists, and ``samefile`` needs
-    both targets to exist already. Folding refuses a pair a preserving
-    volume would have kept apart; not folding lets one requested artefact
-    overwrite another while both are reported written. A comparison key
-    only — the bytes still go to the path the caller named.
-    """
-    resolved = str(path.resolve())
-    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", resolved).casefold())
-
-
-def _preflight_targets(targets: Sequence[tuple[str, Path]]) -> None:
-    """Validate the target set itself before anything is rendered.
-
-    Two ``--emit`` specs may not name one target under :func:`_target_key`,
-    and an existing target must be a regular file: this command line reads a
-    target's prior bytes before replacing it, and a pipe or character device
-    would never return from that read. The write mechanism's own
-    preconditions are not restated here — ``stage_payload`` enforces them
-    (ADR-0005) before any target is replaced, so an out-of-domain target
-    still withholds the whole set, just after a render. See ADR-0001.
-    """
-    seen: dict[str, tuple[str, Path]] = {}
-    for name, path in targets:
-        key = _target_key(path)
-        earlier = seen.get(key)
-        if earlier is not None:
-            earlier_name, earlier_path = earlier
-            raise UsageError(
-                f"--emit {name}={path}: names the same target as "
-                f"--emit {earlier_name}={earlier_path}; two artefacts cannot "
-                "share one path. Targets are compared ignoring letter case "
-                "and Unicode normalisation form, because a filesystem may "
-                "hold two such spellings as one file"
-            )
-        seen[key] = (name, path)
-        if path.exists() and not path.is_file():
-            raise UsageError(
-                f"--emit {name}={path}: exists and is not a regular file; this "
-                "command line reads a target's prior bytes before replacing it"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -887,7 +840,10 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
 
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
-    _preflight_targets(targets)
+    try:
+        check_target_set([path for _format, path in targets])
+    except ValueError as error:
+        raise UsageError(str(error)) from error
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
