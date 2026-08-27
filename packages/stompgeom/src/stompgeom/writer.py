@@ -70,15 +70,19 @@ _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 #: trailing clause backreferences group 4 (``\4``) rather than capturing a
 #: fresh id, which is what proves a following ``COLOUR_RGB`` defines *this*
 #: reference rather than being an unrelated entity that happens to follow a
-#: reused-colour chain with no terminal entity of its own.
+#: reused-colour chain with no terminal entity of its own. Every entity body
+#: here is bounded with ``[^;]*?`` rather than ``.*?``: an entity never
+#: contains a literal ``;`` (see ``_VOLATILE_ENTITY``), so the optional
+#: wrapper cannot expand past an unrelated intervening entity to reach a
+#: styled item that is not really its own.
 _COLOUR_CHAIN = re.compile(
-    rb"(?:#(\d+) = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION\(.*?\);\s*)?"
+    rb"(?:#(\d+) = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION\([^;]*?\);\s*)?"
     rb"#(\d+) = (?:STYLED_ITEM|OVER_RIDING_STYLED_ITEM)\('[^']*',\(#\d+\),#(\d+)(?:,\s*#\d+)?\);\s*"
-    rb"#\d+ = PRESENTATION_STYLE_ASSIGNMENT\(.*?\);\s*"
-    rb"#\d+ = SURFACE_STYLE_USAGE\(.*?\);\s*"
-    rb"#\d+ = SURFACE_SIDE_STYLE\(.*?\);\s*"
-    rb"#\d+ = SURFACE_STYLE_FILL_AREA\(.*?\);\s*"
-    rb"#\d+ = FILL_AREA_STYLE\(.*?\);\s*"
+    rb"#\d+ = PRESENTATION_STYLE_ASSIGNMENT\([^;]*?\);\s*"
+    rb"#\d+ = SURFACE_STYLE_USAGE\([^;]*?\);\s*"
+    rb"#\d+ = SURFACE_SIDE_STYLE\([^;]*?\);\s*"
+    rb"#\d+ = SURFACE_STYLE_FILL_AREA\([^;]*?\);\s*"
+    rb"#\d+ = FILL_AREA_STYLE\([^;]*?\);\s*"
     rb"#\d+ = FILL_AREA_STYLE_COLOUR\('',#(\d+)\);"
     rb"(?:\s*#\4 = COLOUR_RGB\('',([^)]*)\);)?",
     re.DOTALL,
@@ -207,17 +211,72 @@ def _defined_ids(text: bytes) -> list[int]:
     return [int(found) for found in re.findall(rb"#(\d+) = ", text)]
 
 
+def _colour_sort_key(match: re.Match[bytes]) -> tuple[int, bytes, int]:
+    """The shape a chain colours, its literal if own, and its colour id.
+
+    The literal (absent, ``b""``, for a reused colour) and the referenced
+    colour id are both stable, external facts about the chain's content,
+    unaffected by which ids get reassigned -- unlike an id, neither is a
+    float, so this stays a legal dict/set-free sort key across processes.
+    """
+    return (int(match.group(3)), match.group(5) or b"", int(match.group(4)))
+
+
+def _check_reslot_integrity(
+    result: bytes, chain_text: bytes, id_map: dict[int, int]
+) -> None:
+    """Refuse a reslot that lost, duplicated, or dangled an id.
+
+    The count guard in ``_reslot_colours`` cannot see a structurally broken
+    *output*. ``chain_text`` is the renumbered chains alone, gaps excluded:
+    a gap is untouched payload that may define ids of its own (an
+    unrelated product's entities), neither this pass's to own nor missing
+    from it. Every id this pass assigned must be defined exactly once, and
+    every reference a chain makes must resolve somewhere in the file.
+    """
+    defined = sorted(int(found) for found in re.findall(rb"#(\d+) = ", chain_text))
+    if defined != sorted(id_map.values()):
+        raise EmitterError(
+            "_reslot_colours produced a duplicated or missing entity id; "
+            "refusing to write a structurally invalid STEP file"
+        )
+    referenced = {int(found) for found in re.findall(rb"#(\d+)", chain_text)}
+    resolvable = {int(found) for found in re.findall(rb"#(\d+) = ", result)}
+    dangling = referenced - resolvable
+    if dangling:
+        raise EmitterError(
+            f"_reslot_colours left {len(dangling)} dangling reference(s); "
+            "refusing to write a structurally invalid STEP file"
+        )
+
+
 def _reslot_colours(payload: bytes, expected: int) -> bytes:
-    """Re-seat each colour chain into the numeric slot content order picks.
+    """Re-seat every colour chain's content into the id slots content-order picks.
 
     ``STEPCAFControl_Writer::WriteColors`` hashes on the ``TShape`` pointer
     to decide *which* chain goes in *which* slot at the file's tail -- the
     pointer, not the file, so two writes of the same document permute the
-    slots. The chains and the ids they occupy are unaffected: this sorts
-    them by the shape id each colours, breaking a tie on the colour itself,
-    and writes each into the slot the file's own order assigned, renumbering
-    only its own ids (:func:`_defined_ids`).
+    slots. See the comment below for why this renumbers through one global
+    id map rather than a per-chain delta, and why the renumbered chains are
+    also physically reassembled rather than merely renumbered in place.
     """
+    # A per-chain delta (this function's own history) assumed every chain
+    # owned the same count of contiguous ids and referenced no id another
+    # chain defines -- both true only while every chain colours a whole
+    # solid. A sub-shape colour breaks both: chains run 7, 8 or 9 ids
+    # depending on whether they carry a shared wrapper or their own
+    # COLOUR_RGB, and a wrapper's reference list names *sibling* chains'
+    # own ids. This instead builds one id map across every chain -- the
+    # pool of every id any chain defines, in slot (file) order, handed out
+    # to chains in *content*-sorted order -- and renumbers the whole
+    # region through that single table, so a reference to any chain's id
+    # resolves correctly wherever that chain ends up. Renumbering alone
+    # would not make two writes byte-identical (the surrounding text would
+    # still sit at its original, allocator-dependent offset), so the
+    # renumbered chains are also physically reassembled in content order;
+    # the gap between two chains (in practice just the writer's own line
+    # break) travels by position, since a gap carries no id of its own to
+    # place it by content instead.
     chains = list(_COLOUR_CHAIN.finditer(payload))
     # Checked unconditionally, before the "nothing to reorder" shortcut
     # below: a silent count mismatch — not just zero matches — is exactly
@@ -235,32 +294,39 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     if len(chains) < 2:
         return payload
 
-    # ``chains`` is already in slot order (ascending file position == ascending
-    # id); pairing it against the content-sorted list below re-seats chain i's
-    # *content* into slot i's *ids*, whatever order the writer produced them in.
-    # The referenced-colour id (group 4) is a stable tie-breaker whether or not
-    # the chain defines its own literal (group 5, absent for a reused colour).
-    ordered = sorted(
-        chains,
-        key=lambda match: (int(match.group(3)), match.group(5) or b"", int(match.group(4))),
-    )
+    ordered = sorted(chains, key=_colour_sort_key)
 
-    pieces: list[bytes] = []
+    # The pool is every id any chain defines, concatenated in slot (file)
+    # order -- already ascending, since chains are non-overlapping matches
+    # found in file order and ids only increase through the file. Handing
+    # its entries out to chains in content order, one chain's own count at
+    # a time, is a bijection: the pool's total length is exactly the sum of
+    # what every chain consumes.
+    pool = [id_ for chain in chains for id_ in _defined_ids(chain.group(0))]
+    id_map: dict[int, int] = {}
     cursor = 0
-    for slot, content in zip(chains, ordered):
-        pieces.append(payload[cursor:slot.start()])
-        cursor = slot.end()
-        local = set(_defined_ids(content.group(0)))
-        own_start = min(local)
-        delta = min(_defined_ids(slot.group(0))) - own_start
+    for chain in ordered:
+        own = _defined_ids(chain.group(0))
+        id_map.update(zip(own, pool[cursor:cursor + len(own)]))
+        cursor += len(own)
 
-        def shift(match: re.Match[bytes], delta: int = delta, local: set[int] = local) -> bytes:
-            old = int(match.group(1))
-            return b"#" + str(old + delta if old in local else old).encode("ascii")
+    def remap(match: re.Match[bytes]) -> bytes:
+        old = int(match.group(1))
+        return b"#" + str(id_map.get(old, old)).encode("ascii")
 
-        pieces.append(re.sub(rb"#(\d+)", shift, content.group(0)))
-    pieces.append(payload[cursor:])
-    return b"".join(pieces)
+    renumbered = [re.sub(rb"#(\d+)", remap, chain.group(0)) for chain in ordered]
+    gaps = [payload[chains[i].end():chains[i + 1].start()] for i in range(len(chains) - 1)]
+
+    region_pieces: list[bytes] = []
+    for index, content in enumerate(renumbered):
+        region_pieces.append(content)
+        if index < len(gaps):
+            region_pieces.append(gaps[index])
+    region = b"".join(region_pieces)
+
+    result = payload[:chains[0].start()] + region + payload[chains[-1].end():]
+    _check_reslot_integrity(result, b"".join(renumbered), id_map)
+    return result
 
 
 def render_step(

@@ -209,13 +209,13 @@ def read_step(path: Path) -> StepDocument:
 def leaf_labels(document: TDocStd_Document) -> tuple[StepLabel, ...]:
     """Every leaf (non-assembly) label under ``document``'s free shapes.
 
-    The one XCAF descent this workspace performs, ``GetFreeShapes`` prologue
-    included, in document order. Each leaf comes back wrapped in a
-    :class:`StepLabel` holding ``document`` itself, with no filtering -- a
-    null-shaped leaf comes back too, since what a leaf is *for* is a
-    call-site decision. Eager, not lazy: a suspended descent holding a
-    kernel handle over a tree a caller then mutates is a hazard this package
-    has already paid for once. Raises nothing; an empty document is ``()``.
+    The one XCAF *leaf* descent this workspace performs (``writer``'s
+    colour census keeps its own, sanctioned, wider one, since a sub-shape
+    colour can sit on a label this deliberately does not visit). Each leaf
+    comes back wrapped in a :class:`StepLabel` holding ``document`` itself,
+    unfiltered -- a null-shaped leaf comes back too. Eager, not lazy: a
+    suspended descent holding a kernel handle over a tree a caller then
+    mutates is a hazard already paid for once. An empty document is ``()``.
     """
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool

@@ -1,11 +1,12 @@
-"""``stompgeom.step.leaf_labels`` is the only XCAF leaf descent in the workspace.
+"""``stompgeom.step.leaf_labels`` is the only XCAF *leaf* descent in the workspace.
 
-Deduplicating the three sites this fold found closes three recipes; a
-fourth site reopens the class, which has already happened once. This gate
-lives in the owner's own suite (ticket 25): running this package's own
-command must fail when a second descent reappears anywhere in the
-workspace -- previously a duplicate added to this package's own
-``writer.py`` went uncaught by this package's own suite, run alone.
+Deduplicating the three sites this fold found closes three recipes; an
+*undeclared* fourth site reopens the class -- previously a duplicate
+silently added to this package's own ``writer.py`` went uncaught by this
+package's own suite, run alone. This gate lives in the owner's own suite
+(ticket 25): its command must fail when an unsanctioned descent reappears
+anywhere in the workspace. A *declared* second or third home, named in
+``_SANCTIONED`` below, is what it exists to permit rather than forbid.
 """
 
 from __future__ import annotations
@@ -37,8 +38,8 @@ ORACLE_HOME = REPO / "packages" / "stompdrill" / "tests" / "test_step_cut.py"
 #: The writer's own census keeps a third, deliberately independent walk (see
 #: ``_count_colour_assignments``'s own docstring): a sub-shape colour can sit
 #: on an *intermediate* assembly label a leaf-only descent never visits, so
-#: reusing ``leaf_labels`` here would under-count exactly the case Task 8
-#: exists to fix, not merely duplicate it.
+#: reusing ``leaf_labels`` here would under-count a document coloured that
+#: way rather than merely duplicating the descent that reaches it.
 WRITER_HOME = REPO / "packages" / "stompgeom" / "src" / "stompgeom" / "writer.py"
 
 #: The XCAF calls that only a sanctioned walk may make: the assembly test,
@@ -180,9 +181,10 @@ def test_the_scan_reaches_every_workspace_member() -> None:
 
 def test_the_walk_is_named_only_inside_the_definitions_that_own_it() -> None:
     """Two producers in the walk's own home, one declared oracle, and one
-    declared, deliberately independent census.
+    declared, deliberately independent census -- four sanctioned
+    definitions across three declared homes.
 
-    A fourth *definition* naming any of these identifiers is a fifth walk:
+    A fifth *definition* naming any of these identifiers is a fourth walk:
     exactly the class of regression the theme's root cause records having
     already happened once. Anywhere else in any home counts, which is the
     reach a whole-file exclusion used to give away.

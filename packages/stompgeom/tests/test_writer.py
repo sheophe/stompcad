@@ -158,12 +158,26 @@ _CHAIN_COLOURING_200 = (
 )
 
 
+#: The four ids the two chains below reference but never define: each
+#: chain's own shape (#500, #200) and its own representation context
+#: (#999, #998). A real file defines these elsewhere; this test's payload
+#: is only the colour-chain tail, so it stubs them in, or the integrity
+#: check added for the corruption this test's own history exposed would
+#: read every one of them as a dangling reference.
+_EXTERNAL_STUBS = (
+    b"#500 = ADVANCED_FACE('',(),#501,.T.);\n"
+    b"#200 = ADVANCED_FACE('',(),#201,.T.);\n"
+    b"#999 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(),#1);\n"
+    b"#998 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(),#1);\n"
+)
+
+
 def test_reslot_colours_swaps_content_by_the_shape_id_it_colours() -> None:
     """The slot each chain lands in is fixed by file position; which
     *content* fills that slot is fixed by the shape id it colours, sorted
     ascending -- not by the order the writer happened to emit the chains in.
     """
-    payload = _CHAIN_COLOURING_500 + _CHAIN_COLOURING_200
+    payload = _EXTERNAL_STUBS + _CHAIN_COLOURING_500 + _CHAIN_COLOURING_200
 
     # Grounding: confirm the payload is genuinely matched, not vacuously
     # accepted the way an empty payload would be.
@@ -197,6 +211,114 @@ def test_reslot_colours_leaves_a_single_chain_unchanged() -> None:
 
     assert len(list(writer._COLOUR_CHAIN.finditer(payload))) == 1
     assert writer._reslot_colours(payload, expected=1) == payload
+
+
+#: A wrapper-bearing chain (9 ids) colouring the *higher* shape id, and a
+#: bare, reused-colour chain (7 ids -- no wrapper, no own ``COLOUR_RGB``)
+#: colouring the *lower* one, in that file order. Content-sorted order
+#: swaps them, and their lengths differ, which is exactly the combination
+#: a per-chain delta cannot survive: pairing a 9-id slot with 7-id content
+#: (or the reverse) either drops a wrapper outright or duplicates ids
+#: across the boundary. The stubs give the shape ids and the wrapper's own
+#: representation context somewhere to resolve, matching a real file where
+#: they are defined outside this tail region.
+_UNSORTED_VARIABLE_LENGTH_STUBS = (
+    b"#200 = ADVANCED_FACE('',(),#201,.T.);\n"
+    b"#500 = ADVANCED_FACE('',(),#501,.T.);\n"
+    b"#345 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(),#1);\n"
+)
+_CHAIN_WITH_WRAPPER_COLOURING_500 = (
+    b"#100 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"
+    b"('',(#101,#108),#345);\n"
+    b"#101 = STYLED_ITEM('color',(#102),#500);\n"
+    b"#102 = PRESENTATION_STYLE_ASSIGNMENT((#103));\n"
+    b"#103 = SURFACE_STYLE_USAGE(.BOTH.,#104);\n"
+    b"#104 = SURFACE_SIDE_STYLE('',(#105));\n"
+    b"#105 = SURFACE_STYLE_FILL_AREA(#106);\n"
+    b"#106 = FILL_AREA_STYLE('',(#107));\n"
+    b"#107 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+    b"#108 = COLOUR_RGB('',1.,0.,0.);\n"
+)
+_BARE_CHAIN_REUSING_500S_COLOUR_COLOURING_200 = (
+    b"#109 = STYLED_ITEM('color',(#110),#200);\n"
+    b"#110 = PRESENTATION_STYLE_ASSIGNMENT((#111));\n"
+    b"#111 = SURFACE_STYLE_USAGE(.BOTH.,#112);\n"
+    b"#112 = SURFACE_SIDE_STYLE('',(#113));\n"
+    b"#113 = SURFACE_STYLE_FILL_AREA(#114);\n"
+    b"#114 = FILL_AREA_STYLE('',(#115));\n"
+    b"#115 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+)
+
+
+def test_reslot_colours_does_not_dangle_a_reused_colour_across_a_reorder() -> None:
+    """The Critical this task's own history left behind: a per-chain delta
+    corrupted exactly this shape (see the fix comment in ``_reslot_colours``).
+
+    Run against the pre-fix implementation while building this test, this
+    payload left ``#108`` referenced by the reused-colour chain but never
+    defined anywhere in the output -- a real dangling reference, not
+    asserted here since the whole point is that this module no longer
+    contains the code that produced it.
+    """
+    payload = (
+        _UNSORTED_VARIABLE_LENGTH_STUBS
+        + _CHAIN_WITH_WRAPPER_COLOURING_500
+        + _BARE_CHAIN_REUSING_500S_COLOUR_COLOURING_200
+    )
+
+    assert len(list(writer._COLOUR_CHAIN.finditer(payload))) == 2
+
+    # A clean return is itself part of the assertion: _reslot_colours's own
+    # integrity check would have refused the dangling reference this exact
+    # payload produced under the pre-fix implementation (confirmed by hand
+    # while building this test), so reaching the line below already proves
+    # that defect is gone for this shape of input.
+    reslotted = writer._reslot_colours(payload, expected=2)
+
+    # Both chains must end up pointing at the *same* final colour id --
+    # the reused-colour chain's own reference must follow the wrapper
+    # chain's colour to wherever it landed, not linger on its pre-reslot id.
+    after = list(writer._COLOUR_CHAIN.finditer(reslotted))
+    by_shape = {match.group(3): match for match in after}
+    assert by_shape[b"200"].group(4) == by_shape[b"500"].group(4)
+
+    # And that shared id must actually be defined, as the wrapper chain's
+    # own colour, with the literal this fixture gave it.
+    final_colour_id = by_shape[b"500"].group(4)
+    assert (
+        b"#" + final_colour_id + b" = COLOUR_RGB('',1.,0.,0.);"
+    ) in reslotted
+
+
+def test_the_optional_wrapper_does_not_bridge_an_unrelated_entity() -> None:
+    """A wrapper absent before this item must not attach to a later one.
+
+    ``[^;]*?`` cannot cross an entity boundary (no entity body here holds a
+    literal ``;``), so an intervening ``CARTESIAN_POINT`` between a wrapper
+    and the styled item it does *not* own must stop the optional group from
+    matching at all -- group 1 is ``None`` and the point itself is never
+    folded into the chain's own ids.
+    """
+    payload = (
+        b"#100 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"
+        b"('',(#200),#99);\n"
+        b"#150 = CARTESIAN_POINT('',(0.,0.,0.));\n"
+        b"#200 = STYLED_ITEM('color',(#201),#17);\n"
+        b"#201 = PRESENTATION_STYLE_ASSIGNMENT((#202));\n"
+        b"#202 = SURFACE_STYLE_USAGE(.BOTH.,#203);\n"
+        b"#203 = SURFACE_SIDE_STYLE('',(#204));\n"
+        b"#204 = SURFACE_STYLE_FILL_AREA(#205);\n"
+        b"#205 = FILL_AREA_STYLE('',(#206));\n"
+        b"#206 = FILL_AREA_STYLE_COLOUR('',#207);\n"
+        b"#207 = COLOUR_RGB('',1.,0.,0.);\n"
+    )
+
+    found = writer._COLOUR_CHAIN.search(payload)
+
+    assert found is not None
+    assert found.group(1) is None
+    assert found.start() == payload.index(b"#200 = STYLED_ITEM")
+    assert b"CARTESIAN_POINT" not in found.group(0)
 
 
 # ---------------------------------------------------------------------------
@@ -378,11 +500,13 @@ def test_a_per_face_coloured_document_is_written_not_refused() -> None:
 
 
 def test_two_writes_of_one_document_are_byte_identical_across_processes() -> None:
-    """The control _reslot_colours never had, for the fixture this task adds.
+    """Sub-shape colours must not reintroduce process-history leakage.
 
-    Slot assignment hashes on a TShape POINTER, so two writes inside one
-    process can agree by accident. Only separate interpreters vary the
-    allocator enough to exercise the defect, which is why this shells out.
+    This fixture's own chains land in sort order regardless of reslot (see
+    the guilty probe below), so this does not exercise the reslot's
+    effect; it proves the timestamp, NAUO counters and general write path
+    stay deterministic for this new kind of document across processes,
+    which only a shelled-out second interpreter can actually test.
     """
     script = (
         "from stompgeom.writer import render_step;"
