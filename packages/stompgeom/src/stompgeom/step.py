@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from OCP.TopoDS import TopoDS_Shape
 
 __all__ = [
-    "StepSolid", "StepDocument", "StepLabel", "read_step", "leaf_labels",
-    "bounding_box_mm", "assembly_spans", "source_timestamp",
+    "StepSolid", "StepDocument", "StepLabel", "read_step", "read_step_document",
+    "leaf_labels", "bounding_box_mm", "assembly_spans", "source_timestamp",
 ]
 
 #: Used when the source file declares no timestamp. Never a clock reading.
@@ -164,6 +164,24 @@ def assembly_spans(document: StepDocument) -> tuple[float, float, float]:
     return (highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2])
 
 
+def _leaf_solids(document: TDocStd_Document) -> tuple[StepSolid, ...]:
+    """Every non-null leaf shape in ``document``, named where XCAF named it.
+
+    Shared by :func:`read_step` and :func:`read_step_document`: a file-backed
+    document and one only ever held in memory resolve their solids the same
+    way, so the two readers cannot drift on what counts as a leaf.
+    """
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
+
+    solids: list[StepSolid] = []
+    for entry in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
+        if shape.IsNull():
+            continue
+        solids.append(StepSolid(name=entry.name, shape=shape))
+    return tuple(solids)
+
+
 def read_step(path: Path) -> StepDocument:
     """Read ``path`` as an XCAF assembly of named, placed, millimetre solids."""
     require_kernel()
@@ -174,7 +192,6 @@ def read_step(path: Path) -> StepDocument:
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document
     from OCP.XCAFApp import XCAFApp_Application
-    from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     if not path.is_file():
         raise DocumentError(f"no model at {path}")
@@ -195,15 +212,28 @@ def read_step(path: Path) -> StepDocument:
     if not reader.Transfer(document):
         raise DocumentError(f"{path} contains no transferable shape")
 
-    solids: list[StepSolid] = []
-    for entry in leaf_labels(document):
-        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
-        if shape.IsNull():
-            continue
-        solids.append(StepSolid(name=entry.name, shape=shape))
+    solids = _leaf_solids(document)
     if not solids:
         raise DocumentError(f"{path} contains no solids")
-    return StepDocument(tuple(solids), document, source_timestamp(path))
+    return StepDocument(solids, document, source_timestamp(path))
+
+
+def read_step_document(document: TDocStd_Document) -> StepDocument:
+    """Read solids straight out of an in-memory XCAF document, e.g. one
+    :func:`stompgeom.build.build_document` just built.
+
+    No file backs a document like that, so ``timestamp`` is the epoch rather
+    than a real ``FILE_NAME`` field -- there is no clock reading to avoid,
+    only none to invent. Kept distinct from :func:`read_step` because that
+    one also owns file existence, unit normalisation, and STEP parsing --
+    none of which apply to a document already in memory.
+    """
+    require_kernel()
+
+    solids = _leaf_solids(document)
+    if not solids:
+        raise DocumentError("document contains no solids")
+    return StepDocument(solids, document, _EPOCH)
 
 
 def leaf_labels(document: TDocStd_Document) -> tuple[StepLabel, ...]:
