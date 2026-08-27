@@ -20,7 +20,7 @@ from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
 from stompmodel.frames import FaceFrame
 from stompmodel.model import DrillData
-from stompmodel.units import mm_from_nm
+from stompmodel.units import mm_from_nm, nm_from_mm
 
 from ..cad import OcpCaseModel, step_keyword
 from .base import register_emitter
@@ -239,8 +239,11 @@ def _face_point(
     coordinate, rather than trusted to fall out of the frame's own origin.
     """
     basis = frame.basis
-    point: list[float] = list(basis.to_model(hole.x_nm, hole.y_nm))
-    point[model.axis] = model.drilled_position_mm
+    depth_nm = nm_from_mm(
+        (model.drilled_position_mm - mm_from_nm(basis.origin_nm[model.axis]))
+        * basis.w[model.axis]
+    )
+    point: list[float] = list(basis.to_model(hole.x_nm, hole.y_nm, depth_nm))
     wx, wy, wz = basis.w
     return (
         point[0] + overshoot * wx,

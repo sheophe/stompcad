@@ -163,9 +163,11 @@ def contains(
 
     from stompgeom.step import bounding_box_mm
 
-    point: list[float] = list(frame.basis.to_model(x_nm, y_nm))
     plane_at = bounding_box_mm(region)[axis]
-    point[axis] = plane_at
+    depth_nm = nm_from_mm(
+        (plane_at - mm_from_nm(frame.basis.origin_nm[axis])) * frame.basis.w[axis]
+    )
+    point: list[float] = list(frame.basis.to_model(x_nm, y_nm, depth_nm))
 
     classifier = BRepClass_FaceClassifier(region, gp_Pnt(*point), 1e-7)
     if classifier.State() != TopAbs_State.TopAbs_IN:
@@ -224,9 +226,11 @@ def clearance_reason(
             raise StompdrillError("could not measure clearance to a boundary edge group")
         return distance.Value()
 
-    point: list[float] = list(frame.basis.to_model(x_nm, y_nm))
     plane_at = bounding_box_mm(region)[axis]
-    point[axis] = plane_at
+    depth_nm = nm_from_mm(
+        (plane_at - mm_from_nm(frame.basis.origin_nm[axis])) * frame.basis.w[axis]
+    )
+    point: list[float] = list(frame.basis.to_model(x_nm, y_nm, depth_nm))
     vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(*point)).Vertex()
 
     outer = ShapeAnalysis.OuterWire_s(region)
