@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from stompgeom.shapes import compound
 from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace
@@ -172,7 +173,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
     normal = [0.0, 0.0, 0.0]
     normal[axis] = float(drilled.outward)
     return Faces(
-        inner=_compound(inner.faces + (companion.faces if companion else ())),
+        inner=compound(inner.faces + (companion.faces if companion else ())),
         plate_nm=nm_from_mm(thickness),
         outward=(normal[0], normal[1], normal[2]),
         drilled_position_mm=drilled.position,
@@ -327,19 +328,6 @@ def _nearest_companion_level(levels: list[_Level], inner: _Level) -> _Level | No
         candidates,
         key=lambda level: (abs(level.position - inner.position), -inner.outward * level.position),
     )
-
-
-def _compound(faces: tuple[Any, ...]) -> Any:
-    """Bundle ``faces`` into one ``TopoDS_Compound``."""
-    from OCP.BRep import BRep_Builder
-    from OCP.TopoDS import TopoDS_Compound
-
-    compound = TopoDS_Compound()
-    builder = BRep_Builder()
-    builder.MakeCompound(compound)
-    for face in faces:
-        builder.Add(compound, face)
-    return compound
 
 
 def build_frame(faces: Faces, axis: int) -> FaceFrame:

@@ -200,10 +200,10 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     the compound's build order must be a function of the numbering alone,
     never of the tuple order a caller happened to hand in (ADR-0006).
     """
-    from OCP.BRep import BRep_Builder
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
-    from OCP.TopoDS import TopoDS_Compound
+
+    from stompgeom.shapes import compound
 
     holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
@@ -217,15 +217,13 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     depth = abs(model.inner_position_mm - model.drilled_position_mm) + 2 * overshoot
     direction = tuple(-component for component in frame.basis.w)
 
-    compound = TopoDS_Compound()
-    builder = BRep_Builder()
-    builder.MakeCompound(compound)
+    cylinders = []
     for _, hole in holes:
         start = _face_point(model, frame, hole, overshoot)
         axis = gp_Ax2(gp_Pnt(*start), gp_Dir(*direction))
         radius = float(mm_from_nm(hole.diameter_nm)) / 2
-        builder.Add(compound, BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
-    return compound
+        cylinders.append(BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
+    return compound(cylinders)
 
 
 def _face_point(
