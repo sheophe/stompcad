@@ -62,6 +62,21 @@ def _centre(shape: Any) -> tuple[float, float, float]:
     return tuple((box[i] + box[i + 3]) / 2 for i in range(3))  # type: ignore[return-value]
 
 
+def _vertices(shape: Any) -> set[tuple[float, float, float]]:
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_VERTEX)
+    found = set()
+    while explorer.More():
+        point = BRep_Tool.Pnt_s(TopoDS.Vertex_s(explorer.Current()))
+        found.add((round(point.X(), 9), round(point.Y(), 9), round(point.Z(), 9)))
+        explorer.Next()
+    return found
+
+
 def test_placed_moves_the_shape() -> None:
     from stompgeom.shapes import placed
     from stompmodel.frames import RigidTransform
@@ -82,6 +97,34 @@ def test_placed_rotates_as_well_as_translates() -> None:
 
     box = bounding_box_mm(moved)
     assert round(box[4] - box[1], 9) == 4.0     # the long axis is now y
+
+
+def test_placed_agrees_with_apply_point_on_a_named_vertex() -> None:
+    """``placed`` must realise exactly the motion ``RigidTransform`` describes.
+
+    The rotation above is checked only by bounding-box extent, which a
+    transposed rotation matrix (the classic row/column mix-up feeding
+    ``gp_Trsf.SetValues``) leaves unchanged: an axis-aligned box's extent
+    is the same magnitude whichever way a 90-degree turn runs, so a
+    transpose is invisible to an extent-only assertion, symmetric box or
+    not. Naming one corner and comparing against the model-side
+    ``RigidTransform.apply_point`` pins the rotation's direction as well
+    as its magnitude, and pins the seam between the kernel and the model
+    that Tasks 9, 19 and 21 depend on holding.
+    """
+    from stompgeom.shapes import placed
+    from stompmodel.frames import RigidTransform
+
+    quarter_turn = ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    motion = RigidTransform(quarter_turn, (5.0, 7.0, 11.0))
+
+    # (4, 2, 3): no repeated dimension, so no accidental symmetry masks a
+    # transposed rotation the way a cube or a centred shape could.
+    far_corner = (4.0, 0.0, 0.0)
+    expected = tuple(round(c, 9) for c in motion.apply_point(far_corner))
+
+    moved = placed(_box(4, 2, 3), motion)
+    assert expected in _vertices(moved)
 
 
 def test_placed_leaves_the_original_alone() -> None:
