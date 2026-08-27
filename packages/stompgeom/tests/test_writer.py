@@ -251,14 +251,13 @@ _BARE_CHAIN_REUSING_500S_COLOUR_COLOURING_200 = (
 
 
 def test_reslot_colours_does_not_dangle_a_reused_colour_across_a_reorder() -> None:
-    """The Critical this task's own history left behind: a per-chain delta
-    corrupted exactly this shape (see the fix comment in ``_reslot_colours``).
+    """A reused colour must follow its owner wherever the reorder puts it.
 
-    Run against the pre-fix implementation while building this test, this
-    payload left ``#108`` referenced by the reused-colour chain but never
-    defined anywhere in the output -- a real dangling reference, not
-    asserted here since the whole point is that this module no longer
-    contains the code that produced it.
+    The wrapper-bearing chain (9 ids) colours the higher shape id and the
+    bare, reused-colour chain (7 ids) colours the lower one, so a
+    content-sort reorder swaps their positions while their lengths differ
+    -- exactly the shape a per-chain delta cannot renumber correctly,
+    since it assumes every chain owns the same count of contiguous ids.
     """
     payload = (
         _UNSORTED_VARIABLE_LENGTH_STUBS
@@ -288,6 +287,31 @@ def test_reslot_colours_does_not_dangle_a_reused_colour_across_a_reorder() -> No
     assert (
         b"#" + final_colour_id + b" = COLOUR_RGB('',1.,0.,0.);"
     ) in reslotted
+
+
+def test_check_reslot_integrity_refuses_a_duplicated_definition() -> None:
+    """The GUILTY probe for the duplicate-id branch: reached by no other
+    test, so this module's own suite is the only thing that exercises it.
+    """
+    with pytest.raises(EmitterError, match="duplicated or missing"):
+        writer._check_reslot_integrity(
+            result=b"#10 = STYLED_ITEM('color',(#11),#5);\n",
+            chain_text=b"#10 = STYLED_ITEM('color',(#11),#5);\n#10 = STYLED_ITEM('color',(#11),#5);\n",
+            id_map={1: 10, 2: 11},
+        )
+
+
+def test_check_reslot_integrity_refuses_a_dangling_reference() -> None:
+    """The GUILTY probe for the dangling-reference branch: reached by no
+    other test, so this module's own suite is the only thing that
+    exercises it.
+    """
+    with pytest.raises(EmitterError, match="dangling reference"):
+        writer._check_reslot_integrity(
+            result=b"#10 = STYLED_ITEM('color',(#999),#5);\n",
+            chain_text=b"#10 = STYLED_ITEM('color',(#999),#5);\n",
+            id_map={1: 10},
+        )
 
 
 def test_the_optional_wrapper_does_not_bridge_an_unrelated_entity() -> None:

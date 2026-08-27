@@ -48,7 +48,7 @@ _WALK_NAMES = frozenset({"IsAssembly_s", "GetComponents_s", "GetFreeShapes"})
 
 #: The definitions allowed to name the walk, keyed by the file that holds
 #: them. A *definition*, not a file: the oracle's home is a 29 KB test
-#: module, and a fifth walk added anywhere else in it must still be caught.
+#: module, and a fourth walk added anywhere else in it must still be caught.
 #: Both ``step.py`` names are needed -- ``leaf_labels`` holds the
 #: ``GetFreeShapes`` prologue and ``_walk_leaves`` holds the descent.
 _SANCTIONED: dict[Path, frozenset[str]] = {
