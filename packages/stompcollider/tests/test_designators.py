@@ -94,6 +94,21 @@ def test_a_single_point_range_is_the_innocent_probe() -> None:
     assert _admit("D(2..2)") == {"D2"}
 
 
+def test_two_parenthesised_groups_is_malformed_on_its_own() -> None:
+    """A greedy prefix must not swallow the first group as literal text,
+    leaving only the second recognised as a range: that compiles to a
+    pattern no real designator can ever satisfy, the same silent
+    never-match failure the parenthesis-commits-to-range rule exists to
+    rule out. Two groups is refused outright instead."""
+    with pytest.raises(UsageError):
+        parse_filter("AB(1..2)(3..4)")
+
+
+def test_a_single_range_still_parses_after_the_prefix_is_tightened() -> None:
+    """The tightened prefix must not over-reject an ordinary range."""
+    assert _admit("D(2..4)") == {"D2", "D3", "D4"}
+
+
 def test_matching_is_case_sensitive() -> None:
     """The spec declares no case folding; a lower-case pattern must not reach
     the upper-case designators actually present."""

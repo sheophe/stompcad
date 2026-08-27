@@ -18,7 +18,7 @@ from stompcollider.errors import UsageError
 
 __all__ = ["Term", "Filter", "parse_filter"]
 
-_RANGE = re.compile(r"^(?P<prefix>.+)\((?P<lo>-?\d+)\.\.(?P<hi>-?\d+)\)$")
+_RANGE = re.compile(r"^(?P<prefix>[^()]+)\((?P<lo>-?\d+)\.\.(?P<hi>-?\d+)\)$")
 
 
 @dataclass(frozen=True, slots=True)
