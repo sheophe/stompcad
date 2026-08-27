@@ -175,13 +175,14 @@ second tool's value type interoperates through: `Diagnosable`, and the plain-tup
 versioned; the document is at version 6, whose `CaseRegistration` member carries the
 resolved part, drilled face, supplied model's file name and cutting frame as one typed fact
 rather than four — see [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md).
-`stompgeom` owns the kernel layer on both sides it currently touches: reading, where
+`stompgeom` owns the kernel layer across every side it touches: reading, where
 `stompgeom.step` publishes the one rule for what XCAF recorded as a label's name,
-distinguishing an unnamed label from OCC's own synthesised placeholder; and writing, where
+distinguishing an unnamed label from OCC's own synthesised placeholder; writing, where
 `stompgeom.writer.render_step` is the one serialising entry point and returns the finished
-STEP payload rather than a path. Assembling a document from placed, named, coloured solids
-("build") is deliberately not yet owned — see
-[ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md).
+STEP payload rather than a path; partitioning, where `stompgeom.levels()` groups a
+solid's planar faces into the planes they lie in; and building, where
+`stompgeom.build.build_document` assembles a document from placed, named, coloured solids
+— see [ADR-0008](docs/adr/0008-workspace-and-shared-geometry-core.md).
 
 The flow is `AiPdfSource -> RawDrillData -> quantise() -> DrillData -> Pipeline ->
 Emitter`. The source reports measured floats in millimetres. Quantisation compares those

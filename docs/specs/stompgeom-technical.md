@@ -7,9 +7,9 @@ this document and an ADR disagree the ADR governs, by `CLAUDE.md`'s documentatio
 **Spec:** `docs/specs/stompcollider-technical.md` — this is **plan 2 of 3** from its
 "Order of work". Plan 1 extracted `stompmodel`; plan 3 builds `stompcollider`.
 
-**Governed by:** [ADR-0008](../../adr/0008-workspace-and-shared-geometry-core.md) and
-[ADR-0009](../../adr/0009-shared-model-package-and-dependency-order.md). This design
-amends both, and [ADR-0007](../../adr/0007-case-model-and-clearance.md).
+**Governed by:** [ADR-0008](../adr/0008-workspace-and-shared-geometry-core.md) and
+[ADR-0009](../adr/0009-shared-model-package-and-dependency-order.md). This design
+amends both, and [ADR-0007](../adr/0007-case-model-and-clearance.md).
 
 ## Scope
 
@@ -297,10 +297,14 @@ reason the parent spec split three plans instead of writing one.
 
 ADR-0009 is explicit and this design adds nothing to the list: `CaseModel`, `Rejection`,
 `select_solid`'s box and lid keywords, and `region.py`'s play-area reasoning stay in
-`stompdrill`, as do `Faces`, `find_faces`, `build_frame`, `drill_axis` and
-`assembly_spans`. The test for a `stompgeom` type is whether it can be described without
-naming a panel; the test for a `stompmodel` type is interchange or contract. Nothing
-here passes either.
+`stompdrill`, as do `Faces`, `find_faces`, `build_frame` and `drill_axis`. The test for a
+`stompgeom` type is whether it can be described without naming a panel; the test for a
+`stompmodel` type is interchange or contract. Nothing here passes either.
+
+**Amended:** `assembly_spans` moves. The bounding-box span of every solid together, per
+axis, in millimetres, passes this section's own test; it is now
+`stompgeom.step.assembly_spans`, and `stompdrill` imports it rather than defining it. See
+ADR-0009's `stompgeom` inventory.
 
 `stompdrill`'s `Micron` also stays: ADR-0009 keeps it because it states that package's
 grid policy rather than anything about length.

@@ -661,32 +661,51 @@ gains the matching amended paragraph. Closed; nothing further to do.
 
 ## Take the `levels()` cut a level below where plan 3 currently plans it
 
-**Status:** Confirmed gap, not scheduled. Found independently by two lenses in the 2026-08
-architecture review's wave 1 (its own findings F1-07 and F2-04).
+**Status:** Closed — its own premise does not hold under the shape the cut took. Found
+independently by two lenses in the 2026-08 architecture review's wave 1 (its own findings
+F1-07 and F2-04).
 
-**Constraint:** `_levels` (planned for `stompgeom`) consumes an unnamed
-`(area, position, outward, face)` clump, and the ~22 lines that build that clump — the
-planar filter, the axis test, `TopAbs_REVERSED`'s sign, the area and the bbox position —
-are inline in `stompdrill`'s `find_faces`. Whoever makes plan 3's `levels()` cut should take
-the harvest along with the grouping and name the clump; sizing the task as "move `_levels`"
-under-estimates it.
+**Constraint, as originally found:** `_levels` (planned for `stompgeom`) consumes an
+unnamed `(area, position, outward, face)` clump, and the ~22 lines that build that clump
+— the planar filter, the axis test, `TopAbs_REVERSED`'s sign, the area and the bbox
+position — are inline in `stompdrill`'s `find_faces`. Whoever makes plan 3's `levels()`
+cut should take the harvest along with the grouping and name the clump; sizing the task
+as "move `_levels`" under-estimates it.
 
-**Acceptance:** The cut moves both the clump's construction and `_levels` into `stompgeom`,
-the clump is a named type rather than a bare tuple, and `stompdrill`'s suite passes
-unchanged.
+**Acceptance, as originally written:** The cut moves both the clump's construction and
+`_levels` into `stompgeom`, the clump is a named type rather than a bare tuple, and
+`stompdrill`'s suite passes unchanged.
+
+**Why it closes instead of ticking:** `stompgeom.levels()` takes a solid and partitions
+its planar faces directly into `Level`s keyed on their own outward direction and offset —
+see ADR-0009's `stompgeom` inventory. There is no intermediate clump between the walk and
+the grouping for this Acceptance to name: the harvest is `levels()`'s own body, and its
+result is already the named type the Acceptance asked for. The premise — that a clump
+survives the cut and merely lacks a name — does not hold, so the entry closes on that
+ground. Closed; nothing further to do.
 
 ## Give `assembly_spans` and `_part_of` a home wider than `stompdrill.cad`
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
-(its own finding F1-06).
+**Status:** Closed, one helper on each branch of its own Acceptance. Found in the 2026-08
+architecture review's wave 1 (its own finding F1-06).
 
-**Constraint:** Both are private to `stompdrill.cad` today, and both feed a diagnostic that
-more than one tool raises — the same duplication rule `check_millimetres`/
-`check_nanometres` were published to close.
+**Constraint, as originally found:** Both are private to `stompdrill.cad` today, and both
+feed a diagnostic that more than one tool raises — the same duplication rule
+`check_millimetres`/`check_nanometres` were published to close.
 
-**Acceptance:** Either the two helpers move to a package both tools depend on, with an
-admission rule naming the `stompcad`-visible reason, or the decision to leave them is
-recorded with why the duplication is acceptable here.
+**Acceptance, as originally written:** Either the two helpers move to a package both
+tools depend on, with an admission rule naming the `stompcad`-visible reason, or the
+decision to leave them is recorded with why the duplication is acceptable here.
+
+**Resolution:** `assembly_spans` moved: it is `stompgeom.step.assembly_spans` now — the
+bounding-box span of every solid together, per axis, in millimetres, describable without
+naming a panel — and its named `stompcad`-visible reason is `wrong-case-model`, raised by
+`stompdrill`'s clearance stage today and specified for `stompcollider`'s own model check
+(`docs/specs/stompcollider-technical.md`'s diagnostic table), so one span computation
+serves both rather than two. `_part_of` did not move: it is `product_name.split()[0]`,
+naming policy rather than geometry, and no geometric rule is duplicated by leaving it in
+`stompdrill.cad` — the record this Acceptance's second branch asked for. Closed; nothing
+further to do.
 
 ## Delete `cli._options_for`'s type-hint introspection
 

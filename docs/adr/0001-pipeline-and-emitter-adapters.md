@@ -4,7 +4,10 @@
 [ADR-0009](0009-shared-model-package-and-dependency-order.md), which moves
 `Stage`, `Pipeline` and `Emitter` into `stompmodel` and makes them generic in
 the value they fold over. The reasoning here for one authority per fact and for
-computing shared facts once is unchanged.
+computing shared facts once is unchanged. **Amended in place:** the grant
+below has been exercised — `stompmodel.protocols` now publishes the set-level
+target check as `target_key`/`check_target_set`, and `stompdrill.cli` calls
+that published pair rather than keeping a private copy.
 
 ## Context
 
@@ -50,8 +53,9 @@ normalisation form refuses a pair that a volume unifying either would hold as on
 file, and it is applied unconditionally, because whether this host folds is not
 knowable before a target exists and `samefile` needs both targets to exist already.
 The key decides collisions and nothing else — the bytes still go to the path the
-caller named. `stompdrill.cli`'s `_target_key` and `_preflight_targets` are where
-this is enforced. The write mechanism's own preconditions are **not
+caller named. `stompmodel.protocols`'s `target_key` and `check_target_set` are
+where this is enforced; `stompdrill.cli` calls them rather than keeping a
+private copy. The write mechanism's own preconditions are **not
 restated here** — ADR-0005 states them and `stage_payload` enforces them itself, and
 it runs before any target is replaced, so a target outside its domain still
 withholds the whole set; it costs a render first, and that price is stated rather
@@ -85,9 +89,10 @@ not take, which is a durability question this document leaves out alongside fsyn
 and power loss.
 
 ADR-0005 gives `stage_payload`/`StagedWrite.commit` the matching guarantee for one path in
-isolation; this is the set-level rule built on top of it, and it stays the command
-line's own for as long as `stompdrill` is the only caller composing a set of several
-artefact paths for one invocation.
+isolation; this is the set-level rule built on top of it. It is no longer this command
+line's own: `stompmodel.protocols` publishes it as `target_key`/`check_target_set`,
+because `stompdrill`'s command line is no longer expected to be the only caller composing
+a set of several artefact paths for one invocation.
 
 Emitter registration is extensible: a format maps to an emitter without changing the
 processing contract. The CLI explicitly composes the ordered post-quantisation stages;
