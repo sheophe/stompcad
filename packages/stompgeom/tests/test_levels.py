@@ -60,6 +60,19 @@ def _faces(shape: Any, planar_only: bool = False) -> list[Any]:
     return found
 
 
+def _areas(shape: Any) -> list[float]:
+    """Each planar face's area, in the order the kernel explores ``shape``."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    found = []
+    for face in _faces(shape, planar_only=True):
+        properties = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face, properties)
+        found.append(round(properties.Mass(), 9))
+    return found
+
+
 def _summary(found: tuple[Level, ...]) -> list[tuple[Direction, int, float]]:
     """What each level says about the geometry, with the faces left out.
 
@@ -203,17 +216,34 @@ def test_a_billionth_granularity_would_split_that_wall(pcb: StepDocument) -> Non
 
 
 def test_the_partition_does_not_depend_on_traversal_order() -> None:
-    """ADR-0006: no rule may consult input order. Keying, not clustering, is
-    what makes this true by construction rather than by luck.
+    """ADR-0006: no rule may consult input order. Keying the groups, then
+    sorting them on that same key, is what makes this true by construction
+    rather than by luck.
     """
     walk = _faces(_box(10.0, 20.0, 30.0, (0.0, 0.0, 0.0)).shape)
-    forward = _summary(levels(StepSolid(name="forward", shape=compound(walk))))
-    backward = _summary(levels(StepSolid(name="backward", shape=compound(reversed(walk)))))
+    one, other = compound(walk), compound(reversed(walk))
 
-    # The control: the two shapes really do present the same faces in
-    # different orders, so agreement below is not agreement about one walk.
-    assert forward != backward
-    assert sorted(forward) == sorted(backward)
+    # The control: the two compounds really do present the same faces in
+    # opposite orders, so agreement below is not agreement about one walk.
+    assert _areas(one) == list(reversed(_areas(other)))
+    assert _areas(one) != _areas(other)
+
+    forward = _summary(levels(StepSolid(name="forward", shape=one)))
+    backward = _summary(levels(StepSolid(name="backward", shape=other)))
+
+    assert forward == backward
+
+
+def test_levels_come_back_in_their_own_geometric_order() -> None:
+    """Direction then offset, a total key because it is the key the groups
+    were built on. Stated concretely rather than against ``sorted`` of the
+    result, which would hold whatever order the partition happened to emit.
+    """
+    found = levels(_box(10.0, 20.0, 30.0, (0.0, 0.0, 0.0)))
+
+    assert [tuple(round(c) for c in level.direction) for level in found] == [
+        (-1, 0, 0), (0, -1, 0), (0, 0, -1), (0, 0, 1), (0, 1, 0), (1, 0, 0),
+    ]
 
 
 def test_a_published_direction_is_exactly_unit() -> None:

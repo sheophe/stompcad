@@ -21,13 +21,15 @@ __all__ = ["Direction", "Level", "levels"]
 #: A unit vector in kernel coordinates.
 Direction = tuple[float, float, float]
 
-#: Direction components are keyed as integer millionths. Chosen from a
-#: measured gap, not rounded to taste: the largest real coplanar deviation
-#: across every available fixture is 3.846e-08, and the tolerance the axis
-#: filter below inherits is ~4.5e-5 radians. A millionth sits 26x above the
-#: noise and 45x below the tolerance -- near that three-order gap's
-#: geometric midpoint. A billionth was measured and rejected: it splits one
-#: real side wall in two. tests/test_levels.py holds both probes.
+#: Direction components are keyed as integer millionths -- a bin, not a
+#: merge tolerance: two components land in one bin or they do not, however
+#: narrowly they straddle the boundary between two. Chosen from a measured
+#: gap, not rounded to taste: the largest real coplanar deviation across
+#: every available fixture is 3.846e-08, and the tolerance the axis filter
+#: below inherits is ~4.5e-5 radians. A millionth sits 26x above the noise
+#: and 45x below the tolerance -- near that three-order gap's geometric
+#: midpoint. A billionth was measured and rejected: it splits one real side
+#: wall in two. tests/test_levels.py holds both probes.
 _DIRECTION_SCALE = 1e6
 
 #: How nearly a plane's normal must lie along a caller's axis to be kept.
@@ -55,6 +57,7 @@ class Level:
 def levels(solid: StepSolid, axis: Direction | None = None) -> tuple[Level, ...]:
     """Group ``solid``'s planar faces into the planes they lie in.
 
+    Ordered on direction then offset, so a consumer may rely on the order.
     ``axis`` is an optional **unsigned** filter: given one, levels facing
     either way along it are kept and the rest dropped, by the parallelism
     test ``stompdrill`` has always applied.
@@ -72,8 +75,10 @@ def levels(solid: StepSolid, axis: Direction | None = None) -> tuple[Level, ...]
 def _partition(shape: Any, scale: float = _DIRECTION_SCALE) -> tuple[Level, ...]:
     """Every planar face of ``shape``, grouped by outward direction and offset.
 
-    ``scale`` is a parameter only so the granularity's guilty probe can drive
-    the rejected value; production callers take the default.
+    Sorted on that same key, which is total because it is the key the groups
+    were built on: the published order is a function of the geometry, never
+    of the walk. ``scale`` is a parameter only so the granularity's guilty
+    probe can drive the rejected value; production callers take the default.
     """
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.BRepGProp import BRepGProp
@@ -112,13 +117,18 @@ def _partition(shape: Any, scale: float = _DIRECTION_SCALE) -> tuple[Level, ...]
             groups[key].append((properties.Mass(), face))
         explorer.Next()
     return tuple(
-        Level(
-            direction=_unit(components, scale),
-            offset_nm=Nanometre(offset_nm),
-            area_mm2=sum(area for area, _face in members),
-            faces=tuple(face for _area, face in members),
+        sorted(
+            (
+                Level(
+                    direction=_unit(components, scale),
+                    offset_nm=Nanometre(offset_nm),
+                    area_mm2=sum(area for area, _face in members),
+                    faces=tuple(face for _area, face in members),
+                )
+                for (components, offset_nm), members in groups.items()
+            ),
+            key=lambda level: (level.direction, level.offset_nm),
         )
-        for (components, offset_nm), members in groups.items()
     )
 
 

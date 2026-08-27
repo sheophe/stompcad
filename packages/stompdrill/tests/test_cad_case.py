@@ -356,6 +356,31 @@ def test_the_inner_level_tie_break_never_outranks_a_real_area_difference():
     assert _inner_level([far, near], drilled).faces == ("B",)
 
 
+def test_the_inner_level_excludes_a_level_coincident_with_the_drilled_one():
+    """A degenerate zero-thickness plate must not silently zero the thickness.
+
+    ``drilled`` sits away from the origin on purpose. Coincidence is that no
+    material lies between the two levels -- the offsets of two opposed levels
+    sum to it -- not that their offsets are equal, which they never are off
+    the origin. On the origin the two arithmetics agree and this clause goes
+    untested; ``_level(0.0, ...)`` is what every other fixture here uses.
+    """
+    from stompdrill.errors import StompdrillError
+
+    drilled = _level(30.0, 100.0, 1, "D")
+    coincident = _level(30.0, 500.0, -1, "C")
+    backing = _level(24.0, 50.0, -1, "B")
+    # The controls: the coincident level outranks the real one on area, so an
+    # implementation that admitted it would elect it; and its offset differs
+    # from ``drilled``'s, so comparing the two offsets would admit it.
+    assert coincident.area_mm2 > backing.area_mm2
+    assert coincident.offset_nm != drilled.offset_nm
+
+    assert _inner_level([coincident, backing], drilled).faces == ("B",)
+    with pytest.raises(StompdrillError, match="no flat face backs"):
+        _inner_level([coincident], drilled)
+
+
 def test_the_nearest_companion_breaks_an_exact_distance_tie_towards_the_proud_side():
     """Equal distances put the two candidates on opposite sides of ``inner``,
     and exactly one of those sides is the proud one (``+inner.outward``),
