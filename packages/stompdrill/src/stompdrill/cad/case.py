@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from stompgeom.shapes import compound
-from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
+from stompgeom.step import StepDocument, StepSolid, assembly_spans, bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
@@ -20,7 +20,7 @@ from ..errors import StompdrillError
 from .base import step_keyword
 
 __all__ = [
-    "Faces", "drill_axis", "assembly_spans", "select_solid", "find_faces",
+    "Faces", "drill_axis", "select_solid", "find_faces",
     "build_frame",
 ]
 
@@ -86,14 +86,6 @@ def drill_axis(document: StepDocument, footprint_nm: tuple[Nanometre, Nanometre]
         f"{wanted[1]:.2f} x {wanted[0]:.2f} mm; measured spans are "
         f"{spans[0]:.2f}, {spans[1]:.2f}, {spans[2]:.2f} mm"
     )
-
-
-def assembly_spans(document: StepDocument) -> tuple[float, float, float]:
-    """The bounding-box span of every solid together, per axis, in millimetres."""
-    boxes = [bounding_box_mm(solid.shape) for solid in document.solids]
-    lows = [min(b[axis] for b in boxes) for axis in range(3)]
-    highs = [max(b[axis + 3] for b in boxes) for axis in range(3)]
-    return (highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2])
 
 
 def select_solid(document: StepDocument, face: CaseFace) -> StepSolid:

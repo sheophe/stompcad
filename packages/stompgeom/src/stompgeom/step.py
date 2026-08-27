@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "StepSolid", "StepDocument", "StepLabel", "read_step", "leaf_labels",
-    "bounding_box_mm", "source_timestamp",
+    "bounding_box_mm", "assembly_spans", "source_timestamp",
 ]
 
 #: Used when the source file declares no timestamp. Never a clock reading.
@@ -154,6 +154,14 @@ def bounding_box_mm(shape: TopoDS_Shape) -> tuple[float, float, float, float, fl
     box = Bnd_Box()
     BRepBndLib.AddOptimal_s(shape, box)
     return box.Get()
+
+
+def assembly_spans(document: StepDocument) -> tuple[float, float, float]:
+    """The bounding-box span of every solid together, per axis, in millimetres."""
+    boxes = [bounding_box_mm(solid.shape) for solid in document.solids]
+    lows = [min(b[axis] for b in boxes) for axis in range(3)]
+    highs = [max(b[axis + 3] for b in boxes) for axis in range(3)]
+    return (highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2])
 
 
 def read_step(path: Path) -> StepDocument:
