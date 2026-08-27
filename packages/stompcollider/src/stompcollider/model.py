@@ -9,7 +9,9 @@ solids -- see ``docs/specs/stompcollider-technical.md``.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.diagnostics import of_severity as _of_severity
@@ -184,13 +186,13 @@ class Clash:
     """One interference region: what it is against, and its extent.
 
     ``bbox_nm`` is the common region's axis-aligned bounding box in the
-    case's face frame; ``depth_nm`` is its least extent and ``axis`` that
-    axis -- see "Clashes" in the spec.
+    case's face frame, ``(xmin, ymin, zmin, xmax, ymax, zmax)``; ``depth_nm``
+    is its least extent and ``axis`` that axis -- see "Clashes" in the spec.
     """
 
     with_: str
     kind: str
-    bbox_nm: tuple[Nanometre, ...]
+    bbox_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre, Nanometre, Nanometre]
     depth_nm: Nanometre
     axis: str
     volume_nm3: int
@@ -202,6 +204,10 @@ class Clash:
             raise ValueError("a clash states its kind")
         if not self.axis:
             raise ValueError("a clash states its axis")
+        if len(self.bbox_nm) != 6:
+            raise ValueError(
+                f"Clash.bbox_nm must have exactly six components, not {len(self.bbox_nm)}"
+            )
         check_nanometres(
             "Clash",
             **{f"bbox_nm[{index}]": value for index, value in enumerate(self.bbox_nm)},
@@ -249,12 +255,16 @@ class DockData:
 
     case: CaseRegistration
     boards: tuple[Board, ...] = ()
-    placements: dict[int, tuple[Placement, ...]] = field(default_factory=dict)
+    placements: Mapping[int, tuple[Placement, ...]] = field(default_factory=dict)
     unmatched_holes: tuple[int, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     processing: tuple[StageRun, ...] = ()
 
     def __post_init__(self) -> None:
+        # A copy, not a wrapped alias: a caller's dict mutated after
+        # construction must not reach back through this value object, the
+        # same guarantee every tuple field here gets for free.
+        object.__setattr__(self, "placements", MappingProxyType(dict(self.placements)))
         for hole_index in self.unmatched_holes:
             if hole_index < 1:
                 raise ValueError(f"holes are numbered from 1, not {hole_index}")

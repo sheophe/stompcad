@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections.abc import Callable
 
 import pytest
 
@@ -43,6 +44,19 @@ def test_insertion_is_the_least_depth_at_which_the_profile_exceeds_the_hole() ->
     on it at 3 mm, while a 6 mm hole admits the whole part."""
     assert _LED.insertion_through(Nanometre(2_500_000)) == Nanometre(3_000_000)
     assert _LED.insertion_through(Nanometre(3_000_000)) is None
+
+
+def test_radius_at_and_insertion_through_are_pinned_at_the_overlap_point() -> None:
+    """The LED's one genuine multi-candidate point in each direction.
+
+    Depth 3_000_000 is covered by both steps -- "take first" would answer
+    2_450_000 here, not the correct 2_900_000. Radius 2_400_000 has both
+    steps qualifying as "beyond" -- "take the greatest qualifying depth"
+    would answer 3_000_000, not the correct least, 0. Both wrong answers
+    pass every other assertion in this file, which is why they need their
+    own line rather than living inside a monotonicity check."""
+    assert _LED.radius_at(Nanometre(3_000_000)) == Nanometre(2_900_000)
+    assert _LED.insertion_through(Nanometre(2_400_000)) == Nanometre(0)
 
 
 def test_a_largest_radius_rule_would_name_the_flange() -> None:
@@ -215,8 +229,11 @@ def test_correspondence_rejects_a_non_integer_nanometre() -> None:
 # --------------------------------------------------------------------------
 
 
-def _bbox() -> tuple[Nanometre, ...]:
-    return tuple(Nanometre(v) for v in (-1_000, -2_000, -3_000, 4_000, 5_000, 6_000))
+def _bbox() -> tuple[Nanometre, Nanometre, Nanometre, Nanometre, Nanometre, Nanometre]:
+    return (
+        Nanometre(-1_000), Nanometre(-2_000), Nanometre(-3_000),
+        Nanometre(4_000), Nanometre(5_000), Nanometre(6_000),
+    )
 
 
 def test_clash_requires_a_named_other_solid() -> None:
@@ -232,6 +249,11 @@ def test_clash_requires_a_kind() -> None:
 def test_clash_requires_an_axis() -> None:
     with pytest.raises(ValueError, match="axis"):
         Clash("LID", "case", _bbox(), Nanometre(0), "", 0)
+
+
+def test_clash_bbox_must_have_exactly_six_components() -> None:
+    with pytest.raises(ValueError, match="six components"):
+        Clash("LID", "case", (Nanometre(0),) * 4, Nanometre(0), "w", 0)  # type: ignore[arg-type]
 
 
 def test_clash_rejects_a_non_integer_bbox_component() -> None:
@@ -254,6 +276,13 @@ def test_clash_carries_every_bbox_component_not_just_the_first() -> None:
 def test_placement_requires_a_positive_rank() -> None:
     with pytest.raises(ValueError, match="ranked from 1"):
         Placement(0, Nanometre(0), Nanometre(0), Nanometre(0), 0.0, (), ())
+
+
+def test_placement_rejects_a_non_integer_nanometre() -> None:
+    """The lone outlier: every sibling class's ``check_nanometres`` call has
+    a raising test; ``Placement``'s did not, so deleting it failed nothing."""
+    with pytest.raises(TypeError):
+        Placement(1, Nanometre(0), Nanometre(0), 0.5, 0.0, (), ())  # type: ignore[arg-type]
 
 
 def test_placement_theta_must_be_finite() -> None:
@@ -307,11 +336,30 @@ def test_dockdata_unmatched_holes_are_numbered_from_one() -> None:
 
 def test_dockdata_placements_are_keyed_by_board_ordinal() -> None:
     """The workspace rule -- no dict key holds a float -- is a static one
-    here: ``placements`` is typed ``dict[int, ...]``, the same discipline
-    ``Hole.index`` relies on mypy for rather than a runtime type check."""
+    here: ``placements`` is typed ``Mapping[int, ...]``, the same discipline
+    ``Hole.index`` relies on mypy for rather than a runtime key-type check."""
     placement = Placement(1, Nanometre(0), Nanometre(0), Nanometre(0), 0.0, (), ())
     data = DockData(_case(), placements={1: (placement,)})
     assert data.placements[1] == (placement,)
+
+
+def test_dockdata_placements_is_read_only() -> None:
+    """``frozen=True`` stops reassigning the attribute; it says nothing about
+    mutating the mapping in place. ``MappingProxyType`` is what closes that:
+    an in-place write must fail at runtime, not merely at the type checker."""
+    data = DockData(_case(), placements={1: ()})
+    with pytest.raises(TypeError):
+        data.placements[1] = ()  # type: ignore[index]
+
+
+def test_dockdata_placements_does_not_alias_the_caller_supplied_dict() -> None:
+    """The bug a bare ``MappingProxyType(source)`` would let through: wrap a
+    reference to the caller's own dict, and their later mutation of it reaches
+    back through this supposedly immutable value object. A copy closes it."""
+    source: dict[int, tuple[Placement, ...]] = {1: ()}
+    data = DockData(_case(), placements=source)
+    source[1] = (Placement(1, Nanometre(0), Nanometre(0), Nanometre(0), 0.0, (), ()),)
+    assert data.placements[1] == ()
 
 
 def test_dockdata_is_frozen() -> None:
@@ -377,3 +425,66 @@ def test_dockdata_worst_severity_matches_the_published_function() -> None:
 def test_dockdata_worst_severity_matches_the_published_function_when_empty() -> None:
     data = DockData(_case())
     assert data.worst_severity == worst_severity(()) is None
+
+
+# --------------------------------------------------------------------------
+# Frozen/slotted for the six classes not already probed directly above
+# (Profile and DockData each have their own object.__setattr__ probe).
+# --------------------------------------------------------------------------
+
+
+def _built_protrusion() -> Protrusion:
+    return Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple())
+
+
+def _built_component() -> Component:
+    return Component("D1", None)
+
+
+def _built_board() -> Board:
+    return Board(1, ("D1",), _extent(), _frame(), (Component("D1", None),))
+
+
+def _built_correspondence() -> Correspondence:
+    return _correspondence()
+
+
+def _built_clash() -> Clash:
+    return Clash("LID", "case", _bbox(), Nanometre(0), "w", 0)
+
+
+def _built_placement() -> Placement:
+    return Placement(1, Nanometre(0), Nanometre(0), Nanometre(0), 0.0, (), ())
+
+
+_ValueObject = Protrusion | Component | Board | Correspondence | Clash | Placement
+
+_MUTATION_TARGETS: tuple[Callable[[], _ValueObject], ...] = (
+    _built_protrusion,
+    _built_component,
+    _built_board,
+    _built_correspondence,
+    _built_clash,
+    _built_placement,
+)
+
+
+@pytest.mark.parametrize(
+    "build", _MUTATION_TARGETS, ids=[build.__name__ for build in _MUTATION_TARGETS]
+)
+def test_every_remaining_class_is_frozen(build: Callable[[], _ValueObject]) -> None:
+    """Each ``build`` constructs its own type -- reusing one instance across
+    parametrisations would prove nothing about the other five classes."""
+    instance = build()
+    field_name = dataclasses.fields(instance)[0].name
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(instance, field_name, getattr(instance, field_name))
+
+
+@pytest.mark.parametrize(
+    "build", _MUTATION_TARGETS, ids=[build.__name__ for build in _MUTATION_TARGETS]
+)
+def test_every_remaining_class_is_slotted(build: Callable[[], _ValueObject]) -> None:
+    instance = build()
+    with pytest.raises(AttributeError):
+        object.__setattr__(instance, "extra", 1)
