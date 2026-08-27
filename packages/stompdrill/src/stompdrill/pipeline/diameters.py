@@ -16,9 +16,10 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic, ParameterValue
 from stompmodel.model import RawHole, StageRun
-from stompmodel.units import Nanometre, check_nanometres, format_nm, nm_from_mm, scaled_nm
+from stompmodel.units import Nanometre, check_nanometres, format_nm, nm_from_mm
 
 from ..formatting import format_mm
+from ..units import scaled_nm
 
 __all__ = [
     "METRIC_BANDS",

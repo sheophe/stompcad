@@ -19,7 +19,6 @@ __all__ = [
     "Millimetre",
     "NM_PER_MM",
     "nm_from_mm",
-    "scaled_nm",
     "mm_from_nm",
     "format_nm",
     "check_millimetres",
@@ -52,15 +51,6 @@ def nm_from_mm(mm: float) -> Nanometre:
     would be one more number to argue about than the physics already fixes.
     """
     return Nanometre(int(_round_half_up(Decimal(str(mm)) * NM_PER_MM)))
-
-
-def scaled_nm(mm: float) -> Decimal:
-    """Scale a measurement exactly without selecting a nanometre.
-
-    Quantisers compare this value directly with their answer sets so a
-    preliminary rounding cannot manufacture a midpoint tie. See ADR-0003.
-    """
-    return Decimal(str(mm)) * NM_PER_MM
 
 
 def mm_from_nm(nm: Nanometre) -> Millimetre:

@@ -19,12 +19,11 @@ from stompmodel.units import (
     check_nanometres,
     format_nm,
     nm_from_mm,
-    scaled_nm,
 )
 
 from ..formatting import format_mm
 from ..tolerance import within
-from ..units import NM_PER_MICRON, Micron, nm_from_micron
+from ..units import NM_PER_MICRON, Micron, nm_from_micron, scaled_nm
 
 __all__ = ["SnapPositions", "ReviewGridTies"]
 

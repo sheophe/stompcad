@@ -17,9 +17,10 @@ from stompmodel.model import (
     ReferenceOutline,
     StageRun,
 )
-from stompmodel.units import Nanometre, check_nanometres, format_nm, nm_from_mm, scaled_nm
+from stompmodel.units import Nanometre, check_nanometres, format_nm, nm_from_mm
 
 from ..enclosures import footprints
+from ..units import scaled_nm
 
 __all__ = [
     "CATALOGUE",
