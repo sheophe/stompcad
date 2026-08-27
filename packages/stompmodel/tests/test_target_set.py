@@ -28,6 +28,24 @@ def test_a_symlinked_pair_shares_a_key(tmp_path: Path) -> None:
     assert target_key(link) == target_key(real)
 
 
+def test_two_normalisation_forms_of_one_name_are_refused(tmp_path: Path) -> None:
+    """Case is only half of the fold: an NFC and an NFD spelling of one name
+    are two distinct Python strings but one file on disk, so a ``casefold``-
+    only key would miss this pair. Built from explicit ``\\uXXXX`` escapes --
+    never a typed accented character -- so no editor or source encoding can
+    normalise the collision away before the test even runs.
+    """
+    nfc = tmp_path / "caf\u00e9.stp"  # precomposed: e-acute as one code point
+    nfd = tmp_path / "cafe\u0301.stp"  # decomposed: e plus a combining acute
+    # Fixture control: a probe that can pass by finding nothing is not
+    # evidence. Were these already one string there would be no collision
+    # left for the fold below to catch.
+    assert str(nfc) != str(nfd)
+
+    with pytest.raises(ValueError, match="one file"):
+        check_target_set([nfc, nfd])
+
+
 def test_a_colliding_set_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="one file"):
         check_target_set([tmp_path / "a.json", tmp_path / "A.JSON"])

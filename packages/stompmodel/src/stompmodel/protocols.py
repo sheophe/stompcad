@@ -173,7 +173,7 @@ def target_key(path: Path) -> str:
 
     Resolved first: a filesystem may hold two spellings, or two paths joined
     by a symlink, as one file. Folded twice because casefolding can itself
-    denormalise -- see ADR-0005.
+    denormalise -- see ADR-0001.
     """
     resolved = str(path.resolve())
     return unicodedata.normalize("NFD", unicodedata.normalize("NFD", resolved).casefold())
