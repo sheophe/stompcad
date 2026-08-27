@@ -255,9 +255,10 @@ def _signature(head: bytes) -> bytes:
     """One chain's head with every id and every line break flattened away.
 
     The last-resort tiebreak between two chains colouring one shape in one
-    colour: their ids, and the column the writer wrapped a line at, are
-    exactly what varies between processes, so what is left once both are
-    gone is the only part of a chain an order may be taken on.
+    colour. An id is reassigned by the very pass this key orders, so it
+    cannot be read here; flattening the writer's line wrapping as well
+    leaves a key insensitive to the one other thing a chain's own bytes
+    could differ by without differing in content.
     """
     return re.sub(rb"\s+", b" ", re.sub(rb"#\d+", b"#", head))
 

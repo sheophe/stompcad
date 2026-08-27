@@ -410,6 +410,122 @@ def test_which_chain_of_a_shared_colour_defines_it_is_settled_by_content() -> No
     assert reslotted.count(b"COLOUR_RGB") == 1
 
 
+#: Two chains colouring one shape (#500) through structurally identical
+#: heads, so their id-free signatures tie and the colour each resolves to
+#: is the only component of the sort key left to order them by. Written
+#: red first, blue second; blue's literal sorts first, so an order that
+#: read only the shape id would leave them exactly as written.
+_ONE_SHAPE_COLOURED_RED_THEN_BLUE = (
+    b"#100 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#101),#999);\n"
+    b"#101 = STYLED_ITEM('color',(#102),#500);\n"
+    b"#102 = PRESENTATION_STYLE_ASSIGNMENT((#103));\n"
+    b"#103 = SURFACE_STYLE_USAGE(.BOTH.,#104);\n"
+    b"#104 = SURFACE_SIDE_STYLE('',(#105));\n"
+    b"#105 = SURFACE_STYLE_FILL_AREA(#106);\n"
+    b"#106 = FILL_AREA_STYLE('',(#107));\n"
+    b"#107 = FILL_AREA_STYLE_COLOUR('',#108);\n"
+    b"#108 = COLOUR_RGB('',1.,0.,0.);\n"
+    b"#109 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#110),#999);\n"
+    b"#110 = STYLED_ITEM('color',(#111),#500);\n"
+    b"#111 = PRESENTATION_STYLE_ASSIGNMENT((#112));\n"
+    b"#112 = SURFACE_STYLE_USAGE(.BOTH.,#113);\n"
+    b"#113 = SURFACE_SIDE_STYLE('',(#114));\n"
+    b"#114 = SURFACE_STYLE_FILL_AREA(#115);\n"
+    b"#115 = FILL_AREA_STYLE('',(#116));\n"
+    b"#116 = FILL_AREA_STYLE_COLOUR('',#117);\n"
+    b"#117 = COLOUR_RGB('',0.,0.,1.);\n"
+)
+
+
+def test_the_resolved_literal_orders_two_chains_colouring_one_shape() -> None:
+    """The control for the sort key's second component.
+
+    Without it the key reads the shape id alone, two chains colouring one
+    shape tie, and a stable sort hands them back in the order the kernel
+    happened to write them -- which is the freedom this whole pass exists
+    to remove.
+    """
+    payload = _EXTERNAL_STUBS + _ONE_SHAPE_COLOURED_RED_THEN_BLUE
+    parsed = [
+        writer._parse_colour_chain(found)
+        for found in writer._COLOUR_CHAIN.finditer(payload)
+    ]
+
+    # Grounding: the other two components of the key are equal here, so the
+    # resolved literal is the only one that can decide the order.
+    assert len(parsed) == 2
+    assert parsed[0].shape == parsed[1].shape
+    assert writer._signature(parsed[0].head) == writer._signature(parsed[1].head)
+
+    reslotted = writer._reslot_colours(payload, expected=2)
+
+    # b"0.,0.,1." sorts before b"1.,0.,0.", so blue takes the first slot --
+    # the reverse of the order the two chains were written in.
+    assert b"#108 = COLOUR_RGB('',0.,0.,1.);" in reslotted
+    assert b"#117 = COLOUR_RGB('',1.,0.,0.);" in reslotted
+    assert b"#108 = COLOUR_RGB('',1.,0.,0.);" not in reslotted
+
+
+#: Two chains colouring one shape (#500) in one colour, so shape id and
+#: resolved literal both tie and only the id-free content signature is
+#: left to order them by. The bare chain is written first; the
+#: wrapper-bearing one's signature sorts ahead of it (``M`` before ``S``
+#: once the ids are gone), so an order blind to content leaves them as
+#: written.
+_ONE_SHAPE_AND_COLOUR_BARE_THEN_WRAPPED = (
+    b"#100 = STYLED_ITEM('color',(#101),#500);\n"
+    b"#101 = PRESENTATION_STYLE_ASSIGNMENT((#102));\n"
+    b"#102 = SURFACE_STYLE_USAGE(.BOTH.,#103);\n"
+    b"#103 = SURFACE_SIDE_STYLE('',(#104));\n"
+    b"#104 = SURFACE_STYLE_FILL_AREA(#105);\n"
+    b"#105 = FILL_AREA_STYLE('',(#106));\n"
+    b"#106 = FILL_AREA_STYLE_COLOUR('',#107);\n"
+    b"#107 = COLOUR_RGB('',1.,0.,0.);\n"
+    b"#108 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#109),#999);\n"
+    b"#109 = STYLED_ITEM('color',(#110),#500);\n"
+    b"#110 = PRESENTATION_STYLE_ASSIGNMENT((#111));\n"
+    b"#111 = SURFACE_STYLE_USAGE(.BOTH.,#112);\n"
+    b"#112 = SURFACE_SIDE_STYLE('',(#113));\n"
+    b"#113 = SURFACE_STYLE_FILL_AREA(#114);\n"
+    b"#114 = FILL_AREA_STYLE('',(#115));\n"
+    b"#115 = FILL_AREA_STYLE_COLOUR('',#107);\n"
+)
+
+
+def test_the_content_signature_orders_two_chains_agreeing_on_shape_and_colour() -> None:
+    """The control for the sort key's third component.
+
+    Without it two chains agreeing on shape and colour tie, and a stable
+    sort returns the kernel's own order -- and since ownership is handed to
+    whichever chain that order puts first, an unordered tie decides which
+    chain carries the definition too.
+    """
+    payload = _EXTERNAL_STUBS + _ONE_SHAPE_AND_COLOUR_BARE_THEN_WRAPPED
+    parsed = [
+        writer._parse_colour_chain(found)
+        for found in writer._COLOUR_CHAIN.finditer(payload)
+    ]
+    literals = {chain.colour: chain.literal for chain in parsed if chain.literal}
+
+    # Grounding: the other two components of the key are equal here, so the
+    # signature is the only one that can decide the order -- and it differs.
+    assert len(parsed) == 2
+    assert parsed[0].shape == parsed[1].shape
+    assert literals[parsed[0].colour] == literals[parsed[1].colour]
+    assert writer._signature(parsed[0].head) != writer._signature(parsed[1].head)
+
+    reslotted = writer._reslot_colours(payload, expected=2)
+
+    # The wrapper-bearing chain takes the first slot, and the definition
+    # with it, though it was written second and owned nothing.
+    assert (
+        b"#100 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"
+        b"('',(#101),#999);"
+    ) in reslotted
+    assert b"#109 = STYLED_ITEM('color',(#110),#500);" in reslotted
+    assert b"#100 = STYLED_ITEM" not in reslotted
+
+
 #: Two chains defining one RGB literal at two different ids -- a shape
 #: ``STEPCAFControl_Writer`` never writes, since it defines a colour once
 #: and reuses it. Canonical ownership cannot express it: moving the
@@ -798,13 +914,16 @@ _REPEATED_COLOUR_PROBE = (
     " payload.count(b'STYLED_ITEM'), payload.count(b'COLOUR_RGB')))"
 )
 
-#: Enough launches to see the disagreement: six of them produced four
-#: distinct digests before ownership was settled by content, so three
-#: agreeing is already strong evidence -- and the hand-built pair in
-#: ``test_which_chain_of_a_shared_colour_defines_it_is_settled_by_content``
-#: is the falsifiable control this test leans on, since a subprocess
-#: cannot be monkeypatched from here.
-_REPEATED_COLOUR_LAUNCHES = 3
+#: The kernel's choice was measured landing on four of this fixture's five
+#: chains across six launches, so accidental agreement costs no better
+#: than a factor of five per extra launch: three launches agree by chance
+#: about once in twenty-five, which a review run of this test actually
+#: hit, while ten put it under one in a million. Each launch is a real
+#: interpreter, about half a second, so the count is bounded by that as
+#: much as by the odds -- and the falsifiable weight sits on the in-suite
+#: pair in ``..._defines_it_is_settled_by_content``, which a subprocess
+#: cannot be monkeypatched to carry.
+_REPEATED_COLOUR_LAUNCHES = 10
 
 
 def test_shapes_sharing_one_colour_render_identically_across_processes() -> None:
