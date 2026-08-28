@@ -2287,6 +2287,7 @@ name = "stompcollider"
 version = "0.1.0"
 source = { editable = "packages/stompcollider" }
 dependencies = [
+    { name = "stompgeom" },
     { name = "stompmodel" },
 ]
 
@@ -2298,7 +2299,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "stompmodel", editable = "packages/stompmodel" }]
+requires-dist = [
+    { name = "stompgeom", editable = "packages/stompgeom" },
+    { name = "stompmodel", editable = "packages/stompmodel" },
+]
 
 [package.metadata.requires-dev]
 dev = [

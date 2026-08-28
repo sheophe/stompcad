@@ -124,7 +124,7 @@ A solid that XCAF gave a name is a **component**, and that name is its reference
 designator; a solid with no name is **substrate geometry**. This keys on the
 *presence* of component identity, never on what a name says: KiCad writes a name
 per footprint occurrence, and a board body is not a footprint. It is
-threshold-free, and it matched `fixtures/tar-pcb.stp` 41 to 2 without tuning.
+threshold-free, and it matched `tar-pcb.stp` 41 to 2 without tuning.
 
 A file with no unnamed solid is refused as `no-substrate`. It is not guessed at.
 
@@ -544,7 +544,8 @@ TDD throughout, following the repository's existing rules.
   reads the ordering the model states rather than recomputing one from list
   position.
 - **Kernel-backed tests are opt-in behind `--boards`**, mirroring `--hammond`,
-  and run against `fixtures/tar-pcb.stp`. Coverage for `sources/` and
+  and run against `packages/stompcollider/tests/fixtures/tar-pcb.stp`.
+  Coverage for `sources/` and
   `emitters/assembly.py` is measured under that command, not the default one.
 - Cross-artefact claims are asserted by parsing both emitted artefacts and
   comparing what they say about one assembly, as
@@ -601,11 +602,13 @@ promotes the existing test-only builder into `stompgeom` with `placement` and
 caller turns out to need. The assembly emitter must not construct kernel
 documents itself; it calls the promoted builder.
 
-**`fixtures/tar-pcb.stp` sits at the repository root until plan 3.** Plan 1's
-bulk move swept it into `stompdrill`, where no test reads it and mutmut copied
-it into every survey. Plan 3 homes it in `stompcollider`'s own `tests/fixtures/`
-alongside the first test that opens it; the root is where a fixture with no
-member waits, not where one lives.
+**`tar-pcb.stp` waited at the repository root until plan 3.** Plan 1's
+bulk move swept it into `stompdrill`, where no test read it and mutmut copied
+it into every survey. Plan 3's `boards.py` ticket homed it in
+`packages/stompcollider/tests/fixtures/` alongside the first test that opens
+it; the root is where a fixture with no member waits, not where one lives.
+`stompgeom`'s two granularity probes read it across the workspace from there,
+as a file and never as an import.
 
 ## Not decided here
 

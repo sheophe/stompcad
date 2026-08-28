@@ -30,13 +30,15 @@ meant to confirm. Where it could not, the ruling is a maintainer's decision and 
 
 ## Evidence
 
-Figures below describing `fixtures/tar-pcb.stp` and the cached Hammond models are
+Figures below describing `tar-pcb.stp` (homed in
+`packages/stompcollider/tests/fixtures/` by plan 3's `boards.py` ticket) and the
+cached Hammond models are
 properties of immutable inputs, and **the implementing ticket carries each as a test
 assertion** so a figure that drifts fails a suite rather than quietly staling this
 document. Figures describing the repository itself are deliberately given as *commands*
 rather than counts, because a count is stale on the next commit.
 
-**`fixtures/tar-pcb.stp` is two boards.** 43 solids: 41 named with reference designators
+**`tar-pcb.stp` is two boards.** 43 solids: 41 named with reference designators
 (`R5`, `C3`, `D2`, …), 2 unnamed. The unnamed pair measure 91.50 x 17.00 x 1.51 mm and
 106.50 x 53.75 x 1.51 mm, both spanning z 0.000–1.510, disjoint in y by 4.25 mm. A main
 board and a strip, side by side and coplanar — not one board exported in two pieces.

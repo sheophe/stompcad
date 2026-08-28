@@ -3,10 +3,11 @@ name = "stompcollider"
 version = "0.1.0"
 description = "Seats PCB models inside a drilled case and reports where they clash"
 requires-python = ">=3.10"
-# stompmodel alone. This phase's core is kernel-free by design -- the
-# geometry-touching sources and emitters that will need stompgeom and the
-# kernel are a later task's addition, not this one's.
-dependencies = ["stompmodel"]
+# stompmodel and stompgeom. The pure core still reaches neither the kernel
+# nor a sibling above it; `boards.py` is the first module here to read
+# geometry, and it reads it *through* stompgeom -- OCP itself stays foreign,
+# which tests/test_package_boundary.py enforces. See ADR-0008.
+dependencies = ["stompmodel", "stompgeom"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -22,6 +23,7 @@ stompcollider = ["py.typed"]
 
 [tool.uv.sources]
 stompmodel = { workspace = true }
+stompgeom = { workspace = true }
 
 # So ADR-0008's sentence -- change into the member, sync, test -- runs a real
 # suite rather than an import check. `mypy` is here because the root gate
@@ -45,6 +47,15 @@ pythonpath = ["../.."]
 python_version = "3.10"
 mypy_path = ["src", "../.."]
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# cadquery-ocp is a compiled extension with no py.typed marker, so every OCP
+# symbol is Any to mypy. Needed for `tests` alone: this package's own source
+# reaches the kernel only through stompgeom, and tests/test_package_boundary.py
+# is what keeps that true. Narrow to OCP, mirroring stompgeom's identical
+# override and the root pyproject.toml's.
+module = ["OCP.*"]
+ignore_missing_imports = true
 
 # mutmut resolves tests through the pyproject.toml in the current working
 # directory, and the root one names only stompdrill's testpaths, so a mutant of

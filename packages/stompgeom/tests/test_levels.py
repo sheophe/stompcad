@@ -13,8 +13,14 @@ from stompgeom.shapes import compound
 from stompgeom.step import StepDocument, StepSolid, read_step
 from stompmodel.units import nm_from_mm
 
-#: The board this package's fixture folder does not yet hold; Task 16 homes it.
-_PCB = Path(__file__).parents[3] / "fixtures" / "tar-pcb.stp"
+#: The board fixture, homed in ``stompcollider``'s own tests where its first
+#: real consumer lives. Read here as a *file*, never as an import: these two
+#: probes are the granularity constant's control pair and the only geometry
+#: in the repository that exercises it, so they follow the fixture rather
+#: than being deleted with its old path.
+_PCB = (
+    Path(__file__).parents[2] / "stompcollider" / "tests" / "fixtures" / "tar-pcb.stp"
+)
 
 
 def _box(dx: float, dy: float, dz: float, at: tuple[float, float, float]) -> StepSolid:
@@ -179,7 +185,7 @@ def test_faces_of_one_plane_separated_by_export_noise_stay_one_level(
 ) -> None:
     """The granularity's INNOCENT probe.
 
-    ``fixtures/tar-pcb.stp`` carries a face tilted 3.846e-08 off axis --
+    ``tar-pcb.stp`` carries a face tilted 3.846e-08 off axis --
     export noise, not geometry -- which the shipped acceptance test admits.
     At the ruled millionth granularity it stays with its plane.
     """
