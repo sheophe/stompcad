@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -190,6 +193,100 @@ def test_a_placed_coloured_solid_rereads_from_a_written_file(tmp_path: Path) -> 
         got = solid_colour(reread.document, by_name[name])
         assert got is not None
         assert all(round(g - w, 6) == 0 for g, w in zip(got, wanted))
+
+
+#: The one collapse ``AddShape`` performs, measured rather than assumed:
+#: two solids over one base shape survive as separate labels when each is
+#: *located* -- with the same placement or different ones -- and are lost
+#: only when one of them is added unlocated, because that free label is
+#: what the located sibling then refers to. So the repair is narrow, and
+#: these two tests are what hold it to the collapsing case.
+
+
+def test_an_unlocated_and_a_located_solid_over_one_base_both_survive() -> None:
+    """``PlacedSolid`` invites placing one shape twice -- two identical
+    footswitches on one board -- and an unplaced solid over the same base
+    used to vanish, its colour reappearing on the placed one. Both input
+    orders, because the collapse happened either way round."""
+    for reverse in (False, True):
+        base = _box(2, 3, 4)
+        entries = [
+            PlacedSolid(base, "A", _RED, None),
+            PlacedSolid(base, "B", None, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+        ]
+        document = build_document(list(reversed(entries)) if reverse else entries)
+
+        by_name = {solid.name: solid for solid in read_step_document(document).solids}
+
+        assert set(by_name) == {"A", "B"}, f"reversed={reverse}"
+        assert solid_colour(document, by_name["B"]) is None
+        got = solid_colour(document, by_name["A"])
+        assert got is not None
+        assert all(round(g - w, 6) == 0 for g, w in zip(got, _RED))
+
+
+def test_two_unlocated_solids_over_one_base_both_survive() -> None:
+    """The same collapse with no placement in sight: two unplaced solids
+    over one base resolved to one label, so the first name was lost."""
+    base = _box(2, 3, 4)
+    document = build_document([
+        PlacedSolid(base, "A", _RED, None),
+        PlacedSolid(base, "B", _GREEN, None),
+    ])
+
+    by_name = {solid.name: solid for solid in read_step_document(document).solids}
+
+    assert set(by_name) == {"A", "B"}
+    for name, wanted in (("A", _RED), ("B", _GREEN)):
+        got = solid_colour(document, by_name[name])
+        assert got is not None
+        assert all(round(g - w, 6) == 0 for g, w in zip(got, wanted))
+
+
+def test_placing_one_base_shape_twice_writes_one_product() -> None:
+    """The guard on the repair's scope, not on a bug: two *located* solids
+    over one base never collapsed, so neither may be given a shape of its
+    own. Wrapping them defensively would double every assembly of repeated
+    parts -- measured at 2.2x on ``tar-pcb.stp`` -- for nothing.
+    """
+    base = _box(2, 3, 4)
+    document = build_document([
+        PlacedSolid(base, "A", None, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+        PlacedSolid(base, "B", None, RigidTransform(_IDENTITY, (20.0, 0.0, 0.0))),
+    ])
+    payload = render_step(
+        document, title="t", timestamp="1970-01-01T00:00:00+00:00", originating_system="t"
+    )
+
+    assert {solid.name for solid in read_step_document(document).solids} == {"A", "B"}
+    assert payload.count(b"= MANIFOLD_SOLID_BREP") == 1
+
+
+def test_a_shared_base_document_renders_identically_across_processes() -> None:
+    """The structure decision is taken per batch, so it is a new place for
+    process history to leak. ``IsSame`` is the kernel's own identity and a
+    Python ``id()`` would not be; distinct hash seeds are what perturb the
+    allocation pattern an address comes from."""
+    script = (
+        "from stompgeom.writer import render_step;"
+        "from tests.fixtures.shared_base import shared_base_document;"
+        "import hashlib,sys;"
+        "sys.stdout.write(hashlib.sha256(render_step("
+        "shared_base_document(), title='p',"
+        "timestamp='1970-01-01T00:00:00+00:00', originating_system='t')).hexdigest())"
+    )
+    digests = {
+        subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, check=True,
+            cwd=Path(__file__).resolve().parent.parent,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        ).stdout
+        for seed in ("0", "1", "2", "3", "4", "5")
+    }
+
+    assert len(digests) == 1
+    assert digests != {""}
 
 
 def test_a_solids_colour_reads_back() -> None:

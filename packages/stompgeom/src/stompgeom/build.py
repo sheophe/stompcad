@@ -67,9 +67,12 @@ def build_document(solids: Sequence[PlacedSolid]) -> Any:
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     colour_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
 
-    for solid in solids:
-        shape = solid.shape if solid.placement is None else placed(solid.shape, solid.placement)
-        label = shape_tool.AddShape(_addable(shape, solid.colour), False)
+    shapes = [
+        solid.shape if solid.placement is None else placed(solid.shape, solid.placement)
+        for solid in solids
+    ]
+    for solid, shape, collides in zip(solids, shapes, _collisions(shapes)):
+        label = shape_tool.AddShape(_addable(shape, solid.colour, collides), False)
         TDataStd_Name.Set_s(label, TCollection_ExtendedString(solid.name))
         if solid.colour is not None:
             colour_tool.SetColor(
@@ -80,20 +83,49 @@ def build_document(solids: Sequence[PlacedSolid]) -> Any:
     return document
 
 
-def _addable(shape: Any, colour: tuple[float, float, float] | None) -> Any:
+def _collisions(shapes: Sequence[Any]) -> tuple[bool, ...]:
+    """Which of ``shapes`` would otherwise lose their label to another.
+
+    ``AddShape`` refers a *located* shape to a label holding its unlocated
+    base -- reusing a free one when the batch already added it -- so an
+    unlocated shape is the only one a sibling can take over. Two located
+    ones never collide, alike or not, which is measured and is why this is
+    narrow. ``IsSame`` is the kernel's own identity, never a Python
+    ``id()``: an address varies between processes, and structure decided
+    from one is the non-determinism the writer exists to erase. Pairwise,
+    because a batch is one assembly's solids -- tens, not thousands.
+    """
+    from OCP.TopLoc import TopLoc_Location
+
+    bases = [shape.Located(TopLoc_Location()) for shape in shapes]
+    return tuple(
+        shape.Location().IsIdentity()
+        and any(
+            bases[other].IsSame(bases[position])
+            for other in range(len(bases))
+            if other != position
+        )
+        for position, shape in enumerate(shapes)
+    )
+
+
+def _addable(
+    shape: Any, colour: tuple[float, float, float] | None, collides: bool
+) -> Any:
     """``shape`` as something ``AddShape`` will give a label of its own.
 
-    ``AddShape`` makes a *located* shape a reference to the unlocated
-    original, and a colour on a reference becomes a
-    ``PRESENTATION_STYLE_BY_CONTEXT`` chain -- one ``solid_colour`` cannot
-    resolve, the census does not count and the colour region cannot
-    canonicalise. A one-solid compound is identity-located, so the label
-    owns its shape and no geometry is rebuilt. Only a coloured solid needs
-    it: an uncoloured reference writes correctly and shares its base.
+    Two reasons a solid needs one. A colour on a located shape lands on a
+    reference and is written as a ``PRESENTATION_STYLE_BY_CONTEXT`` chain
+    ``solid_colour`` cannot resolve and the colour region cannot
+    canonicalise; and a shape ``_collisions`` reports would be taken over
+    by a sibling and lost outright. A one-solid compound is a shape of its
+    own, so the label owns it and no geometry is rebuilt. Whether a solid
+    needs one is a fact about the batch, not about the solid: the same
+    input always builds the same document, which is all ADR-0006 asks.
     """
-    if colour is None or shape.Location().IsIdentity():
-        return shape
-    return compound([shape])
+    if collides or (colour is not None and not shape.Location().IsIdentity()):
+        return compound([shape])
+    return shape
 
 
 def solid_colour(document: TDocStd_Document, solid: Any) -> tuple[float, float, float] | None:
