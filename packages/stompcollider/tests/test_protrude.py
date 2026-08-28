@@ -1,13 +1,11 @@
 """A component's protrusion: which cylinders count, and the profile they make.
 
-Every synthetic solid here is built so that the three rules disagree with
-the easy answers: several admitted cylinders at different extents with the
-furthest deliberately not first in the walk, a non-parallel cylinder that
-reaches further than any admitted one, a stepped stack rather than a single
-diameter, and geometry that is not symmetric about its own axis midpoint.
-The solids are built through OCP directly because that is what a fixture is;
-the package's own source reaches the kernel only through ``stompgeom``,
-which ``test_package_boundary.py`` is what enforces.
+Every synthetic solid is built so the three rules disagree with the easy
+answers: admitted cylinders of unequal extent with the furthest not first in
+the walk, a non-parallel cylinder reaching further than any admitted one, a
+stepped stack rather than one diameter, and geometry not symmetric about its
+own axis midpoint. The solids use OCP directly because that is what a
+fixture is; the source reaches the kernel only through ``stompgeom``.
 """
 
 from __future__ import annotations
@@ -18,7 +16,10 @@ from typing import Any
 
 import pytest
 
+from stompcollider.canonicalise import _canonicalise_component
+from stompcollider.model import Profile
 from stompcollider.protrude import admissible, protrusion_of
+from stompcollider.raw import RawComponent
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.step import StepDocument, StepSolid, read_step
 from stompmodel.units import Nanometre
@@ -124,10 +125,36 @@ def _a_tall_pin_beside_a_wider_one() -> StepSolid:
     )
 
 
-def _radii(solid: StepSolid, normal: tuple[float, float, float]) -> set[Nanometre]:
+def _profile(solid: StepSolid, normal: tuple[float, float, float]) -> Profile:
+    """The profile the two stages make together.
+
+    ``protrusion_of`` measures and ``canonicalise`` scales, dedupes and
+    orders; a profile is what they produce jointly, so the assertions below
+    are stated in whole nanometres at the seam rather than on either half.
+    """
+    protrusion = _canonicalise_component(_measured_component(solid, normal)).protrusion
+    assert protrusion is not None
+    return protrusion.profile
+
+
+def _axis_nm(
+    solid: StepSolid, normal: tuple[float, float, float]
+) -> tuple[Nanometre, Nanometre]:
+    protrusion = _canonicalise_component(_measured_component(solid, normal)).protrusion
+    assert protrusion is not None
+    return protrusion.axis_xy_nm
+
+
+def _measured_component(
+    solid: StepSolid, normal: tuple[float, float, float]
+) -> RawComponent:
     found = protrusion_of(solid, normal)
     assert found is not None
-    return {step[0] for step in found.profile.steps}
+    return found
+
+
+def _radii(solid: StepSolid, normal: tuple[float, float, float]) -> set[Nanometre]:
+    return {step[0] for step in _profile(solid, normal).steps}
 
 
 def _reach_along(cylinder: Cylinder, axis: tuple[float, float, float]) -> float:
@@ -203,12 +230,13 @@ def test_a_component_whose_every_cylinder_leans_has_no_axis_either() -> None:
 def test_the_furthest_admitted_cylinder_fixes_the_axis_not_the_first_walked() -> None:
     """The short pin is built first and sits at the origin; the answer must be
     the taller one, whose axis is at (3, 7) and whose radius is 2."""
-    found = protrusion_of(_two_pins_of_unequal_reach(), _UP)
+    solid = _two_pins_of_unequal_reach()
 
-    assert found is not None
     # basis_about((0, 0, 1)) gives u = (0, -1, 0) and v = (1, 0, 0).
-    assert found.axis_xy_nm == (Nanometre(-7_000_000), Nanometre(3_000_000))
-    assert found.profile.steps == ((Nanometre(2_000_000), Nanometre(0), Nanometre(9_000_000)),)
+    assert _axis_nm(solid, _UP) == (Nanometre(-7_000_000), Nanometre(3_000_000))
+    assert _profile(solid, _UP).steps == (
+        (Nanometre(2_000_000), Nanometre(0), Nanometre(9_000_000)),
+    )
 
 
 def test_the_walk_order_does_not_choose_the_axis() -> None:
@@ -229,10 +257,7 @@ def test_two_cylinders_reaching_exactly_as_far_are_separated_on_geometry() -> No
 
     assert reaches == {9.0}
     assert protrusion_of(wider_first, _UP) == protrusion_of(narrower_first, _UP)
-    assert protrusion_of(narrower_first, _UP).axis_xy_nm == (  # type: ignore[union-attr]
-        Nanometre(-7_000_000),
-        Nanometre(3_000_000),
-    )
+    assert _axis_nm(narrower_first, _UP) == (Nanometre(-7_000_000), Nanometre(3_000_000))
 
 
 def test_only_a_coaxial_cylinder_joins_the_stack() -> None:
@@ -241,8 +266,22 @@ def test_only_a_coaxial_cylinder_joins_the_stack() -> None:
     assert _radii(_a_tall_pin_beside_a_wider_one(), _UP) == {Nanometre(2_000_000)}
 
 
+def test_two_coincident_faces_contribute_one_step() -> None:
+    """A cylinder split at its seam gives two faces of one axis, one radius
+    and one extent. The feature is stated once: leaving both in changes the
+    value's equality and its serialised form, and on the fixture's footswitch
+    it is the difference between forty-five steps and fifty-four."""
+    twinned = _solid("U4", _pin(1.0, 10.0), _pin(1.0, 10.0))
+
+    assert len(cylindrical_faces(twinned.shape)) == 2
+    assert len(_measured_component(twinned, _UP).stack) == 2
+    assert _profile(twinned, _UP).steps == (
+        (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
+    )
+
+
 def test_the_designator_is_the_solids_own_name() -> None:
-    assert protrusion_of(_two_pins_of_unequal_reach(), _UP).designator == "U1"  # type: ignore[union-attr]
+    assert _measured_component(_two_pins_of_unequal_reach(), _UP).designator == "U1"
 
 
 # --------------------------------------------------------------------------
@@ -253,40 +292,37 @@ def test_the_designator_is_the_solids_own_name() -> None:
 def test_a_stepped_stack_reports_a_radius_that_changes_with_depth() -> None:
     """A narrow pin 10 long with a 4-long collar of radius 3 at its far end:
     the tip is the pin's free end, so the collar covers depth 6 to 10."""
-    found = protrusion_of(_a_stepped_stack(), _UP)
+    profile = _profile(_a_stepped_stack(), _UP)
 
-    assert found is not None
-    assert found.profile.steps == (
+    assert profile.steps == (
         (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
         (Nanometre(3_000_000), Nanometre(6_000_000), Nanometre(10_000_000)),
     )
-    assert found.profile.radius_at(Nanometre(1_000_000)) == Nanometre(1_000_000)
-    assert found.profile.radius_at(Nanometre(8_000_000)) == Nanometre(3_000_000)
+    assert profile.radius_at(Nanometre(1_000_000)) == Nanometre(1_000_000)
+    assert profile.radius_at(Nanometre(8_000_000)) == Nanometre(3_000_000)
 
 
 def test_a_stepped_stack_admits_a_hole_to_the_collar_and_no_further() -> None:
-    found = protrusion_of(_a_stepped_stack(), _UP)
+    profile = _profile(_a_stepped_stack(), _UP)
 
-    assert found is not None
-    assert found.profile.insertion_through(Nanometre(2_000_000)) == Nanometre(6_000_000)
-    assert found.profile.insertion_through(Nanometre(3_000_000)) is None
+    assert profile.insertion_through(Nanometre(2_000_000)) == Nanometre(6_000_000)
+    assert profile.insertion_through(Nanometre(3_000_000)) is None
 
 
 def test_the_outward_direction_is_not_its_own_negation() -> None:
     """The same solid read the other way up: the collar is now at the tip, so
     a 2 mm hole is stopped at once instead of six millimetres in. A rule
     ignoring the normal's sign would report one answer for both."""
-    up = protrusion_of(_a_stepped_stack(), _UP)
-    down = protrusion_of(_a_stepped_stack(), (0.0, 0.0, -1.0))
+    up = _profile(_a_stepped_stack(), _UP)
+    down = _profile(_a_stepped_stack(), (0.0, 0.0, -1.0))
 
-    assert up is not None and down is not None
-    assert down.profile.steps == (
+    assert down.steps == (
         (Nanometre(3_000_000), Nanometre(0), Nanometre(4_000_000)),
         (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
     )
-    assert down.profile.radius_at(Nanometre(1_000_000)) == Nanometre(3_000_000)
-    assert down.profile.insertion_through(Nanometre(2_000_000)) == Nanometre(0)
-    assert up.profile.steps != down.profile.steps
+    assert down.radius_at(Nanometre(1_000_000)) == Nanometre(3_000_000)
+    assert down.insertion_through(Nanometre(2_000_000)) == Nanometre(0)
+    assert up.steps != down.steps
 
 
 # --------------------------------------------------------------------------
@@ -348,7 +384,7 @@ def test_the_footswitch_profile_admits_a_twelve_millimetre_hole_fully(
 ) -> None:
     """The spec's validation table, as a test: 10 tip, 8 shaft, 12 bush;
     a 12 mm hole passes it to full depth and an 11.9 mm one does not."""
-    profile = protrusion_of(_part(document, "SW1"), _OUTWARD).profile  # type: ignore[union-attr]
+    profile = _profile(_part(document, "SW1"), _OUTWARD)
 
     assert profile.steps[0] == (Nanometre(5_000_000), Nanometre(0), Nanometre(4_300_000))
     assert {step[0] for step in profile.steps} == {
@@ -360,12 +396,25 @@ def test_the_footswitch_profile_admits_a_twelve_millimetre_hole_fully(
 
 
 @pytest.mark.boards
+def test_the_footswitch_states_each_of_its_features_once(
+    document: StepDocument,
+) -> None:
+    """Its stack is fifty-four coaxial faces and its profile forty-five
+    steps: nine of those faces are a seam-split cylinder's other half,
+    stating a feature the profile already carries."""
+    switch = _part(document, "SW1")
+
+    assert len(_measured_component(switch, _OUTWARD).stack) == 54
+    assert len(_profile(switch, _OUTWARD).steps) == 45
+
+
+@pytest.mark.boards
 def test_a_potentiometer_profile_is_a_shaft_then_a_narrower_bushing(
     document: StepDocument,
 ) -> None:
     """The spec's table again: 6.35 shaft, then a 6.188 bushing. A stack whose
     second step is *narrower* than its first, which no monotonic rule gives."""
-    profile = protrusion_of(_part(document, "RV1"), _OUTWARD).profile  # type: ignore[union-attr]
+    profile = _profile(_part(document, "RV1"), _OUTWARD)
 
     assert profile.steps[0] == (Nanometre(3_175_000), Nanometre(0), Nanometre(13_700_000))
     assert {step[0] for step in profile.steps} == {
@@ -377,7 +426,7 @@ def test_a_potentiometer_profile_is_a_shaft_then_a_narrower_bushing(
 def test_a_five_millimetre_led_seats_on_its_flange(document: StepDocument) -> None:
     """The case a largest-radius rule gets wrong: the flange is precisely the
     feature that must not pass through, and it is 5.15 mm down the shaft."""
-    profile = protrusion_of(_part(document, "D3"), _OUTWARD).profile  # type: ignore[union-attr]
+    profile = _profile(_part(document, "D3"), _OUTWARD)
 
     assert profile.steps == (
         (Nanometre(2_450_000), Nanometre(0), Nanometre(5_150_000)),
@@ -396,12 +445,10 @@ def test_the_outward_directions_negation_reads_the_wrong_end(
     and the footswitch's tipmost cylinder is a 2 mm solder pin instead of its
     10 mm tip. Both directions satisfy "not None", which is why the tests
     above assert the depths and not merely that there is one."""
-    inverted = protrusion_of(_part(document, "D3"), (0.0, 0.0, 1.0))
-    switch = protrusion_of(_part(document, "SW1"), (0.0, 0.0, 1.0))
+    inverted = _profile(_part(document, "D3"), (0.0, 0.0, 1.0))
 
-    assert inverted is not None and switch is not None
-    assert inverted.profile.insertion_through(Nanometre(2_500_000)) == Nanometre(0)
-    assert {step[0] for step in switch.profile.steps} == {Nanometre(1_000_000)}
+    assert inverted.insertion_through(Nanometre(2_500_000)) == Nanometre(0)
+    assert _radii(_part(document, "SW1"), (0.0, 0.0, 1.0)) == {Nanometre(1_000_000)}
 
 
 @pytest.mark.boards

@@ -1,9 +1,11 @@
-"""A component's protrusion: which cylinders count, and the profile they make.
+"""A component's protrusion: which cylinders count, and the stack they make.
 
 Kernel-backed, but only through ``stompgeom``: the parallelism and
 coaxiality rules are the kernel's own tolerances, published as ``Cylinder``
-methods, and nothing here imports OCP. See "Protrusions" in
-``docs/specs/stompcollider-technical.md`` and ADR-0008 for the layering.
+methods, and nothing here imports OCP. Measurements only -- millimetre
+floats upstream of ``canonicalise``, which is the one place they become
+canonical lengths. See "Protrusions" in
+``docs/specs/stompcollider-technical.md``, ADR-0003 and ADR-0008.
 """
 
 from __future__ import annotations
@@ -11,10 +13,9 @@ from __future__ import annotations
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.levels import Direction
 from stompgeom.step import StepSolid
-from stompmodel.units import Millimetre, Nanometre, nm_from_mm
 
 from .boards import basis_about
-from .model import Profile, Protrusion
+from .raw import RawComponent, RawCylinder
 
 __all__ = ["admissible", "protrusion_of"]
 
@@ -33,13 +34,13 @@ def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, .
     )
 
 
-def protrusion_of(solid: StepSolid, carrier_normal: Direction) -> Protrusion | None:
-    """``solid``'s protrusion along ``carrier_normal``, or ``None`` when it has none.
+def protrusion_of(solid: StepSolid, carrier_normal: Direction) -> RawComponent | None:
+    """``solid``'s measured protrusion, or ``None`` when it has no axis.
 
     ``carrier_normal`` is signed: it points away from the board, at the
     panel, and the admitted cylinder reaching furthest along it fixes the
-    axis. Every cylinder coaxial with that one forms the stack, and the
-    profile is their radius against depth from the tip -- never a diameter.
+    axis. Every cylinder coaxial with that one joins the stack, each
+    measured as a radius against depth from the tip -- never a diameter.
     A component yielding no admissible cylinder has no axis and cannot pair.
     """
     admitted = admissible(solid, carrier_normal)
@@ -48,34 +49,33 @@ def protrusion_of(solid: StepSolid, carrier_normal: Direction) -> Protrusion | N
     u, v = basis_about(carrier_normal)
     tipmost = max(admitted, key=lambda c: _tip_key(c, carrier_normal, u, v))
     tip_mm = _reach(tipmost, carrier_normal)[1]
-    stack = [cylinder for cylinder in admitted if tipmost.is_coaxial_with(cylinder)]
-    steps = sorted(
-        {_step(cylinder, carrier_normal, tip_mm) for cylinder in stack},
-        # Depth first, so the tip leads and the profile reads outside in;
-        # the whole key is geometry, never the order the faces were walked.
-        key=lambda step: (step[1], step[2], step[0]),
-    )
-    return Protrusion(
+    return RawComponent(
         designator=solid.name,
-        axis_xy_nm=(_projected(tipmost, u), _projected(tipmost, v)),
-        profile=Profile(steps=tuple(steps)),
+        axis_xy_mm=(_projected(tipmost, u), _projected(tipmost, v)),
+        # Every coaxial face, stated as measured. Deduplicating a seam's two
+        # halves and ordering the stack are both ``canonicalise``'s, where
+        # the values are whole nanometres: exact equality is a fact about
+        # those and not about a millimetre float, and a set keyed on one
+        # would be the composite float key ADR-0003's boundary rules out.
+        stack=tuple(
+            _measured(cylinder, carrier_normal, tip_mm)
+            for cylinder in admitted
+            if tipmost.is_coaxial_with(cylinder)
+        ),
     )
 
 
-def _step(
-    cylinder: Cylinder, outward: Direction, tip_mm: float
-) -> tuple[Nanometre, Nanometre, Nanometre]:
-    """One cylinder as ``(radius, depth from the tip, to depth)``, in nanometres.
+def _measured(cylinder: Cylinder, outward: Direction, tip_mm: float) -> RawCylinder:
+    """One cylinder as a radius and the depths from the tip it spans.
 
     Depth grows away from the tip, so a cylinder's far end along ``outward``
-    is its shallow bound. Scaled once here, at the one boundary where a
-    measurement becomes a canonical length (ADR-0003).
+    is its shallow bound.
     """
     low_mm, high_mm = _reach(cylinder, outward)
-    return (
-        nm_from_mm(cylinder.radius_mm),
-        nm_from_mm(Millimetre(tip_mm - high_mm)),
-        nm_from_mm(Millimetre(tip_mm - low_mm)),
+    return RawCylinder(
+        radius_mm=cylinder.radius_mm,
+        depth_from_tip_min_mm=tip_mm - high_mm,
+        depth_from_tip_max_mm=tip_mm - low_mm,
     )
 
 
@@ -101,13 +101,13 @@ def _tip_key(
             _dot(cylinder.axis_location_mm, v))
 
 
-def _projected(cylinder: Cylinder, axis: Direction) -> Nanometre:
+def _projected(cylinder: Cylinder, axis: Direction) -> float:
     """The cylinder's axis position along one of the carrier plane's axes.
 
     Any point of a parallel axis projects the same way, so the axis location
     stands for the whole line.
     """
-    return nm_from_mm(Millimetre(_dot(cylinder.axis_location_mm, axis)))
+    return _dot(cylinder.axis_location_mm, axis)
 
 
 def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:

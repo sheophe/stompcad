@@ -2,19 +2,22 @@
 
 Unlike ``stompdrill.quantise``, this selects nothing -- a board's geometry
 has no answer set to snap to. It only scales millimetres to nanometres by
-exact decimal conversion (ADR-0003) and orders boards by geometry, never by
-input order (ADR-0006). See "The boundary is canonicalise(), not quantise()"
+exact decimal conversion (ADR-0003), then orders boards, components and
+profile steps by geometry rather than by input order, stating each distinct
+step once (ADR-0006). See "The boundary is canonicalise(), not quantise()"
 in ``stompcollider-technical.md``.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 from stompmodel.frames import CoordinateFrame
 from stompmodel.model import CaseRegistration
 from stompmodel.units import Nanometre, nm_from_mm
 
 from .model import Board, Component, DockData, Profile, Protrusion
-from .raw import RawBoard, RawBoards, RawComponent
+from .raw import RawBoard, RawBoards, RawComponent, RawCylinder
 
 __all__ = ["canonicalise"]
 
@@ -61,19 +64,40 @@ def _sort_key(board: RawBoard, basis: CoordinateFrame) -> _SortKey:
     return (min_x_nm, min_y_nm, min_z_nm, -footprint_nm2)
 
 
-def _canonicalise_component(raw: RawComponent) -> Component:
-    """Scale one component's axis and stack; select nothing about either."""
-    if raw.axis_xy_mm is None:
-        return Component(designator=raw.designator, protrusion=None)
-    axis_nm = (nm_from_mm(raw.axis_xy_mm[0]), nm_from_mm(raw.axis_xy_mm[1]))
-    steps = tuple(
+def _canonical_steps(
+    stack: Sequence[RawCylinder],
+) -> tuple[tuple[Nanometre, Nanometre, Nanometre], ...]:
+    """One step per distinct cylinder, ordered outside in.
+
+    Both rules apply after the scaling and never before it: exact equality
+    is a fact about whole nanometres, and a set keyed on a millimetre float
+    would be the composite float key ADR-0003's boundary rules out. Depth
+    leads the order so the profile reads from the tip, and every part of the
+    key is geometry, so ``stack``'s own order -- a kernel walk's -- reaches
+    no artefact (ADR-0006).
+    """
+    scaled = {
         (
             nm_from_mm(cylinder.radius_mm),
             nm_from_mm(cylinder.depth_from_tip_min_mm),
             nm_from_mm(cylinder.depth_from_tip_max_mm),
         )
-        for cylinder in raw.stack
-    )
+        for cylinder in stack
+    }
+    return tuple(sorted(scaled, key=lambda step: (step[1], step[2], step[0])))
+
+
+def _canonicalise_component(raw: RawComponent) -> Component:
+    """Scale one component's axis and stack; select nothing about either.
+
+    "Nothing" is exact: no measurement is snapped, and nothing is dropped
+    but a repeat -- two cylinders that scale to one step were one feature
+    stated twice. :func:`_canonical_steps` holds that rule and the order.
+    """
+    if raw.axis_xy_mm is None:
+        return Component(designator=raw.designator, protrusion=None)
+    axis_nm = (nm_from_mm(raw.axis_xy_mm[0]), nm_from_mm(raw.axis_xy_mm[1]))
+    steps = _canonical_steps(raw.stack)
     protrusion = Protrusion(
         designator=raw.designator, axis_xy_nm=axis_nm, profile=Profile(steps=steps)
     )

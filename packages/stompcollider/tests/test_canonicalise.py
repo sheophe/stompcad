@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from stompcollider.canonicalise import canonicalise
+from stompcollider.canonicalise import _canonicalise_component, canonicalise
 from stompcollider.model import DockData, Protrusion
 from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder
 from stompmodel.frames import CoordinateFrame, FaceFrame
@@ -247,3 +247,76 @@ def test_a_genuine_position_tie_breaks_on_footprint() -> None:
     wider board must win ordinal 1."""
     data = canonicalise(_tied_boards(), _rotated_case())
     assert [b.designators for b in data.boards] == [("R_WIDE",), ("R_NARROW",)]
+
+
+def _stacked(*cylinders: RawCylinder) -> tuple[tuple[Nanometre, Nanometre, Nanometre], ...]:
+    """One component's canonical steps, built the way a source hands them over."""
+    raw = RawComponent(designator="U1", axis_xy_mm=(0.0, 0.0), stack=cylinders)
+    component = _canonicalise_component(raw)
+    assert component.protrusion is not None
+    return component.protrusion.profile.steps
+
+
+def test_two_cylinders_that_scale_to_one_step_are_stated_once() -> None:
+    """A cylinder split at its seam reaches here as two faces of one axis,
+    one radius and one extent. The profile states that feature once: leaving
+    both in changes the value's equality and its serialised form. Exact
+    integer equality is what decides it, which is why the rule lives on this
+    side of the scaling and not in the millimetres upstream.
+    """
+    twice = RawCylinder(1.0, 0.0, 10.0)
+
+    assert _stacked(twice, twice) == (
+        (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
+    )
+
+
+def test_two_cylinders_differing_only_below_a_nanometre_are_one_step() -> None:
+    """The rule is equality of the canonical fact, not of the measurement:
+    a difference the model cannot express is not a second feature."""
+    assert _stacked(RawCylinder(1.0, 0.0, 10.0), RawCylinder(1.0000000004, 0.0, 10.0)) == (
+        (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
+    )
+
+
+def test_two_cylinders_a_whole_nanometre_apart_are_two_steps() -> None:
+    """The control beside it: a difference the model *can* express survives,
+    so the rule above is deduplication and not rounding everything together."""
+    assert len(_stacked(RawCylinder(1.0, 0.0, 10.0), RawCylinder(1.000001, 0.0, 10.0))) == 2
+
+
+def test_the_steps_are_ordered_from_the_tip_and_not_by_the_stack() -> None:
+    """The stack arrives in a kernel walk's order, which reaches no artefact
+    (ADR-0006). Depth leads, so the profile reads from the tip; the deepest
+    cylinder is handed over first here precisely so that preserving the
+    stack's order would give a different answer.
+    """
+    ordered = _stacked(
+        RawCylinder(3.0, 6.0, 10.0),
+        RawCylinder(1.0, 0.0, 10.0),
+    )
+
+    assert ordered == (
+        (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
+        (Nanometre(3_000_000), Nanometre(6_000_000), Nanometre(10_000_000)),
+    )
+
+
+def test_steps_starting_at_one_depth_are_ordered_on_where_they_end() -> None:
+    """The key's second component. Two steps sharing a depth-from-tip leave
+    the first comparison tied, so a key of depth alone would fall back to
+    whatever order the set happened to iterate in."""
+    assert _stacked(
+        RawCylinder(1.0, 0.0, 10.0),
+        RawCylinder(3.0, 0.0, 4.0),
+    ) == (
+        (Nanometre(3_000_000), Nanometre(0), Nanometre(4_000_000)),
+        (Nanometre(1_000_000), Nanometre(0), Nanometre(10_000_000)),
+    )
+
+
+def test_a_stack_handed_over_two_ways_round_gives_one_profile() -> None:
+    """ADR-0006 stated directly: two spellings of one measurement agree."""
+    a, b, c = RawCylinder(1.0, 0.0, 10.0), RawCylinder(3.0, 6.0, 10.0), RawCylinder(2.0, 2.0, 6.0)
+
+    assert _stacked(a, b, c) == _stacked(c, a, b) == _stacked(b, c, a)

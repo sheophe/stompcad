@@ -20,7 +20,9 @@ class RawCylinder:
 
     Depths are measured from the protrusion's tip, per "Protrusions" in
     ``stompcollider-technical.md``. Millimetre floats, upstream of the exact
-    decimal scaling ``canonicalise`` applies.
+    decimal scaling ``canonicalise`` applies -- and upstream of the ordering
+    and the one-step-per-feature rule it applies with it, so a stack's own
+    order and any repeat within it both carry no meaning here.
     """
 
     radius_mm: float
