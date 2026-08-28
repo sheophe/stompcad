@@ -14,7 +14,7 @@ from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.levels import Direction
 from stompgeom.step import StepSolid
 
-from .boards import basis_about
+from .boards import basis_about, dot
 from .raw import RawComponent, RawCylinder
 
 __all__ = ["admissible", "protrusion_of", "reach_along"]
@@ -87,8 +87,8 @@ def reach_along(cylinder: Cylinder, outward: Direction) -> tuple[float, float]:
     sign from this measurement, and a second copy of it there would be a
     second chance to disagree about where a face ends.
     """
-    base = _dot(cylinder.axis_location_mm, outward)
-    step = _dot(cylinder.axis_direction, outward)
+    base = dot(cylinder.axis_location_mm, outward)
+    step = dot(cylinder.axis_direction, outward)
     ends = (base + cylinder.extent_mm[0] * step, base + cylinder.extent_mm[1] * step)
     return (min(ends), max(ends))
 
@@ -103,8 +103,8 @@ def _tip_key(
     plane -- all geometry, so two spellings of one part agree (ADR-0006).
     """
     low, high = reach_along(cylinder, outward)
-    return (high, cylinder.radius_mm, low, _dot(cylinder.axis_location_mm, u),
-            _dot(cylinder.axis_location_mm, v))
+    return (high, cylinder.radius_mm, low, dot(cylinder.axis_location_mm, u),
+            dot(cylinder.axis_location_mm, v))
 
 
 def _projected(cylinder: Cylinder, axis: Direction) -> float:
@@ -113,8 +113,4 @@ def _projected(cylinder: Cylinder, axis: Direction) -> float:
     Any point of a parallel axis projects the same way, so the axis location
     stands for the whole line.
     """
-    return _dot(cylinder.axis_location_mm, axis)
-
-
-def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    return dot(cylinder.axis_location_mm, axis)

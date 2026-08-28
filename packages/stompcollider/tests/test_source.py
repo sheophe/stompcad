@@ -294,6 +294,38 @@ def test_a_readable_board_beside_an_unreadable_one_still_yields_its_boards(
     assert raw.diagnostics[0].severity is Severity.ERROR
 
 
+def test_a_board_file_that_is_not_there_is_unreadable_board(tmp_path, monkeypatch) -> None:
+    """The likeliest operator error of all: a path that names nothing.
+
+    Diagnosed like any other unreadable board rather than crashing, and it
+    is the one arm no other test here reaches.
+    """
+    raw = _read_with_boards(tmp_path, monkeypatch, [tmp_path / "absent.stp"])
+    assert _codes(raw) == ["unreadable-board"]
+    assert raw.diagnostics[0].get("model") == "absent.stp"
+
+
+def test_where_a_board_file_sits_reaches_no_diagnostic(tmp_path, monkeypatch) -> None:
+    """One board read from two directories must not make two artefacts.
+
+    Both the payload and the message: the reader states its reason against
+    the path it was handed, so an absolute spelling would carry a whole
+    directory into a document Task 20 is about to serialise.
+    """
+    here, there = tmp_path / "here", tmp_path / "there"
+    for directory in (here, there):
+        directory.mkdir()
+        (directory / "board.stp").write_bytes(b"not STEP\n")
+
+    first = _read_with_boards(here, monkeypatch, [here / "board.stp"])
+    monkeypatch.chdir(there)
+    second = _read_with_boards(there, monkeypatch, [Path("board.stp")])
+
+    assert first.diagnostics[0].data == second.diagnostics[0].data
+    assert first.diagnostics[0].message == second.diagnostics[0].message
+    assert str(here) not in first.diagnostics[0].message
+
+
 def test_the_order_the_files_were_listed_reaches_no_diagnostic(tmp_path, monkeypatch) -> None:
     """ADR-0006 over the command line: two spellings of one input agree."""
     first, second = tmp_path / "a.stp", tmp_path / "b.stp"
@@ -464,6 +496,13 @@ def test_the_board_box_is_the_substrate_and_not_the_whole_assembly(
 
 
 def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    """Deliberately not ``stompcollider.boards.dot``, which the source uses.
+
+    The test above predicts an axis this arithmetic computes; borrowing the
+    production one would let a wrong dot product agree with itself and pass.
+    The three copies in ``src/`` were consolidated; this fourth is the
+    independent instrument that keeps the prediction a real one.
+    """
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
@@ -481,7 +520,7 @@ def test_the_fixture_reads_end_to_end(tmp_path) -> None:
     raw = BoardSource(drill, [_FIXTURE], case).read()
     assert len(raw.boards) == 2
     assert _codes(raw) == ["multiple-boards"]
-    assert {board.carrier_w for board in raw.boards} == {(0.0, 0.0, -1.0)}
+    assert [board.carrier_w for board in raw.boards] == [(0.0, 0.0, -1.0)] * 2
     assert {"SW1", "SW2"} <= {c.designator for b in raw.boards for c in b.components}
 
 

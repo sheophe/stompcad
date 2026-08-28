@@ -28,7 +28,7 @@ from stompmodel.errors import DocumentError
 from stompmodel.model import EnclosureMatch
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
-from ..boards import basis_about, carrier_frame, group, substrates
+from ..boards import basis_about, carrier_frame, dot, group, substrates
 from ..errors import StompcolliderError
 from ..protrude import admissible, protrusion_of, reach_along
 from ..raw import RawBoard, RawBoards, RawComponent
@@ -74,11 +74,7 @@ class BoardSource:
             try:
                 document = read_step(path)
             except DocumentError as failure:
-                diagnostics.append(
-                    Diagnostic.error(
-                        "unreadable-board", str(failure), data=(("path", str(path)),)
-                    )
-                )
+                diagnostics.append(_unreadable(path, failure))
                 continue
             measured.extend(_measure(document))
 
@@ -91,6 +87,23 @@ class BoardSource:
                 )
             )
         return RawBoards(boards=tuple(measured), diagnostics=tuple(diagnostics))
+
+
+def _unreadable(path: Path, failure: DocumentError) -> Diagnostic:
+    """``path`` could not be read as a board, said without naming a directory.
+
+    The file's name, never its path, exactly as ``wrong-case-model`` names
+    the case model and ``CaseRegistration`` names its own: a diagnostic
+    carrying where a file happened to sit would make one board read from two
+    directories produce two artefacts, which is the byte-identity ADR-0006
+    requires. The reader states the reason against the path it was given, so
+    that spelling is reduced too rather than the reason being discarded.
+    """
+    return Diagnostic.error(
+        "unreadable-board",
+        str(failure).replace(str(path), path.name),
+        data=(("model", path.name),),
+    )
 
 
 def _cross_check(
@@ -205,10 +218,14 @@ def _extremes(
 
     Every one of the eight corners, not the two measured extremes: the
     carrier normal need not be a model axis, so the extreme corner there is
-    not necessarily the extreme corner here.
+    not necessarily the extreme corner here. Named assumption: this is the
+    substrate's *box*, which for a carrier normal oblique to the model axes
+    holds slack the substrate itself does not, and unequal slack at the two
+    ends could take :func:`_outward`'s tie the other way. Exact for every
+    axis-aligned board, the committed fixture among them.
     """
     reach = [
-        _dot((x, y, z), axis)
+        dot((x, y, z), axis)
         for x in (box[0], box[3])
         for y in (box[1], box[4])
         for z in (box[2], box[5])
@@ -226,6 +243,3 @@ def _negated(direction: Direction) -> Direction:
     """
     return (0.0 - direction[0], 0.0 - direction[1], 0.0 - direction[2])
 
-
-def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

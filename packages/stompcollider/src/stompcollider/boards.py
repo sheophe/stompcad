@@ -20,7 +20,7 @@ from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
 
-__all__ = ["is_slab", "carrier_frame", "substrates", "group", "basis_about"]
+__all__ = ["is_slab", "carrier_frame", "substrates", "group", "basis_about", "dot"]
 
 #: How nearly equal a slab's two faces must be in area, as the smaller over
 #: the larger. It refuses a *degenerate pairing* -- a second level that is a
@@ -264,7 +264,7 @@ def _projected(
     ]
     spans = []
     for axis in (frame.u, frame.v, frame.w):
-        reach = [_dot(axis, corner) for corner in corners]
+        reach = [dot(axis, corner) for corner in corners]
         spans.append((min(reach), max(reach)))
     return spans[0], spans[1], spans[2]
 
@@ -291,10 +291,17 @@ def _cross(a: Direction, b: Direction) -> Direction:
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-def _dot(a: Direction, b: Direction) -> float:
+def dot(a: Direction, b: Direction) -> float:
+    """The scalar product of two three-vectors.
+
+    Published beside :func:`basis_about` because three modules here project
+    onto an axis and a second spelling of one arithmetic is a second chance
+    to disagree about it -- the same reason ``protrude`` publishes
+    :func:`~stompcollider.protrude.reach_along` rather than let it be copied.
+    """
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
 def _normalised(a: Direction) -> Direction:
-    length = math.sqrt(_dot(a, a))
+    length = math.sqrt(dot(a, a))
     return (a[0] / length, a[1] / length, a[2] / length)
