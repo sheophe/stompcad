@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from stompgeom.build import PlacedSolid, build_document, solid_colour
 from stompgeom.step import bounding_box_mm, read_step, read_step_document
 from stompgeom.writer import render_step
@@ -393,3 +395,54 @@ def test_a_shared_colour_survives_a_render_and_reread_round_trip(tmp_path: Path)
         got = solid_colour(reread.document, solid)
         assert got is not None
         assert all(round(g - w, 6) == 0 for g, w in zip(got, _RED))
+
+
+# --------------------------------------------------------------------------
+# A PlacedSolid validates at construction: OCC raises from inside
+# Quantity_Color about a colour, naming no solid, so the refusal is here.
+# --------------------------------------------------------------------------
+
+
+def test_a_well_formed_placed_solid_is_the_control() -> None:
+    """The anchor: this shape constructs, so each refusal below refuses the
+    one defect it names rather than everything."""
+    solid = PlacedSolid(_box(2, 2, 2), "A", _RED, RigidTransform(_IDENTITY, (1.0, 0.0, 0.0)))
+    assert solid.colour == _RED
+
+
+def test_a_placed_solid_with_no_shape_is_refused() -> None:
+    with pytest.raises(ValueError, match="must be a kernel shape"):
+        PlacedSolid(None, "A", None, None)
+
+
+def test_a_colour_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match="three components"):
+        PlacedSolid(_box(2, 2, 2), "A", (0.1, 0.2), None)  # type: ignore[arg-type]
+
+
+def test_a_non_finite_colour_component_is_refused() -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        PlacedSolid(_box(2, 2, 2), "A", (float("nan"), 0.2, 0.3), None)
+
+
+def test_a_colour_component_above_one_is_refused() -> None:
+    """``Quantity_Color`` runs 0..1; 255 is the spelling that looks right."""
+    with pytest.raises(ValueError, match=r"run 0.0 to 1.0"):
+        PlacedSolid(_box(2, 2, 2), "A", (255.0, 0.0, 0.0), None)
+
+
+def test_a_negative_colour_component_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"run 0.0 to 1.0"):
+        PlacedSolid(_box(2, 2, 2), "A", (-0.01, 0.0, 0.0), None)
+
+
+def test_an_uncoloured_placed_solid_still_constructs() -> None:
+    """``None`` is "no colour of its own", not a colour to check."""
+    assert PlacedSolid(_box(2, 2, 2), "A", None, None).colour is None
+
+
+def test_the_bounds_of_the_colour_range_are_admitted() -> None:
+    """Both endpoints are legal colours, so the check is a range and not a
+    strict interval that would refuse pure black or pure white."""
+    assert PlacedSolid(_box(2, 2, 2), "A", (0.0, 0.0, 0.0), None).colour == (0.0, 0.0, 0.0)
+    assert PlacedSolid(_box(2, 2, 2), "B", (1.0, 1.0, 1.0), None).colour == (1.0, 1.0, 1.0)

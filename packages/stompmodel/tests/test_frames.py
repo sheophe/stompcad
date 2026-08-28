@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from stompmodel.frames import CoordinateFrame
+from stompmodel.frames import CoordinateFrame, RigidTransform
 from stompmodel.units import Nanometre
 
 #: A frame whose axes are deliberately not the kernel's own: ``u`` runs along
@@ -349,3 +349,85 @@ def test_translated_nm_moves_along_the_frames_own_axes() -> None:
     turned = _frame().rotated_about_w(math.pi / 2)
     moved = turned.translated_nm(Nanometre(1_000_000), Nanometre(0), Nanometre(0))
     assert tuple(int(c) for c in moved.origin_nm) == (0, 1_000_000, 0)
+
+
+# --------------------------------------------------------------------------
+# RigidTransform validates at construction, for CoordinateFrame's reason:
+# this value reaches a kernel, and a malformed one raises there instead.
+# --------------------------------------------------------------------------
+
+_IDENTITY_ROTATION = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+
+def test_a_well_formed_rigid_transform_is_the_control() -> None:
+    """The anchor for the refusals below: this shape really does construct,
+    so each one is refusing its own named defect rather than everything."""
+    motion = RigidTransform(_IDENTITY_ROTATION, (1.0, 2.0, 3.0))
+    assert motion.apply_point((0.0, 0.0, 0.0)) == (1.0, 2.0, 3.0)
+
+
+def test_a_rotation_with_two_rows_is_refused() -> None:
+    with pytest.raises(ValueError, match="three rows"):
+        RigidTransform(((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)), (0.0, 0.0, 0.0))  # type: ignore[arg-type]
+
+
+def test_a_rotation_row_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"rotation\[1\] must have exactly three"):
+        RigidTransform(
+            ((1.0, 0.0, 0.0), (0.0, 1.0), (0.0, 0.0, 1.0)),  # type: ignore[arg-type]
+            (0.0, 0.0, 0.0),
+        )
+
+
+def test_a_translation_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match="three components"):
+        RigidTransform(_IDENTITY_ROTATION, (0.0, 0.0))  # type: ignore[arg-type]
+
+
+def test_a_non_finite_translation_is_refused() -> None:
+    with pytest.raises(ValueError, match="translation_mm must be finite"):
+        RigidTransform(_IDENTITY_ROTATION, (float("nan"), 0.0, 0.0))
+
+
+def test_a_non_finite_rotation_component_is_refused() -> None:
+    """The one the review named: an infinity handed straight to a kernel."""
+    with pytest.raises(ValueError, match=r"rotation\[0\] must be finite"):
+        RigidTransform(
+            ((float("inf"), 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+            (0.0, 0.0, 0.0),
+        )
+
+
+def test_a_scaled_rotation_row_is_refused() -> None:
+    """A uniform scale is not a rigid motion, however well-formed it reads."""
+    with pytest.raises(ValueError, match="unit length"):
+        RigidTransform(
+            ((2.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), (0.0, 0.0, 0.0)
+        )
+
+
+def test_a_non_orthogonal_rotation_is_refused() -> None:
+    """Each row unit length is not enough: a shear passes that clause alone."""
+    root = 2.0**-0.5
+    with pytest.raises(ValueError, match="must be orthogonal"):
+        RigidTransform(
+            ((1.0, 0.0, 0.0), (root, root, 0.0), (0.0, 0.0, 1.0)), (0.0, 0.0, 0.0)
+        )
+
+
+def test_an_otherwise_valid_reflection_is_refused() -> None:
+    """Orthonormal but left-handed: a mirror, which moves no rigid body."""
+    with pytest.raises(ValueError, match="right-handed"):
+        RigidTransform(
+            ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, -1.0)), (0.0, 0.0, 0.0)
+        )
+
+
+def test_placement_onto_still_produces_a_transform_this_check_admits() -> None:
+    """The production builder against the new gate: two real frames, one of
+    them turned, and the motion between them constructs rather than raising."""
+    source = _frame(origin_nm=(1_000_000, 2_000_000, 3_000_000))
+    target = _frame(
+        origin_nm=(50_000_000, 0, 0), u=(0.0, 1.0, 0.0), v=(-1.0, 0.0, 0.0), w=(0.0, 0.0, 1.0)
+    )
+    assert source.placement_onto(target).apply_direction(source.u) == target.u

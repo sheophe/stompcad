@@ -25,10 +25,11 @@ from stompgeom.step import (
 from stompmodel.codec import from_document
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.errors import DocumentError
+from stompmodel.frames import dot
 from stompmodel.model import DrillData, EnclosureMatch
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
-from ..boards import basis_about, carrier_frame, dot, group, negated, substrates
+from ..boards import basis_about, carrier_frame, group, negated, substrates
 from ..errors import NoSubstrateError, StompcolliderError
 from ..protrude import admissible, protrusion_of, reach_along
 from ..raw import RawBoard, RawBoards, RawComponent

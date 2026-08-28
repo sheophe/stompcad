@@ -13,8 +13,9 @@ from __future__ import annotations
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.levels import Direction
 from stompgeom.step import StepSolid
+from stompmodel.frames import dot
 
-from .boards import basis_about, dot
+from .boards import basis_about
 from .raw import RawComponent, RawCylinder
 
 __all__ = ["admissible", "protrusion_of", "reach_along"]

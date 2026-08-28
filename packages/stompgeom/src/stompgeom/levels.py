@@ -11,7 +11,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from stompmodel.units import Nanometre, nm_from_mm
+from stompmodel.frames import dot
+from stompmodel.units import Nanometre, check_nanometres, nm_from_mm
 
 from .kernel import require_kernel
 from .step import StepSolid
@@ -20,6 +21,9 @@ __all__ = ["Direction", "Level", "levels"]
 
 #: A unit vector in kernel coordinates.
 Direction = tuple[float, float, float]
+
+#: Components in a direction.
+_COMPONENTS = 3
 
 #: Direction components are keyed as integer millionths -- a bin, not a
 #: merge tolerance: two components land in one bin or they do not, however
@@ -31,6 +35,12 @@ Direction = tuple[float, float, float]
 #: midpoint. A billionth was measured and rejected: it splits one real side
 #: wall in two. tests/test_levels.py holds both probes.
 _DIRECTION_SCALE = 1e6
+
+#: How far a direction's length may sit from one at construction. The same
+#: figure ``stompmodel.frames`` checks a basis vector's length against and
+#: ``cylinders`` an axis direction's: it refuses a malformed hand-built value
+#: rather than absorbing kernel drift, and it is not either tolerance below.
+_UNIT_TOLERANCE = 1e-9
 
 #: How nearly a plane's normal must lie along a caller's axis to be kept.
 #: Inherited unchanged from ``stompdrill``'s ``cad/case.py``, where it has
@@ -53,6 +63,36 @@ class Level:
     area_mm2: float
     faces: tuple[Any, ...]
 
+    def __post_init__(self) -> None:
+        """Refuse a level that states no plane, at construction.
+
+        A unit direction, a whole-nanometre offset along it, a real positive
+        area and at least one face: a level with none of the last is not a
+        plane this solid has. ``_partition`` satisfies all four by
+        construction; a hand-built fixture is where a malformed one enters.
+        """
+        if len(self.direction) != _COMPONENTS:
+            raise ValueError(
+                f"Level.direction must have exactly three components, "
+                f"not {len(self.direction)}"
+            )
+        if not all(math.isfinite(component) for component in self.direction):
+            raise ValueError(f"Level.direction must be finite, not {self.direction!r}")
+        length = math.sqrt(dot(self.direction, self.direction))
+        if abs(length - 1.0) > _UNIT_TOLERANCE:
+            raise ValueError(
+                f"Level.direction must be unit length, not {self.direction!r} "
+                f"(length {length!r})"
+            )
+        check_nanometres("Level", offset_nm=self.offset_nm)
+        if not math.isfinite(self.area_mm2) or self.area_mm2 <= 0.0:
+            raise ValueError(
+                f"Level.area_mm2 must be a positive number of square millimetres, "
+                f"not {self.area_mm2!r}"
+            )
+        if not self.faces:
+            raise ValueError("Level.faces must hold at least one face")
+
 
 def levels(solid: StepSolid, axis: Direction | None = None) -> tuple[Level, ...]:
     """Group ``solid``'s planar faces into the planes they lie in.
@@ -68,16 +108,18 @@ def levels(solid: StepSolid, axis: Direction | None = None) -> tuple[Level, ...]
         return found
     return tuple(
         level for level in found
-        if abs(abs(_dot(level.direction, axis)) - 1.0) < _PARALLEL_TOLERANCE
+        if abs(abs(dot(level.direction, axis)) - 1.0) < _PARALLEL_TOLERANCE
     )
 
 
 def _partition(shape: Any, scale: float = _DIRECTION_SCALE) -> tuple[Level, ...]:
     """Every planar face of ``shape``, grouped by outward direction and offset.
 
-    Sorted on that same key, which is total because it is the key the groups
-    were built on: the published order is a function of the geometry, never
-    of the walk. ``scale`` is a parameter only so the granularity's guilty
+    The *level* order is a function of the geometry: the sort key is the key
+    the groups were built on, so it is total. That claim stops at the level.
+    Within one, ``faces`` is the explorer's own order and ``area_mm2`` a
+    float sum accumulated in it, so a rule reading either owes ADR-0006 its
+    own answer. ``scale`` is a parameter only so the granularity's guilty
     probe can drive the rejected value; production callers take the default.
     """
     from OCP.BRepAdaptor import BRepAdaptor_Surface
@@ -143,6 +185,3 @@ def _unit(components: tuple[int, int, int], scale: float) -> Direction:
     length = math.sqrt(sum(component * component for component in raw))
     return (raw[0] / length, raw[1] / length, raw[2] / length)
 
-
-def _dot(a: Direction, b: Direction) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

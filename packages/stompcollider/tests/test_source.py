@@ -495,7 +495,7 @@ def test_the_board_box_is_the_substrate_and_not_the_whole_assembly(
 
 
 def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-    """Deliberately not ``stompcollider.boards.dot``, which the source uses.
+    """Deliberately not ``stompmodel.frames.dot``, which the source uses.
 
     The test above predicts an axis this arithmetic computes; borrowing the
     production one would let a wrong dot product agree with itself and pass.

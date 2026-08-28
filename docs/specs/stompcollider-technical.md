@@ -99,13 +99,15 @@ grid answer sets; `stompcollider` only changes representation.
 
 ```
 src/stompcollider/
-  __init__.py       exports Source, canonicalise, Match, Seat, and the emitters
+  __init__.py       exports BoardSource, canonicalise, Match, Seat, Clashes,
+                    both emitters, and the Raw* values a source produces
   model.py          DockData, Board, Component, Protrusion, Profile,
-                    Correspondence, Candidate, Placement, Clash
+                    Correspondence, Placement, Clash
   raw.py            RawBoards: what a source measured, in millimetre floats
-  canonicalise.py   RawBoards → DockData, changing representation only
+  canonicalise.py   RawBoards → DockData, changing representation only, and
+                    board_order: the one statement of how boards are numbered
   designators.py    the panel-reference filter: expression → predicate
-  boards.py         substrate identification, contact assignment, board ordinals
+  boards.py         substrate identification, carrier frames, contact assignment
   protrude.py       perpendicular-cylinder stacks → axis and profile
   sources/step.py   BoardSource: STEP files and case model → RawBoards
   match.py          Match

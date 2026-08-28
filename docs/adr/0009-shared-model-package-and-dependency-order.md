@@ -152,10 +152,16 @@ interchange, so that type does not move.
 
 The kernel layer: the STEP reader (`read_step` from a path, `read_step_document` for a
 document already in memory); the deterministic STEP writer with its OCC normalisation;
-`shapes.compound`/`shapes.placed` for bundling and locating kernel shapes; `levels()` for
-partitioning a solid's planar faces into the planes they lie in; `build.build_document`/
-`build.solid_colour` for assembling a document from placed, named, coloured solids and
-reading a solid's colour back; `assembly_spans`; bounding boxes; `KernelUnavailable`.
+`shapes.compound`/`shapes.placed` for bundling and locating kernel shapes, and
+`shapes.common` for the exact boolean intersection of two of them — the operation the
+whole clash check rests on, reported as `None` rather than an untopologised empty
+compound when two bodies share no region; `levels()` for partitioning a solid's planar
+faces into the planes they lie in; `cylinders.Cylinder`/`cylinders.cylindrical_faces`
+for every cylindrical face of a shape with the axis, radius and axial trim a radius
+alone cannot state, which is what a protrusion profile is built from;
+`build.build_document`/`build.solid_colour` for assembling a document from placed,
+named, coloured solids and reading a solid's colour back; `assembly_spans`; bounding
+boxes; `KernelUnavailable`.
 
 Frame *construction* is not here and is not coming. `build_frame` reads an
 enclosure-shaped `Faces` and picks its `u` axis from the footprint spans, which is
@@ -166,10 +172,11 @@ rule two paragraphs below. `stompmodel` owns the frame *type* and its transforms
 `levels()` arrived once `stompcollider`'s carrier-plane need shaped its interface, per
 `docs/specs/foundation-docket-rulings.md`'s Ruling 2 — which stood in for that consumer
 by measuring the repository's own fixtures rather than waiting for the consumer's code
-to exist. It partitions, and keys each face's direction and offset to an integer bin
-rather than clustering by a merge tolerance, which ADR-0006's order-independence
-requires: two faces whose true normals differ by less than the bin's width land in
-different levels however narrowly they straddle it. The measured window this can
+to exist. It partitions, keying each face's direction and offset to an integer bin
+rather than clustering them by a merge tolerance. ADR-0006's order-independence is what
+requires the bin: clustering by a merge tolerance would let the walk's own order decide
+which faces merged. The bin's price is that two faces whose true normals differ by less
+than its width land in different levels however narrowly they straddle it. The measured window this can
 affect is `5e-7`–`4.47e-5` radians of tilt, comfortably clear of every fixture measured.
 Holedness does not move with it: `_plates` and `_HOLED_FRACTION_LIMIT` stay in
 `stompdrill`, discriminating a casting plate from a casting ring, which is the same

@@ -15,13 +15,13 @@ from collections.abc import Sequence
 
 from stompgeom.levels import Direction, Level, levels
 from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
-from stompmodel.frames import CoordinateFrame
+from stompmodel.frames import CoordinateFrame, cross, dot
 from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 from .errors import NoSubstrateError
 
 __all__ = [
-    "is_slab", "carrier_frame", "substrates", "group", "basis_about", "dot", "negated",
+    "is_slab", "carrier_frame", "substrates", "group", "basis_about", "negated",
 ]
 
 #: How nearly equal a slab's two faces must be in area, as the smaller over
@@ -61,7 +61,7 @@ def negated(direction: Direction) -> Direction:
     ``0.0 - c`` rather than ``-c``: IEEE negation turns a zero component
     into ``-0.0``, a second spelling of zero that compares equal and reads
     differently. Negation of a non-zero component is exact either way.
-    Published here beside ``dot`` and ``basis_about`` because two modules
+    Published here beside ``basis_about`` because two modules
     need it -- ``sources/step.py`` to resolve which way a board's parts
     protrude, ``clash.py`` to turn a board over -- and one rule stated
     twice is the duplication the design rules name.
@@ -123,12 +123,12 @@ def group(
     """Pair each substrate with the named solids that belong to it.
 
     A component belongs to the substrate it contacts: among those whose
-    footprint it overlaps in projection along the carrier normal, the
-    nearest along that normal. Overlap is a preference and not a gate, so a
-    part reaching no footprint falls to the nearest substrate rather than
-    being dropped. An exact tie is broken on the substrates' own bounding
-    boxes, never on their position in ``found`` -- the document's walk
-    order. Components come back sorted by designator (ADR-0006).
+    footprint it overlaps along the carrier normal, the nearest along it.
+    Overlap is a preference, not a gate, so a part reaching no footprint
+    falls to the nearest substrate. An exact tie goes to the substrates'
+    own bounding boxes, never their place in ``found`` -- the walk's order;
+    a further tie is unreachable, two substrates of one box being one slab
+    in one place. Components come back sorted by designator (ADR-0006).
     """
     if not found:
         raise NoSubstrateError("there is no board to group these solids onto")
@@ -296,23 +296,8 @@ def basis_about(w: Direction) -> tuple[Direction, Direction]:
     """
     seed_axis = min(range(3), key=lambda index: (abs(w[index]), index))
     seed = tuple(1.0 if index == seed_axis else 0.0 for index in range(3))
-    u = _normalised(_cross(seed, w))  # type: ignore[arg-type]
-    return u, _cross(w, u)
-
-
-def _cross(a: Direction, b: Direction) -> Direction:
-    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
-
-
-def dot(a: Direction, b: Direction) -> float:
-    """The scalar product of two three-vectors.
-
-    Published beside :func:`basis_about` because three modules here project
-    onto an axis and a second spelling of one arithmetic is a second chance
-    to disagree about it -- the same reason ``protrude`` publishes
-    :func:`~stompcollider.protrude.reach_along` rather than let it be copied.
-    """
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    u = _normalised(cross(seed, w))  # type: ignore[arg-type]
+    return u, cross(w, u)
 
 
 def _normalised(a: Direction) -> Direction:

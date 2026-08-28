@@ -9,6 +9,7 @@ consumer -- the assembly emitter -- needed it.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
 
 __all__ = ["PlacedSolid", "build_document", "solid_colour"]
 
+#: Components in an RGB colour.
+_COLOUR_COMPONENTS = 3
+
 
 @dataclass(frozen=True, slots=True)
 class PlacedSolid:
@@ -39,6 +43,32 @@ class PlacedSolid:
     name: str
     colour: tuple[float, float, float] | None
     placement: RigidTransform | None
+
+    def __post_init__(self) -> None:
+        """Refuse a shape or a colour the document could not take.
+
+        ``Quantity_Color`` accepts three components in ``0.0..1.0`` and
+        raises from inside OCC otherwise, about a colour, with nothing to
+        say which solid carried it. A null shape is refused for the same
+        reason. ``placement`` needs no check here: ``RigidTransform``
+        validates itself, and ``None`` is the stated "leave where it was".
+        """
+        if self.shape is None:
+            raise ValueError(f"PlacedSolid.shape must be a kernel shape, not {self.shape!r}")
+        if self.colour is None:
+            return
+        if len(self.colour) != _COLOUR_COMPONENTS:
+            raise ValueError(
+                f"PlacedSolid.colour must have exactly three components, "
+                f"not {len(self.colour)}"
+            )
+        for component in self.colour:
+            if not isinstance(component, (int, float)) or not math.isfinite(component):
+                raise ValueError(f"PlacedSolid.colour must be finite, not {self.colour!r}")
+            if not 0.0 <= component <= 1.0:
+                raise ValueError(
+                    f"PlacedSolid.colour components run 0.0 to 1.0, not {self.colour!r}"
+                )
 
 
 def build_document(solids: Sequence[PlacedSolid]) -> Any:

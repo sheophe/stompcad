@@ -67,11 +67,13 @@ def _sort_key(board: RawBoard, basis: CoordinateFrame) -> _SortKey:
 def board_order(boards: Sequence[RawBoard], basis: CoordinateFrame) -> tuple[int, ...]:
     """The indices of ``boards`` in ordinal order: ordinal *i+1* is ``boards[order[i]]``.
 
-    Published because a caller pairing a canonical board with the geometry
-    it was measured from must not restate how boards are numbered; this is
-    the rule's one statement, and :func:`canonicalise` reads it too. Sorting
-    indices rather than boards keeps the tie-break identical: ``sorted`` is
-    stable, so two boards of one key stay in the order they were measured.
+    Published because a caller pairing a canonical board with the geometry it
+    was measured from must not restate how boards are numbered; this is the
+    rule's one statement, and :func:`canonicalise` reads it too. Sorting
+    indices keeps the tie-break identical -- ``sorted`` is stable -- and that
+    fallback is unreachable: two boards of one key share their boxes' least
+    corner on all three axes and an equal footprint, so their slabs occupy
+    one space, which an assembly of distinct substrates does not contain.
     """
     return tuple(sorted(range(len(boards)), key=lambda index: _sort_key(boards[index], basis)))
 

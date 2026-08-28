@@ -20,6 +20,15 @@ __all__ = ["Term", "Filter", "parse_filter"]
 
 _RANGE = re.compile(r"^(?P<prefix>[^()]+)\((?P<lo>-?\d+)\.\.(?P<hi>-?\d+)\)$")
 
+#: How many values one range term may name. A range names parts on one
+#: board, where a few hundred sharing a prefix is already dense, so nothing
+#: real is refused. The alternation a range compiles into grows with the
+#: range and not with the expression's own length -- thirteen typed
+#: characters can ask for a megabyte of pattern -- and the count is known
+#: before any of it is built, so refusing costs nothing. It is a usage
+#: failure like the descending range beside it, not a diagnostic.
+_MAX_RANGE_VALUES = 10_000
+
 
 @dataclass(frozen=True, slots=True)
 class Term:
@@ -54,6 +63,11 @@ def _compile_range(prefix: str, lo_text: str, hi_text: str) -> re.Pattern[str]:
     lo, hi = int(lo_text), int(hi_text)
     if lo > hi:
         raise UsageError(f"descending range in designator filter term: {prefix}({lo}..{hi})")
+    if hi - lo + 1 > _MAX_RANGE_VALUES:
+        raise UsageError(
+            f"range in designator filter term names {hi - lo + 1} values, more than "
+            f"the {_MAX_RANGE_VALUES} one term may: {prefix}({lo}..{hi})"
+        )
     alternatives = "|".join(str(n) for n in range(lo, hi + 1))
     return re.compile(f"^{re.escape(prefix)}(?:{alternatives})$")
 

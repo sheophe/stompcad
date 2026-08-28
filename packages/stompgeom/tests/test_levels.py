@@ -258,3 +258,77 @@ def test_a_published_direction_is_exactly_unit() -> None:
     """
     for level in levels(_tilted_slab(1e-5)):
         assert abs(math.sqrt(sum(c * c for c in level.direction)) - 1.0) < 1e-15
+
+
+# --------------------------------------------------------------------------
+# A Level validates at construction: it is the value a hand-built fixture
+# supplies to a selection rule, and a malformed one states no plane at all.
+# --------------------------------------------------------------------------
+
+
+def _level(**overrides: Any) -> Level:
+    fields: dict[str, Any] = {
+        "direction": (0.0, 0.0, 1.0),
+        "offset_nm": nm_from_mm(3.0),
+        "area_mm2": 100.0,
+        "faces": ("F",),
+    }
+    return Level(**{**fields, **overrides})
+
+
+def test_a_well_formed_level_is_the_control() -> None:
+    """The anchor: this shape constructs, so each refusal below is refusing
+    the one defect it names rather than everything."""
+    assert _level().faces == ("F",)
+
+
+def test_a_direction_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match="three components"):
+        _level(direction=(0.0, 1.0))
+
+
+def test_a_non_finite_direction_is_refused() -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        _level(direction=(float("nan"), 0.0, 0.0))
+
+
+def test_a_non_unit_direction_is_refused() -> None:
+    """``levels()`` filters on a direction being unit; a level whose own
+    direction is not would answer that filter about the wrong quantity."""
+    with pytest.raises(ValueError, match="unit length"):
+        _level(direction=(0.0, 0.0, 2.0))
+
+
+def test_a_fractional_nanometre_offset_is_refused() -> None:
+    """ADR-0004: a canonical length is whole nanometres, here as anywhere."""
+    with pytest.raises(TypeError, match="whole number of nanometres"):
+        _level(offset_nm=3.5)
+
+
+def test_a_zero_area_level_is_refused() -> None:
+    with pytest.raises(ValueError, match="positive number of square millimetres"):
+        _level(area_mm2=0.0)
+
+
+def test_a_non_finite_area_is_refused() -> None:
+    """A float sum over kernel faces can reach infinity; a level is not that."""
+    with pytest.raises(ValueError, match="positive number of square millimetres"):
+        _level(area_mm2=float("inf"))
+
+
+def test_a_level_with_no_face_is_refused() -> None:
+    """"Every coplanar planar face" of none is not a plane the solid has."""
+    with pytest.raises(ValueError, match="at least one face"):
+        _level(faces=())
+
+
+def test_the_real_partition_satisfies_its_own_value_checks() -> None:
+    """The gate against a check the production path could not pass: every
+    level a real solid partitions into constructs under the rules above."""
+    partitioned = levels(_box(10.0, 6.0, 2.0, (0.0, 0.0, 0.0)))
+
+    assert len(partitioned) == 6
+    for level in partitioned:
+        assert math.isclose(math.sqrt(sum(c * c for c in level.direction)), 1.0)
+        assert level.area_mm2 > 0.0
+        assert level.faces

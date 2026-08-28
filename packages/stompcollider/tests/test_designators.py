@@ -6,6 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from stompcollider import designators
 from stompcollider.designators import parse_filter
 from stompcollider.errors import UsageError
 
@@ -63,6 +64,24 @@ def test_a_descending_range_is_malformed_on_its_own() -> None:
     refused only because its bounds are the wrong way round."""
     with pytest.raises(UsageError):
         parse_filter("D(4..2)")
+
+
+def test_a_range_naming_more_values_than_a_term_may_is_refused() -> None:
+    """A range compiles to an alternation of every value it names, so its
+    size follows the bounds and not the typed expression's own length:
+    thirteen characters can ask for a megabyte of pattern. Refused as the
+    usage failure the descending range beside it already is.
+    """
+    with pytest.raises(UsageError, match="more than"):
+        parse_filter(f"R(1..{designators._MAX_RANGE_VALUES + 1})")
+
+
+def test_a_range_at_the_limit_is_the_innocent_probe() -> None:
+    """The control: the largest admitted range still compiles and matches,
+    so the refusal above is refusing size rather than ranges."""
+    limit = designators._MAX_RANGE_VALUES
+    admitted = parse_filter(f"R(1..{limit})").admit(("R1", f"R{limit}", f"R{limit + 1}"))
+    assert admitted == {"R1", f"R{limit}"}
 
 
 def test_a_non_integer_bound_is_malformed_on_its_own() -> None:

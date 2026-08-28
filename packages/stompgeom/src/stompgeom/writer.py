@@ -269,7 +269,10 @@ def _colour_sort_key(chain: _ColourChain, literals: dict[int, bytes]) -> tuple[i
     Every part is a fact the source document fixes, so two processes agree
     on it: the shape id is external to the region and stable, the resolved
     literal is the same whichever chain defined it, and the signature holds
-    no id at all. None is a float, so this is a legal dict and set key.
+    no id at all. None is a float, so this is a legal dict and set key. A
+    tie falls to file order and reaches no byte: the pool hands slot ids out
+    in file order to chains in content order, so two chains of one key
+    reassemble into byte-identical regions whichever way round they were.
     """
     return (chain.shape, literals[chain.colour], _signature(chain.head))
 

@@ -1753,26 +1753,53 @@ body that others must avoid, and `docs/specs/stompcollider-technical.md`'s comma
 section drops the shortfall it currently records. A test covers a run with one
 under-constrained board and one solved board that clashes with it.
 
-## The set-level commit transaction is duplicated between the two command lines, and the copies have diverged
+## The `-v` stage trace is a near-copy between the two command lines
 
-**Status:** Confirmed duplication, not scheduled.
+**Status:** Confirmed duplication, not scheduled. The commit-loop half of this entry is
+closed: `stompmodel.protocols` publishes the set-level transaction as `stage_all` and
+`commit_all`, both command lines call it, and ADR-0001 records the promotion as it
+recorded the target-set precondition's.
 
-**Constraint:** `stompdrill/cli.py` and `stompcollider/cli.py` each carry the same
-stage-all-then-commit-all-then-roll-back transaction over a set of artefact paths, and the
-two copies are no longer identical: `stompdrill` records a replaced target in a frozen
-`_Committed` dataclass where `stompcollider` records one in a bare
-`tuple[Path, bytes | None]`. The `-v` stage trace is a third near-copy — `stompdrill`'s
-`run_pipeline` takes a `trace` callback, `stompcollider`'s `_traced` writes to a stream.
-The mechanism the loops call is already shared — `stompmodel.protocols.stage_payload` and
-`check_target_set` — so what is duplicated is the policy above it, which is the half that
-decides whether a failed run leaves a target changed. Two copies of that policy will drift
-in the direction that matters.
+**Constraint:** What is left of the duplication is the per-stage trace. `stompdrill.cli`'s
+`run_pipeline` takes an optional `trace` callback; `stompcollider.cli`'s `_traced` takes an
+optional stream and prints to it. Both fold one stage at a time through a single-stage
+`Pipeline` so that the value before and after each stage is available, and both build a
+line from the same three facts — the stage's name, the count of the thing it might drop,
+and the diagnostic codes it added. Two spellings of one fold is a second chance to disagree
+about what a stage did.
 
-**Acceptance:** The set-level transaction lives once in `stompmodel.protocols`, beside
-`stage_payload` and `check_target_set`, and takes the pipeline run with it rather than only
-the commit loop: both command lines call it, neither restates it, and each keeps only the
-sentence it prints. ADR-0001 records the promotion, as it recorded the target-set
-precondition's.
+**Acceptance:** One fold, published where `Pipeline` is, taking the value before and after
+each stage to a caller-supplied observer; each command line keeps only the sentence it
+formats, which is genuinely tool-specific (holes against boards). Both `-v` outputs are
+unchanged byte for byte.
+
+## Two tools raise `wrong-case-model` from two implementations of one rule
+
+**Status:** Confirmed duplication, not scheduled. Recorded rather than patched: the
+promotion this needs was not part of the work that created the second copy.
+
+**Constraint:** `stompcollider/sources/step.py`'s `_cross_check`/`_footprint_nm`/
+`_descending` and `stompdrill/pipeline/clearance.py`'s `CheckCaseClearance._cross_check`
+(reading the footprint `stompdrill/cad/loader.py`'s `_footprint_and_axis` measured) each
+implement one rule: take the case model's three bounding spans, drop the shallowest as the
+depth, reduce the remaining two to descending order, and compare them with the identified
+enclosure's own pair at exact nanometre equality. `stompgeom.assembly_spans` — the
+measurement — was promoted; the *interpretation* of those spans was not, and the
+interpretation is what carries the diagnostic's meaning. Both docstrings say so honestly,
+each naming the other, which is the duplication being visible rather than absent.
+
+**Why it matters:** one diagnostic code, `wrong-case-model`, is now raised by two
+implementations, and nothing compares them. A change to either — which axis counts as the
+depth, whether the comparison stays exact, what a shape with two equal spans does — makes
+that one code mean two different things depending on which tool reported it, with no test
+anywhere that would notice. Matching by `code` is this workspace's rule for reading a
+diagnostic, so a consumer cannot tell the two apart.
+
+**Acceptance:** The interpretation lives once, beside `assembly_spans` in `stompgeom` or as
+a footprint rule in `stompmodel`, and both call sites read it; or, if the two are shown to
+be genuinely different questions, one of them stops using the code the other owns. Either
+way a test compares the two tools' answers over one model rather than each tool's answer
+against itself.
 
 ## `stompgeom`'s subprocess determinism probes run unmutated code, so the writer's survey is not what it looks like
 

@@ -14,11 +14,16 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from stompcollider.emitters import report
 from stompcollider.emitters.report import ReportEmitter
 from stompcollider.model import Board, Clash, Correspondence, DockData, Placement
 from stompmodel.diagnostics import Diagnostic
+from stompmodel.errors import EmitterError
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration
 from stompmodel.units import Nanometre
@@ -167,6 +172,49 @@ def test_angles_are_not_truncated_to_three_decimal_places() -> None:
     payload = ReportEmitter().emit(_data(theta=142.123456))
     assert b'"theta_deg": 142.123456' in payload
     assert b"142.123" not in payload.replace(b"142.123456", b"")
+
+
+def test_a_designator_carrying_the_theta_marker_is_refused_not_rewritten() -> None:
+    """The marker's own hazard: unmarking is a substitution over the encoded
+    text, so a designator spelled like a marked literal would be rewritten
+    into a bare number and the document would still be valid JSON -- a
+    consumer reading a number where a name was, with nothing raised. A
+    designator is a STEP solid name, so it is supplied from outside.
+    """
+    hostile = f"{report._THETA_TAG}1.5"
+    data = replace(
+        _data(),
+        boards=(_board(designators=(hostile,)),),
+        placements={
+            1: (
+                _placement(
+                    correspondence=(_correspondence(designator=hostile),),
+                    clashes=(_clash(),),
+                ),
+            )
+        },
+    )
+
+    with pytest.raises(EmitterError) as failure:
+        ReportEmitter().emit(data)
+
+    assert report._THETA_TAG in str(failure.value)
+
+
+def test_the_marker_guard_admits_the_document_it_is_guarding() -> None:
+    """The control: the same fixture with an ordinary designator encodes,
+    and its angle really is unmarked -- so the guard above refuses the
+    hostile spelling rather than refusing everything."""
+    data = replace(
+        _data(),
+        boards=(_board(designators=("RV3",)),),
+        placements={1: (_placement(correspondence=(_correspondence(),), clashes=(_clash(),)),)},
+    )
+
+    payload = ReportEmitter().emit(data)
+
+    assert b'"theta_deg": 180.000000' in payload
+    assert report._THETA_TAG.encode() not in payload
 
 
 def test_the_recognition_miss_is_a_field() -> None:

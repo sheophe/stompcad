@@ -16,6 +16,7 @@ import re
 from typing import Any, ClassVar
 
 from stompmodel.diagnostics import Diagnostic
+from stompmodel.errors import EmitterError
 from stompmodel.model import CaseRegistration
 
 from ..model import Board, Clash, Correspondence, DockData, Placement
@@ -52,7 +53,25 @@ class ReportEmitter:
     extension: ClassVar[str] = ".json"
 
     def emit(self, data: DockData) -> bytes:
-        text = json.dumps(_document(data), indent=2)
+        """Encode the document, then unmark exactly the literals this run marked.
+
+        The tag is counted against the placements actually written before
+        anything is substituted. A designator carrying the tag would be
+        unmarked into a bare number by the same rule, and the result would
+        still parse -- a consumer would read a number where a name was, with
+        nothing raised anywhere. Designators are STEP solid names, so they
+        are externally supplied and this is refused rather than trusted.
+        """
+        document = _document(data)
+        text = json.dumps(document, indent=2)
+        expected = sum(len(board["placements"]) for board in document["boards"])
+        found = text.count(_THETA_TAG)
+        if found != expected:
+            raise EmitterError(
+                f"the dock report marks {expected} theta literals but its encoding "
+                f"holds {found} occurrences of {_THETA_TAG!r}: a designator or other "
+                f"supplied text carries the marker, which unmarking would rewrite"
+            )
         text = _THETA_PATTERN.sub(r"\1", text)
         return (text + "\n").encode("utf-8")
 

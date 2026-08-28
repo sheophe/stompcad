@@ -219,9 +219,9 @@ def read_step(path: Path) -> StepDocument:
 
 
 def read_step_document(document: TDocStd_Document) -> StepDocument:
-    """Read solids straight out of an in-memory XCAF document, e.g. one
-    :func:`stompgeom.build.build_document` just built.
+    """Read solids straight out of an XCAF document already in memory.
 
+    One :func:`stompgeom.build.build_document` just built, in practice.
     No file backs a document like that, so ``timestamp`` is the epoch rather
     than a real ``FILE_NAME`` field -- there is no clock reading to avoid,
     only none to invent. Kept distinct from :func:`read_step` because that
