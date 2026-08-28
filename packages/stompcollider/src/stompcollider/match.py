@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from itertools import combinations
+from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import Hole, StageRun
@@ -60,7 +61,7 @@ def _axes_for_face(board: Board, face: str) -> dict[str, _Point]:
     return axes
 
 
-def _distance_nm(a: _Point, b: _Point) -> float:
+def _distance_mm(a: _Point, b: _Point) -> float:
     return math.hypot(_mm(a[0] - b[0]), _mm(a[1] - b[1]))
 
 
@@ -90,7 +91,7 @@ def _pair_face(
     matched: dict[str, Hole] = {}
     for designator, axis in axes.items():
         within = [
-            hole for hole in holes if _distance_nm(axis, (hole.x_nm, hole.y_nm)) <= tolerance_mm
+            hole for hole in holes if _distance_mm(axis, (hole.x_nm, hole.y_nm)) <= tolerance_mm
         ]
         for hole in within:
             assert hole.index is not None  # DockData.holes guarantees a drill number
@@ -103,7 +104,7 @@ def _pair_face(
     for designator, hole in matched.items():
         assert hole.index is not None
         axis = axes[designator]
-        offset = _distance_nm(axis, (hole.x_nm, hole.y_nm))
+        offset = _distance_mm(axis, (hole.x_nm, hole.y_nm))
         correspondences.append(
             Correspondence(
                 designator=designator,
@@ -116,7 +117,7 @@ def _pair_face(
     return tuple(sorted(correspondences, key=lambda c: c.designator))
 
 
-def _cross(origin: _Point, a: _Point, b: _Point) -> float:
+def _cross_mm2(origin: _Point, a: _Point, b: _Point) -> float:
     """The signed area of the triangle ``origin, a, b``, in square millimetres."""
     ox, oy = _mm(origin[0]), _mm(origin[1])
     ax, ay = _mm(a[0]), _mm(a[1])
@@ -129,24 +130,41 @@ def _chirality_conflict(
     axes: dict[str, _Point],
     seed_a: Correspondence,
     seed_b: Correspondence,
+    tolerance_nm: Nanometre,
 ) -> bool:
     """Whether a third corresponded point proves this seed needs a reflection.
 
     Two points alone carry no orientation, so a seed pair's own rotation
     always "fits" itself; a third point is what a mirrored layout cannot
-    survive. A collinear reference (either signed area is zero) carries no
-    orientation evidence and is skipped rather than treated as a conflict --
-    this is the explicit determinant check the brief calls for when a
-    mirrored layout would otherwise validate through a seed pair alone.
+    survive -- but every correspondence here already carries up to one
+    ``tolerance`` of ordinary recognition noise, and a near-collinear board
+    (a row of pots is the canonical layout) can flip a signed area's sign on
+    noise alone.
+
+    A cross product is bilinear in its three vertices: moving any one of
+    them by up to ``tolerance`` changes ``_cross_mm2(seed_a, seed_b, other)``
+    by at most ``tolerance`` times the length of the ``seed_a``-``seed_b``
+    edge (the other two vertices contribute no more, since that edge is the
+    longest lever a single-vertex perturbation has here). A signed area at
+    or under that bound is therefore inconclusive -- ordinary noise could
+    have produced either sign -- and only a signed area *exceeding* it, on
+    both the part and the hole side, is evidence of a genuine reflection
+    rather than noise. This is the explicit determinant check the brief
+    calls for when a mirrored layout would otherwise validate through a
+    seed pair alone, banded so it does not also convict a board recognition
+    noise alone can explain.
     """
     part_a, part_b = axes[seed_a.designator], axes[seed_b.designator]
     hole_a, hole_b = seed_a.hole_xy_nm, seed_b.hole_xy_nm
+    tolerance_mm = _mm(tolerance_nm)
+    part_uncertainty = tolerance_mm * _distance_mm(part_a, part_b)
+    hole_uncertainty = tolerance_mm * _distance_mm(hole_a, hole_b)
     for other in correspondences:
         if other.designator in (seed_a.designator, seed_b.designator):
             continue
-        part_cross = _cross(part_a, part_b, axes[other.designator])
-        hole_cross = _cross(hole_a, hole_b, other.hole_xy_nm)
-        if part_cross == 0.0 or hole_cross == 0.0:
+        part_cross = _cross_mm2(part_a, part_b, axes[other.designator])
+        hole_cross = _cross_mm2(hole_a, hole_b, other.hole_xy_nm)
+        if abs(part_cross) <= part_uncertainty or abs(hole_cross) <= hole_uncertainty:
             continue
         if (part_cross > 0) != (hole_cross > 0):
             return True
@@ -226,7 +244,7 @@ def _widest_pair(
     best = (ordered[0], ordered[1])
     best_distance = -1.0
     for a, b in combinations(ordered, 2):
-        distance = _distance_nm(axes[a.designator], axes[b.designator])
+        distance = _distance_mm(axes[a.designator], axes[b.designator])
         if distance > best_distance:
             best_distance = distance
             best = (a, b)
@@ -250,11 +268,11 @@ def _candidates(
     for first, second in combinations(ordered, 2):
         anchor_a: _Anchor = (axes[first.designator], first.hole_xy_nm)
         anchor_b: _Anchor = (axes[second.designator], second.hole_xy_nm)
-        part_gap = _distance_nm(axes[first.designator], axes[second.designator])
-        hole_gap = _distance_nm(first.hole_xy_nm, second.hole_xy_nm)
+        part_gap = _distance_mm(axes[first.designator], axes[second.designator])
+        hole_gap = _distance_mm(first.hole_xy_nm, second.hole_xy_nm)
         if abs(part_gap - hole_gap) > 2 * tolerance_mm:
             continue
-        if _chirality_conflict(correspondences, axes, first, second):
+        if _chirality_conflict(correspondences, axes, first, second, tolerance_nm):
             continue
         transform = _transform(anchor_a, anchor_b)
         if transform is None:
@@ -290,14 +308,20 @@ class Match:
 
     Satisfies ``stompmodel.protocols.Stage[DockData]``. Reads only what
     ``DockData`` already states -- ``boards`` and ``holes`` -- so it neither
-    depends on nor asserts that any other stage ran first.
+    depends on nor asserts that any other stage ran first. Recording this
+    stage's own ``describe()`` into a document's processing history is
+    ``Pipeline.run``'s job, not ``apply``'s -- a stage records nothing about
+    itself.
     """
+
+    name: ClassVar[str] = "match"
 
     def __init__(self, tolerance_nm: Nanometre) -> None:
         self._tolerance_nm = tolerance_nm
 
-    def describe(self) -> str:
-        return f"match(tolerance_nm={int(self._tolerance_nm)})"
+    def describe(self) -> StageRun:
+        """Record the recognition tolerance this stage was configured with."""
+        return StageRun(self.name, (("tolerance_nm", int(self._tolerance_nm)),))
 
     def apply(self, data: DockData) -> DockData:
         boards: list[Board] = []
@@ -327,9 +351,7 @@ class Match:
             boards=tuple(boards),
             placements=placements,
             unmatched_holes=unmatched,
-        ).with_diagnostics(*diagnostics).with_processing(
-            StageRun("match", (("tolerance_nm", int(self._tolerance_nm)),))
-        )
+        ).with_diagnostics(*diagnostics)
 
 
 def _match_board(
@@ -393,4 +415,15 @@ def _match_board(
             claimed,
         )
 
-    return new_board, _candidates(correspondences, axes, tolerance_nm), (), claimed
+    candidates = _candidates(correspondences, axes, tolerance_nm)
+    if not candidates:
+        return (
+            new_board,
+            (),
+            (Diagnostic.error(
+                "no-valid-placement",
+                f"board {board.ordinal}: no candidate transform fits within tolerance",
+            ),),
+            claimed,
+        )
+    return new_board, candidates, (), claimed

@@ -19,7 +19,8 @@ from stompcollider.model import (
     Protrusion,
 )
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, Hole
+from stompmodel.model import CaseFace, CaseRegistration, Hole, StageRun
+from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Nanometre, nm_from_mm
 
 _TOLERANCE = Nanometre(1_270_000)  # half a 2.54 mm grid pitch
@@ -160,20 +161,72 @@ def test_two_protrusions_within_tolerance_of_one_hole_is_ambiguous() -> None:
 
 
 # --------------------------------------------------------------------------
-# Rule 3 and 4: candidate generation, tested directly against
-# ``stompcollider.match._candidates``.
+# Critical fix round 1: the chirality gate needs a tolerance band, and an
+# empty candidate set must never pass through silently.
+# --------------------------------------------------------------------------
+
+
+def test_a_near_collinear_row_of_parts_still_yields_a_placement() -> None:
+    """The reviewer's reachable regression: a row of pots, the canonical
+    pedal layout, with a single 1.0 mm offset (inside the 1.27 mm
+    tolerance) on the third hole. Raw signed areas disagree in sign here on
+    noise alone; the banded chirality check must recognise that disagreement
+    as inconclusive, not as a reflection, so the board is not silently
+    dropped."""
+    board = _board(
+        (
+            _part("D3", 20_000_000, 5_500_000),
+            _part("D1", 0, 5_000_000),
+            _part("D2", 10_000_000, 5_000_000),
+        )
+    )
+    holes = (
+        _hole(3, 20_000_000, 4_500_000),
+        _hole(1, 0, 5_000_000),
+        _hole(2, 10_000_000, 5_000_000),
+    )
+    data = Match(_TOLERANCE).apply(DockData(case=_case(), boards=(board,), holes=holes))
+    assert data.diagnostics == ()
+    assert len(data.placements[1]) == 1
+    assert len(data.placements[1][0].correspondence) == 3
+    assert data.unmatched_holes == ()
+
+
+def test_a_board_with_no_valid_placement_is_reported(monkeypatch) -> None:
+    """A board with two or more correspondences and zero surviving
+    candidates must earn ``no-valid-placement`` (ERROR), never silence.
+
+    Reaching this branch through genuine pairing turns out to be
+    mathematically impossible: the same triangle-inequality and
+    cross-product-sensitivity bounds that let the fix above call
+    near-collinear noise "inconclusive" mean *any* correspondence set
+    ``_pair_face`` could ever produce also always has at least one
+    surviving seed pair -- see the fix report for the proof. This test
+    isolates ``_match_board``'s wiring from that unreachable trigger by
+    stubbing the one function whose emptiness it reacts to; everything
+    else (face selection, diagnostics, the empty ``placements`` result)
+    runs for real through ``Match.apply``.
+    """
+    import stompcollider.match as match_module
+
+    monkeypatch.setattr(match_module, "_candidates", lambda *args, **kwargs: ())
+    data = Match(_TOLERANCE).apply(_board_pairing(front=3, back=1))
+    assert [d.code for d in data.diagnostics] == ["no-valid-placement"]
+    assert data.placements == {}
+
+
+# --------------------------------------------------------------------------
+# Rule 3 and 4: candidate generation.
 #
 # Recognition tolerance bounds any *single* part's offset from its own hole
-# to <= tolerance (rule 2's gate, exercised above through ``Match.apply``).
-# Every scenario below needs correspondences whose combined geometry a
-# single-tolerance pairing gate could never produce on its own -- a 2.4 mm
-# gap disagreement between two independently-recognised parts, a genuine
-# mirror image, or a seed pair 100 mm from another that a real board could
-# never confuse with it. Testing ``_candidates`` directly is what lets each
-# of those scenarios be built without first satisfying a gate the rule under
-# test does not govern. This is a deliberate, documented departure from the
-# brief's literal ``Match(...).apply(...)`` wiring for these three cases --
-# see the task report for the proof that the full pipeline cannot reach them.
+# to <= tolerance (rule 2's gate). Two of the scenarios below -- a 3.0 mm
+# gap disagreement, and a genuine mirror image -- need correspondences whose
+# combined geometry a single-tolerance pairing gate could never produce on
+# its own (the fix report proves this for both, after round 1's chirality
+# fix). Those two are tested directly against ``stompcollider.match.
+# _candidates``, a deliberate, documented departure from the brief's literal
+# ``Match(...).apply(...)`` wiring, each marked where it appears below. Every
+# other scenario in this section goes through ``Match.apply`` for real.
 # --------------------------------------------------------------------------
 
 
@@ -189,11 +242,27 @@ def _candidates(part_gap_mm: float, hole_gap_mm: float) -> int:
     return len(_raw_candidates(correspondences, axes, _TOLERANCE))
 
 
-def test_a_pair_whose_separations_disagree_seeds_no_candidate() -> None:
+def test_a_pair_whose_separations_disagree_beyond_twice_tolerance_seeds_no_candidate() -> None:
     """|p1p2| must equal |h1h2| within TWICE the tolerance -- two independent
-    recognition errors, not one."""
+    recognition errors, not one. A 3.0 mm disagreement exceeds what two
+    independently-recognised parts (each <= 1.27 mm from its own hole) could
+    ever jointly produce (the triangle-inequality bound is 2 x 1.27 = 2.54
+    mm), so -- unlike the 2.4 mm half below -- this case cannot be reached
+    through ``Match.apply``'s own pairing and is tested directly against
+    ``_candidates`` instead."""
     assert _candidates(part_gap_mm=20.0, hole_gap_mm=20.0 + 3.0) == 0
-    assert _candidates(part_gap_mm=20.0, hole_gap_mm=20.0 + 2.4) == 1
+
+
+def test_a_gap_disagreement_within_twice_tolerance_is_accepted() -> None:
+    """The reachable half of the case above: parts at (0,-5) and (20,-5) mm,
+    holes at (-1.2,5) and (21.2,5) mm -- each part 1.2 mm from its own hole
+    (within the 1.27 mm tolerance), giving a 22.4 mm hole gap against a
+    20 mm part gap, a 2.4 mm disagreement under the 2.54 mm bound."""
+    board = _board((_part("D2", 20_000_000, -5_000_000), _part("D1", 0, -5_000_000)))
+    holes = (_hole(2, 21_200_000, 5_000_000), _hole(1, -1_200_000, 5_000_000))
+    data = Match(_TOLERANCE).apply(DockData(case=_case(), boards=(board,), holes=holes))
+    assert data.diagnostics == ()
+    assert len(data.placements[1]) == 1
 
 
 def _mirrored_layout() -> tuple[tuple[Correspondence, ...], dict[str, tuple[Nanometre, Nanometre]]]:
@@ -203,6 +272,14 @@ def _mirrored_layout() -> tuple[tuple[Correspondence, ...], dict[str, tuple[Nano
     ``D3`` is the reflected tip -- every candidate a rigid (non-reflective)
     fit could offer for ``D1``, ``D2`` places ``D3`` on the *other* side of
     that leg from where its hole actually is.
+
+    NOT reachable through ``Match.apply``: ``D3``'s own offset from its
+    hole is 20 mm, far past the 1.27 mm recognition tolerance, so
+    ``_pair_face`` would never let it become a correspondence at all -- a
+    genuine reflection large enough for the chirality check to convict is,
+    by the same bound Critical fix (a) derives, always too large for the
+    reflected point to have paired in the first place. This exercises
+    ``_candidates`` directly; it is not coverage of ``Match`` end to end.
     """
     axes = {
         "D1": (Nanometre(0), Nanometre(0)),
@@ -259,7 +336,15 @@ def _two_fold_symmetric_board() -> tuple[
     """Two independent, exactly-fitting pairs 100 mm apart: one fits as
     measured (0 degrees), the other only once turned end for end (180
     degrees) -- the genuinely correct, order-free answer for a symmetric
-    hole pattern is both, not whichever a caller happens to try first."""
+    hole pattern is both, not whichever a caller happens to try first.
+
+    NOT reachable through ``Match.apply``: a board whose two mounting pairs
+    are 100 mm apart cannot present as ambiguous through ``_pair_face`` --
+    each pair only stays within tolerance of its own holes, never the
+    other's, so a single call never sees the choice between orientations
+    that a *reachable* 180-degree ambiguity would require. This exercises
+    ``_candidates`` directly; it is not coverage of ``Match`` end to end.
+    """
     axes = {
         "D1": (Nanometre(0), Nanometre(0)),
         "D2": (Nanometre(10_000_000), Nanometre(0)),
@@ -287,37 +372,47 @@ def test_a_symmetric_pattern_returns_both_placements() -> None:
 # --------------------------------------------------------------------------
 # Vacuity hazard 2 and rule 4: with only two correspondences, "the two most
 # widely separated" is indistinguishable from "the first two" or "the last
-# two". This needs three, with the widest pair -- D1,D3 -- in the *middle*
-# of designator-sorted ``combinations`` order (D1,D2 first; D2,D3 last), and
-# a deliberate inconsistency at D2 so an anchor choice is observable: seeding
-# from D1,D3 (the true widest pair) reports the identity transform: from
-# D1,D2 or D2,D3 -- either "wrong" anchor -- it would not.
+# two". This needs three, with the widest pair -- D1,D3, 20 mm apart -- in
+# the *middle* of designator-sorted ``combinations`` order ((D1,D2) first,
+# 11.18 mm; (D2,D3) last, 18.03 mm), and a deliberate 0.05 mm inconsistency
+# at D2 so an anchor choice is observable: D1,D3 both match their holes
+# exactly, so seeding from the widest pair reports the identity transform
+# exactly, while (D1,D2) is *also* consistent enough that it validates all
+# three (deduplicating into the same candidate) but reports a small, nonzero
+# angle if it is what gets used. Reachable through the real seam: every
+# offset here is well under the 1.27 mm tolerance and every pairwise gap
+# agrees within it too, so ``Match.apply`` finds these correspondences the
+# same way a real board would.
 # --------------------------------------------------------------------------
 
 
-def _widest_pair_is_not_first_two() -> tuple[
-    tuple[Correspondence, ...], dict[str, tuple[Nanometre, Nanometre]]
-]:
-    axes = {
-        "D1": (Nanometre(0), Nanometre(0)),
-        "D2": (Nanometre(1_000_000), Nanometre(500_000)),
-        "D3": (Nanometre(0), Nanometre(20_000_000)),
-    }
-    correspondences = (
-        Correspondence("D1", 1, (Nanometre(0), Nanometre(0)), None, Nanometre(0)),
-        Correspondence("D2", 2, (Nanometre(1_300_000), Nanometre(500_000)), None, Nanometre(300_000)),
-        Correspondence("D3", 3, (Nanometre(0), Nanometre(20_000_000)), None, Nanometre(0)),
+def _widest_pair_is_not_first_two() -> DockData:
+    board = _board(
+        (
+            _part("D3", 0, 20_000_000),
+            _part("D1", 0, 0),
+            _part("D2", 10_000_000, 5_000_000),
+        )
     )
-    return correspondences, axes
+    holes = (
+        _hole(3, 0, 20_000_000),
+        _hole(1, 0, 0),
+        _hole(2, 10_050_000, 5_000_000),  # 0.05 mm off D2's axis
+    )
+    return DockData(case=_case(), boards=(board,), holes=holes)
 
 
 def test_the_reported_transform_uses_the_widest_corresponded_pair() -> None:
-    correspondences, axes = _widest_pair_is_not_first_two()
-    placements = _raw_candidates(correspondences, axes, _TOLERANCE)
+    data = Match(_TOLERANCE).apply(_widest_pair_is_not_first_two())
+    assert data.diagnostics == ()
+    assert data.boards[0].panel_face == "+w"
+    placements = data.placements[1]
     full = [p for p in placements if len(p.correspondence) == 3]
     assert len(full) == 1
     # D1-D3 (20 mm apart) is the widest pair and fits exactly (0, 0, 0 deg).
-    # D1-D2 or D2-D3 (~1.1-19.5 mm) would report a different, nonzero angle.
+    # D1-D2 (~11.18 mm) or D2-D3 (~18.03 mm) -- either "wrong" anchor --
+    # would report a different, nonzero angle (see the fix report for the
+    # deletion probe that proves this).
     assert full[0].x_nm == Nanometre(0)
     assert full[0].y_nm == Nanometre(0)
     assert round(full[0].theta_deg, 6) == 0.0
@@ -353,12 +448,40 @@ def test_deduplication_collapses_every_seed_reaching_the_same_set() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_describe_names_the_tolerance() -> None:
-    assert "1270000" in Match(_TOLERANCE).describe()
+def test_match_satisfies_the_stage_protocol() -> None:
+    """Runtime presence check, mirroring stompdrill's own
+    ``test_every_stage_satisfies_the_stage_protocol``."""
+    stage = Match(_TOLERANCE)
+    assert isinstance(stage, Stage)
+    assert isinstance(type(stage).name, str)
+    assert type(stage).name
 
 
-def test_apply_records_a_stage_run() -> None:
+def test_match_satisfies_stage_dockdata_under_mypy() -> None:
+    """A static conformance assignment: ``isinstance`` alone cannot see that
+    ``describe()`` returns a ``StageRun`` rather than a ``str`` -- a runtime
+    Protocol checks attribute presence, not signatures. mypy checks this
+    line; nothing here needs to run for the check to matter."""
+    _conforms: Stage[DockData] = Match(_TOLERANCE)
+    assert _conforms is not None
+
+
+def test_describe_returns_a_stage_run_naming_the_tolerance() -> None:
+    run = Match(_TOLERANCE).describe()
+    assert run == StageRun("match", (("tolerance_nm", 1_270_000),))
+
+
+def test_apply_alone_records_no_processing() -> None:
+    """A stage records nothing about itself -- ``Pipeline.run`` appends
+    ``describe()`` only after ``apply`` returns, per
+    ``stompmodel.protocols.Pipeline.run``. A bare ``apply()`` call, as every
+    test above makes, must not have silently duplicated that bookkeeping."""
     data = Match(_TOLERANCE).apply(_board_pairing(front=1, back=1))
+    assert data.processing == ()
+
+
+def test_pipeline_run_records_matchs_stage_run() -> None:
+    data = Pipeline([Match(_TOLERANCE)]).run(_board_pairing(front=1, back=1))
     assert [run.name for run in data.processing] == ["match"]
 
 
