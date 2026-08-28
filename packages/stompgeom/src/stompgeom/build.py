@@ -84,13 +84,12 @@ def _addable(shape: Any, colour: tuple[float, float, float] | None) -> Any:
     """``shape`` as something ``AddShape`` will give a label of its own.
 
     ``AddShape`` makes a *located* shape a reference to the unlocated
-    original, and a colour on a reference is written as a
+    original, and a colour on a reference becomes a
     ``PRESENTATION_STYLE_BY_CONTEXT`` chain -- one ``solid_colour`` cannot
-    resolve, the writer's census does not count and its colour region
-    cannot canonicalise. A one-solid compound is identity-located, so the
-    label owns its shape and no geometry is rebuilt. Only a coloured solid
-    needs it: an uncoloured reference is written correctly, and its shared
-    base product keeps a file of repeated parts far smaller.
+    resolve, the census does not count and the colour region cannot
+    canonicalise. A one-solid compound is identity-located, so the label
+    owns its shape and no geometry is rebuilt. Only a coloured solid needs
+    it: an uncoloured reference writes correctly and shares its base.
     """
     if colour is None or shape.Location().IsIdentity():
         return shape

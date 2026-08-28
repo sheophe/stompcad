@@ -1,13 +1,12 @@
 """The assembly model: the case, plus every board seated where it was placed.
 
 Synthetic and kernel-backed, like ``test_clash.py``: the solids are built
-through OCP directly because that is what a fixture is, while the package's
-own source reaches the kernel only through ``stompgeom``. Every scene here
-breaks the task's four named vacuity hazards on purpose -- a placement whose
+through OCP directly because that is what a fixture is. Every scene breaks
+the task's four named vacuity hazards on purpose -- a placement whose
 rotation permutes all three axes rather than an identity, a seated depth
-that is not zero, two boards rather than one, and colours that are neither
-uniform nor all distinct, so a builder painting everything one colour and
-one that cannot repeat a colour both have somewhere to fail.
+that is not zero, two boards rather than one, and colours neither uniform
+nor all distinct, so a builder painting everything one colour and one that
+cannot repeat a colour both have somewhere to fail.
 """
 
 from __future__ import annotations
