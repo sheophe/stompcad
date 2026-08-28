@@ -8,6 +8,8 @@ each fixture group for which hazard it targets.
 
 from __future__ import annotations
 
+import pytest
+
 from stompcollider.match import Match
 from stompcollider.match import _candidates as _raw_candidates
 from stompcollider.model import (
@@ -18,6 +20,7 @@ from stompcollider.model import (
     Profile,
     Protrusion,
 )
+from stompmodel.diagnostics import Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, Hole, StageRun
 from stompmodel.protocols import Pipeline, Stage
@@ -125,12 +128,14 @@ def test_equal_non_zero_pairings_on_both_faces_is_an_error() -> None:
     """Not broken by a majority, a fallback, or a preference for the front."""
     data = Match(_TOLERANCE).apply(_board_pairing(front=2, back=2))
     assert [d.code for d in data.diagnostics] == ["both-faced-group"]
+    assert [d.severity for d in data.diagnostics] == [Severity.ERROR]
 
 
 def test_zero_pairings_on_both_faces_is_a_different_error() -> None:
     """Distinct code: a wrong board and an undeclared side are different faults."""
     data = Match(_TOLERANCE).apply(_board_pairing(front=0, back=0))
     assert [d.code for d in data.diagnostics] == ["no-correspondence"]
+    assert [d.severity for d in data.diagnostics] == [Severity.ERROR]
 
 
 def test_fewer_than_two_correspondences_is_under_constrained() -> None:
@@ -138,6 +143,8 @@ def test_fewer_than_two_correspondences_is_under_constrained() -> None:
     a rigid planar transform, not a threshold."""
     data = Match(_TOLERANCE).apply(_board_pairing(front=1, back=0))
     assert "under-constrained-board" in {d.code for d in data.diagnostics}
+    (found,) = [d for d in data.diagnostics if d.code == "under-constrained-board"]
+    assert found.severity == Severity.WARNING
 
 
 # --------------------------------------------------------------------------
@@ -158,6 +165,7 @@ def test_two_protrusions_within_tolerance_of_one_hole_is_ambiguous() -> None:
     the weighting the pre-spec refuses."""
     data = Match(_TOLERANCE).apply(_two_parts_one_hole())
     assert [d.code for d in data.diagnostics] == ["ambiguous-pairing"]
+    assert [d.severity for d in data.diagnostics] == [Severity.ERROR]
 
 
 # --------------------------------------------------------------------------
@@ -192,26 +200,27 @@ def test_a_near_collinear_row_of_parts_still_yields_a_placement() -> None:
     assert data.unmatched_holes == ()
 
 
-def test_a_board_with_no_valid_placement_is_reported(monkeypatch) -> None:
+def test_a_board_with_no_valid_placement_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     """A board with two or more correspondences and zero surviving
     candidates must earn ``no-valid-placement`` (ERROR), never silence.
 
-    Reaching this branch through genuine pairing turns out to be
-    mathematically impossible: the same triangle-inequality and
-    cross-product-sensitivity bounds that let the fix above call
-    near-collinear noise "inconclusive" mean *any* correspondence set
-    ``_pair_face`` could ever produce also always has at least one
-    surviving seed pair -- see the fix report for the proof. This test
-    isolates ``_match_board``'s wiring from that unreachable trigger by
-    stubbing the one function whose emptiness it reacts to; everything
-    else (face selection, diagnostics, the empty ``placements`` result)
-    runs for real through ``Match.apply``.
+    Reaching this branch through genuine pairing is provably impossible,
+    but on a knife edge: for three points the signed area's sign is
+    consistent across every seed, so "every seed convicted" collapses to
+    one feasibility question, whose supremum over every reachable layout is
+    exactly zero -- conviction needs strict inequality, so it is never
+    reached. See the fix report for the derivation. This test isolates
+    ``_match_board``'s wiring from that unreachable trigger by stubbing the
+    one function whose emptiness it reacts to; everything else (face
+    selection, diagnostics, the empty ``placements`` result) runs for real
+    through ``Match.apply``.
     """
     import stompcollider.match as match_module
 
     monkeypatch.setattr(match_module, "_candidates", lambda *args, **kwargs: ())
     data = Match(_TOLERANCE).apply(_board_pairing(front=3, back=1))
     assert [d.code for d in data.diagnostics] == ["no-valid-placement"]
+    assert [d.severity for d in data.diagnostics] == [Severity.ERROR]
     assert data.placements == {}
 
 

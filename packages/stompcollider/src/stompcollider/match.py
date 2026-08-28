@@ -136,27 +136,23 @@ def _chirality_conflict(
 
     Two points alone carry no orientation, so a seed pair's own rotation
     always "fits" itself; a third point is what a mirrored layout cannot
-    survive -- but every correspondence here already carries up to one
-    ``tolerance`` of ordinary recognition noise, and a near-collinear board
-    (a row of pots is the canonical layout) can flip a signed area's sign on
-    noise alone.
-
-    A cross product is bilinear in its three vertices: moving any one of
-    them by up to ``tolerance`` changes ``_cross_mm2(seed_a, seed_b, other)``
-    by at most ``tolerance`` times the length of the ``seed_a``-``seed_b``
-    edge (the other two vertices contribute no more, since that edge is the
-    longest lever a single-vertex perturbation has here). A signed area at
-    or under that bound is therefore inconclusive -- ordinary noise could
-    have produced either sign -- and only a signed area *exceeding* it, on
-    both the part and the hole side, is evidence of a genuine reflection
-    rather than noise. This is the explicit determinant check the brief
-    calls for when a mirrored layout would otherwise validate through a
-    seed pair alone, banded so it does not also convict a board recognition
-    noise alone can explain.
+    survive. Every correspondence carries up to one tolerance of ordinary
+    recognition noise, so the check is banded rather than exact -- see the
+    comment beside the band below for what it actually bounds.
     """
     part_a, part_b = axes[seed_a.designator], axes[seed_b.designator]
     hole_a, hole_b = seed_a.hole_xy_nm, seed_b.hole_xy_nm
     tolerance_mm = _mm(tolerance_nm)
+    # cross(seed_a, seed_b, other) equals |seed_a - seed_b| times other's
+    # perpendicular distance from the seed_a-seed_b line, so a signed area
+    # at or under tolerance * |seed_a - seed_b| means that distance is at
+    # most one tolerance -- consistent with ordinary recognition noise on
+    # `other` alone, not evidence of a reflection. This is the explicit
+    # determinant check the brief calls for when a mirrored layout would
+    # otherwise validate through a seed pair alone, banded so it does not
+    # also convict a board recognition noise alone can explain. Each seed
+    # carries its own band from its own edge length; it bounds only a
+    # perturbation of `other`, not of `seed_a` or `seed_b` themselves.
     part_uncertainty = tolerance_mm * _distance_mm(part_a, part_b)
     hole_uncertainty = tolerance_mm * _distance_mm(hole_a, hole_b)
     for other in correspondences:
