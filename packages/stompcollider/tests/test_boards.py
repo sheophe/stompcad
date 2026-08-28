@@ -18,6 +18,7 @@ import pytest
 
 from stompcollider.boards import (
     _area_ratio,
+    _contact,
     _extent_mm,
     _opposed,
     _thickness_nm,
@@ -37,6 +38,7 @@ from stompgeom.step import (
     read_step,
     read_step_document,
 )
+from stompmodel.frames import CoordinateFrame
 from stompmodel.units import Nanometre, nm_from_mm
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
@@ -184,8 +186,30 @@ def _boards_apart() -> StepDocument:
     )
 
 
+def _mirrored_boards() -> StepDocument:
+    """Two identical plates mirrored about x = 0, and a part exactly between.
+
+    The one arrangement that makes ``_contact`` tie outright: ``MID``
+    overlaps neither footprint, touches neither along the normal, and its
+    centre is the same distance from both. Nothing about the part can
+    separate the plates, so only the tie-break can.
+    """
+    return _document_of(
+        ("", _block(40.0, 40.0, 1.5, (-50.0, 0.0, 0.0))),
+        ("", _block(40.0, 40.0, 1.5, (10.0, 0.0, 0.0))),
+        ("MID", _block(4.0, 4.0, 3.0, (-2.0, 18.0, 0.0))),
+    )
+
+
 def _named(document: StepDocument, designator: str) -> StepSolid:
     return next(solid for solid in document.solids if solid.name == designator)
+
+
+def _frame(solid: StepSolid) -> CoordinateFrame:
+    """``solid``'s carrier frame, for a solid a test already knows is one."""
+    frame = carrier_frame(solid)
+    assert frame is not None
+    return frame
 
 
 def _pair(solid: StepSolid) -> tuple[Level, Level]:
@@ -407,6 +431,41 @@ def test_a_part_over_no_board_at_all_is_still_grouped() -> None:
     # The control: it landed on the far plate by choice, not by there being
     # one plate to land on. That plate starts at x = 300.
     assert _holder(grouped, "STRAY")[0] == 300.0
+
+
+def test_two_mirrored_boards_really_do_tie() -> None:
+    """The control for the test below, and the reason it is not coverage
+    theatre: without a genuine tie the tie-break is never reached and any
+    rule at all would look correct. Bit-identical, not merely close."""
+    mirrored = _mirrored_boards()
+    part = bounding_box_mm(_named(mirrored, "MID").shape)
+
+    scores = [
+        _contact(_frame(solid), bounding_box_mm(solid.shape), part)
+        for solid in substrates(mirrored)
+    ]
+
+    assert scores[0] == scores[1]
+
+
+def test_a_tied_part_is_placed_by_geometry_not_by_the_documents_order() -> None:
+    """ADR-0006 where it actually bites. ``_contact`` measures one part
+    against one substrate and cannot see the other, so a tie is broken on
+    the substrates' own bounding boxes -- the left plate starts at x = -50
+    and the right at x = 10, so the left one wins whichever way the
+    document is walked."""
+    mirrored = _mirrored_boards()
+    walked = StepDocument(
+        solids=tuple(reversed(mirrored.solids)),
+        document=mirrored.document,
+        timestamp=mirrored.timestamp,
+    )
+
+    forward = group(mirrored, substrates(mirrored))
+    backward = group(walked, substrates(walked))
+
+    assert _holder(forward, "MID")[0] == -50.0
+    assert _holder(backward, "MID")[0] == -50.0
 
 
 def test_grouping_onto_no_board_at_all_is_refused() -> None:

@@ -112,8 +112,10 @@ def group(
     footprint it overlaps in projection along the carrier normal, the
     nearest along that normal. Overlap is a preference and not a gate, so a
     part reaching no footprint falls to the nearest substrate rather than
-    being dropped. Components come back sorted by designator, never in the
-    document's own walk order.
+    being dropped. An exact tie between two substrates is broken on their
+    own bounding boxes and never on their position in ``found``, which
+    would be the document's walk order (ADR-0006). Components come back
+    sorted by designator, for the same reason.
     """
     if not found:
         raise StompcolliderError("no-substrate: there is no board to group these solids onto")
@@ -124,7 +126,8 @@ def group(
             continue
         box = bounding_box_mm(part.shape)
         index = min(
-            range(len(boxes)), key=lambda i: _contact(boxes[i][1], boxes[i][2], box)
+            range(len(boxes)),
+            key=lambda i: (_contact(boxes[i][1], boxes[i][2], box), boxes[i][2]),
         )
         assigned[index].append(part)
     return tuple(
@@ -222,7 +225,10 @@ def _contact(
 
     Least is nearest: footprints that overlap first, then the gap along the
     carrier normal, then the distance between the two boxes' centres so
-    that a part over no footprint at all still lands somewhere.
+    that a part over no footprint at all still lands somewhere. Three
+    measurements of one part against one substrate and nothing else, so
+    two substrates can tie -- mirrored ones do. :func:`group` breaks that
+    tie; nothing here may, because nothing here can see the other.
     """
     substrate = _projected(substrate_box, frame)
     part = _projected(part_box, frame)
