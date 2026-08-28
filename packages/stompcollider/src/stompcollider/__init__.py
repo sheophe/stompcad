@@ -2,16 +2,17 @@
 
 The package root exposes the canonicalisation entry point and what it
 reads, so a caller never has to guess a submodule -- see
-``docs/specs/stompcollider-technical.md``'s module layout. ``Match``, ``Seat``
-and ``BoardSource`` land here now; the emitters join them as later tasks
-add them, mirroring ``stompdrill``'s own root. The domain values live in
-``stompcollider.model``; the float-millimetre reader types live in
-``stompcollider.raw`` -- one name, one home, each.
+``docs/specs/stompcollider-technical.md``'s module layout. ``Match``, ``Seat``,
+``Clashes`` and ``BoardSource`` land here now; the emitters join them as
+later tasks add them, mirroring ``stompdrill``'s own root. The domain
+values live in ``stompcollider.model``; the float-millimetre reader types
+live in ``stompcollider.raw`` -- one name, one home, each.
 """
 
 from __future__ import annotations
 
 from .canonicalise import canonicalise
+from .clash import Clashes
 from .match import Match
 from .raw import RawBoard, RawBoards, RawComponent, RawCylinder
 from .seat import Seat
@@ -22,6 +23,7 @@ __all__ = [
     "canonicalise",
     "Match",
     "Seat",
+    "Clashes",
     "RawCylinder",
     "RawComponent",
     "RawBoard",
