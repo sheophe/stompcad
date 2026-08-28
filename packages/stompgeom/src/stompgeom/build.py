@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from stompmodel.frames import RigidTransform
 
 from .kernel import require_kernel
-from .shapes import placed
+from .shapes import compound, placed
 
 if TYPE_CHECKING:
     # Real OCP name for readability only; resolved to Any either way by
@@ -48,7 +48,8 @@ def build_document(solids: Sequence[PlacedSolid]) -> Any:
     not yet own placing one document's solids into a shared parent, only
     placing a single solid before it is added. Colour is set through
     ``XCAFDoc_ColorTool.SetColor`` on the very label the shape tool handed
-    back, the route the writer's colour census walks -- see ADR-0008 and
+    back -- which ``_addable`` is what keeps owning the shape -- the route
+    the writer's colour census walks. See ADR-0008 and
     ``stompgeom.writer._count_colour_assignments``.
     """
     require_kernel()
@@ -68,7 +69,7 @@ def build_document(solids: Sequence[PlacedSolid]) -> Any:
 
     for solid in solids:
         shape = solid.shape if solid.placement is None else placed(solid.shape, solid.placement)
-        label = shape_tool.AddShape(shape, False)
+        label = shape_tool.AddShape(_addable(shape, solid.colour), False)
         TDataStd_Name.Set_s(label, TCollection_ExtendedString(solid.name))
         if solid.colour is not None:
             colour_tool.SetColor(
@@ -77,6 +78,23 @@ def build_document(solids: Sequence[PlacedSolid]) -> Any:
                 XCAFDoc_ColorType.XCAFDoc_ColorSurf,
             )
     return document
+
+
+def _addable(shape: Any, colour: tuple[float, float, float] | None) -> Any:
+    """``shape`` as something ``AddShape`` will give a label of its own.
+
+    ``AddShape`` makes a *located* shape a reference to the unlocated
+    original, and a colour on a reference is written as a
+    ``PRESENTATION_STYLE_BY_CONTEXT`` chain -- one ``solid_colour`` cannot
+    resolve, the writer's census does not count and its colour region
+    cannot canonicalise. A one-solid compound is identity-located, so the
+    label owns its shape and no geometry is rebuilt. Only a coloured solid
+    needs it: an uncoloured reference is written correctly, and its shared
+    base product keeps a file of repeated parts far smaller.
+    """
+    if colour is None or shape.Location().IsIdentity():
+        return shape
+    return compound([shape])
 
 
 def solid_colour(document: TDocStd_Document, solid: Any) -> tuple[float, float, float] | None:

@@ -81,6 +81,117 @@ def test_an_absent_placement_leaves_the_solid_where_it_was() -> None:
     assert round(bounding_box_mm(solids[0].shape)[0], 9) == 0.0
 
 
+def test_a_placed_solid_keeps_its_colour() -> None:
+    """Placement and colour together, which no test above reaches: every
+    placement test here is uncoloured and every colour test unplaced, and
+    the two interact -- ``AddShape`` turns a *located* shape into a
+    reference to the unlocated original, and a colour set on a reference
+    is not the colour ``solid_colour`` resolves."""
+    document = build_document([
+        PlacedSolid(_box(2, 2, 2), "A", _RED, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+    ])
+    solid = read_step_document(document).solids[0]
+    got = solid_colour(document, solid)
+    assert got is not None
+    assert all(round(g - w, 6) == 0 for g, w in zip(got, _RED))
+
+
+def test_two_placed_solids_sharing_one_base_shape_keep_distinct_colours() -> None:
+    """The control on the fix: a real board's solids share very few base
+    shapes -- ``tar-pcb.stp``'s 43 solids share 5 -- so a repair that
+    coloured the *referred* label instead would paint them all one colour
+    and lose every name but the last."""
+    base = _box(2, 3, 4)
+    document = build_document([
+        PlacedSolid(base, "A", _RED, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+        PlacedSolid(base, "B", _GREEN, RigidTransform(_IDENTITY, (0.0, 20.0, 0.0))),
+    ])
+    solids = read_step_document(document).solids
+    by_name = {solid.name: solid for solid in solids}
+    assert set(by_name) == {"A", "B"}
+    for name, wanted in (("A", _RED), ("B", _GREEN)):
+        got = solid_colour(document, by_name[name])
+        assert got is not None
+        assert all(round(g - w, 6) == 0 for g, w in zip(got, wanted))
+
+
+#: Repeated enough that two fresh allocations landing in the same slot
+#: order by chance is unlikely, without the cost of a subprocess per try --
+#: the same instrument ``test_writer``'s reslot control uses.
+_TRIALS = 20
+
+
+def test_placed_coloured_solids_render_identically_from_fresh_allocations() -> None:
+    """The written half of the same defect, and the sharper one: a colour
+    on a *located* shape is serialised as a ``PRESENTATION_STYLE_BY_CONTEXT``
+    chain, which the census does not count and ``_COLOUR_CHAIN`` does not
+    match -- so the guard sees zero of zero, the reslot is skipped, and the
+    kernel's pointer-hashed colour order reaches the file unnormalised.
+    Nothing raises; the bytes simply stop agreeing between allocations.
+    """
+
+    def rendered() -> bytes:
+        document = build_document([
+            PlacedSolid(_box(2, 2, 2), "A", _RED, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+            PlacedSolid(_box(3, 3, 3), "B", _GREEN, RigidTransform(_IDENTITY, (0.0, 30.0, 0.0))),
+        ])
+        return render_step(
+            document, title="t",
+            timestamp="1970-01-01T00:00:00+00:00", originating_system="t",
+        )
+
+    payloads = {rendered() for _ in range(_TRIALS)}
+
+    assert len(payloads) == 1
+    # Grounding: agreement over a document carrying no colour chain at all
+    # would prove nothing about the region this test is named for.
+    assert next(iter(payloads)).count(b"STYLED_ITEM") == 2
+
+
+def test_a_coloured_and_an_uncoloured_placement_share_one_base_shape() -> None:
+    """The mixed document the assembly emitter actually builds: only the
+    coloured solid needs its own product, so both structures appear in one
+    file and must not disturb each other's colour region."""
+    base = _box(2, 3, 4)
+    document = build_document([
+        PlacedSolid(base, "A", _RED, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+        PlacedSolid(base, "B", None, RigidTransform(_IDENTITY, (0.0, 20.0, 0.0))),
+    ])
+    payload = render_step(
+        document, title="t", timestamp="1970-01-01T00:00:00+00:00", originating_system="t"
+    )
+    assert payload.count(b"STYLED_ITEM") == 1
+
+    solids = read_step_document(document).solids
+    by_name = {solid.name: solid for solid in solids}
+    assert set(by_name) == {"A", "B"}
+    assert solid_colour(document, by_name["B"]) is None
+    got = solid_colour(document, by_name["A"])
+    assert got is not None
+    assert all(round(g - w, 6) == 0 for g, w in zip(got, _RED))
+
+
+def test_a_placed_coloured_solid_rereads_from_a_written_file(tmp_path: Path) -> None:
+    """Placement and colour together through a real round trip, the way the
+    assembly emitter writes them."""
+    document = build_document([
+        PlacedSolid(_box(2, 2, 2), "A", _RED, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
+        PlacedSolid(_box(3, 3, 3), "B", _GREEN, RigidTransform(_IDENTITY, (0.0, 30.0, 0.0))),
+    ])
+    path = tmp_path / "placed.stp"
+    path.write_bytes(render_step(
+        document, title="t", timestamp="1970-01-01T00:00:00+00:00", originating_system="t"
+    ))
+
+    reread = read_step(path)
+    by_name = {solid.name: solid for solid in reread.solids}
+    assert round(bounding_box_mm(by_name["A"].shape)[0], 9) == 10.0
+    for name, wanted in (("A", _RED), ("B", _GREEN)):
+        got = solid_colour(reread.document, by_name[name])
+        assert got is not None
+        assert all(round(g - w, 6) == 0 for g, w in zip(got, wanted))
+
+
 def test_a_solids_colour_reads_back() -> None:
     """The published reading half stompcollider-technical.md:598-602 requires."""
     document = build_document([PlacedSolid(_box(1, 1, 1), "A", (1.0, 0.0, 0.0), None)])
