@@ -48,8 +48,8 @@ def build_document(solids: Sequence[PlacedSolid]) -> Any:
     not yet own placing one document's solids into a shared parent, only
     placing a single solid before it is added. Colour is set through
     ``XCAFDoc_ColorTool.SetColor`` on the very label the shape tool handed
-    back -- which ``_addable`` is what keeps owning the shape -- the route
-    the writer's colour census walks. See ADR-0008 and
+    back, which is the route the writer's colour census walks; ``_addable``
+    is what keeps that label the owner of the shape. See ADR-0008 and
     ``stompgeom.writer._count_colour_assignments``.
     """
     require_kernel()

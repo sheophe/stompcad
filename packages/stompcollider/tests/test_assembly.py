@@ -292,9 +292,79 @@ def test_the_assembly_holds_the_case_solids_and_every_board_s_solids() -> None:
     assert len(solids) == len(_CASE_PARTS) + len(_BOARD_ONE_PARTS) + len(_BOARD_TWO_PARTS)
 
 
-def test_every_named_solid_keeps_the_name_it_arrived_with() -> None:
+def test_a_case_solid_keeps_the_name_it_arrived_with() -> None:
+    """A case solid is named by its own product name -- the name the
+    report's ``with_`` field already uses for it."""
     names = {solid.name for solid in _read_back(payload())}
-    assert {"BOX", "LID", "RV1", "SW1", "J1", "D1"} <= names
+    assert {"BOX", "LID"} <= names
+
+
+def test_a_board_solid_carries_the_board_it_belongs_to() -> None:
+    """Every board solid is qualified, not only the ones nobody named."""
+    names = {solid.name for solid in _read_back(payload())}
+    assert {"board:1:RV1", "board:1:SW1", "board:2:J1", "board:2:D1"} <= names
+    assert "RV1" not in names
+
+
+def test_two_boards_sharing_a_designator_get_distinct_names() -> None:
+    """Why every board solid is qualified: a designator is unique within a
+    board, never across an assembly, and two solids of one name in one
+    document leave a reader -- and the agreement test -- no way to tell
+    which board's component they are looking at."""
+    parts = (
+        ("", _MOSS, (2.0, 3.0, 5.0), (20.0, 8.0, 1.6)),
+        ("RV1", _RUST, (4.0, 5.0, 6.6), (3.0, 3.0, 9.0)),
+    )
+    emitter = AssemblyEmitter(
+        case=_group(_CASE_PARTS),
+        boards={1: _group(parts), 2: _group(parts)},
+        title="dock",
+        timestamp="1970-01-01T00:00:00+00:00",
+    )
+    data = DockData(
+        case=_case(),
+        boards=(_board(1, ("RV1",)), _board(2, ("RV1",))),
+        placements={
+            1: (_placement(1, *_ONE_CHOSEN),),
+            2: (_placement(1, *_TWO_CHOSEN),),
+        },
+    )
+
+    names = [solid.name for solid in _read_back(emitter.emit(data))]
+
+    assert len(names) == len(set(names))
+    assert {"board:1:RV1", "board:2:RV1"} <= set(names)
+
+
+def test_two_solids_sharing_a_name_and_a_corner_order_by_extent() -> None:
+    """A name and a least corner do not settle an order. Two unnamed solids
+    on one least corner take the same geometry-keyed name, so a key three
+    wide would leave them in the order they arrived in -- which ADR-0006
+    forbids and which only the far corner can break."""
+    twins = (
+        ("", None, (2.0, 3.0, 5.0), (20.0, 8.0, 1.6)),
+        ("", None, (2.0, 3.0, 5.0), (12.0, 6.0, 4.0)),
+    )
+    data = DockData(
+        case=_case(),
+        boards=(_board(1, ("RV1",)),),
+        placements={1: (_placement(1, *_ONE_CHOSEN),)},
+    )
+
+    def rendered(reverse: bool) -> bytes:
+        emitter = AssemblyEmitter(
+            case=_group(_CASE_PARTS),
+            boards={1: _group(twins, reverse)},
+            title="dock",
+            timestamp="1970-01-01T00:00:00+00:00",
+        )
+        return emitter.emit(data)
+
+    # Grounding: the two really do share the name the order must break.
+    named = {solid.name for solid in _read_back(rendered(False))}
+    assert "board:1:unnamed@2000000,3000000,5000000" in named
+
+    assert rendered(False) == rendered(True)
 
 
 def test_a_solid_nobody_named_is_named_by_its_own_geometry() -> None:
@@ -315,16 +385,16 @@ def test_a_board_is_written_at_its_placement_not_at_its_export_position() -> Non
     fails this one: the composed rotation permutes all three axes, so a
     3 x 3 x 9 shaft comes back 3 x 9 x 3."""
     solids = _read_back(payload())
-    assert _box_of(solids, "RV1") == _expected_box((4.0, 5.0, 6.6), (3.0, 3.0, 9.0), _seated_one)
-    assert _box_of(solids, "RV1") != (4.0, 5.0, 6.6, 7.0, 8.0, 15.6)
+    assert _box_of(solids, "board:1:RV1") == _expected_box((4.0, 5.0, 6.6), (3.0, 3.0, 9.0), _seated_one)
+    assert _box_of(solids, "board:1:RV1") != (4.0, 5.0, 6.6, 7.0, 8.0, 15.6)
 
 
 def test_every_board_is_written_at_its_own_placement() -> None:
     """One board cannot tell "every board is placed" from "the first board
     is placed", so board 2 is seated by a different transform entirely."""
     solids = _read_back(payload())
-    assert _box_of(solids, "J1") == _expected_box((32.0, 4.0, 6.6), (4.0, 3.0, 6.0), _seated_two)
-    assert _box_of(solids, "J1") != _expected_box((32.0, 4.0, 6.6), (4.0, 3.0, 6.0), _seated_one)
+    assert _box_of(solids, "board:2:J1") == _expected_box((32.0, 4.0, 6.6), (4.0, 3.0, 6.0), _seated_two)
+    assert _box_of(solids, "board:2:J1") != _expected_box((32.0, 4.0, 6.6), (4.0, 3.0, 6.0), _seated_one)
 
 
 def test_the_case_solids_are_written_where_they_already_were() -> None:
@@ -341,8 +411,8 @@ def test_the_written_placement_is_the_rank_one_one_not_the_first_listed() -> Non
         (4.0, 5.0, 6.6), (3.0, 3.0, 9.0),
         lambda point: (point[0] + 8.0, 14.0 - point[2], 15.0 + point[1]),
     )
-    assert _box_of(solids, "RV1") != runner_up
-    assert _box_of(solids, "RV1") == _expected_box(
+    assert _box_of(solids, "board:1:RV1") != runner_up
+    assert _box_of(solids, "board:1:RV1") == _expected_box(
         (4.0, 5.0, 6.6), (3.0, 3.0, 9.0), _seated_one
     )
 
@@ -374,10 +444,9 @@ def test_a_seated_board_s_depth_is_its_exported_w_plus_the_placement_z() -> None
     exported = (6.6, 15.6)
     z_mm = -28.085
 
-    seated = _face_w(_box_of(_read_back(payload()), "RV1"))
+    seated = _face_w(_box_of(_read_back(payload()), "board:1:RV1"))
 
     assert seated == (round(exported[0] + z_mm, 6), round(exported[1] + z_mm, 6))
-    assert seated != (z_mm, z_mm)
     assert seated != exported
 
 
@@ -388,10 +457,9 @@ def test_the_seating_datum_holds_for_the_second_board_too() -> None:
     exported = (6.6, 12.6)
     z_mm = -12.25
 
-    seated = _face_w(_box_of(_read_back(payload()), "J1"))
+    seated = _face_w(_box_of(_read_back(payload()), "board:2:J1"))
 
     assert seated == (round(exported[0] + z_mm, 6), round(exported[1] + z_mm, 6))
-    assert seated != (z_mm, z_mm)
     assert seated != exported
 
 
@@ -455,7 +523,7 @@ def test_distinct_colours_survive_the_placement() -> None:
 
     assert _colour_of(written.document, written.solids, "BOX") == _rounded(_SLATE)
     assert _colour_of(written.document, written.solids, "LID") == _rounded(_CLAY)
-    assert _colour_of(written.document, written.solids, "RV1") == _rounded(_RUST)
+    assert _colour_of(written.document, written.solids, "board:1:RV1") == _rounded(_RUST)
 
 
 def test_a_colour_shared_by_solids_of_two_boards_survives_on_both() -> None:
@@ -465,8 +533,8 @@ def test_a_colour_shared_by_solids_of_two_boards_survives_on_both() -> None:
         path.write_bytes(payload())
         written = read_step(path)
 
-    assert _colour_of(written.document, written.solids, "RV1") == _rounded(_RUST)
-    assert _colour_of(written.document, written.solids, "J1") == _rounded(_RUST)
+    assert _colour_of(written.document, written.solids, "board:1:RV1") == _rounded(_RUST)
+    assert _colour_of(written.document, written.solids, "board:2:J1") == _rounded(_RUST)
 
 
 def test_a_solid_nobody_coloured_stays_uncoloured() -> None:
@@ -477,7 +545,7 @@ def test_a_solid_nobody_coloured_stays_uncoloured() -> None:
         path.write_bytes(payload())
         written = read_step(path)
 
-    assert _colour_of(written.document, written.solids, "D1") is None
+    assert _colour_of(written.document, written.solids, "board:2:D1") is None
 
 
 # --------------------------------------------------------------------------
@@ -601,8 +669,8 @@ def test_a_board_with_no_placement_is_left_out_rather_than_written_unplaced() ->
 
     names = {solid.name for solid in _read_back(_emitter().emit(data))}
 
-    assert "RV1" in names
-    assert "J1" not in names
+    assert "board:1:RV1" in names
+    assert "board:2:J1" not in names
 
 
 def test_a_group_needs_a_solid() -> None:
@@ -624,7 +692,7 @@ def test_a_real_board_s_names_survive_the_placement() -> None:
 
     names = {solid.name for solid in _read_back(emitter.emit(_seated_one_board()))}
 
-    assert "RV1" in names and "BOX" in names
+    assert "board:1:RV1" in names and "BOX" in names
 
 
 def _seated_one_board() -> DockData:

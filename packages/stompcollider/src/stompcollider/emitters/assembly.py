@@ -11,7 +11,7 @@ the report and the model cannot disagree about where a board went.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -40,6 +40,9 @@ _TITLE = "stompcollider"
 #: two runs over one input must agree byte for byte (ADR-0006).
 _EPOCH = "1970-01-01T00:00:00+00:00"
 
+#: A shape's bounding box in millimetres, as ``stompgeom`` reports one.
+_Box = tuple[float, float, float, float, float, float]
+
 
 @dataclass(frozen=True, slots=True)
 class Solids:
@@ -60,21 +63,35 @@ class Solids:
             raise ValueError("a group of solids to write needs at least one solid")
 
 
+def _board_solid_name(solid: StepSolid, box: _Box, group: str) -> str:
+    """A board solid's name, always carrying the board it belongs to.
+
+    Every one, not only the solids nobody named: two boards may each carry
+    an ``RV1``, so a designator alone is not unique across an assembly, and
+    a reader opening one needs to know whose component it is anyway.
+    ``solid_name`` states the unnamed half, here and for ``Clashes``.
+    """
+    return f"{group}:{solid.name}" if solid.name else solid_name(solid, box, group)
+
+
 def _ordered(
-    solids: Solids, group: str
+    solids: Solids, name_of: Callable[[StepSolid, _Box], str]
 ) -> list[tuple[str, tuple[Nanometre, ...], StepSolid]]:
-    """``solids`` named within ``group`` and sorted on their own geometry.
+    """``solids`` named by ``name_of`` and sorted on their own geometry.
 
     Sorted rather than taken in the order they were supplied: two files
     listing the same solids differently must reach the same bytes, and the
-    build order decides the written entity order (ADR-0006). The corner is
-    whole nanometres, so the key holds no float.
+    build order decides the written entity order (ADR-0006). The key is the
+    whole bounding box, both corners: two solids can share a name and a
+    least corner and differ only in extent, and a three-wide key would let
+    those fall back to the order they arrived in. Whole nanometres, so the
+    key holds no float.
     """
     entries = []
     for solid in solids.solids:
         box = bounding_box_mm(solid.shape)
-        corner = tuple(nm_from_mm(box[axis]) for axis in range(3))
-        entries.append((solid_name(solid, box, group), corner, solid))
+        extent = tuple(nm_from_mm(value) for value in box)
+        entries.append((name_of(solid, box), extent, solid))
     return sorted(entries, key=lambda entry: (entry[0], entry[1]))
 
 
@@ -110,7 +127,7 @@ class AssemblyEmitter:
         self._timestamp = timestamp
 
     def emit(self, data: DockData) -> bytes:
-        """Build one document from the case and every seated board, and write it.
+        """One document from the case and every seated board, rendered to bytes.
 
         Boards are walked in ordinal order and their solids in geometry
         order, so nothing about the caller's own ordering reaches the bytes.
@@ -132,7 +149,9 @@ class AssemblyEmitter:
         """The case, unmoved: ``placement`` is ``None``, never an identity."""
         return [
             PlacedSolid(solid.shape, name, solid_colour(self._case.document, solid), None)
-            for name, _corner, solid in _ordered(self._case, "case")
+            for name, _extent, solid in _ordered(
+                self._case, lambda solid, box: solid_name(solid, box, "case")
+            )
         ]
 
     def _board_solids(
@@ -144,13 +163,16 @@ class AssemblyEmitter:
         board silently left out of the assembly looks exactly like a board
         that is not there, the same reason ``Clashes`` refuses.
         """
-        group = self._boards.get(board.ordinal)
-        if group is None:
+        supplied = self._boards.get(board.ordinal)
+        if supplied is None:
             raise EmitterError(
                 f"board {board.ordinal} is placed but no solids were supplied for it"
             )
+        group = f"board:{board.ordinal}"
         motion = placement_transform(board, placement, basis)
         return [
-            PlacedSolid(solid.shape, name, solid_colour(group.document, solid), motion)
-            for name, _corner, solid in _ordered(group, f"board:{board.ordinal}")
+            PlacedSolid(solid.shape, name, solid_colour(supplied.document, solid), motion)
+            for name, _extent, solid in _ordered(
+                supplied, lambda solid, box: _board_solid_name(solid, box, group)
+            )
         ]
