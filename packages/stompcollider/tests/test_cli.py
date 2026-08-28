@@ -801,7 +801,7 @@ def test_a_target_that_cannot_be_staged_leaves_every_other_target_alone(
 
 @dataclass
 class _RefusingWrite:
-    """A staged write that will not commit -- the failure ``_commit`` unwinds."""
+    """A staged write that will not commit -- the failure ``commit_all`` unwinds."""
 
     path: Path
 
@@ -814,14 +814,14 @@ class _RefusingWrite:
 
 def _refusing_second(monkeypatch: pytest.MonkeyPatch, refuse: Path) -> None:
     """Stage everything for real but ``refuse``, which fails at commit time."""
-    from stompcollider import cli
+    from stompmodel import protocols
 
-    real = cli.stage_payload
+    real = protocols.stage_payload
 
     def staged(path: Path, payload: object) -> object:
         return _RefusingWrite(path) if path == refuse else real(path, payload)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(cli, "stage_payload", staged)
+    monkeypatch.setattr(protocols, "stage_payload", staged)
 
 
 def test_a_commit_that_fails_puts_back_the_target_already_replaced(
@@ -863,11 +863,11 @@ def test_a_rollback_that_itself_fails_does_not_displace_the_first_failure(
     operator, and the report is left holding this run's bytes -- the one
     target ADR-0001 excludes from the guarantee.
     """
-    from stompcollider import cli
+    from stompmodel import protocols
 
     run = _prepare(tmp_path, monkeypatch)
     run.report.write_bytes(b"previous")
-    real, seen = cli.stage_payload, set()
+    real, seen = protocols.stage_payload, set()
 
     def staged(path: Path, payload: object) -> object:
         if path == run.assembly or path in seen:
@@ -875,7 +875,7 @@ def test_a_rollback_that_itself_fails_does_not_displace_the_first_failure(
         seen.add(path)
         return real(path, payload)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(cli, "stage_payload", staged)
+    monkeypatch.setattr(protocols, "stage_payload", staged)
 
     assert main(run.argv) == 3
     assert run.report.read_bytes() != b"previous"

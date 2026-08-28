@@ -355,6 +355,8 @@ def test_the_write_mechanism_publishes_a_value_and_one_way_to_make_it() -> None:
         "Payload",
         "StagedWrite",
         "stage_payload",
+        "stage_all",
+        "commit_all",
         "target_key",
         "check_target_set",
         "Pipeline",

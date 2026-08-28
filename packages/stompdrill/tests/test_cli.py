@@ -11,7 +11,6 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 
@@ -1451,100 +1450,12 @@ def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
     assert "Traceback" not in capsys.readouterr().err
 
 
-class _SimulatedFailure(Exception):
-    """Marks a failure this test injects, distinct from a real OSError."""
-
-
-@pytest.mark.parametrize(
-    ("position", "kind"),
-    [
-        (position, kind)
-        for position in ("first", "middle", "last")
-        for kind in ("staging", "the pre-commit read", "the commit")
-    ],
-)
-def test_every_position_and_failure_kind_leaves_no_temporary_behind(
-    position: str, kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Criterion 1 (ticket 35): the leak is closed at every position and
-    every failure kind. Three real targets, seeded with distinct prior
-    bytes so "restored" is distinguishable from "never written", swept
-    across {first, middle, last} x {staging fails, the pre-commit read
-    fails, the commit fails}. After the raise, the directory holds
-    exactly the three target names -- no temporary of any shape -- and
-    every target holds its seeded prior bytes. Supersedes the falsify
-    suite's F2-01/F3-01 leak reproductions; see report-35 for both
-    falsifiers this test was run against.
-    """
-    index = {"first": 0, "middle": 1, "last": 2}[position]
-    names = ["a.json", "b.drl", "c.svg"]
-    prior = [b"OLD-A", b"OLD-B", b"OLD-C"]
-    new_text = ["NEW-A", "NEW-B", "NEW-C"]
-    targets = [tmp_path / name for name in names]
-    for target, data in zip(targets, prior):
-        target.write_bytes(data)
-
-    class _FakeEmitter:
-        name: ClassVar[str] = "fake"
-        media_type: ClassVar[str] = "text/plain"
-        extension: ClassVar[str] = "txt"
-
-        def emit(self, data: DrillData) -> protocols.Payload:
-            raise NotImplementedError("this fake never renders; payloads are supplied directly")
-
-    rendered: list[tuple[cli.Emitter[DrillData], Path, protocols.Payload]] = [
-        (_FakeEmitter(), target, new_text[i]) for i, target in enumerate(targets)
-    ]
-    failing = targets[index]
-
-    if kind == "staging":
-        real_stage = cli.stage_payload
-
-        def fake_stage(path: Path, payload: protocols.Payload) -> protocols.StagedWrite:
-            if path == failing:
-                raise _SimulatedFailure("staging")
-            return real_stage(path, payload)
-
-        monkeypatch.setattr(cli, "stage_payload", fake_stage)
-        with pytest.raises(_SimulatedFailure):
-            cli._stage(rendered)
-    else:
-        staged = cli._stage(rendered)
-        if kind == "the pre-commit read":
-            real_read_bytes = Path.read_bytes
-
-            def fake_read_bytes(self: Path, *args: object, **kwargs: object) -> bytes:
-                if self == failing:
-                    raise _SimulatedFailure("read")
-                return real_read_bytes(self, *args, **kwargs)
-
-            monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
-        else:
-            real_commit = protocols.StagedWrite.commit
-
-            def fake_commit(self: protocols.StagedWrite) -> int:
-                if self.path == failing:
-                    raise _SimulatedFailure("commit")
-                return real_commit(self)
-
-            monkeypatch.setattr(protocols.StagedWrite, "commit", fake_commit)
-
-        with pytest.raises(_SimulatedFailure):
-            cli._commit(staged)
-
-    # Undo the patches before inspecting the result: the assertions below
-    # read the same targets and must see the real filesystem, not the
-    # injected failure.
-    monkeypatch.undo()
-
-    assert sorted(p.name for p in tmp_path.iterdir()) == names, (
-        f"a temporary survived the {kind!r} failure at the {position} position"
-    )
-    for target, data in zip(targets, prior):
-        assert target.read_bytes() == data, (
-            f"{target} was not restored to its seeded prior bytes after the "
-            f"{kind!r} failure at the {position} position"
-        )
+# The exhaustive {first, middle, last} x {staging, the pre-commit read,
+# the commit} sweep over the set-level transaction now lives with the rule
+# itself, in ``packages/stompmodel/tests/test_write_transaction.py``: this
+# command line composes ``stage_all``/``commit_all`` and no longer states
+# either loop. The whole-invocation consequences of that rule are still
+# asserted here, through ``cli.main``, above and below this line.
 
 
 def test_re_running_over_existing_targets_leaves_no_backup_files_behind(fake_source, tmp_path):
@@ -1600,15 +1511,15 @@ def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
 def test_the_cli_write_path_calls_stage_payload_then_staged_write_commit(fake_source, tmp_path, monkeypatch):
     """F1-01/F2-01/F3-04/F5-01, migrated: a full ``--emit`` run must call the
     published mechanism, not re-implement it (``write_payload`` no longer
-    exists; the design verdict deletes it outright). The two halves are
-    patched at different seams for one reason: ``cli.py`` holds its own
-    module reference to ``stage_payload``, and reaches the commit verb only
-    through the value staging handed it, so the class attribute is the only
-    reference the CLI actually resolves through.
+    exists; the design verdict deletes it outright). Both halves are
+    patched in the owner's own module: the CLI reaches staging through
+    ``stompmodel.protocols.stage_all``, which resolves ``stage_payload``
+    there, and reaches the commit verb only through the value staging
+    handed it.
     """
     fake_source(read())
     calls: list[str] = []
-    original_stage = cli.stage_payload
+    original_stage = protocols.stage_payload
     original_commit = protocols.StagedWrite.commit
 
     def spy_stage(path, payload):
@@ -1619,7 +1530,7 @@ def test_the_cli_write_path_calls_stage_payload_then_staged_write_commit(fake_so
         calls.append(("commit", staged.path))
         return original_commit(staged)
 
-    monkeypatch.setattr(cli, "stage_payload", spy_stage)
+    monkeypatch.setattr(protocols, "stage_payload", spy_stage)
     monkeypatch.setattr(protocols.StagedWrite, "commit", spy_commit)
 
     out = tmp_path / "out.json"

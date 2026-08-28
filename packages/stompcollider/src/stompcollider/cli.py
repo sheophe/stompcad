@@ -32,12 +32,11 @@ from stompmodel.errors import StompError
 from stompmodel.model import CaseRegistration
 from stompmodel.protocols import (
     Emitter,
-    Payload,
     Pipeline,
     Stage,
-    StagedWrite,
     check_target_set,
-    stage_payload,
+    commit_all,
+    stage_all,
 )
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
@@ -351,82 +350,23 @@ def _emitters(
 # ---------------------------------------------------------------------------
 
 
-#: One rendered artefact staged for commit: its emitter, for the report
-#: line, beside the value ``stage_payload`` already wrote in full.
-_Staged = tuple[Emitter[DockData], StagedWrite]
-
-#: One target already replaced during this commit loop, and the bytes it
-#: held before -- ``None`` when it did not exist.
-_Committed = tuple[Path, bytes | None]
-
-
-def _stage(rendered: Iterable[tuple[Emitter[DockData], Path, Payload]]) -> list[_Staged]:
-    """Stage every payload through ``stage_payload``; no target is touched here.
-
-    A failure partway through discards every staged write this call already
-    produced, so one artefact that cannot be written leaves every target of
-    the invocation exactly as it was -- ADR-0001 and ADR-0005. The set-level
-    loop only; the mechanism itself is ``stompmodel``'s and is not restated.
-    """
-    staged: list[_Staged] = []
-    try:
-        for emitter, path, payload in rendered:
-            staged.append((emitter, stage_payload(path, payload)))
-    except BaseException:
-        for _emitter, written in staged:
-            written.discard()
-        raise
-    return staged
-
-
-def _rollback(committed: list[_Committed]) -> None:
-    """Restore every target already replaced earlier in this commit loop.
-
-    Through the same published mechanism every other write here uses, and
-    never raising: a target this cannot restore is the residual ADR-0001
-    excludes, and swallowing it keeps the original failure the one that
-    propagates.
-    """
-    for path, previous in reversed(committed):
-        try:
-            if previous is None:
-                path.unlink(missing_ok=True)
-            else:
-                stage_payload(path, previous).commit()
-        except OSError:
-            pass
-
-
-def _commit(staged: list[_Staged]) -> list[str]:
-    """Replace every target from its already-staged write, in order.
-
-    An existing target's bytes are read before its own commit so they can
-    be put back; on failure what this loop already replaced is rolled back
-    and everything still pending is discarded. That is what makes the whole
-    set one transaction rather than each path one.
-    """
-    lines: list[str] = []
-    committed: list[_Committed] = []
-    pending = list(staged)
-    try:
-        while pending:
-            emitter, written = pending[0]
-            previous = written.path.read_bytes() if written.path.exists() else None
-            size = written.commit()
-            pending.pop(0)
-            committed.append((written.path, previous))
-            lines.append(f"wrote {written.path}  ({emitter.name}, {size} bytes)")
-    except BaseException:
-        _rollback(committed)
-        for _emitter, written in pending:
-            written.discard()
-        raise
-    return lines
-
-
 def _write(emitters: Sequence[tuple[Emitter[DockData], Path]], data: DockData) -> list[str]:
-    """Render every artefact, then stage every one, then commit every one."""
-    return _commit(_stage([(emitter, path, emitter.emit(data)) for emitter, path in emitters]))
+    """Render every artefact, then stage every one, then commit every one.
+
+    Every payload is rendered before any target is touched. Neither loop
+    below is this file's own: staging and the whole-set transaction are
+    ``stompmodel``'s, and this keeps only the sentence it prints from the
+    count each commit returned -- see ADR-0001 and ADR-0005.
+    """
+    rendered = [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
+    staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
+    sizes = commit_all(staged)
+    return [
+        f"wrote {written.path}  ({emitter.name}, {size} bytes)"
+        for (emitter, _path, _payload), written, size in zip(
+            rendered, staged, sizes, strict=True
+        )
+    ]
 
 
 def _withheld(targets: Iterable[tuple[str, Path]]) -> list[str]:

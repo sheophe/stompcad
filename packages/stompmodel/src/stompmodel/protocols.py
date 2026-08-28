@@ -28,6 +28,8 @@ __all__ = [
     "Payload",
     "StagedWrite",
     "stage_payload",
+    "stage_all",
+    "commit_all",
     "target_key",
     "check_target_set",
     "Pipeline",
@@ -166,6 +168,78 @@ def stage_payload(path: Path, payload: Payload) -> StagedWrite:
         tmp.unlink(missing_ok=True)
         raise
     return StagedWrite(path=path, size=len(data), _tmp=tmp)
+
+
+#: One target already replaced during a commit loop, beside the bytes it
+#: held before -- ``None`` when the target did not exist. Rolling the two
+#: back differs: rewrite one, delete the other.
+_Committed = tuple[Path, bytes | None]
+
+
+def stage_all(targets: Iterable[tuple[Path, Payload]]) -> list[StagedWrite]:
+    """Stage every payload through :func:`stage_payload`; touch no target.
+
+    A failure partway through discards every staged write this call has
+    already produced and re-raises, so one payload that cannot be staged
+    leaves every target of the set exactly as it was. This is the
+    set-level half of ADR-0001's guarantee; :func:`stage_payload` owns the
+    per-path half, and no caller states either mechanism itself.
+    """
+    staged: list[StagedWrite] = []
+    try:
+        for path, payload in targets:
+            staged.append(stage_payload(path, payload))
+    except BaseException:
+        for written in staged:
+            written.discard()
+        raise
+    return staged
+
+
+def _rollback(committed: list[_Committed]) -> None:
+    """Undo every target already replaced earlier in a commit loop.
+
+    Restores each through the same published mechanism every other write
+    here uses, and never raises: a target this cannot restore is the one
+    residual ADR-0001 excludes from the guarantee, and swallowing it keeps
+    the failure that triggered the rollback the one that propagates.
+    """
+    for path, previous in reversed(committed):
+        try:
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                stage_payload(path, previous).commit()
+        except OSError:
+            pass
+
+
+def commit_all(staged: Iterable[StagedWrite]) -> list[int]:
+    """Replace every target from its already-staged write, in order.
+
+    Returns each :meth:`StagedWrite.commit`'s own byte count, positionally.
+    An existing target's prior bytes are read before its own commit so they
+    can be put back; on failure :func:`_rollback` restores what this loop
+    already replaced and every write still pending is discarded. That is
+    what makes the whole set one transaction rather than each path one.
+    """
+    sizes: list[int] = []
+    committed: list[_Committed] = []
+    pending = list(staged)
+    try:
+        while pending:
+            written = pending[0]
+            previous = written.path.read_bytes() if written.path.exists() else None
+            size = written.commit()
+            pending.pop(0)
+            committed.append((written.path, previous))
+            sizes.append(size)
+    except BaseException:
+        _rollback(committed)
+        for written in pending:
+            written.discard()
+        raise
+    return sizes
 
 
 def target_key(path: Path) -> str:
