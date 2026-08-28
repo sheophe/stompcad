@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from stompmodel.errors import StompError
 
-__all__ = ["StompcolliderError", "UsageError"]
+__all__ = ["StompcolliderError", "UsageError", "NoSubstrateError"]
 
 
 class StompcolliderError(StompError):
@@ -18,3 +18,12 @@ class StompcolliderError(StompError):
 
 class UsageError(StompcolliderError):
     """A malformed flag or invocation, resolved before any file is opened."""
+
+
+class NoSubstrateError(StompcolliderError):
+    """A model holds no board body to group components onto.
+
+    Its own type because a caller reading several files reports this one as
+    the ``no-substrate`` diagnostic the spec's table lists and carries on to
+    the next file -- a decision that must not rest on reading a message.
+    """

@@ -19,7 +19,7 @@ from stompmodel.units import Nanometre, nm_from_mm
 from .model import Board, Component, DockData, Profile, Protrusion
 from .raw import RawBoard, RawBoards, RawComponent, RawCylinder
 
-__all__ = ["canonicalise"]
+__all__ = ["board_order", "canonicalise"]
 
 #: A board's ordinal sort key, as "Board ordinals" in the spec fixes it:
 #: least corner first, then largest footprint first among ties.
@@ -62,6 +62,18 @@ def _sort_key(board: RawBoard, basis: CoordinateFrame) -> _SortKey:
     min_z_nm = min(nm_from_mm(p[2]) for p in corners)
     footprint_nm2 = (max_x_nm - min_x_nm) * (max_y_nm - min_y_nm)
     return (min_x_nm, min_y_nm, min_z_nm, -footprint_nm2)
+
+
+def board_order(boards: Sequence[RawBoard], basis: CoordinateFrame) -> tuple[int, ...]:
+    """The indices of ``boards`` in ordinal order: ordinal *i+1* is ``boards[order[i]]``.
+
+    Published because a caller pairing a canonical board with the geometry
+    it was measured from must not restate how boards are numbered; this is
+    the rule's one statement, and :func:`canonicalise` reads it too. Sorting
+    indices rather than boards keeps the tie-break identical: ``sorted`` is
+    stable, so two boards of one key stay in the order they were measured.
+    """
+    return tuple(sorted(range(len(boards)), key=lambda index: _sort_key(boards[index], basis)))
 
 
 def _canonical_steps(
@@ -139,9 +151,9 @@ def canonicalise(raw: RawBoards, case: CaseRegistration) -> DockData:
     through: dropping them here would leave the only ``wrong-case-model``
     or ``unreadable-board`` a run raises reaching no artefact at all.
     """
-    ordered = sorted(raw.boards, key=lambda board: _sort_key(board, case.frame.basis))
+    order = board_order(raw.boards, case.frame.basis)
     boards = tuple(
-        _canonicalise_board(board, ordinal)
-        for ordinal, board in enumerate(ordered, start=1)
+        _canonicalise_board(raw.boards[index], ordinal)
+        for ordinal, index in enumerate(order, start=1)
     )
     return DockData(case=case, boards=boards, diagnostics=raw.diagnostics)

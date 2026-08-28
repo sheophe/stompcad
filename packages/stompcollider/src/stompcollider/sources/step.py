@@ -25,15 +25,44 @@ from stompgeom.step import (
 from stompmodel.codec import from_document
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.errors import DocumentError
-from stompmodel.model import EnclosureMatch
+from stompmodel.model import DrillData, EnclosureMatch
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from ..boards import basis_about, carrier_frame, dot, group, negated, substrates
-from ..errors import StompcolliderError
+from ..errors import NoSubstrateError, StompcolliderError
 from ..protrude import admissible, protrusion_of, reach_along
 from ..raw import RawBoard, RawBoards, RawComponent
 
-__all__ = ["BoardSource"]
+__all__ = ["BoardGeometry", "BoardScan", "BoardSource"]
+
+
+@dataclass(frozen=True, slots=True)
+class BoardGeometry:
+    """One board's own solids, and the document their colours are read from.
+
+    The substrate first, then the components grouped onto it -- everything
+    a later stage must place, check for interference, or write, which is
+    every solid of the group and not only the ones that pair with a hole.
+    """
+
+    document: StepDocument
+    solids: tuple[StepSolid, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BoardScan:
+    """One run's whole reading: what it measured, and what it measured from.
+
+    ``geometry`` is aligned with ``raw.boards`` index for index, which is
+    what lets a caller pair a canonical board with its own solids without
+    reading a file twice or restating how boards are numbered -- see
+    ``stompcollider.canonicalise.board_order``.
+    """
+
+    drill: DrillData
+    case: StepDocument
+    geometry: tuple[BoardGeometry, ...]
+    raw: RawBoards
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,11 +84,18 @@ class BoardSource:
             raise StompcolliderError("a docking run needs at least one board model to read")
 
     def read(self) -> RawBoards:
+        """Just the measurements of :meth:`scan`, for a caller wanting no geometry."""
+        return self.scan().raw
+
+    def scan(self) -> BoardScan:
         """Measure every board, having first checked the case model is the right one.
 
         Board files are read in sorted order, not the order the operator
         listed them: two spellings of one command line must reach the same
-        artefact, which ADR-0006 requires of element order generally.
+        artefact, which ADR-0006 requires of element order generally. Each
+        board's own solids come back beside its measurements, because the
+        clash check and the assembly need the geometry a second read of the
+        same files would only recover less reliably.
         """
         drill = from_document(json.loads(self.drill.read_text(encoding="utf-8")))
         case = read_step(self.case_model)
@@ -70,13 +106,21 @@ class BoardSource:
             diagnostics.append(mismatch)
 
         measured: list[RawBoard] = []
+        geometry: list[BoardGeometry] = []
         for path in sorted(self.boards):
             try:
                 document = read_step(path)
             except DocumentError as failure:
                 diagnostics.append(_unreadable(path, failure))
                 continue
-            measured.extend(_measure(document))
+            try:
+                found = substrates(document)
+            except NoSubstrateError as failure:
+                diagnostics.append(_no_substrate(path, failure))
+                continue
+            for substrate, parts in group(document, found):
+                measured.append(_board(substrate, parts, path))
+                geometry.append(BoardGeometry(document, (substrate, *parts)))
 
         if len(measured) > 1:
             diagnostics.append(
@@ -86,7 +130,12 @@ class BoardSource:
                     data=(("boards", len(measured)),),
                 )
             )
-        return RawBoards(boards=tuple(measured), diagnostics=tuple(diagnostics))
+        return BoardScan(
+            drill=drill,
+            case=case,
+            geometry=tuple(geometry),
+            raw=RawBoards(boards=tuple(measured), diagnostics=tuple(diagnostics)),
+        )
 
 
 def _unreadable(path: Path, failure: DocumentError) -> Diagnostic:
@@ -103,6 +152,19 @@ def _unreadable(path: Path, failure: DocumentError) -> Diagnostic:
         "unreadable-board",
         str(failure).replace(str(path), path.name),
         data=(("model", path.name),),
+    )
+
+
+def _no_substrate(path: Path, failure: NoSubstrateError) -> Diagnostic:
+    """``path`` holds no board body, said as the finding the spec's table lists.
+
+    A finding and not an abort: a file yielding no board is the same class
+    of problem as one that will not read at all, and one such file among
+    several must not decide what the others are allowed to report. The
+    file's name, never its path, for :func:`_unreadable`'s reason.
+    """
+    return Diagnostic.error(
+        "no-substrate", f"{path.name}: {failure}", data=(("model", path.name),)
     )
 
 
@@ -156,17 +218,24 @@ def _descending(pair: tuple[Nanometre, ...]) -> tuple[Nanometre, Nanometre]:
     return (larger, smaller)
 
 
-def _measure(document: StepDocument) -> list[RawBoard]:
-    """Every board ``document`` holds, each with the components grouped onto it."""
-    found = substrates(document)
-    return [_board(substrate, parts) for substrate, parts in group(document, found)]
+def _board(substrate: StepSolid, parts: Sequence[StepSolid], path: Path) -> RawBoard:
+    """One substrate and its parts, measured about the way those parts protrude.
 
-
-def _board(substrate: StepSolid, parts: Sequence[StepSolid]) -> RawBoard:
-    """One substrate and its parts, measured about the way those parts protrude."""
+    A board body that grouped no component is refused here rather than
+    left to the value object's own guard: the refusal names the file it is
+    in, and a caller can tell it from the programming fault a bare
+    ``ValueError`` out of a reader would look like. Skipping such a board
+    is the one answer ruled out -- a board absent from the assembly looks
+    exactly like a board that is not there.
+    """
+    if not parts:
+        raise StompcolliderError(
+            f"{path.name}: a board body in this model carries no component, "
+            f"which this version has no way to state"
+        )
     frame = carrier_frame(substrate)
     if frame is None:  # pragma: no cover - substrates() admits only slabs
-        raise StompcolliderError("no-substrate: a grouped solid measures no slab")
+        raise NoSubstrateError("a grouped solid measures no slab")
     outward = _outward(frame.w, substrate, parts)
     u, v = basis_about(outward)
     box = bounding_box_mm(substrate.shape)

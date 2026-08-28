@@ -28,7 +28,7 @@ from stompcollider.boards import (
     is_slab,
     substrates,
 )
-from stompcollider.errors import StompcolliderError
+from stompcollider.errors import NoSubstrateError
 from stompgeom.build import PlacedSolid, build_document
 from stompgeom.levels import Level, levels
 from stompgeom.step import (
@@ -365,7 +365,7 @@ def test_a_document_with_no_unnamed_solid_is_refused() -> None:
     everything gets a refusal rather than a guess."""
     named = _document_of(("U1", _block(30.0, 20.0, 1.0, (0.0, 0.0, 0.0))))
 
-    with pytest.raises(StompcolliderError, match="no-substrate"):
+    with pytest.raises(NoSubstrateError, match="every solid in the document is named"):
         substrates(named)
 
 
@@ -374,7 +374,7 @@ def test_a_document_whose_unnamed_solids_are_no_slab_is_refused_too() -> None:
     verification leaves no substrate, which is not guessed at either."""
     blocks = _document_of(("", _block(30.0, 20.0, 10.0, (0.0, 0.0, 0.0))))
 
-    with pytest.raises(StompcolliderError, match="no-substrate"):
+    with pytest.raises(NoSubstrateError, match="measures a slab"):
         substrates(blocks)
 
 
@@ -473,7 +473,7 @@ def test_grouping_onto_no_board_at_all_is_refused() -> None:
     silently returning nothing would drop every designator."""
     document = _document_of(("U1", _block(30.0, 20.0, 1.0, (0.0, 0.0, 0.0))))
 
-    with pytest.raises(StompcolliderError, match="no-substrate"):
+    with pytest.raises(NoSubstrateError, match="no board to group"):
         group(document, ())
 
 
@@ -484,7 +484,7 @@ def test_grouping_onto_a_solid_that_is_no_slab_is_refused() -> None:
     document = _document_of(("U1", _block(4.0, 4.0, 4.0, (0.0, 0.0, 0.0))))
     block = _box(30.0, 20.0, 10.0, (0.0, 0.0, 0.0))
 
-    with pytest.raises(StompcolliderError, match="no-substrate"):
+    with pytest.raises(NoSubstrateError, match="has no carrier"):
         group(document, (block,))
 
 

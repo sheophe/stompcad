@@ -18,7 +18,7 @@ from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
 from stompmodel.frames import CoordinateFrame
 from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
-from .errors import StompcolliderError
+from .errors import NoSubstrateError
 
 __all__ = [
     "is_slab", "carrier_frame", "substrates", "group", "basis_about", "dot", "negated",
@@ -108,14 +108,12 @@ def substrates(document: StepDocument) -> tuple[StepSolid, ...]:
     """
     candidates = tuple(solid for solid in document.solids if not solid.name)
     if not candidates:
-        raise StompcolliderError(
-            "no-substrate: every solid in the document is named, so none is a board body"
+        raise NoSubstrateError(
+            "every solid in the document is named, so none is a board body"
         )
     found = tuple(solid for solid in candidates if is_slab(solid))
     if not found:
-        raise StompcolliderError(
-            "no-substrate: no unnamed solid in the document measures a slab"
-        )
+        raise NoSubstrateError("no unnamed solid in the document measures a slab")
     return found
 
 
@@ -134,7 +132,7 @@ def group(
     sorted by designator, for the same reason.
     """
     if not found:
-        raise StompcolliderError("no-substrate: there is no board to group these solids onto")
+        raise NoSubstrateError("there is no board to group these solids onto")
     boxes = [(solid, _frame_of(solid), bounding_box_mm(solid.shape)) for solid in found]
     assigned: list[list[StepSolid]] = [[] for _ in boxes]
     for part in document.solids:
@@ -226,8 +224,8 @@ def _frame_of(solid: StepSolid) -> CoordinateFrame:
     """
     frame = carrier_frame(solid)
     if frame is None:
-        raise StompcolliderError(
-            "no-substrate: a solid grouped onto measures no slab, so it has no carrier"
+        raise NoSubstrateError(
+            "a solid grouped onto measures no slab, so it has no carrier"
         )
     return frame
 

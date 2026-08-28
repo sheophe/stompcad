@@ -145,7 +145,7 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
     scanned = {str(module.relative_to(SOURCE)) for module in modules()}
 
     assert scanned == {
-        "__init__.py", "boards.py", "canonicalise.py", "clash.py",
+        "__init__.py", "boards.py", "canonicalise.py", "clash.py", "cli.py",
         "designators.py", "emitters/__init__.py", "emitters/assembly.py",
         "emitters/report.py",
         "errors.py", "match.py", "model.py", "protrude.py",

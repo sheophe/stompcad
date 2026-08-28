@@ -7,6 +7,6 @@ keeps that true. See ADR-0001 for the flow and ADR-0008 for the layering.
 
 from __future__ import annotations
 
-from .step import BoardSource
+from .step import BoardGeometry, BoardScan, BoardSource
 
-__all__ = ["BoardSource"]
+__all__ = ["BoardSource", "BoardScan", "BoardGeometry"]
