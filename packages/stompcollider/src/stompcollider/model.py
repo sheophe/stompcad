@@ -17,7 +17,7 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.diagnostics import of_severity as _of_severity
 from stompmodel.diagnostics import worst_severity as _worst_severity
 from stompmodel.frames import CoordinateFrame
-from stompmodel.model import CaseRegistration, StageRun
+from stompmodel.model import CaseRegistration, Hole, StageRun
 from stompmodel.units import Nanometre, check_nanometres
 
 __all__ = [
@@ -116,12 +116,19 @@ class Component:
             raise ValueError("a component needs the designator of the solid it was read from")
 
 
+#: The two legal values of ``Board.panel_face``: a sign along the board's own
+#: carrier normal, as exported -- see "The report" in the technical spec.
+_PANEL_FACES = frozenset({"+w", "-w"})
+
+
 @dataclass(frozen=True, slots=True)
 class Board:
     """One substrate and the components attached to it, numbered by geometry.
 
     ``ordinal`` is assigned by sorting on position, never on input order --
-    see "Board ordinals" in the spec and ADR-0006.
+    see "Board ordinals" in the spec and ADR-0006. ``panel_face`` is ``None``
+    until ``Match`` resolves which side of the carrier plane points at the
+    panel; it is never guessed at construction.
     """
 
     ordinal: int
@@ -129,6 +136,7 @@ class Board:
     extent_nm: tuple[Nanometre, Nanometre, Nanometre]
     carrier: CoordinateFrame
     components: tuple[Component, ...]
+    panel_face: str | None = None
 
     def __post_init__(self) -> None:
         if self.ordinal < 1:
@@ -146,6 +154,10 @@ class Board:
             extent_y_nm=self.extent_nm[1],
             extent_z_nm=self.extent_nm[2],
         )
+        if self.panel_face is not None and self.panel_face not in _PANEL_FACES:
+            raise ValueError(
+                f"Board.panel_face must be '+w', '-w' or None, not {self.panel_face!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,13 +165,16 @@ class Correspondence:
     """One matched pair: a component's protrusion and the hole it fits.
 
     ``offset_nm`` is the recognition miss -- a field, not a message, so a
-    near-fit is reported rather than silently discarded.
+    near-fit is reported rather than silently discarded. ``insertion_nm`` is
+    ``None`` for a part the hole admits entirely -- a real geometric fact
+    (nothing stops it), not a missing measurement -- see "Protrusions" in the
+    technical spec.
     """
 
     designator: str
     hole_index: int
     hole_xy_nm: tuple[Nanometre, Nanometre]
-    insertion_nm: Nanometre
+    insertion_nm: Nanometre | None
     offset_nm: Nanometre
 
     def __post_init__(self) -> None:
@@ -172,13 +187,14 @@ class Correspondence:
                 f"Correspondence.hole_xy_nm must have exactly two components, "
                 f"not {len(self.hole_xy_nm)}"
             )
-        check_nanometres(
-            "Correspondence",
-            hole_x_nm=self.hole_xy_nm[0],
-            hole_y_nm=self.hole_xy_nm[1],
-            insertion_nm=self.insertion_nm,
-            offset_nm=self.offset_nm,
-        )
+        lengths = {
+            "hole_x_nm": self.hole_xy_nm[0],
+            "hole_y_nm": self.hole_xy_nm[1],
+            "offset_nm": self.offset_nm,
+        }
+        if self.insertion_nm is not None:
+            lengths["insertion_nm"] = self.insertion_nm
+        check_nanometres("Correspondence", **lengths)
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +271,7 @@ class DockData:
 
     case: CaseRegistration
     boards: tuple[Board, ...] = ()
+    holes: tuple[Hole, ...] = ()
     placements: Mapping[int, tuple[Placement, ...]] = field(default_factory=dict)
     unmatched_holes: tuple[int, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
@@ -268,6 +285,12 @@ class DockData:
         for hole_index in self.unmatched_holes:
             if hole_index < 1:
                 raise ValueError(f"holes are numbered from 1, not {hole_index}")
+        for hole in self.holes:
+            if hole.index is None:
+                raise ValueError(
+                    "DockData.holes carries the drilled hole set: every hole "
+                    "needs the drill number the document already assigned it"
+                )
 
     def with_processing(self, *runs: StageRun) -> DockData:
         """Append completed stage records in execution order."""
