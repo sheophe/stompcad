@@ -58,9 +58,12 @@ Run the project checks and tools from the repository root:
 # another member through it reports a package no test in scope imports end to
 # end and grades its codec far below the 100% target below.
 .venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov-report=term-missing
-cd packages/stompmodel && uv run --no-sync pytest -o addopts= --cov=stompmodel --cov-report=term-missing
-cd packages/stompgeom && uv run --no-sync pytest -o addopts= --cov=stompgeom --cov-report=term-missing
-cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards --cov=stompcollider --cov-report=term-missing
+cd packages/stompmodel && uv run --no-sync pytest -o addopts= \
+  --cov=stompmodel --cov-report=term-missing
+cd packages/stompgeom && uv run --no-sync pytest -o addopts= \
+  --cov=stompgeom --cov-report=term-missing
+cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards \
+  --cov=stompcollider --cov-report=term-missing
 
 # Lint and types. `mypy packages` excludes every member's own tests but
 # stompdrill's -- four `tests` packages cannot share one scan -- so each
@@ -392,8 +395,9 @@ CLI.
   `test_dock_agreement.py`, forbids **both** `stompcollider`, which wrote the report,
   and `stompgeom`, whose writer produced the STEP.
 - Coverage targets are 90% for each package and 100% for quantisers, stages, emitters, and
-  `stompmodel`'s codec — `stompcollider`'s `match` and `seat` are stages by that rule. `stompdrill`'s figure only reaches its target with the kernel tests
-  included, so measure it under `--hammond` — see the kernel-test rule below.
+  `stompmodel`'s codec — `stompcollider`'s `match` and `seat` are stages by that rule.
+  `stompdrill`'s figure only reaches its target with the kernel tests included, so
+  measure it under `--hammond` — see the kernel-test rule below.
 - `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most
   hand-built lengths are fixtures. Test helpers accept plain literals and brand them
   internally; direct model construction wraps explicitly.

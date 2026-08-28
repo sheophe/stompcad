@@ -169,13 +169,13 @@ def test_two_protrusions_within_tolerance_of_one_hole_is_ambiguous() -> None:
 
 
 # --------------------------------------------------------------------------
-# Critical fix round 1: the chirality gate needs a tolerance band, and an
-# empty candidate set must never pass through silently.
+# The chirality gate needs a tolerance band, and an empty candidate set must
+# never pass through silently.
 # --------------------------------------------------------------------------
 
 
 def test_a_near_collinear_row_of_parts_still_yields_a_placement() -> None:
-    """The reviewer's reachable regression: a row of pots, the canonical
+    """The reachable case the band exists for: a row of pots, the canonical
     pedal layout, with a single 1.0 mm offset (inside the 1.27 mm
     tolerance) on the third hole. Raw signed areas disagree in sign here on
     noise alone; the banded chirality check must recognise that disagreement
@@ -227,10 +227,10 @@ def test_a_board_with_no_valid_placement_is_reported(monkeypatch: pytest.MonkeyP
 # to <= tolerance (rule 2's gate). Two of the scenarios below -- a 3.0 mm
 # gap disagreement, and a genuine mirror image -- need correspondences whose
 # combined geometry a single-tolerance pairing gate could never produce on
-# its own (the fix report proves this for both, after round 1's chirality
-# fix). Those two are tested directly against ``stompcollider.match.
-# _candidates``, a deliberate, documented departure from the brief's literal
-# ``Match(...).apply(...)`` wiring, each marked where it appears below. Every
+# its own -- each fixture's own docstring shows why it is unreachable. Those
+# two are tested directly against ``stompcollider.match._candidates``, a
+# deliberate departure from ``Match(...).apply(...)`` wiring, marked where
+# each appears below. Every
 # other scenario in this section goes through ``Match.apply`` for real.
 # --------------------------------------------------------------------------
 

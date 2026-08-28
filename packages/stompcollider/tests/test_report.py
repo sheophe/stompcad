@@ -129,7 +129,7 @@ def _data(
 
 
 # --------------------------------------------------------------------------
-# The brief's own tests, transcribed
+# What the document itself claims, one test per claim
 # --------------------------------------------------------------------------
 
 

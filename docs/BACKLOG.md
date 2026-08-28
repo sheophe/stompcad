@@ -1038,7 +1038,8 @@ to the unreconciled play area rather than crashing. Two observations travel with
 `stompmodel.protocols.Stage`'s own docstring — "A deterministic preprocessing step
 independent of pipeline position" — states nothing about an ordering obligation between its
 two methods, so a second implementer (`stompcollider`'s `Match`/`Seat` stages,
-`docs/specs/stompcollider-technical.md:532`) meets no warning before writing the same shape.
+`docs/specs/stompcollider-technical.md`'s "Internal architecture") meets no warning before
+writing the same shape.
 `apply`/`_play_area_in` used to decide whether to reframe by testing
 `frame is self.model.frame` — object identity, which the concrete `OcpCaseModel` dataclass
 happens to preserve but which the `CaseModel` protocol never promises. Ticket 51 replaced
@@ -1236,7 +1237,7 @@ is fit at most once per read, and the full stompdrill suite passes unchanged.
 **Status:** Resolved by ticket 46 (2026-08). Found in the 2026-08 architecture review's
 wave 3 (F1-04). Spec-axis; harm was entirely forecast.
 
-**Constraint:** `docs/specs/stompcollider-technical.md:505-507` says `stompcollider`'s
+**Constraint:** `docs/specs/stompcollider-technical.md`'s "Command line" said `stompcollider`'s
 `wrong-case-model` "compares the drill document's declared enclosure part against the
 model's own product name — the same check `stompdrill` already makes." `stompdrill` makes no
 such check: `pipeline/clearance.py`'s `_cross_check` reduces both the model's measured
@@ -1863,7 +1864,8 @@ tolerance, silently") rather than folded into this entry.
 **Constraint:**
 
 - **A `reconciled: bool` flag on `CaseRegistration`.** Declined: no consumer today reads it —
-  `stompcollider-technical.md:281-284, 405, 502-506` reads `case.frame` as a complete
+  `stompcollider-technical.md`'s "What a placement is", "The report" and "Command line"
+  read `case.frame` as a complete
   registration and never asks after its provenance — and a forecast consumer licenses not
   narrowing an interface, never adding one.
 - **A public `axis_correspondence` primitive in `stompmodel`.** Rejected: one call site after

@@ -309,7 +309,7 @@ def test_where_a_board_file_sits_reaches_no_diagnostic(tmp_path, monkeypatch) ->
 
     Both the payload and the message: the reader states its reason against
     the path it was handed, so an absolute spelling would carry a whole
-    directory into a document Task 20 is about to serialise.
+    directory into the document the report emitter serialises.
     """
     here, there = tmp_path / "here", tmp_path / "there"
     for directory in (here, there):

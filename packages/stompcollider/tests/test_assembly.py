@@ -588,7 +588,7 @@ def test_one_assembly_is_byte_identical_across_processes() -> None:
 
 
 # --------------------------------------------------------------------------
-# The rule this task carries: the emitter builds no kernel document itself.
+# The rule this module must not break: it builds no kernel document itself.
 # --------------------------------------------------------------------------
 
 #: Names that only appear where a module assembles an XCAF document itself.
@@ -680,8 +680,8 @@ def test_a_group_needs_a_solid() -> None:
 
 @pytest.mark.boards
 def test_a_real_board_s_names_survive_the_placement() -> None:
-    """Which is why ``stompgeom.shapes.placed`` locates rather than
-    rebuilds, and why the census had to widen before this task existed."""
+    """Which is why ``stompgeom.shapes.placed`` locates rather than rebuilds,
+    and why the writer's colour census walks wider than a leaf-only descent."""
     read = read_step(_PCB)
     emitter = AssemblyEmitter(
         case=_group(_CASE_PARTS),

@@ -42,7 +42,7 @@ def test_compound_holds_every_shape_given() -> None:
 
 
 def test_compound_of_nothing_is_an_empty_compound() -> None:
-    """A level with no faces is a value, not an error; see this task's Interfaces."""
+    """A level with no faces is a value, not an error."""
     from OCP.TopAbs import TopAbs_ShapeEnum
 
     empty = compound([])
@@ -139,7 +139,7 @@ def test_placed_leaves_the_original_alone() -> None:
 def test_placed_returns_a_location_not_a_rebuild() -> None:
     """A location moves the placement, not the geometry underneath it.
 
-    This is the test the brief warns is missing from the obvious version: a
+    This is the test the obvious version of this check is missing: a
     ``BRepBuilderAPI_Transform`` result also passes the two tests above, but
     it carries an identity ``TopLoc_Location`` because it baked the motion
     into fresh vertices instead. Only a genuine ``TopoDS_Shape.Moved`` result

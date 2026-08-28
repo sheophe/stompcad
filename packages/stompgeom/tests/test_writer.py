@@ -218,7 +218,7 @@ def test_a_foreign_entity_between_chains_is_refused() -> None:
     """This module cannot re-seat an entity that belongs to no chain of its
     own; its id is exactly as allocator-dependent as a colour chain's, so
     silently keeping it would make the output non-deterministic again --
-    precisely the class of document Task 8 must go back to refusing.
+    precisely the class of document this module refuses.
     """
     payload = (
         _EXTERNAL_STUBS

@@ -483,7 +483,7 @@ def test_a_withheld_part_still_reaches_the_report_and_the_model(
 
 
 # --------------------------------------------------------------------------
-# The five decisions this task inherited.
+# Five decisions about input a run cannot use: which are findings, which end it.
 # --------------------------------------------------------------------------
 
 

@@ -3,9 +3,10 @@
 Not through ``stompgeom``: that package's writer produced these bytes, and a
 reader drawn from it could invert its own transform and prove nothing. OCP is
 the independent parser here, the role ``pdfminer.six`` plays for
-``stompdrill``'s drawing recovery. The emitter writes each solid as its own
-free shape, so the file's free shapes *are* the products it wrote; this reader
-takes them without descending, and reports each one's name and extent.
+``stompdrill``'s drawing recovery. One thing *is* shared with the writer --
+``stompmodel``'s ``nm_from_mm``, the canonical millimetre-to-nanometre rule --
+so a scale wrong there would cancel across the round trip. That is sanctioned,
+and named because an unstated shared constant weakens the independence claim.
 """
 
 from __future__ import annotations
@@ -54,9 +55,11 @@ def read_assembly(payload: bytes) -> RecoveredAssembly:
 def _solids(document: Any) -> list[RecoveredSolid]:
     """The document's free shapes, each named and measured.
 
-    A null shape is refused rather than skipped: a product the file names
-    but holds no geometry for is exactly the failure a comparison over
-    names alone would pass.
+    The emitter writes each solid as its own free shape, so these *are* the
+    products it wrote and this reader never descends into one. A null shape
+    is refused rather than skipped: a product the file names but holds no
+    geometry for is exactly the failure a comparison over names alone would
+    pass.
     """
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool

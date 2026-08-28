@@ -171,9 +171,9 @@ def _silence_stdout() -> Iterator[None]:
         os.close(saved)
 
 
-# Kernel-side resets were tried first and abandoned (Task 12 investigation):
-# ``STEPControl_Controller.Init_s()`` and a fresh ``XSControl_WorkSession``
-# per call both leave the counters below unaffected, and no
+# Kernel-side resets cannot do this job. ``STEPControl_Controller.Init_s()``
+# and a fresh ``XSControl_WorkSession`` per call both leave the counters
+# below unaffected, and no
 # ``Interface_Static`` key touches either one — ``write.step.product.name``
 # only substitutes the wrapper product's *prefix*, never the "<counter>.1"
 # suffix appended after it, and the NAUO counter has no exposed key at all.
@@ -397,10 +397,10 @@ def _reslot_colours(payload: bytes, expected: int) -> bytes:
     # The renumbering below assumes every entity in the region belongs to
     # some chain it can re-seat; a foreign entity's own id is exactly as
     # allocator-dependent, but this pass has no way to make it canonical.
-    # Before this task such a document was refused outright (the census
-    # under-counted it); this restores that safe refusal for precisely the
-    # documents this widened census still cannot make deterministic,
-    # rather than silently emitting non-canonical bytes.
+    # Such a document is refused outright: a refusal is the only honest
+    # answer for the documents the census admits but this renumbering
+    # cannot re-seat, and the alternative is silently emitting bytes that
+    # differ between processes.
     if _foreign_entity_in_gaps(payload, chains):
         raise EmitterError(
             "the colour region contains foreign entities between chains "

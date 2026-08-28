@@ -5,7 +5,7 @@ Deduplicating the three sites this fold found closes three recipes; an
 silently added to this package's own ``writer.py`` went uncaught by this
 package's own suite, run alone. This gate lives in the owner's own suite
 (ticket 25): its command must fail when an unsanctioned descent reappears
-anywhere in the workspace. A *declared* second or third home, named in
+anywhere in the workspace. A *declared* further home, named in
 ``_SANCTIONED`` below, is what it exists to permit rather than forbid.
 """
 
@@ -190,14 +190,13 @@ def test_the_scan_reaches_every_workspace_member() -> None:
 
 
 def test_the_walk_is_named_only_inside_the_definitions_that_own_it() -> None:
-    """Two producers in the walk's own home, one declared oracle, and one
-    declared, deliberately independent census -- four sanctioned
-    definitions across three declared homes.
+    """Two producers in the walk's own home, one declared oracle, one
+    declared census, and one declared cross-artefact recovery -- five
+    sanctioned definitions across four declared homes.
 
-    A fifth *definition* naming any of these identifiers is a fourth walk:
-    exactly the class of regression the theme's root cause records having
-    already happened once. Anywhere else in any home counts, which is the
-    reach a whole-file exclusion used to give away.
+    A sixth *definition* naming any of these identifiers is an undeclared
+    walk, the class of regression this gate exists for. Anywhere else in
+    any home counts, which is the reach a whole-file exclusion gives away.
     """
     offenders = {
         str(path): lines

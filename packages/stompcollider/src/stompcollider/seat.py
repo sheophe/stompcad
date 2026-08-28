@@ -25,10 +25,10 @@ __all__ = ["Seat", "rank_key"]
 def rank_key(placement: Placement) -> tuple[int, int, int, float, int, int]:
     """The spec's lexicographic key, whole, from the first version.
 
-    Written six-wide before clashes exist so that Task 19 supplies data to
-    a comparator rather than replacing one: at this point in the plan every
-    placement's ``clashes`` is empty, so the first three elements are
-    always zero and ordering falls through to ``(theta_deg, x_nm, y_nm)``.
+    Six-wide whether or not any clash has been found, so that the clash
+    stage feeds this comparator rather than replacing one: a placement with
+    no clashes scores zero on the first three elements and orders on
+    ``(theta_deg, x_nm, y_nm)`` alone.
     """
     return (
         len(placement.clashes),

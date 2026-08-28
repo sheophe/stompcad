@@ -10,7 +10,10 @@ numbers out of a document and the other measures geometry out of a file.
 # The end-to-end scene comes from ``test_cli.py``: the docking under test is
 # then one the whole pipeline really produced, and that fixture is already
 # built to defeat accidental agreement -- two boards whose parts are named
-# differently and listed out of ordinal order.
+# differently and listed out of ordinal order. It stubs
+# ``sources.step.read_step`` for the two STEP inputs, because a written file
+# cannot carry an unnamed substrate, so the real file read is not exercised
+# here; ``test_source.py`` owns that.
 
 from __future__ import annotations
 

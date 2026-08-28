@@ -262,9 +262,9 @@ def _volume_reduction_pair() -> tuple[Placement, Placement]:
 
 
 def test_clash_volume_reduces_by_the_total_not_the_largest_single_clash() -> None:
-    """Proves the volume field is ``sum``, not ``max``: mutating the
-    production reduction to ``max`` flips this fixture's order (verified in
-    the Task 15 fix-round-1 report)."""
+    """Proves the volume field is ``sum``, not ``max``: this fixture's two
+    placements order one way under ``sum`` and the other under ``max``, so a
+    reduction changed to ``max`` fails here."""
     ranked = sorted(_volume_reduction_pair(), key=rank_key)
     assert [sum(c.volume_nm3 for c in p.clashes) for p in ranked] == [16, 20]
 
@@ -293,9 +293,9 @@ def _depth_reduction_pair() -> tuple[Placement, Placement]:
 
 
 def test_clash_depth_reduces_by_the_greatest_clash_not_the_least() -> None:
-    """Proves the depth field is ``max``, not ``min``: mutating the
-    production reduction to ``min`` flips this fixture's order (verified in
-    the Task 15 fix-round-1 report)."""
+    """Proves the depth field is ``max``, not ``min``: this fixture's two
+    placements order one way under ``max`` and the other under ``min``, so a
+    reduction changed to ``min`` fails here."""
     ranked = sorted(_depth_reduction_pair(), key=rank_key)
     assert [max(int(c.depth_nm) for c in p.clashes) for p in ranked] == [60, 100]
 

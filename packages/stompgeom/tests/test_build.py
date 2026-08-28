@@ -61,9 +61,9 @@ def test_a_placement_moves_the_solid_in_the_built_document() -> None:
 
 
 def test_a_rotating_placement_turns_an_asymmetric_solid_too() -> None:
-    """The brief's own placement test moves by translation alone, so a
-    ``build_document`` that reads only ``translation_mm`` and silently
-    drops ``rotation`` would still pass it. A box asymmetric in x and y,
+    """A placement test that moves by translation alone is passed by a
+    ``build_document`` reading only ``translation_mm`` and silently dropping
+    ``rotation``. A box asymmetric in x and y,
     turned 90 degrees about z, swaps which axis is long -- a fact only the
     rotation, not the translation, can produce."""
     rotate_90_about_z = ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
@@ -322,7 +322,7 @@ def test_several_distinctly_coloured_solids_all_read_back_correctly() -> None:
 
 
 def test_a_colour_shared_by_several_solids_reads_back_on_each() -> None:
-    """Task 8's reslot made a shared colour safe to write; this is the
+    """The writer's reslot is what makes a shared colour safe to write; this is the
     builder-level control that a repeated colour still resolves per-solid,
     not just once for whichever chain happened to define it."""
     document = build_document([
@@ -352,7 +352,7 @@ def test_distinct_colours_survive_a_render_and_reread_round_trip(tmp_path: Path)
     colour: render, write bytes to a real file, read a fresh document back
     through ``read_step``, and check the colour there -- exercising
     ``writer``'s gamma-encoded ``COLOUR_RGB`` and its reslot together, the
-    way Task 21's caller will."""
+    way a caller writing an assembly does."""
     document = build_document([
         PlacedSolid(_box(1, 1, 1), "A", _RED, None),
         PlacedSolid(_box(2, 2, 2), "B", _GREEN, None),
@@ -372,7 +372,7 @@ def test_distinct_colours_survive_a_render_and_reread_round_trip(tmp_path: Path)
 
 
 def test_a_shared_colour_survives_a_render_and_reread_round_trip(tmp_path: Path) -> None:
-    """The shared-colour case, through the same real round trip: Task 8's
+    """The shared-colour case, through the same real round trip: the writer's
     canonicalisation of which chain of a repeated colour defines it is
     exactly the code path a lost or scrambled colour would hide in, and the
     in-memory tests above cannot reach it at all."""

@@ -147,7 +147,7 @@ def _chirality_conflict(
     # at or under tolerance * |seed_a - seed_b| means that distance is at
     # most one tolerance -- consistent with ordinary recognition noise on
     # `other` alone, not evidence of a reflection. This is the explicit
-    # determinant check the brief calls for when a mirrored layout would
+    # determinant check for the case where a mirrored layout would
     # otherwise validate through a seed pair alone, banded so it does not
     # also convict a board recognition noise alone can explain. Each seed
     # carries its own band from its own edge length; it bounds only a
