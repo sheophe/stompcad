@@ -104,8 +104,12 @@ class Protrusion:
 class Component:
     """One named solid: its designator, and its protrusion if it has one.
 
-    ``protrusion`` is ``None`` for a component with no admissible cylinder --
-    reported as ``unmatched-part``, never inferred as absent geometry.
+    ``protrusion`` is ``None`` for a component with no admissible cylinder
+    *or* one the panel-reference filter does not admit -- the command line
+    withholds it there, and only ``Match`` reads it, so having none says
+    exactly "this part pairs with no hole". The two causes are therefore
+    indistinguishable in this field, and ``unmatched-part`` -- which names
+    the first alone -- cannot be derived from it.
     """
 
     designator: str

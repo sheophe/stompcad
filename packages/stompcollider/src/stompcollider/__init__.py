@@ -1,14 +1,12 @@
 """Seats PCB models inside a drilled case and reports where they clash.
 
 The package root exposes the canonicalisation entry point and what it
-reads, so a caller never has to guess a submodule -- see
-``docs/specs/stompcollider-technical.md``'s module layout. ``Match``, ``Seat``,
-``Clashes``, ``BoardSource`` and both emitters land here, mirroring
-``stompdrill``'s own root. The command line does not: a console script is
-how a command line is reached, and ``stompdrill``'s root exports no
-``main`` either. The domain values live in
-``stompcollider.model``; the float-millimetre reader types live in
-``stompcollider.raw`` -- one name, one home, each.
+reads, so a caller never guesses a submodule -- see the module layout in
+``docs/specs/stompcollider-technical.md``. ``Match``, ``Seat``,
+``Clashes``, ``BoardSource`` and both emitters land here; the command
+line does not, because a console script is how one is reached and
+``stompdrill``'s root exports no ``main`` either. Domain values live in
+``stompcollider.model``, the reader's float millimetres in ``raw``.
 """
 
 from __future__ import annotations

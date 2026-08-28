@@ -477,8 +477,8 @@ def _placement_line(placement: Placement) -> str:
     """One placement: where it puts the board, and what it found there."""
     return (
         f"      rank {placement.rank}   "
-        f"x {format_nm(placement.x_nm)}  "
-        f"y {format_nm(placement.y_nm)}  "
+        f"x {format_nm(placement.x_nm)} mm  "
+        f"y {format_nm(placement.y_nm)} mm  "
         f"z {format_nm(placement.z_nm)} mm  "
         f"theta {placement.theta_deg:.3f} deg   "
         f"{len(placement.correspondence)} paired, {len(placement.clashes)} clashing"
