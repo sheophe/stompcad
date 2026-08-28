@@ -7,6 +7,7 @@ import math
 from stompcollider.canonicalise import _canonicalise_component, canonicalise
 from stompcollider.model import DockData, Protrusion
 from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder
+from stompmodel.diagnostics import Diagnostic
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration
 from stompmodel.units import Nanometre
@@ -320,3 +321,20 @@ def test_a_stack_handed_over_two_ways_round_gives_one_profile() -> None:
     a, b, c = RawCylinder(1.0, 0.0, 10.0), RawCylinder(3.0, 6.0, 10.0), RawCylinder(2.0, 2.0, 6.0)
 
     assert _stacked(a, b, c) == _stacked(c, a, b) == _stacked(b, c, a)
+
+
+def test_the_sources_findings_reach_the_document() -> None:
+    """A finding the source raised is a fact about the run, not about a board.
+
+    Without this the only ``wrong-case-model`` a run can raise would be
+    built, carried to the boundary, and dropped there unseen.
+    """
+    finding = Diagnostic.error("wrong-case-model", "not this case")
+    raw = _raw_with_axis(1.0, 1.0)
+    data = canonicalise(RawBoards(boards=raw.boards, diagnostics=(finding,)), _case())
+    assert data.diagnostics == (finding,)
+
+
+def test_a_scan_with_no_finding_states_none() -> None:
+    """The control: a document does not invent a diagnostic of its own."""
+    assert canonicalise(_raw_with_axis(1.0, 1.0), _case()).diagnostics == ()

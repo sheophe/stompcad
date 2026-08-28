@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder
+from stompmodel.diagnostics import Diagnostic
 
 _CYLINDER = RawCylinder(radius_mm=1.0, depth_from_tip_min_mm=0.0, depth_from_tip_max_mm=1.0)
 
@@ -50,6 +51,18 @@ def test_a_board_needs_at_least_one_component() -> None:
 def test_a_boards_scan_needs_at_least_one_board() -> None:
     with pytest.raises(ValueError, match="at least one board"):
         RawBoards(boards=())
+
+
+def test_an_error_diagnostic_buys_a_scan_with_no_board() -> None:
+    """An unreadable file is a reported finding, not a silently empty result."""
+    scan = RawBoards(boards=(), diagnostics=(Diagnostic.error("unreadable-board", "no"),))
+    assert scan.boards == ()
+
+
+def test_a_warning_does_not_buy_a_scan_with_no_board() -> None:
+    """The clause tested apart from the one above: warning is not error."""
+    with pytest.raises(ValueError, match="at least one board"):
+        RawBoards(boards=(), diagnostics=(Diagnostic.warning("multiple-boards", "two"),))
 
 
 def test_a_cylinder_radius_must_be_finite_millimetres() -> None:

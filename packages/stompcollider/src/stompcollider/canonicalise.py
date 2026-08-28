@@ -134,10 +134,14 @@ def canonicalise(raw: RawBoards, case: CaseRegistration) -> DockData:
     Ordering happens on an explicitly sorted sequence, keyed by geometry in
     the case's face frame -- never by ``raw.boards``' own order, per
     ADR-0006. Ordinals are then assigned 1..n over that sorted sequence.
+
+    The source's findings come through, as ``quantise`` brings a source's
+    through: dropping them here would leave the only ``wrong-case-model``
+    or ``unreadable-board`` a run raises reaching no artefact at all.
     """
     ordered = sorted(raw.boards, key=lambda board: _sort_key(board, case.frame.basis))
     boards = tuple(
         _canonicalise_board(board, ordinal)
         for ordinal, board in enumerate(ordered, start=1)
     )
-    return DockData(case=case, boards=boards)
+    return DockData(case=case, boards=boards, diagnostics=raw.diagnostics)

@@ -1,14 +1,15 @@
 """The float-millimetre side of the canonicalisation boundary.
 
 Every length here is a measurement, not yet a canonical fact -- see ADR-0003
-and ADR-0004. ``canonicalise`` is these types' only consumer; nothing past
-that boundary may hold a float length again.
+and ADR-0004. ``stompcollider.sources`` builds these and ``canonicalise``
+consumes them; nothing past that boundary may hold a float length again.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from stompmodel.diagnostics import Diagnostic, Severity, of_severity
 from stompmodel.units import check_millimetres
 
 __all__ = ["RawCylinder", "RawComponent", "RawBoard", "RawBoards"]
@@ -75,8 +76,8 @@ class RawBoard:
     substrate's axis-aligned bounding box in the model frame, in either
     order -- ``canonicalise`` takes their per-axis min and max itself, so
     corner order carries no meaning. ``carrier_*`` is the substrate's own
-    plane as ``stompgeom.levels()`` finds it upstream (a later task); only
-    the origin is a length, the basis vectors are already unitless.
+    plane, ``w`` signed the way its parts protrude; only the origin is a
+    length, the basis vectors are already unitless.
     """
 
     corner_a_mm: tuple[float, float, float]
@@ -104,10 +105,18 @@ class RawBoard:
 
 @dataclass(frozen=True, slots=True)
 class RawBoards:
-    """A source's whole result: every measured board, before canonicalisation."""
+    """A source's whole result: every measured board, and what it found reading them.
+
+    A scan with no board at all is admitted only when an error diagnostic
+    says why -- an unreadable file is a reported finding, not a silently
+    empty result, and an error withholds every artefact anyway. A warning
+    does not buy the exemption: nothing that still exits 1 may leave a
+    caller with no board and no error.
+    """
 
     boards: tuple[RawBoard, ...]
+    diagnostics: tuple[Diagnostic, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.boards:
-            raise ValueError("a raw scan needs at least one board")
+        if not self.boards and not of_severity(self.diagnostics, Severity.ERROR):
+            raise ValueError("a raw scan needs at least one board, or the error explaining none")

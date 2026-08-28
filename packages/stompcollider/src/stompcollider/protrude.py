@@ -17,7 +17,7 @@ from stompgeom.step import StepSolid
 from .boards import basis_about
 from .raw import RawComponent, RawCylinder
 
-__all__ = ["admissible", "protrusion_of"]
+__all__ = ["admissible", "protrusion_of", "reach_along"]
 
 
 def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, ...]:
@@ -48,7 +48,7 @@ def protrusion_of(solid: StepSolid, carrier_normal: Direction) -> RawComponent |
         return None
     u, v = basis_about(carrier_normal)
     tipmost = max(admitted, key=lambda c: _tip_key(c, carrier_normal, u, v))
-    tip_mm = _reach(tipmost, carrier_normal)[1]
+    tip_mm = reach_along(tipmost, carrier_normal)[1]
     return RawComponent(
         designator=solid.name,
         axis_xy_mm=(_projected(tipmost, u), _projected(tipmost, v)),
@@ -71,7 +71,7 @@ def _measured(cylinder: Cylinder, outward: Direction, tip_mm: float) -> RawCylin
     Depth grows away from the tip, so a cylinder's far end along ``outward``
     is its shallow bound.
     """
-    low_mm, high_mm = _reach(cylinder, outward)
+    low_mm, high_mm = reach_along(cylinder, outward)
     return RawCylinder(
         radius_mm=cylinder.radius_mm,
         depth_from_tip_min_mm=tip_mm - high_mm,
@@ -79,8 +79,14 @@ def _measured(cylinder: Cylinder, outward: Direction, tip_mm: float) -> RawCylin
     )
 
 
-def _reach(cylinder: Cylinder, outward: Direction) -> tuple[float, float]:
-    """Where the cylinder's two end circles sit along ``outward``, least first."""
+def reach_along(cylinder: Cylinder, outward: Direction) -> tuple[float, float]:
+    """Where the cylinder's two end circles sit along ``outward``, least first.
+
+    Public because a caller must be able to ask how far a cylinder reaches
+    *before* it knows which way is outward: ``sources/step.py`` derives that
+    sign from this measurement, and a second copy of it there would be a
+    second chance to disagree about where a face ends.
+    """
     base = _dot(cylinder.axis_location_mm, outward)
     step = _dot(cylinder.axis_direction, outward)
     ends = (base + cylinder.extent_mm[0] * step, base + cylinder.extent_mm[1] * step)
@@ -96,7 +102,7 @@ def _tip_key(
     the wider one, then its near end, then where its axis sits in the carrier
     plane -- all geometry, so two spellings of one part agree (ADR-0006).
     """
-    low, high = _reach(cylinder, outward)
+    low, high = reach_along(cylinder, outward)
     return (high, cylinder.radius_mm, low, _dot(cylinder.axis_location_mm, u),
             _dot(cylinder.axis_location_mm, v))
 
