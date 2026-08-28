@@ -1,13 +1,12 @@
 """``Match``: which face of a board points at the panel, and what fits.
 
 A board's carrier normal comes from ``stompgeom.levels()``'s own partition
-key, unsearched and unswept -- its sign is not a fact about which side faces
-the panel. ``Match`` therefore tries both, purely in the plane: each
-protrusion's axis as measured, and the same axis with one in-plane
-coordinate negated (the two-dimensional trace of physically turning the
-board over). Whichever hypothesis produces strictly more within-tolerance
-pairings is the one that faces the panel -- a predicate over counts, never a
-score. See "Match" in ``docs/specs/stompcollider-technical.md``.
+key -- its sign is not a fact about which side faces the panel. ``Match``
+tries both, purely in the plane: each protrusion's axis as measured, and the
+same axis with one in-plane coordinate negated (the trace of turning the
+board over). The hypothesis with strictly more within-tolerance pairings is
+the one facing the panel -- a predicate over counts, never a score. See
+"Match" in ``docs/specs/stompcollider-technical.md``.
 """
 
 from __future__ import annotations

@@ -243,13 +243,11 @@ class FaceFrame:
 
     ``basis.origin_nm`` sits on the **inner** surface -- never the side the
     bit enters; see ADR-0007. ``basis.w``'s sense is unrelated to that datum
-    and is a *stated* convention, not derivable: it is the **outward**
-    normal, away from the material and out of the enclosure. Both senses
-    satisfy ``CoordinateFrame``'s own checks equally, so no validator can
-    recover it -- see ADR-0009.
-
-    Composes rather than extends -- a subclass would pass wherever a bare
-    ``CoordinateFrame`` is wanted, the leak ADR-0008 names as this risk.
+    and is a *stated* convention, not derivable: it is the **outward** normal,
+    away from the material and out of the enclosure, and both senses satisfy
+    ``CoordinateFrame``'s own checks equally, so no validator can recover it
+    (ADR-0009). Composes rather than extends -- a subclass would pass wherever
+    a bare ``CoordinateFrame`` is wanted, the leak ADR-0008 names as this risk.
     """
 
     basis: CoordinateFrame

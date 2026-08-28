@@ -1,6 +1,6 @@
 # stompcollider — technical specification
 
-**Status:** accepted, unimplemented.
+**Status:** accepted and implemented, on `stompcad-collider` from `9180569`.
 
 Decides the libraries, interfaces and internal architecture that
 [`docs/specs/stompcollider.md`](stompcollider.md) deliberately left open. That document
@@ -71,7 +71,7 @@ below.
                                                            DockData
                                                                │
                                                                ▼
-                                                    Pipeline(Match, Seat)
+                                            Pipeline(Match, Seat, Clashes)
                                                                │
                                                                ▼
                                                            DockData
@@ -102,19 +102,24 @@ src/stompcollider/
   __init__.py       exports Source, canonicalise, Match, Seat, and the emitters
   model.py          DockData, Board, Component, Protrusion, Profile,
                     Correspondence, Candidate, Placement, Clash
+  raw.py            RawBoards: what a source measured, in millimetre floats
+  canonicalise.py   RawBoards → DockData, changing representation only
   designators.py    the panel-reference filter: expression → predicate
   boards.py         substrate identification, contact assignment, board ordinals
   protrude.py       perpendicular-cylinder stacks → axis and profile
   sources/step.py   BoardSource: STEP files and case model → RawBoards
   match.py          Match
   seat.py           Seat
+  clash.py          Clashes
   emitters/report.py, emitters/assembly.py
   cli.py, errors.py
 ```
 
-Everything above `sources/` and `emitters/` is pure: `Match` and `Seat` operate
-on `DockData` and never touch the kernel, so both are testable with hand-built
-values.
+**`Match` and `Seat` are pure**: both fold over `DockData` and never touch the
+kernel, so both are testable with hand-built values. That is a claim about
+those two stages, not about everything listed above `sources/`. `boards.py`,
+`protrude.py` and `clash.py` read geometry, and read it through `stompgeom`
+rather than through OCP — `Clashes` is the pipeline's one impure stage.
 
 ## Reading boards
 
@@ -229,7 +234,11 @@ whose axis pairs with no hole.
 
 For each board, and for each of its two faces:
 
-1. Project every admitted protrusion's axis into the face frame's plane.
+1. Reduce every admitted protrusion's axis to a two-dimensional coordinate in
+   the carrier plane, which is parallel to the drilled face by construction.
+   This is **not** the face frame's own transform applied: that transform is
+   the unknown the Candidates section below solves for, out of the pairs step
+   2 makes, so it is not available here.
 2. Pair each axis with a hole whose centre lies within the **recognition
    tolerance**. That tolerance is half the drill grid pitch — derived, not
    chosen: holes are quantised to that grid, so two distinct holes are at least
@@ -268,9 +277,10 @@ choice available, with ties broken by designator order.
 
 Fewer than two correspondences is `under-constrained-board`: one leaves the board
 free to turn about that point. Two is the rank of a rigid planar transform, not a
-threshold. An under-constrained board is placed explicitly through `--place` and
-otherwise held at its exported position, and is treated as a fixed body that
-others must avoid.
+threshold. An under-constrained board earns that finding and no placement:
+`--place` is refused rather than honoured, for the reason the command line
+section states, so nothing decides where such a board goes and nothing writes
+it into the assembly.
 
 ## Seat
 
@@ -310,47 +320,6 @@ model. This resolves the pre-spec's open question about cases where seating is
 more than a single query: the set is empty, because the question was mis-framed.
 A standoff is not a seating constraint; it is a solid that clashes.
 
-### Clashes
-
-Each board is checked against **the whole of the rest of the assembly**: every
-solid of the case model, and every other board. No part of the enclosure is
-privileged or exempt — walls, corner bosses, the floor and the lid are all simply
-geometry, and so is a neighbouring board. The rule is stated this way
-deliberately: an enumerated list of things worth checking would eventually omit
-one, and the omission would look like a passing result.
-
-Bounding boxes filter pairs; a surviving pair gets an exact
-`BRepAlgoAPI_Common`. A clash is that common region's axis-aligned bounding box
-in the case's face frame. **Depth is its least extent and direction is that
-axis** — defined as the least distance along a face-frame axis that would clear
-the overlap. It is an exact answer to that definition and an honest upper bound
-on true penetration depth, it needs no meshing, and it degrades sensibly: a board
-2 mm too long reports 2 mm along the long axis; a lid 3 mm too shallow reports
-3 mm along the normal.
-
-A clash against the lid is **named as such** in the report. That is emphasis in
-the wording, not a narrowing of the check.
-
-### Contact is not a clash, and needs no threshold
-
-A 12.000 mm bush meets a 12.000 mm hole exactly, so their common region's extents
-lie at the kernel's modelling tolerance and round to **0 nm** under ADR-0003's
-canonical representation. Zero-nanometre depth is contact. Anything the canonical
-representation cannot express is not a fact, so the resolution is the test and no
-threshold is introduced.
-
-**This claim must be verified, not assumed.** The implementation carries a test
-that seats `tar-pcb.stp`'s footswitches through nominal ⌀12 holes and asserts the
-measured depth rounds to zero. If OCC's boolean returns more than that, the fix is
-to state the kernel's actual guarantee — not to add a tolerance.
-
-Where a corresponded protrusion's profile exactly equals its hole radius, the
-report records `zero-clearance` at INFO. It is an interference fit by design, and
-it is why a fit report is optimistic wherever a thread is involved: a
-potentiometer's M7 bushing is modelled at its 6.188 mm thread minor diameter, not
-the 7 mm the real part occupies. Model fidelity is the caller's responsibility;
-naming where the report inherits it is not.
-
 ### Ranking
 
 Placements are ranked lexicographically ascending on
@@ -376,12 +345,59 @@ Board-level ranking is therefore independent and order-free — determinism does
 rest on a traversal order, and the Cartesian product of every board's candidates
 never appears. This keeps the pre-spec's meaning of "sequential": one board at a
 time, never jointly optimised. A board with more than one placement is reported as
-`ambiguous-placement` so `stompcad` can offer a picker, and a caller pins one with
-`--pin N=RANK` on re-run.
+`ambiguous-placement` so `stompcad` can offer a picker; the model is written at
+rank 1, and `--pin N=RANK` is refused rather than honoured, for the reason the
+command line section states.
 
 Inter-board clashes are **reported, never compromised away**. A hole pattern is a
 hard constraint, so two boards that fight is a fault in the pedal, and the useful
 output says where and by how much.
+
+## Clashes
+
+Each board is checked against **the whole of the rest of the assembly**: every
+solid of the case model, and every other board. No part of the enclosure is
+privileged or exempt — walls, corner bosses, the floor and the lid are all simply
+geometry, and so is a neighbouring board. The rule is stated this way
+deliberately: an enumerated list of things worth checking would eventually omit
+one, and the omission would look like a passing result.
+
+Bounding boxes filter pairs; a surviving pair gets an exact
+`BRepAlgoAPI_Common`. A clash is that common region's axis-aligned bounding box
+in the case's face frame. **Depth is its least extent and direction is that
+axis** — defined as the least distance along a face-frame axis that would clear
+the overlap. It is an exact answer to that definition and an honest upper bound
+on true penetration depth, it needs no meshing, and it degrades sensibly: a board
+2 mm too long reports 2 mm along the long axis; a lid 3 mm too shallow reports
+3 mm along the normal.
+
+A clash against the lid is **named as such** in the report. That is emphasis in
+the wording, not a narrowing of the check.
+
+### Contact is not a clash, and needs no threshold
+
+A 12.000 mm bush meets a 12.000 mm hole exactly, and the exact boolean answers
+that pair with **nothing at all**: a non-null compound carrying no vertex, no
+face and no solid, off which a bounding box cannot even be read. Contact is
+therefore decided by the kernel's own result, not by comparing an extent
+against a tolerance chosen here — there is no extent to compare.
+
+Zero-nanometre depth is contact too, for any region that does arrive with an
+extent ADR-0003's canonical representation cannot express. Anything that
+representation cannot state is not a fact, so the resolution is the test and no
+threshold is introduced. One whole nanometre is a fact, and is reported.
+
+**This claim is verified, not assumed.** The implementation carries the named
+test — a 12.000 mm shaft in a 12.000 mm bore, curved contact rather than
+planar — beside the probe a rule discarding everything would fail: one micron
+of radial interference is a clash, and so is a one-nanometre overlap.
+
+Where a corresponded protrusion's profile exactly equals its hole radius, the
+report records `zero-clearance` at INFO. It is an interference fit by design, and
+it is why a fit report is optimistic wherever a thread is involved: a
+potentiometer's M7 bushing is modelled at its 6.188 mm thread minor diameter, not
+the 7 mm the real part occupies. Model fidelity is the caller's responsibility;
+naming where the report inherits it is not.
 
 ## Emitters
 
@@ -417,13 +433,19 @@ diagnostics matched by `code` — the same conventions as the drill document.
  "unmatched_holes": [7, 9],
  "diagnostics": [
    {"severity": "warning", "code": "unmatched-part",
-    "message": "RV5 has no hole", "data": {"designator": "RV5"}}]}
+    "message": "RV5 has no hole", "location_nm": null,
+    "data": {"designator": "RV5"}}]}
 ```
+
+`location_nm` is written on **every** diagnostic, `null` where the finding names
+no position — the same unconditional field `stompmodel`'s codec writes for the
+same shared `Diagnostic`, so a consumer can tell a finding with no position from
+a key that was dropped.
 
 `case.face` is echoed from the drill document, never chosen here.
 `panel_face` is which side of the carrier plane points at the panel, as a sign
-along the board's own carrier normal in the file it was exported from — `-n` or
-`+n`. Angles are serialised at six decimal places, which is the only float in
+along the board's own carrier normal in the file it was exported from — `-w` or
+`+w`. Angles are serialised at six decimal places, which is the only float in
 the document and the only place byte-identity depends on formatting.
 
 `offset_nm` is the recognition miss for that correspondence. It is a field, not a
@@ -458,6 +480,7 @@ to 2 — through `stompmodel`'s shared reduction.
 | `empty-group` | ERROR | The filter parsed but admitted nothing — set the flag |
 | `both-faced-group` | ERROR | Equal pairings on both faces; the side must be declared |
 | `ambiguous-pairing` | ERROR | Two protrusions within tolerance of one hole |
+| `no-valid-placement` | ERROR | Correspondences enough to place the board, but no candidate transform fits them all |
 | `no-substrate` | ERROR | Every solid is named; no board body to group onto |
 | `unreadable-board` | ERROR | Not a readable STEP file, or no solids |
 | `degenerate-geometry` | ERROR | A boolean or profile could not be evaluated |
@@ -469,6 +492,12 @@ to 2 — through `stompmodel`'s shared reduction.
 | `under-constrained-board` | WARNING | Fewer than two correspondences |
 | `ambiguous-placement` | WARNING | More than one distinct placement survives |
 | `zero-clearance` | INFO | A profile exactly equals its hole radius |
+
+**A board with correspondences but no candidate is an error, not a silence.**
+Two correspondences are the rank of a rigid planar transform, so a board
+carrying two or more that no single transform fits is one this tool cannot
+place. Saying nothing would leave it with no placement, no finding, and no
+mention anywhere in either artefact.
 
 **Matching and fitting fail differently, and only one is an error.** A matched
 board whose every candidate clashes is the *right* board with a misaligned design:
@@ -498,6 +527,22 @@ stompcollider DRILL.json BOARD.stp [BOARD.stp …]
 Every flag resolves before any file is opened, so an unparseable filter
 expression, a malformed `--place`, or a `--pin` naming a board ordinal that
 cannot exist is exit 3 rather than a diagnostic.
+
+**`--place` and `--pin` are parsed, validated, and then refused.** Neither has
+a consumer: nothing places a board explicitly, so `Match` gives an
+under-constrained board no placement at all, and `Clashes` re-ranks every
+placement once its clashes are known, so no pinned rank could survive to the
+report. Both are refused with the reason stated, as a usage failure. An
+accepted flag that silently changed nothing would be the worse failure — the
+operator would read back a placement they never asked for and believe they
+did. They are validated *before* they are refused, so a bad ordinal is still
+reported as the bad ordinal it is rather than being hidden behind the refusal.
+
+This falls short of [`stompcollider.md`](stompcollider.md), which requires that an
+under-constrained board be explicitly placed and treated as a fixed body others
+must avoid. That document wins, so this one records the shortfall rather than
+restating the refusal as though it were the intended design; `docs/BACKLOG.md`
+carries the gap as work.
 
 There is no `--case-face`: the drill document carries the face frame `stompdrill`
 cut in, so `stompcollider` reads the registration instead of choosing a face. It
@@ -549,7 +594,11 @@ TDD throughout, following the repository's existing rules.
   `emitters/assembly.py` is measured under that command, not the default one.
 - Cross-artefact claims are asserted by parsing both emitted artefacts and
   comparing what they say about one assembly, as
-  `packages/stompdrill/tests/test_drawing_agreement.py` does today.
+  `packages/stompdrill/tests/test_drawing_agreement.py` does today. The two
+  readers live in `packages/stompcollider/tests/recovery/` and may import
+  neither `stompcollider`, which wrote the report, nor `stompgeom`, whose
+  writer produced the STEP: a recovery that inverts its own writer's transform
+  proves that writer self-consistent and nothing more.
 - The contact-is-not-a-clash claim above is a named test, not an assumption.
 - Coverage targets match the workspace: 90% overall, 100% for `Match`, `Seat`
   and the emitters.
@@ -564,7 +613,7 @@ is recorded rather than left to be rediscovered.
 | --- | --- | --- |
 | 1 — `stompmodel` | lengths, `DrillData` and its members, diagnostics, the JSON codec plus the reader it never had, and the generic `Stage[T]` / `Pipeline[T]` / `Emitter[T]` contracts | done — 3af2bd9 |
 | 2 — `stompgeom` | the STEP reader, the deterministic writer with its OCC normalisation, and the kernel guard; the `CoordinateFrame` / `FaceFrame` split moved *down* into `stompmodel`, not into `stompgeom` — see ADR-0009 as amended | done — 277ac8d |
-| 3 — `stompcollider` | everything this document specifies, built test-first | its own suite, and the cross-artefact agreement test |
+| 3 — `stompcollider` | everything this document specifies, built test-first | done — its own suite passes under `--boards`, the coverage targets above are met, and `tests/test_dock_agreement.py` compares the two artefacts through two independent readers |
 
 **Why three.** Plans 1 and 2 succeed when *nothing observable changes*; plan 3
 succeeds when new behaviour appears. One plan would interleave "prove nothing

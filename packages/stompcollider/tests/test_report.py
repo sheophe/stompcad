@@ -215,6 +215,28 @@ def test_a_panel_wide_diagnostic_location_serialises_as_null() -> None:
     assert document["diagnostics"][0]["location_nm"] is None
 
 
+def test_a_diagnostic_datum_that_is_a_pair_serialises_as_a_list() -> None:
+    """``wrong-case-model`` carries two footprints as tuples of lengths, and
+    JSON has no tuple. A scalar in the same mapping stays a scalar, so this
+    fails an implementation that listed every value it was handed."""
+    measured = Diagnostic.error(
+        "wrong-case-model",
+        "the model is not the enclosure the drill document identifies",
+        data=(
+            ("model", "case.stp"),
+            ("enclosure_nm", (_nm(112_400_000), _nm(60_500_000))),
+        ),
+    )
+    data = DockData(case=_case(), boards=(_board(),), diagnostics=(measured,))
+
+    document = json.loads(ReportEmitter().emit(data))
+
+    assert document["diagnostics"][0]["data"] == {
+        "model": "case.stp",
+        "enclosure_nm": [112_400_000, 60_500_000],
+    }
+
+
 def _placements_out_of_rank_order() -> tuple[Placement, ...]:
     """Two placements for one board, built with rank 2 listed before rank
     1 -- the same "trust the field, not the container order" shape as the

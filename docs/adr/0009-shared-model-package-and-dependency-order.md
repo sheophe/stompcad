@@ -57,12 +57,19 @@ should not.
 Five packages, in a linear acyclic order (Figure 1).
 
 ```
-stompmodel ──► stompgeom ──┬──► stompdrill ────┐
-                     └──► stompcollider ─┴──► stompcad
+stompmodel ──► stompgeom ──┬──► stompdrill ─────┐
+                           └──► stompcollider ──┴──► stompcad
 ```
 
 *Figure 1: the workspace's dependency order. Each package installs and passes its
 own tests alone, as ADR-0008 requires.*
+
+Four of the five are built, in exactly this order: `stompmodel`, `stompgeom`,
+`stompdrill` and `stompcollider`. `stompcollider` depends on `stompmodel` and
+`stompgeom` and on neither of the others — it reads a drill document through
+`stompmodel`'s codec, never through `stompdrill` — and it carries its own test,
+type and mutation commands, as every member does. `stompcad` is the one package
+this figure still anticipates rather than describes.
 
 ### `stompmodel`
 

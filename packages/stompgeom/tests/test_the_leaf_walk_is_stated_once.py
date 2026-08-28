@@ -42,6 +42,15 @@ ORACLE_HOME = REPO / "packages" / "stompdrill" / "tests" / "test_step_cut.py"
 #: way rather than merely duplicating the descent that reaches it.
 WRITER_HOME = REPO / "packages" / "stompgeom" / "src" / "stompgeom" / "writer.py"
 
+#: The dock recovery's fourth walk, declared for the oracle's own reason one
+#: artefact along: ``stompcollider``'s assembly emitter writes its STEP
+#: through this package's writer, so reading that file back through
+#: ``leaf_labels`` would be the writer inverting itself. That recovery may
+#: not import ``stompgeom`` at all, which its own suite enforces.
+RECOVERY_HOME = (
+    REPO / "packages" / "stompcollider" / "tests" / "recovery" / "assembly.py"
+)
+
 #: The XCAF calls that only a sanctioned walk may make: the assembly test,
 #: the component accessor, and the free-shape accessor.
 _WALK_NAMES = frozenset({"IsAssembly_s", "GetComponents_s", "GetFreeShapes"})
@@ -55,6 +64,7 @@ _SANCTIONED: dict[Path, frozenset[str]] = {
     WALK_HOME: frozenset({"leaf_labels", "_walk_leaves"}),
     ORACLE_HOME: frozenset({"_colours_by_product"}),
     WRITER_HOME: frozenset({"_count_colour_assignments"}),
+    RECOVERY_HOME: frozenset({"_solids"}),
 }
 
 

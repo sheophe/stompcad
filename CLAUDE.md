@@ -7,7 +7,12 @@ this repository.
 
 `stompdrill` reads drill geometry from Adobe Illustrator artwork and emits fabrication
 artefacts. `DrillData` is the library integration contract and the JSON emitter is its
-serialised form. KiCad data and component semantics are outside the package's scope.
+serialised form. KiCad data and component semantics are outside `stompdrill`'s scope.
+
+`stompcollider` is the second tool. It takes that drill document, a **drilled** case
+model and one or more board models, seats each board on the holes its panel-reference
+parts pair with, and reports where anything clashes. It drills nothing and resolves no
+collision away: seeing the interference is the point.
 
 Enclosure geometry enters only as a supplied model: `stompdrill` never synthesises an
 enclosure, and reads one only to verify clearance and to cut the holes it has already
@@ -36,7 +41,8 @@ replaced.
 `pdfminer.six` is declared only in `packages/stompdrill/pyproject.toml`'s dev group,
 because `tests/recovery/pdf.py` imports it and ADR-0008's governing test is that each
 member passes its own tests alone. `hypothesis` is declared there too, and in the root's
-dev group and `stompmodel`'s. Both arrive with a plain `uv sync --all-packages`.
+dev group, `stompmodel`'s and `stompcollider`'s, for the same reason. Both arrive with a
+plain `uv sync --all-packages`.
 
 Run the project checks and tools from the repository root:
 
@@ -49,22 +55,27 @@ Run the project checks and tools from the repository root:
 .venv/bin/python -m pytest -o addopts= packages/stompdrill/tests/test_pipeline.py::test_name -v
 
 # Coverage, per package. The root testpaths cover only stompdrill, so measuring
-# stompmodel or stompgeom through it reports a package no test in scope imports
-# end to end and grades its codec far below the 100% target below.
+# another member through it reports a package no test in scope imports end to
+# end and grades its codec far below the 100% target below.
 .venv/bin/python -m pytest -o addopts= --cov=stompdrill --cov-report=term-missing
 cd packages/stompmodel && uv run --no-sync pytest -o addopts= --cov=stompmodel --cov-report=term-missing
 cd packages/stompgeom && uv run --no-sync pytest -o addopts= --cov=stompgeom --cov-report=term-missing
+cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards --cov=stompcollider --cov-report=term-missing
 
-# Lint and types. `mypy packages` excludes stompmodel's and stompgeom's tests --
-# three `tests` packages cannot share one scan -- so each member's own config is
-# a second gate.
+# Lint and types. `mypy packages` excludes every member's own tests but
+# stompdrill's -- four `tests` packages cannot share one scan -- so each
+# member's own config is a second gate.
 ruff check packages tools
 mypy packages
 cd packages/stompmodel && uv run --no-sync mypy
 cd packages/stompgeom && uv run --no-sync mypy
+cd packages/stompcollider && uv run --no-sync mypy
 
 # Kernel tests against real Hammond models (downloads and caches them)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond --tb=short
+
+# stompcollider's kernel-backed tests, which read its committed board fixture
+cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q
 
 # Behaviour lock: whole artefacts from two panels, hashed. Capture before a change
 # that must move no artefact byte, then run again after. It is not a gate on HEAD
@@ -78,6 +89,8 @@ bash tools/verify-lock.sh
 (cd packages/stompgeom && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
   && ../../.venv/bin/mutmut results)
 (cd packages/stompdrill && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
+  && ../../.venv/bin/mutmut results)
+(cd packages/stompcollider && PYTHONDONTWRITEBYTECODE=1 ../../.venv/bin/mutmut run \
   && ../../.venv/bin/mutmut results)
 
 # Regenerate the enclosure catalogue after editing docs/parts/dimensions.tsv.
@@ -133,6 +146,14 @@ failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `grid-ambiguous`, `hole-outside-outline`, `nesting-truncated`,
 `case-orientation-unverifiable` and `off-size` are warnings and reach exit 1.
 
+`stompcollider`'s own command line is `DRILL.json BOARD.stp …` with `--case-model`,
+`--panel-reference`, `--match-tolerance`, `--report`, `--assembly` and `-v`; there is
+no `--case-face`, because the drill document carries the face frame `stompdrill` cut
+in. `--place` and `--pin` are accepted and parsed, so a bad ordinal is still a usage
+error naming that ordinal — and then **refused with a stated reason**, because nothing
+downstream honours either: no stage places a board explicitly, and `Clashes` re-ranks
+after a pinned rank could have been held. Do not make either silently do nothing.
+
 `packages/stompdrill/tests/fixtures/tar.ai` is within tolerance of both `1590B`/`1590B2`
 (112.40 × 60.50) and `1590BS` (112.00 × 60.50), so it needs `--case 1590B`. Undeclared it
 is `ambiguous-enclosure`, an error. This is the correct answer, not a regression: do not
@@ -141,9 +162,13 @@ millimetres.
 
 ## Architecture
 
-The workspace is `packages/stompmodel`, `packages/stompgeom` and
-`packages/stompdrill`, in that dependency order; each installs and passes its own
-tests alone, which is ADR-0008's governing test.
+The workspace is `packages/stompmodel`, `packages/stompgeom`, `packages/stompdrill`
+and `packages/stompcollider`, in that dependency order; each installs and passes its
+own tests alone, which is ADR-0008's governing test. `stompcollider` depends on
+`stompmodel` and `stompgeom` and on neither `stompdrill` nor a kernel binding of its
+own: it reads a drill document through `stompmodel`'s codec and reaches OCP only
+through `stompgeom`, which `packages/stompcollider/tests/test_package_boundary.py`
+enforces.
 
 The accepted architecture is defined by:
 
@@ -361,8 +386,13 @@ CLI.
   that inverts its own emitter's transform proves that emitter self-consistent and nothing
   more. An AST gate in `test_recovery.py` forbids anything under `recovery/` from
   importing `stompdrill`.
+- `packages/stompcollider/tests/recovery/` is the same arrangement for the two docking
+  artefacts: `report.py` reads the JSON through the standard library and `assembly.py`
+  reads the STEP through OCP, sharing a vocabulary in `__init__.py`. Its gate, in
+  `test_dock_agreement.py`, forbids **both** `stompcollider`, which wrote the report,
+  and `stompgeom`, whose writer produced the STEP.
 - Coverage targets are 90% for each package and 100% for quantisers, stages, emitters, and
-  `stompmodel`'s codec. `stompdrill`'s figure only reaches its target with the kernel tests
+  `stompmodel`'s codec — `stompcollider`'s `match` and `seat` are stages by that rule. `stompdrill`'s figure only reaches its target with the kernel tests
   included, so measure it under `--hammond` — see the kernel-test rule below.
 - `mypy` covers `tests` as well as `packages/stompdrill/src/stompdrill`, because most
   hand-built lengths are fixtures. Test helpers accept plain literals and brand them
@@ -376,16 +406,22 @@ CLI.
   They are opt-in behind `--hammond`; a standard run skips them. Coverage targets for
   `stompgeom.step`, `stompgeom.writer` and `stompdrill`'s cutter are measured under
   that command, not the default one.
+- `stompcollider`'s equivalent is `--boards`, which enables the tests that read its
+  committed STEP board fixture. Coverage for `stompcollider.sources` and its assembly
+  emitter is measured under that flag, not the default one. Like `--hammond` it is not a
+  kernel-availability switch: `stompgeom` is an unconditional dependency, so a missing
+  kernel is a failure rather than a silent pass.
 - Verification reports name the exact commands run; a tool invocation that suppresses the
   claimed rule is not evidence.
 - Record no counts in this file — not test totals, not mutation survivors. A recorded
   number is stale on the next commit; name the command that produces it instead.
 - No single command proves every suite at once: the root `testpaths` covers only
-  `stompdrill`, and three `tests` packages cannot share one interpreter. Run each:
+  `stompdrill`, and four `tests` packages cannot share one interpreter. Run each:
 
   ```bash
   .venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
   cd packages/stompgeom && uv run --no-sync pytest -o addopts= -q
+  cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q
   .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
   ```
 
@@ -410,10 +446,12 @@ CLI.
 - `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
   `pipeline.validate`, `quantise` and `stompdrill.units`; `cd packages/stompmodel &&
   mutmut run` — its own `[tool.mutmut]`, resolving against its own tests — is what reaches
-  `stompmodel.units`, worth chasing for the same reason; and `cd packages/stompgeom &&
+  `stompmodel.units`, worth chasing for the same reason; `cd packages/stompgeom &&
   mutmut run` is that arrangement a third time, over the kernel guard, the STEP reader
-  and the deterministic writer. There is no workspace-wide command, the same reason the
-  root `mypy` gate excludes the other members' tests.
+  and the deterministic writer; and `cd packages/stompcollider && mutmut run` is the
+  fourth, over `match`, `seat`, `clash`, `canonicalise` and `designators` — the modules
+  holding this tool's cited rules rather than its placement. There is no workspace-wide
+  command, the same reason the root `mypy` gate excludes the other members' tests.
 
 ## Agent skills
 

@@ -1,7 +1,9 @@
 # Foundation docket: the seven rulings that gate plan 3
 
-**Status:** accepted, not executed. Settles every question on the 2026-08 foundation
-audit's ruling docket. `docs/plans/` turns this into plan 3.
+**Status:** accepted and executed. Settles every question on the 2026-08 foundation
+audit's ruling docket; plan 3 carried out the consolidated work list below, on
+`stompcad-collider` from `9180569`. The amendments table near the end is the record
+of what was changed, not a list of outstanding work.
 
 **Spec:** the work itself is specified by
 [`stompcollider-technical.md`](stompcollider-technical.md); this document supplies the

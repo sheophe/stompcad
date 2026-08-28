@@ -100,10 +100,11 @@ def test_a_placed_solid_keeps_its_colour() -> None:
 
 
 def test_two_placed_solids_sharing_one_base_shape_keep_distinct_colours() -> None:
-    """The control on the fix: a real board's solids share very few base
-    shapes -- ``tar-pcb.stp``'s 43 solids share 5 -- so a repair that
-    coloured the *referred* label instead would paint them all one colour
-    and lose every name but the last."""
+    """The control on the fix: a real board's solids do share base shapes --
+    ``tar-pcb.stp``'s 43 solids resolve to 18 distinct unlocated bases, the
+    largest of them shared by 14 solids -- so a repair that coloured the
+    *referred* label instead would paint a whole group one colour and lose
+    every name in it but the last."""
     base = _box(2, 3, 4)
     document = build_document([
         PlacedSolid(base, "A", _RED, RigidTransform(_IDENTITY, (10.0, 0.0, 0.0))),
@@ -290,7 +291,8 @@ def test_a_shared_base_document_renders_identically_across_processes() -> None:
 
 
 def test_a_solids_colour_reads_back() -> None:
-    """The published reading half stompcollider-technical.md:598-602 requires."""
+    """The published reading half ``Order of work`` in
+    ``docs/specs/stompcollider-technical.md`` requires."""
     document = build_document([PlacedSolid(_box(1, 1, 1), "A", (1.0, 0.0, 0.0), None)])
     solid = read_step_document(document).solids[0]
     assert solid_colour(document, solid) == (1.0, 0.0, 0.0)

@@ -1,13 +1,12 @@
 """The command line: which exit code a run earns, and which artefacts it writes.
 
-Kernel-backed but synthetic, like ``test_clash.py``. Only the *file* reader
-is stubbed, and only for the two STEP inputs: ``stompgeom``'s writer names
-every product, so an unnamed substrate -- what makes a solid a board body --
-survives no round trip through a file (``test_source.py`` states the same
-reason). The drill document is a real file and both artefacts are written to
-real paths. Every scenario here is **one baseline with exactly one thing
-changed**, so a suite that reached each exit code through an unrelated
-fixture has nowhere to hide.
+Kernel-backed but synthetic, like ``test_clash.py``. Only the *file* reader is
+stubbed, and only for the two STEP inputs: ``stompgeom``'s writer names every
+product, so an unnamed substrate -- what makes a solid a board body -- survives
+no round trip through a file. The drill document is a real file and both
+artefacts are written to real paths. Every scenario is **one baseline with
+exactly one thing changed**, so a suite that reached each exit code through an
+unrelated fixture has nowhere to hide.
 """
 
 from __future__ import annotations

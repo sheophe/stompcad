@@ -88,12 +88,11 @@ def _collisions(shapes: Sequence[Any]) -> tuple[bool, ...]:
 
     ``AddShape`` refers a *located* shape to a label holding its unlocated
     base -- reusing a free one when the batch already added it -- so an
-    unlocated shape is the only one a sibling can take over. Two located
-    ones never collide, alike or not, which is measured and is why this is
-    narrow. ``IsSame`` is the kernel's own identity, never a Python
-    ``id()``: an address varies between processes, and structure decided
-    from one is the non-determinism the writer exists to erase. Pairwise,
-    because a batch is one assembly's solids -- tens, not thousands.
+    unlocated shape is the only one a sibling can take over; two located ones
+    never collide, which is measured. ``IsSame`` is the kernel's own identity
+    and never a Python ``id()``: an address varies between processes, and
+    structure decided from one is the non-determinism the writer erases.
+    Pairwise, because a batch is one assembly's solids -- tens, not thousands.
     """
     from OCP.TopLoc import TopLoc_Location
 
@@ -115,13 +114,12 @@ def _addable(
     """``shape`` as something ``AddShape`` will give a label of its own.
 
     Two reasons a solid needs one. A colour on a located shape lands on a
-    reference and is written as a ``PRESENTATION_STYLE_BY_CONTEXT`` chain
-    ``solid_colour`` cannot resolve and the colour region cannot
-    canonicalise; and a shape ``_collisions`` reports would be taken over
-    by a sibling and lost outright. A one-solid compound is a shape of its
-    own, so the label owns it and no geometry is rebuilt. Whether a solid
-    needs one is a fact about the batch, not about the solid: the same
-    input always builds the same document, which is all ADR-0006 asks.
+    reference, written as a ``PRESENTATION_STYLE_BY_CONTEXT`` chain
+    ``solid_colour`` cannot resolve; and a shape ``_collisions`` reports would
+    be taken over by a sibling and lost outright. A one-solid compound is a
+    shape of its own, so the label owns it and no geometry is rebuilt. Needing
+    one is a fact about the batch, not the solid: the same input always builds
+    the same document, which is all ADR-0006 asks.
     """
     if collides or (colour is not None and not shape.Location().IsIdentity()):
         return compound([shape])
@@ -132,12 +130,11 @@ def solid_colour(document: TDocStd_Document, solid: Any) -> tuple[float, float, 
     """``solid``'s own surface colour in ``document``, or ``None`` if it has none.
 
     The published reading half of ``build_document``'s colouring, named
-    explicitly rather than left implicit -- see
-    ``stompcollider-technical.md:598-602``. Reads by shape, not by label:
+    explicitly rather than left implicit -- see ``Order of work`` in
+    ``docs/specs/stompcollider-technical.md``. Reads by shape, not by label:
     ``XCAFDoc_ColorTool`` resolves a shape straight back to the label it was
-    assigned under. ``solid`` is anything with a ``.shape`` -- a
-    :class:`stompgeom.step.StepSolid`, never a raw ``TDF_Label`` -- despite
-    the brief's paraphrase naming this parameter "label".
+    assigned under, so ``solid`` is anything with a ``.shape`` -- a
+    :class:`stompgeom.step.StepSolid`, never a raw ``TDF_Label``.
     """
     require_kernel()
     from OCP.Quantity import Quantity_Color

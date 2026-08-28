@@ -474,20 +474,27 @@ rediscovery rather than removing it. Closed; nothing further to do.
 
 ## Promote the kernel document builder into `stompgeom`, once plan 3 needs it
 
-**Status:** Deliberate deferral, not scheduled. ADR-0008 records the same deferral.
+**Status:** Closed — the caller arrived and the builder moved. Recorded before that as a
+deliberate deferral, which ADR-0008 recorded too.
 
-**Constraint:** Assembling a document from placed, named, coloured solids ("build") has
+**Constraint, as originally found:** Assembling a document from placed, named, coloured solids ("build") has
 exactly one caller today, and that caller is a test fixture — not a real second consumer,
 so the interface is not yet designable. Plan 3's first geometry ticket is what supplies
 one: it promotes the existing test-only builder into `stompgeom` with `placement` and
 `colour` parameters, and the solid value gains whatever reading half that caller turns out
 to need. `stompcollider`'s assembly emitter must not construct kernel documents itself.
 
-**Acceptance:** The builder moves into `stompgeom`, taking `placement` and `colour`
-parameters, once `stompcollider`'s assembly emitter is its real caller; the assembly
-emitter calls it rather than building a document itself; and
+**Acceptance, as originally written:** The builder moves into `stompgeom`, taking
+`placement` and `colour` parameters, once `stompcollider`'s assembly emitter is its real
+caller; the assembly emitter calls it rather than building a document itself; and
 `docs/specs/stompcollider-technical.md`'s Order of work section and ADR-0008 agree about
 why it waited.
+
+**Resolution:** All three. `stompgeom.build.build_document` takes
+`PlacedSolid(shape, name, colour, placement)`, and `stompgeom.build.solid_colour` is the
+reading half that caller turned out to need; `stompcollider`'s assembly emitter calls the
+builder and constructs no kernel document of its own; and both documents record why it
+waited. Closed; nothing further to do.
 
 ## Defer moving the CLI's usage/IO policy below `stompdrill`, until a second consumer exists
 
@@ -1006,6 +1013,14 @@ interface against, and folding it now would be Speculative Generality.
 **Acceptance:** The three sites promote to one `stompgeom` helper once a real second
 consumer (for example `stompcollider`'s assembly emitter) needs the same idiom; until
 then this entry stands.
+
+**Resolution:** Closed. `stompgeom.shapes.compound(shapes)` is that helper, and the second
+consumer arrived: `stompcollider`'s clash stage builds a board's solids into one compound
+through it, and the assembly emitter reaches it through `build_document`. The three
+`stompdrill` sites call it rather than repeating the `BRep_Builder()` pair; the remaining
+`MakeCompound` calls in the tree are fixtures building geometry, which is not the
+duplication this named (`grep -rn "MakeCompound" packages --include="*.py"`). Closed;
+nothing further to do.
 
 ## `CheckCaseClearance` is stateful, and nothing states the `apply`-before-`describe` order it relies on
 
@@ -1688,6 +1703,94 @@ can pass by finding nothing.
 **Acceptance:** The assertion binds to the gate's own failure -- the spliced-in breach named
 in the subprocess's output, or a distinguishable exit code -- and a control shows the test
 failing when the subprocess dies before collection.
+
+## `Match` pairs a protrusion to a hole by absolute proximity, so a real export pairs nothing
+
+**Status:** Confirmed defect, not scheduled. It is a specification change as well as a code
+change, so it is recorded rather than patched. Found while the dock report and the assembly
+model were first read back and compared.
+
+**Constraint:** `stompcollider.match._pair_face` measures the distance from a protrusion's
+`axis_xy_nm` — a coordinate in the board model's own frame — to a hole's `(x_nm, y_nm)` in
+the case's face frame, and pairs them when it is within the recognition tolerance. That
+presupposes the board model's origin already coincides with the face frame's origin, which
+is precisely the quantity the Candidates step exists to compute from the pairs this step
+produces. On the synthetic fixtures the two origins do coincide, so the suite is green; a
+real KiCad export, whose origin sits at a board corner or a sheet origin, is displaced far
+past any tolerance and pairs nothing, earning `no-correspondence` on every board.
+
+A visible consequence, worth stating because it looks like a separate fact: every placement
+this implementation can produce has `x_nm`, `y_nm` and `theta_deg` at or near zero, because
+a correspondence only exists where a part already lies on its hole.
+
+**Acceptance:** Pairing is seeded from *relative* geometry — the invariant the Candidates
+section already half-describes, `| p₁p₂ | = | h₁h₂ |` within twice the tolerance — so that a
+board displaced by an arbitrary rigid motion still pairs, and `docs/specs/stompcollider-technical.md`'s
+Match section is amended to specify that seed rather than absolute proximity. A test seats a
+board whose model origin is displaced by more than the tolerance and finds the same
+correspondences as the undisplaced one, and the agreement test then has a placement with a
+non-zero translation and turn to compare.
+
+## An under-constrained board reaches no artefact, which the pre-spec requires it to reach
+
+**Status:** Confirmed gap between the two `stompcollider` specifications, not scheduled.
+
+**Constraint:** `docs/specs/stompcollider.md` states that a board with no panel-reference
+parts, or exactly one, "is explicitly placed rather than solved, and treated as a fixed
+body others must avoid". Nothing implements that. `Match` records
+`under-constrained-board` and gives such a board no placement; the assembly emitter then
+leaves it out entirely, so it is neither drawn nor checked for interference, and the
+boards around it are checked against a space it really occupies as though it were empty.
+`--place` is the flag that would supply the missing placement, and it is refused, because
+no stage consumes one. Refusing it is right — an accepted flag that changed nothing would
+be worse — but the requirement behind it is still unmet, and the pre-spec is the authority
+where the two documents disagree.
+
+**Acceptance:** A stage places an explicitly placed board, `--place N=X,Y,THETA` feeds it,
+such a board appears in the assembly model and participates in the clash check as a fixed
+body that others must avoid, and `docs/specs/stompcollider-technical.md`'s command line
+section drops the shortfall it currently records. A test covers a run with one
+under-constrained board and one solved board that clashes with it.
+
+## The set-level commit transaction is duplicated between the two command lines, and the copies have diverged
+
+**Status:** Confirmed duplication, not scheduled.
+
+**Constraint:** `stompdrill/cli.py` and `stompcollider/cli.py` each carry the same
+stage-all-then-commit-all-then-roll-back transaction over a set of artefact paths, and the
+two copies are no longer identical: `stompdrill` records a replaced target in a frozen
+`_Committed` dataclass where `stompcollider` records one in a bare
+`tuple[Path, bytes | None]`. The `-v` stage trace is a third near-copy — `stompdrill`'s
+`run_pipeline` takes a `trace` callback, `stompcollider`'s `_traced` writes to a stream.
+The mechanism the loops call is already shared — `stompmodel.protocols.stage_payload` and
+`check_target_set` — so what is duplicated is the policy above it, which is the half that
+decides whether a failed run leaves a target changed. Two copies of that policy will drift
+in the direction that matters.
+
+**Acceptance:** The set-level transaction lives once in `stompmodel.protocols`, beside
+`stage_payload` and `check_target_set`, and takes the pipeline run with it rather than only
+the commit loop: both command lines call it, neither restates it, and each keeps only the
+sentence it prints. ADR-0001 records the promotion, as it recorded the target-set
+precondition's.
+
+## `stompgeom`'s subprocess determinism probes run unmutated code, so the writer's survey is not what it looks like
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** Several of `stompgeom`'s determinism tests run their probe in a subprocess
+(`sys.executable -c …` in `tests/test_writer.py`), and that interpreter resolves
+`import stompgeom` through the installed distribution rather than through the tree the
+test is running against. Under `cd packages/stompgeom && mutmut run` the mutant lives in
+mutmut's own copy of the source, so those subprocesses execute the unmutated code and pass
+whatever the mutant did: they can kill nothing in `writer._reslot_colours` or
+`writer._canonicalise_ownership`. Every kill the survey credits for those two functions is
+an in-process test's, and the determinism claim the subprocess probes exist to make is not
+surveyed at all — which a survey read by module gives no sign of.
+
+**Acceptance:** The subprocess resolves `stompgeom` from the tree under test (a
+`PYTHONPATH` it inherits, or a probe run in-process), a control shows a deliberate breach
+of the determinism rule failing that subprocess, and the survey is re-read for those two
+functions with the coupling gone.
 
 ## Rulings, for citation
 

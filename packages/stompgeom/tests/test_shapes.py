@@ -104,13 +104,11 @@ def test_placed_agrees_with_apply_point_on_a_named_vertex() -> None:
 
     The rotation above is checked only by bounding-box extent, which a
     transposed rotation matrix (the classic row/column mix-up feeding
-    ``gp_Trsf.SetValues``) leaves unchanged: an axis-aligned box's extent
-    is the same magnitude whichever way a 90-degree turn runs, so a
-    transpose is invisible to an extent-only assertion, symmetric box or
-    not. Naming one corner and comparing against the model-side
-    ``RigidTransform.apply_point`` pins the rotation's direction as well
-    as its magnitude, and pins the seam between the kernel and the model
-    that Tasks 9, 19 and 21 depend on holding.
+    ``gp_Trsf.SetValues``) leaves unchanged: an axis-aligned box's extent is
+    the same magnitude whichever way a 90-degree turn runs. Naming one corner
+    and comparing against the model-side ``RigidTransform.apply_point`` pins
+    the rotation's direction as well as its magnitude, which is the seam every
+    kernel-side placement in this workspace rests on.
     """
     from stompgeom.shapes import placed
     from stompmodel.frames import RigidTransform

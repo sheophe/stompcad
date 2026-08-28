@@ -201,19 +201,15 @@ def test_a_near_collinear_row_of_parts_still_yields_a_placement() -> None:
 
 
 def test_a_board_with_no_valid_placement_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A board with two or more correspondences and zero surviving
-    candidates must earn ``no-valid-placement`` (ERROR), never silence.
+    """Two or more correspondences and zero surviving candidates must earn
+    ``no-valid-placement`` (ERROR), never silence.
 
-    Reaching this branch through genuine pairing is provably impossible,
-    but on a knife edge: for three points the signed area's sign is
-    consistent across every seed, so "every seed convicted" collapses to
-    one feasibility question, whose supremum over every reachable layout is
-    exactly zero -- conviction needs strict inequality, so it is never
-    reached. See the fix report for the derivation. This test isolates
-    ``_match_board``'s wiring from that unreachable trigger by stubbing the
-    one function whose emptiness it reacts to; everything else (face
-    selection, diagnostics, the empty ``placements`` result) runs for real
-    through ``Match.apply``.
+    Reaching that branch by genuine pairing is impossible, on a knife edge:
+    for three points the signed area's sign is consistent across every seed,
+    so "every seed convicted" collapses to one feasibility question whose
+    supremum over reachable layouts is exactly zero, and conviction needs
+    strict inequality. This stubs the one function whose emptiness
+    ``_match_board`` reacts to; the rest runs through ``Match.apply``.
     """
     import stompcollider.match as match_module
 
@@ -277,18 +273,12 @@ def test_a_gap_disagreement_within_twice_tolerance_is_accepted() -> None:
 def _mirrored_layout() -> tuple[tuple[Correspondence, ...], dict[str, tuple[Nanometre, Nanometre]]]:
     """An L: two legs at right angles, reflected across one leg.
 
-    ``D1``/``D2`` sit on the true leg (parts and holes agree exactly);
-    ``D3`` is the reflected tip -- every candidate a rigid (non-reflective)
-    fit could offer for ``D1``, ``D2`` places ``D3`` on the *other* side of
-    that leg from where its hole actually is.
-
-    NOT reachable through ``Match.apply``: ``D3``'s own offset from its
-    hole is 20 mm, far past the 1.27 mm recognition tolerance, so
-    ``_pair_face`` would never let it become a correspondence at all -- a
-    genuine reflection large enough for the chirality check to convict is,
-    by the same bound Critical fix (a) derives, always too large for the
-    reflected point to have paired in the first place. This exercises
-    ``_candidates`` directly; it is not coverage of ``Match`` end to end.
+    ``D1``/``D2`` sit on the true leg; ``D3`` is the reflected tip, which
+    every rigid fit for ``D1``, ``D2`` places on the *other* side of that leg
+    from its hole. NOT reachable through ``Match.apply``: ``D3``'s offset is
+    20 mm, far past the 1.27 mm recognition tolerance, and a reflection large
+    enough to convict is by that same bound always too large to have paired
+    at all. This exercises ``_candidates`` directly, not ``Match`` end to end.
     """
     axes = {
         "D1": (Nanometre(0), Nanometre(0)),
@@ -342,17 +332,14 @@ def test_two_seed_pairs_validating_one_set_are_one_candidate() -> None:
 def _two_fold_symmetric_board() -> tuple[
     tuple[Correspondence, ...], dict[str, tuple[Nanometre, Nanometre]]
 ]:
-    """Two independent, exactly-fitting pairs 100 mm apart: one fits as
-    measured (0 degrees), the other only once turned end for end (180
-    degrees) -- the genuinely correct, order-free answer for a symmetric
-    hole pattern is both, not whichever a caller happens to try first.
+    """Two exactly-fitting pairs 100 mm apart: one fits as measured, the other
+    only once turned end for end.
 
-    NOT reachable through ``Match.apply``: a board whose two mounting pairs
-    are 100 mm apart cannot present as ambiguous through ``_pair_face`` --
-    each pair only stays within tolerance of its own holes, never the
-    other's, so a single call never sees the choice between orientations
-    that a *reachable* 180-degree ambiguity would require. This exercises
-    ``_candidates`` directly; it is not coverage of ``Match`` end to end.
+    The order-free answer for a symmetric hole pattern is both, not whichever
+    a caller tries first. NOT reachable through ``Match.apply``: each pair
+    stays within tolerance of its own holes and never the other's, so one
+    call never sees the choice between orientations a *reachable* 180-degree
+    ambiguity needs. This exercises ``_candidates``, not ``Match`` end to end.
     """
     axes = {
         "D1": (Nanometre(0), Nanometre(0)),

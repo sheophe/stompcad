@@ -3,11 +3,10 @@
 The synthetic solids are built through OCP directly because that is what a
 fixture is; the package's own source reaches the kernel only through
 ``stompgeom``, which ``test_package_boundary.py`` enforces. Only the *file*
-reader is stubbed, and only where a test needs a document a written STEP
-file cannot carry: the writer names every product, so an unnamed substrate
-survives no round trip through a file. Everything the stub hands back is a
-real kernel document, so ``assembly_spans`` and every measurement below are
-the kernel's own.
+reader is stubbed, and only where a test needs a document a written STEP file
+cannot carry: the writer names every product, so an unnamed substrate survives
+no round trip. What the stub hands back is a real kernel document, so every
+measurement below is the kernel's own.
 """
 
 from __future__ import annotations

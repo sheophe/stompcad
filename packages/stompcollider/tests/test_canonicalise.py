@@ -206,18 +206,15 @@ def _rotated_case() -> CaseRegistration:
 
 
 def _tied_boards() -> RawBoards:
-    """Two boards whose bounding boxes tie exactly on the sort key's leading
-    three fields under ``_rotated_case()``, but differ in footprint.
+    """Two boards tying exactly on the sort key's leading three fields under
+    ``_rotated_case()``, but differing in footprint.
 
-    ``narrow`` is a 10x1 mm rectangle at the origin. ``wide`` is a 10x2 mm
-    rectangle translated by (0.5, -0.5) mm -- chosen so that, once every one
-    of its eight bounding-box corners is projected through the rotated
-    frame, its least x and least y exactly match ``narrow``'s. Neither
-    board's tying corner is one of its own two *raw* extreme corners: it
-    only appears once the box's other six corners are generated and
-    projected too. With the position genuinely tied, only the
-    ``-footprint_nm2`` term can order them, and ``wide``'s footprint is the
-    larger one, so it must be ordinal 1.
+    ``narrow`` is a 10x1 mm rectangle at the origin; ``wide`` is a 10x2 mm
+    one translated by (0.5, -0.5) mm, so that once all eight of its
+    bounding-box corners are projected through the rotated frame its least x
+    and least y match ``narrow``'s exactly. Its tying corner is neither of
+    its own *raw* extremes. With position genuinely tied, only
+    ``-footprint_nm2`` can order them, so ``wide`` must be ordinal 1.
     """
     narrow = RawBoard(
         corner_a_mm=(0.0, 0.0, 0.0),

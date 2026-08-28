@@ -126,10 +126,9 @@ def group(
     footprint it overlaps in projection along the carrier normal, the
     nearest along that normal. Overlap is a preference and not a gate, so a
     part reaching no footprint falls to the nearest substrate rather than
-    being dropped. An exact tie between two substrates is broken on their
-    own bounding boxes and never on their position in ``found``, which
-    would be the document's walk order (ADR-0006). Components come back
-    sorted by designator, for the same reason.
+    being dropped. An exact tie is broken on the substrates' own bounding
+    boxes, never on their position in ``found`` -- the document's walk
+    order. Components come back sorted by designator (ADR-0006).
     """
     if not found:
         raise NoSubstrateError("there is no board to group these solids onto")
