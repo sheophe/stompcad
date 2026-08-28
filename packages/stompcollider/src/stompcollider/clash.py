@@ -27,7 +27,7 @@ from .errors import StompcolliderError
 from .model import Board, Clash, DockData, Placement
 from .seat import rank_key
 
-__all__ = ["Clashes", "placement_transform"]
+__all__ = ["Clashes", "placement_transform", "solid_name"]
 
 #: A clash's axis names one of the face frame's own three, never a model
 #: axis: the frame the enclosure was drilled in is the frame a depth means
@@ -135,21 +135,20 @@ def _clash_from(region: Any, basis: CoordinateFrame, with_: str, kind: str) -> C
     )
 
 
-def _case_name(solid: StepSolid, box: _Box) -> str:
-    """What to call a case solid, including one the model never named.
+def solid_name(solid: StepSolid, box: _Box, group: str) -> str:
+    """What to call ``solid`` within ``group``, including one nobody named.
 
-    ``StepSolid.name`` is empty exactly when nobody named the solid, and a
-    supplied enclosure may hold such a solid (ADR-0007), so an empty name is
-    legitimate input rather than a fault -- but ``Clash`` refuses one, and a
-    clash that cannot be named must still be reported. Keyed on the solid's
-    own least corner in whole nanometres: a property of the geometry, so two
-    files listing the same solids in a different order name them the same
-    way, where an index into the supplied sequence would not (ADR-0006).
+    An empty ``StepSolid.name`` means nobody named the solid, legitimate
+    input for a supplied enclosure (ADR-0007) that ``Clash`` still refuses
+    and the assembly must still write. Keyed on the solid's own least
+    corner in whole nanometres -- a property of the geometry, so two files
+    listing the same solids in a different order name them the same way,
+    where an index into the supplied sequence would not (ADR-0006).
     """
     if solid.name:
         return solid.name
     corner = ",".join(str(nm_from_mm(box[axis])) for axis in range(3))
-    return f"case:unnamed@{corner}"
+    return f"{group}:unnamed@{corner}"
 
 
 def _pair_clash(
@@ -275,7 +274,7 @@ class Clashes:
             clash
             for solid, other in case
             if (clash := _pair_clash(
-                shape, box, solid.shape, other, basis, _case_name(solid, other), "case"
+                shape, box, solid.shape, other, basis, solid_name(solid, other, "case"), "case"
             ))
             is not None
         ]
