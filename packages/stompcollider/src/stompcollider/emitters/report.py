@@ -134,11 +134,20 @@ def _clash(clash: Clash) -> dict[str, Any]:
 
 
 def _diagnostic(diagnostic: Diagnostic) -> dict[str, Any]:
-    """Matched by ``code``, never by ``message`` -- see CLAUDE.md."""
+    """Matched by ``code``, never by ``message`` -- see CLAUDE.md.
+
+    ``location_nm`` is always present, ``null`` when the finding is
+    panel-wide -- no ``stompcollider`` diagnostic sets one today, but the
+    key must not silently drop the day one does, mirroring
+    ``stompmodel.codec``'s unconditional emission of the same shared field.
+    """
     return {
         "severity": diagnostic.severity.value,
         "code": diagnostic.code,
         "message": diagnostic.message,
+        "location_nm": (
+            None if diagnostic.location_nm is None else list(diagnostic.location_nm)
+        ),
         "data": {key: _listed(value) for key, value in diagnostic.data},
     }
 

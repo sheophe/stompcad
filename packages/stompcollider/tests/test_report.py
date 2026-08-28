@@ -191,6 +191,71 @@ def test_a_full_insertion_serialises_as_null() -> None:
     assert entry["insertion_nm"] is None
 
 
+def test_a_diagnostic_location_serialises_as_a_pair() -> None:
+    """``location_nm`` is always present, ``null`` when a finding is
+    panel-wide -- but the not-``None`` branch needs its own test, or an
+    implementation that always writes ``null`` (indistinguishable from
+    plain omission on every other fixture here) would still pass."""
+    located = Diagnostic.warning(
+        "unmatched-part",
+        "RV5 has no hole",
+        location_nm=(_nm(12_400_000), _nm(30_000_000)),
+        data=(("designator", "RV5"),),
+    )
+    data = DockData(case=_case(), boards=(_board(),), diagnostics=(located,))
+    document = json.loads(ReportEmitter().emit(data))
+    assert document["diagnostics"][0]["location_nm"] == [12_400_000, 30_000_000]
+
+
+def test_a_panel_wide_diagnostic_location_serialises_as_null() -> None:
+    """The control for the test above: a fixture whose only diagnostic
+    always has ``location_nm=None`` cannot tell "always null" from
+    "echoes what was given"."""
+    document = json.loads(ReportEmitter().emit(_data()))
+    assert document["diagnostics"][0]["location_nm"] is None
+
+
+def _placements_out_of_rank_order() -> tuple[Placement, ...]:
+    """Two placements for one board, built with rank 2 listed before rank
+    1 -- the same "trust the field, not the container order" shape as the
+    boards-out-of-order fixture above, but for ``Placement.rank``."""
+    correspondence = (_correspondence(designator="RV3", hole_index=4),)
+    rank_two = Placement(
+        rank=2,
+        x_nm=_nm(5_000_000),
+        y_nm=_nm(0),
+        z_nm=_nm(-28_085_000),
+        theta_deg=0.0,
+        correspondence=correspondence,
+        clashes=(),
+    )
+    rank_one = Placement(
+        rank=1,
+        x_nm=_nm(0),
+        y_nm=_nm(0),
+        z_nm=_nm(-28_085_000),
+        theta_deg=0.0,
+        correspondence=correspondence,
+        clashes=(),
+    )
+    return (rank_two, rank_one)
+
+
+def test_placements_are_reported_in_rank_order() -> None:
+    """A board with two placements supplied rank-2-then-rank-1 must be
+    reported rank 1 first. Every other fixture here has at most one
+    placement per board, so this is the only test the rank sort answers
+    to; removing ``report.py``'s ``sorted(..., key=lambda p: p.rank)``
+    turns this red while leaving the rest of the suite green."""
+    data = DockData(
+        case=_case(),
+        boards=(_board(),),
+        placements={1: _placements_out_of_rank_order()},
+    )
+    document = json.loads(ReportEmitter().emit(data))
+    assert [p["rank"] for p in document["boards"][0]["placements"]] == [1, 2]
+
+
 def _two_boards_sharing_leftovers() -> DockData:
     """Two boards, each covering a disjoint subset of holes, with holes 7
     and 9 covered by neither -- an assembly-level fact, not either board's.
