@@ -28,7 +28,7 @@ from stompmodel.errors import DocumentError
 from stompmodel.model import EnclosureMatch
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
-from ..boards import basis_about, carrier_frame, dot, group, substrates
+from ..boards import basis_about, carrier_frame, dot, group, negated, substrates
 from ..errors import StompcolliderError
 from ..protrude import admissible, protrusion_of, reach_along
 from ..raw import RawBoard, RawBoards, RawComponent
@@ -208,7 +208,7 @@ def _outward(normal: Direction, substrate: StepSolid, parts: Sequence[StepSolid]
         return normal
     forward = max(reach[1] for reach in reaches) - high
     backward = low - min(reach[0] for reach in reaches)
-    return normal if forward >= backward else _negated(normal)
+    return normal if forward >= backward else negated(normal)
 
 
 def _extremes(
@@ -231,15 +231,3 @@ def _extremes(
         for z in (box[2], box[5])
     ]
     return (min(reach), max(reach))
-
-
-def _negated(direction: Direction) -> Direction:
-    """The opposite direction, with no negative zero in it.
-
-    ``0.0 - x`` rather than ``-x``: IEEE negation turns a zero component
-    into ``-0.0``, which compares equal to ``0.0`` and serialises
-    differently, so a board whose normal happened to be flipped would state
-    a basis no other spelling of the same geometry states.
-    """
-    return (0.0 - direction[0], 0.0 - direction[1], 0.0 - direction[2])
-

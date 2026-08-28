@@ -104,6 +104,24 @@ def _turned_frame() -> CoordinateFrame:
     )
 
 
+def _skew_frame() -> CoordinateFrame:
+    """A face frame turned an eighth about ``w``, not a quarter.
+
+    Every frame ``stompdrill`` produces today is a quarter turn about a
+    model axis, and under one of those a model-frame box and a face-frame
+    box coincide -- so a quarter-turn fixture cannot tell a region's own box
+    from the box of its model box. This one can: a circle 10 mm across has a
+    model box 10 mm square whose corners reach 14.142 mm once projected.
+    """
+    half = math.sqrt(2) / 2
+    return CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        u=(half, half, 0.0),
+        v=(0.0 - half, half, 0.0),
+        w=(0.0, 0.0, 1.0),
+    )
+
+
 def _case(frame: CoordinateFrame | None = None) -> CaseRegistration:
     return CaseRegistration(
         "1590BB", CaseFace.BOX, "case.stp", FaceFrame(frame or _identity_frame())
@@ -238,6 +256,26 @@ def test_the_bbox_is_stated_in_the_case_face_frame_not_in_model_coordinates() ->
         _nm(0.0), _nm(-10.0), _nm(0.0), _nm(12.0), _nm(-8.0), _nm(14.0),
     )
     assert found[0].axis == "v"
+
+
+def test_the_bbox_is_the_regions_own_box_in_that_frame_not_the_box_of_its_model_box() -> None:
+    """The measurement, not merely the frame. A cylinder 10 mm across is
+    10 mm across in every frame; boxing it on the model axes first and
+    reprojecting that box's corners answers 14.142 mm under this one -- a
+    41% overstatement of the number this tool exists to report. Only a
+    non-quarter-turn frame separates the two, which is why this fixture is
+    an eighth turn.
+    """
+    found = _clashes_between(
+        _cylinder((0, 0, 0), 5.0, 30.0),
+        _box((-40, -40, 0), 80, 80, 30),
+        frame=_skew_frame(),
+    )
+
+    assert found[0].depth_nm == _nm(10.0)
+    assert found[0].bbox_nm == (
+        _nm(-5.0), _nm(-5.0), _nm(0.0), _nm(5.0), _nm(5.0), _nm(30.0),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -472,6 +510,79 @@ def test_the_case_solids_own_order_reaches_no_result() -> None:
     backward = Clashes(tuple(reversed(_enclosure())), {1: _reaching_board()}).apply(data)
 
     assert forward.placements[1][0].clashes == backward.placements[1][0].clashes
+
+
+def _unnamed_enclosure() -> tuple[StepSolid, ...]:
+    """Two case solids the model never named, in the way of one board."""
+    return (
+        _solid("", _box((20, -50, -30), 4, 100, 40)),
+        _solid("", _box((-50, -50, 8), 100, 100, 3)),
+    )
+
+
+def test_a_case_solid_the_model_never_named_is_still_reported() -> None:
+    """``StepSolid.name`` is empty exactly when nobody named the solid, and a
+    supplied enclosure may hold such a solid. ``Clash`` refuses an empty
+    name, so without a fallback this run raises instead of reporting."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    found = Clashes(_unnamed_enclosure(), {1: _reaching_board()}).apply(data).placements[1][0].clashes
+
+    assert len(found) == 2
+    assert {clash.kind for clash in found} == {"case"}
+
+
+def test_two_unnamed_case_solids_are_told_apart_by_their_own_geometry() -> None:
+    """A single fallback spelling would collapse both into one entry."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    found = Clashes(_unnamed_enclosure(), {1: _reaching_board()}).apply(data).placements[1][0].clashes
+
+    assert [clash.with_ for clash in found] == [
+        "case:unnamed@-50000000,-50000000,8000000",
+        "case:unnamed@20000000,-50000000,-30000000",
+    ]
+
+
+def test_an_unnamed_case_solids_identifier_does_not_depend_on_the_order_supplied() -> None:
+    """ADR-0006: an index into the supplied sequence would fail this."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    solids = _unnamed_enclosure()
+    forward = Clashes(solids, {1: _reaching_board()}).apply(data)
+    backward = Clashes(tuple(reversed(solids)), {1: _reaching_board()}).apply(data)
+
+    assert forward.placements[1][0].clashes == backward.placements[1][0].clashes
+
+
+def test_a_named_case_solid_keeps_its_own_name() -> None:
+    """The innocent probe: a fallback applied unconditionally passes the
+    three tests above and renames every enclosure the catalogue ships."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    found = Clashes(_enclosure(), {1: _reaching_board()}).apply(data).placements[1][0].clashes
+
+    assert [clash.with_ for clash in found] == ["LID", "WALL"]
+
+
+def test_a_sub_micron_clash_does_not_read_as_zero_millimetres() -> None:
+    """Rule 3 says one nanometre is a fact and contact is not. A message
+    saying "0.000 mm" for the smallest thing the tool can honestly assert
+    erases that distinction in the half of the report a person acts on."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    stage = Clashes(
+        (_solid("WALL", _box((9.999999, 0, 0), 10, 12, 14)),),
+        {1: (_solid("", _box((0, 0, 0), 10, 12, 14)),)},
+    )
+    finding = stage.apply(data).diagnostics[0]
+
+    assert "0.000001 mm" in finding.message
+    assert dict(finding.data)["depth_nm"] == 1
+
+
+def test_a_clash_of_ordinary_size_is_still_stated_at_three_decimals() -> None:
+    """The control beside it: the fallback is for what three decimals cannot
+    say, not a new default for everything."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    finding = Clashes(_enclosure(), {1: _reaching_board()}).apply(data).diagnostics[0]
+
+    assert "2.000 mm" in finding.message
 
 
 # --------------------------------------------------------------------------

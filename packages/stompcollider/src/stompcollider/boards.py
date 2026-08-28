@@ -20,7 +20,9 @@ from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
 
-__all__ = ["is_slab", "carrier_frame", "substrates", "group", "basis_about", "dot"]
+__all__ = [
+    "is_slab", "carrier_frame", "substrates", "group", "basis_about", "dot", "negated",
+]
 
 #: How nearly equal a slab's two faces must be in area, as the smaller over
 #: the larger. It refuses a *degenerate pairing* -- a second level that is a
@@ -51,6 +53,20 @@ _SLAB_AREA_RATIO_FLOOR = 0.5
 #: Named residual: it also refuses a board smaller than about 16 mm square,
 #: whose 1.6 mm substrate is genuinely not thin against its own extent.
 _SLAB_THICKNESS_FRACTION = 0.1
+
+
+def negated(direction: Direction) -> Direction:
+    """The opposite direction, with no negative zero in it.
+
+    ``0.0 - c`` rather than ``-c``: IEEE negation turns a zero component
+    into ``-0.0``, a second spelling of zero that compares equal and reads
+    differently. Negation of a non-zero component is exact either way.
+    Published here beside ``dot`` and ``basis_about`` because two modules
+    need it -- ``sources/step.py`` to resolve which way a board's parts
+    protrude, ``clash.py`` to turn a board over -- and one rule stated
+    twice is the duplication the design rules name.
+    """
+    return (0.0 - direction[0], 0.0 - direction[1], 0.0 - direction[2])
 
 
 def is_slab(solid: StepSolid) -> bool:

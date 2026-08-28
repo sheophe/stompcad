@@ -22,6 +22,7 @@ from stompmodel.frames import CoordinateFrame, RigidTransform
 from stompmodel.model import StageRun
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
+from .boards import negated
 from .errors import StompcolliderError
 from .model import Board, Clash, DockData, Placement
 from .seat import rank_key
@@ -40,16 +41,16 @@ _FLIPPED = "-w"
 #: A shape's bounding box, ``(x0, y0, z0, x1, y1, z1)`` in millimetres.
 _Box = tuple[float, float, float, float, float, float]
 
-
-def _negated(direction: tuple[float, float, float]) -> tuple[float, float, float]:
-    """The opposite direction, with no negative zero in it.
-
-    ``0.0 - c`` rather than ``-c``: IEEE negation turns a zero component
-    into ``-0.0``, a second spelling of zero that compares equal and reads
-    differently. The same rule ``sources/step.py`` states for a direction,
-    and negation of a non-zero component is exact either way.
-    """
-    return (0.0 - direction[0], 0.0 - direction[1], 0.0 - direction[2])
+#: The model frame itself. The motion carrying a face frame onto this one
+#: restates a body's own coordinates as that face frame's, which is how a
+#: region gets boxed *in* the face frame rather than boxed in the model's
+#: and reprojected -- see :func:`_clash_from`.
+_MODEL_FRAME = CoordinateFrame(
+    origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+    u=(1.0, 0.0, 0.0),
+    v=(0.0, 1.0, 0.0),
+    w=(0.0, 0.0, 1.0),
+)
 
 
 def _board_frame(board: Board) -> CoordinateFrame:
@@ -68,8 +69,8 @@ def _board_frame(board: Board) -> CoordinateFrame:
         return CoordinateFrame(
             origin_nm=origin,
             u=carrier.u,
-            v=_negated(carrier.v),
-            w=_negated(carrier.w),
+            v=negated(carrier.v),
+            w=negated(carrier.w),
         )
     return CoordinateFrame(origin_nm=origin, u=carrier.u, v=carrier.v, w=carrier.w)
 
@@ -106,22 +107,17 @@ def _boxes_overlap(first: _Box, second: _Box) -> bool:
 def _clash_from(region: Any, basis: CoordinateFrame, with_: str, kind: str) -> Clash | None:
     """``region`` as a clash in ``basis``, or ``None`` when it is contact.
 
-    Every one of the box's eight corners is projected, not the two measured
-    extremes: the face frame may be turned relative to the model frame, so
-    the extreme corner there is not the extreme corner here. Depth is the
-    least extent and the axis is that axis; a depth of zero nanometres is
-    what the canonical representation says about contact, and contact is
-    not a clash.
+    The region is moved into the face frame and measured there. Boxing it in
+    the model frame first and reprojecting the eight corners of *that* box
+    is a different quantity -- the box of a box -- and for any frame not a
+    quarter turn about a model axis it is strictly larger: a 10 mm region
+    reads 14.142 mm under a 45-degree frame. Depth is the least extent and
+    the axis is that axis; zero nanometres is what the canonical
+    representation says about contact, and contact is not a clash.
     """
-    box = bounding_box_mm(region)
-    corners = [
-        basis.to_canonical((x, y, z))
-        for x in (box[0], box[3])
-        for y in (box[1], box[4])
-        for z in (box[2], box[5])
-    ]
-    lows = tuple(nm_from_mm(min(corner[axis] for corner in corners)) for axis in range(3))
-    highs = tuple(nm_from_mm(max(corner[axis] for corner in corners)) for axis in range(3))
+    box = bounding_box_mm(placed(region, basis.placement_onto(_MODEL_FRAME)))
+    lows = tuple(nm_from_mm(box[axis]) for axis in range(3))
+    highs = tuple(nm_from_mm(box[axis + 3]) for axis in range(3))
     extents = tuple(highs[axis] - lows[axis] for axis in range(3))
     least = min(range(3), key=lambda axis: extents[axis])
     if extents[least] == 0:
@@ -137,6 +133,23 @@ def _clash_from(region: Any, basis: CoordinateFrame, with_: str, kind: str) -> C
         axis=_AXES[least],
         volume_nm3=extents[0] * extents[1] * extents[2],
     )
+
+
+def _case_name(solid: StepSolid, box: _Box) -> str:
+    """What to call a case solid, including one the model never named.
+
+    ``StepSolid.name`` is empty exactly when nobody named the solid, and a
+    supplied enclosure may hold such a solid (ADR-0007), so an empty name is
+    legitimate input rather than a fault -- but ``Clash`` refuses one, and a
+    clash that cannot be named must still be reported. Keyed on the solid's
+    own least corner in whole nanometres: a property of the geometry, so two
+    files listing the same solids in a different order name them the same
+    way, where an index into the supplied sequence would not (ADR-0006).
+    """
+    if solid.name:
+        return solid.name
+    corner = ",".join(str(nm_from_mm(box[axis])) for axis in range(3))
+    return f"case:unnamed@{corner}"
 
 
 def _pair_clash(
@@ -261,7 +274,9 @@ class Clashes:
         found = [
             clash
             for solid, other in case
-            if (clash := _pair_clash(shape, box, solid.shape, other, basis, solid.name, "case"))
+            if (clash := _pair_clash(
+                shape, box, solid.shape, other, basis, _case_name(solid, other), "case"
+            ))
             is not None
         ]
         return tuple(sorted(found, key=_clash_key))
@@ -311,6 +326,21 @@ def _with_assembly_clashes(
     return (replace(first, clashes=merged), *placements[1:])
 
 
+def _stated_mm(depth_nm: Nanometre) -> str:
+    """``depth_nm`` in millimetres, never rounded away to nothing.
+
+    Three decimals is what the rest of the workspace states a length at, but
+    rule 3's whole content is that one nanometre is a fact and contact is
+    not, and "0.000 mm" erases exactly that distinction in the half of the
+    report a person reads. Six decimals states any whole nanometre exactly,
+    so the fallback cannot round to zero either.
+    """
+    stated = format_nm(depth_nm, 3)
+    if stated == format_nm(Nanometre(0), 3):
+        return format_nm(depth_nm, 6)
+    return stated
+
+
 def _findings(placements: Mapping[int, tuple[Placement, ...]]) -> tuple[Diagnostic, ...]:
     """One warning per clash of each board's chosen placement.
 
@@ -322,7 +352,7 @@ def _findings(placements: Mapping[int, tuple[Placement, ...]]) -> tuple[Diagnost
         Diagnostic.warning(
             "clash",
             f"board {ordinal} clashes with {clash.with_} by "
-            f"{format_nm(clash.depth_nm)} mm along {clash.axis}",
+            f"{_stated_mm(clash.depth_nm)} mm along {clash.axis}",
             data=(
                 ("board", ordinal),
                 ("with", clash.with_),
