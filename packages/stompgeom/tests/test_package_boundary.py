@@ -119,6 +119,7 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
     assert scanned == {
         "__init__.py",
         "build.py",
+        "cylinders.py",
         "errors.py",
         "kernel.py",
         "levels.py",

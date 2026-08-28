@@ -20,7 +20,7 @@ from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
 
-__all__ = ["is_slab", "carrier_frame", "substrates", "group"]
+__all__ = ["is_slab", "carrier_frame", "substrates", "group", "basis_about"]
 
 #: How nearly equal a slab's two faces must be in area, as the smaller over
 #: the larger. It refuses a *degenerate pairing* -- a second level that is a
@@ -77,7 +77,7 @@ def carrier_frame(solid: StepSolid) -> CoordinateFrame | None:
     if carriers is None:
         return None
     outer = max(carriers, key=lambda level: (level.direction, level.offset_nm))
-    u, v = _basis_about(outer.direction)
+    u, v = basis_about(outer.direction)
     reach = mm_from_nm(outer.offset_nm)
     origin = tuple(nm_from_mm(Millimetre(component * reach)) for component in outer.direction)
     return CoordinateFrame(origin_nm=origin, u=u, v=v, w=outer.direction)  # type: ignore[arg-type]
@@ -274,7 +274,7 @@ def _span(first: tuple[float, float], second: tuple[float, float]) -> float:
     return min(first[1], second[1]) - max(first[0], second[0])
 
 
-def _basis_about(w: Direction) -> tuple[Direction, Direction]:
+def basis_about(w: Direction) -> tuple[Direction, Direction]:
     """A right-handed ``(u, v)`` completing ``w``, chosen without a search.
 
     Seeded from the world axis ``w`` leans on least, so the cross product

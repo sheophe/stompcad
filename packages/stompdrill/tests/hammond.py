@@ -159,31 +159,22 @@ def hammond_y() -> Path:
 def cylinders(shape: Any) -> set[tuple[int, int, int, int]]:
     """Every cylindrical face's axis point and radius, in nanometres.
 
+    The walk itself is ``stompgeom.cylinders.cylindrical_faces``, which also
+    reports the direction and axial extent this comparison has no use for.
     Rounded to the kernel's own confusion so two runs of one geometry agree;
     this is the single epsilon the whole verification design admits.
     """
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.GeomAbs import GeomAbs_SurfaceType
     from OCP.Precision import Precision
-    from OCP.TopAbs import TopAbs_ShapeEnum
-    from OCP.TopExp import TopExp_Explorer
-    from OCP.TopoDS import TopoDS
+
+    from stompgeom.cylinders import cylindrical_faces
 
     tolerance_mm = Precision.Confusion_s()
-    found: set[tuple[int, int, int, int]] = set()
-    explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_FACE)
-    while explorer.More():
-        # A bare TopoDS_Shape has no surface; ``cad/case.py`` and
-        # ``cad/region.py`` downcast the same way before adapting one.
-        surface = BRepAdaptor_Surface(TopoDS.Face_s(explorer.Current()))
-        if surface.GetType() == GeomAbs_SurfaceType.GeomAbs_Cylinder:
-            cylinder = surface.Cylinder()
-            axis = cylinder.Axis().Location()
-            found.add(
-                tuple(
-                    round(v / tolerance_mm)
-                    for v in (axis.X(), axis.Y(), axis.Z(), cylinder.Radius())
-                )
-            )
-        explorer.Next()
-    return found
+    return {
+        (
+            round(found.axis_location_mm[0] / tolerance_mm),
+            round(found.axis_location_mm[1] / tolerance_mm),
+            round(found.axis_location_mm[2] / tolerance_mm),
+            round(found.radius_mm / tolerance_mm),
+        )
+        for found in cylindrical_faces(shape)
+    }
