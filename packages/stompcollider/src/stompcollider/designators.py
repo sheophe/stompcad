@@ -20,7 +20,10 @@ __all__ = ["Term", "Filter", "parse_filter"]
 
 _RANGE = re.compile(r"^(?P<prefix>[^()]+)\((?P<lo>-?\d+)\.\.(?P<hi>-?\d+)\)$")
 
-#: How many values one range term may name. A range names parts on one
+#: How many values one range term may name. Unlike its neighbouring
+#: constants, this figure is not measured against any gap: there is no
+#: population of legitimate-huge and illegitimate-huge ranges to separate,
+#: so it is a resource bound chosen as policy. A range names parts on one
 #: board, where a few hundred sharing a prefix is already dense, so nothing
 #: real is refused. The alternation a range compiles into grows with the
 #: range and not with the expression's own length -- thirteen typed

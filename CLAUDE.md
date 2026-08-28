@@ -348,11 +348,11 @@ CLI.
 - Number diagrams within each ADR as `Figure 1`, `Figure 2`, and so on. Refer to them as
   `ADR-000N, Figure N` in the surrounding prose.
 - Keep new or edited docstrings to at most ten physical lines.
-  `packages/stompdrill/tests/test_documentation.py` audits every workspace member's
-  own `src` and `tests`, discovered through `tools.workspace_membership` rather than
-  listed, plus `tools/`, through `tools/check_docstrings.py`, but only warns — the ceiling guides new prose
-  rather than gating the suite. Put architectural rationale in an ADR and keep docstrings
-  local to the code they document.
+  `packages/stompdrill/tests/test_documentation.py` audits every workspace member's own
+  `src` and `tests`, discovered through `tools.workspace_membership` rather than listed,
+  plus `tools/`, through `tools/check_docstrings.py`, but only warns — the ceiling
+  guides new prose rather than gating the suite. Put architectural rationale in an ADR
+  and keep docstrings local to the code they document.
 - Use British spelling in prose and established American spelling in identifiers.
 - Keep `from __future__ import annotations` and an explicit, logically ordered `__all__`
   in each Python module. Value objects are frozen, slotted dataclasses whose transforms

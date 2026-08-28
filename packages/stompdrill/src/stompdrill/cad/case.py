@@ -13,7 +13,7 @@ from typing import Any
 from stompgeom.levels import Level, levels
 from stompgeom.shapes import compound
 from stompgeom.step import StepDocument, StepSolid, assembly_spans, bounding_box_mm
-from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.frames import CoordinateFrame, FaceFrame, cross
 from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
@@ -277,8 +277,8 @@ def build_frame(faces: Faces, axis: int) -> FaceFrame:
     other = next(index for index in free if index != lead)
     reference = [0.0, 0.0, 0.0]
     reference[other] = 1.0
-    u = _normalise(_cross(tuple(reference), w))
-    v = _cross(w, u)
+    u = _normalise(cross((reference[0], reference[1], reference[2]), w))
+    v = cross(w, u)
     origin = [0.0, 0.0, 0.0]
     origin[axis] = faces.inner_position_mm
     return FaceFrame(
@@ -288,14 +288,6 @@ def build_frame(faces: Faces, axis: int) -> FaceFrame:
             v=v,
             w=w,
         )
-    )
-
-
-def _cross(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, float, float]:
-    return (
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
     )
 
 

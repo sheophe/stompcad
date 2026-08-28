@@ -1785,8 +1785,12 @@ implement one rule: take the case model's three bounding spans, drop the shallow
 depth, reduce the remaining two to descending order, and compare them with the identified
 enclosure's own pair at exact nanometre equality. `stompgeom.assembly_spans` — the
 measurement — was promoted; the *interpretation* of those spans was not, and the
-interpretation is what carries the diagnostic's meaning. Both docstrings say so honestly,
-each naming the other, which is the duplication being visible rather than absent.
+interpretation is what carries the diagnostic's meaning. `stompcollider`'s docstring says
+so honestly, naming `stompdrill`'s `CheckCaseClearance._cross_check` as the rule it
+repeats; `stompdrill`'s own docstring names only `case.py` and `enclosure.py` and never
+`stompcollider`, correctly, since `stompdrill` sits below `stompcollider` in the
+workspace's dependency order and must not know about it. The duplication is visible from
+one direction only, which is the right arrangement given that order, not a gap in it.
 
 **Why it matters:** one diagnostic code, `wrong-case-model`, is now raised by two
 implementations, and nothing compares them. A change to either — which axis counts as the
@@ -1819,6 +1823,40 @@ surveyed at all — which a survey read by module gives no sign of.
 `PYTHONPATH` it inherits, or a probe run in-process), a control shows a deliberate breach
 of the determinism rule failing that subprocess, and the survey is re-read for those two
 functions with the coupling gone.
+
+## `RigidTransform`'s basis tolerance has no headroom against `CoordinateFrame`'s own edge
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** `stompmodel.frames._BASIS_TOLERANCE` is the same `1e-9` for
+`RigidTransform` as it is for `CoordinateFrame`, so a frame legally admitted at its own
+orthogonality edge (`u·v = 9.9e-10`, just inside `CoordinateFrame`'s own check) makes
+`placement_onto` raise where an otherwise-legal frame previously returned; the break-even
+sits near `5e-10`. Unreachable from any production builder today — the measured deviation
+`build_frame` actually produces is exactly `0.0` — but it is a real domain narrowing on a
+published type, since a hand-built `CoordinateFrame` could meet the admitted edge that
+`RigidTransform` then refuses.
+
+**Acceptance:** Either `RigidTransform` is shown to need no headroom beyond
+`CoordinateFrame`'s own edge and this is recorded as the reason, or its tolerance widens
+enough to admit every frame `CoordinateFrame` itself admits, and a test constructs the
+`9.9e-10` edge case and asserts the chosen behaviour.
+
+## A bare `ValueError` escapes `stompcollider`'s CLI on an oversized range bound
+
+**Status:** Confirmed gap, not scheduled. Pre-existing; found beside the refusal policy a
+recent wave rewrote.
+
+**Constraint:** `packages/stompcollider/src/stompcollider/designators.py:64` calls
+`int(lo_text)` on a range term's bound before checking its width. A bound long enough to
+overflow Python's integer-to-string conversion threshold (thousands of digits) raises a
+bare `ValueError` there, and `stompcollider.cli.main` catches only `StompError` and
+`OSError`, so the failure escapes as a traceback rather than the `UsageError` the same
+function raises for an ordinary oversized range.
+
+**Acceptance:** The oversized-bound case raises the same `UsageError` an oversized range
+raises today, a test drives it with a bound wide enough to trigger the conversion limit,
+and `stompcollider.cli.main`'s existing catch clauses need no widening to reach it.
 
 ## Rulings, for citation
 

@@ -49,11 +49,12 @@ class PlacedSolid:
 
         ``Quantity_Color`` accepts three components in ``0.0..1.0`` and
         raises from inside OCC otherwise, about a colour, with nothing to
-        say which solid carried it. A null shape is refused for the same
+        say which solid carried it. A null shape -- ``None``, or an OCC
+        shape whose own ``IsNull()`` is true -- is refused for the same
         reason. ``placement`` needs no check here: ``RigidTransform``
         validates itself, and ``None`` is the stated "leave where it was".
         """
-        if self.shape is None:
+        if self.shape is None or self.shape.IsNull():
             raise ValueError(f"PlacedSolid.shape must be a kernel shape, not {self.shape!r}")
         if self.colour is None:
             return

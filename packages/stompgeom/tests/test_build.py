@@ -415,6 +415,16 @@ def test_a_placed_solid_with_no_shape_is_refused() -> None:
         PlacedSolid(None, "A", None, None)
 
 
+def test_a_placed_solid_with_a_null_occ_shape_is_refused() -> None:
+    """``None`` and a default-constructed ``TopoDS_Shape`` are both null,
+    but only ``None`` fails an identity check -- ``IsNull()`` is what
+    catches the second."""
+    from OCP.TopoDS import TopoDS_Shape
+
+    with pytest.raises(ValueError, match="must be a kernel shape"):
+        PlacedSolid(TopoDS_Shape(), "A", None, None)
+
+
 def test_a_colour_with_two_components_is_refused() -> None:
     with pytest.raises(ValueError, match="three components"):
         PlacedSolid(_box(2, 2, 2), "A", (0.1, 0.2), None)  # type: ignore[arg-type]

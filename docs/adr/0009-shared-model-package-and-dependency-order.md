@@ -176,8 +176,9 @@ to exist. It partitions, keying each face's direction and offset to an integer b
 rather than clustering them by a merge tolerance. ADR-0006's order-independence is what
 requires the bin: clustering by a merge tolerance would let the walk's own order decide
 which faces merged. The bin's price is that two faces whose true normals differ by less
-than its width land in different levels however narrowly they straddle it. The measured window this can
-affect is `5e-7`–`4.47e-5` radians of tilt, comfortably clear of every fixture measured.
+than its width land in different levels however narrowly they straddle it. The measured
+window this can affect is `5e-7`–`4.47e-5` radians of tilt, comfortably clear of every
+fixture measured.
 Holedness does not move with it: `_plates` and `_HOLED_FRACTION_LIMIT` stay in
 `stompdrill`, discriminating a casting plate from a casting ring, which is the same
 enclosure reasoning that keeps `build_frame` out of this package.
