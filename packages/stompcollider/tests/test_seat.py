@@ -249,6 +249,57 @@ def test_clash_volume_outranks_clash_depth_in_the_key() -> None:
     assert [c.volume_nm3 for placement in ranked for c in placement.clashes] == [1, 2]
 
 
+def _volume_reduction_pair() -> tuple[Placement, Placement]:
+    """Tied clash count (2 each); volumes arranged so ``sum`` and ``max``
+    disagree about which placement ranks first. First: (10, 10) -- sum 20,
+    max 10. Second: (15, 1) -- sum 16, max 15. Ascending sum ranks the
+    second placement (16) ahead of the first (20); ascending max would rank
+    the first (10) ahead of the second (15) instead."""
+    return (
+        _placement(clashes=(_clash(volume_nm3=10), _clash(volume_nm3=10))),
+        _placement(clashes=(_clash(volume_nm3=15), _clash(volume_nm3=1))),
+    )
+
+
+def test_clash_volume_reduces_by_the_total_not_the_largest_single_clash() -> None:
+    """Proves the volume field is ``sum``, not ``max``: mutating the
+    production reduction to ``max`` flips this fixture's order (verified in
+    the Task 15 fix-round-1 report)."""
+    ranked = sorted(_volume_reduction_pair(), key=rank_key)
+    assert [sum(c.volume_nm3 for c in p.clashes) for p in ranked] == [16, 20]
+
+
+def _depth_reduction_pair() -> tuple[Placement, Placement]:
+    """Tied clash count (2 each) and tied total volume (2 each); depths
+    arranged so ``max`` and ``min`` disagree about which placement ranks
+    first. First: depths (10, 100) -- max 100, min 10. Second: depths
+    (50, 60) -- max 60, min 50. Ascending max ranks the second placement
+    (60) ahead of the first (100); ascending min would rank the first (10)
+    ahead of the second (50) instead."""
+    return (
+        _placement(
+            clashes=(
+                _clash(volume_nm3=1, depth_nm=10),
+                _clash(volume_nm3=1, depth_nm=100),
+            )
+        ),
+        _placement(
+            clashes=(
+                _clash(volume_nm3=1, depth_nm=50),
+                _clash(volume_nm3=1, depth_nm=60),
+            )
+        ),
+    )
+
+
+def test_clash_depth_reduces_by_the_greatest_clash_not_the_least() -> None:
+    """Proves the depth field is ``max``, not ``min``: mutating the
+    production reduction to ``min`` flips this fixture's order (verified in
+    the Task 15 fix-round-1 report)."""
+    ranked = sorted(_depth_reduction_pair(), key=rank_key)
+    assert [max(int(c.depth_nm) for c in p.clashes) for p in ranked] == [60, 100]
+
+
 # --------------------------------------------------------------------------
 # apply(): ranks are assigned, nothing is filtered, boards are independent
 # --------------------------------------------------------------------------
