@@ -1,0 +1,74 @@
+[project]
+name = "stompcollider"
+version = "0.1.0"
+description = "Seats PCB models inside a drilled case and reports where they clash"
+requires-python = ">=3.10"
+# stompmodel and stompgeom. The pure core still reaches neither the kernel
+# nor a sibling above it; `boards.py` is the first module here to read
+# geometry, and it reads it *through* stompgeom -- OCP itself stays foreign,
+# which tests/test_package_boundary.py enforces. See ADR-0008.
+dependencies = ["stompmodel", "stompgeom"]
+
+[project.scripts]
+stompcollider = "stompcollider.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: without this marker a downstream type checker discards every
+# annotation this distribution ships.
+[tool.setuptools.package-data]
+stompcollider = ["py.typed"]
+
+[tool.uv.sources]
+stompmodel = { workspace = true }
+stompgeom = { workspace = true }
+
+# So ADR-0008's sentence -- change into the member, sync, test -- runs a real
+# suite rather than an import check. `mypy` is here because the root gate
+# excludes this member's tests: three (now four) `tests` packages cannot
+# share one scan. `hypothesis` covers the property tests later tasks add.
+[dependency-groups]
+dev = ["pytest", "mypy", "hypothesis"]
+
+# `pythonpath` reaches the repo root, mirroring the other members: the
+# ownership gates read `tools.workspace_membership` for the one statement of
+# which packages to scan -- a text read across siblings, never an import of
+# one.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["../.."]
+
+# `mypy_path` gains the repo root for the same reason `pythonpath` does above:
+# the ownership gates import `tools.workspace_membership`.
+[tool.mypy]
+python_version = "3.10"
+mypy_path = ["src", "../.."]
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# cadquery-ocp is a compiled extension with no py.typed marker, so every OCP
+# symbol is Any to mypy. Needed for `tests` alone: this package's own source
+# reaches the kernel only through stompgeom, and tests/test_package_boundary.py
+# is what keeps that true. Narrow to OCP, mirroring stompgeom's identical
+# override and the root pyproject.toml's.
+module = ["OCP.*"]
+ignore_missing_imports = true
+
+# mutmut resolves tests through the pyproject.toml in the current working
+# directory, and the root one names only stompdrill's testpaths, so a mutant of
+# this member run through the root config would record a false survivor.
+# `cd packages/stompcollider && mutmut run` is the real survey.
+[tool.mutmut]
+source_paths = ["src/stompcollider"]
+# mutmut injects `import mutmut` into every module it instruments, which the
+# boundary gate rejects by design. Deselecting keeps the gate's assertion
+# exact rather than weakening the rule itself.
+pytest_add_cli_args_test_selection = [
+    "--deselect=tests/test_package_boundary.py::test_every_module_imports_only_the_standard_library_and_itself",
+]

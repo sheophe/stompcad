@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from stompdrill.emitters.drawing import content
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import DrillData, EnclosureMatch, StageRun
+from stompmodel.model import SNAP_GRID_PARAMETER, SNAP_STAGE, DrillData, EnclosureMatch, StageRun
 from tests.conftest import at, make_data
 
 
@@ -31,14 +31,14 @@ def test_the_grid_note_says_so_when_no_pitch_was_recorded():
     assert content.grid_note(DrillData()) == "GRID NOT RECORDED"
 
     tabled = DrillData().with_processing(
-        StageRun(content.SNAP_STAGE, ((content.GRID_PARAMETER, (250_000, 500_000)),))
+        StageRun(SNAP_STAGE, ((SNAP_GRID_PARAMETER, (250_000, 500_000)),))
     )
     assert content.grid_note(tabled) == "GRID NOT RECORDED"
 
 
 def test_the_grid_note_reports_a_recorded_pitch_in_millimetres():
     data = DrillData().with_processing(
-        StageRun(content.SNAP_STAGE, ((content.GRID_PARAMETER, 250_000),))
+        StageRun(SNAP_STAGE, ((SNAP_GRID_PARAMETER, 250_000),))
     )
 
     assert content.grid_note(data) == "GRID 0.250 mm"

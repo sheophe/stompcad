@@ -474,20 +474,27 @@ rediscovery rather than removing it. Closed; nothing further to do.
 
 ## Promote the kernel document builder into `stompgeom`, once plan 3 needs it
 
-**Status:** Deliberate deferral, not scheduled. ADR-0008 records the same deferral.
+**Status:** Closed — the caller arrived and the builder moved. Recorded before that as a
+deliberate deferral, which ADR-0008 recorded too.
 
-**Constraint:** Assembling a document from placed, named, coloured solids ("build") has
+**Constraint, as originally found:** Assembling a document from placed, named, coloured solids ("build") has
 exactly one caller today, and that caller is a test fixture — not a real second consumer,
 so the interface is not yet designable. Plan 3's first geometry ticket is what supplies
 one: it promotes the existing test-only builder into `stompgeom` with `placement` and
 `colour` parameters, and the solid value gains whatever reading half that caller turns out
 to need. `stompcollider`'s assembly emitter must not construct kernel documents itself.
 
-**Acceptance:** The builder moves into `stompgeom`, taking `placement` and `colour`
-parameters, once `stompcollider`'s assembly emitter is its real caller; the assembly
-emitter calls it rather than building a document itself; and
+**Acceptance, as originally written:** The builder moves into `stompgeom`, taking
+`placement` and `colour` parameters, once `stompcollider`'s assembly emitter is its real
+caller; the assembly emitter calls it rather than building a document itself; and
 `docs/specs/stompcollider-technical.md`'s Order of work section and ADR-0008 agree about
 why it waited.
+
+**Resolution:** All three. `stompgeom.build.build_document` takes
+`PlacedSolid(shape, name, colour, placement)`, and `stompgeom.build.solid_colour` is the
+reading half that caller turned out to need; `stompcollider`'s assembly emitter calls the
+builder and constructs no kernel document of its own; and both documents record why it
+waited. Closed; nothing further to do.
 
 ## Defer moving the CLI's usage/IO policy below `stompdrill`, until a second consumer exists
 
@@ -661,32 +668,51 @@ gains the matching amended paragraph. Closed; nothing further to do.
 
 ## Take the `levels()` cut a level below where plan 3 currently plans it
 
-**Status:** Confirmed gap, not scheduled. Found independently by two lenses in the 2026-08
-architecture review's wave 1 (its own findings F1-07 and F2-04).
+**Status:** Closed — its own premise does not hold under the shape the cut took. Found
+independently by two lenses in the 2026-08 architecture review's wave 1 (its own findings
+F1-07 and F2-04).
 
-**Constraint:** `_levels` (planned for `stompgeom`) consumes an unnamed
-`(area, position, outward, face)` clump, and the ~22 lines that build that clump — the
-planar filter, the axis test, `TopAbs_REVERSED`'s sign, the area and the bbox position —
-are inline in `stompdrill`'s `find_faces`. Whoever makes plan 3's `levels()` cut should take
-the harvest along with the grouping and name the clump; sizing the task as "move `_levels`"
-under-estimates it.
+**Constraint, as originally found:** `_levels` (planned for `stompgeom`) consumes an
+unnamed `(area, position, outward, face)` clump, and the ~22 lines that build that clump
+— the planar filter, the axis test, `TopAbs_REVERSED`'s sign, the area and the bbox
+position — are inline in `stompdrill`'s `find_faces`. Whoever makes plan 3's `levels()`
+cut should take the harvest along with the grouping and name the clump; sizing the task
+as "move `_levels`" under-estimates it.
 
-**Acceptance:** The cut moves both the clump's construction and `_levels` into `stompgeom`,
-the clump is a named type rather than a bare tuple, and `stompdrill`'s suite passes
-unchanged.
+**Acceptance, as originally written:** The cut moves both the clump's construction and
+`_levels` into `stompgeom`, the clump is a named type rather than a bare tuple, and
+`stompdrill`'s suite passes unchanged.
+
+**Why it closes instead of ticking:** `stompgeom.levels()` takes a solid and partitions
+its planar faces directly into `Level`s keyed on their own outward direction and offset —
+see ADR-0009's `stompgeom` inventory. There is no intermediate clump between the walk and
+the grouping for this Acceptance to name: the harvest is `levels()`'s own body, and its
+result is already the named type the Acceptance asked for. The premise — that a clump
+survives the cut and merely lacks a name — does not hold, so the entry closes on that
+ground. Closed; nothing further to do.
 
 ## Give `assembly_spans` and `_part_of` a home wider than `stompdrill.cad`
 
-**Status:** Confirmed gap, not scheduled. Found in the 2026-08 architecture review's wave 1
-(its own finding F1-06).
+**Status:** Closed, one helper on each branch of its own Acceptance. Found in the 2026-08
+architecture review's wave 1 (its own finding F1-06).
 
-**Constraint:** Both are private to `stompdrill.cad` today, and both feed a diagnostic that
-more than one tool raises — the same duplication rule `check_millimetres`/
-`check_nanometres` were published to close.
+**Constraint, as originally found:** Both are private to `stompdrill.cad` today, and both
+feed a diagnostic that more than one tool raises — the same duplication rule
+`check_millimetres`/`check_nanometres` were published to close.
 
-**Acceptance:** Either the two helpers move to a package both tools depend on, with an
-admission rule naming the `stompcad`-visible reason, or the decision to leave them is
-recorded with why the duplication is acceptable here.
+**Acceptance, as originally written:** Either the two helpers move to a package both
+tools depend on, with an admission rule naming the `stompcad`-visible reason, or the
+decision to leave them is recorded with why the duplication is acceptable here.
+
+**Resolution:** `assembly_spans` moved: it is `stompgeom.step.assembly_spans` now — the
+bounding-box span of every solid together, per axis, in millimetres, describable without
+naming a panel — and its named `stompcad`-visible reason is `wrong-case-model`, raised by
+`stompdrill`'s clearance stage today and specified for `stompcollider`'s own model check
+(`docs/specs/stompcollider-technical.md`'s diagnostic table), so one span computation
+serves both rather than two. `_part_of` did not move: it is `product_name.split()[0]`,
+naming policy rather than geometry, and no geometric rule is duplicated by leaving it in
+`stompdrill.cad` — the record this Acceptance's second branch asked for. Closed; nothing
+further to do.
 
 ## Delete `cli._options_for`'s type-hint introspection
 
@@ -988,6 +1014,14 @@ interface against, and folding it now would be Speculative Generality.
 consumer (for example `stompcollider`'s assembly emitter) needs the same idiom; until
 then this entry stands.
 
+**Resolution:** Closed. `stompgeom.shapes.compound(shapes)` is that helper, and the second
+consumer arrived: `stompcollider`'s clash stage builds a board's solids into one compound
+through it, and the assembly emitter reaches it through `build_document`. The three
+`stompdrill` sites call it rather than repeating the `BRep_Builder()` pair; the remaining
+`MakeCompound` calls in the tree are fixtures building geometry, which is not the
+duplication this named (`grep -rn "MakeCompound" packages --include="*.py"`). Closed;
+nothing further to do.
+
 ## `CheckCaseClearance` is stateful, and nothing states the `apply`-before-`describe` order it relies on
 
 **Status:** Confirmed gap, not scheduled. Found independently by three lenses in the 2026-08
@@ -1004,7 +1038,8 @@ to the unreconciled play area rather than crashing. Two observations travel with
 `stompmodel.protocols.Stage`'s own docstring — "A deterministic preprocessing step
 independent of pipeline position" — states nothing about an ordering obligation between its
 two methods, so a second implementer (`stompcollider`'s `Match`/`Seat` stages,
-`docs/specs/stompcollider-technical.md:532`) meets no warning before writing the same shape.
+`docs/specs/stompcollider-technical.md`'s "Internal architecture") meets no warning before
+writing the same shape.
 `apply`/`_play_area_in` used to decide whether to reframe by testing
 `frame is self.model.frame` — object identity, which the concrete `OcpCaseModel` dataclass
 happens to preserve but which the `CaseModel` protocol never promises. Ticket 51 replaced
@@ -1202,7 +1237,7 @@ is fit at most once per read, and the full stompdrill suite passes unchanged.
 **Status:** Resolved by ticket 46 (2026-08). Found in the 2026-08 architecture review's
 wave 3 (F1-04). Spec-axis; harm was entirely forecast.
 
-**Constraint:** `docs/specs/stompcollider-technical.md:505-507` says `stompcollider`'s
+**Constraint:** `docs/specs/stompcollider-technical.md`'s "Command line" said `stompcollider`'s
 `wrong-case-model` "compares the drill document's declared enclosure part against the
 model's own product name — the same check `stompdrill` already makes." `stompdrill` makes no
 such check: `pipeline/clearance.py`'s `_cross_check` reduces both the model's measured
@@ -1670,6 +1705,159 @@ can pass by finding nothing.
 in the subprocess's output, or a distinguishable exit code -- and a control shows the test
 failing when the subprocess dies before collection.
 
+## `Match` pairs a protrusion to a hole by absolute proximity, so a real export pairs nothing
+
+**Status:** Confirmed defect, not scheduled. It is a specification change as well as a code
+change, so it is recorded rather than patched. Found while the dock report and the assembly
+model were first read back and compared.
+
+**Constraint:** `stompcollider.match._pair_face` measures the distance from a protrusion's
+`axis_xy_nm` — a coordinate in the board model's own frame — to a hole's `(x_nm, y_nm)` in
+the case's face frame, and pairs them when it is within the recognition tolerance. That
+presupposes the board model's origin already coincides with the face frame's origin, which
+is precisely the quantity the Candidates step exists to compute from the pairs this step
+produces. On the synthetic fixtures the two origins do coincide, so the suite is green; a
+real KiCad export, whose origin sits at a board corner or a sheet origin, is displaced far
+past any tolerance and pairs nothing, earning `no-correspondence` on every board.
+
+A visible consequence, worth stating because it looks like a separate fact: every placement
+this implementation can produce has `x_nm`, `y_nm` and `theta_deg` at or near zero, because
+a correspondence only exists where a part already lies on its hole.
+
+**Acceptance:** Pairing is seeded from *relative* geometry — the invariant the Candidates
+section already half-describes, `| p₁p₂ | = | h₁h₂ |` within twice the tolerance — so that a
+board displaced by an arbitrary rigid motion still pairs, and `docs/specs/stompcollider-technical.md`'s
+Match section is amended to specify that seed rather than absolute proximity. A test seats a
+board whose model origin is displaced by more than the tolerance and finds the same
+correspondences as the undisplaced one, and the agreement test then has a placement with a
+non-zero translation and turn to compare.
+
+## An under-constrained board reaches no artefact, which the pre-spec requires it to reach
+
+**Status:** Confirmed gap between the two `stompcollider` specifications, not scheduled.
+
+**Constraint:** `docs/specs/stompcollider.md` states that a board with no panel-reference
+parts, or exactly one, "is explicitly placed rather than solved, and treated as a fixed
+body others must avoid". Nothing implements that. `Match` records
+`under-constrained-board` and gives such a board no placement; the assembly emitter then
+leaves it out entirely, so it is neither drawn nor checked for interference, and the
+boards around it are checked against a space it really occupies as though it were empty.
+`--place` is the flag that would supply the missing placement, and it is refused, because
+no stage consumes one. Refusing it is right — an accepted flag that changed nothing would
+be worse — but the requirement behind it is still unmet, and the pre-spec is the authority
+where the two documents disagree.
+
+**Acceptance:** A stage places an explicitly placed board, `--place N=X,Y,THETA` feeds it,
+such a board appears in the assembly model and participates in the clash check as a fixed
+body that others must avoid, and `docs/specs/stompcollider-technical.md`'s command line
+section drops the shortfall it currently records. A test covers a run with one
+under-constrained board and one solved board that clashes with it.
+
+## The `-v` stage trace is a near-copy between the two command lines
+
+**Status:** Confirmed duplication, not scheduled. The commit-loop half of this entry is
+closed: `stompmodel.protocols` publishes the set-level transaction as `stage_all` and
+`commit_all`, both command lines call it, and ADR-0001 records the promotion as it
+recorded the target-set precondition's.
+
+**Constraint:** What is left of the duplication is the per-stage trace. `stompdrill.cli`'s
+`run_pipeline` takes an optional `trace` callback; `stompcollider.cli`'s `_traced` takes an
+optional stream and prints to it. Both fold one stage at a time through a single-stage
+`Pipeline` so that the value before and after each stage is available, and both build a
+line from the same three facts — the stage's name, the count of the thing it might drop,
+and the diagnostic codes it added. Two spellings of one fold is a second chance to disagree
+about what a stage did.
+
+**Acceptance:** One fold, published where `Pipeline` is, taking the value before and after
+each stage to a caller-supplied observer; each command line keeps only the sentence it
+formats, which is genuinely tool-specific (holes against boards). Both `-v` outputs are
+unchanged byte for byte.
+
+## Two tools raise `wrong-case-model` from two implementations of one rule
+
+**Status:** Confirmed duplication, not scheduled. Recorded rather than patched: the
+promotion this needs was not part of the work that created the second copy.
+
+**Constraint:** `stompcollider/sources/step.py`'s `_cross_check`/`_footprint_nm`/
+`_descending` and `stompdrill/pipeline/clearance.py`'s `CheckCaseClearance._cross_check`
+(reading the footprint `stompdrill/cad/loader.py`'s `_footprint_and_axis` measured) each
+implement one rule: take the case model's three bounding spans, drop the shallowest as the
+depth, reduce the remaining two to descending order, and compare them with the identified
+enclosure's own pair at exact nanometre equality. `stompgeom.assembly_spans` — the
+measurement — was promoted; the *interpretation* of those spans was not, and the
+interpretation is what carries the diagnostic's meaning. `stompcollider`'s docstring says
+so honestly, naming `stompdrill`'s `CheckCaseClearance._cross_check` as the rule it
+repeats; `stompdrill`'s own docstring names only `case.py` and `enclosure.py` and never
+`stompcollider`, correctly, since `stompdrill` sits below `stompcollider` in the
+workspace's dependency order and must not know about it. The duplication is visible from
+one direction only, which is the right arrangement given that order, not a gap in it.
+
+**Why it matters:** one diagnostic code, `wrong-case-model`, is now raised by two
+implementations, and nothing compares them. A change to either — which axis counts as the
+depth, whether the comparison stays exact, what a shape with two equal spans does — makes
+that one code mean two different things depending on which tool reported it, with no test
+anywhere that would notice. Matching by `code` is this workspace's rule for reading a
+diagnostic, so a consumer cannot tell the two apart.
+
+**Acceptance:** The interpretation lives once, beside `assembly_spans` in `stompgeom` or as
+a footprint rule in `stompmodel`, and both call sites read it; or, if the two are shown to
+be genuinely different questions, one of them stops using the code the other owns. Either
+way a test compares the two tools' answers over one model rather than each tool's answer
+against itself.
+
+## `stompgeom`'s subprocess determinism probes run unmutated code, so the writer's survey is not what it looks like
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** Several of `stompgeom`'s determinism tests run their probe in a subprocess
+(`sys.executable -c …` in `tests/test_writer.py`), and that interpreter resolves
+`import stompgeom` through the installed distribution rather than through the tree the
+test is running against. Under `cd packages/stompgeom && mutmut run` the mutant lives in
+mutmut's own copy of the source, so those subprocesses execute the unmutated code and pass
+whatever the mutant did: they can kill nothing in `writer._reslot_colours` or
+`writer._canonicalise_ownership`. Every kill the survey credits for those two functions is
+an in-process test's, and the determinism claim the subprocess probes exist to make is not
+surveyed at all — which a survey read by module gives no sign of.
+
+**Acceptance:** The subprocess resolves `stompgeom` from the tree under test (a
+`PYTHONPATH` it inherits, or a probe run in-process), a control shows a deliberate breach
+of the determinism rule failing that subprocess, and the survey is re-read for those two
+functions with the coupling gone.
+
+## `RigidTransform`'s basis tolerance has no headroom against `CoordinateFrame`'s own edge
+
+**Status:** Confirmed gap, not scheduled.
+
+**Constraint:** `stompmodel.frames._BASIS_TOLERANCE` is the same `1e-9` for
+`RigidTransform` as it is for `CoordinateFrame`, so a frame legally admitted at its own
+orthogonality edge (`u·v = 9.9e-10`, just inside `CoordinateFrame`'s own check) makes
+`placement_onto` raise where an otherwise-legal frame previously returned; the break-even
+sits near `5e-10`. Unreachable from any production builder today — the measured deviation
+`build_frame` actually produces is exactly `0.0` — but it is a real domain narrowing on a
+published type, since a hand-built `CoordinateFrame` could meet the admitted edge that
+`RigidTransform` then refuses.
+
+**Acceptance:** Either `RigidTransform` is shown to need no headroom beyond
+`CoordinateFrame`'s own edge and this is recorded as the reason, or its tolerance widens
+enough to admit every frame `CoordinateFrame` itself admits, and a test constructs the
+`9.9e-10` edge case and asserts the chosen behaviour.
+
+## A bare `ValueError` escapes `stompcollider`'s CLI on an oversized range bound
+
+**Status:** Confirmed gap, not scheduled. Pre-existing; found beside the refusal policy a
+recent wave rewrote.
+
+**Constraint:** `packages/stompcollider/src/stompcollider/designators.py:64` calls
+`int(lo_text)` on a range term's bound before checking its width. A bound long enough to
+overflow Python's integer-to-string conversion threshold (thousands of digits) raises a
+bare `ValueError` there, and `stompcollider.cli.main` catches only `StompError` and
+`OSError`, so the failure escapes as a traceback rather than the `UsageError` the same
+function raises for an ordinary oversized range.
+
+**Acceptance:** The oversized-bound case raises the same `UsageError` an oversized range
+raises today, a test drives it with a bound wide enough to trigger the conversion limit,
+and `stompcollider.cli.main`'s existing catch clauses need no widening to reach it.
+
 ## Rulings, for citation
 
 Entries below are decisions, not open work: each states an alternative that was considered
@@ -1741,7 +1929,8 @@ tolerance, silently") rather than folded into this entry.
 **Constraint:**
 
 - **A `reconciled: bool` flag on `CaseRegistration`.** Declined: no consumer today reads it —
-  `stompcollider-technical.md:281-284, 405, 502-506` reads `case.frame` as a complete
+  `stompcollider-technical.md`'s "What a placement is", "The report" and "Command line"
+  read `case.frame` as a complete
   registration and never asks after its provenance — and a forecast consumer licenses not
   narrowing an interface, never adding one.
 - **A public `axis_correspondence` primitive in `stompmodel`.** Rejected: one call site after

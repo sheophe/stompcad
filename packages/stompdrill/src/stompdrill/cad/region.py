@@ -163,9 +163,11 @@ def contains(
 
     from stompgeom.step import bounding_box_mm
 
-    point: list[float] = list(frame.basis.to_model(x_nm, y_nm))
     plane_at = bounding_box_mm(region)[axis]
-    point[axis] = plane_at
+    depth_nm = nm_from_mm(
+        (plane_at - mm_from_nm(frame.basis.origin_nm[axis])) * frame.basis.w[axis]
+    )
+    point: list[float] = list(frame.basis.to_model(x_nm, y_nm, depth_nm))
 
     classifier = BRepClass_FaceClassifier(region, gp_Pnt(*point), 1e-7)
     if classifier.State() != TopAbs_State.TopAbs_IN:
@@ -191,7 +193,6 @@ def clearance_reason(
     lies outside the region, else ``"convex"``. These partition every edge
     ``contains`` measured, so whichever is nearest is the true reason.
     """
-    from OCP.BRep import BRep_Builder
     from OCP.BRepAdaptor import BRepAdaptor_Curve
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
     from OCP.BRepClass import BRepClass_FaceClassifier
@@ -201,8 +202,9 @@ def clearance_reason(
     from OCP.ShapeAnalysis import ShapeAnalysis
     from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_State
     from OCP.TopExp import TopExp_Explorer
-    from OCP.TopoDS import TopoDS, TopoDS_Compound
+    from OCP.TopoDS import TopoDS
 
+    from stompgeom.shapes import compound
     from stompgeom.step import bounding_box_mm
 
     def edge_group(edge: Any, on_outer: bool) -> str:
@@ -219,19 +221,16 @@ def clearance_reason(
     def nearest_mm(vertex: Any, edges: list[Any]) -> float:
         if not edges:
             return float("inf")
-        compound = TopoDS_Compound()
-        builder = BRep_Builder()
-        builder.MakeCompound(compound)
-        for edge in edges:
-            builder.Add(compound, edge)
-        distance = BRepExtrema_DistShapeShape(vertex, compound)
+        distance = BRepExtrema_DistShapeShape(vertex, compound(edges))
         if not distance.IsDone():
             raise StompdrillError("could not measure clearance to a boundary edge group")
         return distance.Value()
 
-    point: list[float] = list(frame.basis.to_model(x_nm, y_nm))
     plane_at = bounding_box_mm(region)[axis]
-    point[axis] = plane_at
+    depth_nm = nm_from_mm(
+        (plane_at - mm_from_nm(frame.basis.origin_nm[axis])) * frame.basis.w[axis]
+    )
+    point: list[float] = list(frame.basis.to_model(x_nm, y_nm, depth_nm))
     vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(*point)).Vertex()
 
     outer = ShapeAnalysis.OuterWire_s(region)
@@ -339,16 +338,14 @@ def _proud_mm(
 
 def _boundary(region: Any) -> Any:
     """Every wire of ``region`` as one compound, for distance measurement."""
-    from OCP.BRep import BRep_Builder
     from OCP.TopAbs import TopAbs_ShapeEnum
     from OCP.TopExp import TopExp_Explorer
-    from OCP.TopoDS import TopoDS_Compound
 
-    compound = TopoDS_Compound()
-    builder = BRep_Builder()
-    builder.MakeCompound(compound)
+    from stompgeom.shapes import compound
+
+    wires = []
     explorer = TopExp_Explorer(region, TopAbs_ShapeEnum.TopAbs_WIRE)
     while explorer.More():
-        builder.Add(compound, explorer.Current())
+        wires.append(explorer.Current())
         explorer.Next()
-    return compound
+    return compound(wires)

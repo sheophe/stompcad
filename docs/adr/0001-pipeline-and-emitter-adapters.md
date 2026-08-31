@@ -4,7 +4,11 @@
 [ADR-0009](0009-shared-model-package-and-dependency-order.md), which moves
 `Stage`, `Pipeline` and `Emitter` into `stompmodel` and makes them generic in
 the value they fold over. The reasoning here for one authority per fact and for
-computing shared facts once is unchanged.
+computing shared facts once is unchanged. **Amended in place:** the grant
+below has been exercised — `stompmodel.protocols` now publishes the set-level
+target check as `target_key`/`check_target_set` and the set-level write
+transaction as `stage_all`/`commit_all`, and both command lines call that
+published surface rather than keeping private copies.
 
 ## Context
 
@@ -50,16 +54,17 @@ normalisation form refuses a pair that a volume unifying either would hold as on
 file, and it is applied unconditionally, because whether this host folds is not
 knowable before a target exists and `samefile` needs both targets to exist already.
 The key decides collisions and nothing else — the bytes still go to the path the
-caller named. `stompdrill.cli`'s `_target_key` and `_preflight_targets` are where
-this is enforced. The write mechanism's own preconditions are **not
+caller named. `stompmodel.protocols`'s `target_key` and `check_target_set` are
+where this is enforced; `stompdrill.cli` calls them rather than keeping a
+private copy. The write mechanism's own preconditions are **not
 restated here** — ADR-0005 states them and `stage_payload` enforces them itself, and
 it runs before any target is replaced, so a target outside its domain still
 withholds the whole set; it costs a render first, and that price is stated rather
 than hidden. This pre-flight is not a guarantee that the commit will succeed. An
 ERROR diagnostic withholds all of them before rendering begins, as already stated
 above. Past both gates, every payload is rendered before any target path is touched;
-the command line then stages every rendered payload to a temporary beside its own
-target, and only once every one of those writes has succeeded does it replace each
+`stage_all` then stages every rendered payload to a temporary beside its own target,
+and only once every one of those writes has succeeded does `commit_all` replace each
 target from its temporary — reading a target's own prior bytes first, whenever the
 target already exists, so they can be put back. A failure anywhere in rendering,
 staging, or committing — an emitter's own fault, the operating system refusing a
@@ -68,8 +73,8 @@ succeeded — unwinds whatever this invocation had staged or already replaced an
 leaves every target exactly as it was before the run, whether that is absent or
 holding a previous invocation's artefact. Restoring an already-replaced target that
 held bytes before the run uses the same `stage_payload`/`StagedWrite.commit` mechanism
-as every other write in the loop, never a write path of its own: the command line
-states no write path `stompmodel.protocols` does not already publish. A target that
+as every other write in the loop, never a write path of its own: neither command line
+states any write path `stompmodel.protocols` does not already publish. A target that
 did not exist before the run is restored by removing it, which is a deletion rather
 than a write and is the one filesystem call this bookkeeping makes directly.
 
@@ -85,9 +90,15 @@ not take, which is a durability question this document leaves out alongside fsyn
 and power loss.
 
 ADR-0005 gives `stage_payload`/`StagedWrite.commit` the matching guarantee for one path in
-isolation; this is the set-level rule built on top of it, and it stays the command
-line's own for as long as `stompdrill` is the only caller composing a set of several
-artefact paths for one invocation.
+isolation; the transaction above is the set-level rule built on top of it. It is no
+longer this command line's own: `stompmodel.protocols` publishes it as `stage_all` and
+`commit_all` — staging every payload or none, then committing every target with the
+prior-bytes bookkeeping and the rollback described above — beside the `target_key`/
+`check_target_set` pre-flight it publishes for the same reason. `stompdrill`'s command
+line is no longer the only caller composing a set of several artefact paths for one
+invocation: `stompcollider`'s composes one too, and both now call the published pair
+instead of restating the loops. What each command line keeps is the sentence it prints
+from the count each commit returned.
 
 Emitter registration is extensible: a format maps to an emitter without changing the
 processing contract. The CLI explicitly composes the ordered post-quantisation stages;
@@ -166,12 +177,13 @@ Staging every artefact before committing any of them costs one extra temporary f
 target, briefly present beside it until the whole set commits. That is the deliberate
 price of never leaving a previous invocation's artefact replaced by only part of this
 one's. The set-level rule is composed from `stompmodel`'s per-path mechanism rather than
-restating it: the command line calls `stage_payload` for every requested target, then
-`StagedWrite.commit` for each in turn, and `StagedWrite.discard` for whatever it abandons; reading
-a target's prior bytes before its own commit, and restoring them through that same
-`stage_payload`/`StagedWrite.commit` pair on a later failure, is the command line's own
-bookkeeping around that mechanism, never a second write path beside it. `stompdrill`
-states no temporary-file mechanism of its own. The set commits in the order its targets
+restating it: `stage_all` calls `stage_payload` for every requested target, `commit_all`
+calls `StagedWrite.commit` for each in turn, and both call `StagedWrite.discard` for
+whatever they abandon; reading a target's prior bytes before its own commit, and
+restoring them through that same `stage_payload`/`StagedWrite.commit` pair on a later
+failure, is bookkeeping around that mechanism, never a second write path beside it.
+Neither command line states a temporary-file mechanism, or a set-level loop, of its
+own. The set commits in the order its targets
 were requested; when one target's own read or commit fails, or an earlier target's
 commit fails, every target already committed in the same loop is restored to what it
 held before this run, and every other staged write — the one whose own read or commit

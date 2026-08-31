@@ -1,7 +1,9 @@
 # Foundation docket: the seven rulings that gate plan 3
 
-**Status:** accepted, not executed. Settles every question on the 2026-08 foundation
-audit's ruling docket. `docs/plans/` turns this into plan 3.
+**Status:** accepted and executed. Settles every question on the 2026-08 foundation
+audit's ruling docket; plan 3 carried out the consolidated work list below, on
+`stompcad-collider` from `9180569`. The amendments table near the end is the record
+of what was changed, not a list of outstanding work.
 
 **Spec:** the work itself is specified by
 [`stompcollider-technical.md`](stompcollider-technical.md); this document supplies the
@@ -30,13 +32,15 @@ meant to confirm. Where it could not, the ruling is a maintainer's decision and 
 
 ## Evidence
 
-Figures below describing `fixtures/tar-pcb.stp` and the cached Hammond models are
+Figures below describing `tar-pcb.stp` (homed in
+`packages/stompcollider/tests/fixtures/` by plan 3's `boards.py` ticket) and the
+cached Hammond models are
 properties of immutable inputs, and **the implementing ticket carries each as a test
 assertion** so a figure that drifts fails a suite rather than quietly staling this
 document. Figures describing the repository itself are deliberately given as *commands*
 rather than counts, because a count is stale on the next commit.
 
-**`fixtures/tar-pcb.stp` is two boards.** 43 solids: 41 named with reference designators
+**`tar-pcb.stp` is two boards.** 43 solids: 41 named with reference designators
 (`R5`, `C3`, `D2`, …), 2 unnamed. The unnamed pair measure 91.50 x 17.00 x 1.51 mm and
 106.50 x 53.75 x 1.51 mm, both spanning z 0.000–1.510, disjoint in y by 4.25 mm. A main
 board and a strip, side by side and coplanar — not one board exported in two pieces.
@@ -118,7 +122,7 @@ change this.
 ## Ruling 1 — a substrate is selected by name and verified by slab-ness
 
 A solid XCAF gave a name is a component; an unnamed solid is a substrate **candidate**.
-`stompcollider-technical.md:123-129` stands as written.
+`stompcollider-technical.md`'s "Substrates and components" stands as written.
 
 Each candidate is then **verified to be a slab**: its two largest levels must be
 **exactly opposed**, of comparable area, and their offsets must sum to a thickness small
@@ -241,7 +245,8 @@ tolerances with distinct jobs, each stated where it acts: the millionth granular
 ## Ruling 3 — `CoordinateFrame` gains composition; the kernel realisation lives in `stompgeom`
 
 `CoordinateFrame` is an origin plus a right-handed orthonormal basis, which is a `gp_Ax3`
-in all but name. The placement `stompcollider-technical.md:275-288` specifies — rotate the
+in all but name. The placement `stompcollider-technical.md`'s "What a placement is"
+specifies — rotate the
 carrier normal antiparallel to the face normal, rotate θ about it, translate by `(x, y)`
 then `z` — is exactly the rigid transform taking one frame to another. **The workspace is
 not missing a transform type. It is missing composition.**
@@ -295,8 +300,8 @@ ADR-0008's rule that an interface grows when a real second consumer arrives says
 promote it. `stompgeom`'s inventory does not grow here.
 
 An impure `clash.py` sits between `Seat` and the emitters, taking placements in and clash
-records out. Consequences: `stompcollider-technical.md:115-117`'s purity and coverage
-claims become true as written; `Seat`'s cheap property tests keep their whole subject;
+records out. Consequences: the purity and coverage claims in
+`stompcollider-technical.md`'s "Module layout" become true as written; `Seat`'s cheap property tests keep their whole subject;
 `### Clashes` moves out from under `## Seat` in the specification; and one module joins a
 layout the specification presents as settled.
 
@@ -321,7 +326,7 @@ have left. It moves back.
 `mm_from_nm` is that — so it is admitted under rule 2, which ADR-0009:308-310 requires be
 justified by a nameable `stompcad`-visible behaviour. **That sentence has never been
 written, and this ruling writes it:** the collider's report prints nanometre quantities
-(`depth_nm`, `volume_nm3` at `stompcollider-technical.md:416`), `stompcad` reduces both
+(`depth_nm`, `volume_nm3` in `stompcollider-technical.md`'s "The report"), `stompcad` reduces both
 tools' output to one report, and two independent renderers would print one nanometre two
 ways.
 

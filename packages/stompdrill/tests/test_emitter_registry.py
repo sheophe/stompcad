@@ -8,6 +8,7 @@ from stompdrill import cli
 from stompdrill.emitters import base
 from stompdrill.emitters.base import available, get_emitter, register_emitter
 from stompmodel.errors import EmitterError
+from stompmodel.model import DrillData
 
 
 def test_the_fixture_really_restores_the_registry(clean_registry):
@@ -177,7 +178,7 @@ def test_a_bytes_payload_is_written_verbatim(tmp_path):
             return payload
 
     path = tmp_path / "out.bin"
-    lines = cli._commit(cli._stage([(BinaryEmitter(), path, payload)]))
+    lines = cli._write([(BinaryEmitter(), path)], DrillData())
 
     assert path.read_bytes() == payload
     assert "20 bytes" in lines[0]
@@ -195,7 +196,7 @@ def test_a_text_payload_is_still_written_as_utf8(tmp_path):
         def emit(self, data):
             return "⌀7.000"
 
-    lines = cli._commit(cli._stage([(TextEmitter(), path, "⌀7.000")]))
+    lines = cli._write([(TextEmitter(), path)], DrillData())
 
     assert path.read_text(encoding="utf-8") == "⌀7.000"
     # ⌀ is three bytes in UTF-8, so the count is not the character count.

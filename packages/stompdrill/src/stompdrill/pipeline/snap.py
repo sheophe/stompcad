@@ -12,27 +12,28 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import DrillData, Hole, RawHole, StageRun
+from stompmodel.model import (
+    SNAP_GRID_PARAMETER,
+    SNAP_STAGE,
+    DrillData,
+    Hole,
+    RawHole,
+    StageRun,
+)
 from stompmodel.units import (
     Millimetre,
     Nanometre,
     check_nanometres,
     format_nm,
     nm_from_mm,
-    scaled_nm,
 )
 
 from ..formatting import format_mm
 from ..tolerance import within
-from ..units import NM_PER_MICRON, Micron, nm_from_micron
+from ..units import NM_PER_MICRON, Micron, nm_from_micron, scaled_nm
 
 __all__ = ["SnapPositions", "ReviewGridTies"]
 
-#: The key ``SnapPositions`` records its effective pitch under, and the key
-#: `ReviewGridTies` reads it back from. Spelled once, because the two are one
-#: conversation: a reader looking under a name the writer stopped using would
-#: find no pitch and silently review nothing.
-_GRID_PARAMETER: str = "grid_nm"
 
 #: The finest grid a drilled panel can be described on. The drill file and the
 #: drawing both print three decimals of a millimetre, so below a micron the
@@ -74,7 +75,7 @@ class SnapPositions:
     construction. ``warn_over_nm`` defaults to a quarter of that pitch.
     """
 
-    name: ClassVar[str] = "snap"
+    name: ClassVar[str] = SNAP_STAGE
 
     def __init__(self, grid_nm: Nanometre, warn_over_nm: Nanometre | None = None) -> None:
         check_nanometres("SnapPositions", grid_nm=grid_nm)
@@ -103,7 +104,7 @@ class SnapPositions:
         """Record the effective pitch and resolved warning threshold."""
         return StageRun(
             self.name,
-            ((_GRID_PARAMETER, self.grid_nm), ("warn_over_nm", self.warn_over_nm)),
+            ((SNAP_GRID_PARAMETER, self.grid_nm), ("warn_over_nm", self.warn_over_nm)),
         )
 
     def quantise(
@@ -180,17 +181,11 @@ class ReviewGridTies:
         return StageRun(self.name, ())
 
     def apply(self, data: DrillData) -> DrillData:
-        grid_nm = self._pitch(data)
+        grid_nm = data.grid_nm
         if grid_nm is None:
             return data
         tied = tuple((h.x_nm, h.y_nm) for h in data.holes if _is_tied(h, grid_nm))
         return data.with_diagnostics(*((_ambiguous(tied, grid_nm),) if tied else ()))
-
-    def _pitch(self, data: DrillData) -> Nanometre | None:
-        """Read the effective snap pitch, or ``None`` when none was recorded."""
-        run = data.last_run(SnapPositions.name)
-        pitch = None if run is None else run.get(_GRID_PARAMETER)
-        return Nanometre(pitch) if isinstance(pitch, int) else None
 
 
 def _is_tied(hole: Hole, grid_nm: Nanometre) -> bool:

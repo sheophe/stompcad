@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
-from stompmodel.frames import CoordinateFrame
+from stompmodel.frames import CoordinateFrame, RigidTransform
 from stompmodel.units import Nanometre
 
 #: A frame whose axes are deliberately not the kernel's own: ``u`` runs along
@@ -244,3 +246,188 @@ def test_a_well_formed_frame_is_the_control() -> None:
     )
 
     assert frame.origin_nm == (1, 2, 3)
+
+
+def _frame(
+    origin_nm: tuple[int, int, int] = (0, 0, 0),
+    u: tuple[float, float, float] = (1.0, 0.0, 0.0),
+    v: tuple[float, float, float] = (0.0, 1.0, 0.0),
+    w: tuple[float, float, float] = (0.0, 0.0, 1.0),
+) -> CoordinateFrame:
+    return CoordinateFrame(
+        origin_nm=(Nanometre(origin_nm[0]), Nanometre(origin_nm[1]), Nanometre(origin_nm[2])),
+        u=u, v=v, w=w,
+    )
+
+
+def test_to_model_depth_defaults_to_the_frame_plane() -> None:
+    """The new argument is additive: omitting it must reproduce today's answer."""
+    frame = _frame(origin_nm=(10_000_000, 20_000_000, 30_000_000))
+    assert frame.to_model(Nanometre(1_000_000), Nanometre(2_000_000)) == (11.0, 22.0, 30.0)
+
+
+def test_to_model_depth_moves_along_w_not_along_a_kernel_axis() -> None:
+    """The clause the three patched call sites got right only by luck: on a
+    frame whose w is not a kernel axis, a depth is a translation along w."""
+    root = 2.0 ** -0.5
+    frame = _frame(u=(0.0, 1.0, 0.0), v=(root, 0.0, -root), w=(-root, 0.0, -root))
+    x, y, z = frame.to_model(Nanometre(0), Nanometre(0), Nanometre(1_000_000))
+    assert round(x, 12) == round(-root, 12)
+    assert round(y, 12) == 0.0
+    assert round(z, 12) == round(-root, 12)
+
+
+def test_apply_direction_ignores_the_translation() -> None:
+    """A direction has no origin. to_canonical subtracting one is the defect
+    Ruling 4 names; a rotation-only operation is the answer."""
+    moved = _frame().translated_nm(Nanometre(10_000_000), Nanometre(0), Nanometre(0))
+    motion = _frame().placement_onto(moved)
+    assert motion.apply_direction((1.0, 0.0, 0.0)) == (1.0, 0.0, 0.0)
+    assert motion.apply_point((0.0, 0.0, 0.0)) == (10.0, 0.0, 0.0)
+
+
+def test_placement_onto_carries_this_frame_onto_the_target() -> None:
+    """The defining property, stated on all four of a frame's parts."""
+    source = _frame(origin_nm=(1_000_000, 2_000_000, 3_000_000))
+    target = _frame(
+        origin_nm=(50_000_000, 0, 0), u=(0.0, 1.0, 0.0), v=(-1.0, 0.0, 0.0), w=(0.0, 0.0, 1.0)
+    )
+    motion = source.placement_onto(target)
+    moved_origin = motion.apply_point((1.0, 2.0, 3.0))
+    assert tuple(round(c, 9) for c in moved_origin) == (50.0, 0.0, 0.0)
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.u)) == target.u
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.w)) == target.w
+
+
+def test_placement_onto_itself_is_the_identity() -> None:
+    """The innocent probe: a frame already in place must not be moved."""
+    frame = _frame(origin_nm=(7_000_000, 0, 0))
+    motion = frame.placement_onto(frame)
+    assert tuple(round(c, 12) for c in motion.apply_point((1.0, 2.0, 3.0))) == (1.0, 2.0, 3.0)
+
+
+def test_placement_onto_composes_for_two_non_identity_frames() -> None:
+    """The identity-self test above cannot catch an implementation that
+    used only ``target`` and ignored ``self`` entirely: with an identity
+    ``self``, ``R = U_target . U_self^T`` collapses to ``U_target``, so a
+    buggy ``R = U_target`` implementation would pass it too. Neither frame
+    here is the identity, ``self``'s basis is a 60-degree rotation about
+    ``w`` (not an axis flip), and ``target``'s is a distinct axis cycle, so
+    the resulting rotation is not symmetric and cannot be produced by
+    dropping ``self`` from the formula."""
+    root3over2 = 3.0 ** 0.5 / 2.0
+    source = _frame(
+        origin_nm=(1_000_000, 2_000_000, 3_000_000),
+        u=(root3over2, 0.5, 0.0),
+        v=(-0.5, root3over2, 0.0),
+        w=(0.0, 0.0, 1.0),
+    )
+    target = _frame(
+        origin_nm=(5_000_000, -1_000_000, 2_000_000),
+        u=(0.0, 1.0, 0.0),
+        v=(0.0, 0.0, 1.0),
+        w=(1.0, 0.0, 0.0),
+    )
+    motion = source.placement_onto(target)
+    moved_origin = motion.apply_point((1.0, 2.0, 3.0))
+    assert tuple(round(c, 9) for c in moved_origin) == (5.0, -1.0, 2.0)
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.u)) == target.u
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.v)) == target.v
+    assert tuple(round(c, 9) for c in motion.apply_direction(source.w)) == target.w
+
+
+def test_rotated_about_w_keeps_the_normal_and_stays_right_handed() -> None:
+    """Both clauses matter: a rotation that flipped w would still be unit."""
+    turned = _frame().rotated_about_w(math.pi / 2)
+    assert turned.w == (0.0, 0.0, 1.0)
+    assert tuple(round(c, 12) for c in turned.u) == (0.0, 1.0, 0.0)
+    # __post_init__ re-checks u x v == w, so construction proves handedness.
+
+
+def test_translated_nm_moves_along_the_frames_own_axes() -> None:
+    """Not along the kernel's. A frame turned 90 degrees moves sideways."""
+    turned = _frame().rotated_about_w(math.pi / 2)
+    moved = turned.translated_nm(Nanometre(1_000_000), Nanometre(0), Nanometre(0))
+    assert tuple(int(c) for c in moved.origin_nm) == (0, 1_000_000, 0)
+
+
+# --------------------------------------------------------------------------
+# RigidTransform validates at construction, for CoordinateFrame's reason:
+# this value reaches a kernel, and a malformed one raises there instead.
+# --------------------------------------------------------------------------
+
+_IDENTITY_ROTATION = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+
+def test_a_well_formed_rigid_transform_is_the_control() -> None:
+    """The anchor for the refusals below: this shape really does construct,
+    so each one is refusing its own named defect rather than everything."""
+    motion = RigidTransform(_IDENTITY_ROTATION, (1.0, 2.0, 3.0))
+    assert motion.apply_point((0.0, 0.0, 0.0)) == (1.0, 2.0, 3.0)
+
+
+def test_a_rotation_with_two_rows_is_refused() -> None:
+    with pytest.raises(ValueError, match="three rows"):
+        RigidTransform(((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)), (0.0, 0.0, 0.0))  # type: ignore[arg-type]
+
+
+def test_a_rotation_row_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"rotation\[1\] must have exactly three"):
+        RigidTransform(
+            ((1.0, 0.0, 0.0), (0.0, 1.0), (0.0, 0.0, 1.0)),  # type: ignore[arg-type]
+            (0.0, 0.0, 0.0),
+        )
+
+
+def test_a_translation_with_two_components_is_refused() -> None:
+    with pytest.raises(ValueError, match="three components"):
+        RigidTransform(_IDENTITY_ROTATION, (0.0, 0.0))  # type: ignore[arg-type]
+
+
+def test_a_non_finite_translation_is_refused() -> None:
+    with pytest.raises(ValueError, match="translation_mm must be finite"):
+        RigidTransform(_IDENTITY_ROTATION, (float("nan"), 0.0, 0.0))
+
+
+def test_a_non_finite_rotation_component_is_refused() -> None:
+    """The one the review named: an infinity handed straight to a kernel."""
+    with pytest.raises(ValueError, match=r"rotation\[0\] must be finite"):
+        RigidTransform(
+            ((float("inf"), 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+            (0.0, 0.0, 0.0),
+        )
+
+
+def test_a_scaled_rotation_row_is_refused() -> None:
+    """A uniform scale is not a rigid motion, however well-formed it reads."""
+    with pytest.raises(ValueError, match="unit length"):
+        RigidTransform(
+            ((2.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), (0.0, 0.0, 0.0)
+        )
+
+
+def test_a_non_orthogonal_rotation_is_refused() -> None:
+    """Each row unit length is not enough: a shear passes that clause alone."""
+    root = 2.0**-0.5
+    with pytest.raises(ValueError, match="must be orthogonal"):
+        RigidTransform(
+            ((1.0, 0.0, 0.0), (root, root, 0.0), (0.0, 0.0, 1.0)), (0.0, 0.0, 0.0)
+        )
+
+
+def test_an_otherwise_valid_reflection_is_refused() -> None:
+    """Orthonormal but left-handed: a mirror, which moves no rigid body."""
+    with pytest.raises(ValueError, match="right-handed"):
+        RigidTransform(
+            ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, -1.0)), (0.0, 0.0, 0.0)
+        )
+
+
+def test_placement_onto_still_produces_a_transform_this_check_admits() -> None:
+    """The production builder against the new gate: two real frames, one of
+    them turned, and the motion between them constructs rather than raising."""
+    source = _frame(origin_nm=(1_000_000, 2_000_000, 3_000_000))
+    target = _frame(
+        origin_nm=(50_000_000, 0, 0), u=(0.0, 1.0, 0.0), v=(-1.0, 0.0, 0.0), w=(0.0, 0.0, 1.0)
+    )
+    assert source.placement_onto(target).apply_direction(source.u) == target.u

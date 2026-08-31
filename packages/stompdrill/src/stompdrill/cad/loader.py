@@ -134,7 +134,9 @@ def load_case_model(
 
 def _footprint_and_axis(document: Any) -> tuple[tuple[Nanometre, Nanometre], int]:
     """Measure the assembly's footprint and the axis normal to it."""
-    from .case import assembly_spans, drill_axis
+    from stompgeom.step import assembly_spans
+
+    from .case import drill_axis
 
     spans = assembly_spans(document)
     axis = min(range(3), key=lambda index: spans[index])

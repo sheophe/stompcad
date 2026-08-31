@@ -9,24 +9,22 @@ from pathlib import Path
 from stompdrill.emitters import available
 from stompmodel.codec import FORMAT
 from tools.check_docstrings import find_long_docstrings
+from tools.workspace_membership import member_area_roots, member_package_dirs
 
 PACKAGE = Path(__file__).resolve().parent.parent
 REPO = PACKAGE.parent.parent
-STOMPMODEL = REPO / "packages" / "stompmodel"
-STOMPGEOM = REPO / "packages" / "stompgeom"
 # The scripts stayed at the repository root when the package moved beneath it,
-# and a root that does not exist scans as empty rather than failing, so the two
-# levels are named apart to keep the audit's reach honest. stompmodel and
-# stompgeom are sibling workspace members, not subtrees of this package, so
-# each one's src and tests are named apart again.
-PYTHON_ROOTS = (
-    PACKAGE / "src",
-    PACKAGE / "tests",
-    REPO / "tools",
-    STOMPMODEL / "src",
-    STOMPMODEL / "tests",
-    STOMPGEOM / "src",
-    STOMPGEOM / "tests",
+# and a root that does not exist scans as empty rather than failing, so `tools`
+# is named apart. Every member's own areas come from the one statement of
+# workspace membership rather than a list restated here: a member missing from
+# a hand-written list is a member whose prose nothing audits at all, and the
+# list gives no sign of it. `test_the_docstring_audit_reaches_every_member`
+# below is the control that this really reaches them.
+PYTHON_ROOTS = (REPO / "tools",) + tuple(
+    directory / area
+    for directory in member_package_dirs()
+    for area in ("src", "tests")
+    if (directory / area).is_dir()
 )
 
 
@@ -52,6 +50,25 @@ def test_the_scanner_reports_the_owner_and_physical_line_count(tmp_path: Path):
     assert violation.line == 2
     assert violation.owner == "example"
     assert violation.lines == 3
+
+
+def test_the_docstring_audit_reaches_every_member():
+    """The reach control: a root list that named one package short would let
+    that package's prose go unaudited and report nothing while doing it.
+
+    Ground truth comes from a second walk of ``packages/`` that never calls
+    the function ``PYTHON_ROOTS`` is built from, so a narrowed return there
+    fails here. Non-emptiness is asserted first, because a walk finding no
+    member would otherwise satisfy every containment below for free.
+    """
+    scanned = frozenset(PYTHON_ROOTS)
+    sources, suites = member_area_roots("src"), member_area_roots("tests")
+
+    assert sources and suites
+
+    assert sources <= scanned
+    assert suites <= scanned
+    assert (REPO / "tools") in scanned
 
 
 def test_the_repository_docstring_audit_reports_every_over_length_docstring():

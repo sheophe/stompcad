@@ -20,7 +20,7 @@ from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
 from stompmodel.frames import FaceFrame
 from stompmodel.model import DrillData
-from stompmodel.units import mm_from_nm
+from stompmodel.units import mm_from_nm, nm_from_mm
 
 from ..cad import OcpCaseModel, step_keyword
 from .base import register_emitter
@@ -200,10 +200,10 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     the compound's build order must be a function of the numbering alone,
     never of the tuple order a caller happened to hand in (ADR-0006).
     """
-    from OCP.BRep import BRep_Builder
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
-    from OCP.TopoDS import TopoDS_Compound
+
+    from stompgeom.shapes import compound
 
     holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
@@ -217,15 +217,13 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     depth = abs(model.inner_position_mm - model.drilled_position_mm) + 2 * overshoot
     direction = tuple(-component for component in frame.basis.w)
 
-    compound = TopoDS_Compound()
-    builder = BRep_Builder()
-    builder.MakeCompound(compound)
+    cylinders = []
     for _, hole in holes:
         start = _face_point(model, frame, hole, overshoot)
         axis = gp_Ax2(gp_Pnt(*start), gp_Dir(*direction))
         radius = float(mm_from_nm(hole.diameter_nm)) / 2
-        builder.Add(compound, BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
-    return compound
+        cylinders.append(BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
+    return compound(cylinders)
 
 
 def _face_point(
@@ -241,8 +239,11 @@ def _face_point(
     coordinate, rather than trusted to fall out of the frame's own origin.
     """
     basis = frame.basis
-    point: list[float] = list(basis.to_model(hole.x_nm, hole.y_nm))
-    point[model.axis] = model.drilled_position_mm
+    depth_nm = nm_from_mm(
+        (model.drilled_position_mm - mm_from_nm(basis.origin_nm[model.axis]))
+        * basis.w[model.axis]
+    )
+    point: list[float] = list(basis.to_model(hole.x_nm, hole.y_nm, depth_nm))
     wx, wy, wz = basis.w
     return (
         point[0] + overshoot * wx,

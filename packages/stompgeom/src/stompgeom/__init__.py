@@ -1,7 +1,8 @@
 """The workspace's kernel layer.
 
-The format side of geometry: reading a STEP assembly, writing one
-deterministically, and refusing to start without the kernel. No enclosure
+The operations that need OpenCASCADE: reading a STEP assembly, writing one
+deterministically, partitioning a solid's faces into the planes they lie in,
+and building an assembly from placed, named, coloured solids. No enclosure
 vocabulary crosses this boundary. See ADR-0008 and ADR-0009.
 """
 

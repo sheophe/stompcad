@@ -560,7 +560,7 @@ def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_sile
     )
     monkeypatch.setattr(writer_module, "_COLOUR_CHAIN", broken)
 
-    with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN.*likely needs updating"):
+    with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN needs updating"):
         _emit(at(0, 0, 6 * MM, index=1))
 
 

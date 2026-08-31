@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["BODY_SIZE_MM", "build_document"]
+__all__ = ["BODY_COLOUR", "BODY_SIZE_MM", "LID_COLOUR", "build_document"]
 
 #: The named leaf's own extent, asserted after a round trip through the file.
 #: Deliberately unequal in all three axes, so a transposed bounding box fails.
@@ -21,8 +21,8 @@ BODY_SIZE_MM = (11.0, 23.0, 3.0)
 #: Neither is one of STEP's pre-defined colours. A pure red or green is
 #: written as ``DRAUGHTING_PRE_DEFINED_COLOUR`` instead of ``COLOUR_RGB``,
 #: which is not the chain ``_reslot_colours`` reorders.
-_BODY_COLOUR = (0.21, 0.43, 0.65)
-_LID_COLOUR = (0.75, 0.31, 0.12)
+BODY_COLOUR = (0.21, 0.43, 0.65)
+LID_COLOUR = (0.75, 0.31, 0.12)
 
 
 def build_document() -> Any:
@@ -62,8 +62,8 @@ def build_document() -> Any:
             )
         return label
 
-    body = leaf("body", BODY_SIZE_MM, _BODY_COLOUR)
-    lid = leaf("lid", (11.0, 23.0, 1.0), _LID_COLOUR)
+    body = leaf("body", BODY_SIZE_MM, BODY_COLOUR)
+    lid = leaf("lid", (11.0, 23.0, 1.0), LID_COLOUR)
     bracket = leaf("", (2.0, 2.0, 2.0), None)
 
     lifted = gp_Trsf()

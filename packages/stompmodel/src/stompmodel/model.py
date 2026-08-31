@@ -39,7 +39,19 @@ __all__ = [
     "SourceInfo",
     "StageRun",
     "DrillData",
+    "latest_run",
+    "SNAP_STAGE",
+    "SNAP_GRID_PARAMETER",
 ]
+
+#: The snapping stage's name, and the key it records its effective pitch
+#: under. Spelled here rather than in the stage, because a writer and its
+#: readers are one conversation and they no longer share a package: a
+#: reader looking under a name the writer stopped using would find no
+#: pitch and silently do nothing. ``DrillData.grid_nm`` below is the one
+#: read, so no consumer needs either literal.
+SNAP_STAGE: str = "snap"
+SNAP_GRID_PARAMETER: str = "grid_nm"
 
 
 class Origin(Enum):
@@ -349,6 +361,20 @@ class StageRun:
         return default
 
 
+def latest_run(processing: Iterable[StageRun], stage_name: str) -> StageRun | None:
+    """The latest record for ``stage_name``, or ``None`` when absent.
+
+    A plain-tuple reduction like ``of_severity``, for the same reason: a
+    second value type carrying a processing history reads its own the same
+    way rather than growing a second copy of the scan.
+    """
+    for run in reversed(tuple(processing)):
+        if run.name == stage_name:
+            return run
+    return None
+
+
+
 @dataclass(frozen=True, slots=True)
 class DrillData:
     """The single object that travels the whole pipeline."""
@@ -450,11 +476,25 @@ class DrillData:
         ]
 
     def last_run(self, stage_name: str) -> StageRun | None:
-        """Return the latest record for ``stage_name``, or ``None`` if absent."""
-        for run in reversed(self.processing):
-            if run.name == stage_name:
-                return run
-        return None
+        """Delegate to the published reduction so there is one implementation."""
+        return latest_run(self.processing, stage_name)
+
+    @property
+    def grid_nm(self) -> Nanometre | None:
+        """The effective snap pitch, or ``None`` when none was recorded.
+
+        The document answers for its own pitch so that no consumer spells
+        the stage or parameter name. ``None`` covers every way an answer can
+        be absent: no snapping ran, it recorded no pitch, or the pitch is
+        not one anything may divide by. Whole-int-ness is already settled --
+        ``_check_payload_lengths`` holds every ``_nm`` key to it at
+        construction -- so only the sign is asked here.
+        """
+        run = self.last_run(SNAP_STAGE)
+        pitch = None if run is None else run.get(SNAP_GRID_PARAMETER)
+        if type(pitch) is not int or pitch <= 0:
+            return None
+        return Nanometre(pitch)
 
     def of_severity(self, severity: Severity) -> tuple[Diagnostic, ...]:
         """Delegate to the published reduction so there is one implementation."""

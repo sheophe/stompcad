@@ -8,15 +8,17 @@ space and belongs beside the parser that reads it. See ADR-0009.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import NewType
 
-from stompmodel.units import Millimetre, Nanometre
+from stompmodel.units import NM_PER_MM, Millimetre, Nanometre
 
 __all__ = [
     "Micron",
     "NM_PER_MICRON",
     "mm_from_pt",
     "nm_from_micron",
+    "scaled_nm",
 ]
 
 #: The grid pitch, which is a whole number of microns and never finer.
@@ -38,3 +40,12 @@ def mm_from_pt(points: float) -> Millimetre:
 def nm_from_micron(microns: Micron) -> Nanometre:
     """Widen a grid pitch to the canonical unit."""
     return Nanometre(microns * NM_PER_MICRON)
+
+
+def scaled_nm(mm: float) -> Decimal:
+    """Scale a measurement exactly without selecting a nanometre.
+
+    Quantisers compare this value directly with their answer sets so a
+    preliminary rounding cannot manufacture a midpoint tie. See ADR-0003.
+    """
+    return Decimal(str(mm)) * NM_PER_MM

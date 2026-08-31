@@ -11,9 +11,10 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from stompdrill.pipeline import ReviewGridTies, SnapPositions
+from stompdrill.units import scaled_nm
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, Hole, RawHole, StageRun
-from stompmodel.units import Millimetre, Nanometre, nm_from_mm, scaled_nm
+from stompmodel.units import Millimetre, Nanometre, nm_from_mm
 
 
 def raw(x: float, y: float, *, diameter: float = 7.0) -> RawHole:

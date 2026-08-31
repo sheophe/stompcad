@@ -7,9 +7,14 @@ for one repository and for extracting before the new tools is unchanged.
 
 Two of the three primitives this ADR named as certainly shared have since settled in
 `stompmodel`: the length newtypes, and the frame values that replaced `Frame`'s rigid
-transform. What `stompgeom` holds is therefore the kernel layer — the STEP reader, the
-deterministic writer, and the operations that need OpenCASCADE — so read "shared geometry
-core" below as that layer rather than as one package holding every shared primitive.
+transform. That settles `stompdrill`'s own spatial need — canonical `(x, y)` on a drilled
+face — not the workspace's: `stompmodel` also publishes `RigidTransform` itself and the
+frame-to-frame composition that builds one (`CoordinateFrame.translated_nm`,
+`rotated_about_w`, `placement_onto`), and `stompgeom` publishes the kernel realisation
+that applies a composed transform to a shape (`shapes.placed`). What `stompgeom` holds is
+therefore the kernel layer — the STEP reader, the deterministic writer, and the
+operations that need OpenCASCADE — so read "shared geometry core" below as that layer
+rather than as one package holding every shared primitive.
 
 ## Context
 
@@ -20,9 +25,10 @@ drives both, manages the case-model cache, and turns a diagnostic into an
 interactive question.
 
 They share primitives. `stompcollider` needs the branded length newtypes of
-ADR-0004 exactly as `stompdrill` defines them, needs a rigid transform, and needs
-the level-based planar-face extraction that `cad/case.py` uses to find a drilled
-face — a PCB's carrier plane is the same problem with a different solid. Without
+ADR-0004 exactly as `stompdrill` defines them, needs a rigid transform composed from two
+frames — placing one body against another, not `stompdrill`'s single canonical origin —
+and needs the level-based planar-face extraction that `cad/case.py` uses to find a
+drilled face — a PCB's carrier plane is the same problem with a different solid. Without
 a decision, each tool grows its own `Nanometre` and the three drift.
 
 The repository is currently the `stompdrill` package and nothing else, and is named
@@ -221,12 +227,35 @@ gains later needs no edit to any existing gate or to this convention test.
 `stompgeom.writer.render_step` is the one serialising entry point, returning the
 finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
 along the way is an implementation detail forced by that kernel's own path-only API, not
-part of this function's contract. The fourth verb, **build** — assembling a document
-from placed, named, coloured solids — is deliberately **not yet owned**. ADR-0008's own
-rule is why: the interface grows when a real second consumer arrives, and today the only
-caller of that shape is a test fixture. The builder is expected, not omitted: plan 3's
-first geometry ticket promotes that fixture's construction into `stompgeom` once
-`stompcollider` gives it a real caller to be designed against.
+part of this function's contract. Its determinism guarantee is scoped, not universal: it
+is byte-identical across processes for a document this workspace assembles, and it
+**refuses** a document carrying an unparsed presentation entity in its colour region, or
+one whose colour is a STEP pre-defined colour rather than an inline `COLOUR_RGB` —
+neither of which anything in this workspace produces. The writer canonicalises colour
+ownership among the chains it does parse, which is what makes a repeated colour safe.
+
+`stompgeom` now owns the fourth verb too: **build**, assembling a document from placed,
+named, coloured solids. `stompgeom.build.build_document` does the assembling and
+`stompgeom.build.solid_colour` reads a solid's colour back, promoted once
+`stompcollider-technical.md`'s own build contract fixed the shape a real second caller —
+the assembly emitter — needs: a `placement` and a `colour`.
+
+Reading that colour back is not one lookup, because a file does not record colour in one
+place. `build_document` sets it on the label owning the whole shape, and asking XCAF for
+that shape answers directly. A real file mostly does neither: an assembly component's
+shape is its product's shape carried under a location while the colour sits on the
+product, and a component modelled face by face carries no whole-solid colour at all.
+`solid_colour` therefore asks for the shape as given, then for its unlocated base, and
+only then weighs the colours its faces carry — by **surface area**, since a part is the
+colour of its body rather than of its many small leads. Ties fall to the lowest RGB
+triple, so the answer never depends on the order the kernel walks a shape in (ADR-0006).
+A solid nothing coloured is still `None`; no default is invented for it.
+
+One colour assignment is not one written colour chain, either. `STEPCAFControl_Writer`
+styles each solid of a coloured shape in its own right, so the writer's census counts
+solids per coloured label rather than labels — an ordinary board component reaches the
+reader as one leaf holding a dozen solids. A census counting assignments refuses a file
+it has just written correctly, which is what the guard exists to prevent.
 
 The risk carried is that `stompgeom` accumulates whatever is convenient rather than
 what is universal. `Frame` is the live example: it is a rigid transform, which

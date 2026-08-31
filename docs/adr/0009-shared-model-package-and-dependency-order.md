@@ -57,12 +57,19 @@ should not.
 Five packages, in a linear acyclic order (Figure 1).
 
 ```
-stompmodel ──► stompgeom ──┬──► stompdrill ────┐
-                     └──► stompcollider ─┴──► stompcad
+stompmodel ──► stompgeom ──┬──► stompdrill ─────┐
+                           └──► stompcollider ──┴──► stompcad
 ```
 
 *Figure 1: the workspace's dependency order. Each package installs and passes its
 own tests alone, as ADR-0008 requires.*
+
+Four of the five are built, in exactly this order: `stompmodel`, `stompgeom`,
+`stompdrill` and `stompcollider`. `stompcollider` depends on `stompmodel` and
+`stompgeom` and on neither of the others — it reads a drill document through
+`stompmodel`'s codec, never through `stompdrill` — and it carries its own test,
+type and mutation commands, as every member does. `stompcad` is the one package
+this figure still anticipates rather than describes.
 
 ### `stompmodel`
 
@@ -77,7 +84,10 @@ Pure Python. No kernel, no parser, no I/O beyond serialisation. It holds:
 - `Diagnostic`, `Severity`, `ParameterValue`, the plain-tuple `of_severity` and
   `worst_severity` reductions, and the severity-to-exit-code reduction.
 - `Processable`, `Diagnosable`, `Stage[T]`, `Pipeline[T]`, `Emitter[T]`, `Payload`,
-  `StageRun`.
+  `StageRun`, and the plain-tuple `latest_run` reduction beside it.
+- `SNAP_STAGE` and `SNAP_GRID_PARAMETER` -- the snapping stage's name and the key
+  it records its effective pitch under -- with `DrillData.grid_nm` as the one read
+  of them.
 - The workspace's error base: `StompError`, with `EmitterError` and
   `DocumentError` beneath it. Each tool's own base descends from it —
   `StompdrillError` does — so a package's errors stay identifiable while every
@@ -137,15 +147,45 @@ Four admission rules, and nothing else gets in:
    area recorded beside it in the clearance stage's own provenance, rather
    than the live handle it used to require.
 
+   **A fact a second consumer may read but need not have stays where it
+   lies.** `stompcollider` derives its recognition tolerance from the grid
+   pitch `stompdrill` records in the snapping stage's provenance: a second
+   consumer reading `StageRun.parameters`, which is the shape this rule
+   exists to refuse. It is admitted, and the difference is the override.
+   `--match-tolerance` supplies the same length directly, and a document
+   recording no pitch is a usage failure naming that flag -- so nothing
+   `stompcollider` requires is reachable only through the bag.
+   `CaseRegistration` had no such escape: there is no `--case-face`, by
+   design, so the face frame really was unreconstructable and really did
+   have to become a member. **The test is whether a second consumer depends
+   on the fact, not whether it reads it.**
+
+   What such a read does owe is a published spelling. `SNAP_STAGE`,
+   `SNAP_GRID_PARAMETER` and the single `DrillData.grid_nm` that uses them
+   live here rather than in `stompdrill`, so the bag is opened once under
+   Rule 3: a renamed stage now breaks one accessor loudly instead of leaving
+   three readers across two packages silently finding nothing. Promote the
+   pitch to a typed member the day anything needs it with no flag to fall
+   back on -- that day this paragraph expires.
+
 A type a package owns and merely exposes to a library consumer **stays home**.
 `stompcad` reading `stompcollider`'s `DockReport` is ordinary library consumption, not
 interchange, so that type does not move.
 
 ### `stompgeom`
 
-The kernel layer: the STEP reader, the deterministic STEP writer with its OCC
-normalisation, `levels()` for grouping coplanar faces and measuring holedness, bounding
-boxes, `KernelUnavailable`.
+The kernel layer: the STEP reader (`read_step` from a path, `read_step_document` for a
+document already in memory); the deterministic STEP writer with its OCC normalisation;
+`shapes.compound`/`shapes.placed` for bundling and locating kernel shapes, and
+`shapes.common` for the exact boolean intersection of two of them — the operation the
+whole clash check rests on, reported as `None` rather than an untopologised empty
+compound when two bodies share no region; `levels()` for partitioning a solid's planar
+faces into the planes they lie in; `cylinders.Cylinder`/`cylinders.cylindrical_faces`
+for every cylindrical face of a shape with the axis, radius and axial trim a radius
+alone cannot state, which is what a protrusion profile is built from;
+`build.build_document`/`build.solid_colour` for assembling a document from placed,
+named, coloured solids and reading a solid's colour back; `assembly_spans`; bounding
+boxes; `KernelUnavailable`.
 
 Frame *construction* is not here and is not coming. `build_frame` reads an
 enclosure-shaped `Faces` and picks its `u` axis from the footprint spans, which is
@@ -153,9 +193,19 @@ enclosure reasoning wearing a geometric coat, so it stays in `stompdrill` under 
 rule two paragraphs below. `stompmodel` owns the frame *type* and its transforms;
 `stompgeom` owns neither. A reader looking here for a frame builder will not find one.
 
-`levels()` is the opposite case: it belongs here and has simply not arrived yet. It
-comes last, once `stompcollider`'s carrier-plane code exists to shape its interface.
-The technical specification's order of work says why.
+`levels()` arrived once `stompcollider`'s carrier-plane need shaped its interface, per
+`docs/specs/foundation-docket-rulings.md`'s Ruling 2 — which stood in for that consumer
+by measuring the repository's own fixtures rather than waiting for the consumer's code
+to exist. It partitions, keying each face's direction and offset to an integer bin
+rather than clustering them by a merge tolerance. ADR-0006's order-independence is what
+requires the bin: clustering by a merge tolerance would let the walk's own order decide
+which faces merged. The bin's price is that two faces whose true normals differ by less
+than its width land in different levels however narrowly they straddle it. The measured
+window this can affect is `5e-7`–`4.47e-5` radians of tilt, comfortably clear of every
+fixture measured.
+Holedness does not move with it: `_plates` and `_HOLED_FRACTION_LIMIT` stay in
+`stompdrill`, discriminating a casting plate from a casting ring, which is the same
+enclosure reasoning that keeps `build_frame` out of this package.
 
 No enclosure vocabulary crosses this boundary. `select_solid`'s box/lid keywords,
 `CaseModel`, `Rejection` and the play-area reasoning in `region.py` stay in
@@ -307,7 +357,11 @@ key is read rather than handed an unexpected member.
 
 The risk is that `stompmodel` accumulates types on rule 2's authority. The check is
 that a type admitted under rule 2 must name the `stompcad` behaviour that depends on
-the uniformity; a type that cannot name one is being moved for tidiness.
+the uniformity; a type that cannot name one is being moved for tidiness. `format_nm` is
+the worked example: it is a formatter rather than a conversion between the published
+newtypes (`mm_from_nm` is that), so rule 2 is what admits it, and the behaviour it names
+is that `stompcad` reduces both tools' nanometre quantities to one report — two
+independent renderers would print one nanometre two ways.
 
 **Amended again: a standing gate joins the four admission rules above.** The
 human-facing report must be reproducible from the document alone: every fact

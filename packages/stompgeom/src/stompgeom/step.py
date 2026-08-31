@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from OCP.TopoDS import TopoDS_Shape
 
 __all__ = [
-    "StepSolid", "StepDocument", "StepLabel", "read_step", "leaf_labels",
-    "bounding_box_mm", "source_timestamp",
+    "StepSolid", "StepDocument", "StepLabel", "read_step", "read_step_document",
+    "leaf_labels", "bounding_box_mm", "assembly_spans", "source_timestamp",
 ]
 
 #: Used when the source file declares no timestamp. Never a clock reading.
@@ -156,6 +156,32 @@ def bounding_box_mm(shape: TopoDS_Shape) -> tuple[float, float, float, float, fl
     return box.Get()
 
 
+def assembly_spans(document: StepDocument) -> tuple[float, float, float]:
+    """The bounding-box span of every solid together, per axis, in millimetres."""
+    boxes = [bounding_box_mm(solid.shape) for solid in document.solids]
+    lows = [min(b[axis] for b in boxes) for axis in range(3)]
+    highs = [max(b[axis + 3] for b in boxes) for axis in range(3)]
+    return (highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2])
+
+
+def _leaf_solids(document: TDocStd_Document) -> tuple[StepSolid, ...]:
+    """Every non-null leaf shape in ``document``, named where XCAF named it.
+
+    Shared by :func:`read_step` and :func:`read_step_document`: a file-backed
+    document and one only ever held in memory resolve their solids the same
+    way, so the two readers cannot drift on what counts as a leaf.
+    """
+    from OCP.XCAFDoc import XCAFDoc_ShapeTool
+
+    solids: list[StepSolid] = []
+    for entry in leaf_labels(document):
+        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
+        if shape.IsNull():
+            continue
+        solids.append(StepSolid(name=entry.name, shape=shape))
+    return tuple(solids)
+
+
 def read_step(path: Path) -> StepDocument:
     """Read ``path`` as an XCAF assembly of named, placed, millimetre solids."""
     require_kernel()
@@ -166,7 +192,6 @@ def read_step(path: Path) -> StepDocument:
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document
     from OCP.XCAFApp import XCAFApp_Application
-    from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     if not path.is_file():
         raise DocumentError(f"no model at {path}")
@@ -187,27 +212,40 @@ def read_step(path: Path) -> StepDocument:
     if not reader.Transfer(document):
         raise DocumentError(f"{path} contains no transferable shape")
 
-    solids: list[StepSolid] = []
-    for entry in leaf_labels(document):
-        shape = XCAFDoc_ShapeTool.GetShape_s(entry.label)
-        if shape.IsNull():
-            continue
-        solids.append(StepSolid(name=entry.name, shape=shape))
+    solids = _leaf_solids(document)
     if not solids:
         raise DocumentError(f"{path} contains no solids")
-    return StepDocument(tuple(solids), document, source_timestamp(path))
+    return StepDocument(solids, document, source_timestamp(path))
+
+
+def read_step_document(document: TDocStd_Document) -> StepDocument:
+    """Read solids straight out of an XCAF document already in memory.
+
+    One :func:`stompgeom.build.build_document` just built, in practice.
+    No file backs a document like that, so ``timestamp`` is the epoch rather
+    than a real ``FILE_NAME`` field -- there is no clock reading to avoid,
+    only none to invent. Kept distinct from :func:`read_step` because that
+    one also owns file existence, unit normalisation, and STEP parsing --
+    none of which apply to a document already in memory.
+    """
+    require_kernel()
+
+    solids = _leaf_solids(document)
+    if not solids:
+        raise DocumentError("document contains no solids")
+    return StepDocument(solids, document, _EPOCH)
 
 
 def leaf_labels(document: TDocStd_Document) -> tuple[StepLabel, ...]:
     """Every leaf (non-assembly) label under ``document``'s free shapes.
 
-    The one XCAF descent this workspace performs, ``GetFreeShapes`` prologue
-    included, in document order. Each leaf comes back wrapped in a
-    :class:`StepLabel` holding ``document`` itself, with no filtering -- a
-    null-shaped leaf comes back too, since what a leaf is *for* is a
-    call-site decision. Eager, not lazy: a suspended descent holding a
-    kernel handle over a tree a caller then mutates is a hazard this package
-    has already paid for once. Raises nothing; an empty document is ``()``.
+    The one XCAF *leaf* descent this workspace performs (``writer``'s
+    colour census keeps its own, sanctioned, wider one, since a sub-shape
+    colour can sit on a label this deliberately does not visit). Each leaf
+    comes back wrapped in a :class:`StepLabel` holding ``document`` itself,
+    unfiltered -- a null-shaped leaf comes back too. Eager, not lazy: a
+    suspended descent holding a kernel handle over a tree a caller then
+    mutates is a hazard already paid for once. An empty document is ``()``.
     """
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool

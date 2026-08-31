@@ -24,8 +24,6 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the checker
 __all__ = [
     "CHAR_RATIO",
     "DUP_CODE",
-    "SNAP_STAGE",
-    "GRID_PARAMETER",
     "POSITION_DECIMALS",
     "FOOTPRINT_DECIMALS",
     "DIAMETER_STAGE",
@@ -69,12 +67,6 @@ __all__ = [
 CHAR_RATIO = 0.62
 
 DUP_CODE = "duplicate-hole"
-
-#: The ``StageRun`` name the title block's grid is read from, and the parameter
-#: within it. Names the *record*, not the class: the emitter reads provenance and
-#: has no import of, or opinion about, which stage wrote it.
-SNAP_STAGE = "snap"
-GRID_PARAMETER = "grid_nm"
 
 #: How many decimals of a millimetre a *position* — a schedule cell, a dimension
 #: label, an overall size — is printed to. Three, and not a matter of taste:
@@ -384,18 +376,16 @@ def grid_note(data: DrillData) -> str:
 
 def grid_value(data: DrillData) -> str:
     """The same fact as a title-block cell's value, under its own label."""
-    run = data.last_run(SNAP_STAGE)
-    grid_nm = None if run is None else run.get(GRID_PARAMETER)
-    # ``StageRun`` payloads are deliberately generic. The model holds an ``_nm``
-    # key to whole nanometres at construction — which is what rules out the
-    # ``True`` that would otherwise have stamped the sheet "GRID 0.000 mm" — but
-    # it admits a *tuple* of them, since one parameter in the pipeline is a table
-    # of sizes. A table is not a pitch, and neither is a pitch of nothing, so
-    # both get the same answer as no record at all. ``type(...) is int`` rather
-    # than ``isinstance`` on the precedent the model sets.
-    if type(grid_nm) is not int or grid_nm <= 0:
+    # The read itself is ``DrillData.grid_nm``, which is where the stage's name
+    # and its pitch key are spelled for the whole workspace: this sheet, the
+    # tie review, and ``stompcollider``'s recognition tolerance all ask the
+    # document the one question. That accessor is also what answers ``None``
+    # for a table of sizes, a ``True``, or a pitch of nothing -- none of which
+    # is a pitch, and all of which would otherwise have stamped a number here.
+    grid_nm = data.grid_nm
+    if grid_nm is None:
         return "NOT RECORDED"
-    return f"{format_nm(Nanometre(grid_nm))} mm"
+    return f"{format_nm(grid_nm)} mm"
 
 
 def millimetre_label(diameter_nm: Nanometre) -> str:
