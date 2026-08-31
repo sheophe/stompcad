@@ -619,3 +619,86 @@ def test_a_shape_measures_identically_whether_or_not_its_document_is_held() -> N
     held = XCAFDoc_ShapeTool.GetShape_s(held_leaf.label)
 
     assert bounding_box_mm(released) == pytest.approx(bounding_box_mm(held), abs=1e-9)
+
+
+# --------------------------------------------------------------------------
+# ``StepSolid.box_mm``: the same box, measured once.
+# --------------------------------------------------------------------------
+
+
+def _unit_box(dx: float, dy: float, dz: float) -> Any:
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+
+    return BRepPrimAPI_MakeBox(dx, dy, dz).Shape()
+
+
+def test_a_solids_own_box_is_the_box_of_its_shape() -> None:
+    """The memo answers what the function answers, or it is a second rule."""
+    from stompgeom.step import StepSolid
+
+    solid = StepSolid(name="BODY", shape=_unit_box(2.0, 3.0, 4.0))
+
+    assert solid.box_mm == bounding_box_mm(solid.shape)
+
+
+def test_a_solids_own_box_is_measured_once_however_often_it_is_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A box is an exact function of an immutable solid, and a run reads the
+    same one from the scan, the clash stage and the assembly writer.
+
+    The first assertion is this test's own control: a memo that never
+    measured at all, or one seeded with a wrong value, fails it, so the
+    second assertion is evidence rather than a rule that cannot fire.
+    """
+    import stompgeom.step as step
+
+    calls: list[Any] = []
+    real = step.bounding_box_mm
+
+    def counted(shape: Any) -> Any:
+        calls.append(shape)
+        return real(shape)
+
+    monkeypatch.setattr(step, "bounding_box_mm", counted)
+    solid = step.StepSolid(name="BODY", shape=_unit_box(2.0, 3.0, 4.0))
+
+    first = solid.box_mm
+    assert len(calls) == 1
+
+    assert solid.box_mm is first
+    assert len(calls) == 1
+
+
+def test_two_solids_over_the_same_shape_each_measure_their_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The memo belongs to the solid, not to a table keyed on something
+    shared: two values wrapping one shape are two values."""
+    import stompgeom.step as step
+
+    calls: list[Any] = []
+    real = step.bounding_box_mm
+
+    def counted(shape: Any) -> Any:
+        calls.append(shape)
+        return real(shape)
+
+    monkeypatch.setattr(step, "bounding_box_mm", counted)
+    shape = _unit_box(2.0, 3.0, 4.0)
+
+    assert step.StepSolid("A", shape).box_mm == step.StepSolid("B", shape).box_mm
+    assert len(calls) == 2
+
+
+def test_a_solids_box_does_not_join_its_equality() -> None:
+    """Reading the box must not change what the value is: two equal solids
+    stay equal, and one that has been measured still equals one that has not.
+    """
+    from stompgeom.step import StepSolid
+
+    shape = _unit_box(2.0, 3.0, 4.0)
+    measured = StepSolid("A", shape)
+    _box = measured.box_mm
+
+    assert measured == StepSolid("A", shape)

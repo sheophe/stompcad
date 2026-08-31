@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pytest
@@ -296,4 +297,67 @@ def test_common_is_symmetric_in_its_arguments() -> None:
 
     assert bounding_box_mm(common(first, second)) == pytest.approx(
         bounding_box_mm(common(second, first)), abs=1e-9
+    )
+
+
+# --------------------------------------------------------------------------
+# ``volume_mm3``: how much material a region actually holds.
+# --------------------------------------------------------------------------
+
+
+def test_volume_mm3_is_the_material_a_shape_holds() -> None:
+    """A box of known size, in cubic millimetres."""
+    from stompgeom.shapes import volume_mm3
+
+    assert volume_mm3(_box_at((3, 5, 7), 2.0, 3.0, 4.0)) == pytest.approx(24.0)
+
+
+def test_volume_mm3_is_not_the_volume_of_the_bounding_box() -> None:
+    """The whole reason this exists beside a box: a cylinder fills pi/4 of the
+    box around it, so a rule reading the box back would answer 8.0 here."""
+    from stompgeom.shapes import volume_mm3
+
+    measured = volume_mm3(_cylinder((0.0, 0.0, 0.0), 1.0, 2.0))
+
+    assert measured == pytest.approx(2.0 * math.pi)
+    assert measured < 8.0
+
+
+def test_volume_mm3_of_a_common_region_measures_that_region_alone() -> None:
+    """The call ``Clashes`` makes: the material two solids share, not either
+    solid's own and not the box around what they share."""
+    from stompgeom.shapes import common, volume_mm3
+
+    region = common(_box_at((0, 0, 0), 10, 10, 10), _box_at((8, 0, 0), 10, 40, 40))
+
+    assert volume_mm3(region) == pytest.approx(2.0 * 10.0 * 10.0)
+
+
+def test_volume_mm3_of_a_region_that_is_not_a_box_is_far_under_its_box() -> None:
+    """The measured claim the spec states: a shaft through a plate shares a
+    cylinder, whose box overstates the material by a fixed factor."""
+    from stompgeom.shapes import common, volume_mm3
+    from stompgeom.step import bounding_box_mm
+
+    region = common(
+        _box_at((15.0, 15.0, 0.0), 10.0, 10.0, 3.0),
+        _cylinder((20.0, 20.0, -5.0), 2.0, 13.0),
+    )
+    box = bounding_box_mm(region)
+    boxed = (box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2])
+
+    assert volume_mm3(region) == pytest.approx(math.pi * 4.0 * 3.0)
+    assert boxed == pytest.approx(4.0 * 4.0 * 3.0)
+
+
+def test_volume_mm3_of_a_flat_face_is_nothing() -> None:
+    """A region with no thickness holds no material; contact is not a clash."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+
+    from stompgeom.shapes import volume_mm3
+
+    plane = gp_Pln(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0))
+    assert volume_mm3(BRepBuilderAPI_MakeFace(plane, 0.0, 4.0, 0.0, 5.0).Face()) == (
+        pytest.approx(0.0)
     )

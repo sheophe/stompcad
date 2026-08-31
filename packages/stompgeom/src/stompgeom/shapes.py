@@ -15,7 +15,7 @@ from stompmodel.frames import RigidTransform
 from .errors import StompgeomError
 from .kernel import require_kernel
 
-__all__ = ["compound", "placed", "common"]
+__all__ = ["compound", "placed", "common", "volume_mm3"]
 
 
 def compound(shapes: Iterable[Any]) -> Any:
@@ -82,3 +82,22 @@ def common(first: Any, second: Any) -> Any | None:
     if region.IsNull() or not TopExp_Explorer(region, TopAbs_ShapeEnum.TopAbs_VERTEX).More():
         return None
     return region
+
+
+def volume_mm3(shape: Any) -> float:
+    """How much material ``shape`` holds, in cubic millimetres.
+
+    Read off the exact geometry by Gauss integration over its faces, never
+    off a triangulation: a quantity read from a mesh is a function of the
+    deflection it was built at rather than of the input. A region with no
+    thickness -- two bodies meeting on a face -- holds nothing and measures
+    zero, which is the same answer :func:`common` gives by handing back
+    ``None`` before a caller ever gets here.
+    """
+    require_kernel()
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    properties = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, properties)
+    return float(properties.Mass())

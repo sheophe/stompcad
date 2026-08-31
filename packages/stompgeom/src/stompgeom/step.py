@@ -9,7 +9,7 @@ one modelled in millimetres.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,9 +27,13 @@ if TYPE_CHECKING:
     from OCP.TopoDS import TopoDS_Shape
 
 __all__ = [
-    "StepSolid", "StepDocument", "StepLabel", "read_step", "read_step_document",
-    "leaf_labels", "bounding_box_mm", "assembly_spans", "source_timestamp",
+    "StepSolid", "StepDocument", "StepLabel", "BoxMm", "read_step",
+    "read_step_document", "leaf_labels", "bounding_box_mm", "assembly_spans",
+    "source_timestamp",
 ]
+
+#: An axis-aligned bounding box in millimetres: ``(x0, y0, z0, x1, y1, z1)``.
+BoxMm = tuple[float, float, float, float, float, float]
 
 #: Used when the source file declares no timestamp. Never a clock reading.
 _EPOCH = "1970-01-01T00:00:00+00:00"
@@ -120,6 +124,24 @@ class StepSolid:
 
     name: str
     shape: TopoDS_Shape
+    _box_mm: BoxMm | None = field(default=None, init=False, compare=False, repr=False)
+
+    @property
+    def box_mm(self) -> BoxMm:
+        """This solid's own bounding box, measured once and then kept.
+
+        A solid is immutable and its box is an exact function of it, while
+        measuring one is the most expensive read this package offers. One
+        run wants the same box from the board scan, the clash filter and
+        the assembly writer, so the value carries it rather than each
+        caller paying again. Excluded from equality and from ``__init__``:
+        reading a box must not change what a solid *is*.
+        """
+        measured = self._box_mm
+        if measured is None:
+            measured = bounding_box_mm(self.shape)
+            object.__setattr__(self, "_box_mm", measured)
+        return measured
 
 
 @dataclass(frozen=True)
@@ -140,7 +162,7 @@ class StepDocument:
         return tuple(s for s in self.solids if wanted in s.name.upper())
 
 
-def bounding_box_mm(shape: TopoDS_Shape) -> tuple[float, float, float, float, float, float]:
+def bounding_box_mm(shape: TopoDS_Shape) -> BoxMm:
     """``(x0, y0, z0, x1, y1, z1)`` of ``shape`` in millimetres.
 
     ``AddOptimal_s`` rather than plain ``Add_s``: without a precomputed mesh,
