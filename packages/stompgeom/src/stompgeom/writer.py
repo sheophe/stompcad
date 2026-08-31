@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     # readability only, resolved to Any either way by this workspace's
     # mypy configuration. See ADR-0008.
     from OCP.TDocStd import TDocStd_Document
+    from OCP.TopoDS import TopoDS_Shape
 
 __all__ = ["render_step"]
 
@@ -100,15 +101,15 @@ _COLOUR_CHAIN = re.compile(
 # does not serialise colour for a shape it had to replace. No further
 # in-kernel route is exposed through this binding to force it.
 def _count_colour_assignments(document: TDocStd_Document, replaced_labels: frozenset[str]) -> int:
-    """Distinct shapes coloured in ``document``, excluding a replaced solid.
+    """Colour chains ``document`` will be written with, excluding a replaced solid.
 
-    A board colours individual faces on *sub-shape* labels a leaf-only
-    census misses, so this walks components and sub-shapes together (no
-    ``ColorTool.GetShapesOfColor`` here, and a face colour is observed
-    beneath an intermediate label, not only a leaf). A replaced solid is
-    excluded, not counted (``SetShape`` keeps the assignment but not the
-    written colour); a label reached twice counts once, resolved to its
-    referred label when one exists.
+    A board colours individual faces on *sub-shape* labels a leaf-only census
+    misses, so this walks components and sub-shapes together (no
+    ``ColorTool.GetShapesOfColor``, and a face colour is observed beneath an
+    intermediate label, not only a leaf). A replaced solid is excluded, not
+    counted (``SetShape`` keeps the assignment but not the written colour); a
+    label reached twice counts once, resolved to its referred label when one
+    exists. One assignment is not one chain: see :func:`_chains_written_for`.
     """
     from OCP.TDF import TDF_Label, TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
@@ -121,7 +122,7 @@ def _count_colour_assignments(document: TDocStd_Document, replaced_labels: froze
         XCAFDoc_ColorType.XCAFDoc_ColorCurv,
     )
 
-    coloured: set[str] = set()
+    coloured: dict[str, int] = {}
     seen: set[str] = set()
 
     def visit(label: TDF_Label) -> None:
@@ -134,7 +135,7 @@ def _count_colour_assignments(document: TDocStd_Document, replaced_labels: froze
         if entry in replaced_labels:
             return
         if any(color_tool.IsSet(target, kind) for kind in kinds):
-            coloured.add(entry)
+            coloured[entry] = _chains_written_for(XCAFDoc_ShapeTool.GetShape_s(target))
         children = TDF_LabelSequence()
         XCAFDoc_ShapeTool.GetSubShapes_s(target, children)
         for index in range(1, children.Length() + 1):
@@ -149,7 +150,27 @@ def _count_colour_assignments(document: TDocStd_Document, replaced_labels: froze
     shape_tool.GetFreeShapes(free)
     for index in range(1, free.Length() + 1):
         visit(free.Value(index))
-    return len(coloured)
+    return sum(coloured.values())
+
+
+def _chains_written_for(shape: TopoDS_Shape) -> int:
+    """How many colour chains one colour on ``shape`` is written as.
+
+    ``STEPCAFControl_Writer`` styles each solid of a coloured shape in its
+    own right, so a part reaching the reader as one leaf holding a dozen
+    solids -- an ordinary board component -- is a dozen chains, not one.
+    A coloured shape holding no solid at all, a bare face or shell, is
+    still written as one; counting solids alone would expect none.
+    """
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp_Explorer
+
+    explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
+    solids = 0
+    while explorer.More():
+        solids += 1
+        explorer.Next()
+    return max(solids, 1)
 
 
 @contextlib.contextmanager

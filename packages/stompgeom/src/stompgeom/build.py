@@ -162,17 +162,106 @@ def solid_colour(document: TDocStd_Document, solid: Any) -> tuple[float, float, 
 
     The published reading half of ``build_document``'s colouring, named
     explicitly rather than left implicit -- see ``Order of work`` in
-    ``docs/specs/stompcollider-technical.md``. Reads by shape, not by label:
-    ``XCAFDoc_ColorTool`` resolves a shape straight back to the label it was
-    assigned under, so ``solid`` is anything with a ``.shape`` -- a
-    :class:`stompgeom.step.StepSolid`, never a raw ``TDF_Label``.
+    ``docs/specs/stompcollider-technical.md``. Reads by shape, not by label,
+    so ``solid`` is anything with a ``.shape`` -- a
+    :class:`stompgeom.step.StepSolid`, never a raw ``TDF_Label``. Three
+    routes, because a file records a colour in three shapes; see
+    :func:`_recorded_colour` and :func:`_broadest_colour`.
     """
     require_kernel()
-    from OCP.Quantity import Quantity_Color
-    from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
     colour_tool = XCAFDoc_DocumentTool.ColorTool_s(document.Main())
-    found = Quantity_Color()
-    if not colour_tool.GetColor(solid.shape, XCAFDoc_ColorType.XCAFDoc_ColorSurf, found):
+    own = _recorded_colour(colour_tool, solid.shape)
+    if own is not None:
+        return own
+    return _broadest_colour(colour_tool, solid.shape)
+
+
+def _recorded_colour(colour_tool: Any, shape: Any) -> tuple[float, float, float] | None:
+    """The surface colour recorded against ``shape`` itself, or ``None``.
+
+    Two lookups, not one. ``XCAFDoc_ColorTool`` resolves a shape back to the
+    label it was assigned under, and an assembly component's shape is its
+    product's shape carried under a location, while the colour was assigned
+    to the product. So the located shape is asked first -- an instance colour
+    belongs to that instance and must win -- and the unlocated base second.
+    """
+    from OCP.Quantity import Quantity_Color
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_ColorType
+
+    for candidate in (shape, shape.Located(TopLoc_Location())):
+        found = Quantity_Color()
+        if colour_tool.GetColor(candidate, XCAFDoc_ColorType.XCAFDoc_ColorSurf, found):
+            return (found.Red(), found.Green(), found.Blue())
+    return None
+
+
+def _broadest_colour(colour_tool: Any, shape: Any) -> tuple[float, float, float] | None:
+    """The colour covering most of ``shape``'s surface, or ``None`` for none.
+
+    What a component modelled face by face records: no colour on the solid,
+    one on each face. Weighed by area rather than by face count, because a
+    part is the colour of its body and not of its many small leads. Ties
+    fall to the lowest RGB triple, so the answer never depends on the order
+    the kernel walks the faces in. ``None`` stays ``None``: a solid nothing
+    coloured has no broadest colour to report.
+    """
+    from OCP.TopAbs import TopAbs_ShapeEnum
+
+    areas: dict[tuple[float, float, float], float] = {}
+    for part, inherited in _colour_bearing_parts(colour_tool, shape):
+        for face in _sub_shapes(part, TopAbs_ShapeEnum.TopAbs_FACE):
+            colour = _recorded_colour(colour_tool, face) or inherited
+            if colour is None:
+                continue
+            areas[colour] = areas.get(colour, 0.0) + _surface_area(face)
+    if not areas:
         return None
-    return (found.Red(), found.Green(), found.Blue())
+    return min(areas, key=lambda colour: (-areas[colour], colour))
+
+
+def _colour_bearing_parts(
+    colour_tool: Any, shape: Any
+) -> list[tuple[Any, tuple[float, float, float] | None]]:
+    """``shape``'s solids, each with the colour its own faces fall back to.
+
+    A leaf shape is routinely a compound of solids, and a file may colour
+    the solid rather than its faces -- a bare board substrate does exactly
+    that. A shape holding no solid at all is walked as one part with nothing
+    to inherit, so a loose shell is not silently dropped.
+    """
+    from OCP.TopAbs import TopAbs_ShapeEnum
+
+    solids = _sub_shapes(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
+    if not solids:
+        return [(shape, None)]
+    return [(solid, _recorded_colour(colour_tool, solid)) for solid in solids]
+
+
+def _sub_shapes(shape: Any, kind: Any) -> list[Any]:
+    """Every sub-shape of ``shape`` of the given ``TopAbs_ShapeEnum`` kind.
+
+    Materialised rather than yielded: the explorer holds kernel state over
+    the shape it is walking, and the callers here walk one kind while
+    resolving colour against another.
+    """
+    from OCP.TopExp import TopExp_Explorer
+
+    explorer = TopExp_Explorer(shape, kind)
+    found = []
+    while explorer.More():
+        found.append(explorer.Current())
+        explorer.Next()
+    return found
+
+
+def _surface_area(face: Any) -> float:
+    """``face``'s area in square millimetres, as the kernel measures it."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    properties = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(face, properties)
+    return float(properties.Mass())

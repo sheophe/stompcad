@@ -675,6 +675,12 @@ _FILE_NAME = re.compile(
 
 _NAUO_ID = re.compile(rb"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)'")
 
+#: Every colour chain begins with one of these, overriding or not.
+_STYLED_ITEM = re.compile(rb"= (?:STYLED_ITEM|OVER_RIDING_STYLED_ITEM)\(")
+
+#: Not one of STEP's pre-defined colours; see ``tests/xcaf.py``'s own note.
+_A_COLOUR = (0.21, 0.43, 0.65)
+
 
 def _write(document: Any) -> bytes:
     """Render ``document`` with this module's supplied identity."""
@@ -830,6 +836,50 @@ def test_a_per_face_coloured_document_is_written_not_refused() -> None:
         originating_system="test",
     )
     assert payload.count(b"STYLED_ITEM") >= 6
+
+
+def test_a_coloured_compound_of_solids_is_written_not_refused() -> None:
+    """One colour on a part built from several solids: the writer emits a
+    chain per solid, so a census counting the assignment once under-counts.
+
+    Real board components are shaped this way -- a switch reaches the
+    reader as one leaf holding a dozen solids -- and the guard fires on the
+    whole assembly rather than on the one part responsible. The counts are
+    asserted against the solids the shape actually holds, not a literal, so
+    the test cannot pass by matching a number the census happens to invent.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompgeom.build import PlacedSolid, build_document
+    from stompgeom.shapes import compound
+
+    parts = [BRepPrimAPI_MakeBox(gp_Pnt(10.0 * n, 0.0, 0.0), 2.0, 2.0, 2.0).Shape()
+             for n in range(3)]
+    document = build_document([PlacedSolid(compound(parts), "part", _A_COLOUR, None)])
+
+    payload = _write(document)
+    assert len(_STYLED_ITEM.findall(payload)) == len(parts)
+
+
+def test_a_coloured_part_holding_no_solid_is_still_counted_once() -> None:
+    """The control on the test above: counting solids must not answer zero
+    for a coloured shape that holds none.
+
+    A bare shell is one such shape, and the writer emits one chain for it.
+    A census reading the solid count straight off would expect none and
+    refuse a file it had just written correctly.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompgeom.build import PlacedSolid, build_document
+
+    shell = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 2.0, 2.0, 2.0).Shell()
+    document = build_document([PlacedSolid(shell, "skin", _A_COLOUR, None)])
+
+    payload = _write(document)
+    assert len(_STYLED_ITEM.findall(payload)) == 1
 
 
 def test_two_writes_of_one_document_are_byte_identical_across_processes() -> None:

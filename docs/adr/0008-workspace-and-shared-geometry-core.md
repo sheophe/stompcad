@@ -240,6 +240,23 @@ named, coloured solids. `stompgeom.build.build_document` does the assembling and
 `stompcollider-technical.md`'s own build contract fixed the shape a real second caller —
 the assembly emitter — needs: a `placement` and a `colour`.
 
+Reading that colour back is not one lookup, because a file does not record colour in one
+place. `build_document` sets it on the label owning the whole shape, and asking XCAF for
+that shape answers directly. A real file mostly does neither: an assembly component's
+shape is its product's shape carried under a location while the colour sits on the
+product, and a component modelled face by face carries no whole-solid colour at all.
+`solid_colour` therefore asks for the shape as given, then for its unlocated base, and
+only then weighs the colours its faces carry — by **surface area**, since a part is the
+colour of its body rather than of its many small leads. Ties fall to the lowest RGB
+triple, so the answer never depends on the order the kernel walks a shape in (ADR-0006).
+A solid nothing coloured is still `None`; no default is invented for it.
+
+One colour assignment is not one written colour chain, either. `STEPCAFControl_Writer`
+styles each solid of a coloured shape in its own right, so the writer's census counts
+solids per coloured label rather than labels — an ordinary board component reaches the
+reader as one leaf holding a dozen solids. A census counting assignments refuses a file
+it has just written correctly, which is what the guard exists to prevent.
+
 The risk carried is that `stompgeom` accumulates whatever is convenient rather than
 what is universal. `Frame` is the live example: it is a rigid transform, which
 is universal, wrapped in a meaning — Y-up, originating at the reference-outline
