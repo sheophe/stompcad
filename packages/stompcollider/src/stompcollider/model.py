@@ -21,6 +21,7 @@ from stompmodel.model import CaseRegistration, Hole, StageRun
 from stompmodel.units import Nanometre, check_nanometres
 
 __all__ = [
+    "admitting_radius",
     "Profile",
     "Protrusion",
     "Component",
@@ -32,13 +33,34 @@ __all__ = [
 ]
 
 
+def admitting_radius(diameter_nm: Nanometre, clearance_nm: Nanometre) -> Nanometre:
+    """The radius a hole of ``diameter_nm`` admits, given a fit clearance.
+
+    Stated once because two callers need the same number: the reader probes
+    a solid at it and ``Match`` queries a profile with it, and two spellings
+    of one rule would let a part be measured against one radius and judged
+    against another. The clearance is a diameter, as every other size in
+    this tool is, so it contributes half its value to a radius.
+    """
+    check_nanometres(
+        "admitting_radius", diameter_nm=diameter_nm, clearance_nm=clearance_nm
+    )
+    if diameter_nm <= 0:
+        raise ValueError(f"a hole has a positive diameter, not {diameter_nm}")
+    if clearance_nm < 0:
+        raise ValueError(f"a fit clearance is not negative, not {clearance_nm}")
+    return Nanometre(diameter_nm // 2 + clearance_nm // 2)
+
+
 @dataclass(frozen=True, slots=True)
 class Profile:
-    """A component's radius-versus-depth stack, one entry per cylinder.
+    """A component's radius-versus-depth stack: how wide it is, and where.
 
-    Each step is ``(radius_nm, depth_from_tip_min_nm, depth_from_tip_max_nm)``.
-    A profile with no admissible cylinder has no representable profile at
-    all -- see ``stompcollider-technical.md``'s "Protrusions".
+    Each step is ``(radius_nm, depth_from_tip_min_nm, depth_from_tip_max_nm)``
+    and states material *at least* that wide over those depths -- steps
+    overlap freely, and the widest covering one is what a hole must admit
+    there. A profile with no admissible cylinder has no representable
+    profile at all -- see ``stompcollider-technical.md``'s "Protrusions".
     """
 
     steps: tuple[tuple[Nanometre, Nanometre, Nanometre], ...]
@@ -74,18 +96,34 @@ class Profile:
         beyond = sorted(low for radius, low, _high in self.steps if radius > radius_nm)
         return Nanometre(beyond[0]) if beyond else None
 
+    def meets(self, radius_nm: Nanometre) -> bool:
+        """Whether some step states material at exactly ``radius_nm``.
+
+        The interference fit the report names ``zero-clearance``: a bush
+        measuring 12.000 mm into a 12.000 mm hole passes, because
+        :meth:`insertion_through` is strict, and passes with nothing to
+        spare. Exact equality of whole nanometres, never a tolerance --
+        anything the canonical representation cannot state is not a fact.
+        """
+        return any(radius == radius_nm for radius, _low, _high in self.steps)
+
 
 @dataclass(frozen=True, slots=True)
 class Protrusion:
-    """One component's admitted cylinder stack: its axis and its profile.
+    """One component's protrusion: where its axis runs, and how wide it is.
 
-    ``axis_xy_nm`` sits in the carrier plane. Only ``Match`` reads the axis;
-    the profile is ``Seat``'s question -- see "Protrusions" in the spec.
+    ``axis_xy_nm`` sits in the carrier plane and ``tip_nm`` on the carrier
+    normal -- how far the part's tip stands along it, in the board's own
+    exported frame. The tip is what turns a depth *through* a hole into a
+    depth the board travels, so ``Seat`` cannot place the board without it.
+    Only ``Match`` reads the axis; the profile is ``Seat``'s question -- see
+    "Protrusions" in the spec.
     """
 
     designator: str
     axis_xy_nm: tuple[Nanometre, Nanometre]
     profile: Profile
+    tip_nm: Nanometre
 
     def __post_init__(self) -> None:
         if not self.designator:
@@ -96,33 +134,45 @@ class Protrusion:
                 f"not {len(self.axis_xy_nm)}"
             )
         check_nanometres(
-            "Protrusion", axis_x_nm=self.axis_xy_nm[0], axis_y_nm=self.axis_xy_nm[1]
+            "Protrusion",
+            axis_x_nm=self.axis_xy_nm[0],
+            axis_y_nm=self.axis_xy_nm[1],
+            tip_nm=self.tip_nm,
         )
 
 
 @dataclass(frozen=True, slots=True)
 class Component:
-    """One named solid: its designator, and its protrusion if it has one.
+    """One named solid: its designator, its protrusion, and whether it counts.
 
     ``protrusion`` is ``None`` for a component with no admissible cylinder
-    *or* one the panel-reference filter does not admit -- the command line
-    withholds it there, and only ``Match`` reads it, so having none says
-    exactly "this part pairs with no hole". The two causes are therefore
-    indistinguishable in this field, and ``unmatched-part`` -- which names
-    the first alone -- cannot be derived from it.
+    *or* one the panel-reference filter does not admit, so having none says
+    exactly "this part pairs with no hole". ``admitted`` separates the two
+    causes, because ``unmatched-part`` names the first alone: a part the
+    expression never meant to reach a hole is not a finding. It defaults to
+    ``True`` -- nothing is withheld until the filter runs.
     """
 
     designator: str
     protrusion: Protrusion | None
+    admitted: bool = True
 
     def __post_init__(self) -> None:
         if not self.designator:
             raise ValueError("a component needs the designator of the solid it was read from")
+        if type(self.admitted) is not bool:
+            raise TypeError(
+                f"Component.admitted states whether the panel-reference filter "
+                f"kept this part, not {self.admitted!r}"
+            )
 
 
-#: The two legal values of ``Board.panel_face``: a sign along the board's own
-#: carrier normal, as exported -- see "The report" in the technical spec.
-_PANEL_FACES = frozenset({"+w", "-w"})
+#: The one legal value of ``Board.panel_face``: a sign along the board's own
+#: carrier normal, as exported. Only ``+w``, because which face points at the
+#: panel is derived rather than searched -- a board is seatable only when its
+#: components protrude out through the drilled face. See "Match" and "The
+#: report" in the technical spec.
+_PANEL_FACES = frozenset({"+w"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +210,7 @@ class Board:
         )
         if self.panel_face is not None and self.panel_face not in _PANEL_FACES:
             raise ValueError(
-                f"Board.panel_face must be '+w', '-w' or None, not {self.panel_face!r}"
+                f"Board.panel_face must be '+w' or None, not {self.panel_face!r}"
             )
 
 
@@ -172,7 +222,11 @@ class Correspondence:
     near-fit is reported rather than silently discarded. ``insertion_nm`` is
     ``None`` for a part the hole admits entirely -- a real geometric fact
     (nothing stops it), not a missing measurement -- see "Protrusions" in the
-    technical spec.
+    technical spec. ``seat_nm`` is where this pairing alone brings the board
+    to rest along the face normal, negative into the cavity: the insertion
+    depth is measured from the part's tip, so the travel is that depth less
+    the tip's own stand-off, and ``Seat`` reduces one number per pairing
+    rather than looking a protrusion back up.
     """
 
     designator: str
@@ -180,6 +234,7 @@ class Correspondence:
     hole_xy_nm: tuple[Nanometre, Nanometre]
     insertion_nm: Nanometre | None
     offset_nm: Nanometre
+    seat_nm: Nanometre | None
 
     def __post_init__(self) -> None:
         if not self.designator:
@@ -198,7 +253,15 @@ class Correspondence:
         }
         if self.insertion_nm is not None:
             lengths["insertion_nm"] = self.insertion_nm
+        if self.seat_nm is not None:
+            lengths["seat_nm"] = self.seat_nm
         check_nanometres("Correspondence", **lengths)
+        if (self.insertion_nm is None) != (self.seat_nm is None):
+            raise ValueError(
+                "a correspondence states an insertion depth and the seating it "
+                "implies together, or neither: nothing stops a part the hole "
+                "admits entirely, so it seats the board nowhere"
+            )
 
 
 @dataclass(frozen=True, slots=True)

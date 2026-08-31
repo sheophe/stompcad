@@ -1049,3 +1049,63 @@ def test_two_holes_tied_on_nominal_x_come_back_in_the_same_order_either_way() ->
 
     order = lambda rows: [h.diameter_nm for _, holes in rows for h in holes]  # noqa: E731
     assert order(forward) == order(backward) == [3_000_000, 4_000_000]
+
+
+# --------------------------------------------------------------------------
+# DrillData.grid_nm: the effective snap pitch, read back from the history
+# --------------------------------------------------------------------------
+
+
+def test_the_grid_pitch_is_read_back_from_the_snap_run() -> None:
+    """The document answers for its own pitch, so no reader spells the keys.
+
+    Both literals -- the stage's name and the parameter's -- live here
+    because a writer and every reader are one conversation: a reader looking
+    under a name the writer stopped using would find no pitch and say so
+    silently.
+    """
+    data = DrillData(processing=(StageRun("snap", (("grid_nm", 250_000),)),))
+    assert data.grid_nm == 250_000
+
+
+def test_a_document_that_never_snapped_has_no_pitch() -> None:
+    """``None`` is the honest answer, and distinguishable from a real pitch."""
+    assert DrillData().grid_nm is None
+    assert DrillData(processing=(StageRun("route-holes", ()),)).grid_nm is None
+
+
+def test_a_snap_run_recording_no_pitch_has_no_pitch() -> None:
+    """The run is present but silent about the grid — still ``None``."""
+    assert DrillData(processing=(StageRun("snap", ()),)).grid_nm is None
+    assert DrillData(
+        processing=(StageRun("snap", (("warn_over_nm", 62_500),)),)
+    ).grid_nm is None
+
+
+@pytest.mark.parametrize("recorded", [0, -250_000])
+def test_a_pitch_that_is_not_positive_is_no_pitch(recorded: int) -> None:
+    """A non-positive pitch is refused rather than handed to a divider.
+
+    ``check_nanometres`` establishes whole-int-ness for every ``_nm`` key at
+    construction but says nothing about sign, so this is the clause that
+    keeps a zero out of ``stompdrill``'s quotient and out of the tolerance
+    ``stompcollider`` derives.
+    """
+    data = DrillData(processing=(StageRun("snap", (("grid_nm", recorded),)),))
+    assert data.grid_nm is None
+
+
+def test_the_latest_snap_run_is_the_one_that_counts() -> None:
+    """Two runs is history, not a contradiction: the last one is effective.
+
+    Written with two *different* pitches so the test fails if the accessor
+    reads the first, which a fixture repeating one value could not detect.
+    """
+    data = DrillData(
+        processing=(
+            StageRun("snap", (("grid_nm", 1_000_000),)),
+            StageRun("deduplicate", ()),
+            StageRun("snap", (("grid_nm", 250_000),)),
+        )
+    )
+    assert data.grid_nm == 250_000

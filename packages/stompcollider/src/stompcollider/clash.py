@@ -22,7 +22,6 @@ from stompmodel.frames import CoordinateFrame, RigidTransform
 from stompmodel.model import StageRun
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
-from .boards import negated
 from .errors import StompcolliderError
 from .model import Board, Clash, DockData, Placement
 from .seat import rank_key
@@ -33,10 +32,6 @@ __all__ = ["Clashes", "placement_transform", "solid_name"]
 #: axis: the frame the enclosure was drilled in is the frame a depth means
 #: something in.
 _AXES = ("u", "v", "w")
-
-#: ``Match``'s name for the hypothesis that the board faces the panel the
-#: way it was exported. The other one turns it over.
-_FLIPPED = "-w"
 
 #: A shape's bounding box, ``(x0, y0, z0, x1, y1, z1)`` in millimetres.
 _Box = tuple[float, float, float, float, float, float]
@@ -54,24 +49,18 @@ _MODEL_FRAME = CoordinateFrame(
 
 
 def _board_frame(board: Board) -> CoordinateFrame:
-    """The board's own frame under the face hypothesis ``Match`` selected.
+    """The board's own frame, as the file it was exported from states it.
 
     Origin at the model origin, not at the carrier plane: a protrusion's
     ``axis_xy_nm`` is the plain projection of its axis onto ``u`` and ``v``,
-    so ``Match``'s ``(x, y, theta)`` is fitted against exactly these
-    coordinates. Turning the board over negates ``v`` and ``w`` together,
-    which is the proper rotation whose trace in the carrier plane is the
-    single-axis reflection ``Match._flip`` applies.
+    so ``Match``'s ``(x, y, theta)`` is solved against exactly these
+    coordinates. There is no second hypothesis to switch on -- which face
+    points at the panel is derived rather than searched, so ``panel_face``
+    is ``+w`` for every board that has one, and a board Match never reached
+    is placed the same way.
     """
     carrier = board.carrier
     origin = (Nanometre(0), Nanometre(0), Nanometre(0))
-    if board.panel_face == _FLIPPED:
-        return CoordinateFrame(
-            origin_nm=origin,
-            u=carrier.u,
-            v=negated(carrier.v),
-            w=negated(carrier.w),
-        )
     return CoordinateFrame(origin_nm=origin, u=carrier.u, v=carrier.v, w=carrier.w)
 
 

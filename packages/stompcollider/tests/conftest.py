@@ -42,3 +42,25 @@ def pytest_collection_modifyitems(config, items) -> None:
     for item in items:
         if "boards" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(scope="session")
+def tar_document():
+    """The committed board fixture, read once for every suite that reads it.
+
+    Session-scoped because two modules measure the same boards and the file
+    is nine megabytes: reading it per module would be the same answer paid
+    for twice. Deferred inside the fixture so a run without ``--boards``
+    neither reads the file nor imports the kernel to do it.
+    """
+    from tests import tar
+
+    return tar.read()
+
+
+@pytest.fixture(scope="session")
+def tar_dock(tar_document):
+    """That fixture measured and canonicalised, filtered to its panel references."""
+    from tests import tar
+
+    return tar.dock(tar_document)

@@ -31,6 +31,7 @@ from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from ..boards import basis_about, carrier_frame, group, negated, substrates
 from ..errors import NoSubstrateError, StompcolliderError
+from ..model import admitting_radius
 from ..protrude import admissible, protrusion_of, reach_along
 from ..raw import RawBoard, RawBoards, RawComponent
 
@@ -72,12 +73,16 @@ class BoardSource:
 
     ``boards`` is a list of models rather than one because a design may
     stack several; which board is which is settled downstream by ordinal,
-    never by the order they are listed here.
+    never by the order they are listed here. ``fit_clearance_nm`` is how
+    much wider than a part its hole must be, on diameter: a part is measured
+    against the radii this panel's own holes admit, so the reader has to
+    know them and the clearance both.
     """
 
     drill: Path
     boards: Sequence[Path]
     case_model: Path
+    fit_clearance_nm: Nanometre = Nanometre(0)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "boards", tuple(self.boards))
@@ -101,6 +106,8 @@ class BoardSource:
         drill = from_document(json.loads(self.drill.read_text(encoding="utf-8")))
         case = read_step(self.case_model)
 
+        probes = _probes(drill, self.fit_clearance_nm)
+
         diagnostics: list[Diagnostic] = []
         mismatch = _cross_check(drill.enclosure, assembly_spans(case), self.case_model)
         if mismatch is not None:
@@ -120,7 +127,7 @@ class BoardSource:
                 diagnostics.append(_no_substrate(path, failure))
                 continue
             for substrate, parts in group(document, found):
-                measured.append(_board(substrate, parts, path))
+                measured.append(_board(substrate, parts, path, probes))
                 geometry.append(BoardGeometry(document, (substrate, *parts)))
 
         if len(measured) > 1:
@@ -137,6 +144,19 @@ class BoardSource:
             geometry=tuple(geometry),
             raw=RawBoards(boards=tuple(measured), diagnostics=tuple(diagnostics)),
         )
+
+
+def _probes(drill: DrillData, clearance_nm: Nanometre) -> tuple[Nanometre, ...]:
+    """The radii this panel's holes admit, each stated once.
+
+    Every part is measured against the same set, whichever hole it turns out
+    to pair with: which one that is nobody knows until ``Match`` has
+    registered the board, and a reader cannot measure against an answer it
+    is upstream of.
+    """
+    return tuple(
+        sorted({admitting_radius(hole.diameter_nm, clearance_nm) for hole in drill.holes})
+    )
 
 
 def _unreadable(path: Path, failure: DocumentError) -> Diagnostic:
@@ -219,7 +239,12 @@ def _descending(pair: tuple[Nanometre, ...]) -> tuple[Nanometre, Nanometre]:
     return (larger, smaller)
 
 
-def _board(substrate: StepSolid, parts: Sequence[StepSolid], path: Path) -> RawBoard:
+def _board(
+    substrate: StepSolid,
+    parts: Sequence[StepSolid],
+    path: Path,
+    probes_nm: Sequence[Nanometre] = (),
+) -> RawBoard:
     """One substrate and its parts, measured about the way those parts protrude.
 
     A board body that grouped no component is refused here rather than
@@ -247,13 +272,15 @@ def _board(substrate: StepSolid, parts: Sequence[StepSolid], path: Path) -> RawB
         carrier_u=u,
         carrier_v=v,
         carrier_w=outward,
-        components=tuple(_component(part, outward) for part in parts),
+        components=tuple(_component(part, outward, probes_nm) for part in parts),
     )
 
 
-def _component(part: StepSolid, outward: Direction) -> RawComponent:
+def _component(
+    part: StepSolid, outward: Direction, probes_nm: Sequence[Nanometre]
+) -> RawComponent:
     """``part``'s protrusion, or the same part stated as having no axis."""
-    found = protrusion_of(part, outward)
+    found = protrusion_of(part, outward, probes_nm)
     return found if found is not None else RawComponent(designator=part.name, axis_xy_mm=None)
 
 

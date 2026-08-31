@@ -38,13 +38,28 @@ def _case() -> CaseRegistration:
     return CaseRegistration("1590BB", CaseFace.BOX, "test.stp", FaceFrame(_identity_frame()))
 
 
-def _correspondence(designator: str, insertion_nm: int | None, hole_index: int) -> Correspondence:
+#: How far above its board the tip of every hand-built part here stands.
+#: Non-zero, and different from every seating below, so an implementation
+#: reducing the insertion depth rather than the seating it implies reads a
+#: different number rather than the same one.
+_TIP = 20_000_000
+
+
+def _correspondence(designator: str, seat_nm: int | None, hole_index: int) -> Correspondence:
+    """One pairing, stated by where it alone would bring the board to rest.
+
+    ``insertion_nm`` is derived rather than given: the two are the same
+    fact measured from opposite ends -- a depth from the part's tip, and
+    the travel that depth leaves the board -- and a fixture free to state
+    them inconsistently would let ``Seat`` read either and look right.
+    """
     return Correspondence(
         designator=designator,
         hole_index=hole_index,
         hole_xy_nm=(_nm(0), _nm(0)),
-        insertion_nm=None if insertion_nm is None else _nm(insertion_nm),
+        insertion_nm=None if seat_nm is None else _nm(seat_nm + _TIP),
         offset_nm=_nm(0),
+        seat_nm=None if seat_nm is None else _nm(seat_nm),
     )
 
 
@@ -66,12 +81,12 @@ def _placement(
     y_nm: int = 0,
     z_nm: int = 0,
     theta_deg: float = 0.0,
-    insertions: tuple[int | None, ...] = (),
+    seatings: tuple[int | None, ...] = (),
     clashes: tuple[Clash, ...] = (),
 ) -> Placement:
     correspondence = tuple(
-        _correspondence(f"D{index}", insertion, hole_index=index + 1)
-        for index, insertion in enumerate(insertions)
+        _correspondence(f"D{index}", seat, hole_index=index + 1)
+        for index, seat in enumerate(seatings)
     )
     return Placement(
         rank=rank,
@@ -88,8 +103,8 @@ def _dock(placements: dict[int, tuple[Placement, ...]]) -> DockData:
     return DockData(case=_case(), placements=placements)
 
 
-def _placement_with_insertions(insertions: list[int | None]) -> DockData:
-    return _dock({1: (_placement(insertions=tuple(insertions)),)})
+def _placement_with_seatings(seatings: list[int | None]) -> DockData:
+    return _dock({1: (_placement(seatings=tuple(seatings)),)})
 
 
 # --------------------------------------------------------------------------
@@ -97,20 +112,20 @@ def _placement_with_insertions(insertions: list[int | None]) -> DockData:
 # --------------------------------------------------------------------------
 
 
-def test_travel_is_the_least_insertion_over_the_correspondences() -> None:
-    """The shallowest part is what stops the board, not the average or the
-    deepest -- so a fixture with a distinct minimum (neither the first nor
-    the last entry) proves the reduction is really ``min``."""
-    data = Seat().apply(_placement_with_insertions([9_000_000, 3_000_000, 7_000_000]))
-    assert data.placements[1][0].z_nm == Nanometre(-3_000_000)
+def test_travel_is_the_least_seating_over_the_correspondences() -> None:
+    """The tallest obstruction is what stops the board, not the average or
+    the shortest -- so a fixture with a distinct minimum (neither the first
+    nor the last entry) proves the reduction is really ``min``."""
+    data = Seat().apply(_placement_with_seatings([-3_000_000, -9_000_000, -7_000_000]))
+    assert data.placements[1][0].z_nm == Nanometre(-9_000_000)
 
 
 def test_a_part_that_passes_fully_does_not_constrain_seating() -> None:
     """``insertion_through`` returns ``None`` for a part the hole admits
-    entirely; a ``None`` treated as zero would seat the board on nothing.
-    Mixing a ``None`` with a bounded entry proves ``None`` is excluded from
-    the minimum rather than winning it."""
-    data = Seat().apply(_placement_with_insertions([None, 4_000_000]))
+    entirely, and such a pairing seats the board nowhere; a ``None`` treated
+    as zero would seat it on nothing. Mixing a ``None`` with a bounded entry
+    proves ``None`` is excluded from the minimum rather than winning it."""
+    data = Seat().apply(_placement_with_seatings([None, -4_000_000]))
     assert data.placements[1][0].z_nm == Nanometre(-4_000_000)
 
 
@@ -118,7 +133,7 @@ def test_seating_depth_is_the_panel_surface_when_nothing_bounds_it() -> None:
     """When every correspondence is unbounded, nothing stops the board
     short of the panel surface: ``z_nm = 0``, not a fallback depth and not
     a ``TypeError`` from ``min()`` over an all-``None`` list."""
-    data = Seat().apply(_placement_with_insertions([None, None]))
+    data = Seat().apply(_placement_with_seatings([None, None]))
     assert data.placements[1][0].z_nm == Nanometre(0)
 
 
@@ -128,8 +143,8 @@ def test_a_standoff_does_not_raise_the_board() -> None:
     and it has no representation in ``Placement.correspondence`` at all, so
     the seating minimum here is computed exactly as it is above, from the
     panel-reference correspondences alone."""
-    data = Seat().apply(_placement_with_insertions([9_000_000, 3_000_000, 7_000_000]))
-    assert data.placements[1][0].z_nm == Nanometre(-3_000_000)
+    data = Seat().apply(_placement_with_seatings([-3_000_000, -9_000_000, -7_000_000]))
+    assert data.placements[1][0].z_nm == Nanometre(-9_000_000)
 
 
 # --------------------------------------------------------------------------
@@ -309,8 +324,8 @@ def _two_placements() -> DockData:
     return _dock(
         {
             1: (
-                _placement(x_nm=100, insertions=(5_000_000,)),
-                _placement(x_nm=50, insertions=(5_000_000,)),
+                _placement(x_nm=100, seatings=(-5_000_000,)),
+                _placement(x_nm=50, seatings=(-5_000_000,)),
             )
         }
     )
@@ -368,6 +383,6 @@ def test_describe_returns_a_stage_run_named_seat() -> None:
 def test_apply_does_not_record_its_own_processing() -> None:
     """``Pipeline.run`` already appends ``describe()``; ``apply`` recording
     it too would double the entry the moment Seat runs inside a pipeline."""
-    data = _dock({1: (_placement(insertions=(1_000_000,)),)})
+    data = _dock({1: (_placement(seatings=(-1_000_000,)),)})
     result = Seat().apply(data)
     assert result.processing == ()

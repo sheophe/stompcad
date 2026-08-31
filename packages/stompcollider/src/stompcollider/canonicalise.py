@@ -108,12 +108,15 @@ def _canonicalise_component(raw: RawComponent) -> Component:
     but a repeat -- two cylinders that scale to one step were one feature
     stated twice. :func:`_canonical_steps` holds that rule and the order.
     """
-    if raw.axis_xy_mm is None:
+    if raw.axis_xy_mm is None or raw.tip_mm is None:
         return Component(designator=raw.designator, protrusion=None)
     axis_nm = (nm_from_mm(raw.axis_xy_mm[0]), nm_from_mm(raw.axis_xy_mm[1]))
     steps = _canonical_steps(raw.stack)
     protrusion = Protrusion(
-        designator=raw.designator, axis_xy_nm=axis_nm, profile=Profile(steps=steps)
+        designator=raw.designator,
+        axis_xy_nm=axis_nm,
+        profile=Profile(steps=steps),
+        tip_nm=nm_from_mm(raw.tip_mm),
     )
     return Component(designator=raw.designator, protrusion=protrusion)
 

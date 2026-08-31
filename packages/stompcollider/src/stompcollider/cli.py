@@ -29,7 +29,7 @@ from stompmodel.diagnostics import (
     exit_for_severity,
 )
 from stompmodel.errors import StompError
-from stompmodel.model import CaseRegistration
+from stompmodel.model import CaseRegistration, DrillData, latest_run
 from stompmodel.protocols import (
     Emitter,
     Pipeline,
@@ -46,7 +46,7 @@ from .designators import Filter, parse_filter
 from .emitters import AssemblyEmitter, ReportEmitter
 from .emitters.assembly import Solids
 from .errors import UsageError
-from .match import Match
+from .match import TOLERANCE_PARAMETER, Match
 from .model import DockData, Placement
 from .seat import Seat
 from .sources import BoardGeometry, BoardScan, BoardSource
@@ -73,6 +73,12 @@ _SEVERITY_ORDER = (Severity.ERROR, Severity.WARNING, Severity.INFO)
 
 #: Width of the report's label column.
 _LABEL = 15
+
+#: What ``--fit-clearance`` defaults to, on diameter: what a builder allows
+#: when drilling for a bushing. The flag exists because the interval that
+#: selects one seating is a property of the components rather than a law,
+#: not because this figure was tuned -- see "Fit clearance" in the spec.
+_FIT_CLEARANCE_MM = "0.1"
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +111,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--match-tolerance",
         metavar="MM",
-        required=True,
-        help="recognition tolerance in millimetres: half the drill grid pitch",
+        default=None,
+        help="recognition tolerance in millimetres; defaults to half the grid "
+        "pitch the drill document records, which is where it comes from",
+    )
+    parser.add_argument(
+        "--fit-clearance",
+        metavar="MM",
+        default=_FIT_CLEARANCE_MM,
+        help="how much wider than a part its hole must be, on diameter, in "
+        f"millimetres; default {_FIT_CLEARANCE_MM}",
     )
     parser.add_argument(
         "--place",
@@ -145,14 +159,23 @@ def parse_targets(args: argparse.Namespace) -> list[tuple[str, Path]]:
     return [(name, Path(value)) for name, value in requested if value is not None]
 
 
-def parse_length(text: str, flag: str) -> Nanometre:
-    """A positive, finite millimetre value from the command line, in nanometres."""
+def parse_length(text: str, flag: str, *, allow_zero: bool = False) -> Nanometre:
+    """A finite, non-negative millimetre value from the command line, in nanometres.
+
+    ``allow_zero`` is the whole difference between the two flags that reach
+    here: a recognition tolerance of nothing would pair no part with any
+    hole, while a fit clearance of nothing is the strict fit the comparison
+    already is, so one refuses zero and the other admits it.
+    """
     try:
         millimetres = float(text)
     except ValueError:
         raise UsageError(f"{flag} expects a number of millimetres, got {text!r}") from None
-    if not math.isfinite(millimetres) or millimetres <= 0:
-        raise UsageError(f"{flag} must be a positive, finite number of millimetres, got {text!r}")
+    floor = "a non-negative" if allow_zero else "a positive"
+    if not math.isfinite(millimetres) or millimetres < 0 or (
+        millimetres == 0 and not allow_zero
+    ):
+        raise UsageError(f"{flag} must be {floor}, finite number of millimetres, got {text!r}")
     return nm_from_mm(millimetres)
 
 
@@ -232,6 +255,7 @@ def _refuse_unhonoured(args: argparse.Namespace) -> None:
 
 def build_pipeline(
     tolerance_nm: Nanometre,
+    clearance_nm: Nanometre,
     case_solids: Sequence[StepSolid],
     board_solids: dict[int, tuple[StepSolid, ...]],
 ) -> Pipeline[DockData]:
@@ -242,7 +266,9 @@ def build_pipeline(
     depth; clashes need a seated placement to check. No stage asserts that
     another ran, which is why the order lives here and not in a stage.
     """
-    return Pipeline([Match(tolerance_nm), Seat(), Clashes(case_solids, board_solids)])
+    return Pipeline(
+        [Match(tolerance_nm, clearance_nm), Seat(), Clashes(case_solids, board_solids)]
+    )
 
 
 def board_geometry(scan: BoardScan, case: CaseRegistration) -> dict[int, BoardGeometry]:
@@ -288,10 +314,11 @@ def admit(data: DockData, panel_reference: Filter) -> DockData:
 
     Withheld rather than dropped: a part the expression passes over is
     still the board's, still named in the report and still a solid the
-    clash check must place. Only ``Match`` reads a protrusion, so having
-    none is exactly "this part is not a panel reference". A board the
-    expression admits nothing of earns ``empty-group`` -- a flag that does
-    not fit this board, which is a finding and not a parse failure.
+    clash check must place. ``admitted`` is cleared beside it so ``Match``
+    can tell such a part from one it kept that yielded no cylinder: only
+    the second is ``unmatched-part``. A board the expression admits nothing
+    of earns ``empty-group`` -- a flag that does not fit this board, which
+    is a finding and not a parse failure.
     """
     admitted = panel_reference.admit(
         designator for board in data.boards for designator in board.designators
@@ -305,7 +332,7 @@ def admit(data: DockData, panel_reference: Filter) -> DockData:
                 components=tuple(
                     component
                     if component.designator in admitted
-                    else replace(component, protrusion=None)
+                    else replace(component, protrusion=None, admitted=False)
                     for component in board.components
                 ),
             )
@@ -385,13 +412,35 @@ def _field(label: str, value: str) -> str:
     return f"  {label:<{_LABEL}}{value}"
 
 
+def _matched_tolerance(data: DockData) -> str:
+    """The tolerance ``Match`` ran with, read back from its own record.
+
+    Read from the history rather than from the command line, so the figure
+    shown is the one that actually paired these parts with these holes --
+    and so it is shown at all when nobody typed it. A run whose matching
+    never got as far as recording one says so rather than inventing it.
+    """
+    run = latest_run(data.processing, Match.name)
+    recorded = None if run is None else run.get(TOLERANCE_PARAMETER)
+    if type(recorded) is not int:
+        return "(not recorded)"
+    return f"{format_nm(Nanometre(recorded))} mm"
+
+
 def format_case(data: DockData) -> list[str]:
-    """The case this run docked against, read from the drill document."""
+    """How this run was set up: the case docked against, and what recognised it.
+
+    The tolerance earns its line because it is usually derived from the
+    drill document rather than typed, and it decides which hole belongs to
+    which part -- a number nobody chose and nobody can see would be the
+    worst of both.
+    """
     case = data.case
     return [
         "CASE",
         _field("part", f"{case.part}  ({case.face.value})"),
         _field("model", case.model),
+        _field("tolerance", _matched_tolerance(data)),
     ]
 
 
@@ -509,6 +558,26 @@ def _degenerate(
     return EXIT_ERRORS
 
 
+def _derived_tolerance(data: DrillData, drill: Path) -> Nanometre:
+    """Half the grid pitch the drill document records.
+
+    Derived rather than chosen: holes are quantised to that grid, so two
+    distinct holes lie at least one pitch apart and any offset under half a
+    pitch identifies exactly one. Halving is exact for every pitch
+    ``stompdrill`` writes -- a whole number of microns is even in nanometres
+    -- and floors otherwise, which narrows recognition rather than inventing
+    a pairing. A document recording no usable pitch is a usage failure: a
+    guessed tolerance would silently decide which hole belongs to which part.
+    """
+    grid_nm = data.grid_nm
+    if grid_nm is None:
+        raise UsageError(
+            f"{drill} records no drill grid pitch, so the recognition tolerance "
+            f"cannot be derived from it: pass --match-tolerance MM"
+        )
+    return Nanometre(grid_nm // 2)
+
+
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     targets = parse_targets(args)
     try:
@@ -519,20 +588,36 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     # Everything the command line can get wrong is resolved before an input
     # is opened: an unparseable expression, a tolerance that is not a
     # length, and an ordinal no board could carry are usage failures rather
-    # than diagnostics about geometry nobody has read yet.
+    # than diagnostics about geometry nobody has read yet. A tolerance that
+    # was *omitted* is the one exception, and only because the document it
+    # comes from has to be read first; it is still a usage failure, so the
+    # distinction costs no exit code.
     panel_reference = parse_filter(args.panel_reference)
-    tolerance_nm = parse_length(args.match_tolerance, "--match-tolerance")
+    tolerance_nm = (
+        None
+        if args.match_tolerance is None
+        else parse_length(args.match_tolerance, "--match-tolerance")
+    )
+    clearance_nm = parse_length(args.fit_clearance, "--fit-clearance", allow_zero=True)
     _refuse_unhonoured(args)
 
     drill = Path(args.drill)
-    source = BoardSource(drill, [Path(board) for board in args.boards], Path(args.case_model))
+    source = BoardSource(
+        drill,
+        [Path(board) for board in args.boards],
+        Path(args.case_model),
+        clearance_nm,
+    )
     try:
         scan = source.scan()
+        if tolerance_nm is None:
+            tolerance_nm = _derived_tolerance(scan.drill, drill)
         case = _registration(scan, drill)
         data = admit(_docked(scan, case), panel_reference)
         geometry = board_geometry(scan, case)
         pipeline = build_pipeline(
             tolerance_nm,
+            clearance_nm,
             scan.case.solids,
             {ordinal: board.solids for ordinal, board in geometry.items()},
         )

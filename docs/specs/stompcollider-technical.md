@@ -102,13 +102,13 @@ src/stompcollider/
   __init__.py       exports BoardSource, canonicalise, Match, Seat, Clashes,
                     both emitters, and the Raw* values a source produces
   model.py          DockData, Board, Component, Protrusion, Profile,
-                    Correspondence, Placement, Clash
+                    Correspondence, Placement, Clash, admitting_radius
   raw.py            RawBoards: what a source measured, in millimetre floats
   canonicalise.py   RawBoards → DockData, changing representation only, and
                     board_order: the one statement of how boards are numbered
   designators.py    the panel-reference filter: expression → predicate
   boards.py         substrate identification, carrier frames, contact assignment
-  protrude.py       perpendicular-cylinder stacks → axis and profile
+  protrude.py       axis from the admitted cylinders, profile from the solid
   sources/step.py   BoardSource: STEP files and case model → RawBoards
   match.py          Match
   seat.py           Seat
@@ -208,22 +208,98 @@ chosen here. Coaxiality likewise uses `Precision::Confusion()` on the axis
 position.
 
 The admitted cylinder reaching furthest along the outward direction fixes the
-**axis**. Every cylinder coaxial with it forms the **stack**.
+**axis**. That is all the cylinders decide.
 
-A protrusion is a **radius-versus-depth profile**, not a diameter. Each cylinder
-in the stack contributes `(radius_nm, depth_from_tip_min_nm, depth_from_tip_max_nm)`,
-and the profile at depth *d* is the greatest radius of any cylinder covering *d*.
-The **insertion depth** through a hole of radius *r* is the least *d* at which the
-profile exceeds *r*.
+**The profile is the whole solid's radial extent about that axis, not its
+cylinders'.** A protrusion is a radius-versus-depth profile: the profile at depth
+*d* is the greatest distance from the axis of any material of the component at
+that depth. The **insertion depth** through a hole is the least *d* at which the
+profile exceeds the hole's radius by more than the fit clearance below.
 
-The rule was validated against every panel-reference part on the fixture, first
-attempt, without tuning:
+Deriving the profile from coaxial cylinders alone is withdrawn, and it was the
+defect that made every real board seat flush against the panel. What arrests a
+through-panel component is almost never a cylinder: a potentiometer is stopped by
+its rectangular can, a footswitch by its body, a jack by a shell with no
+axis-parallel cylindrical face at all. None of those contributed a step, so every
+correspondence reported an unbounded insertion, `Seat` had nothing to seat
+against, and both boards of the tar assembly came to rest at `z = 0` — coplanar,
+inside the casting wall, with entire component bodies driven through holes far too
+small to admit them. The cylinders answer *where the axis is*; only the solid
+answers *what will not fit*.
 
-| Part | Profile | Through |
+**The radial extent is measured by an exact boolean, never by a mesh.** For a
+radius *r*, the material of the solid lying strictly outside a cylinder of that
+radius about the axis is `solid − cylinder`, and how far that residue reaches
+along the outward direction is where material too wide for *r* begins. This is
+`stompgeom.radial.radial_reach`, and it is exact where a triangulation is not:
+mesh output varies with the deflection parameters it was built at and with the
+kernel's version, which ADR-0006 forbids. Strictness comes free with it —
+material lying *on* the cylinder is coincident with the tool and the cut removes
+it — so a bush exactly filling its bore reaches nothing and passes.
+
+**The radii probed are the radii this panel's holes admit.** A cut answers one
+radius, so the set has to be finite and known before the solid is measured; it
+is `{ admitting_radius(d, clearance) : d a hole diameter of this drill
+document }`, which is exactly the set `Match` will later query. Every part is
+probed at all of them, because which hole a part pairs with is not known until
+the board is registered, and the reader is upstream of that. Each answer is
+stated as one band of the profile: the material there is *strictly* wider than
+the probe, which in whole nanometres is at least one nanometre wider, and that
+lower bound is what the band records. The alternative — bounding each face
+cylindrically and taking its greatest radius over its whole depth range —
+over-approximates wherever a face's radius varies with depth, a cone or a
+fillet or a thread flank, and would arrest such a part at the shallow end of
+that face rather than where it really binds.
+
+**A protrusion also carries its tip.** ``Protrusion.tip_nm`` is how far the
+part's tip stands along the carrier normal in the board's own exported frame.
+Every depth in the profile is measured back from that tip while a placement's
+``z`` is measured to the board's own origin plane, so seating cannot be computed
+without it — see "Seating depth".
+
+### Fit clearance
+
+A hole admits material narrower than itself. Material exactly as wide is the
+interesting case, and it is common rather than exceptional: a 3PDT bush measures
+12.000 mm into a 12.000 mm hole. Comparison is therefore strict — a profile
+exactly equal to its hole radius passes — and equality is reported as
+`zero-clearance`, an INFO finding, because a part fitting with nothing to spare is
+worth seeing even though it is not a fault.
+
+Strictness alone is not enough, because a modelled bushing need not be drawn at
+nominal. On the tar fixture the footswitch bush measures exactly 6.0000 mm on
+radius, but the potentiometer's measures 3.5271 — 7.054 mm across, in a hole
+drilled to 7.000. Judged strictly it cannot pass, and the board cannot seat.
+
+`--fit-clearance` names how much wider than a part its hole must be, **on
+diameter**, as every other size in this tool is stated. It defaults to 0.1 mm,
+which is what a builder allows when drilling for a bushing. The flag exists
+because how much a part needs is a property of that part rather than a law, not
+because its value was tuned.
+
+**How insensitive the default is differs by part, and one of these two parts is
+not insensitive at all.** Measured on the fixture, the potentiometer board seats
+at -10.885 mm for every clearance from 0.06 mm to 5 mm: its bushing is 0.054 mm
+over the hole and the next feature, the can, is 5.6 mm over, so the interval
+between them is wide and flat. The footswitch board is not. Its bush crest
+measures exactly 6.000 mm on radius, but the modelled M12 thread does not end
+there -- the run-out where it meets the body flares to roughly 12.1 mm across,
+about a tenth of a millimetre over, and *that* is the next feature rather than
+the 25.5 mm body. So the footswitch board's seating moves with the clearance:
+-17.715 mm at 0.06, -17.061 at the default 0.1, -16.886 at 0.2, -17.162 at 0.5
+and -16.551 at 5 -- not even monotonically, because near a radius the thread
+crest reaches exactly, the boolean is deciding tangency. The whole spread is
+1.16 mm, and every value in it is within a millimetre of the 17.000 mm the
+operator measured by hand, which is why this is worth stating rather than worth
+tuning: the residual is bounded by that part's model fidelity, not by this flag.
+
+The rule, restated against every panel-reference part on the fixture:
+
+| Part | What stops it | Through |
 | --- | --- | --- |
-| 5 mm LED | 4.9 to the flange, then 5.8 | ⌀5 seats on the flange; ⌀6 passes fully |
-| Potentiometer | 6.35 shaft, 6.188 bushing, then the body | ⌀7 inserts to the body |
-| 3PDT footswitch | 10 tip, 8 shaft, 12 bush | ⌀12, full depth |
+| 5 mm LED | the flange at 5.8 | ⌀5 seats on the flange; ⌀6 passes fully |
+| Potentiometer | 6.35 shaft, 7.054 bushing, then the can at 12.6 | ⌀7 inserts to the can |
+| 3PDT footswitch | 10 tip, 12 bush at exactly ⌀12, the thread run-out at about ⌀12.1, then the body at 25.5 | ⌀12 inserts to the run-out |
 
 A largest-radius rule would name the LED's flange — precisely the feature that
 must *not* pass through. **Match reads only the axis; the profile is Seat's.**
@@ -234,26 +310,115 @@ whose axis pairs with no hole.
 
 ## Match
 
-For each board, and for each of its two faces:
+**Registration precedes recognition.** A board arrives in the frame its CAD tool
+exported it in, and the rigid transform taking that frame onto the panel is the
+unknown this section solves for. Until it is solved, no protrusion can be said to
+lie near any hole at all, so the transform is found *before* pairing rather than
+fitted to pairs afterwards.
 
-1. Reduce every admitted protrusion's axis to a two-dimensional coordinate in
-   the carrier plane, which is parallel to the drilled face by construction.
-   This is **not** the face frame's own transform applied: that transform is
-   the unknown the Candidates section below solves for, out of the pairs step
-   2 makes, so it is not available here.
-2. Pair each axis with a hole whose centre lies within the **recognition
-   tolerance**. That tolerance is half the drill grid pitch — derived, not
-   chosen: holes are quantised to that grid, so two distinct holes are at least
-   one pitch apart, and any offset below half a pitch identifies exactly one
-   hole. `stompcollider` receives it as a length and never learns a lattice exists.
-3. Two protrusions within tolerance of the same hole is `ambiguous-pairing`,
-   exit 2. Two parts cannot occupy one hole, and choosing between them would be
-   the weighting the pre-spec refuses.
+An earlier version of this specification had it the other way round: pair each
+axis with a hole within the recognition tolerance, then fit a transform to the
+pairs that step made. That ordering is circular, and it is withdrawn. It could
+only recognise a board already standing in panel coordinates, and no exported
+board is: a layout tool places a substrate wherever the design sat on its own
+sheet, tens of millimetres from the panel origin and turned by whatever multiple
+of a right angle the two tools disagree about. On the tar panel's own boards
+every admitted part stands between 6.9 and 23.5 mm from the nearest hole before
+registration, and the whole layout is a quarter turn out — against a recognition
+tolerance of 0.125 mm. So every real board reached `no-correspondence`, and the
+rule was reachable only by a fixture authored in the answer's own coordinates.
 
-**Pairing is a predicate, not a score.** The face with strictly more pairings is
-the face that points at the panel. Equal non-zero counts on both faces is
-`both-faced-group`; zero on both is `no-correspondence`. Neither is broken by a
-majority or a fallback.
+For each board:
+
+1. Reduce every admitted protrusion's axis to a two-dimensional coordinate in the
+   carrier plane, which is parallel to the drilled face by construction. These
+   coordinates are in the *board's own* frame. Their origin and rotation relative
+   to the panel are exactly the unknown step 2 solves for, and no step before it
+   may compare one against a hole.
+
+2. **Seed a registration from every part pair against every hole pair.** For each
+   unordered pair of admitted protrusions `{p₁,p₂}` and each *ordered* pair of
+   distinct holes `(h₁,h₂)`, require `| p₁p₂ | = | h₁h₂ |` within twice the
+   recognition tolerance — two independent recognition errors — then solve the
+   unique rigid planar transform taking `p₁→h₁` and `p₂→h₂`. Both orderings of the
+   hole pair are enumerated, because which of the two protrusions goes to which
+   hole is itself part of the unknown. Only a proper rotation is solved for: a
+   board cannot be mirrored in its own plane, and no reflected hypothesis is
+   admissible either — the paragraph below derives the handedness instead of
+   searching for it.
+
+   Separation is the only quantity compared before a transform exists, and it is
+   the one quantity invariant under that transform. That is what makes seeding
+   possible at all: how far apart two points lie is knowable before either
+   point's position is.
+
+3. **Recognise under each seeded registration.** Apply the transform to every
+   admitted axis and pair it with the hole nearest the result, when that hole
+   lies within one recognition tolerance. That tolerance is half the drill grid
+   pitch — derived, not chosen: holes are quantised to that grid, so two distinct
+   holes are at least one pitch apart, and any offset below half a pitch
+   identifies exactly one hole. The command line derives it from the pitch the
+   drill document itself records, so nobody hand-computes a halving the document
+   already determines; `--match-tolerance` overrides it, and a document recording
+   no usable pitch is a usage failure naming that flag rather than a guess.
+   `Match` still receives a length and never learns a lattice exists.
+
+   **Every registration recognising as many protrusions as any other does
+   survives, and nothing chooses between them.** A registration recognising
+   fewer than another is strictly *dominated*: a rigid motion demonstrably
+   exists putting more of this board's parts through holes, so the poorer one
+   is no serious claim about where the board sits and is discarded. A tie *at*
+   the maximum is different in kind — two genuinely symmetric seatings — and
+   every one of those is returned, because `Ranking` below is where placements
+   are ordered and handing back one silently is how a pedal gets assembled
+   mirror-imaged. More than one surviving is `ambiguous-placement`, a warning:
+   the operator is told there is a choice rather than left to notice it.
+
+4. Two protrusions within tolerance of one hole is `ambiguous-pairing`, exit 2.
+   Two parts cannot occupy one hole, and choosing between them would be the
+   weighting the pre-spec refuses. It is raised when **any** surviving
+   registration exposes it, which needs no one of them singled out: two parts
+   within a tolerance of one hole stand closer together than the grid pitch
+   itself, so the pathology is in the input rather than in the hypothesis that
+   revealed it. A *dominated* seed routinely piles several parts onto one hole,
+   and convicting a board over one of those would refuse nearly every real
+   input — which is exactly what discarding them above prevents.
+
+5. An admitted protrusion that **every** surviving registration leaves with no
+   hole within tolerance is `unmatched-part`, a warning. Quantifying over the
+   whole surviving set is what makes the finding independent of any choice
+   between equally good seatings. The finding names the hole it came nearest
+   and by how much it missed — the *smallest* miss any surviving registration
+   achieves, because that is the useful number: a part a fraction of a
+   millimetre outside tolerance is a misplaced footprint worth seeing, and the
+   same part read through some other seating is metres away. Dropping it
+   silently would let a real misalignment reach no artefact — the tar panel's
+   two LEDs miss by 0.495 mm, four times the tolerance, and nothing said so.
+
+**Which face points at the panel is derived, not searched.** A board is seatable
+only when its components protrude *out* through the drilled face, so the rotation
+placing it satisfies `R · w_board = w_panel`, where `w_board` is the direction
+`_outward` measures the components protruding and `w_panel` is the face frame's
+outward normal. Both bases are right-handed about their own normals, so that one
+equation fixes the handedness of the planar map: step 2 solves a proper rotation
+of the axes exactly as measured. `panel_face` is `+w` for every board this tool
+can place, and a board recognising no hole at all is `no-correspondence`.
+
+An earlier version tried both of a board's faces and took the one with strictly
+more pairings, equal non-zero counts being `both-faced-group`. That search is
+withdrawn, and the code with it. It was a hedge against `_outward` reading the
+protrusion direction backwards, and it cannot pay: a board whose parts are
+reflection-symmetric in the carrier plane — a row of collinear pots, a pair of
+footswitches — registers equally well either way, so the count ties precisely
+where the hedge would have had to decide; and a board whose `_outward` really
+were reversed has already had every profile depth measured from the wrong tip,
+which no choice of face repairs. Measured on the tar panel, where the reflected
+hypothesis is not merely unnecessary but impossible: it lays each substrate
+*inside* the 2 mm casting wall — 1189 mm³ and 6215 mm³ of solid intersection —
+where the derived face leaves both in the cavity, intersecting the casting by
+nothing at all. Reconstructing that placement reproduces the board-to-case
+interference measured in the operator's own manual assembly, 29.13 mm³, a figure
+it was not fitted to.
 
 Recognition is deliberately more permissive than fit. Whether a shaft physically
 passes through a hole is Seat's question, and asking it here would make the test
@@ -261,28 +426,46 @@ unsatisfiable: a 3PDT bush measures 12.000 mm into a 12.000 mm hole.
 
 ### Candidates
 
-Each unordered pair of correspondences implies exactly one placement. For a pair
-`{(p₁,h₁), (p₂,h₂)}`, require `| p₁p₂ | = | h₁h₂ |` within twice the recognition
-tolerance — two independent recognition errors — then solve the unique rigid
-planar transform taking `p₁→h₁` and `p₂→h₂`. A transform that fits only under
-reflection is rejected: a board cannot be mirrored in its own plane.
-
-Every other correspondence is then tested against that transform and kept when it
-lands within tolerance.
+**Every seeded registration recognising as many protrusions as any other does
+is a candidate placement.** Candidates are not built from correspondences; the
+correspondences are what a candidate produces. Two remains the *floor* — the
+rank of a rigid planar transform, not a threshold — but a candidate must also
+reach the maximum any seed reaches, for the domination reason step 3 gives.
+Candidates are returned in an order fixed by their correspondence sets, so that
+the set is a function of the geometry rather than of enumeration order
+(ADR-0006); that order states no preference, and `Seat` ranks them.
 
 **A candidate is identified by the set of correspondences it validates.** Two
-seed pairs validating the same set are the same candidate. This deduplication is
-exact and discrete — no rounding of x, y or θ, and therefore no angular
-resolution to choose. The transform for a distinct candidate is computed from its
-two most widely separated corresponded protrusions, which is the best-conditioned
-choice available, with ties broken by designator order.
+seeds reaching the same set are the same candidate. This deduplication is exact
+and discrete — no rounding of x, y or θ, and therefore no angular resolution to
+choose. The transform for a distinct candidate is recomputed from its two most
+widely separated corresponded protrusions, which is the best-conditioned choice
+available, with ties broken by designator order.
 
-Fewer than two correspondences is `under-constrained-board`: one leaves the board
-free to turn about that point. Two is the rank of a rigid planar transform, not a
-threshold. An under-constrained board earns that finding and no placement:
-`--place` is refused rather than honoured, for the reason the command line
-section states, so nothing decides where such a board goes and nothing writes
-it into the assembly.
+The enumeration is quadratic in each of the admitted protrusions and the holes,
+and the separation test above rejects most seeds before a transform is built.
+`--panel-reference` is required for this reason among others: it is the
+operator's own bound on the first factor, and a board whose every part were
+admitted would seed against holes no panel reference ever meant to reach.
+
+A board offering fewer than two admitted protrusions is `under-constrained-board`
+and earns no placement: one point leaves the board free to turn about itself, and
+none seeds nothing. The same finding covers a board whose parts are too few to
+fix a transform after recognition. `--place` is refused rather than honoured, for
+the reason the command line section states, so nothing decides where such a board
+goes and nothing writes it into the assembly.
+
+A board whose every seed fails the separation test is `no-correspondence`: its
+parts and this panel's holes do not stand in the same relation to one another,
+under any rigid motion at all, so it is the wrong board for this case.
+
+That is the only way a board with two or more admitted protrusions reaches no
+placement, which retires `no-valid-placement`. The former algorithm could pair
+protrusions with holes and then fail to fit a transform to those pairs, so the
+two failures were distinct. Seeding cannot: a surviving seed carries its own two
+protrusions onto their two holes exactly, so it always validates the two
+correspondences a rigid planar transform has rank for. A candidate set is empty
+precisely when no seed survived, and one finding says so.
 
 ## Seat
 
@@ -291,7 +474,7 @@ it into the assembly.
 A placement is a single rigid transform, composed in one fixed order:
 
 1. Rotate the board so its carrier normal is antiparallel to the face frame's
-   outward normal on the panel-facing side Match selected — the board is turned
+   outward normal on the panel-facing side Match derived — the board is turned
    to face the panel.
 2. Rotate by θ about that normal, and translate by `(x, y)` in the face frame.
 3. Translate by `z` along the normal, which seating fixes.
@@ -306,12 +489,31 @@ With `(x, y, θ)` fixed, seating is one-dimensional and closed-form. Travel alon
 the face normal is
 
 ```
-    travel = min over correspondences of ( insertion depth of the profile
-                                           through that hole's radius )
+    seating of one pairing = ( insertion depth of the profile through that
+                               hole's radius widened by the fit clearance )
+                             − ( that part's own tip stand-off )
+
+    travel = min over correspondences of that seating
 ```
 
 measured against the inner surface of the drilled plate, which the face frame
-registers. **No kernel query and no descent.** A shaft ends up centred in its
+registers. **The tip subtraction is not a detail.** An insertion depth is
+measured from the part's tip and a placement's `z` translates the board's own
+origin plane, so the two are quantities in different frames: the arresting
+feature stands `tip − insertion` above the board, and the board travels the
+negative of that. Reducing the insertion depths directly is wrong wherever a
+part's tip does not sit in the board's origin plane, which is every real part;
+on the tar boards it seats them 7.3 and 3.8 mm too deep. Each correspondence
+therefore states its own `seat_nm` beside its `insertion_nm`, negative into the
+cavity, and `Seat` reduces one number per pairing rather than looking a
+protrusion back up — which is what keeps that stage reading nothing but
+`DockData.placements`. The tallest obstruction is the one that arrives at the
+face first, so the least seating is the travel.
+
+Depth is a fact about one board's own parts, so two boards of one
+assembly seat at their own depths and are coplanar only by coincidence: on the
+tar assembly the footswitch board comes to rest about 6 mm deeper than the board
+carrying the pots, because a 3PDT body is the larger obstruction. **No kernel query and no descent.** A shaft ends up centred in its
 hole because that is the only configuration in which the board seats, not because
 anything was told what a shaft is.
 
@@ -420,7 +622,7 @@ diagnostics matched by `code` — the same conventions as the drill document.
    {"ordinal": 1,
     "designators": ["C1", "…", "RV5"],
     "extent_nm": [106500000, 53750000, 1510000],
-    "panel_face": "-w",
+    "panel_face": "+w",
     "placements": [
       {"rank": 1,
        "x_nm": 0, "y_nm": 0, "z_nm": -28085000, "theta_deg": 180.0,
@@ -435,9 +637,17 @@ diagnostics matched by `code` — the same conventions as the drill document.
  "unmatched_holes": [7, 9],
  "diagnostics": [
    {"severity": "warning", "code": "unmatched-part",
-    "message": "RV5 has no hole", "location_nm": null,
-    "data": {"designator": "RV5"}}]}
+    "message": "D3 lands 0.495 mm from hole 1, its nearest",
+    "location_nm": null,
+    "data": {"designator": "D3", "nearest_hole": 1, "offset_nm": 495000}}]}
 ```
+
+`unmatched-part` takes two shapes under one code. A part whose axis every
+surviving registration leaves near no hole carries `nearest_hole` and `offset_nm`,
+as above.
+A part yielding no admissible cylinder has no axis, so it has no distance to any
+hole and carries neither key — the reader tells them apart by their presence, not
+by a second code.
 
 `location_nm` is written on **every** diagnostic, `null` where the finding names
 no position — the same unconditional field `stompmodel`'s codec writes for the
@@ -446,8 +656,10 @@ a key that was dropped.
 
 `case.face` is echoed from the drill document, never chosen here.
 `panel_face` is which side of the carrier plane points at the panel, as a sign
-along the board's own carrier normal in the file it was exported from — `-w` or
-`+w`. Angles are serialised at six decimal places, which is the only float in
+along the board's own carrier normal in the file it was exported from. It is
+`+w` for every placed board, derived rather than searched — see Match — and is
+written because a reader must be able to see the convention a placement assumed
+rather than infer it. Angles are serialised at six decimal places, which is the only float in
 the document and the only place byte-identity depends on formatting.
 
 `offset_nm` is the recognition miss for that correspondence. It is a field, not a
@@ -480,20 +692,18 @@ to 2 — through `stompmodel`'s shared reduction.
 | --- | --- | --- |
 | `no-correspondence` | ERROR | Wrong board for this case; nothing to show |
 | `empty-group` | ERROR | The filter parsed but admitted nothing — set the flag |
-| `both-faced-group` | ERROR | Equal pairings on both faces; the side must be declared |
 | `ambiguous-pairing` | ERROR | Two protrusions within tolerance of one hole |
-| `no-valid-placement` | ERROR | Correspondences enough to place the board, but no candidate transform fits them all |
 | `no-substrate` | ERROR | Every solid is named; no board body to group onto |
 | `unreadable-board` | ERROR | Not a readable STEP file, or no solids |
 | `degenerate-geometry` | ERROR | A boolean or profile could not be evaluated |
 | `wrong-case-model` | ERROR | The model's footprint is not the enclosure the drill document identifies |
 | `clash` | WARNING | Two solids occupy the same space in a completed placement |
-| `unmatched-part` | WARNING | An admitted part with no hole |
+| `unmatched-part` | WARNING | An admitted part with no axis, or whose axis every surviving registration leaves near no hole |
 | `unmatched-hole` | WARNING | A hole no board covers |
 | `multiple-boards` | WARNING | The input held more boards than one file suggests |
 | `under-constrained-board` | WARNING | Fewer than two correspondences |
 | `ambiguous-placement` | WARNING | More than one distinct placement survives |
-| `zero-clearance` | INFO | A profile exactly equals its hole radius |
+| `zero-clearance` | INFO | A profile exactly equals its hole radius; it passes, with nothing to spare |
 
 **A board with correspondences but no candidate is an error, not a silence.**
 Two correspondences are the rank of a rigid planar transform, so a board
@@ -518,7 +728,9 @@ Any error withholds every requested artefact, as `stompdrill` does.
 stompcollider DRILL.json BOARD.stp [BOARD.stp …]
     --case-model PATH          the drilled case model
     --panel-reference EXPR     required; no default
-    --match-tolerance MM       required; half the drill grid pitch
+    --match-tolerance MM       optional; overrides the derived half-pitch
+    --fit-clearance MM         optional; how much wider than a part its hole
+                               must be, on diameter. Default 0.1
     --place N=X,Y,THETA        repeatable; an under-constrained board
     --pin N=RANK               repeatable; choose among ranked placements
     --report PATH
@@ -528,7 +740,15 @@ stompcollider DRILL.json BOARD.stp [BOARD.stp …]
 
 Every flag resolves before any file is opened, so an unparseable filter
 expression, a malformed `--place`, or a `--pin` naming a board ordinal that
-cannot exist is exit 3 rather than a diagnostic.
+cannot exist is exit 3 rather than a diagnostic. A `--match-tolerance` that was
+*supplied* is resolved there too; only the derived one is necessarily settled
+after the drill document is read, because that document is where it comes
+from. Both are usage failures, so the distinction costs no exit code.
+
+The tolerance the run actually matched with is stated in the report's `CASE`
+block, read back from `Match`'s own record rather than from the command line.
+A value that is usually derived and decides which hole belongs to which part
+may not also be invisible.
 
 **`--place` and `--pin` are parsed, validated, and then refused.** Neither has
 a consumer: nothing places a board explicitly, so `Match` gives an
@@ -566,7 +786,22 @@ algorithm choice, not merely output.
 - **No iterative numerical step anywhere.** Every stage is an enumeration or a
   closed-form query. Correspondence is enumerated, rotation is implied rather
   than swept, seating is arithmetic on profiles, and clash depth is a bounding
-  box of an exact boolean.
+  box of an exact boolean. A profile's own bands are the same kind of answer:
+  one boolean per probe radius, over a probe set the drill document fixes, with
+  no search or bisection over radius anywhere.
+- **No mesh, for anything measured.** A triangulation is a function of the
+  deflection parameters it was built at and of the kernel's version, so a
+  quantity read off one is not a fact about the input. `radial_reach` and
+  `axial_extent` read exact geometry, and every bounding box they take is taken
+  with triangulation disabled.
+- **A near-tangent boolean is deterministic but not robust.** Cutting a solid
+  against a cylinder whose radius all but equals a face of it -- a ⌀12 thread
+  crest probed at 12.000 mm -- leaves slivers, and the residue's reach then
+  names a feature nearer the tip than the one that really binds. It is the same
+  answer on every run, so determinism holds; it is a fidelity limit of the
+  model rather than of the rule, and the fit clearance is what normally keeps a
+  probe away from a crest. The footswitch measured above is this case, and it
+  is named here rather than smoothed away.
 - **No noise source and no stochastic search.**
 - **No hash-ordered iteration.** Every traversal is over an explicitly sorted
   sequence; solids sort by designator, boards by ordinal, correspondences by
@@ -581,8 +816,22 @@ algorithm choice, not merely output.
 
 TDD throughout, following the repository's existing rules.
 
-- `Match` and `Seat` are pure and are tested with hand-built `DockData`. No
-  kernel is involved, and no fixture file is read.
+- `Match` and `Seat` are pure, and their *unit* tests use hand-built `DockData`
+  with no kernel and no fixture file. Those fixtures state a board in its **own**
+  frame — an origin and rotation away from the panel — and never in the answer's
+  coordinates. A builder taking a part's position in panel coordinates cannot
+  express an undocked board at all, which is how the registration defect above
+  survived a suite that was otherwise careful: every hand-built board was already
+  standing on its holes, so the pairing rule was never asked the question it got
+  wrong.
+- **The reader-to-`Match` seam is itself a test, behind `--boards`.** Real
+  geometry from `tar-pcb.stp` goes through `substrates`, `group`, `protrude` and
+  `canonicalise` into `Match` against holes from a drill document, and the
+  correspondences it reaches are asserted. Purity is a property of the stage, not
+  a reason to leave the join between two stages unexercised: `Match`'s unit tests
+  and the board reader's unit tests were both green and complete while the one
+  path a real run takes through them was broken. A stage tested only on inputs
+  another stage never produces is tested against a contract nothing implements.
 - **Property tests:** filter parse-and-apply idempotence; profile monotonicity in
   depth; insertion depth non-increasing as hole radius decreases; candidate
   deduplication idempotence; placement ranking is a total order.

@@ -19,14 +19,21 @@ from typing import Any
 
 import pytest
 
-from stompcollider.cli import main, parse_pin, parse_place
+from stompcollider.cli import (
+    format_case,
+    main,
+    parse_length,
+    parse_pin,
+    parse_place,
+)
 from stompcollider.errors import UsageError
+from stompcollider.model import DockData
 from stompcollider.sources import step as source_step
 from stompgeom.build import PlacedSolid, build_document
 from stompgeom.step import StepDocument, read_step, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, StageRun
 from stompmodel.units import Nanometre, nm_from_mm
 
 # --------------------------------------------------------------------------
@@ -56,8 +63,9 @@ def _pin(at: tuple[float, float]) -> Any:
     """An 11 mm shaft of radius 2 on a 3 mm bush of radius 3, fused into one solid.
 
     The step is what gives the profile a bounded insertion depth: through a
-    5 mm hole it seats 8 mm down, which is the ``z`` every placement below
-    is checked against.
+    5 mm hole the bush arrests 8 mm from the shaft's tip, which stands 3 mm
+    above the board's own origin plane, so the board seats 3 mm down -- the
+    ``z`` every placement below is checked against.
     """
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
 
@@ -81,10 +89,11 @@ def _document(parts: tuple[tuple[str, Any], ...]) -> StepDocument:
 
 
 #: Board A's three pins, in the board model's own frame. Deliberately not
-#: symmetric about either axis: a symmetric layout pairs equally well with
-#: the board turned over, which ``Match`` refuses as ``both-faced-group``.
-#: The third is what lets a run place a board while the filter withholds one
-#: of its parts.
+#: symmetric about either axis: two points alone are carried onto their own
+#: two holes by a second registration too -- the half turn about their
+#: midpoint -- and a third point off that line is what fixes one seating.
+#: The third is also what lets a run place a board while the filter
+#: withholds one of its parts, which leaves two, and that ambiguity back.
 _PINS_A = ((-7.0, 2.0), (9.0, 2.0), (0.0, -6.0))
 #: Board B is board A's first two pins, 35 mm along the model's y axis.
 _PINS_B = ((-7.0, 37.0), (9.0, 37.0))
@@ -159,7 +168,7 @@ def _case(*, post: bool, bores: tuple[tuple[float, float], ...]) -> StepDocument
         ("PANEL", _bored(_box((-50.0, -25.0, 0.0), 100.0, 50.0, 3.0), bores)),
     )
     if post:
-        parts = parts + (("POST", _box((-1.0, -1.0, -12.0), 2.0, 2.0, 5.0)),)
+        parts = parts + (("POST", _box((-1.0, -1.0, -6.0), 2.0, 2.0, 5.0)),)
     return _document(parts)
 
 
@@ -188,7 +197,13 @@ def _identity_face() -> FaceFrame:
     )
 
 
-def _drill(path: Path, holes: tuple[tuple[float, float], ...], *, case: bool = True) -> Path:
+def _drill(
+    path: Path,
+    holes: tuple[tuple[float, float], ...],
+    *,
+    case: bool = True,
+    grid_nm: int | None = None,
+) -> Path:
     """A real drill document, written through stompmodel's own codec."""
     drilled = tuple(
         replace(
@@ -201,7 +216,20 @@ def _drill(path: Path, holes: tuple[tuple[float, float], ...], *, case: bool = T
         CaseRegistration("1590B", CaseFace.BOX, "case.stp", _identity_face()) if case else None
     )
     path.write_text(
-        json.dumps(to_document(DrillData(holes=drilled, case=registration))), encoding="utf-8"
+        json.dumps(
+            to_document(
+                DrillData(
+                    holes=drilled,
+                    case=registration,
+                    processing=(
+                        ()
+                        if grid_nm is None
+                        else (StageRun("snap", (("grid_nm", grid_nm),)),)
+                    ),
+                )
+            )
+        ),
+        encoding="utf-8",
     )
     return path
 
@@ -229,9 +257,15 @@ def _prepare(
     case_model: bool = True,
     drill_case: bool = True,
     reference: str = "RV*,SW*",
+    grid_nm: int | None = None,
+    tolerance: str | None = "0.125",
 ) -> Run:
-    """The baseline run, with exactly the one thing a caller changes changed."""
-    drill = _drill(tmp_path / "drill.json", holes, case=drill_case)
+    """The baseline run, with exactly the one thing a caller changes changed.
+
+    ``tolerance=None`` omits the flag entirely, which is how a caller asks
+    for the pitch the document itself records to be the one that matters.
+    """
+    drill = _drill(tmp_path / "drill.json", holes, case=drill_case, grid_nm=grid_nm)
     board_path, case_path = tmp_path / "board.stp", tmp_path / "case.stp"
     prepared = {board_path: board if board is not None else _board_a()}
     if case_model:
@@ -248,7 +282,7 @@ def _prepare(
             str(drill), str(board_path),
             "--case-model", str(case_path),
             "--panel-reference", reference,
-            "--match-tolerance", "0.125",
+            *(() if tolerance is None else ("--match-tolerance", tolerance)),
             "--report", str(report),
             "--assembly", str(assembly),
         ],
@@ -466,19 +500,24 @@ def test_a_withheld_part_still_reaches_the_report_and_the_model(
 ) -> None:
     """The filter chooses what pairs, never what a board is made of.
 
-    ``RV3`` is no panel reference here, and the board is still placed by
-    the other two: the report must still list it and the model must still
-    carry its solid, because a filter that dropped components would lose
-    geometry the clash check has to place.
+    ``RV3`` is no panel reference here, and the board is still placed by the
+    other two: the report lists it and the model carries its solid, because
+    a filter that dropped components would lose geometry the clash check has
+    to place. Exit 1 because two pins alone are carried onto their holes by a
+    half turn as well -- a real second seating, so ``ambiguous-placement``.
+    ``RV3``'s own pin tells them apart by meeting the unbored plate under the
+    turned one, so ranking puts the clean seating first.
     """
     run = _prepare(tmp_path, monkeypatch, reference="RV1,RV2")
-    assert main(run.argv) == 0
+    assert main(run.argv) == 1
 
     written = json.loads(run.report.read_text())
+    assert [d["code"] for d in written["diagnostics"]] == ["ambiguous-placement"]
     assert written["boards"][0]["designators"] == ["RV1", "RV2", "RV3"]
-    assert [c["designator"] for c in written["boards"][0]["placements"][0]["correspondence"]] == [
-        "RV1", "RV2"
-    ]
+    placements = written["boards"][0]["placements"]
+    assert [p["rank"] for p in placements] == [1, 2]
+    assert placements[0]["clashes"] == []
+    assert [c["designator"] for c in placements[0]["correspondence"]] == ["RV1", "RV2"]
     assert "board:1:RV3" in run.assembly.read_text(encoding="utf-8", errors="replace")
 
 
@@ -642,9 +681,10 @@ def test_each_boards_ordinal_reaches_the_geometry_that_board_was_measured_from(
 def test_the_report_states_the_seating_the_pipeline_computed(tmp_path, monkeypatch) -> None:
     """The written bytes, parsed: the emitter's document, not the console's prose.
 
-    ``-8 mm`` is the profile's own insertion depth through a 5 mm hole, so a
-    run that seated at the panel surface, or that never ran ``Seat``, says
-    something else here.
+    ``-3 mm`` is where the bush comes to rest against the face: the profile
+    inserts 8 mm through a 5 mm hole and the tip stands 11 mm above the
+    board, so a run that seated at the panel surface, that never ran
+    ``Seat``, or that forgot the tip stands anywhere, says something else.
     """
     run = _prepare(tmp_path, monkeypatch)
     assert main(run.argv) == 0
@@ -654,7 +694,7 @@ def test_the_report_states_the_seating_the_pipeline_computed(tmp_path, monkeypat
 
     assert written["format"] == "stompcollider-dock-report"
     assert written["case"] == {"part": "1590B", "face": "box", "model": "case.stp"}
-    assert (placement["x_nm"], placement["y_nm"], placement["z_nm"]) == (0, 0, -8_000_000)
+    assert (placement["x_nm"], placement["y_nm"], placement["z_nm"]) == (0, 0, -3_000_000)
     assert [c["designator"] for c in placement["correspondence"]] == ["RV1", "RV2", "RV3"]
 
 
@@ -733,6 +773,78 @@ def test_a_tolerance_of_zero_is_usage(tmp_path, monkeypatch) -> None:
     argv[argv.index("--match-tolerance") + 1] = "0"
 
     assert main(argv) == 3
+
+
+# --------------------------------------------------------------------------
+# --fit-clearance: how much wider than a part its hole must be, on diameter
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["nonsense", "-0.1", "nan"])
+def test_an_unusable_fit_clearance_is_usage(tmp_path, monkeypatch, value) -> None:
+    """Resolved before any file is opened, like every other flag: a clearance
+    that is not a number, or one below zero -- which would narrow a hole
+    rather than widen it -- is exit 3 and not a diagnostic about geometry."""
+    run = _prepare(tmp_path, monkeypatch)
+
+    assert main([*run.argv, "--fit-clearance", value]) == 3
+    assert run.written() == (False, False)
+
+
+def test_a_fit_clearance_of_zero_is_the_strict_fit_and_is_accepted() -> None:
+    """Zero is a fit, unlike a recognition tolerance of zero: the comparison
+    is already strict, so nothing wider than its hole passes and nothing
+    narrower is refused. Parsed here rather than run, because that is the
+    whole difference between the two flags."""
+    assert parse_length("0", "--fit-clearance", allow_zero=True) == Nanometre(0)
+    with pytest.raises(UsageError, match="positive"):
+        parse_length("0", "--match-tolerance")
+
+
+def _proud_pin(at: tuple[float, float]) -> Any:
+    """A pin whose bush is 0.02 mm proud of its 5 mm hole, on radius.
+
+    What a modelled bushing is: drawn a shade over nominal, so a strict
+    comparison arrests it and the fit clearance a builder allows lets it
+    through. 0.02 is inside half of the default 0.1 and outside nothing.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+
+    return BRepAlgoAPI_Fuse(
+        _cylinder((at[0], at[1], 0.0), 2.0, 11.0),
+        _cylinder((at[0], at[1], 0.0), 2.52, 3.0),
+    ).Shape()
+
+
+@lru_cache(maxsize=None)
+def _board_proud() -> StepDocument:
+    return _document((_slab(-10.0), *(
+        (f"RV{number}", _proud_pin(at)) for number, at in enumerate(_PINS_A, start=1)
+    )))
+
+
+def _seating_of(tmp_path, monkeypatch, *extra: str) -> int:
+    run = _prepare(tmp_path, monkeypatch, board=_board_proud())
+    assert main([*run.argv, *extra]) in (0, 1)
+    written = json.loads(run.report.read_text())
+    return written["boards"][0]["placements"][0]["z_nm"]
+
+
+def test_the_fit_clearance_decides_whether_a_proud_bush_passes(
+    tmp_path, monkeypatch
+) -> None:
+    """The flag's whole point, read off the artefact.
+
+    Judged strictly, a bush 0.02 mm over its hole is arrested and the board
+    seats 3 mm down; judged against the hole widened by half the default
+    clearance it passes, nothing stops the board, and it comes to rest at
+    the face. The two runs differ in that one flag alone.
+    """
+    strict = _seating_of(tmp_path, monkeypatch, "--fit-clearance", "0")
+    allowed = _seating_of(tmp_path, monkeypatch)
+
+    assert strict == -3_000_000
+    assert allowed == 0
 
 
 # --------------------------------------------------------------------------
@@ -879,3 +991,150 @@ def test_a_rollback_that_itself_fails_does_not_displace_the_first_failure(
 
     assert main(run.argv) == 3
     assert run.report.read_bytes() != b"previous"
+
+
+# --------------------------------------------------------------------------
+# The recognition tolerance: derived from the document unless overridden.
+# --------------------------------------------------------------------------
+
+
+def test_the_tolerance_is_derived_from_the_grid_the_document_records(
+    tmp_path, monkeypatch
+) -> None:
+    """No flag, and the run still recognises: half the recorded pitch.
+
+    The pitch chosen is twice the baseline's explicit ``0.125``, so a build
+    that ignored the document and fell back to some default would have to
+    land on exactly the right number by accident to pass this.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=250_000, tolerance=None)
+
+    assert "--match-tolerance" not in run.argv
+    assert main(run.argv) == 0
+    assert run.written() == (True, True)
+
+
+def test_the_derived_tolerance_is_the_one_the_operator_would_have_typed(
+    tmp_path, monkeypatch
+) -> None:
+    """Deriving half a 0.250 mm pitch must equal typing ``0.125`` by hand.
+
+    Compared as whole report bytes: the derivation is only worth having if
+    it is indistinguishable from the arithmetic it replaces, and an
+    assertion on the exit code alone would pass for any tolerance that
+    happened to pair the same holes.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=250_000, tolerance=None)
+
+    assert main(run.argv) == 0
+    derived = run.report.read_bytes()
+
+    assert main([*run.argv, "--match-tolerance", "0.125"]) == 0
+    assert run.report.read_bytes() == derived
+
+
+def test_an_explicit_tolerance_overrides_the_recorded_grid(tmp_path, monkeypatch) -> None:
+    """The flag is an override, so it must win over a usable recorded pitch.
+
+    **One** hole sits 0.05 mm off its pin -- comfortably inside the 0.125 mm
+    the recorded pitch derives, and far outside the 1 nm the flag names. The
+    misfit has to be differential: registration solves for the board's own
+    origin and rotation, so a uniform 0.05 mm shift of every hole is exactly
+    what it absorbs, and every tolerance would recognise such a board
+    equally. Without any offset the pins sit *exactly* on their holes and
+    the override would look honoured whether it was read or ignored.
+    """
+    offset = tuple(
+        (x + 0.05, y) if index == 0 else (x, y) for index, (x, y) in enumerate(_HOLES_A)
+    )
+    run = _prepare(
+        tmp_path, monkeypatch, holes=offset, bores=offset, grid_nm=250_000, tolerance=None
+    )
+
+    assert main(run.argv) == 0
+    assert main([*run.argv, "--match-tolerance", "0.000001"]) != 0
+
+
+def test_a_document_recording_no_grid_and_no_flag_is_a_usage_failure(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Exit 3 naming the remedy, rather than a tolerance nobody chose.
+
+    A recognition tolerance decides which hole pairs with which part, so a
+    guessed one would silently change what the tool reports. The document
+    that cannot supply it is named, and so is the flag that would.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=None, tolerance=None)
+
+    assert main(run.argv) == 3
+    assert run.written() == (False, False)
+    message = capsys.readouterr().err
+    assert "--match-tolerance" in message and "drill.json" in message
+
+
+def test_a_grid_too_degenerate_to_halve_is_refused_rather_than_divided_by(
+    tmp_path, monkeypatch
+) -> None:
+    """A recorded pitch of zero is no pitch, not a tolerance of zero.
+
+    ``check_nanometres`` holds every ``_nm`` payload to a whole int but says
+    nothing about sign, so a hand-edited document really can carry this.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=0, tolerance=None)
+
+    assert main(run.argv) == 3
+
+
+def test_the_offset_is_what_gives_the_override_test_its_teeth(tmp_path, monkeypatch) -> None:
+    """The control for the override test above, without which it proves nothing.
+
+    On the unoffset baseline the board's pins sit exactly on the document's
+    holes, so even a 1 nm tolerance recognises all three and the run is
+    clean. That is the reading the override test would have got for free had
+    its fixture not moved the holes -- so this is the probe showing the
+    offset, not the flag's mere presence, is what makes the two differ.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=250_000, tolerance=None)
+
+    assert main([*run.argv, "--match-tolerance", "0.000001"]) == 0
+
+
+def test_the_report_states_the_tolerance_that_recognised_the_boards(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """A derived number nobody typed still has to be one the operator can read.
+
+    Asserted against a pitch whose half is *not* the baseline's 0.125, so a
+    report that printed a constant, or the flag's own text, could not pass.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=500_000, tolerance=None)
+
+    assert main(run.argv) == 0
+    printed = capsys.readouterr().out
+    assert "tolerance" in printed and "0.250 mm" in printed
+
+
+def test_the_report_states_an_explicit_tolerance_too(tmp_path, monkeypatch, capsys) -> None:
+    """The line reports what matched, not how it was decided.
+
+    Same document as the test above, so the printed figure changes only
+    because the flag displaced the derivation -- which is what proves the
+    line reads the stage's record rather than the document's pitch.
+    """
+    run = _prepare(tmp_path, monkeypatch, grid_nm=500_000, tolerance="0.125")
+
+    assert main(run.argv) == 0
+    assert "0.125 mm" in capsys.readouterr().out
+
+
+def test_the_report_says_so_when_no_matching_was_ever_recorded() -> None:
+    """The fallback branch of the tolerance line, which no run reaches.
+
+    ``Match`` records its tolerance whenever the pipeline runs, so ``main``
+    cannot produce this. A library caller formatting a bare ``DockData``
+    can, and the line must then say it has no figure rather than print a
+    zero -- so the branch is pinned here rather than left to be believed.
+    """
+    bare = DockData(case=CaseRegistration("1590B", CaseFace.BOX, "case.stp", _identity_face()))
+
+    assert any("(not recorded)" in line for line in format_case(bare))

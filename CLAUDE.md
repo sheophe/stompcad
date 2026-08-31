@@ -150,9 +150,21 @@ failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `case-orientation-unverifiable` and `off-size` are warnings and reach exit 1.
 
 `stompcollider`'s own command line is `DRILL.json BOARD.stp …` with `--case-model`,
-`--panel-reference`, `--match-tolerance`, `--report`, `--assembly` and `-v`; there is
+`--panel-reference`, `--match-tolerance`, `--fit-clearance`, `--report`, `--assembly`
+and `-v`; there is
 no `--case-face`, because the drill document carries the face frame `stompdrill` cut
-in. `--place` and `--pin` are accepted and parsed, so a bad ordinal is still a usage
+in. `--fit-clearance` is how much wider than a part its hole must be, stated **on
+diameter** and so contributing half its value to a radius; it defaults to 0.1 mm and
+zero is a legal value, being the strict fit the comparison already is. It is the one
+number the board reader needs before it can measure anything, because a component's
+profile is measured by cutting the solid at the radii this panel's holes admit. `--match-tolerance` is **optional**: it defaults to half the grid pitch the drill
+document records under its `snap` run, which is the derivation the flag's own help
+used to ask the operator to perform by hand. A supplied value overrides it; a document
+recording no usable pitch is a usage failure naming the flag, never a guessed
+tolerance. Do not restore the requirement, and do not invent a default pitch — the
+tolerance decides which hole pairs with which part. The value a run actually matched
+with is printed in the report's `CASE` block.
+`--place` and `--pin` are accepted and parsed, so a bad ordinal is still a usage
 error naming that ordinal — and then **refused with a stated reason**, because nothing
 downstream honours either: no stage places a board explicitly, and `Clashes` re-ranks
 after a pinned rank could have been held. Do not make either silently do nothing.
@@ -199,7 +211,13 @@ The accepted architecture is defined by:
 `stompmodel` publishes the guards a measurement's unit must satisfy — `check_millimetres`
 and `check_nanometres` — beside the newtypes they check, and the diagnostics vocabulary a
 second tool's value type interoperates through: `Diagnosable`, and the plain-tuple
-`of_severity`/`worst_severity` reductions beside `Diagnostic`. The `DrillData` JSON codec is
+`of_severity`/`worst_severity` reductions beside `Diagnostic`, and the `latest_run`
+reduction beside `StageRun` for the same reason. It also owns what a *document* means
+where two tools must agree on it: `SNAP_STAGE` and `SNAP_GRID_PARAMETER` are the
+snapping stage's name and pitch key spelled once for the whole workspace, and
+`DrillData.grid_nm` is the one read of them — `stompdrill` records the pitch and
+reviews grid ties through it, `stompcollider` derives its recognition tolerance from
+it, and neither spells either literal. The `DrillData` JSON codec is
 versioned; the document is at version 6, whose `CaseRegistration` member carries the
 resolved part, drilled face, supplied model's file name and cutting frame as one typed fact
 rather than four — see [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md).

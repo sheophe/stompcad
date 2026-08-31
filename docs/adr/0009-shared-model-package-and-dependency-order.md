@@ -84,7 +84,10 @@ Pure Python. No kernel, no parser, no I/O beyond serialisation. It holds:
 - `Diagnostic`, `Severity`, `ParameterValue`, the plain-tuple `of_severity` and
   `worst_severity` reductions, and the severity-to-exit-code reduction.
 - `Processable`, `Diagnosable`, `Stage[T]`, `Pipeline[T]`, `Emitter[T]`, `Payload`,
-  `StageRun`.
+  `StageRun`, and the plain-tuple `latest_run` reduction beside it.
+- `SNAP_STAGE` and `SNAP_GRID_PARAMETER` -- the snapping stage's name and the key
+  it records its effective pitch under -- with `DrillData.grid_nm` as the one read
+  of them.
 - The workspace's error base: `StompError`, with `EmitterError` and
   `DocumentError` beneath it. Each tool's own base descends from it —
   `StompdrillError` does — so a package's errors stay identifiable while every
@@ -143,6 +146,27 @@ Four admission rules, and nothing else gets in:
    only once that formatter reads `DrillData.case`, and the plate and play
    area recorded beside it in the clearance stage's own provenance, rather
    than the live handle it used to require.
+
+   **A fact a second consumer may read but need not have stays where it
+   lies.** `stompcollider` derives its recognition tolerance from the grid
+   pitch `stompdrill` records in the snapping stage's provenance: a second
+   consumer reading `StageRun.parameters`, which is the shape this rule
+   exists to refuse. It is admitted, and the difference is the override.
+   `--match-tolerance` supplies the same length directly, and a document
+   recording no pitch is a usage failure naming that flag -- so nothing
+   `stompcollider` requires is reachable only through the bag.
+   `CaseRegistration` had no such escape: there is no `--case-face`, by
+   design, so the face frame really was unreconstructable and really did
+   have to become a member. **The test is whether a second consumer depends
+   on the fact, not whether it reads it.**
+
+   What such a read does owe is a published spelling. `SNAP_STAGE`,
+   `SNAP_GRID_PARAMETER` and the single `DrillData.grid_nm` that uses them
+   live here rather than in `stompdrill`, so the bag is opened once under
+   Rule 3: a renamed stage now breaks one accessor loudly instead of leaving
+   three readers across two packages silently finding nothing. Promote the
+   pitch to a typed member the day anything needs it with no flag to fall
+   back on -- that day this paragraph expires.
 
 A type a package owns and merely exposes to a library consumer **stays home**.
 `stompcad` reading `stompcollider`'s `DockReport` is ordinary library consumption, not

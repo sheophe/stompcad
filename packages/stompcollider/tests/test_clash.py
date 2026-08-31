@@ -617,23 +617,12 @@ def test_the_placement_transform_agrees_with_the_transform_match_fitted() -> Non
     assert centre == pytest.approx(expected, abs=1e-9)
 
 
-def test_a_board_seated_on_its_other_face_is_turned_over() -> None:
-    """``panel_face`` is a sign along the board's own carrier normal, and
-    ``Match`` negates one in-plane coordinate for the flipped hypothesis. A
-    transform ignoring it places the board's back where its front belongs."""
-    placement = _placement()
-    marker = _cylinder((11.0, 4.0, 1.0), 0.5, 2.0)
-
-    motion = placement_transform(_board(1, panel_face="-w"), placement, _identity_frame())
-    box = bounding_box_mm(placed(marker, motion))
-
-    assert round((box[1] + box[4]) / 2, 9) == -4.0
-    assert round((box[2] + box[5]) / 2, 9) == -2.0
-
-
 def test_a_board_with_no_resolved_face_is_placed_as_exported() -> None:
     """``panel_face`` is ``None`` until ``Match`` resolves it, and a stage may
-    not assert that another stage ran first."""
+    not assert that another stage ran first. There is nothing else it can be:
+    which face points at the panel is derived rather than searched, so the
+    only value ``Match`` writes is the one this transform already assumes.
+    """
     placement = _placement()
     marker = _cylinder((11.0, 4.0, 1.0), 0.5, 2.0)
 

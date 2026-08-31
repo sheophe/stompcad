@@ -17,13 +17,17 @@ __all__ = ["RawCylinder", "RawComponent", "RawBoard", "RawBoards"]
 
 @dataclass(frozen=True, slots=True)
 class RawCylinder:
-    """One measured cylinder in a protrusion stack: radius and depth range.
+    """One measured band of a part's radial extent: a radius over a depth range.
 
-    Depths are measured from the protrusion's tip, per "Protrusions" in
-    ``stompcollider-technical.md``. Millimetre floats, upstream of the exact
-    decimal scaling ``canonicalise`` applies -- and upstream of the ordering
-    and the one-step-per-feature rule it applies with it, so a stack's own
-    order and any repeat within it both carry no meaning here.
+    A cylinder in the sense of the band the part fills, not necessarily a
+    cylindrical face of it: a coaxial face states one directly, and a cut
+    against the whole solid states one for the material too wide to pass a
+    given radius. Depths are measured from the protrusion's tip, per
+    "Protrusions" in ``stompcollider-technical.md``. Millimetre floats,
+    upstream of the exact decimal scaling ``canonicalise`` applies -- and
+    upstream of the ordering and the one-step-per-feature rule it applies
+    with it, so a stack's own order and any repeat within it both carry no
+    meaning here.
     """
 
     radius_mm: float
@@ -43,15 +47,17 @@ class RawCylinder:
 class RawComponent:
     """One named solid, as measured: its designator and its protrusion stack.
 
-    ``axis_xy_mm`` and ``stack`` are both present or both absent: a
-    component the filter admitted but which yielded no admissible cylinder
-    has neither, reported downstream as ``unmatched-part`` -- never guessed
-    at here.
+    ``axis_xy_mm``, ``tip_mm`` and ``stack`` are all present or all absent:
+    a component the filter admitted but which yielded no admissible cylinder
+    has none of them, reported downstream as ``unmatched-part`` -- never
+    guessed at here. ``tip_mm`` is where the part's tip stands along the
+    carrier normal, which every depth in ``stack`` is measured back from.
     """
 
     designator: str
     axis_xy_mm: tuple[float, float] | None
     stack: tuple[RawCylinder, ...] = ()
+    tip_mm: float | None = None
 
     def __post_init__(self) -> None:
         if not self.designator:
@@ -61,9 +67,13 @@ class RawComponent:
         if self.axis_xy_mm is None:
             if self.stack:
                 raise ValueError("a raw component with no axis can carry no cylinder stack")
+            if self.tip_mm is not None:
+                raise ValueError("a raw component with no axis has no tip to measure from")
             return
         x_mm, y_mm = self.axis_xy_mm
-        check_millimetres("RawComponent", axis_x_mm=x_mm, axis_y_mm=y_mm)
+        check_millimetres(
+            "RawComponent", axis_x_mm=x_mm, axis_y_mm=y_mm, tip_mm=self.tip_mm
+        )
         if not self.stack:
             raise ValueError("a raw component with an axis needs at least one cylinder")
 

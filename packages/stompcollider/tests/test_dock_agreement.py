@@ -237,12 +237,13 @@ _BOARD_PARTS = (
 )
 _CASE_PARTS = (("PANEL", (-60.0, -60.0, 0.0), (120.0, 120.0, 3.0)),)
 
-#: One board seated as exported and one turned over, at different places and
-#: through different quarter turns: a writer honouring only the first board's
-#: face, or applying one board's motion to both, disagrees with the report.
+#: Two boards at different places and through different quarter turns: a
+#: writer applying one board's motion to both disagrees with the report.
+#: Both carry the one face there is -- which side points at the panel is
+#: derived, not searched -- so it is the placements that must differ.
 _SEATED = {
     1: ("+w", (11.0, -23.0, -9.0), 90.0),
-    2: ("-w", (-7.0, 31.0, -4.0), 270.0),
+    2: ("+w", (-7.0, 31.0, -4.0), 270.0),
 }
 
 
@@ -297,6 +298,7 @@ def _placement(ordinal: int) -> Placement:
                 hole_xy_nm=(nm_from_mm(translation[0]), nm_from_mm(translation[1])),
                 insertion_nm=nm_from_mm(4.0),
                 offset_nm=Nanometre(0),
+                seat_nm=nm_from_mm(-6.0),
             ),
         ),
         clashes=(),

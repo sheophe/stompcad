@@ -41,20 +41,23 @@ def rank_key(placement: Placement) -> tuple[int, int, int, float, int, int]:
 
 
 def _seated_z_nm(placement: Placement) -> Nanometre:
-    """Travel along the face normal: the least bounded insertion depth.
+    """Travel along the face normal: the least seating any pairing allows.
 
-    ``Correspondence.insertion_nm`` is ``None`` for a part the hole admits
-    fully -- excluded here, never coerced to zero. A placement whose every
-    correspondence is unbounded seats at the panel surface, ``z_nm = 0``.
+    Each correspondence states where that pairing alone would bring the
+    board to rest, negative into the cavity; the board stops at the first
+    of them, which is the least. ``Correspondence.seat_nm`` is ``None`` for
+    a part the hole admits fully -- excluded here, never coerced to zero. A
+    placement whose every correspondence is unbounded seats at the panel
+    surface, ``z_nm = 0``.
     """
     bounded_nm = [
-        correspondence.insertion_nm
+        correspondence.seat_nm
         for correspondence in placement.correspondence
-        if correspondence.insertion_nm is not None
+        if correspondence.seat_nm is not None
     ]
     if not bounded_nm:
         return Nanometre(0)
-    return Nanometre(-min(bounded_nm))
+    return Nanometre(min(bounded_nm))
 
 
 class Seat:

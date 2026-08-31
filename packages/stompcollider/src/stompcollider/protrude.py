@@ -1,19 +1,26 @@
-"""A component's protrusion: which cylinders count, and the stack they make.
+"""A component's protrusion: where its axis runs, and how wide it is where.
 
-Kernel-backed, but only through ``stompgeom``: the parallelism and
-coaxiality rules are the kernel's own tolerances, published as ``Cylinder``
-methods, and nothing here imports OCP. Measurements only -- millimetre
-floats upstream of ``canonicalise``, which is the one place they become
-canonical lengths. See "Protrusions" in
+The cylinders answer only where the axis is. What arrests a through-panel
+part is almost never one of them -- a potentiometer is stopped by its can, a
+footswitch by its body, a jack by a shell with no axis-parallel cylindrical
+face at all -- so the profile is the whole solid's radial extent about that
+axis, measured by an exact boolean at the radii the panel's own holes admit.
+Kernel-backed, but only through ``stompgeom``; nothing here imports OCP.
+Measurements only -- millimetre floats upstream of ``canonicalise``, which
+is the one place they become canonical lengths. See "Protrusions" in
 ``docs/specs/stompcollider-technical.md``, ADR-0003 and ADR-0008.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.levels import Direction
+from stompgeom.radial import axial_extent, radial_reach
 from stompgeom.step import StepSolid
 from stompmodel.frames import dot
+from stompmodel.units import Nanometre, mm_from_nm
 
 from .boards import basis_about
 from .raw import RawComponent, RawCylinder
@@ -35,14 +42,17 @@ def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, .
     )
 
 
-def protrusion_of(solid: StepSolid, carrier_normal: Direction) -> RawComponent | None:
+def protrusion_of(
+    solid: StepSolid, carrier_normal: Direction, probes_nm: Sequence[Nanometre] = ()
+) -> RawComponent | None:
     """``solid``'s measured protrusion, or ``None`` when it has no axis.
 
     ``carrier_normal`` is signed: it points away from the board, at the
     panel, and the admitted cylinder reaching furthest along it fixes the
-    axis. Every cylinder coaxial with that one joins the stack, each
-    measured as a radius against depth from the tip -- never a diameter.
-    A component yielding no admissible cylinder has no axis and cannot pair.
+    axis. ``probes_nm`` are the radii the panel's holes admit; the solid is
+    cut against each, which is what states the width of a can or a body no
+    cylinder describes. A component yielding no admissible cylinder has no
+    axis and cannot pair.
     """
     admitted = admissible(solid, carrier_normal)
     if not admitted:
@@ -53,17 +63,56 @@ def protrusion_of(solid: StepSolid, carrier_normal: Direction) -> RawComponent |
     return RawComponent(
         designator=solid.name,
         axis_xy_mm=(_projected(tipmost, u), _projected(tipmost, v)),
-        # Every coaxial face, stated as measured. Deduplicating a seam's two
-        # halves and ordering the stack are both ``canonicalise``'s, where
-        # the values are whole nanometres: exact equality is a fact about
-        # those and not about a millimetre float, and a set keyed on one
-        # would be the composite float key ADR-0003's boundary rules out.
+        tip_mm=tip_mm,
+        # Every coaxial face, stated as measured, and every radius a hole
+        # admits, stated as cut. Deduplicating a seam's two halves and
+        # ordering the stack are both ``canonicalise``'s, where the values
+        # are whole nanometres: exact equality is a fact about those and not
+        # about a millimetre float, and a set keyed on one would be the
+        # composite float key ADR-0003's boundary rules out.
         stack=tuple(
             _measured(cylinder, carrier_normal, tip_mm)
             for cylinder in admitted
             if tipmost.is_coaxial_with(cylinder)
-        ),
+        )
+        + _cut(solid, tipmost, carrier_normal, tip_mm, probes_nm),
     )
+
+
+def _cut(
+    solid: StepSolid,
+    tipmost: Cylinder,
+    outward: Direction,
+    tip_mm: float,
+    probes_nm: Sequence[Nanometre],
+) -> tuple[RawCylinder, ...]:
+    """One band per probe radius the solid is wider than somewhere.
+
+    The cut says only that the material there is *strictly* wider than the
+    probe, never how much wider; in whole nanometres, strictly wider is at
+    least one nanometre wider, and that lower bound is exactly what the band
+    states. It is enough, because the radius a profile is asked about is a
+    radius it was probed at -- ``model.admitting_radius`` is the one
+    statement of that number, read by this module's caller and by ``Match``.
+    The band runs from where the material begins to the far end of the part,
+    which is the deepest anything it holds can be.
+    """
+    ends_mm = tip_mm - axial_extent(solid.shape, outward)[0]
+    bands = []
+    for probe_nm in sorted(set(probes_nm)):
+        reach_mm = radial_reach(
+            solid.shape, tipmost.axis_location_mm, outward, mm_from_nm(probe_nm)
+        )
+        if reach_mm is None:
+            continue
+        bands.append(
+            RawCylinder(
+                radius_mm=mm_from_nm(Nanometre(probe_nm + 1)),
+                depth_from_tip_min_mm=tip_mm - reach_mm,
+                depth_from_tip_max_mm=ends_mm,
+            )
+        )
+    return tuple(bands)
 
 
 def _measured(cylinder: Cylinder, outward: Direction, tip_mm: float) -> RawCylinder:

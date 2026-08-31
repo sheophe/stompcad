@@ -27,12 +27,28 @@ def test_a_component_with_no_axis_cannot_carry_a_stack() -> None:
 
 def test_a_component_with_an_axis_needs_at_least_one_cylinder() -> None:
     with pytest.raises(ValueError, match="at least one cylinder"):
-        RawComponent(designator="R1", axis_xy_mm=(1.0, 1.0), stack=())
+        RawComponent(designator="R1", axis_xy_mm=(1.0, 1.0), stack=(), tip_mm=1.0)
 
 
 def test_a_component_axis_must_be_finite_millimetres() -> None:
     with pytest.raises(TypeError):
-        RawComponent(designator="R1", axis_xy_mm=(1, 1.0), stack=(_CYLINDER,))
+        RawComponent(designator="R1", axis_xy_mm=(1, 1.0), stack=(_CYLINDER,), tip_mm=1.0)
+
+
+def test_a_component_with_an_axis_states_the_tip_its_depths_are_measured_from() -> None:
+    """Every depth in the stack is measured back from the tip, and a
+    placement's travel is that depth less the tip's own stand-off, so a
+    protrusion without one is measured against nothing."""
+    with pytest.raises(TypeError):
+        RawComponent(designator="R1", axis_xy_mm=(1.0, 1.0), stack=(_CYLINDER,))
+
+
+def test_a_component_with_no_axis_has_no_tip_either() -> None:
+    """The other half of the both-or-neither rule: a tip is a position on an
+    axis, so a part with no axis stating one would be stating a position on
+    a line nobody found."""
+    with pytest.raises(ValueError, match="no tip"):
+        RawComponent(designator="R1", axis_xy_mm=None, tip_mm=1.0)
 
 
 def test_a_board_needs_at_least_one_component() -> None:

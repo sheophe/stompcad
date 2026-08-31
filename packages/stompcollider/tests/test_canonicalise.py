@@ -43,6 +43,7 @@ def _raw_with_axis(x_mm: float, y_mm: float) -> RawBoards:
         designator="R1",
         axis_xy_mm=(x_mm, y_mm),
         stack=(RawCylinder(radius_mm=1.0, depth_from_tip_min_mm=0.0, depth_from_tip_max_mm=2.0),),
+        tip_mm=6.0,
     )
     board = RawBoard(
         corner_a_mm=(0.0, 0.0, 0.0),
@@ -156,8 +157,14 @@ def test_every_component_and_every_cylinder_step_survives() -> None:
                     RawCylinder(0.5, 0.0, 1.0),
                     RawCylinder(1.0, 1.0, 3.0),
                 ),
+                tip_mm=4.0,
             ),
-            RawComponent(designator="R1", axis_xy_mm=(1.0, 1.0), stack=(RawCylinder(0.25, 0.0, 0.5),)),
+            RawComponent(
+                designator="R1",
+                axis_xy_mm=(1.0, 1.0),
+                stack=(RawCylinder(0.25, 0.0, 0.5),),
+                tip_mm=3.0,
+            ),
             RawComponent(designator="R3", axis_xy_mm=None),
         ),
     )
@@ -249,7 +256,9 @@ def test_a_genuine_position_tie_breaks_on_footprint() -> None:
 
 def _stacked(*cylinders: RawCylinder) -> tuple[tuple[Nanometre, Nanometre, Nanometre], ...]:
     """One component's canonical steps, built the way a source hands them over."""
-    raw = RawComponent(designator="U1", axis_xy_mm=(0.0, 0.0), stack=cylinders)
+    raw = RawComponent(
+        designator="U1", axis_xy_mm=(0.0, 0.0), stack=cylinders, tip_mm=12.0
+    )
     component = _canonicalise_component(raw)
     assert component.protrusion is not None
     return component.protrusion.profile.steps

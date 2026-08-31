@@ -68,6 +68,7 @@ def _correspondence(
         hole_xy_nm=(_nm(12_400_000), _nm(30_000_000)),
         insertion_nm=None if insertion_nm is None else _nm(insertion_nm),
         offset_nm=_nm(offset_nm),
+        seat_nm=None if insertion_nm is None else _nm(insertion_nm - 20_000_000),
     )
 
 
@@ -108,7 +109,7 @@ def _board(ordinal: int = 1, designators: tuple[str, ...] = ("RV3",)) -> Board:
         extent_nm=(_nm(106_500_000), _nm(53_750_000), _nm(1_510_000)),
         carrier=_identity_frame(),
         components=(),
-        panel_face="-w",
+        panel_face="+w",
     )
 
 

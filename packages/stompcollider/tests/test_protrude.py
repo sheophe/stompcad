@@ -125,14 +125,20 @@ def _a_tall_pin_beside_a_wider_one() -> StepSolid:
     )
 
 
-def _profile(solid: StepSolid, normal: tuple[float, float, float]) -> Profile:
+def _profile(
+    solid: StepSolid,
+    normal: tuple[float, float, float],
+    probes_nm: tuple[Nanometre, ...] = (),
+) -> Profile:
     """The profile the two stages make together.
 
     ``protrusion_of`` measures and ``canonicalise`` scales, dedupes and
     orders; a profile is what they produce jointly, so the assertions below
     are stated in whole nanometres at the seam rather than on either half.
     """
-    protrusion = _canonicalise_component(_measured_component(solid, normal)).protrusion
+    protrusion = _canonicalise_component(
+        _measured_component(solid, normal, probes_nm)
+    ).protrusion
     assert protrusion is not None
     return protrusion.profile
 
@@ -146,9 +152,11 @@ def _axis_nm(
 
 
 def _measured_component(
-    solid: StepSolid, normal: tuple[float, float, float]
+    solid: StepSolid,
+    normal: tuple[float, float, float],
+    probes_nm: tuple[Nanometre, ...] = (),
 ) -> RawComponent:
-    found = protrusion_of(solid, normal)
+    found = protrusion_of(solid, normal, probes_nm)
     assert found is not None
     return found
 
@@ -460,3 +468,73 @@ def test_every_admitted_cylinder_is_within_a_thousandth_of_the_normal(
     for name in ("SW1", "RV1", "D2", "D3"):
         for cylinder in admissible(_part(document, name), _OUTWARD):
             assert math.isclose(abs(cylinder.axis_direction[2]), 1.0, abs_tol=1e-9)
+
+
+# --------------------------------------------------------------------------
+# The profile is the whole solid's radial extent, not its cylinders'
+# --------------------------------------------------------------------------
+
+
+def _a_pin_on_a_can() -> StepSolid:
+    """A 10 mm pin of radius 1 standing on a 6 mm cube, the pin at its centre.
+
+    The cube is what a real potentiometer's can, a footswitch's body or a
+    jack's shell is: the feature that arrests the part, with no cylindrical
+    face anywhere on it. Measured from the pin's tip the cube's top face is
+    10 mm down, and its half-width of 3 mm is the radius that stops there.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    return _solid(
+        "U9",
+        BRepPrimAPI_MakeBox(gp_Pnt(-3.0, -3.0, -6.0), 6.0, 6.0, 6.0).Shape(),
+        _pin(1.0, 10.0, at=(0.0, 0.0, 0.0)),
+    )
+
+
+def test_a_can_no_cylinder_describes_still_arrests_the_part() -> None:
+    """The defect this module was rewritten for, in one solid.
+
+    Every cylindrical face of this part measures radius 1, so a profile
+    built from the cylinders alone says a 4 mm hole admits the whole thing.
+    Probed at that hole's radius, the cube states itself: material wider
+    than 2 mm begins exactly where the pin meets it.
+    """
+    probes = (Nanometre(2_000_000),)
+
+    assert _profile(_a_pin_on_a_can(), _UP).insertion_through(Nanometre(2_000_000)) is None
+    assert _profile(_a_pin_on_a_can(), _UP, probes).insertion_through(
+        Nanometre(2_000_000)
+    ) == Nanometre(10_000_000)
+
+
+def test_a_probe_the_whole_part_passes_states_no_band_at_all() -> None:
+    """The control beside it: a hole wide enough for the cube reports nothing
+    to stop the part, so the band above is evidence about the cube rather
+    than about being probed at all."""
+    probes = (Nanometre(5_000_000),)
+
+    assert _profile(_a_pin_on_a_can(), _UP, probes).insertion_through(
+        Nanometre(5_000_000)
+    ) is None
+
+
+def test_a_band_states_only_that_the_material_is_wider_than_the_probe() -> None:
+    """Whole nanometres, so *wider* is at least one nanometre wider -- which
+    is what makes the band answer the radius it was probed at under a strict
+    comparison, and what keeps it from claiming a width nobody measured."""
+    probes = (Nanometre(2_000_000),)
+    steps = _profile(_a_pin_on_a_can(), _UP, probes).steps
+
+    assert (Nanometre(2_000_001), Nanometre(10_000_000), Nanometre(16_000_000)) in steps
+
+
+def test_the_tip_is_measured_and_carried_beside_the_axis() -> None:
+    """Where the part's tip stands along the carrier normal, in the board's
+    own frame: the pin's free end at 10, not the depth 0 it is measured as
+    and not the cube's own -6."""
+    measured = _measured_component(_a_pin_on_a_can(), _UP)
+
+    assert measured.tip_mm == pytest.approx(10.0, abs=1e-9)
+    assert _canonicalise_component(measured).protrusion.tip_nm == Nanometre(10_000_000)  # type: ignore[union-attr]

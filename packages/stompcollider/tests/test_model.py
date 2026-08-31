@@ -17,6 +17,7 @@ from stompcollider.model import (
     Placement,
     Profile,
     Protrusion,
+    admitting_radius,
 )
 from stompmodel.diagnostics import Diagnostic, Severity, of_severity, worst_severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
@@ -31,6 +32,11 @@ def _profile(*steps: tuple[int, int, int]) -> Profile:
 
 #: A 5 mm LED: 4.9 to the flange at 3 mm, then 5.8 beyond it.
 _LED = _profile((2_450_000, 0, 3_000_000), (2_900_000, 3_000_000, 8_000_000))
+
+#: How far the tip of every hand-built protrusion here stands along the
+#: carrier normal. Deliberately neither zero nor any depth in ``_LED``, so a
+#: value read from the wrong field cannot agree by accident.
+_TIP = Nanometre(9_000_000)
 
 
 def test_radius_at_takes_the_greatest_step_covering_that_depth() -> None:
@@ -103,6 +109,40 @@ def test_a_profile_is_slotted() -> None:
         object.__setattr__(profile, "extra", 1)
 
 
+def test_a_profile_meets_a_radius_only_when_a_step_states_that_radius_exactly() -> None:
+    """``zero-clearance``: material exactly as wide as its hole, which passes.
+
+    Exact equality of whole nanometres, so the flange one nanometre either
+    side of the hole is not it -- a tolerance here would report an
+    interference fit for a part that has clearance and for one that binds.
+    """
+    assert _LED.meets(Nanometre(2_900_000)) is True
+    assert _LED.meets(Nanometre(2_899_999)) is False
+    assert _LED.meets(Nanometre(2_900_001)) is False
+
+
+def test_a_hole_admits_its_own_radius_plus_half_the_clearance() -> None:
+    """The clearance is a diameter, as every other size in this tool is, so
+    a tenth of a millimetre on a 7 mm hole widens the radius by 0.05 mm and
+    not by 0.1. Stated once here because the reader probes at this number
+    and ``Match`` queries at it, and two spellings would disagree."""
+    assert admitting_radius(Nanometre(7_000_000), Nanometre(100_000)) == Nanometre(
+        3_550_000
+    )
+    assert admitting_radius(Nanometre(7_000_000), Nanometre(0)) == Nanometre(3_500_000)
+
+
+def test_a_hole_with_no_diameter_or_a_negative_clearance_is_refused() -> None:
+    """Neither is a fit anybody drilled; a hole of nothing admits nothing and
+    a clearance below zero would narrow the hole rather than widen it."""
+    with pytest.raises(ValueError, match="positive diameter"):
+        admitting_radius(Nanometre(0), Nanometre(0))
+    with pytest.raises(ValueError, match="not negative"):
+        admitting_radius(Nanometre(7_000_000), Nanometre(-1))
+    with pytest.raises(TypeError):
+        admitting_radius(7.0, Nanometre(0))  # type: ignore[arg-type]
+
+
 # --------------------------------------------------------------------------
 # Protrusion
 # --------------------------------------------------------------------------
@@ -114,17 +154,26 @@ def _profile_simple() -> Profile:
 
 def test_protrusion_requires_a_designator() -> None:
     with pytest.raises(ValueError, match="designator"):
-        Protrusion("", (Nanometre(0), Nanometre(0)), _profile_simple())
+        Protrusion("", (Nanometre(0), Nanometre(0)), _profile_simple(), _TIP)
 
 
 def test_protrusion_axis_must_have_two_components() -> None:
     with pytest.raises(ValueError, match="two components"):
-        Protrusion("D1", (Nanometre(0),), _profile_simple())  # type: ignore[arg-type]
+        Protrusion("D1", (Nanometre(0),), _profile_simple(), _TIP)  # type: ignore[arg-type]
 
 
 def test_protrusion_axis_rejects_a_non_integer_nanometre() -> None:
     with pytest.raises(TypeError):
-        Protrusion("D1", (Nanometre(0), 0.5), _profile_simple())  # type: ignore[arg-type]
+        Protrusion("D1", (Nanometre(0), 0.5), _profile_simple(), _TIP)  # type: ignore[arg-type]
+
+
+def test_protrusion_states_where_its_tip_stands_along_the_carrier_normal() -> None:
+    """Every depth in the profile is measured back from the tip, so the tip's
+    own stand-off is what turns a depth *through* a hole into the travel the
+    board makes. A float is a measurement that crossed no boundary."""
+    assert Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple(), _TIP).tip_nm == _TIP
+    with pytest.raises(TypeError):
+        Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple(), 1.5)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------
@@ -142,8 +191,24 @@ def test_component_may_have_no_protrusion() -> None:
 
 
 def test_component_carries_its_protrusion() -> None:
-    protrusion = Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple())
+    protrusion = Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple(), _TIP)
     assert Component("D1", protrusion).protrusion is protrusion
+
+
+def test_a_component_counts_until_the_filter_says_otherwise() -> None:
+    """Nothing is withheld before the panel-reference expression runs, so a
+    part read off a board is admitted until ``admit`` clears it. ``Match``
+    reads exactly this to tell a part with no cylinder -- a finding -- from
+    one the expression passed over, which is not."""
+    assert Component("D1", None).admitted is True
+    assert Component("D1", None, admitted=False).admitted is False
+
+
+def test_a_component_refuses_a_truthy_stand_in_for_admitted() -> None:
+    """An exact type check, as every other guard here is: ``1`` reads as
+    admitted under ``if`` and would serialise as an integer."""
+    with pytest.raises(TypeError, match="admitted"):
+        Component("D1", None, admitted=1)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------
@@ -184,6 +249,19 @@ def test_board_extent_rejects_a_non_integer_nanometre() -> None:
         Board(1, ("D1",), (Nanometre(1), Nanometre(1), 1.0), _frame(), (Component("D1", None),))  # type: ignore[arg-type]
 
 
+def test_board_takes_the_one_panel_face_there_is_or_none() -> None:
+    """``+w`` is the only value, because which face points at the panel is
+    derived rather than searched: a board is seatable only when its
+    components protrude out through the drilled face. ``-w`` was the other
+    half of a search that is withdrawn, and it is now refused rather than
+    accepted and silently ignored."""
+    parts = (Component("D1", None),)
+    assert Board(1, ("D1",), _extent(), _frame(), parts, panel_face="+w").panel_face == "+w"
+    assert Board(1, ("D1",), _extent(), _frame(), parts).panel_face is None
+    with pytest.raises(ValueError, match="panel_face"):
+        Board(1, ("D1",), _extent(), _frame(), parts, panel_face="-w")
+
+
 def test_board_carries_every_designator_and_component_not_just_the_first() -> None:
     """Vacuity hazard: a single-component board passes an implementation
     that quietly drops every component but the first."""
@@ -200,28 +278,48 @@ def test_board_carries_every_designator_and_component_not_just_the_first() -> No
 
 def _correspondence(designator: str = "D1", hole_index: int = 1) -> Correspondence:
     return Correspondence(
-        designator, hole_index, (Nanometre(0), Nanometre(0)), Nanometre(0), Nanometre(0)
+        designator,
+        hole_index,
+        (Nanometre(0), Nanometre(0)),
+        Nanometre(0),
+        Nanometre(0),
+        Nanometre(0),
     )
 
 
 def test_correspondence_requires_a_designator() -> None:
     with pytest.raises(ValueError, match="designator"):
-        Correspondence("", 1, (Nanometre(0), Nanometre(0)), Nanometre(0), Nanometre(0))
+        Correspondence("", 1, (Nanometre(0), Nanometre(0)), Nanometre(0), Nanometre(0), Nanometre(0))
 
 
 def test_correspondence_hole_index_is_numbered_from_one() -> None:
     with pytest.raises(ValueError, match="numbered from 1"):
-        Correspondence("D1", 0, (Nanometre(0), Nanometre(0)), Nanometre(0), Nanometre(0))
+        Correspondence("D1", 0, (Nanometre(0), Nanometre(0)), Nanometre(0), Nanometre(0), Nanometre(0))
 
 
 def test_correspondence_hole_xy_must_have_two_components() -> None:
     with pytest.raises(ValueError, match="two components"):
-        Correspondence("D1", 1, (Nanometre(0),), Nanometre(0), Nanometre(0))  # type: ignore[arg-type]
+        Correspondence("D1", 1, (Nanometre(0),), Nanometre(0), Nanometre(0), Nanometre(0))  # type: ignore[arg-type]
+
+
+def test_a_correspondence_states_its_insertion_and_its_seating_together() -> None:
+    """Both or neither: nothing stops a part the hole admits entirely, so it
+    seats the board nowhere, and a value stating one without the other would
+    let ``Seat`` reduce a depth that no insertion bounds."""
+    with pytest.raises(ValueError, match="or neither"):
+        Correspondence("D1", 1, (Nanometre(0), Nanometre(0)), Nanometre(4), Nanometre(0), None)
+    with pytest.raises(ValueError, match="or neither"):
+        Correspondence("D1", 1, (Nanometre(0), Nanometre(0)), None, Nanometre(0), Nanometre(-4))
+
+
+def test_a_correspondence_seating_is_a_whole_number_of_nanometres() -> None:
+    with pytest.raises(TypeError):
+        Correspondence("D1", 1, (Nanometre(0), Nanometre(0)), Nanometre(4), Nanometre(0), -0.5)  # type: ignore[arg-type]
 
 
 def test_correspondence_rejects_a_non_integer_nanometre() -> None:
     with pytest.raises(TypeError):
-        Correspondence("D1", 1, (Nanometre(0), Nanometre(0)), 0.5, Nanometre(0))  # type: ignore[arg-type]
+        Correspondence("D1", 1, (Nanometre(0), Nanometre(0)), 0.5, Nanometre(0), Nanometre(0))  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------
@@ -434,7 +532,7 @@ def test_dockdata_worst_severity_matches_the_published_function_when_empty() -> 
 
 
 def _built_protrusion() -> Protrusion:
-    return Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple())
+    return Protrusion("D1", (Nanometre(0), Nanometre(0)), _profile_simple(), _TIP)
 
 
 def _built_component() -> Component:
