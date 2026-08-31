@@ -1,4 +1,4 @@
-"""Serialise ``DockData`` as the dock report -- ``stompcollider-dock-report`` v1.
+"""Serialise ``DockData`` as the dock report -- ``stompcollider-dock-report`` v2.
 
 Satisfies ``stompmodel.protocols.Emitter[DockData]``: ``ReportEmitter.emit``
 returns bytes and never writes them (ADR-0005). Integer nanometres
@@ -24,7 +24,7 @@ from ..model import Board, Clash, Correspondence, DockData, Placement
 __all__ = ["ReportEmitter"]
 
 FORMAT = "stompcollider-dock-report"
-VERSION = 1
+VERSION = 2
 _UNITS = "nm"
 
 _THETA_TAG = "stompcolliderthetaliteral"
@@ -142,13 +142,25 @@ def _correspondence(correspondence: Correspondence) -> dict[str, Any]:
 
 
 def _clash(clash: Clash) -> dict[str, Any]:
+    """Both volumes, and the solid this side of the pair, unconditionally.
+
+    ``bbox_volume_nm3`` is the stated box's own volume and ``common_volume_nm3``
+    the material actually shared, which over a whole board the first bounds
+    only loosely. ``part`` is JSON ``null`` where the whole board was
+    checked at once rather than absent, so a consumer tells a
+    board-against-case finding from a key that was dropped -- the same rule
+    ``location_nm`` follows below. The pair of them is why this document is
+    version 2.
+    """
     return {
         "with": clash.with_,
         "kind": clash.kind,
+        "part": clash.part,
         "bbox_nm": list(clash.bbox_nm),
         "depth_nm": clash.depth_nm,
         "axis": clash.axis,
-        "volume_nm3": clash.volume_nm3,
+        "bbox_volume_nm3": clash.bbox_volume_nm3,
+        "common_volume_nm3": clash.common_volume_nm3,
     }
 
 

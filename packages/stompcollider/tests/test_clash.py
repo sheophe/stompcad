@@ -241,7 +241,7 @@ def test_the_volume_is_the_bounding_box_volume_in_whole_nanometres() -> None:
         _box((0, 0, 0), 10, 12, 14), _box((8, 0, 0), 10, 40, 40)
     )
 
-    assert found[0].volume_nm3 == 2_000_000 * 12_000_000 * 14_000_000
+    assert found[0].bbox_volume_nm3 == 2_000_000 * 12_000_000 * 14_000_000
 
 
 def test_the_bbox_is_stated_in_the_case_face_frame_not_in_model_coordinates() -> None:
@@ -447,31 +447,40 @@ def _three_boards() -> tuple[DockData, Clashes]:
         {1: (_placement(),), 2: (_placement(),), 3: (_placement(),)},
     )
     solids = {
-        1: (_solid("", _box((0, 0, 0), 12, 14, 5)),),
-        2: (_solid("", _box((-12, 0, 0), 12, 6, 8)),),
-        3: (_solid("", _box((10, 0, 0), 9, 14, 5)),),
+        1: (_solid("P", _box((0, 0, 0), 12, 14, 5)),),
+        2: (_solid("Q", _box((-12, 0, 0), 12, 6, 8)),),
+        3: (_solid("R", _box((10, 0, 0), 9, 14, 5)),),
     }
     return data, Clashes(_enclosure(), solids)
 
 
 def test_a_clash_with_another_board_is_kinded_board() -> None:
-    """So a consumer never parses the ``with`` string to learn what it is."""
+    """So a consumer never parses the ``with`` string to learn what it is.
+
+    ``with`` names the other board's *solid*, under the very name the
+    assembly model writes it as, so a reader can find it in the file.
+    """
     data, stage = _three_boards()
     found = stage.apply(data).placements[1][0].clashes
 
     assert found[0].kind == "board"
-    assert found[0].with_ == "board:3"
+    assert found[0].with_ == "board:3:R"
+    assert found[0].part == "board:1:P"
 
 
 def test_a_board_is_checked_against_every_other_board_not_only_its_neighbour() -> None:
     """Rule 1 again, over boards: board 1 meets board 3 with board 2 sitting
-    between them in ordinal order and touching neither."""
+    between them in ordinal order and touching neither.
+
+    The pair is stated once, on the lower ordinal, so board 3 carries no
+    second copy of the one fact -- see the stated-once test below.
+    """
     data, stage = _three_boards()
     placements = stage.apply(data).placements
 
-    assert [clash.with_ for clash in placements[1][0].clashes] == ["board:3"]
+    assert [clash.with_ for clash in placements[1][0].clashes] == ["board:3:R"]
     assert placements[2][0].clashes == ()
-    assert [clash.with_ for clash in placements[3][0].clashes] == ["board:1"]
+    assert placements[3][0].clashes == ()
 
 
 def test_an_inter_board_clash_is_measured_the_same_way_a_case_clash_is() -> None:
@@ -482,7 +491,8 @@ def test_an_inter_board_clash_is_measured_the_same_way_a_case_clash_is() -> None
 
     assert found[0].depth_nm == _nm(2.0)
     assert found[0].axis == "u"
-    assert found[0].volume_nm3 == 2_000_000 * 14_000_000 * 5_000_000
+    assert found[0].bbox_volume_nm3 == 2_000_000 * 14_000_000 * 5_000_000
+    assert found[0].common_volume_nm3 == pytest.approx(found[0].bbox_volume_nm3, rel=1e-12)
 
 
 def test_clashes_sort_by_kind_then_with_then_depth() -> None:
@@ -722,8 +732,8 @@ def _assembly_scene() -> tuple[DockData, Clashes]:
         {1: (_placement(rank=1), _placement(rank=2, x_mm=36.0)), 2: (_placement(),)},
     )
     solids = {
-        1: (_solid("", _box((-14, 0, 0), 12, 20, 5)),),
-        2: (_solid("", _box((-10, 0, 0), 16, 26, 3)),),
+        1: (_solid("P", _box((-14, 0, 0), 12, 20, 5)),),
+        2: (_solid("Q", _box((-10, 0, 0), 16, 26, 3)),),
     }
     return data, Clashes(_enclosure(), solids)
 
@@ -735,7 +745,7 @@ def test_each_board_is_ranked_against_the_case_alone() -> None:
     chosen = stage.apply(data).placements[1][0]
 
     assert int(chosen.x_nm) == 0
-    assert [clash.with_ for clash in chosen.clashes] == ["board:2"]
+    assert [clash.with_ for clash in chosen.clashes] == ["board:2:Q"]
     assert chosen.clashes[0].depth_nm == _nm(3.0)
 
 
@@ -773,7 +783,9 @@ def test_a_clashing_board_is_still_reported_and_still_drawn() -> None:
 
     assert len(result.placements[1]) == 2
     assert max(finding.severity for finding in result.diagnostics).name == "WARNING"
-    assert {finding.code for finding in result.diagnostics} == {"clash"}
+    assert {finding.code for finding in result.of_severity(Severity.WARNING)} == {
+        "clash"
+    }
 
 
 def test_a_clash_is_reported_once_per_clash_of_the_chosen_placement() -> None:
@@ -783,7 +795,9 @@ def test_a_clash_is_reported_once_per_clash_of_the_chosen_placement() -> None:
     result = Clashes(_enclosure(), {1: _reaching_board()}).apply(data)
 
     assert len(result.of_severity(Severity.WARNING)) == 2
-    assert {dict(finding.data)["with"] for finding in result.diagnostics} == {"LID", "WALL"}
+    assert {
+        dict(finding.data)["with"] for finding in result.of_severity(Severity.WARNING)
+    } == {"LID", "WALL"}
 
 
 def test_a_clean_assembly_raises_nothing() -> None:
@@ -882,3 +896,332 @@ def test_apply_does_not_record_its_own_stage_run() -> None:
     result = Clashes(_enclosure(), {1: _reaching_board()}).apply(data)
 
     assert result.processing == ()
+
+
+# --------------------------------------------------------------------------
+# A clash carries its true volume as well as its box.
+# --------------------------------------------------------------------------
+
+
+def test_a_clash_states_the_exact_volume_of_the_region_beside_its_box() -> None:
+    """The box answers how far to move; the region answers how much is in the
+    way, and over a curved region the two differ by a fixed factor.
+
+    A shaft 4 mm across through a 3 mm plate shares a cylinder: pi * 4 * 3
+    cubic millimetres of material inside a box of 4 * 4 * 3.
+    """
+    found = _clashes_between(
+        _cylinder((20.0, 20.0, -5.0), 2.0, 13.0), _box((15, 15, 0), 10, 10, 3)
+    )
+
+    assert len(found) == 1
+    assert found[0].bbox_volume_nm3 == 4_000_000 * 4_000_000 * 3_000_000
+    assert found[0].common_volume_nm3 == pytest.approx(
+        math.pi * 4.0 * 3.0 * 10**18, rel=1e-6
+    )
+    assert found[0].common_volume_nm3 < found[0].bbox_volume_nm3
+
+
+def test_the_two_volumes_agree_exactly_where_the_region_really_is_its_box() -> None:
+    """The control beside it: a rule reporting the box for both would pass the
+    equality here and fail the inequality above, and one reporting nothing for
+    the exact volume would pass above and fail here."""
+    found = _clashes_between(_box((0, 0, 0), 10, 12, 14), _box((8, 0, 0), 10, 40, 40))
+
+    assert found[0].common_volume_nm3 == pytest.approx(found[0].bbox_volume_nm3, rel=1e-12)
+    assert found[0].common_volume_nm3 == pytest.approx(
+        2_000_000 * 12_000_000 * 14_000_000, rel=1e-12
+    )
+
+
+# --------------------------------------------------------------------------
+# Between two boards: per solid, and stated once.
+# --------------------------------------------------------------------------
+
+
+def _meeting_boards() -> tuple[DockData, Clashes]:
+    """Two boards whose solids meet in two places, clear of every case solid.
+
+    Board 1 carries two named parts and board 2 one; each of board 1's meets
+    board 2's, in 2 x 10 x 4 mm of material apiece. A rule reporting one
+    finding per board pair states one clash here where there are two.
+    """
+    data = _dock((_board(1), _board(2)), {1: (_placement(),), 2: (_placement(),)})
+    solids = {
+        1: (_solid("A", _box((0, 0, 0), 10, 10, 4)),
+            _solid("B", _box((0, 20, 0), 10, 10, 4))),
+        2: (_solid("C", _box((8, 0, 0), 6, 30, 4)),),
+    }
+    return data, Clashes(_enclosure(), solids)
+
+
+def test_an_inter_board_finding_names_the_two_solids_that_meet() -> None:
+    """Not the two boards: "board 1 clashes with board 2" is not something a
+    person can act on."""
+    data, stage = _meeting_boards()
+    found = stage.apply(data).placements[1][0].clashes
+
+    assert [(clash.part, clash.with_) for clash in found] == [
+        ("board:1:A", "board:2:C"), ("board:1:B", "board:2:C"),
+    ]
+    assert {clash.kind for clash in found} == {"board"}
+
+
+def test_each_meeting_pair_of_solids_states_its_own_volume() -> None:
+    """Two pairs, each 2 x 10 x 4 mm of material: the detail a person acts on."""
+    data, stage = _meeting_boards()
+    found = stage.apply(data).placements[1][0].clashes
+
+    assert [clash.common_volume_nm3 for clash in found] == pytest.approx(
+        [2_000_000 * 10_000_000 * 4_000_000] * 2, rel=1e-12
+    )
+
+
+def test_an_unordered_pair_of_boards_is_stated_once_and_not_from_both_sides() -> None:
+    """The same interference recorded against both boards is one fact printed
+    twice, and a reader counting findings would count it twice."""
+    data, stage = _meeting_boards()
+    placements = stage.apply(data).placements
+
+    assert len(placements[1][0].clashes) == 2
+    assert placements[2][0].clashes == ()
+
+
+def test_the_pair_is_summarised_beside_the_per_solid_detail() -> None:
+    """An assembly of many parts needs a line saying *these two boards
+    interfere* without reading every pair; it is a summary over the detail
+    rather than the only statement."""
+    data, stage = _meeting_boards()
+    findings = stage.apply(data).diagnostics
+    summary = [f for f in findings if "solids" in dict(f.data)]
+
+    assert len(summary) == 1
+    stated = dict(summary[0].data)
+    assert stated["board"] == 1
+    assert stated["with"] == "board:2"
+    assert stated["kind"] == "board"
+    assert stated["solids"] == 2
+    assert stated["common_volume_nm3"] == pytest.approx(
+        2 * 2_000_000 * 10_000_000 * 4_000_000, rel=1e-12
+    )
+
+
+def test_the_detail_findings_name_the_solids_the_summary_counts() -> None:
+    """The control on the summary: it must not be the only board finding, or
+    the per-solid rule above reaches no report."""
+    data, stage = _meeting_boards()
+    detail = [
+        dict(f.data)["part"]
+        for f in stage.apply(data).diagnostics
+        if "part" in dict(f.data)
+    ]
+
+    assert detail == ["board:1:A", "board:1:B"]
+
+
+def _meeting_substrates() -> tuple[DockData, Clashes]:
+    """The same meeting between two solids nobody named: two substrates."""
+    data = _dock((_board(1), _board(2)), {1: (_placement(),), 2: (_placement(),)})
+    solids = {
+        1: (_solid("", _box((0, 0, 0), 10, 10, 4)),),
+        2: (_solid("", _box((8, 0, 0), 6, 30, 4)),),
+    }
+    return data, Clashes(_enclosure(), solids)
+
+
+def test_a_finding_calls_a_solid_nobody_named_a_substrate_on_either_side() -> None:
+    """A least corner identifies a solid but does not read as one. The message
+    says what it is, on both sides of the pair; the finding's own keys keep the
+    exact identity, which is the name the assembly writes that solid under."""
+    data, stage = _meeting_substrates()
+    found = [f for f in stage.apply(data).diagnostics if "part" in dict(f.data)]
+
+    assert len(found) == 1
+    assert found[0].message.startswith(
+        "board 1's substrate clashes with board 2's substrate by "
+    )
+    stated = dict(found[0].data)
+    assert str(stated["part"]).startswith("board:1:unnamed@")
+    assert str(stated["with"]).startswith("board:2:unnamed@")
+
+
+def test_a_named_board_solid_keeps_its_designator_in_the_message() -> None:
+    """The control beside it: only a solid nobody named is restated, so a rule
+    rewriting every name would fail here."""
+    data, stage = _meeting_boards()
+    found = [f for f in stage.apply(data).diagnostics if "part" in dict(f.data)]
+
+    assert [f.message.split(" clashes with ")[0] for f in found] == [
+        "board:1:A",
+        "board:1:B",
+    ]
+    assert all(
+        f.message.split(" clashes with ")[1].startswith("board:2:C by ") for f in found
+    )
+
+
+# --------------------------------------------------------------------------
+# Two-stage seating selection.
+# --------------------------------------------------------------------------
+
+
+def _two_stage_scene() -> tuple[DockData, Clashes]:
+    """Board 1 has two seatings that both clear the case, and one of them
+    fouls board 2.
+
+    Stage one ranks on the transform alone, which puts the fouling one at
+    ``x = 25`` first. Stage two must move the clear one at ``x = 100`` to
+    rank 1, on mutual interference alone.
+    """
+    data = _dock(
+        (_board(1), _board(2)),
+        {1: (_placement(rank=1, x_mm=25.0), _placement(rank=2, x_mm=100.0)),
+         2: (_placement(),)},
+    )
+    solids = {
+        1: (_solid("A", _box((0, 0, 0), 10, 10, 4)),),
+        2: (_solid("C", _box((30, 0, 0), 10, 10, 4)),),
+    }
+    return data, Clashes(_enclosure(), solids)
+
+
+def test_stage_one_alone_would_choose_the_seating_that_fouls_its_neighbour() -> None:
+    """The control for the test below: with no clash to read, the ranking key
+    falls through to the transform and puts ``x = 25`` first."""
+    data, _stage = _two_stage_scene()
+    ranked = Seat().apply(data).placements[1]
+
+    assert [int(placement.x_nm) for placement in ranked] == [25_000_000, 100_000_000]
+
+
+def test_stage_two_chooses_the_assembly_of_least_inter_board_volume() -> None:
+    """Both of board 1's seatings clear the case, so the case has already been
+    answered and mutual interference alone decides between them."""
+    data, stage = _two_stage_scene()
+    ranked = stage.apply(data).placements[1]
+
+    assert int(ranked[0].x_nm) == 100_000_000
+    assert ranked[0].rank == 1
+    assert ranked[0].clashes == ()
+
+
+def test_the_seating_stage_two_rejected_is_still_reported() -> None:
+    """Every distinct placement is returned; rank is a reported field and
+    never a verdict that withholds one."""
+    data, stage = _two_stage_scene()
+    ranked = stage.apply(data).placements[1]
+
+    assert [int(p.x_nm) for p in ranked] == [100_000_000, 25_000_000]
+    assert [p.rank for p in ranked] == [1, 2]
+
+
+def test_a_seating_that_fouls_the_case_takes_no_part_in_stage_two() -> None:
+    """A seating that fouls the enclosure is not a seating, so it cannot be
+    improved by anything a neighbouring board does.
+
+    Board 1's ``x = 0`` candidate is clear of every other board and would win
+    stage two outright; it fouls the wall, so stage one discards it and the
+    clean candidate at ``x = 100`` is chosen although it is not rank 1 by the
+    transform.
+    """
+    data = _dock(
+        (_board(1),),
+        {1: (_placement(rank=1), _placement(rank=2, x_mm=100.0))},
+    )
+    stage = Clashes(_enclosure(), {1: (_solid("A", _box((0, 0, 0), 21, 14, 10)),)})
+    ranked = stage.apply(data).placements[1]
+
+    assert int(ranked[0].x_nm) == 100_000_000
+    assert ranked[0].clashes == ()
+
+
+def test_a_board_no_seating_clears_the_case_for_says_so() -> None:
+    """Otherwise a reader could not tell a chosen seating from a defaulted one."""
+    data = _dock((_board(1),), {1: (_placement(), _placement(rank=2, y_mm=1.0))})
+    result = Clashes(_enclosure(), {1: _reaching_board()}).apply(data)
+
+    assert [f.code for f in result.of_severity(Severity.INFO)] == [
+        "every-seating-clashes"
+    ]
+    assert dict(result.of_severity(Severity.INFO)[0].data) == {"board": 1}
+
+
+def test_that_board_keeps_its_stage_one_rank_one_and_is_still_written() -> None:
+    """The assembly is written at its stage-one rank 1: withholding the model
+    would take away the very artefact that shows what to fix."""
+    data = _dock((_board(1),), {1: (_placement(), _placement(rank=2, y_mm=1.0))})
+    ranked = Clashes(_enclosure(), {1: _reaching_board()}).apply(data).placements[1]
+
+    assert [p.rank for p in ranked] == [1, 2]
+    assert int(ranked[0].y_nm) == 0
+
+
+def test_a_board_with_a_clean_seating_earns_no_such_finding() -> None:
+    """The control: a stage raising it unconditionally passes both tests above."""
+    data = _dock((_board(1),), {1: (_placement(x_mm=200.0),)})
+    result = Clashes(_enclosure(), {1: _reaching_board()}).apply(data)
+
+    assert [f.code for f in result.diagnostics] == []
+
+
+def test_the_combination_count_is_bounded_and_the_bound_is_stated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never truncated silently: a run that could not try every assembly says
+    so, and says how many there were."""
+    monkeypatch.setattr("stompcollider.clash._COMBINATION_LIMIT", 1)
+    data, stage = _two_stage_scene()
+    result = stage.apply(data)
+    notes = [f for f in result.diagnostics if f.code == "seating-search-bounded"]
+
+    assert len(notes) == 1
+    assert dict(notes[0].data) == {"limit": 1, "combinations": 2}
+    assert int(result.placements[1][0].x_nm) == 25_000_000
+
+
+def test_an_unbounded_search_states_no_bound_and_reaches_the_better_assembly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control beside it: with room for both combinations the note is
+    absent and the assembly chosen is the one the bound cut off."""
+    monkeypatch.setattr("stompcollider.clash._COMBINATION_LIMIT", 2)
+    data, stage = _two_stage_scene()
+    result = stage.apply(data)
+
+    assert [f.code for f in result.diagnostics if f.code == "seating-search-bounded"] == []
+    assert int(result.placements[1][0].x_nm) == 100_000_000
+
+
+def test_a_sub_millicubic_clash_does_not_read_as_zero_cubic_millimetres() -> None:
+    """The volume half of rule 3: a region a person should see must not print
+    as nothing, and cubic nanometres shrink far faster than nanometres do.
+
+    Two boards overlapping by one nanometre over 12 by 14 millimetres hold
+    0.000168 mm3 of shared material, which three decimals erase entirely.
+    """
+    data = _dock((_board(1), _board(2)), {1: (_placement(),), 2: (_placement(),)})
+    stage = Clashes(
+        (),
+        {
+            1: (_solid("P", _box((0, 0, 0), 10, 12, 14)),),
+            2: (_solid("Q", _box((9.999999, 0, 0), 10, 12, 14)),),
+        },
+    )
+    detail = [
+        f for f in stage.apply(data).diagnostics if "part" in dict(f.data)
+    ]
+
+    assert len(detail) == 1
+    assert "0.000168" in detail[0].message
+    assert "by 0.000 mm³" not in detail[0].message
+
+
+def test_an_ordinary_clash_volume_is_still_stated_at_three_decimals() -> None:
+    """The control beside it: the fallback is for what three decimals cannot
+    state, and a rule applying it always would print every volume long."""
+    data, stage = _meeting_boards()
+    detail = [
+        f for f in stage.apply(data).diagnostics if "part" in dict(f.data)
+    ]
+
+    assert "by 80.000 mm³" in detail[0].message

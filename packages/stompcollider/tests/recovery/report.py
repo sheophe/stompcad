@@ -27,7 +27,7 @@ from . import (
 __all__ = ["read_report"]
 
 FORMAT = "stompcollider-dock-report"
-VERSION = 1
+VERSION = 2
 UNITS = "nm"
 
 
@@ -164,16 +164,24 @@ def _correspondence(value: Any) -> RecoveredCorrespondence:
 
 def _clash(value: Any) -> RecoveredClash:
     clash = _fields(
-        value, ("with", "kind", "bbox_nm", "depth_nm", "axis", "volume_nm3"), "clash"
+        value,
+        ("with", "kind", "part", "bbox_nm", "depth_nm", "axis", "bbox_volume_nm3",
+         "common_volume_nm3"),
+        "clash",
     )
     box = _lengths(clash["bbox_nm"], 6, "clash.bbox_nm")
+    part = clash["part"]
     return RecoveredClash(
         with_=_text(clash["with"], "clash.with"),
         kind=_text(clash["kind"], "clash.kind"),
+        part=None if part is None else _text(part, "clash.part"),
         bbox_nm=(box[0], box[1], box[2], box[3], box[4], box[5]),
         depth_nm=_length(clash["depth_nm"], "clash.depth_nm"),
         axis=_text(clash["axis"], "clash.axis"),
-        volume_nm3=_count(clash["volume_nm3"], "clash.volume_nm3"),
+        bbox_volume_nm3=_count(clash["bbox_volume_nm3"], "clash.bbox_volume_nm3"),
+        common_volume_nm3=_count(
+            clash["common_volume_nm3"], "clash.common_volume_nm3"
+        ),
     )
 
 

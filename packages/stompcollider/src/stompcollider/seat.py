@@ -25,14 +25,16 @@ __all__ = ["Seat", "rank_key"]
 def rank_key(placement: Placement) -> tuple[int, int, int, float, int, int]:
     """The spec's lexicographic key, whole, from the first version.
 
-    Six-wide whether or not any clash has been found, so that the clash
-    stage feeds this comparator rather than replacing one: a placement with
-    no clashes scores zero on the first three elements and orders on
-    ``(theta_deg, x_nm, y_nm)`` alone.
+    Six-wide whether or not any clash has been found, so the clash stage
+    feeds this comparator rather than replacing one: a clean placement
+    scores zero on the first three and orders on the transform alone. The
+    volume compared is the material shared, never the box around it -- a
+    box over a whole board overstates what meets by a factor the spec
+    measures at fifty. Depth still comes from the box.
     """
     return (
         len(placement.clashes),
-        sum(clash.volume_nm3 for clash in placement.clashes),
+        sum(clash.common_volume_nm3 for clash in placement.clashes),
         max((int(clash.depth_nm) for clash in placement.clashes), default=0),
         placement.theta_deg,
         int(placement.x_nm),

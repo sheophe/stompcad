@@ -19,7 +19,6 @@ from stompgeom.step import (
     StepDocument,
     StepSolid,
     assembly_spans,
-    bounding_box_mm,
     read_step,
 )
 from stompmodel.codec import from_document
@@ -264,7 +263,7 @@ def _board(
         raise NoSubstrateError("a grouped solid measures no slab")
     outward = _outward(frame.w, substrate, parts)
     u, v = basis_about(outward)
-    box = bounding_box_mm(substrate.shape)
+    box = substrate.box_mm
     return RawBoard(
         corner_a_mm=(box[0], box[1], box[2]),
         corner_b_mm=(box[3], box[4], box[5]),
@@ -295,7 +294,7 @@ def _outward(normal: Direction, substrate: StepSolid, parts: Sequence[StepSolid]
     the side one reaches furthest beyond the substrate wins. With no such
     cylinder either way nothing protrudes, so the frame's normal stands.
     """
-    low, high = _extremes(bounding_box_mm(substrate.shape), normal)
+    low, high = _extremes(substrate.box_mm, normal)
     reaches = [
         reach_along(cylinder, normal)
         for part in parts

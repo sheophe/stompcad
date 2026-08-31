@@ -266,11 +266,14 @@ class Correspondence:
 
 @dataclass(frozen=True, slots=True)
 class Clash:
-    """One interference region: what it is against, and its extent.
+    """One interference region: what it is against, and how much there is.
 
-    ``bbox_nm`` is the common region's axis-aligned bounding box in the
-    case's face frame, ``(xmin, ymin, zmin, xmax, ymax, zmax)``; ``depth_nm``
-    is its least extent and ``axis`` that axis -- see "Clashes" in the spec.
+    ``bbox_nm`` is the region's box in the case's face frame; ``depth_nm``
+    is its least extent and ``axis`` that axis. ``bbox_volume_nm3`` is the box's
+    own volume and ``common_volume_nm3`` the region's -- the box answers
+    how far to move, the region how much is in the way. ``part`` names this
+    board's own solid where two solids met, ``None`` where the whole board
+    was checked at once. See "Clashes" in the spec.
     """
 
     with_: str
@@ -278,7 +281,9 @@ class Clash:
     bbox_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre, Nanometre, Nanometre]
     depth_nm: Nanometre
     axis: str
-    volume_nm3: int
+    bbox_volume_nm3: int
+    common_volume_nm3: int
+    part: str | None = None
 
     def __post_init__(self) -> None:
         if not self.with_:
@@ -287,10 +292,21 @@ class Clash:
             raise ValueError("a clash states its kind")
         if not self.axis:
             raise ValueError("a clash states its axis")
+        if self.part is not None and not self.part:
+            raise ValueError("a clash naming its own solid names it, or names none")
         if len(self.bbox_nm) != 6:
             raise ValueError(
                 f"Clash.bbox_nm must have exactly six components, not {len(self.bbox_nm)}"
             )
+        for name, volume in (
+            ("bbox_volume_nm3", self.bbox_volume_nm3),
+            ("common_volume_nm3", self.common_volume_nm3),
+        ):
+            if type(volume) is not int or volume < 0:
+                raise ValueError(
+                    f"Clash.{name} must be a whole number of cubic nanometres, "
+                    f"not {volume!r}"
+                )
         check_nanometres(
             "Clash",
             **{f"bbox_nm[{index}]": value for index, value in enumerate(self.bbox_nm)},

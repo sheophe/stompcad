@@ -14,7 +14,7 @@ import math
 from collections.abc import Sequence
 
 from stompgeom.levels import Direction, Level, levels
-from stompgeom.step import StepDocument, StepSolid, bounding_box_mm
+from stompgeom.step import StepDocument, StepSolid
 from stompmodel.frames import CoordinateFrame, cross, dot
 from stompmodel.units import Millimetre, Nanometre, mm_from_nm, nm_from_mm
 
@@ -132,12 +132,12 @@ def group(
     """
     if not found:
         raise NoSubstrateError("there is no board to group these solids onto")
-    boxes = [(solid, _frame_of(solid), bounding_box_mm(solid.shape)) for solid in found]
+    boxes = [(solid, _frame_of(solid), solid.box_mm) for solid in found]
     assigned: list[list[StepSolid]] = [[] for _ in boxes]
     for part in document.solids:
         if not part.name:
             continue
-        box = bounding_box_mm(part.shape)
+        box = part.box_mm
         index = min(
             range(len(boxes)),
             key=lambda i: (_contact(boxes[i][1], boxes[i][2], box), boxes[i][2]),

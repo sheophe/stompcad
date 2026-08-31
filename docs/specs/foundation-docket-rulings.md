@@ -326,7 +326,7 @@ have left. It moves back.
 `mm_from_nm` is that — so it is admitted under rule 2, which ADR-0009:308-310 requires be
 justified by a nameable `stompcad`-visible behaviour. **That sentence has never been
 written, and this ruling writes it:** the collider's report prints nanometre quantities
-(`depth_nm`, `volume_nm3` in `stompcollider-technical.md`'s "The report"), `stompcad` reduces both
+(`depth_nm`, `bbox_volume_nm3` in `stompcollider-technical.md`'s "The report"), `stompcad` reduces both
 tools' output to one report, and two independent renderers would print one nanometre two
 ways.
 

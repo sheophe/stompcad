@@ -72,14 +72,16 @@ def _correspondence(
     )
 
 
-def _clash(with_: str = "LID") -> Clash:
+def _clash(with_: str = "LID", part: str | None = None) -> Clash:
     return Clash(
         with_=with_,
         kind="case",
         bbox_nm=(_nm(-4_000_000), _nm(20_000_000), _nm(-2_100_000), _nm(4_000_000), _nm(26_000_000), _nm(0)),
         depth_nm=_nm(2_100_000),
         axis="w",
-        volume_nm3=42_000_000_000_000_000_000,
+        bbox_volume_nm3=42_000_000_000_000_000_000,
+        common_volume_nm3=13_000_000_000_000_000_000,
+        part=part,
     )
 
 
@@ -142,7 +144,7 @@ def _data(
 def test_the_header_names_the_format_and_version() -> None:
     document = json.loads(ReportEmitter().emit(_data()))
     assert document["format"] == "stompcollider-dock-report"
-    assert document["version"] == 1
+    assert document["version"] == 2
     assert document["units"] == "nm"
 
 

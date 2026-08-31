@@ -97,16 +97,23 @@ class RecoveredCorrespondence:
 
 @dataclass(frozen=True, slots=True)
 class RecoveredClash:
-    """One interference the report states, with the extent it claims."""
+    """One interference the report states, with the extent it claims.
+
+    Both volumes are modelled and so is ``part``: a reader that skipped
+    what it does not model would pass an emitter change by omission, and
+    these three are exactly what version 2 added.
+    """
 
     with_: str
     kind: str
+    part: str | None
     bbox_nm: tuple[
         Nanometre, Nanometre, Nanometre, Nanometre, Nanometre, Nanometre
     ]
     depth_nm: Nanometre
     axis: str
-    volume_nm3: int
+    bbox_volume_nm3: int
+    common_volume_nm3: int
 
 
 @dataclass(frozen=True, slots=True)

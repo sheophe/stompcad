@@ -336,33 +336,33 @@ def _bbox() -> tuple[Nanometre, Nanometre, Nanometre, Nanometre, Nanometre, Nano
 
 def test_clash_requires_a_named_other_solid() -> None:
     with pytest.raises(ValueError, match="against"):
-        Clash("", "case", _bbox(), Nanometre(0), "w", 0)
+        Clash("", "case", _bbox(), Nanometre(0), "w", 0, 0)
 
 
 def test_clash_requires_a_kind() -> None:
     with pytest.raises(ValueError, match="kind"):
-        Clash("LID", "", _bbox(), Nanometre(0), "w", 0)
+        Clash("LID", "", _bbox(), Nanometre(0), "w", 0, 0)
 
 
 def test_clash_requires_an_axis() -> None:
     with pytest.raises(ValueError, match="axis"):
-        Clash("LID", "case", _bbox(), Nanometre(0), "", 0)
+        Clash("LID", "case", _bbox(), Nanometre(0), "", 0, 0)
 
 
 def test_clash_bbox_must_have_exactly_six_components() -> None:
     with pytest.raises(ValueError, match="six components"):
-        Clash("LID", "case", (Nanometre(0),) * 4, Nanometre(0), "w", 0)  # type: ignore[arg-type]
+        Clash("LID", "case", (Nanometre(0),) * 4, Nanometre(0), "w", 0, 0)  # type: ignore[arg-type]
 
 
 def test_clash_rejects_a_non_integer_bbox_component() -> None:
     bad = (Nanometre(0), Nanometre(0), Nanometre(0), Nanometre(1), Nanometre(1), 1.0)
     with pytest.raises(TypeError):
-        Clash("LID", "case", bad, Nanometre(0), "w", 0)  # type: ignore[arg-type]
+        Clash("LID", "case", bad, Nanometre(0), "w", 0, 0)  # type: ignore[arg-type]
 
 
 def test_clash_carries_every_bbox_component_not_just_the_first() -> None:
     bbox = _bbox()
-    clash = Clash("LID", "case", bbox, Nanometre(1), "w", 1)
+    clash = Clash("LID", "case", bbox, Nanometre(1), "w", 1, 1)
     assert clash.bbox_nm == bbox
 
 
@@ -548,7 +548,7 @@ def _built_correspondence() -> Correspondence:
 
 
 def _built_clash() -> Clash:
-    return Clash("LID", "case", _bbox(), Nanometre(0), "w", 0)
+    return Clash("LID", "case", _bbox(), Nanometre(0), "w", 0, 0)
 
 
 def _built_placement() -> Placement:
@@ -586,3 +586,30 @@ def test_every_remaining_class_is_slotted(build: Callable[[], _ValueObject]) -> 
     instance = build()
     with pytest.raises(AttributeError):
         object.__setattr__(instance, "extra", 1)
+
+
+def test_clash_requires_a_whole_exact_volume() -> None:
+    """The material shared is a count of cubic nanometres like the box's own,
+    so a float measurement is refused at the boundary rather than carried."""
+    with pytest.raises(ValueError, match="common_volume_nm3"):
+        Clash("LID", "case", _bbox(), Nanometre(1), "w", 1, 1.0)  # type: ignore[arg-type]
+
+
+def test_clash_refuses_a_negative_volume_of_either_kind() -> None:
+    """Neither a box nor the material inside one holds less than nothing."""
+    with pytest.raises(ValueError, match="bbox_volume_nm3"):
+        Clash("LID", "case", _bbox(), Nanometre(1), "w", -1, 1)
+    with pytest.raises(ValueError, match="common_volume_nm3"):
+        Clash("LID", "case", _bbox(), Nanometre(1), "w", 1, -1)
+
+
+def test_clash_names_its_own_solid_or_names_none() -> None:
+    """``part`` is the solid this side of an inter-board pair; ``None`` says
+    the whole board was checked at once, and an empty string says nothing."""
+    assert Clash("LID", "case", _bbox(), Nanometre(1), "w", 1, 1).part is None
+    assert (
+        Clash("b:2:Q", "board", _bbox(), Nanometre(1), "w", 1, 1, "b:1:P").part
+        == "b:1:P"
+    )
+    with pytest.raises(ValueError, match="own solid"):
+        Clash("b:2:Q", "board", _bbox(), Nanometre(1), "w", 1, 1, "")

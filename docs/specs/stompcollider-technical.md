@@ -541,17 +541,47 @@ mirror-imaged.
 
 ### Several boards
 
-Each board is ranked against the case **alone**. The assembly is then formed from
-each board's rank-1 placement, and inter-board clashes are computed once on that
-assembly.
+Seating an assembly is **two stages, and the first is a filter**.
 
-Board-level ranking is therefore independent and order-free — determinism does not
-rest on a traversal order, and the Cartesian product of every board's candidates
-never appears. This keeps the pre-spec's meaning of "sequential": one board at a
-time, never jointly optimised. A board with more than one placement is reported as
-`ambiguous-placement` so `stompcad` can offer a picker; the model is written at
-rank 1, and `--pin N=RANK` is refused rather than honoured, for the reason the
-command line section states.
+**Stage one ranks each board against the case alone**, exactly as `Ranking`
+states. Its output is not one placement but a set: every seating of that board
+whose clash with the case is *empty*. A seating that fouls the enclosure is not a
+seating, so it cannot be improved by anything a neighbouring board does, and it
+takes no part in what follows.
+
+**Stage two chooses among the survivors on mutual interference alone.** Over the
+combinations of stage one's candidate sets, one per board, the assembly taken is
+the one of least total inter-board clash volume. The case plays no part here; it
+was already answered, and a candidate that reached this stage clears it.
+
+The filter is what makes the second stage affordable. The Cartesian product is
+real — *k* candidates per board over *n* boards is *kⁿ* combinations — but it is
+formed over seatings that already clear the enclosure, which is a small set and
+frequently a single element. Where it is not small the count is bounded and
+stated, never silently truncated: the combinations are enumerated in stage-one
+rank order and the first `_COMBINATION_LIMIT` of them are tried, so the fallback
+when the bound bites is every board's own rank 1 rather than an arbitrary
+assembly, and `seating-search-bounded` says how many there were.
+
+Ties are broken on the stage-one ranks, which are themselves a function of the
+geometry, so which assembly a tie yields never depends on the order the product
+enumerated (ADR-0006).
+
+**A board no seating clears the case for skips stage two entirely.** Its clashes
+are reported, the assembly is written at its stage-one rank 1, and
+`every-seating-clashes` says so, because otherwise a reader could not tell a
+chosen seating from a defaulted one. This is deliberate rather than a
+degradation: a board that fights the enclosure in every orientation is a fault to
+fix, and the mutual-interference question is worth asking again once it is fixed
+and the tool re-run. Withholding the model instead would take away the very
+artefact that shows what to fix.
+
+Ordering within a board is still independent and order-free — determinism does
+not rest on a traversal order. What is now joint is only the choice *between*
+already-clean seatings. A board with more than one surviving candidate is
+reported as `ambiguous-placement` so `stompcad` can offer a picker; the model is
+written at rank 1, and `--pin N=RANK` is refused rather than honoured, for the
+reason the command line section states.
 
 Inter-board clashes are **reported, never compromised away**. A hole pattern is a
 hard constraint, so two boards that fight is a fault in the pedal, and the useful
@@ -567,7 +597,13 @@ deliberately: an enumerated list of things worth checking would eventually omit
 one, and the omission would look like a passing result.
 
 Bounding boxes filter pairs; a surviving pair gets an exact
-`BRepAlgoAPI_Common`. A clash is that common region's axis-aligned bounding box
+`BRepAlgoAPI_Common`. The filtering box of a *placed* solid is the solid's own
+box carried through the placement corner by corner, which bounds the moved shape
+without measuring it: a box too large can only send a pair to the boolean that
+would have decided it anyway, and the filter may never discard a pair that
+boolean would have kept. Nothing measured is read off it — a clash's own box
+comes from the region the boolean returned, boxed with triangulation disabled as
+"Determinism" requires. A clash is that common region's axis-aligned bounding box
 in the case's face frame. **Depth is its least extent and direction is that
 axis** — defined as the least distance along a face-frame axis that would clear
 the overlap. It is an exact answer to that definition and an honest upper bound
@@ -577,6 +613,36 @@ on true penetration depth, it needs no meshing, and it degrades sensibly: a boar
 
 A clash against the lid is **named as such** in the report. That is emphasis in
 the wording, not a narrowing of the check.
+
+### A clash carries its true volume as well as its box
+
+The bounding box gives depth and direction, which no cheaper measure does, but it
+is only a bound on how much material actually overlaps — and over a whole board
+against a whole board it is a poor one. On the tar assembly the box measures
+2684.80 mm³ where the material meeting is 53.44 mm³, a factor of fifty. So a
+clash states both: the box, which answers *how far to move*, and the exact volume
+of the common region, which answers *how much is in the way*. The second costs
+nothing extra — the common shape is already built, and its volume is one query on
+it. Selection between seatings reads the exact volume; depth and direction still
+come from the box.
+
+### Between two boards, per solid and stated once
+
+An inter-board finding names the two solids that meet, not the two boards. "Board
+1 clashes with board 2" is not something a person can act on; "C7 meets board 2's
+substrate by 25.94 mm³" is. The aggregate remains, because an assembly of many
+parts needs a line that says *these two boards interfere* without reading every
+pair, but it is a summary over the detail rather than the only statement.
+
+Each unordered pair is **stated once**, against the lower of the two ordinals. The
+same interference recorded against both boards is one fact printed twice, and a
+reader counting findings would count it twice. The geometry was never computed
+twice — the pairing is over `combinations`, not over an ordered product — so this
+is a reporting rule, not an optimisation.
+
+The aggregate is a diagnostic and not a second clash record: summing the exact
+volumes of the pair's own findings, it would otherwise be counted twice by
+anything reducing over `clashes`, which is exactly what stage two does.
 
 ### Contact is not a clash, and needs no threshold
 
@@ -612,11 +678,18 @@ deliberately.
 
 ### The report
 
-`stompcollider-dock-report` v1. Integer nanometres, a `format`/`version` header, and
+`stompcollider-dock-report` v2. Integer nanometres, a `format`/`version` header, and
 diagnostics matched by `code` — the same conventions as the drill document.
 
+**Version 2 is what a clash now states.** Each clash carries `common_volume_nm3`
+beside `bbox_volume_nm3` and `part` beside `with`; every clash object in the
+document gains three keys and loses v1's `volume_nm3`, so a v1 reader modelling
+exactly the keys it knows would refuse it. That is the version's whole content —
+no other field moved, and both volumes are named for what they measure rather
+than one keeping the unqualified name it held while it was the only one.
+
 ```json
-{"format": "stompcollider-dock-report", "version": 1, "units": "nm",
+{"format": "stompcollider-dock-report", "version": 2, "units": "nm",
  "case": {"part": "1590BB", "face": "box", "model": "1590BB.stp"},
  "boards": [
    {"ordinal": 1,
@@ -631,9 +704,11 @@ diagnostics matched by `code` — the same conventions as the drill document.
           "hole_xy_nm": [12400000, 30000000],
           "insertion_nm": 9000000, "offset_nm": 150000}],
        "clashes": [
-         {"with": "LID", "kind": "case",
+         {"with": "LID", "kind": "case", "part": null,
           "bbox_nm": [-4000000, 20000000, -2100000, 4000000, 26000000, 0],
-          "depth_nm": 2100000, "axis": "w", "volume_nm3": 42000000000000000000}]}]}],
+          "depth_nm": 2100000, "axis": "w",
+          "bbox_volume_nm3": 42000000000000000000,
+          "common_volume_nm3": 13000000000000000000}]}]}],
  "unmatched_holes": [7, 9],
  "diagnostics": [
    {"severity": "warning", "code": "unmatched-part",
@@ -666,8 +741,23 @@ the document and the only place byte-identity depends on formatting.
 message, because it is what turns "no valid placement" into "RV3 is 0.15 mm off
 and will bind" — the answer the tool exists to give when a board nearly fits.
 
-`with` names a case solid by its STEP product name, or another board as
-`board:2`; `kind` is `case` or `board`, so a consumer never parses that string.
+`with` names a case solid by its STEP product name, or a solid of another board
+as `board:2:SW1` — the very name the assembly model writes that solid under, so a
+reader can find it in the file. `kind` is `case` or `board`, so a consumer never
+parses that string to learn what it is looking at. `part` names this board's own
+solid, under the same rule, and is `null` where the whole board was checked at
+once; a board-against-case finding is stated per case solid, because a wall is one
+thing to move a board away from however many of its parts reach into it.
+
+`bbox_volume_nm3` is the stated box's own volume, exact by construction as the
+product of three canonical lengths. `common_volume_nm3` is the material the boolean
+actually found, converted from the kernel's own integration, so the two agree only
+where the region really is its box.
+
+An inter-board finding is recorded against the **lower** of the two ordinals, once.
+The report therefore holds no clash under the higher-numbered board for a pair the
+lower one already states, and `part`/`with` say which way round it is without a
+reader having to know that rule.
 
 Holes with no part are normal per board — each board covers a subset by
 construction — so `unmatched_holes` is reported **once across the assembly**,
@@ -704,6 +794,8 @@ to 2 — through `stompmodel`'s shared reduction.
 | `under-constrained-board` | WARNING | Fewer than two correspondences |
 | `ambiguous-placement` | WARNING | More than one distinct placement survives |
 | `zero-clearance` | INFO | A profile exactly equals its hole radius; it passes, with nothing to spare |
+| `every-seating-clashes` | INFO | No seating of this board clears the case, so it took no part in choosing the assembly |
+| `seating-search-bounded` | INFO | More combinations of case-clean seatings exist than stage two tried; the assembly chosen is the best of those it did |
 
 **A board with correspondences but no candidate is an error, not a silence.**
 Two correspondences are the rank of a rigid planar transform, so a board

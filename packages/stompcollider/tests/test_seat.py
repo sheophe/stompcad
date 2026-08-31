@@ -63,14 +63,21 @@ def _correspondence(designator: str, seat_nm: int | None, hole_index: int) -> Co
     )
 
 
-def _clash(volume_nm3: int = 0, depth_nm: int = 0, with_: str = "case") -> Clash:
+def _clash(
+    bbox_volume_nm3: int = 0,
+    depth_nm: int = 0,
+    with_: str = "case",
+    common_volume_nm3: int | None = None,
+) -> Clash:
+    """One clash. The two volumes agree unless a test sets them apart."""
     return Clash(
         with_=with_,
         kind="solid",
         bbox_nm=(_nm(0), _nm(0), _nm(0), _nm(1), _nm(1), _nm(1)),
         depth_nm=_nm(depth_nm),
         axis="z",
-        volume_nm3=volume_nm3,
+        bbox_volume_nm3=bbox_volume_nm3,
+        common_volume_nm3=bbox_volume_nm3 if common_volume_nm3 is None else common_volume_nm3,
     )
 
 
@@ -224,7 +231,7 @@ def _one_clean_one_clashing() -> tuple[Placement, ...]:
     """The clashing placement has the smaller x_nm, so a comparator that
     checked position before clash count would (wrongly) rank it first."""
     return (
-        _placement(x_nm=0, clashes=(_clash(volume_nm3=5, depth_nm=5),)),
+        _placement(x_nm=0, clashes=(_clash(bbox_volume_nm3=5, depth_nm=5),)),
         _placement(x_nm=1_000_000),
     )
 
@@ -239,8 +246,8 @@ def _count_beats_volume_pair() -> tuple[Placement, Placement]:
     volume were compared before count, the two-tiny-clash placement (total
     volume 2) would outrank the one-huge-clash placement (volume 1e9)."""
     return (
-        _placement(clashes=(_clash(volume_nm3=1_000_000_000),)),
-        _placement(clashes=(_clash(volume_nm3=1), _clash(volume_nm3=1))),
+        _placement(clashes=(_clash(bbox_volume_nm3=1_000_000_000),)),
+        _placement(clashes=(_clash(bbox_volume_nm3=1), _clash(bbox_volume_nm3=1))),
     )
 
 
@@ -254,14 +261,14 @@ def _volume_beats_depth_pair() -> tuple[Placement, Placement]:
     if depth were compared before volume, the depth-1 placement would win
     even though its volume (2) is larger than the other's (1)."""
     return (
-        _placement(clashes=(_clash(volume_nm3=1, depth_nm=1_000_000),)),
-        _placement(clashes=(_clash(volume_nm3=2, depth_nm=1),)),
+        _placement(clashes=(_clash(bbox_volume_nm3=1, depth_nm=1_000_000),)),
+        _placement(clashes=(_clash(bbox_volume_nm3=2, depth_nm=1),)),
     )
 
 
 def test_clash_volume_outranks_clash_depth_in_the_key() -> None:
     ranked = sorted(_volume_beats_depth_pair(), key=rank_key)
-    assert [c.volume_nm3 for placement in ranked for c in placement.clashes] == [1, 2]
+    assert [c.bbox_volume_nm3 for placement in ranked for c in placement.clashes] == [1, 2]
 
 
 def _volume_reduction_pair() -> tuple[Placement, Placement]:
@@ -271,8 +278,8 @@ def _volume_reduction_pair() -> tuple[Placement, Placement]:
     second placement (16) ahead of the first (20); ascending max would rank
     the first (10) ahead of the second (15) instead."""
     return (
-        _placement(clashes=(_clash(volume_nm3=10), _clash(volume_nm3=10))),
-        _placement(clashes=(_clash(volume_nm3=15), _clash(volume_nm3=1))),
+        _placement(clashes=(_clash(bbox_volume_nm3=10), _clash(bbox_volume_nm3=10))),
+        _placement(clashes=(_clash(bbox_volume_nm3=15), _clash(bbox_volume_nm3=1))),
     )
 
 
@@ -281,7 +288,7 @@ def test_clash_volume_reduces_by_the_total_not_the_largest_single_clash() -> Non
     placements order one way under ``sum`` and the other under ``max``, so a
     reduction changed to ``max`` fails here."""
     ranked = sorted(_volume_reduction_pair(), key=rank_key)
-    assert [sum(c.volume_nm3 for c in p.clashes) for p in ranked] == [16, 20]
+    assert [sum(c.bbox_volume_nm3 for c in p.clashes) for p in ranked] == [16, 20]
 
 
 def _depth_reduction_pair() -> tuple[Placement, Placement]:
@@ -294,14 +301,14 @@ def _depth_reduction_pair() -> tuple[Placement, Placement]:
     return (
         _placement(
             clashes=(
-                _clash(volume_nm3=1, depth_nm=10),
-                _clash(volume_nm3=1, depth_nm=100),
+                _clash(bbox_volume_nm3=1, depth_nm=10),
+                _clash(bbox_volume_nm3=1, depth_nm=100),
             )
         ),
         _placement(
             clashes=(
-                _clash(volume_nm3=1, depth_nm=50),
-                _clash(volume_nm3=1, depth_nm=60),
+                _clash(bbox_volume_nm3=1, depth_nm=50),
+                _clash(bbox_volume_nm3=1, depth_nm=60),
             )
         ),
     )
@@ -386,3 +393,37 @@ def test_apply_does_not_record_its_own_processing() -> None:
     data = _dock({1: (_placement(seatings=(-1_000_000,)),)})
     result = Seat().apply(data)
     assert result.processing == ()
+
+
+def _box_beats_material_pair() -> tuple[Placement, Placement]:
+    """Equal clash count; the boxes and the material they hold disagree.
+
+    The first placement's clash is a thin region inside a large box -- a
+    board meeting a board -- and the second's is a small box packed solid.
+    A key summing the boxes ranks them one way round and a key summing the
+    material the other.
+    """
+    return (
+        _placement(clashes=(_clash(bbox_volume_nm3=1_000, common_volume_nm3=1),)),
+        _placement(clashes=(_clash(bbox_volume_nm3=10, common_volume_nm3=9),)),
+    )
+
+
+def test_ranking_reads_the_material_that_clashes_not_the_box_around_it() -> None:
+    """Selection between seatings reads the exact volume; depth and direction
+    still come from the box. On the tar assembly the box overstates the
+    material by a factor of fifty, so the two are not interchangeable."""
+    ranked = sorted(_box_beats_material_pair(), key=rank_key)
+
+    assert [c.common_volume_nm3 for p in ranked for c in p.clashes] == [1, 9]
+
+
+def test_the_box_volumes_alone_would_have_ranked_that_pair_the_other_way() -> None:
+    """The control beside it: a key still summing ``bbox_volume_nm3`` passes the
+    test above only by accident, and this states there is no accident."""
+    ranked = sorted(
+        _box_beats_material_pair(),
+        key=lambda p: sum(c.bbox_volume_nm3 for c in p.clashes),
+    )
+
+    assert [c.common_volume_nm3 for p in ranked for c in p.clashes] == [9, 1]

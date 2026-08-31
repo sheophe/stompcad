@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from stompgeom.build import PlacedSolid, build_document, solid_colour
-from stompgeom.step import StepSolid, bounding_box_mm
+from stompgeom.step import StepSolid
 from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
 from stompmodel.frames import CoordinateFrame
 from stompmodel.units import Nanometre, nm_from_mm
 
-from ..clash import placement_transform, solid_name
+from ..clash import board_solid_name, placement_transform, solid_name
 from ..model import Board, DockData, Placement
 
 __all__ = ["Solids", "AssemblyEmitter"]
@@ -63,17 +63,6 @@ class Solids:
             raise ValueError("a group of solids to write needs at least one solid")
 
 
-def _board_solid_name(solid: StepSolid, box: _Box, group: str) -> str:
-    """A board solid's name, always carrying the board it belongs to.
-
-    Every one, not only the solids nobody named: two boards may each carry
-    an ``RV1``, so a designator alone is not unique across an assembly, and
-    a reader opening one needs to know whose component it is anyway.
-    ``solid_name`` states the unnamed half, here and for ``Clashes``.
-    """
-    return f"{group}:{solid.name}" if solid.name else solid_name(solid, box, group)
-
-
 def _ordered(
     solids: Solids, name_of: Callable[[StepSolid, _Box], str]
 ) -> list[tuple[str, tuple[Nanometre, ...], StepSolid]]:
@@ -89,7 +78,7 @@ def _ordered(
     """
     entries = []
     for solid in solids.solids:
-        box = bounding_box_mm(solid.shape)
+        box = solid.box_mm
         extent = tuple(nm_from_mm(value) for value in box)
         entries.append((name_of(solid, box), extent, solid))
     return sorted(entries, key=lambda entry: (entry[0], entry[1]))
@@ -173,6 +162,6 @@ class AssemblyEmitter:
         return [
             PlacedSolid(solid.shape, name, solid_colour(supplied.document, solid), motion)
             for name, _extent, solid in _ordered(
-                supplied, lambda solid, box: _board_solid_name(solid, box, group)
+                supplied, lambda solid, box: board_solid_name(solid, box, group)
             )
         ]

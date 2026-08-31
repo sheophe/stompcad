@@ -310,13 +310,17 @@ def test_only_a_case_solid_moves_the_clean_run_to_a_finding(tmp_path, monkeypatc
 
     A clash is a WARNING, so the artefacts are still written: withholding
     the model here would defeat the tool, which is why exit 1 is asserted
-    together with both files rather than on its own.
+    together with both files rather than on its own. The board's only
+    seating now fouls the case, so it also earns the INFO saying it took no
+    part in choosing the assembly -- see "Several boards" in the spec.
     """
     run = _prepare(tmp_path, monkeypatch, post=True)
 
     assert main(run.argv) == 1
     assert run.written() == (True, True)
-    assert [d["code"] for d in json.loads(run.report.read_text())["diagnostics"]] == ["clash"]
+    assert [d["code"] for d in json.loads(run.report.read_text())["diagnostics"]] == [
+        "clash", "every-seating-clashes",
+    ]
 
 
 def test_only_moving_the_holes_moves_the_clean_run_to_an_error(tmp_path, monkeypatch) -> None:
