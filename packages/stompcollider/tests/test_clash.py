@@ -12,17 +12,25 @@ least, has somewhere to fail.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from stompcollider.clash import Clashes, placement_transform
+from stompcollider.clash import Clashes
 from stompcollider.errors import StompcolliderError
 from stompcollider.match import _apply
-from stompcollider.model import Board, Clash, DockData, Placement
+from stompcollider.model import (
+    Board,
+    Clash,
+    Correspondence,
+    DockData,
+    Placement,
+)
 from stompcollider.seat import Seat, rank_key
+from stompcollider.solids import placement_transform
 from stompgeom.shapes import placed
 from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -423,7 +431,13 @@ def test_every_case_solid_is_checked_not_only_the_first() -> None:
 
 def test_the_lid_is_checked_like_any_other_solid() -> None:
     """No part of the enclosure is privileged or exempt; the lid is named in
-    the report for emphasis, which is not a narrowing of the check."""
+    the report for emphasis, which is not a narrowing of the check.
+
+    It is also this file's control that a *name* buys nothing: this solid is
+    called LID and lies inside the cavity by the measurement below, so it is
+    kinded ``case`` like the wall beside it. What closes over a cavity is
+    settled by geometry, in the tests further down.
+    """
     data = _dock((_board(1),), {1: (_placement(),)})
     found = Clashes(_enclosure(), {1: _reaching_board()}).apply(data).placements[1][0].clashes
     lid = [clash for clash in found if clash.with_ == "LID"]
@@ -431,6 +445,102 @@ def test_the_lid_is_checked_like_any_other_solid() -> None:
     assert lid[0].kind == "case"
     assert lid[0].depth_nm == _nm(2.0)
     assert lid[0].axis == "w"
+
+
+# --------------------------------------------------------------------------
+# What closes over the cavity: reported, and never a reason to prefer one
+# seating of a board to another.
+# --------------------------------------------------------------------------
+
+
+def _closed_enclosure() -> tuple[StepSolid, ...]:
+    """A drilled shell 25 deep, and the backplate that closes over it."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    shell = BRepAlgoAPI_Cut(
+        _box((-50, -25, -25), 100, 50, 28), _box((-48, -23, -25), 96, 46, 25)
+    ).Shape()
+    return (_solid("BOX", shell), _solid("PLATE", _box((-49, -24, -29), 98, 48, 6)))
+
+
+def _into_the_backplate() -> tuple[StepSolid, ...]:
+    """A board solid standing out of the cavity mouth into the backplate."""
+    return (_solid("", _box((-5, -5, -30), 10, 10, 6)),)
+
+
+def _into_the_wall() -> tuple[StepSolid, ...]:
+    """A board solid reaching 1 mm into the cavity's own wall."""
+    return (_solid("", _box((39, -5, -20), 10, 10, 6)),)
+
+
+def _grazing_the_wall() -> tuple[StepSolid, ...]:
+    """The same solid overlapping that wall by 0.00005 mm.
+
+    Under the 0.0001 mm the insertion search treats as coincident, so the
+    search calls this pose clear and advances a board to it -- and the exact
+    intersection the clash stage runs still finds a region there.
+    """
+    return (_solid("", _box((38.00005, -5, -20), 10, 10, 6)),)
+
+
+def test_a_clash_with_what_closes_over_the_cavity_is_kinded_closure() -> None:
+    """Geometry names it: this plate lies beyond the cavity mouth and spans
+    the board both ways across the face, which no solid of ``_enclosure()``
+    above does however it is named."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    stage = Clashes(_closed_enclosure(), {1: _into_the_backplate()})
+
+    found = stage.apply(data).placements[1][0].clashes
+
+    assert [(clash.with_, clash.kind) for clash in found] == [("PLATE", "closure")]
+    assert found[0].depth_nm == _nm(5.0)
+
+
+def test_a_seating_that_only_meets_the_closure_still_clears_stage_one() -> None:
+    """A lid that will not close is a finding about the design and never a
+    seating removed from consideration."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    result = Clashes(_closed_enclosure(), {1: _into_the_backplate()}).apply(data)
+
+    assert [finding.code for finding in result.of_severity(Severity.INFO)] == []
+
+
+def test_a_seating_that_meets_the_cavity_itself_does_not_clear_stage_one() -> None:
+    """The control: the same board moved onto the wall it is inserted past,
+    which is the enclosure stage one does filter on."""
+    data = _dock((_board(1),), {1: (_placement(),)})
+    result = Clashes(_closed_enclosure(), {1: _into_the_wall()}).apply(data)
+
+    assert [finding.code for finding in result.of_severity(Severity.INFO)] == [
+        "every-seating-clashes"
+    ]
+
+
+def test_an_overlap_the_insertion_search_calls_contact_clears_stage_one() -> None:
+    """Stage one asks the predicate the search asks, so a board the search
+    advanced to rest at first contact passes it by construction.
+
+    Two definitions of interference would leave every such board failing the
+    filter over a sliver the search had already called clear, and stage two
+    would never run for any assembly at all.
+    """
+    data = _dock((_board(1),), {1: (_placement(),)})
+    result = Clashes(_closed_enclosure(), {1: _grazing_the_wall()}).apply(data)
+
+    assert [clash.with_ for clash in result.placements[1][0].clashes] == ["BOX"]
+    assert [finding.code for finding in result.of_severity(Severity.INFO)] == []
+
+
+def test_an_overlap_the_search_would_see_does_not_clear_stage_one() -> None:
+    """The control beside it: twenty times that overlap is interference to
+    both definitions, and the filter keeps refusing it."""
+    coarse = (_solid("", _box((38.001, -5, -20), 10, 10, 6)),)
+    data = _dock((_board(1),), {1: (_placement(),)})
+    result = Clashes(_closed_enclosure(), {1: coarse}).apply(data)
+
+    assert [finding.code for finding in result.of_severity(Severity.INFO)] == [
+        "every-seating-clashes"
+    ]
 
 
 def _three_boards() -> tuple[DockData, Clashes]:
@@ -1133,6 +1243,66 @@ def test_a_seating_that_fouls_the_case_takes_no_part_in_stage_two() -> None:
 
     assert int(ranked[0].x_nm) == 100_000_000
     assert ranked[0].clashes == ()
+
+
+def _shortfall_scene() -> tuple[DockData, Clashes]:
+    """Board 1 has two seatings that both clear the cavity, one of them 5 mm
+    short of the seat its own holes fix.
+
+    The short one is clear of board 2 and would win stage two outright; the
+    seated one fouls board 2. Stage one has to drop the short one, or the
+    assembly is written with a board that never went in.
+    """
+    seated = replace(
+        _placement(rank=1), z_nm=_nm(-2.0), correspondence=_pairing(-2.0)
+    )
+    short = replace(
+        _placement(rank=2, x_mm=200.0), z_nm=_nm(-7.0), correspondence=_pairing(-2.0)
+    )
+    data = _dock((_board(1), _board(2)), {1: (seated, short), 2: (_placement(),)})
+    solids = {
+        1: (_solid("P", _box((-14, 0, 0), 12, 20, 5)),),
+        2: (_solid("Q", _box((-10, 0, 0), 16, 26, 3)),),
+    }
+    return data, Clashes(_enclosure(), solids)
+
+
+def _pairing(seat_mm: float) -> tuple[Correspondence, ...]:
+    """One correspondence stating where this placement's holes seat it."""
+    return (
+        Correspondence(
+            designator="J1",
+            hole_index=1,
+            hole_xy_nm=(_nm(0.0), _nm(0.0)),
+            insertion_nm=_nm(1.0),
+            offset_nm=_nm(0.0),
+            seat_nm=_nm(seat_mm),
+        ),
+    )
+
+
+def test_a_seating_that_does_not_seat_takes_no_part_in_stage_two() -> None:
+    """It clears the cavity by leaning on it and fouls its neighbour less
+    for having never gone in, which is exactly the trade stage two must not
+    make: the seated placement stays at rank 1 although it is the one that
+    clashes."""
+    data, stage = _shortfall_scene()
+    ranked = stage.apply(data).placements[1]
+
+    assert int(ranked[0].x_nm) == 0
+    assert [clash.with_ for clash in ranked[0].clashes] == ["board:2:Q"]
+
+
+def test_stage_two_would_have_taken_the_short_seating_on_volume_alone() -> None:
+    """The control: the same scene with both seatings inserting equally far,
+    where mutual interference does decide and the clear one wins."""
+    data, stage = _shortfall_scene()
+    level = tuple(
+        replace(placement, z_nm=_nm(-2.0)) for placement in data.placements[1]
+    )
+    ranked = stage.apply(replace(data, placements={**data.placements, 1: level}))
+
+    assert int(ranked.placements[1][0].x_nm) == 200_000_000
 
 
 def test_a_board_no_seating_clears_the_case_for_says_so() -> None:

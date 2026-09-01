@@ -51,7 +51,7 @@ def test_both_boards_register_onto_the_holes_they_were_drilled_for(
     weaker claim than the geometry supports. The two diodes sit 0.495 mm from
     holes 1 and 2, four times the tolerance, so they pair with nothing.
     """
-    matched = Match(tar.TOLERANCE, tar.CLEARANCE).apply(tar_dock)
+    matched = Match(tar.TOLERANCE).apply(tar_dock)
     rv = tar.carrying(matched.boards, "RV1")
     sw = tar.carrying(matched.boards, "SW1")
 
@@ -77,7 +77,7 @@ def test_the_second_seating_of_each_board_is_reported_rather_than_dropped(
     -- and the two indicator diodes, loose under both seatings, are named
     once each with the smaller of the two misses they suffer.
     """
-    matched = Match(tar.TOLERANCE, tar.CLEARANCE).apply(tar_dock)
+    matched = Match(tar.TOLERANCE).apply(tar_dock)
 
     ambiguous = [d for d in matched.diagnostics if d.code == "ambiguous-placement"]
     assert [d.get("placements") for d in ambiguous] == [2, 2]

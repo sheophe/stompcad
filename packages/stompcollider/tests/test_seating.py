@@ -22,19 +22,20 @@ from stompmodel.model import Hole
 from stompmodel.units import Nanometre, nm_from_mm
 from tests import tar
 
-#: The operator's own manual dock of this pedal, measured off the assembly
-#: they built: the pot board stands 10.000 mm below the drilled face and the
-#: switch board 17.000 mm. Held to a millimetre, because these are the
-#: distances a builder reads off a real assembly and not a figure this tool
-#: produced.
-RV_STANDOFF_NM = Nanometre(10_000_000)
-SW_STANDOFF_NM = Nanometre(17_000_000)
-WITHIN_NM = Nanometre(1_000_000)
+#: What each board's own profile states, measured against each hole's own
+#: radius with nothing added to it. Neither is where the board rests -- the
+#: insertion search against the supplied enclosure fixes that -- and neither
+#: is the standoff the operator's own assembly has, which stands the two
+#: boards 10.000 and 17.000 mm below the drilled face. Written down because
+#: they are the numbers the probe radius and the tip subtraction produce, so
+#: a change to either moves one of them.
+RV_PROFILE_NM = Nanometre(-15_816_259)
+SW_PROFILE_NM = Nanometre(-28_385_633)
 
 
 def _seated(dock: DockData) -> tuple[DockData, dict[str, Nanometre]]:
     """Both boards matched and seated, with each board's own depth beside it."""
-    data = Seat().apply(Match(tar.TOLERANCE, tar.CLEARANCE).apply(dock))
+    data = Seat().apply(Match(tar.TOLERANCE).apply(dock))
     depths = {
         "RV": tar.seating(
             data, tar.carrying(data.boards, "RV1"), tar.RV_CORRESPONDENCE
@@ -80,19 +81,24 @@ def test_the_switch_board_seats_deeper_than_the_board_carrying_the_pots(
 
 
 @pytest.mark.boards
-def test_both_depths_agree_with_the_assembly_the_operator_built_by_hand(
+def test_the_profile_alone_states_neither_boards_standoff(
     tar_dock: DockData,
 ) -> None:
-    """Within a millimetre of a dock measured off the real pedal.
+    """What the hole geometry says here, and why it is reported not obeyed.
 
-    An independent number: the standoffs come from the operator's own
-    assembly, not from anything this tool computed, so agreeing with them
-    is evidence about the geometry rather than about the arithmetic.
+    The pot bushing measures 27 microns too fat for its ⌀7.000 hole and so
+    binds at the plate; the 3PDT bush is tangent to its ⌀12.000 bore, which
+    the radial cut answers two ways -- 20.992 mm for ``SW2`` and 9.499 for
+    ``SW1`` -- and the least of those puts that board 11 mm further out than
+    it goes. Against an assembly standing these boards 10 and 17 mm below
+    the face, neither figure is the standoff, which is exactly why the
+    enclosure and not the profile fixes the depth. No cavity is supplied
+    here, so these are the profile's own answers.
     """
     _data, depths = _seated(tar_dock)
 
-    assert abs(-depths["RV"] - RV_STANDOFF_NM) <= WITHIN_NM
-    assert abs(-depths["SW"] - SW_STANDOFF_NM) <= WITHIN_NM
+    assert depths["RV"] == RV_PROFILE_NM
+    assert depths["SW"] == SW_PROFILE_NM
 
 
 @pytest.mark.boards
@@ -152,7 +158,7 @@ def test_a_bush_exactly_as_wide_as_its_hole_is_reported_rather_than_refused(
     It passes -- comparison is strict -- and it is worth seeing, so it is an
     INFO finding rather than silence. The potentiometers are the control
     beside it: their bushings measure 7.054 mm across a 7.000 mm hole, so
-    they pass only because of the fit clearance and are not zero-clearance.
+    they are proud of it rather than exactly as wide, and earn nothing.
     """
     data, _depths = _seated(tar_dock)
 

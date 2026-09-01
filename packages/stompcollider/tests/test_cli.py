@@ -11,6 +11,7 @@ unrelated fixture has nowhere to hide.
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -20,10 +21,11 @@ from typing import Any
 import pytest
 
 from stompcollider.cli import (
+    build_pipeline,
     format_case,
     main,
-    parse_length,
     parse_pin,
+    parse_pitches,
     parse_place,
 )
 from stompcollider.errors import UsageError
@@ -234,6 +236,16 @@ def _drill(
     return path
 
 
+#: What the baseline run exits with. The insertion search advances a board
+#: until the enclosure stops it, and the predicate it advances under treats
+#: geometry within 0.0001 mm as coincident -- so a board arrested by the
+#: case comes to rest that much inside it, and the exact intersection the
+#: clash stage runs finds a sliver of that depth. It is a WARNING about a
+#: contact that really is there, so the baseline is exit 1 rather than 0;
+#: every scenario below is still one change away from this one run.
+_BASELINE_EXIT = 1
+
+
 @dataclass(frozen=True)
 class Run:
     """One prepared invocation: its arguments and the two paths it may write."""
@@ -296,13 +308,23 @@ def _prepare(
 # --------------------------------------------------------------------------
 
 
-def test_a_clean_run_exits_zero_and_writes_both_artefacts(tmp_path, monkeypatch) -> None:
-    """The baseline every other scenario below is one change away from."""
+def test_the_baseline_run_seats_the_board_and_writes_both_artefacts(
+    tmp_path, monkeypatch
+) -> None:
+    """The baseline every other scenario below is one change away from.
+
+    The board goes in, the panel stops its bushes, and the only finding is
+    the contact that stopped it -- stated at the depth the search's own
+    predicate calls coincident, which is a fact about where the board rests
+    rather than about the design.
+    """
     run = _prepare(tmp_path, monkeypatch)
 
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     assert run.written() == (True, True)
-    assert run.report.stat().st_size > 0 and run.assembly.stat().st_size > 0
+    assert [d["code"] for d in json.loads(run.report.read_text())["diagnostics"]] == [
+        "clash"
+    ]
 
 
 def test_only_a_case_solid_moves_the_clean_run_to_a_finding(tmp_path, monkeypatch) -> None:
@@ -310,16 +332,19 @@ def test_only_a_case_solid_moves_the_clean_run_to_a_finding(tmp_path, monkeypatc
 
     A clash is a WARNING, so the artefacts are still written: withholding
     the model here would defeat the tool, which is why exit 1 is asserted
-    together with both files rather than on its own. The board's only
-    seating now fouls the case, so it also earns the INFO saying it took no
-    part in choosing the assembly -- see "Several boards" in the spec.
+    together with both files rather than on its own. The post stands on the
+    board's insertion path, so the board never gets to the depth its holes
+    fix and says so. It comes to rest *touching* the post, which stage one
+    admits -- the filter asks the predicate the search advanced under -- so
+    there is no INFO saying the board took no part in choosing the
+    assembly: see "Several boards" in the spec.
     """
     run = _prepare(tmp_path, monkeypatch, post=True)
 
     assert main(run.argv) == 1
     assert run.written() == (True, True)
     assert [d["code"] for d in json.loads(run.report.read_text())["diagnostics"]] == [
-        "clash", "every-seating-clashes",
+        "seated-short", "clash",
     ]
 
 
@@ -395,7 +420,7 @@ def test_the_set_check_admits_the_same_two_targets_spelled_apart(
     """The control on the refusal above: two paths, one file each, is a clean run."""
     run = _prepare(tmp_path, monkeypatch)
 
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
 
 
 # --------------------------------------------------------------------------
@@ -510,17 +535,23 @@ def test_a_withheld_part_still_reaches_the_report_and_the_model(
     to place. Exit 1 because two pins alone are carried onto their holes by a
     half turn as well -- a real second seating, so ``ambiguous-placement``.
     ``RV3``'s own pin tells them apart by meeting the unbored plate under the
-    turned one, so ranking puts the clean seating first.
+    turned one, which stops that seating 8 mm short of its holes -- the
+    second finding -- and is what puts the seating that does go in at rank
+    1. The third finding is that one's own contact with the plate it rests
+    against.
     """
     run = _prepare(tmp_path, monkeypatch, reference="RV1,RV2")
     assert main(run.argv) == 1
 
     written = json.loads(run.report.read_text())
-    assert [d["code"] for d in written["diagnostics"]] == ["ambiguous-placement"]
+    assert [d["code"] for d in written["diagnostics"]] == [
+        "ambiguous-placement", "seated-short", "clash",
+    ]
     assert written["boards"][0]["designators"] == ["RV1", "RV2", "RV3"]
     placements = written["boards"][0]["placements"]
     assert [p["rank"] for p in placements] == [1, 2]
-    assert placements[0]["clashes"] == []
+    assert placements[0]["z_nm"] == -2_999_900
+    assert [c["with"] for c in placements[0]["clashes"]] == ["PANEL"]
     assert [c["designator"] for c in placements[0]["correspondence"]] == ["RV1", "RV2"]
     assert "board:1:RV3" in run.assembly.read_text(encoding="utf-8", errors="replace")
 
@@ -631,7 +662,7 @@ def test_a_missing_kernel_stays_a_usage_failure(tmp_path, monkeypatch) -> None:
 def test_the_assembly_carries_the_case_models_own_timestamp(tmp_path, monkeypatch) -> None:
     """Decision 5: from the input, never from the clock and never a default."""
     run = _prepare(tmp_path, monkeypatch)
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
 
     assert _CASE_TIMESTAMP in run.assembly.read_text(encoding="utf-8", errors="replace")
 
@@ -639,13 +670,13 @@ def test_the_assembly_carries_the_case_models_own_timestamp(tmp_path, monkeypatc
 def test_two_runs_over_one_input_write_identical_bytes(tmp_path, monkeypatch) -> None:
     """What the timestamp decision is for: nothing in either artefact varies."""
     first = _prepare(tmp_path, monkeypatch)
-    assert main(first.argv) == 0
+    assert main(first.argv) == _BASELINE_EXIT
     report, assembly = first.report.read_bytes(), first.assembly.read_bytes()
 
     elsewhere = tmp_path / "again"
     elsewhere.mkdir()
     second = _prepare(elsewhere, monkeypatch)
-    assert main(second.argv) == 0
+    assert main(second.argv) == _BASELINE_EXIT
 
     assert (second.report.read_bytes(), second.assembly.read_bytes()) == (report, assembly)
 
@@ -691,14 +722,18 @@ def test_the_report_states_the_seating_the_pipeline_computed(tmp_path, monkeypat
     ``Seat``, or that forgot the tip stands anywhere, says something else.
     """
     run = _prepare(tmp_path, monkeypatch)
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
 
     written = json.loads(run.report.read_text())
     placement = written["boards"][0]["placements"][0]
 
     assert written["format"] == "stompcollider-dock-report"
     assert written["case"] == {"part": "1590B", "face": "box", "model": "case.stp"}
-    assert (placement["x_nm"], placement["y_nm"], placement["z_nm"]) == (0, 0, -3_000_000)
+    # One fuzz value above the -3 mm the profile alone fixes: the search's
+    # own predicate treats geometry within 0.0001 mm as coincident, so the
+    # deepest pose it calls clear lies that much beyond true contact. It is
+    # the search that seats the board, and this is where that shows.
+    assert (placement["x_nm"], placement["y_nm"], placement["z_nm"]) == (0, 0, -2_999_900)
     assert [c["designator"] for c in placement["correspondence"]] == ["RV1", "RV2", "RV3"]
 
 
@@ -717,10 +752,10 @@ def test_verbose_traces_the_stages_without_changing_the_verdict(
 ) -> None:
     """``-v`` adds to what is printed and nothing to what is decided."""
     run = _prepare(tmp_path, monkeypatch)
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     quiet = capsys.readouterr().out
 
-    assert main([*run.argv, "-v"]) == 0
+    assert main([*run.argv, "-v"]) == _BASELINE_EXIT
     loud = capsys.readouterr().out
 
     assert len(loud) > len(quiet)
@@ -780,37 +815,68 @@ def test_a_tolerance_of_zero_is_usage(tmp_path, monkeypatch) -> None:
 
 
 # --------------------------------------------------------------------------
-# --fit-clearance: how much wider than a part its hole must be, on diameter
+# --seat-pitch-max / --seat-pitch-min: how the insertion path is walked
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", ["nonsense", "-0.1", "nan"])
-def test_an_unusable_fit_clearance_is_usage(tmp_path, monkeypatch, value) -> None:
-    """Resolved before any file is opened, like every other flag: a clearance
-    that is not a number, or one below zero -- which would narrow a hole
-    rather than widen it -- is exit 3 and not a diagnostic about geometry."""
+@pytest.mark.parametrize(
+    "flag", ["--seat-pitch-max", "--seat-pitch-min"]
+)
+@pytest.mark.parametrize("value", ["nonsense", "-1", "0", "inf"])
+def test_an_unusable_seat_pitch_is_usage(tmp_path, monkeypatch, flag, value) -> None:
+    """Resolved before any file is opened, like every other flag. Zero is
+    refused as well as negative: a scan whose step is nothing never reaches
+    the seat, so it is no scan rather than a very fine one."""
     run = _prepare(tmp_path, monkeypatch)
 
-    assert main([*run.argv, "--fit-clearance", value]) == 3
+    assert main([*run.argv, flag, value]) == 3
     assert run.written() == (False, False)
 
 
-def test_a_fit_clearance_of_zero_is_the_strict_fit_and_is_accepted() -> None:
-    """Zero is a fit, unlike a recognition tolerance of zero: the comparison
-    is already strict, so nothing wider than its hole passes and nothing
-    narrower is refused. Parsed here rather than run, because that is the
-    whole difference between the two flags."""
-    assert parse_length("0", "--fit-clearance", allow_zero=True) == Nanometre(0)
-    with pytest.raises(UsageError, match="positive"):
-        parse_length("0", "--match-tolerance")
+def test_a_coarse_step_finer_than_the_fine_one_is_usage(tmp_path, monkeypatch) -> None:
+    """The two are an ordered pair, and a run that silently swapped them
+    would scan at a pitch nobody asked for."""
+    run = _prepare(tmp_path, monkeypatch)
+
+    assert main([*run.argv, "--seat-pitch-max", "0.05", "--seat-pitch-min", "2.0"]) == 3
+    assert run.written() == (False, False)
+
+
+def test_the_two_pitches_may_be_equal(tmp_path, monkeypatch) -> None:
+    """The boundary of the rule above: one pitch for both passes is a scan,
+    so the comparison is an ordering rather than a strict one."""
+    parse_pitches(
+        argparse.Namespace(seat_pitch_max="0.5", seat_pitch_min="0.5")
+    )
+
+
+def test_the_pitches_the_run_scanned_at_are_recorded_by_the_stage_that_used_them(
+) -> None:
+    """A search that happened is recorded as one: the stage's own provenance
+    carries both steps, so a reader of a document's processing history can
+    tell what the scan could see. Read off the pipeline the command line
+    composes, because that is where the two flags become a stage."""
+    pipeline = build_pipeline(
+        Nanometre(125_000), (), {}, Nanometre(1_500_000), Nanometre(250_000)
+    )
+    seat = next(stage for stage in pipeline if stage.name == "seat")
+
+    assert seat.describe() == StageRun(
+        "seat", (("seat_pitch_max_nm", 1_500_000), ("seat_pitch_min_nm", 250_000))
+    )
+
+
+# --------------------------------------------------------------------------
+# What a hole admits, now that nothing widens it
+# --------------------------------------------------------------------------
 
 
 def _proud_pin(at: tuple[float, float]) -> Any:
     """A pin whose bush is 0.02 mm proud of its 5 mm hole, on radius.
 
-    What a modelled bushing is: drawn a shade over nominal, so a strict
-    comparison arrests it and the fit clearance a builder allows lets it
-    through. 0.02 is inside half of the default 0.1 and outside nothing.
+    What a modelled bushing is: drawn a shade over nominal. Judged against
+    the hole's own radius it is arrested; what decides where the board rests
+    is the plate it binds on, not that judgement.
     """
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
 
@@ -827,28 +893,40 @@ def _board_proud() -> StepDocument:
     )))
 
 
-def _seating_of(tmp_path, monkeypatch, *extra: str) -> int:
+def _proud_run(tmp_path, monkeypatch, *extra: str) -> dict:
+    """The proud-bush board's own placement, as the report states it."""
     run = _prepare(tmp_path, monkeypatch, board=_board_proud())
     assert main([*run.argv, *extra]) in (0, 1)
     written = json.loads(run.report.read_text())
-    return written["boards"][0]["placements"][0]["z_nm"]
+    return written["boards"][0]["placements"][0]
 
 
-def test_the_fit_clearance_decides_whether_a_proud_bush_passes(
+def test_a_proud_bush_is_measured_against_the_hole_and_nothing_added_to_it(
     tmp_path, monkeypatch
 ) -> None:
-    """The flag's whole point, read off the artefact.
+    """Every pairing states the depth it inserts to, and 0.02 mm of proudness
+    is enough to state one: nothing widens the radius a profile is queried
+    with, so a part a hair over its hole binds where the hair begins."""
+    proud = _proud_run(tmp_path, monkeypatch)
 
-    Judged strictly, a bush 0.02 mm over its hole is arrested and the board
-    seats 3 mm down; judged against the hole widened by half the default
-    clearance it passes, nothing stops the board, and it comes to rest at
-    the face. The two runs differ in that one flag alone.
+    assert [c["insertion_nm"] for c in proud["correspondence"]] == [8_000_000] * 3
+
+
+def test_the_plate_and_not_that_profile_is_what_seats_the_board(
+    tmp_path, monkeypatch
+) -> None:
+    """The insertion depth above is a **reported measurement**, not the seat.
+
+    Where this board comes to rest is where the plate stops it: one fuzz
+    value beyond the -3 mm its profile predicted, because the search's own
+    predicate treats geometry within 0.0001 mm as coincident. The two agree
+    here to a tenth of a micron, and on the tar footswitch board -- whose
+    bush is tangent to its bore -- they differ by 11 mm, which is why the
+    profile does not govern.
     """
-    strict = _seating_of(tmp_path, monkeypatch, "--fit-clearance", "0")
-    allowed = _seating_of(tmp_path, monkeypatch)
+    proud = _proud_run(tmp_path, monkeypatch)
 
-    assert strict == -3_000_000
-    assert allowed == 0
+    assert proud["z_nm"] == -2_999_900
 
 
 # --------------------------------------------------------------------------
@@ -1014,7 +1092,7 @@ def test_the_tolerance_is_derived_from_the_grid_the_document_records(
     run = _prepare(tmp_path, monkeypatch, grid_nm=250_000, tolerance=None)
 
     assert "--match-tolerance" not in run.argv
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     assert run.written() == (True, True)
 
 
@@ -1030,10 +1108,10 @@ def test_the_derived_tolerance_is_the_one_the_operator_would_have_typed(
     """
     run = _prepare(tmp_path, monkeypatch, grid_nm=250_000, tolerance=None)
 
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     derived = run.report.read_bytes()
 
-    assert main([*run.argv, "--match-tolerance", "0.125"]) == 0
+    assert main([*run.argv, "--match-tolerance", "0.125"]) == _BASELINE_EXIT
     assert run.report.read_bytes() == derived
 
 
@@ -1055,7 +1133,7 @@ def test_an_explicit_tolerance_overrides_the_recorded_grid(tmp_path, monkeypatch
         tmp_path, monkeypatch, holes=offset, bores=offset, grid_nm=250_000, tolerance=None
     )
 
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     assert main([*run.argv, "--match-tolerance", "0.000001"]) != 0
 
 
@@ -1100,7 +1178,7 @@ def test_the_offset_is_what_gives_the_override_test_its_teeth(tmp_path, monkeypa
     """
     run = _prepare(tmp_path, monkeypatch, grid_nm=250_000, tolerance=None)
 
-    assert main([*run.argv, "--match-tolerance", "0.000001"]) == 0
+    assert main([*run.argv, "--match-tolerance", "0.000001"]) == _BASELINE_EXIT
 
 
 def test_the_report_states_the_tolerance_that_recognised_the_boards(
@@ -1113,7 +1191,7 @@ def test_the_report_states_the_tolerance_that_recognised_the_boards(
     """
     run = _prepare(tmp_path, monkeypatch, grid_nm=500_000, tolerance=None)
 
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     printed = capsys.readouterr().out
     assert "tolerance" in printed and "0.250 mm" in printed
 
@@ -1127,7 +1205,7 @@ def test_the_report_states_an_explicit_tolerance_too(tmp_path, monkeypatch, caps
     """
     run = _prepare(tmp_path, monkeypatch, grid_nm=500_000, tolerance="0.125")
 
-    assert main(run.argv) == 0
+    assert main(run.argv) == _BASELINE_EXIT
     assert "0.125 mm" in capsys.readouterr().out
 
 

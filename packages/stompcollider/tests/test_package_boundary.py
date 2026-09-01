@@ -148,6 +148,7 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
         "__init__.py", "boards.py", "canonicalise.py", "clash.py", "cli.py",
         "designators.py", "emitters/__init__.py", "emitters/assembly.py",
         "emitters/report.py",
-        "errors.py", "match.py", "model.py", "protrude.py",
-        "raw.py", "seat.py", "sources/__init__.py", "sources/step.py",
+        "errors.py", "insert.py", "match.py", "model.py", "protrude.py",
+        "raw.py", "seat.py", "solids.py", "sources/__init__.py",
+        "sources/step.py",
     }

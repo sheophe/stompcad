@@ -72,16 +72,13 @@ class BoardSource:
 
     ``boards`` is a list of models rather than one because a design may
     stack several; which board is which is settled downstream by ordinal,
-    never by the order they are listed here. ``fit_clearance_nm`` is how
-    much wider than a part its hole must be, on diameter: a part is measured
-    against the radii this panel's own holes admit, so the reader has to
-    know them and the clearance both.
+    never by the order they are listed here. A part is measured against the
+    radii this panel's own holes admit, so the reader has to know them.
     """
 
     drill: Path
     boards: Sequence[Path]
     case_model: Path
-    fit_clearance_nm: Nanometre = Nanometre(0)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "boards", tuple(self.boards))
@@ -105,7 +102,7 @@ class BoardSource:
         drill = from_document(json.loads(self.drill.read_text(encoding="utf-8")))
         case = read_step(self.case_model)
 
-        probes = _probes(drill, self.fit_clearance_nm)
+        probes = _probes(drill)
 
         diagnostics: list[Diagnostic] = []
         mismatch = _cross_check(drill.enclosure, assembly_spans(case), self.case_model)
@@ -145,7 +142,7 @@ class BoardSource:
         )
 
 
-def _probes(drill: DrillData, clearance_nm: Nanometre) -> tuple[Nanometre, ...]:
+def _probes(drill: DrillData) -> tuple[Nanometre, ...]:
     """The radii this panel's holes admit, each stated once.
 
     Every part is measured against the same set, whichever hole it turns out
@@ -154,7 +151,7 @@ def _probes(drill: DrillData, clearance_nm: Nanometre) -> tuple[Nanometre, ...]:
     is upstream of.
     """
     return tuple(
-        sorted({admitting_radius(hole.diameter_nm, clearance_nm) for hole in drill.holes})
+        sorted({admitting_radius(hole.diameter_nm) for hole in drill.holes})
     )
 
 

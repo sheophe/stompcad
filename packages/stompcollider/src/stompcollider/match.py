@@ -29,7 +29,7 @@ from .model import (
     admitting_radius,
 )
 
-__all__ = ["Match", "PANEL_FACE", "CLEARANCE_PARAMETER", "TOLERANCE_PARAMETER"]
+__all__ = ["Match", "PANEL_FACE", "TOLERANCE_PARAMETER"]
 
 #: The key ``Match`` records its recognition tolerance under, and the key
 #: the report reads it back from. Spelled once for the reason the pitch's
@@ -38,11 +38,6 @@ __all__ = ["Match", "PANEL_FACE", "CLEARANCE_PARAMETER", "TOLERANCE_PARAMETER"]
 #: boards -- and a reader looking under a stale name would show nothing.
 TOLERANCE_PARAMETER: str = "tolerance_nm"
 
-#: The key ``Match`` records its fit clearance under. Recorded for the same
-#: reason the tolerance is: it widens every hole this stage measures a part
-#: against, so a run whose provenance did not carry it could not be read
-#: back to the seating it produced.
-CLEARANCE_PARAMETER: str = "clearance_nm"
 
 #: Which side of the carrier plane points at the panel. Derived, never
 #: searched: a board is seatable only when its components protrude *out*
@@ -95,22 +90,18 @@ def _axes(board: Board) -> dict[str, _Point]:
     }
 
 
-def _insertion_nm(
-    component: Component, hole: Hole, clearance_nm: Nanometre
-) -> Nanometre | None:
+def _insertion_nm(component: Component, hole: Hole) -> Nanometre | None:
     """The profile's own insertion depth through this hole -- a fact, not a
     fit judgement: recognition never rejects a pairing over it.
 
-    Measured against the radius the hole *admits*, which is its own widened
-    by half the fit clearance: a modelled bushing need not be drawn at
-    nominal, and a profile 0.027 mm proud of its hole on radius would
-    otherwise stop a part its builder drills for as a matter of course.
+    Measured against the radius the hole admits, which is its own exactly.
+    A **reported** measurement rather than the seat: where a board really
+    comes to rest is the insertion search's answer, and a profile measured
+    at a tangency states a depth the drilled plate does not agree with.
     """
     protrusion = component.protrusion
     assert protrusion is not None
-    return protrusion.profile.insertion_through(
-        admitting_radius(hole.diameter_nm, clearance_nm)
-    )
+    return protrusion.profile.insertion_through(admitting_radius(hole.diameter_nm))
 
 
 def _seat_nm(component: Component, insertion_nm: Nanometre | None) -> Nanometre | None:
@@ -147,7 +138,7 @@ def _exact(
             protrusion = components[designator].protrusion
             if protrusion is None:  # pragma: no cover - pairings carry an axis
                 continue
-            if protrusion.profile.meets(Nanometre(hole.diameter_nm // 2)):
+            if protrusion.profile.meets(admitting_radius(hole.diameter_nm)):
                 found.setdefault((designator, _number(hole)), None)
     return tuple(
         Diagnostic.info(
@@ -307,7 +298,6 @@ def _placement(
     pairings: tuple[_Pairing, ...],
     axes: dict[str, _Point],
     components: dict[str, Component],
-    clearance_nm: Nanometre,
 ) -> tuple[Placement, _Transform]:
     """One registration's placement, measured under its own recomputed motion.
 
@@ -326,7 +316,7 @@ def _placement(
     assert final is not None
     x_mm, y_mm, theta_rad = final
     correspondence = tuple(
-        _correspondence(designator, hole, final, axes, components, clearance_nm)
+        _correspondence(designator, hole, final, axes, components)
         for designator, hole in sorted(pairings, key=lambda pairing: pairing[0])
     )
     placement = Placement(
@@ -347,11 +337,10 @@ def _correspondence(
     transform: _Transform,
     axes: dict[str, _Point],
     components: dict[str, Component],
-    clearance_nm: Nanometre,
 ) -> Correspondence:
     """One pairing measured: how far it misses, how deep it goes, where it seats."""
     component = components[designator]
-    insertion_nm = _insertion_nm(component, hole, clearance_nm)
+    insertion_nm = _insertion_nm(component, hole)
     return Correspondence(
         designator=designator,
         hole_index=_number(hole),
@@ -496,27 +485,12 @@ class Match:
 
     name: ClassVar[str] = "match"
 
-    def __init__(
-        self, tolerance_nm: Nanometre, clearance_nm: Nanometre = Nanometre(0)
-    ) -> None:
+    def __init__(self, tolerance_nm: Nanometre) -> None:
         self._tolerance_nm = tolerance_nm
-        self._clearance_nm = clearance_nm
 
     def describe(self) -> StageRun:
-        """Record the recognition tolerance and fit clearance this stage ran with.
-
-        The clearance defaults to nothing here and to a tenth of a
-        millimetre on the command line: a stage widens a hole by what it was
-        told and, told nothing, widens it by nothing. Which of the two a run
-        used is why this is recorded rather than assumed.
-        """
-        return StageRun(
-            self.name,
-            (
-                (TOLERANCE_PARAMETER, int(self._tolerance_nm)),
-                (CLEARANCE_PARAMETER, int(self._clearance_nm)),
-            ),
-        )
+        """Record the recognition tolerance this stage ran with."""
+        return StageRun(self.name, ((TOLERANCE_PARAMETER, int(self._tolerance_nm)),))
 
     def apply(self, data: DockData) -> DockData:
         boards: list[Board] = []
@@ -526,7 +500,7 @@ class Match:
 
         for board in data.boards:
             new_board, board_placements, board_diagnostics, claimed = _match_board(
-                board, data.holes, self._tolerance_nm, self._clearance_nm
+                board, data.holes, self._tolerance_nm
             )
             boards.append(new_board)
             diagnostics.extend(board_diagnostics)
@@ -553,7 +527,6 @@ def _match_board(
     board: Board,
     holes: tuple[Hole, ...],
     tolerance_nm: Nanometre,
-    clearance_nm: Nanometre,
 ) -> tuple[Board, tuple[Placement, ...], tuple[Diagnostic, ...], tuple[int, ...]]:
     """One board's whole story: registration, then what it recognises.
 
@@ -596,7 +569,7 @@ def _match_board(
         )
 
     built = tuple(
-        _placement(pairings, axes, components, clearance_nm) for pairings in candidates
+        _placement(pairings, axes, components) for pairings in candidates
     )
     transforms = tuple(transform for _placement_, transform in built)
     # Every part-level finding below is judged over the whole surviving set,

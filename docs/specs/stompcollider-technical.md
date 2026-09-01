@@ -110,18 +110,25 @@ src/stompcollider/
   boards.py         substrate identification, carrier frames, contact assignment
   protrude.py       axis from the admitted cylinders, profile from the solid
   sources/step.py   BoardSource: STEP files and case model → RawBoards
+  solids.py         placing and naming one run's solids: the body three
+                    modules reason about, stated once
   match.py          Match
   seat.py           Seat
+  insert.py         the insertion search: Cavity, CaseCavity, contact_depth
   clash.py          Clashes
   emitters/report.py, emitters/assembly.py
   cli.py, errors.py
 ```
 
-**`Match` and `Seat` are pure**: both fold over `DockData` and never touch the
-kernel, so both are testable with hand-built values. That is a claim about
-those two stages, not about everything listed above `sources/`. `boards.py`,
-`protrude.py` and `clash.py` read geometry, and read it through `stompgeom`
-rather than through OCP — `Clashes` is the pipeline's one impure stage.
+**`Match` is pure**: it folds over `DockData` and never touches the kernel, so
+it is testable with hand-built values. **`Seat` is pure in its arithmetic and
+impure in one query**: the reduction over correspondences touches nothing, and
+the insertion search it then runs is handed to it as a `Cavity` — a
+kernel-free protocol, so every seating *rule* is still testable with
+arithmetic, and a `Seat()` built without one is exactly the pure stage it was.
+That is a claim about those two stages, not about everything listed above
+`sources/`. `boards.py`, `protrude.py`, `insert.py` and `clash.py` read
+geometry, and read it through `stompgeom` rather than through OCP.
 
 ## Reading boards
 
@@ -214,7 +221,9 @@ The admitted cylinder reaching furthest along the outward direction fixes the
 cylinders'.** A protrusion is a radius-versus-depth profile: the profile at depth
 *d* is the greatest distance from the axis of any material of the component at
 that depth. The **insertion depth** through a hole is the least *d* at which the
-profile exceeds the hole's radius by more than the fit clearance below.
+profile exceeds the hole's own radius. It is a **reported measurement**, not the
+seat: where a board comes to rest is what the insertion search finds against the
+supplied enclosure — see "Seating depth".
 
 Deriving the profile from coaxial cylinders alone is withdrawn, and it was the
 defect that made every real board seat flush against the panel. What arrests a
@@ -239,8 +248,9 @@ it — so a bush exactly filling its bore reaches nothing and passes.
 
 **The radii probed are the radii this panel's holes admit.** A cut answers one
 radius, so the set has to be finite and known before the solid is measured; it
-is `{ admitting_radius(d, clearance) : d a hole diameter of this drill
-document }`, which is exactly the set `Match` will later query. Every part is
+is `{ admitting_radius(d) : d a hole diameter of this drill document }` — each
+hole's own radius, with nothing added to it — which is exactly the set `Match`
+will later query. Every part is
 probed at all of them, because which hole a part pairs with is not known until
 the board is registered, and the reader is upstream of that. Each answer is
 stated as one band of the profile: the material there is *strictly* wider than
@@ -257,7 +267,7 @@ Every depth in the profile is measured back from that tip while a placement's
 ``z`` is measured to the board's own origin plane, so seating cannot be computed
 without it — see "Seating depth".
 
-### Fit clearance
+### Material exactly as wide as its hole
 
 A hole admits material narrower than itself. Material exactly as wide is the
 interesting case, and it is common rather than exceptional: a 3PDT bush measures
@@ -266,40 +276,35 @@ exactly equal to its hole radius passes — and equality is reported as
 `zero-clearance`, an INFO finding, because a part fitting with nothing to spare is
 worth seeing even though it is not a fault.
 
-Strictness alone is not enough, because a modelled bushing need not be drawn at
-nominal. On the tar fixture the footswitch bush measures exactly 6.0000 mm on
-radius, but the potentiometer's measures 3.5271 — 7.054 mm across, in a hole
-drilled to 7.000. Judged strictly it cannot pass, and the board cannot seat.
+**There is no fit allowance, and there was one.** `--fit-clearance` widened every
+hole a profile was judged against, by a tenth of a millimetre on diameter by
+default, because a modelled bushing need not be drawn at nominal: the tar
+potentiometer's bushing measures 3.5271 mm on radius in a hole drilled to 3.500,
+and judged strictly its board could not seat. The flag is withdrawn, because the
+insertion search made it unnecessary and the search reads the metal rather than a
+prediction about it. That pot's bushing binds on the drilled plate, which the
+search finds; the allowance only moved the *prediction* out of the way.
 
-`--fit-clearance` names how much wider than a part its hole must be, **on
-diameter**, as every other size in this tool is stated. It defaults to 0.1 mm,
-which is what a builder allows when drilling for a bushing. The flag exists
-because how much a part needs is a property of that part rather than a law, not
-because its value was tuned.
+**The prediction is not reliable enough to govern, and this is why.** Probed at
+exactly its hole radius, the tar footswitch reads two ways for one part: `SW2`
+states an insertion of 20.992 mm and `SW1`, the same 3PDT through the same
+⌀12.000 hole, states 9.499 mm. The bush is tangent to its bore, the radial cut is
+deciding a tangency, and the boolean leaves a degenerate sliver on one of them and
+not the other. Reduced by the least seating, that board would come to rest 11 mm
+short of where it goes. The search does not repeat the error, because contact is
+not interference and a tangent bush passes: measured against the drilled 1590B, it
+stops that board at −17.1444 mm, which is where the flag's default put it and
+where the operator's own assembly has it.
 
-**How insensitive the default is differs by part, and one of these two parts is
-not insensitive at all.** Measured on the fixture, the potentiometer board seats
-at -10.885 mm for every clearance from 0.06 mm to 5 mm: its bushing is 0.054 mm
-over the hole and the next feature, the can, is 5.6 mm over, so the interval
-between them is wide and flat. The footswitch board is not. Its bush crest
-measures exactly 6.000 mm on radius, but the modelled M12 thread does not end
-there -- the run-out where it meets the body flares to roughly 12.1 mm across,
-about a tenth of a millimetre over, and *that* is the next feature rather than
-the 25.5 mm body. So the footswitch board's seating moves with the clearance:
--17.715 mm at 0.06, -17.061 at the default 0.1, -16.886 at 0.2, -17.162 at 0.5
-and -16.551 at 5 -- not even monotonically, because near a radius the thread
-crest reaches exactly, the boolean is deciding tangency. The whole spread is
-1.16 mm, and every value in it is within a millimetre of the 17.000 mm the
-operator measured by hand, which is why this is worth stating rather than worth
-tuning: the residual is bounded by that part's model fidelity, not by this flag.
-
-The rule, restated against every panel-reference part on the fixture:
+So the profile is measured, reported per correspondence as `insertion_nm`, and
+does **not** decide where a board rests. The rule, restated against every
+panel-reference part on the fixture:
 
 | Part | What stops it | Through |
 | --- | --- | --- |
 | 5 mm LED | the flange at 5.8 | ⌀5 seats on the flange; ⌀6 passes fully |
-| Potentiometer | 6.35 shaft, 7.054 bushing, then the can at 12.6 | ⌀7 inserts to the can |
-| 3PDT footswitch | 10 tip, 12 bush at exactly ⌀12, the thread run-out at about ⌀12.1, then the body at 25.5 | ⌀12 inserts to the run-out |
+| Potentiometer | 6.35 shaft, 7.054 bushing, then the can at 12.6 | ⌀7 inserts to the bushing |
+| 3PDT footswitch | 10 tip, 12 bush at exactly ⌀12, the thread run-out at about ⌀12.1, then the body at 25.5 | ⌀12 is a tangency the cut answers two ways |
 
 A largest-radius rule would name the LED's flange — precisely the feature that
 must *not* pass through. **Match reads only the axis; the profile is Seat's.**
@@ -485,12 +490,17 @@ by construction, no other degree of freedom exists.
 
 ### Seating depth
 
-With `(x, y, θ)` fixed, seating is one-dimensional and closed-form. Travel along
-the face normal is
+With `(x, y, θ)` fixed, seating is one-dimensional, and **the enclosure answers
+it**: a board is pushed in until something stops it, and the search of the
+subsection below is what finds where. The hole geometry answers it in closed form
+too, and that answer is kept for two jobs — it is what a shortfall is stated
+against, and it is where a board rests that the enclosure never touches, which is
+also what a run given no case model gets. Travel along the face normal, as the
+holes alone fix it, is
 
 ```
     seating of one pairing = ( insertion depth of the profile through that
-                               hole's radius widened by the fit clearance )
+                               hole's own radius )
                              − ( that part's own tip stand-off )
 
     travel = min over correspondences of that seating
@@ -517,24 +527,245 @@ carrying the pots, because a 3PDT body is the larger obstruction. **No kernel qu
 hole because that is the only configuration in which the board seats, not because
 anything was told what a shaft is.
 
-Seating depth is fixed by the panel-reference correspondences **alone**. Anything
-else that would foul at that depth is a clash to report, not a constraint to yield
-to — which is what "collisions left in place" already says about the emitted
+Seating depth is fixed by the panel-reference correspondences **and the
+enclosure**, and by nothing else: no stand-off, no neighbouring board and no other
+board's parts move a board. Anything else that would foul at the resting depth is
+a clash to report, not a constraint to yield to — which is what "collisions left in place" already says about the emitted
 model. This resolves the pre-spec's open question about cases where seating is
 more than a single query: the set is empty, because the question was mis-framed.
 A standoff is not a seating constraint; it is a solid that clashes.
+
+### The case is what stops a board, and finding where is a search
+
+Hole geometry says how deep a board *would* sit if the enclosure were not in the
+way. It is in the way of every real board: a board enters through the case's open
+back and rises toward the drilled face, and anything it meets on that path
+arrests it — a component's own shoulder on the inside of the drilled plate, a
+footswitch body grazing the wall's inner fillet, a boss, a screw.
+
+**The path is not bounded by the hole seat.** It is bounded by the last travel at
+which any contact is geometrically possible, taken from the same boxes the entry
+pose comes from, and the board rests at the first contact found within it —
+which may be *deeper* than the profile predicted as well as shallower. The
+alternative was tried and is withdrawn: bounding the walk at the hole seat lets a
+profile that mis-measures a tangency hold a board 11 mm out of its case, and the
+plate is the thing that really stops it. Where the whole path is clear the search
+says so by reaching that bound, and the hole seat is what the board rests at.
+
+**The travel is `+w`, toward the panel, not into it.** The board is inserted from
+the open end and its controls emerge through the face; a 1590B's box spans −25 to
++2 mm along `w` with its cavity mouth at −25, and no board passes through the
+drilled face itself — the tar boards measure 91.5 × 17 and 106.5 × 53.75 mm and
+there is no aperture that admits either. A model that pushes a board inward from
+outside the panel is not this assembly.
+
+**Seat-then-retreat is wrong.** Testing the hole seat for interference and
+backing off until it clears finds *a* clear depth, not the *reachable* one: a
+board can pass an obstruction and be clear again beyond it, and retreat cannot
+see that it never got there. The question is where contact happens **first**
+along the path, and only a search from the entry pose answers it.
+
+This is an argument about the two rules rather than a reading of one fixture,
+and the record should say so, because a measurement was once offered here that
+does not support it. Board 1 of the tar assembly reads as *clear at its own hole
+seat and blocked over a band below it* under the kernel's default tolerance —
+which is retreat's counterexample exactly — and reads as blocked continuously
+from the seat down to 4.2 mm below it under the tolerance this tool's predicate
+actually uses, where retreat would reach the same depth the search does. Only
+one of those two readings can be a continuous overlap, and the fuzz note in
+`stompgeom.shapes` measures which. The disproof therefore rests on the rule and
+on a control the suite carries — a synthetic band a board is clear on both sides
+of — not on this enclosure.
+
+**Contact is not interference.** The predicate is a positive shared volume; two
+bodies meeting on a surface share none and the board may advance to that pose.
+This is rule 3 of `Contact is not a clash` applied to the path rather than to a
+resting place.
+
+#### Why it is a search and not a formula
+
+A swept volume would answer this in one query, and it cannot be built here.
+`BRepPrimAPI_MakePrism` refuses a solid, and sweeping a solid's boundary faces
+instead yields a degenerate prism for every cylindrical wall that contains the
+sweep direction — which every bushing on a board has — so the boolean against
+that sweep does not merely cost too much, it fails. Exact directional clearance
+is likewise unavailable: `BRepExtrema_DistShapeShape` answers the Euclidean
+distance, not the axial one, and returns zero for a bushing that fills its hole,
+so advancing by it advances by nothing. Solving the directional case exactly
+means a contact solver, which this kernel does not offer.
+
+So the depth is searched for. **The domain makes that exact rather than
+approximate**: canonical lengths are whole nanometres (ADR-0003, ADR-0004), a
+finite ordered set, so the refinement below is a binary search over that set and
+not a numerical descent with a convergence tolerance. It terminates in
+`⌈log₂ pitch⌉` steps and lands on an integer nanometre, and its determinism is
+structural.
+
+#### Coarse to fine, bounded from above
+
+Sampling every candidate depth at the finest pitch would be wasteful, because
+almost all of the path is clear and the useful information is the *shallowest*
+blocked depth. So:
+
+1. Scan from the entry pose toward the hole seat at `--seat-pitch-max`. The hole
+   seat itself is always one of the samples, however the pitch divides the path:
+   a band ending exactly at the seat is the common case, and a scan stopping one
+   pitch short of it would report a clear path.
+2. **Every blocked sample is an upper bound on the answer**, so the moment one is
+   found the remaining search is bounded above by it and nothing beyond it is
+   ever sampled again. The interval shrinks rather than being rescanned.
+3. Sweep the bracket that pass leaves — between the last clear sample and the
+   first blocked one — once at `--seat-pitch-min`, from its clear end, stopping
+   at the first blocked sample. This is where the fine pitch does its work, and
+   it subsumes the intermediate halvings: a sweep at `pitch_min` already sees
+   every band a halved sequence ending there would, in one pass instead of
+   `⌈log₂(pitch_max / pitch_min)⌉` of them.
+4. Bisect between the last clear sample and the first blocked one, over whole
+   nanometres, for the exact contact depth.
+
+A board that reaches its hole seat unobstructed is governed by the hole geometry
+alone, as before; the search costs one pass and finds nothing.
+
+**Rescanning `[entry, upper]` at each halved pitch is what this replaces, and it
+is not affordable.** Measured on the tar assembly: board 1's path from its entry
+pose to its hole seat is 44.2 mm, an interference query on that board against the
+1590B box costs between 0.15 and 3 s, and a sequence of scans of the whole
+interval at 2.0, 1.0, … , 0.05 mm issues on the order of 1400 of them — some ten
+minutes for one of the four placements a two-board run seats. The step above
+costs the whole run's four searches about 230 queries between them. The
+difference in what they see is bounded and named in the next section.
+
+#### What the search cannot see, stated plainly
+
+**A blocked band the coarse pass steps over is stepped over.** The fine sweep
+refines the bracket the coarse pass found, so a band lying wholly between two
+`--seat-pitch-max` samples and *below* the first blocked one is never reached at
+any fine pitch; a band inside that bracket and at least `--seat-pitch-min` wide
+always is. A band's width is the sum of the two bodies' extents along `w` at the
+offending column, and a glancing edge-on-edge crossing has no positive lower
+bound, so no choice of pitch makes this vanish. Silence about a band below either
+pitch is not evidence of clearance, exactly as `nesting-truncated` is not
+evidence about artwork below a refused form level. This is measured, not
+hypothetical: a 0.5 mm pitch steps straight over board 1's 4.10 mm-short blocked
+sample, which a 0.25 mm pitch finds.
+
+Two kernel conditions the search must hold to, both measured on this fixture.
+The boolean is asked for one pair at many depths, which the clash stage never
+does, and under that use it must be **non-destructive** — the placement shares a
+`TShape` with the solid it was placed from, and a destructive boolean lets one
+query change the answer to the next. It must also carry a **fuzzy value**, or an
+ill-conditioned pose reports an empty shape rather than the region it holds: at
+default tolerance a 0.07 mm window of board 1's path reads exactly clear between
+two blocked samples on either side, which a volume predicate reads as a way
+through. Both settings are part of the definition of the predicate, not tuning.
+
+**The fuzzy value does not make contact into interference, and that is
+measured rather than assumed.** The pair the claim is about is a 12.000 mm 3PDT
+bush in a 12.000 mm hole — the same interference fit `zero-clearance` reports —
+and it reads identically at both tolerances, at every depth of board 2's path:
+nothing shared, so the board travels to within 0.083 mm of its seat and is
+stopped by a footswitch body grazing a wall fillet instead. What the tolerance
+does change is a bushing standing 0.027 mm proud in its own bore, which is
+interference and not contact, and which the default tolerance fails to build.
+
+**The fuzzy value is the resolution of the answer, and shows in one place.**
+Geometry closer than it is coincident to the kernel, so the last depth the
+predicate calls clear can lie up to that much beyond true contact: a board
+arrested on a plate reads 0.0001 mm past it. The depth is still an exact whole
+nanometre and still the same on every run; it is the predicate that is
+tolerant, not the search. One consequence is worth naming rather than
+discovering: a board stopped short comes to rest a fuzz *inside* what stopped
+it, so `Clashes` measures a sub-micron overlap there and the seating is not
+case-clean. `every-seating-clashes` therefore reports of a board the enclosure
+arrested, which is true and is why that finding is an INFO rather than a fault.
+
+#### Three outcomes
+
+| Outcome | Meaning |
+| --- | --- |
+| reaches its seat | Nothing on the path obstructs it; the hole geometry governs |
+| stopped short | First contact before the seat. The achieved depth, the shortfall, the blocking pair, and which correspondences go unmet are all reported |
+| cannot enter | The entry pose itself interferes, so no travel is defined |
+
+A board stopped short is a finding, never a correction: `seated-short` states how
+far it fell and what stopped it. `cannot-enter` is an error, and it is never
+reported as a travel of zero — a board that cannot go in at all and a board that
+seats immediately are different facts.
+
+**`cannot-enter` does not arise from a supplied model, and that is a property of
+the entry pose rather than an omission.** The entry pose is *derived*: it is the
+deepest travel at which any pair of bounding boxes meets at all, and a bounding
+box contains its own solid, so at that depth no material can be shared. The
+outcome is modelled and reported end to end because the entry pose is a choice
+this version derives and a later one might be given.
+
+#### The lid is not part of this
+
+Insertion runs against the enclosure the board is fitted into — the box, its
+bosses and its screws — and never against the lid. The assembly order is
+physical: boards go into an open case, and the backplate closes over them
+afterwards. Checking insertion against a closed case makes a real design
+unanalysable rather than wrong: board 1's pot bodies reach `w = −28.15 mm` while
+the tar 1590B's backplate begins at `−25.0`, so with the lid present that board
+is obstructed at its entry pose and no depth is defined for it — while the same
+board goes into the open box and stops 4.2 mm short for reasons worth reporting.
+
+**Which solid that is, is measured, never named.** Product names take no part:
+the drilled solid is the one whose material straddles the face frame's own
+plane, the cavity's mouth is how deep that solid reaches, and what closes over
+the cavity is a solid whose **centre of mass lies beyond that mouth** *and*
+which **spans at least as much as the board in both lateral directions**. Both
+halves are needed and neither is a threshold. A plane alone cannot do it,
+because the screws that fasten the backplate on occupy exactly the depths it
+does — measured on the tar case, the backplate's centre of mass sits at
+`w = −27.39` and each screw's at `−24.12`, either side of the `−25.0` mouth,
+which the plane does separate; but the span test is what keeps a boss or a post
+standing *inside* a shallow cavity from reading as a closure, and a bare drilled
+plate with a post under it is exactly that case. A closure narrower than the
+board it covers is read as an obstruction instead, which states the same
+measured overlap as a shortfall rather than as a case that will not close —
+a different finding, never silence.
+
+A board meeting the lid is a different finding and reads as one: the enclosure is
+too shallow for this design, by the amount stated — the extent of the shared
+region along the face normal, which is the dimension of the enclosure that is
+short. It never removes a seating from consideration in `Several boards`, because
+a lid that will not close is precisely what an operator runs this tool to
+discover.
+
+**And it never ranks one seating above another.** The same split decides both:
+a clash against the enclosure a board is inserted into is `kind: "case"` and one
+against what closes over it is `kind: "closure"`, and only the first is read by
+the ranking key or by stage one's filter. Measured on the tar assembly, the lid
+was the *only* thing separating board 1's two seatings, and it separated them the
+wrong way round: the seating whose pots never reach their holes fouls the
+backplate less, precisely because it never entered the case. A closure clash is
+reported exactly as it always was.
 
 ### Ranking
 
 Placements are ranked lexicographically ascending on
 
 ```
-    (clash count, total clash volume, greatest clash depth, θ, x_nm, y_nm)
+    (insertion shortfall, clash count, total clash volume,
+     greatest clash depth, θ, x_nm, y_nm)
 ```
 
-Clean placements sort first; a genuinely symmetric pair falls through to the
-transform, which is exact comparison rather than a measured quantity, so the
-order never depends on kernel round-off. Rank is a reported field, not a verdict:
+where the shortfall is the seat that placement's own holes fix less the depth it
+came to rest at, and is negative where the enclosure let the board further in
+than its profile predicted.
+
+**The shortfall leads, and it dominates.** A seating that never entered the case
+fouls less of it *because* it never entered, so a key led by the clash fields
+prefers the board whose parts are nowhere near their holes. Measured on the tar
+assembly, board 1's two seatings differ by 19.020 mm of shortfall and the
+clash-led key chose the one 19 mm out — the wrong orientation, written into the
+assembly model at rank 1. Only clashes against the enclosure the board is
+inserted into are counted; see "The lid is not part of this".
+
+Behind the shortfall, clean placements sort first; a genuinely symmetric pair
+falls through to the transform, which is exact comparison rather than a measured
+quantity, so the order never depends on kernel round-off. Rank is a reported field, not a verdict:
 **every** distinct placement is returned. A symmetric hole pattern genuinely
 admits two seatings, and handing back one silently is how a pedal gets assembled
 mirror-imaged.
@@ -545,14 +776,40 @@ Seating an assembly is **two stages, and the first is a filter**.
 
 **Stage one ranks each board against the case alone**, exactly as `Ranking`
 states. Its output is not one placement but a set: every seating of that board
-whose clash with the case is *empty*. A seating that fouls the enclosure is not a
-seating, so it cannot be improved by anything a neighbouring board does, and it
-takes no part in what follows.
+that does not interfere with the enclosure it is inserted into.
+
+**That is the search's own predicate, and it has to be.** A board the search
+advanced to rest at first contact lies within a nanometre of what stopped it, and
+the exact intersection every measured quantity is read from finds a sliver
+there — 99 and 305 nanometres, measured on the tar assembly's two boards. Asking
+a second definition of interference here left *every* real seating failing the
+filter, `every-seating-clashes` firing for every board, and stage two never
+running at all. One predicate, asked by the search and by the filter, and a board
+seated at contact passes it by construction. Not a volume threshold: a threshold
+would be a third rule, and the sliver would still be a rule nobody stated.
+
+A seating that fouls the enclosure is not a seating, so it cannot be improved by
+anything a neighbouring board does, and it takes no part in what follows. What
+closes over the cavity takes no part either, in this filter or in the ranking
+above it.
+
+**And neither is a seating that does not seat.** A board the case arrests well
+out of it clears the cavity by leaning on it, and it fouls a neighbour *less*
+than the seating that really goes in — precisely because it never went in.
+Measured on the tar assembly, that is board 1's 14 mm shortfall taking stage two
+outright and being written into the assembly model, after the ranking key had
+already put the right seating first. So stage one keeps a seating only if it
+inserts as far as any other seating of that board does, compared on the same
+shortfall the ranking key leads with and by exact equality of whole nanometres,
+which leaves a genuinely symmetric pair whole. What stage two then chooses among
+are boards that are all equally seated, and mutual interference alone decides
+between them — as stated below.
 
 **Stage two chooses among the survivors on mutual interference alone.** Over the
 combinations of stage one's candidate sets, one per board, the assembly taken is
 the one of least total inter-board clash volume. The case plays no part here; it
-was already answered, and a candidate that reached this stage clears it.
+was already answered, and a candidate that reached this stage clears it and is as
+deeply inserted as any seating of its own board.
 
 The filter is what makes the second stage affordable. The Cartesian product is
 real — *k* candidates per board over *n* boards is *kⁿ* combinations — but it is
@@ -729,6 +986,13 @@ no position — the same unconditional field `stompmodel`'s codec writes for the
 same shared `Diagnostic`, so a consumer can tell a finding with no position from
 a key that was dropped.
 
+`insertion_nm` is how far that part's profile passes through that hole's own
+radius, measured back from the part's tip. It is a **reported measurement and not
+the seat**: the placement's `z_nm` comes from the insertion search against the
+supplied enclosure, and the two disagree wherever a profile is deciding a
+tangency. `null` there means the hole admits the part entirely, which is a
+geometric fact rather than a missing measurement.
+
 `case.face` is echoed from the drill document, never chosen here.
 `panel_face` is which side of the carrier plane points at the panel, as a sign
 along the board's own carrier normal in the file it was exported from. It is
@@ -743,8 +1007,11 @@ and will bind" — the answer the tool exists to give when a board nearly fits.
 
 `with` names a case solid by its STEP product name, or a solid of another board
 as `board:2:SW1` — the very name the assembly model writes that solid under, so a
-reader can find it in the file. `kind` is `case` or `board`, so a consumer never
-parses that string to learn what it is looking at. `part` names this board's own
+reader can find it in the file. `kind` is `case`, `closure` or `board`, so a
+consumer never parses that string to learn what it is looking at: `case` is the
+enclosure the board is inserted into, `closure` what closes over the cavity, and
+that distinction is the one thing ranking and stage one's filter read — see
+"The lid is not part of this". `part` names this board's own
 solid, under the same rule, and is `null` where the whole board was checked at
 once; a board-against-case finding is stated per case solid, because a wall is one
 thing to move a board away from however many of its parts reach into it.
@@ -795,6 +1062,9 @@ to 2 — through `stompmodel`'s shared reduction.
 | `ambiguous-placement` | WARNING | More than one distinct placement survives |
 | `zero-clearance` | INFO | A profile exactly equals its hole radius; it passes, with nothing to spare |
 | `every-seating-clashes` | INFO | No seating of this board clears the case, so it took no part in choosing the assembly |
+| `seated-short` | WARNING | The enclosure stops this board before its holes would, by the amount stated |
+| `cannot-enter` | ERROR | The board interferes with the enclosure at its entry pose, so no insertion depth exists |
+| `enclosure-too-shallow` | WARNING | A seated board meets the lid: the case will not close over this design |
 | `seating-search-bounded` | INFO | More combinations of case-clean seatings exist than stage two tried; the assembly chosen is the best of those it did |
 
 **A board with correspondences but no candidate is an error, not a silence.**
@@ -821,8 +1091,12 @@ stompcollider DRILL.json BOARD.stp [BOARD.stp …]
     --case-model PATH          the drilled case model
     --panel-reference EXPR     required; no default
     --match-tolerance MM       optional; overrides the derived half-pitch
-    --fit-clearance MM         optional; how much wider than a part its hole
-                               must be, on diameter. Default 0.1
+    --seat-pitch-max MM        optional; the insertion scan's coarsest step.
+                               Default 2.0
+    --seat-pitch-min MM        optional; the pitch the bracket that scan
+                               leaves is swept at, and so the width of the
+                               narrowest obstruction visible inside it.
+                               Default 0.05
     --place N=X,Y,THETA        repeatable; an under-constrained board
     --pin N=RANK               repeatable; choose among ranked placements
     --report PATH
@@ -841,6 +1115,20 @@ The tolerance the run actually matched with is stated in the report's `CASE`
 block, read back from `Match`'s own record rather than from the command line.
 A value that is usually derived and decides which hole belongs to which part
 may not also be invisible.
+
+Both seat pitches are positive lengths and an ordered pair: a coarse step finer
+than the fine one describes no scan, so it is a usage failure rather than a
+search that silently reverses them. Equal is legal — one pitch for both passes
+is still a scan. `Seat` records the pair it ran with in its own `describe()`,
+because a search that happened must be legible as one.
+
+**There is no `--fit-clearance`.** It widened a hole in the *profile* and never
+in the model, and it was withdrawn once the insertion search made the profile a
+reported measurement rather than the seat: the metal the search reads is what a
+bushing drawn proud of its bore really meets. See "Material exactly as wide as
+its hole" for the measurements, and note that removing it changed no radius the
+reader probes at — the probe set is one radius per distinct hole diameter either
+way — so it bought no work back.
 
 **`--place` and `--pin` are parsed, validated, and then refused.** Neither has
 a consumer: nothing places a board explicitly, so `Match` gives an
@@ -875,12 +1163,17 @@ skipped rather than guessed at.
 Identical inputs produce a geometrically and byte-identical result. This binds
 algorithm choice, not merely output.
 
-- **No iterative numerical step anywhere.** Every stage is an enumeration or a
-  closed-form query. Correspondence is enumerated, rotation is implied rather
-  than swept, seating is arithmetic on profiles, and clash depth is a bounding
-  box of an exact boolean. A profile's own bands are the same kind of answer:
-  one boolean per probe radius, over a probe set the drill document fixes, with
-  no search or bisection over radius anywhere.
+- **No numerical descent anywhere, and the one search is over a finite set.**
+  Every stage is an enumeration, a closed-form query, or a bisection over whole
+  nanometres. Correspondence is enumerated, rotation is implied rather than
+  swept, seating is arithmetic on profiles, and clash depth is a bounding box of
+  an exact boolean. A profile's own bands are the same kind of answer: one
+  boolean per probe radius, over a probe set the drill document fixes, with no
+  search or bisection over radius anywhere. The insertion depth is the exception
+  and is exact for the reason "Why it is a search and not a formula" gives: the
+  candidate depths are a finite ordered set, the sample schedule is fixed by two
+  stated pitches, and the last step lands on an integer rather than at a
+  convergence tolerance.
 - **No mesh, for anything measured.** A triangulation is a function of the
   deflection parameters it was built at and of the kernel's version, so a
   quantity read off one is not a fact about the input. `radial_reach` and
@@ -891,9 +1184,10 @@ algorithm choice, not merely output.
   crest probed at 12.000 mm -- leaves slivers, and the residue's reach then
   names a feature nearer the tip than the one that really binds. It is the same
   answer on every run, so determinism holds; it is a fidelity limit of the
-  model rather than of the rule, and the fit clearance is what normally keeps a
-  probe away from a crest. The footswitch measured above is this case, and it
-  is named here rather than smoothed away.
+  model rather than of the rule, and it is why the profile is reported rather
+  than obeyed. The footswitch measured above is this case -- two of one part
+  read 20.992 and 9.499 mm through the same hole -- and it is named here rather
+  than smoothed away.
 - **No noise source and no stochastic search.**
 - **No hash-ordered iteration.** Every traversal is over an explicitly sorted
   sequence; solids sort by designator, boards by ordinal, correspondences by
@@ -908,8 +1202,16 @@ algorithm choice, not merely output.
 
 TDD throughout, following the repository's existing rules.
 
-- `Match` and `Seat` are pure, and their *unit* tests use hand-built `DockData`
-  with no kernel and no fixture file. Those fixtures state a board in its **own**
+- `Match` and `Seat`'s own rules are pure, and their *unit* tests use hand-built
+  `DockData` with no kernel and no fixture file — `Seat`'s take a fake `Cavity`
+  answering arithmetic, the arrangement `stompdrill`'s clearance stage already
+  uses for `CaseModel`. The insertion search is tested in two halves for the same
+  reason: `contact_depth` against a synthetic blocked set, which is where the
+  control lives that tells this design from seat-then-retreat — a band the board
+  is clear on both sides of, so retreating from the seat reports no correction
+  while the search reports the band's near edge — and `CaseCavity` against solids
+  built in the test rather than read from the fixture, so both run in a standard
+  suite. Those fixtures state a board in its **own**
   frame — an origin and rotation away from the panel — and never in the answer's
   coordinates. A builder taking a part's position in panel coordinates cannot
   express an undocked board at all, which is how the registration defect above
@@ -924,6 +1226,10 @@ TDD throughout, following the repository's existing rules.
   and the board reader's unit tests were both green and complete while the one
   path a real run takes through them was broken. A stage tested only on inputs
   another stage never produces is tested against a contract nothing implements.
+- **The two seat pitches each have a test that fails when the other is used.**
+  A flag that changed no answer would be worse than an absent one, and the fine
+  sweep is the only thing `--seat-pitch-min` moves: the paired test states one
+  geometry, two pitches and two different depths.
 - **Property tests:** filter parse-and-apply idempotence; profile monotonicity in
   depth; insertion depth non-increasing as hole radius decreases; candidate
   deduplication idempotence; placement ranking is a total order.

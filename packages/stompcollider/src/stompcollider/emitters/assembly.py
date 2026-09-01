@@ -5,7 +5,7 @@ bytes and never writes them (ADR-0005). **Collisions are left in place**
 -- interference is not resolved away, and seeing the clash is the point.
 The XCAF document is assembled by ``stompgeom.build``, never here
 (ADR-0008 and ``stompcollider-technical.md``'s "The assembly model"), and
-the placement is the one ``clash.placement_transform`` already states, so
+the placement is the one ``solids.placement_transform`` already states, so
 the report and the model cannot disagree about where a board went.
 """
 
@@ -22,8 +22,8 @@ from stompmodel.errors import EmitterError
 from stompmodel.frames import CoordinateFrame
 from stompmodel.units import Nanometre, nm_from_mm
 
-from ..clash import board_solid_name, placement_transform, solid_name
 from ..model import Board, DockData, Placement
+from ..solids import board_solid_name, placement_transform, solid_name
 
 __all__ = ["Solids", "AssemblyEmitter"]
 
