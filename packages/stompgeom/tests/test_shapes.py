@@ -287,6 +287,26 @@ def test_common_refuses_a_boolean_the_kernel_could_not_evaluate() -> None:
         common(TopoDS_Shape(), _box_at((0, 0, 0), 10, 10, 10))
 
 
+def test_common_leaves_its_arguments_fit_to_be_asked_again() -> None:
+    """The pair a search asks repeatedly is the pair a clash check measures.
+
+    A destructive boolean rewrites the ``TShape`` its arguments share with
+    every located copy of them, so a later query of those same solids reads
+    geometry an earlier one produced -- and a board resting at contact then
+    answers one way before its clash region is measured and another way
+    after. Two shapes, three questions, one answer each time.
+    """
+    from stompgeom.shapes import common, interferes, volume_mm3
+
+    plate, shaft = _bored_plate(6.0), _cylinder((20.0, 20.0, -5.0), 6.001, 13.0)
+    before = interferes(plate, shaft)
+    volumes = [volume_mm3(common(plate, shaft)) for _ in range(2)]
+
+    assert before is True
+    assert interferes(plate, shaft) is True
+    assert volumes[0] == pytest.approx(volumes[1])
+
+
 def test_common_is_symmetric_in_its_arguments() -> None:
     """Neither argument is privileged; the same pair either way round is one region."""
     from stompgeom.shapes import common
@@ -361,3 +381,169 @@ def test_volume_mm3_of_a_flat_face_is_nothing() -> None:
     assert volume_mm3(BRepBuilderAPI_MakeFace(plane, 0.0, 4.0, 0.0, 5.0).Face()) == (
         pytest.approx(0.0)
     )
+
+
+# --------------------------------------------------------------------------
+# ``interferes``: whether two shapes share positive volume, asked repeatedly.
+# --------------------------------------------------------------------------
+
+
+def test_interferes_is_true_of_two_shapes_that_overlap() -> None:
+    from stompgeom.shapes import interferes
+
+    assert interferes(_box_at((0, 0, 0), 10, 10, 10), _box_at((8, 0, 0), 10, 40, 40))
+
+
+def test_interferes_is_false_of_two_disjoint_shapes() -> None:
+    from stompgeom.shapes import interferes
+
+    assert not interferes(_box_at((0, 0, 0), 10, 10, 10), _box_at((30, 0, 0), 10, 10, 10))
+
+
+def test_two_shapes_meeting_on_a_face_do_not_interfere() -> None:
+    """Contact is not interference: the board may advance to that pose.
+
+    Rule 3 of "Contact is not a clash" applied to a path rather than to a
+    resting place -- two boxes sharing a whole face share no material, so a
+    search using this predicate is not stopped by touching.
+    """
+    from stompgeom.shapes import interferes
+
+    assert not interferes(_box_at((0, 0, 0), 10, 10, 10), _box_at((10, 0, 0), 10, 10, 10))
+
+
+def test_a_shaft_exactly_filling_its_bore_does_not_interfere() -> None:
+    """The curved case beside the planar one: a 12.000 mm shaft in a
+    12.000 mm bore touches over a whole cylinder and passes anyway."""
+    from stompgeom.shapes import interferes
+
+    assert not interferes(_bored_plate(6.0), _cylinder((20.0, 20.0, -5.0), 6.0, 13.0))
+
+
+def test_one_micron_of_radial_interference_is_interference() -> None:
+    """The control beside the two above: a predicate answering ``False`` to
+    everything would pass them both and fail here."""
+    from stompgeom.shapes import interferes
+
+    assert interferes(_bored_plate(6.0), _cylinder((20.0, 20.0, -5.0), 6.001, 13.0))
+
+
+def test_several_shapes_that_overlap_each_other_are_asked_of_as_a_sequence() -> None:
+    """A sequence is several operands; a compound is one shape.
+
+    Handed *one* shape holding parts that intersect each other the kernel
+    reads a self-intersecting argument and answers nothing at all, silently,
+    for a pair that really does share a region. A caller whose bundle may
+    meet itself passes a sequence, and both booleans then answer it.
+    """
+    from stompgeom.shapes import common, compound, interferes
+
+    board = _box_at((0, 0, 0), 21, 14, 10)
+    wall = _box_at((20, -50, -30), 4, 100, 40)
+    lid = _box_at((-50, -50, 8), 100, 100, 3)
+
+    assert interferes(board, [wall, lid])
+    assert common(board, [wall, lid]) is not None
+    assert not interferes(board, compound([wall, lid]))
+
+
+def test_the_members_of_that_bundle_do_overlap_each_other() -> None:
+    """The control beside it: the fixture states the condition it is about,
+    so the sequence form is being tested on the case that needs it rather
+    than on two disjoint solids that any spelling would answer."""
+    from stompgeom.shapes import interferes
+
+    assert interferes(
+        _box_at((20, -50, -30), 4, 100, 40), _box_at((-50, -50, 8), 100, 100, 3)
+    )
+
+
+def test_a_sequence_holding_nothing_shares_nothing_rather_than_raising() -> None:
+    """No operands is a legitimate value -- a level with no faces, a board
+    whose boxes reach no solid -- and the answer is that nothing is shared."""
+    from stompgeom.shapes import common, interferes
+
+    assert not interferes(_box_at((0, 0, 0), 10, 10, 10), [])
+    assert common([], _box_at((0, 0, 0), 10, 10, 10)) is None
+
+
+def test_interferes_leaves_its_arguments_fit_to_be_asked_again() -> None:
+    """Non-destructive: the same pair, asked twice, answers the same twice.
+
+    A destructive boolean modifies the ``TShape`` its arguments share with
+    every located copy of them, so the second query of a search reads
+    geometry the first one rewrote. The search asks one pair at many poses,
+    which is the only use that reaches this.
+    """
+    from stompgeom.shapes import interferes
+
+    plate, shaft = _bored_plate(6.0), _cylinder((20.0, 20.0, -5.0), 6.001, 13.0)
+    answers = [interferes(plate, shaft) for _ in range(3)]
+
+    assert answers == [True, True, True]
+
+
+def test_the_same_shapes_moved_apart_and_back_answer_the_same() -> None:
+    """The control for non-destructiveness: located copies of one solid, asked
+    in a sequence, must not have their shared topology consumed by an
+    earlier query -- so an interleaved sequence reads the same as a plain one."""
+    from stompgeom.shapes import interferes, placed
+    from stompmodel.frames import RigidTransform
+
+    identity = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    plate, shaft = _bored_plate(6.0), _cylinder((20.0, 20.0, -5.0), 6.001, 13.0)
+    offsets = (0.0, 40.0, 0.0, 40.0, 0.0)
+    answers = [
+        interferes(placed(shaft, RigidTransform(identity, (offset, 0.0, 0.0))), plate)
+        for offset in offsets
+    ]
+
+    assert answers == [True, False, True, False, True]
+
+
+# --------------------------------------------------------------------------
+# ``centre_of_mass_mm``: where a solid's material sits.
+# --------------------------------------------------------------------------
+
+
+def test_centre_of_mass_of_a_box_is_its_middle() -> None:
+    from stompgeom.shapes import centre_of_mass_mm
+
+    centre = centre_of_mass_mm(_box_at((2.0, 4.0, 6.0), 10.0, 20.0, 30.0))
+
+    assert tuple(round(value, 9) for value in centre) == (7.0, 14.0, 21.0)
+
+
+def test_centre_of_mass_is_not_the_centre_of_the_bounding_box() -> None:
+    """The distinction a caller reaches for this to draw: a lopsided solid
+    holds its material away from the middle of the box that bounds it."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+
+    from stompgeom.shapes import centre_of_mass_mm
+    from stompgeom.step import bounding_box_mm
+
+    heavy = _box_at((0.0, 0.0, 0.0), 10.0, 10.0, 10.0)
+    thin = _box_at((0.0, 0.0, 10.0), 1.0, 1.0, 30.0)
+    lopsided = BRepAlgoAPI_Fuse(heavy, thin).Shape()
+    box = bounding_box_mm(lopsided)
+
+    assert centre_of_mass_mm(lopsided)[2] < (box[2] + box[5]) / 2.0
+
+
+def test_the_fuzzy_predicate_agrees_with_the_exact_one_about_contact() -> None:
+    """The control the fuzzy value needs, and the claim it must not break.
+
+    A shaft exactly filling its bore is contact, and ``common`` -- the exact
+    intersection every measured quantity in this workspace is read from --
+    says so by returning nothing. :func:`interferes` runs a tolerant boolean
+    and must reach the same verdict, or the tolerance would have turned an
+    interference fit into a fault. Measured on the tar assembly at every
+    depth of a 12.000 mm bush through a 12.000 mm hole; stated here on the
+    same geometry the two rules above use.
+    """
+    from stompgeom.shapes import common, interferes
+
+    plate, shaft = _bored_plate(6.0), _cylinder((20.0, 20.0, -5.0), 6.0, 13.0)
+
+    assert common(plate, shaft) is None
+    assert not interferes(plate, shaft)
