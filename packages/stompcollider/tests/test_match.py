@@ -553,7 +553,6 @@ def test_ambiguity_under_any_surviving_candidate_convicts_not_just_the_first() -
         _raw_candidates(axes, data.holes, _TOLERANCE)[0],
         axes,
         {c.designator: c for c in data.boards[0].components},
-        Nanometre(0),
     )[1]
 
     convictions = _raw_ambiguous(
@@ -695,20 +694,10 @@ def test_match_satisfies_stage_dockdata_under_mypy() -> None:
 
 
 def test_describe_returns_a_stage_run_naming_the_tolerance() -> None:
-    run = Match(_TOLERANCE).describe()
-    assert run == StageRun(
-        "match", (("tolerance_nm", 1_270_000), ("clearance_nm", 0))
-    )
-
-
-def test_describe_records_the_fit_clearance_the_stage_was_given() -> None:
-    """The clearance widens every hole this stage measures a part against, so
-    a provenance that named only the tolerance could not be read back to the
-    seating the run produced. Non-zero, so a record hard-coded to the
-    default would fail here rather than agree with the line above."""
-    run = Match(_TOLERANCE, Nanometre(100_000)).describe()
-    assert run == StageRun(
-        "match", (("tolerance_nm", 1_270_000), ("clearance_nm", 100_000))
+    """The one thing this stage is configured with, and the only number a
+    reader can check a registration against."""
+    assert Match(_TOLERANCE).describe() == StageRun(
+        "match", (("tolerance_nm", 1_270_000),)
     )
 
 
@@ -729,7 +718,7 @@ def test_pipeline_run_records_matchs_stage_run() -> None:
 
 
 # --------------------------------------------------------------------------
-# Fit: the clearance, the seating each pairing implies, and an exact fit
+# Fit: the seating each pairing implies, and an exact fit
 # --------------------------------------------------------------------------
 
 
@@ -737,7 +726,7 @@ def _stepped_board(radius_nm: int) -> Board:
     """The three parts, each a shaft of ``radius_nm`` from 4 mm down the tip.
 
     One profile for all three, so the fit rules below are read off the
-    hole's diameter and the clearance rather than off which part it was.
+    hole's diameter rather than off which part it was.
     """
     profile = Profile(((Nanometre(radius_nm), Nanometre(4_000_000), Nanometre(9_000_000)),))
     components = tuple(
@@ -756,22 +745,25 @@ def _stepped_board(radius_nm: int) -> Board:
     return Board(1, designators, _extent(), _identity_frame(), components)
 
 
-def _fitted(radius_nm: int, clearance_nm: int) -> DockData:
+def _fitted(radius_nm: int) -> DockData:
     board = _stepped_board(radius_nm)
     holes = (_hole(2, _D3), _hole(3, _D1), _hole(1, _D2))
-    return Match(_TOLERANCE, Nanometre(clearance_nm)).apply(_dock(board, holes))
+    return Match(_TOLERANCE).apply(_dock(board, holes))
 
 
-def test_a_part_a_shade_wider_than_its_hole_passes_on_the_fit_clearance() -> None:
-    """A modelled bushing need not be drawn at nominal. Through a 3 mm hole a
-    1.505 mm shaft is 5 microns proud on radius: judged against the hole
-    alone it is arrested, judged against the hole widened by half a tenth of
-    a millimetre it passes -- which is the whole reason the flag exists."""
-    strict = _fitted(1_505_000, 0).placements[1][0]
-    allowed = _fitted(1_505_000, 100_000).placements[1][0]
+def test_a_part_wider_than_its_hole_states_the_depth_it_reaches() -> None:
+    """The hole's own radius exactly, with nothing added to it: through a
+    3 mm hole a 1.505 mm shaft is 5 microns proud on radius and is arrested
+    where its shoulder begins, while a 1.495 mm one passes fully.
 
-    assert {c.insertion_nm for c in strict.correspondence} == {Nanometre(4_000_000)}
-    assert {c.insertion_nm for c in allowed.correspondence} == {None}
+    A reported measurement, not a seat: where the board really comes to rest
+    is what the insertion search finds against the drilled plate.
+    """
+    proud = _fitted(1_505_000).placements[1][0]
+    clear = _fitted(1_495_000).placements[1][0]
+
+    assert {c.insertion_nm for c in proud.correspondence} == {Nanometre(4_000_000)}
+    assert {c.insertion_nm for c in clear.correspondence} == {None}
 
 
 def test_each_pairing_states_the_seating_its_own_insertion_implies() -> None:
@@ -779,7 +771,7 @@ def test_each_pairing_states_the_seating_its_own_insertion_implies() -> None:
     from the board's own origin plane, so the travel is the one less the
     other: negative, into the cavity. A seating equal to the insertion, or
     to its negation, means the tip was never subtracted."""
-    placement = _fitted(1_505_000, 0).placements[1][0]
+    placement = _fitted(1_505_000).placements[1][0]
 
     assert {c.seat_nm for c in placement.correspondence} == {
         Nanometre(4_000_000 - _TIP)
@@ -791,8 +783,8 @@ def test_a_part_exactly_as_wide_as_its_hole_is_reported_as_zero_clearance() -> N
     an INFO finding naming the part and the hole rather than silence. The
     control is beside it: a shaft five microns narrower fits with room to
     spare and earns nothing."""
-    exact = _fitted(1_500_000, 100_000)
-    clear = _fitted(1_495_000, 100_000)
+    exact = _fitted(1_500_000)
+    clear = _fitted(1_495_000)
 
     findings = [d for d in exact.diagnostics if d.code == "zero-clearance"]
     assert {d.severity for d in findings} == {Severity.INFO}
@@ -802,10 +794,13 @@ def test_a_part_exactly_as_wide_as_its_hole_is_reported_as_zero_clearance() -> N
     assert [d for d in clear.diagnostics if d.code == "zero-clearance"] == []
 
 
-def test_an_exact_fit_is_judged_against_the_hole_and_not_the_widened_radius() -> None:
-    """The clearance decides what *passes*; it never decides what is exact.
-    A shaft of exactly half the hole's diameter is zero-clearance whatever
-    the clearance is, and one grown into the clearance is not."""
+def test_an_exact_fit_is_the_hole_radius_and_nothing_within_a_hair_of_it() -> None:
+    """``zero-clearance`` is exact equality of whole nanometres: a shaft
+    fifty microns wider than half the hole's diameter is not it, and neither
+    is one fifty microns narrower."""
     assert [
-        d for d in _fitted(1_550_000, 100_000).diagnostics if d.code == "zero-clearance"
+        d for d in _fitted(1_550_000).diagnostics if d.code == "zero-clearance"
+    ] == []
+    assert [
+        d for d in _fitted(1_450_000).diagnostics if d.code == "zero-clearance"
     ] == []

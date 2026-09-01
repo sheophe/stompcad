@@ -13,31 +13,36 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations, islice, product
 from typing import Any, ClassVar
 
-from stompgeom.shapes import common, compound, placed, volume_mm3
-from stompgeom.step import BoxMm, StepSolid, bounding_box_mm
+from stompgeom.shapes import common, compound, interferes, placed, volume_mm3
+from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.frames import CoordinateFrame, RigidTransform
+from stompmodel.frames import CoordinateFrame
 from stompmodel.model import StageRun
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .errors import StompcolliderError
-from .model import Board, Clash, DockData, Placement
-from .seat import rank_key
+from .insert import CavitySplit
+from .model import CASE_KIND, CLOSURE_KIND, Board, Clash, DockData, Placement
+from .seat import rank_key, shortfall_nm
+from .solids import (
+    MODEL_FRAME,
+    Body,
+    bodies,
+    boxes_overlap,
+    solid_name,
+)
 
-__all__ = ["Clashes", "board_solid_name", "placement_transform", "solid_name"]
+__all__ = ["Clashes"]
 
 #: A clash's axis names one of the face frame's own three, never a model
 #: axis: the frame the enclosure was drilled in is the frame a depth means
 #: something in.
 _AXES = ("u", "v", "w")
-
-#: A shape's bounding box, ``(x0, y0, z0, x1, y1, z1)`` in millimetres.
-_Box = BoxMm
 
 #: A board solid nobody named, exactly as :func:`solid_name` spells one: the
 #: board it belongs to, and the corner that tells it from its neighbours.
@@ -51,101 +56,6 @@ _NM3_PER_MM3 = Decimal(10) ** 18
 #: single element, but nothing in the geometry bounds it, so this does --
 #: and a run that reaches it says so rather than truncating in silence.
 _COMBINATION_LIMIT = 4096
-
-#: The model frame itself. The motion carrying a face frame onto this one
-#: restates a body's own coordinates as that face frame's, which is how a
-#: region gets boxed *in* the face frame rather than boxed in the model's
-#: and reprojected -- see :func:`_clash_from`.
-_MODEL_FRAME = CoordinateFrame(
-    origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
-    u=(1.0, 0.0, 0.0),
-    v=(0.0, 1.0, 0.0),
-    w=(0.0, 0.0, 1.0),
-)
-
-
-@dataclass(frozen=True, slots=True)
-class _Body:
-    """One solid placed for a check: what to call it, and where it now is.
-
-    ``box`` bounds ``shape`` and is only ever read as a filter, so it may
-    be wider than the shape's own box but never narrower -- see
-    :func:`_transformed_box`.
-    """
-
-    name: str
-    shape: Any
-    box: _Box
-
-
-def _board_frame(board: Board) -> CoordinateFrame:
-    """The board's own frame, as the file it was exported from states it.
-
-    Origin at the model origin, not at the carrier plane: a protrusion's
-    ``axis_xy_nm`` is the plain projection of its axis onto ``u`` and ``v``,
-    so ``Match``'s ``(x, y, theta)`` is solved against exactly these
-    coordinates. There is no second hypothesis to switch on -- which face
-    points at the panel is derived rather than searched, so ``panel_face``
-    is ``+w`` for every board that has one, and a board Match never reached
-    is placed the same way.
-    """
-    carrier = board.carrier
-    origin = (Nanometre(0), Nanometre(0), Nanometre(0))
-    return CoordinateFrame(origin_nm=origin, u=carrier.u, v=carrier.v, w=carrier.w)
-
-
-def placement_transform(
-    board: Board, placement: Placement, basis: CoordinateFrame
-) -> RigidTransform:
-    """The rigid motion carrying ``board`` into ``placement`` on the face.
-
-    The spec's composition, in its stated order: the board turned to the
-    face it was matched on, rotated by theta about the face normal,
-    translated by ``(x, y)`` in the face frame and by ``z`` along its
-    normal. Built as one frame-to-frame placement rather than a product of
-    matrices written here -- ``translated_nm`` moves along the frame's own
-    unrotated axes, so it comes before the turn.
-    """
-    target = basis.translated_nm(
-        placement.x_nm, placement.y_nm, placement.z_nm
-    ).rotated_about_w(math.radians(placement.theta_deg))
-    return _board_frame(board).placement_onto(target)
-
-
-def _transformed_box(box: _Box, motion: RigidTransform) -> _Box:
-    """``box``'s eight corners under ``motion``, boxed again.
-
-    A bound on the moved shape, not that shape's own box: the box of a box
-    is the larger under any rotation but a quarter turn. Sound *here* and
-    nowhere else, because this is only ever rule 2's negative filter -- a
-    box too large can only send a pair to the boolean that decides it
-    anyway, and nothing measured is read off it. Boxing the moved shape
-    instead is this package's most expensive read, once per solid per
-    candidate seating.
-    """
-    rows = motion.rotation
-    shift = motion.translation_mm
-    lows = [math.inf] * 3
-    highs = [-math.inf] * 3
-    for corner in product((box[0], box[3]), (box[1], box[4]), (box[2], box[5])):
-        for axis in range(3):
-            value = shift[axis] + sum(
-                rows[axis][index] * corner[index] for index in range(3)
-            )
-            lows[axis] = min(lows[axis], value)
-            highs[axis] = max(highs[axis], value)
-    return (lows[0], lows[1], lows[2], highs[0], highs[1], highs[2])
-
-
-def _boxes_overlap(first: _Box, second: _Box) -> bool:
-    """Whether two axis-aligned boxes share any point, contact included.
-
-    Non-strict on purpose: the filter may never discard a pair the exact
-    intersection would have kept, so two boxes merely touching go through
-    to the boolean, which answers contact for itself.
-    """
-    return all(first[axis] <= second[axis + 3] and second[axis] <= first[axis + 3]
-               for axis in range(3))
 
 
 def _nm3_from_mm3(volume_mm3_: float) -> int:
@@ -179,7 +89,7 @@ def _clash_from(
     the axis is that axis; zero nanometres is what the canonical
     representation says about contact, and contact is not a clash.
     """
-    box = bounding_box_mm(placed(region, basis.placement_onto(_MODEL_FRAME)))
+    box = bounding_box_mm(placed(region, basis.placement_onto(MODEL_FRAME)))
     lows = tuple(nm_from_mm(box[axis]) for axis in range(3))
     highs = tuple(nm_from_mm(box[axis + 3]) for axis in range(3))
     extents = tuple(highs[axis] - lows[axis] for axis in range(3))
@@ -205,37 +115,9 @@ def _clash_from(
     )
 
 
-def solid_name(solid: StepSolid, box: _Box, group: str) -> str:
-    """What to call ``solid`` within ``group``, including one nobody named.
-
-    An empty ``StepSolid.name`` means nobody named the solid, legitimate
-    input for a supplied enclosure (ADR-0007) that ``Clash`` still refuses
-    and the assembly must still write. Keyed on the solid's own least
-    corner in whole nanometres -- a property of the geometry, so two files
-    listing the same solids in a different order name them the same way,
-    where an index into the supplied sequence would not (ADR-0006).
-    """
-    if solid.name:
-        return solid.name
-    corner = ",".join(str(nm_from_mm(box[axis])) for axis in range(3))
-    return f"{group}:unnamed@{corner}"
-
-
-def board_solid_name(solid: StepSolid, box: _Box, group: str) -> str:
-    """A board solid's name, always carrying the board it belongs to.
-
-    Every one, not only the solids nobody named: two boards may each carry
-    an ``RV1``, so a designator alone is not unique across an assembly, and
-    a reader opening the model needs to know whose component it is anyway.
-    One rule for the assembly writer and for an inter-board finding, so the
-    name the report states is the name the model was written under.
-    """
-    return f"{group}:{solid.name}" if solid.name else solid_name(solid, box, group)
-
-
 def _pair_clash(
-    first: _Body,
-    second: _Body,
+    first: Body,
+    second: Body,
     basis: CoordinateFrame,
     with_: str,
     kind: str,
@@ -247,7 +129,7 @@ def _pair_clash(
     to check gets the same filter and the same boolean rather than a second
     copy of either.
     """
-    if not _boxes_overlap(first.box, second.box):
+    if not boxes_overlap(first.box, second.box):
         return None
     region = common(first.shape, second.shape)
     if region is None:
@@ -271,10 +153,12 @@ class Clashes:
     Satisfies ``stompmodel.protocols.Stage[DockData]``. Each board is
     checked against **the whole of the rest of the assembly**. Seating is
     two stages: stage one ranks each board against the case alone and keeps
-    every seating whose case clash is empty; stage two picks, over the
-    combinations of those, the assembly of least inter-board material.
-    Reads only ``DockData.placements`` and ``.boards``, so it asserts no
-    other stage ran, and ``describe()`` is ``Pipeline.run``'s to record.
+    every seating the cavity itself admits -- asked with the predicate the
+    insertion search uses, so a board resting at contact passes; stage two
+    picks, over the combinations of those, the assembly of least inter-board
+    material. Reads only ``DockData.placements`` and ``.boards``, so it
+    asserts no other stage ran, and ``describe()`` is ``Pipeline.run``'s to
+    record.
     """
 
     name: ClassVar[str] = "clashes"
@@ -293,8 +177,12 @@ class Clashes:
         # read them, and a pair of seatings is intersected once however
         # many combinations hold both -- which is what keeps stage two's
         # product affordable rather than quadratic in the same booleans.
-        self._placed: dict[tuple[int, Placement], tuple[_Body, ...]] = {}
+        self._placed: dict[tuple[int, Placement], tuple[Body, ...]] = {}
         self._pairs: dict[tuple[int, Placement, int, Placement], tuple[Clash, ...]] = {}
+        # The same split the insertion search walks a board into, so the two
+        # stages cannot disagree about which solid is the enclosure and which
+        # closes over it.
+        self._split = CavitySplit(self._case)
 
     def describe(self) -> StageRun:
         """Report the (parameterless) configuration this stage ran with."""
@@ -305,18 +193,31 @@ class Clashes:
         boards = {board.ordinal: board for board in data.boards}
 
         ranked: dict[int, tuple[Placement, ...]] = {}
+        clean: dict[int, tuple[Placement, ...]] = {}
         for ordinal in sorted(data.placements):
             board = self._board_for(ordinal, boards)
             filled = [
-                replace(placement, clashes=self._against_case(board, placement, basis))
+                (
+                    replace(
+                        placement, clashes=self._against_case(board, placement, basis)
+                    ),
+                    self._clears_the_cavity(board, placement, basis),
+                )
                 for placement in data.placements[ordinal]
             ]
-            ranked[ordinal] = tuple(
+            order = sorted(filled, key=lambda pair: rank_key(pair[0]))
+            numbered = [
                 replace(placement, rank=rank)
-                for rank, placement in enumerate(sorted(filled, key=rank_key), start=1)
+                for rank, (placement, _clear) in enumerate(order, start=1)
+            ]
+            ranked[ordinal] = tuple(numbered)
+            clean[ordinal] = tuple(
+                placement
+                for placement, (_seated, clear) in zip(numbered, order, strict=True)
+                if clear
             )
 
-        seated, notes = self._assembly(ranked, boards, basis)
+        seated, notes = self._assembly(ranked, clean, boards, basis)
         return replace(
             data,
             placements=seated,
@@ -342,21 +243,12 @@ class Clashes:
 
     def _bodies(
         self, board: Board, placement: Placement, basis: CoordinateFrame
-    ) -> tuple[_Body, ...]:
+    ) -> tuple[Body, ...]:
         """This board's solids, each named and bounded, under one placement."""
         key = (board.ordinal, placement)
         cached = self._placed.get(key)
         if cached is None:
-            motion = placement_transform(board, placement, basis)
-            group = f"board:{board.ordinal}"
-            cached = tuple(
-                _Body(
-                    board_solid_name(solid, solid.box_mm, group),
-                    placed(solid.shape, motion),
-                    _transformed_box(solid.box_mm, motion),
-                )
-                for solid in self._boards[board.ordinal]
-            )
+            cached = bodies(board, placement, basis, self._boards[board.ordinal])
             self._placed[key] = cached
         return cached
 
@@ -370,21 +262,63 @@ class Clashes:
         into it. Only the parts whose boxes reach that solid are compounded
         for the boolean, which is rule 2's own filter and changes no answer
         -- a solid whose box misses cannot contribute to the shared region.
+        Each finding carries whether it is against the cavity or against
+        what closes over it, which decides nothing about what is reported
+        and everything about what may rank a seating.
         """
+        inside, beyond = self._split.of(basis, board.extent_nm)
         bodies = self._bodies(board, placement, basis)
         found = []
-        for solid in self._case:
+        for solid, kind in [(one, CASE_KIND) for one in inside] + [
+            (one, CLOSURE_KIND) for one in beyond
+        ]:
             box = solid.box_mm
-            meeting = [body.shape for body in bodies if _boxes_overlap(body.box, box)]
+            meeting = [body.shape for body in bodies if boxes_overlap(body.box, box)]
             if not meeting:
                 continue
             region = common(compound(meeting), solid.shape)
             if region is None:
                 continue
-            clash = _clash_from(region, basis, solid_name(solid, box, "case"), "case")
+            clash = _clash_from(region, basis, solid_name(solid, box, "case"), kind)
             if clash is not None:
                 found.append(clash)
         return tuple(sorted(found, key=_clash_key))
+
+    def _clears_the_cavity(
+        self, board: Board, placement: Placement, basis: CoordinateFrame
+    ) -> bool:
+        """Whether the enclosure this board is inserted into admits this seating.
+
+        **The predicate the insertion search asks**, not the exact
+        intersection the findings are measured with, and one coherent rule
+        rather than a threshold laid over two. A board the search advanced
+        to rest at first contact lies within a nanometre of what stopped it,
+        and the exact boolean finds a sliver there; asking a second
+        definition here left every real seating failing this filter, and the
+        mutual-interference stage behind it never ran at all.
+
+        What closes over the cavity takes no part: the board is inserted
+        into an open case and the backplate goes on afterwards, so a lid
+        that will not close is a finding rather than a seating refused.
+
+        The case solids go as a sequence, for the reason ``CaseCavity``'s
+        own predicate passes them that way.
+        """
+        inside, _beyond = self._split.of(basis, board.extent_nm)
+        bodies = self._bodies(board, placement, basis)
+        met = [
+            solid.shape
+            for solid in inside
+            if any(boxes_overlap(body.box, solid.box_mm) for body in bodies)
+        ]
+        if not met:
+            return True
+        meeting = [
+            body.shape
+            for body in bodies
+            if any(boxes_overlap(body.box, solid.box_mm) for solid in inside)
+        ]
+        return not interferes(compound(meeting), met)
 
     def _between(
         self,
@@ -417,20 +351,21 @@ class Clashes:
     def _assembly(
         self,
         ranked: Mapping[int, tuple[Placement, ...]],
+        clean: Mapping[int, tuple[Placement, ...]],
         boards: Mapping[int, Board],
         basis: CoordinateFrame,
     ) -> tuple[dict[int, tuple[Placement, ...]], tuple[Diagnostic, ...]]:
-        """Stage two: which of the case-clean seatings this assembly is made of.
+        """Stage two: which of the cavity-clean seatings this assembly is made of.
 
         The case takes no part here, having already been answered in stage
-        one. A board no seating clears the case for is fixed at its
+        one. A board no seating clears the cavity for is fixed at its
         stage-one rank 1 and says so, because a seating that fouls the
         enclosure cannot be improved by anything a neighbour does -- and
         because a reader could not otherwise tell a chosen seating from a
         defaulted one.
         """
         notes: list[Diagnostic] = []
-        candidates = self._candidates(ranked, notes)
+        candidates = self._candidates(ranked, clean, notes)
         ordinals = sorted(candidates)
         possible = math.prod(len(candidates[ordinal]) for ordinal in ordinals)
         tried = list(
@@ -467,17 +402,29 @@ class Clashes:
     def _candidates(
         self,
         ranked: Mapping[int, tuple[Placement, ...]],
+        clean: Mapping[int, tuple[Placement, ...]],
         notes: list[Diagnostic],
     ) -> dict[int, tuple[Placement, ...]]:
-        """Stage one's survivors: every seating whose clash with the case is empty."""
+        """Stage one's survivors: the seatings the cavity admits *and* that seat.
+
+        Two conditions, and the second is not redundant. A board the case
+        arrests well out of it clears the cavity by resting against it, and
+        it fouls a neighbour less than the seating that really goes in --
+        precisely because it never went in. Measured on the tar assembly,
+        that is a 14 mm shortfall winning stage two outright. So a seating
+        that inserts less far than another of the same board is not a
+        candidate, exactly as one that fouls the enclosure is not; what
+        stage two then chooses among is boards that are all equally seated,
+        and mutual interference alone decides between them.
+        """
         candidates: dict[int, tuple[Placement, ...]] = {}
         for ordinal in sorted(ranked):
             placements = ranked[ordinal]
             if not placements:
                 continue
-            clean = tuple(one for one in placements if not one.clashes)
-            candidates[ordinal] = clean or (placements[0],)
-            if clean:
+            admitted = _best_seated(clean.get(ordinal, ()))
+            candidates[ordinal] = admitted or (placements[0],)
+            if admitted:
                 continue
             notes.append(
                 Diagnostic.info(
@@ -521,6 +468,21 @@ class Clashes:
         if best is None:  # pragma: no cover - product() always yields one tuple
             return {}, {}
         return best[1], best[2]
+
+
+def _best_seated(placements: Sequence[Placement]) -> tuple[Placement, ...]:
+    """Those of ``placements`` that insert as far as any of them does.
+
+    Exact equality of whole nanometres, so a genuinely symmetric pair -- the
+    case a second seating exists to report at all -- survives whole, and a
+    board that merely leant on the enclosure does not.
+    """
+    if not placements:
+        return ()
+    least = min(shortfall_nm(placement) for placement in placements)
+    return tuple(
+        placement for placement in placements if shortfall_nm(placement) == least
+    )
 
 
 def _chosen_first(

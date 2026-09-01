@@ -2130,3 +2130,39 @@ not.
   caller in the room while the seam is being designed — which is precisely what plan 3 is
   expected to supply.
 
+
+## Reduce the insertion search's kernel cost
+
+**Status:** Agreed, deferred. The search is the correct algorithm and lands first;
+this is the follow-up.
+
+**Constraint:** `stompcollider` seats a board by asking, at many depths along one
+axis, whether it interferes with the enclosure. That search is what makes the
+seating honest, and no optimisation may weaken it: contact must stay passable,
+the answer must stay an exact whole nanometre, and two runs over one input must
+agree byte for byte (ADR-0006). Preserve `--seat-pitch-min` as the stated bound
+on what the search can see.
+
+**Measured before starting** — capture these again rather than trusting them, but
+they are where the last measurement left it: one real two-board run takes about
+150 s against 49 s for the same run seated by hole geometry alone. Roughly 118 s
+of that is around 228 interference queries. Board 1 costs ~0.17 s a query over
+~92 queries; board 2 costs ~0.75 s a query over 45, being two 534-face
+footswitches against a 264-face box.
+
+Three approaches were tried and did not pay, so do not repeat them without a
+reason: `BRepExtrema_DistShapeShape` as a cheap "provably clear" filter is 10-20x
+*slower* than the boolean it would avoid; per-solid queries with early exit are 3x
+slower than one compound; face-level bounding boxes reduce nothing, because the
+box's rim face spans the whole footprint.
+
+Two levers remain, neither attempted. Bounding an annular face by its outer box
+less its inner wire's box would exclude most of the deep path, and is new
+`stompgeom` work. `BOPAlgo_Options.SetRunParallel(True)` measured about 5x on the
+hardest poses and about 10% overall, and was declined rather than gamble the
+determinism contract on two green runs -- adopting it needs evidence that the
+result is invariant, not merely that it was equal twice.
+
+**Acceptance:** The real two-board run is materially faster, every artefact is
+byte-identical to the run before the change, and the suite passes. A lever that
+cannot be shown deterministic is not adopted, whatever it saves.

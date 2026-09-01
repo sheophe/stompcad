@@ -121,26 +121,26 @@ def test_a_profile_meets_a_radius_only_when_a_step_states_that_radius_exactly() 
     assert _LED.meets(Nanometre(2_900_001)) is False
 
 
-def test_a_hole_admits_its_own_radius_plus_half_the_clearance() -> None:
-    """The clearance is a diameter, as every other size in this tool is, so
-    a tenth of a millimetre on a 7 mm hole widens the radius by 0.05 mm and
-    not by 0.1. Stated once here because the reader probes at this number
-    and ``Match`` queries at it, and two spellings would disagree."""
-    assert admitting_radius(Nanometre(7_000_000), Nanometre(100_000)) == Nanometre(
-        3_550_000
-    )
-    assert admitting_radius(Nanometre(7_000_000), Nanometre(0)) == Nanometre(3_500_000)
+def test_a_hole_admits_its_own_radius_and_nothing_beyond_it() -> None:
+    """Nothing is added to it: how much wider than a part its hole must be
+    is not a number this tool is told. Stated once here because the reader
+    probes at this number and ``Match`` queries at it, and two spellings
+    would let a part be measured against one radius and judged against
+    another. Odd diameters floor rather than round, which is what keeps the
+    answer a whole nanometre."""
+    assert admitting_radius(Nanometre(7_000_000)) == Nanometre(3_500_000)
+    assert admitting_radius(Nanometre(7_000_001)) == Nanometre(3_500_000)
 
 
-def test_a_hole_with_no_diameter_or_a_negative_clearance_is_refused() -> None:
-    """Neither is a fit anybody drilled; a hole of nothing admits nothing and
-    a clearance below zero would narrow the hole rather than widen it."""
+def test_a_hole_with_no_diameter_is_refused() -> None:
+    """A hole of nothing admits nothing, and a diameter is a canonical
+    length rather than a measurement in millimetres."""
     with pytest.raises(ValueError, match="positive diameter"):
-        admitting_radius(Nanometre(0), Nanometre(0))
-    with pytest.raises(ValueError, match="not negative"):
-        admitting_radius(Nanometre(7_000_000), Nanometre(-1))
+        admitting_radius(Nanometre(0))
+    with pytest.raises(ValueError, match="positive diameter"):
+        admitting_radius(Nanometre(-1))
     with pytest.raises(TypeError):
-        admitting_radius(7.0, Nanometre(0))  # type: ignore[arg-type]
+        admitting_radius(7.0)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------

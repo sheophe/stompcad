@@ -150,14 +150,34 @@ failure. Exit 2 is reachable from `unknown-diameter`, `ambiguous-enclosure`,
 `case-orientation-unverifiable` and `off-size` are warnings and reach exit 1.
 
 `stompcollider`'s own command line is `DRILL.json BOARD.stp …` with `--case-model`,
-`--panel-reference`, `--match-tolerance`, `--fit-clearance`, `--report`, `--assembly`
+`--panel-reference`, `--match-tolerance`, `--seat-pitch-max`,
+`--seat-pitch-min`, `--report`, `--assembly`
 and `-v`; there is
 no `--case-face`, because the drill document carries the face frame `stompdrill` cut
-in. `--fit-clearance` is how much wider than a part its hole must be, stated **on
-diameter** and so contributing half its value to a radius; it defaults to 0.1 mm and
-zero is a legal value, being the strict fit the comparison already is. It is the one
-number the board reader needs before it can measure anything, because a component's
-profile is measured by cutting the solid at the radii this panel's holes admit. `--match-tolerance` is **optional**: it defaults to half the grid pitch the drill
+in. There is **no `--fit-clearance`**: a hole admits its own radius and nothing is
+added to it, because the insertion search reads the metal and a profile is a
+reported measurement rather than the seat. Do not restore it — the flag existed to
+move a *prediction* out of the way, and on the tar footswitch that prediction reads
+two ways for one part (20.992 and 9.499 mm through one ⌀12 hole, a tangency the cut
+answers twice), which is why the profile does not govern.
+
+`--seat-pitch-max` (default 2.0 mm) and `--seat-pitch-min` (default 0.05 mm) are
+the insertion search's two steps: the coarse pitch the insertion path is walked
+at, and the pitch the bracket that walk leaves is swept at. They are an ordered
+pair and both positive; a coarse step finer than the fine one, or either at zero,
+is a usage failure. `Seat` records both in its own `describe()`. **The enclosure
+fixes the depth**, and the answer is the **first** contact along the path -- not
+"seat then retreat until clear", which is disproved on the fixture. The path is
+bounded by the last travel at which contact is possible and *not* by the hole
+seat, so a board may rest deeper than its profile predicted; where nothing on the
+path touches it, the hole seat is what it rests at. Ranking leads on the
+insertion shortfall against that seat, so a board that never entered the case
+cannot outrank one that did -- and stage one drops such a seating from the
+assembly search for the same reason, or stage two would trade it back for the
+mutual interference it avoids by not being in the case. The lid takes no part in insertion, in ranking or in
+stage one's filter, and is identified geometrically, never by the string `LID`;
+its clashes are still reported, kinded `closure`.
+`--match-tolerance` is **optional**: it defaults to half the grid pitch the drill
 document records under its `snap` run, which is the derivation the flag's own help
 used to ask the operator to perform by hand. A supplied value overrides it; a document
 recording no usable pitch is a usage failure naming the flag, never a guessed
@@ -221,7 +241,11 @@ it, and neither spells either literal. The `DrillData` JSON codec is
 versioned; the document is at version 6, whose `CaseRegistration` member carries the
 resolved part, drilled face, supplied model's file name and cutting frame as one typed fact
 rather than four — see [ADR-0009](docs/adr/0009-shared-model-package-and-dependency-order.md).
-`stompgeom` owns the kernel layer across every side it touches: reading, where
+`stompgeom` owns the kernel layer across every side it touches: intersecting and
+measuring, where `stompgeom.shapes` publishes `common` beside `interferes` --
+one exact region for measuring, one boolean predicate for asking about a single
+pair at many poses, which is non-destructive and fuzzy because that use requires
+both -- and `volume_mm3` beside `centre_of_mass_mm`; reading, where
 `stompgeom.step` publishes the one rule for what XCAF recorded as a label's name,
 distinguishing an unnamed label from OCC's own synthesised placeholder; writing, where
 `stompgeom.writer.render_step` is the one serialising entry point and returns the finished

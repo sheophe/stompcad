@@ -46,6 +46,7 @@ from .designators import Filter, parse_filter
 from .emitters import AssemblyEmitter, ReportEmitter
 from .emitters.assembly import Solids
 from .errors import UsageError
+from .insert import CaseCavity
 from .match import TOLERANCE_PARAMETER, Match
 from .model import DockData, Placement
 from .seat import Seat
@@ -57,6 +58,7 @@ __all__ = [
     "build_pipeline",
     "parse_targets",
     "parse_length",
+    "parse_pitches",
     "parse_place",
     "parse_pin",
     "admit",
@@ -74,11 +76,14 @@ _SEVERITY_ORDER = (Severity.ERROR, Severity.WARNING, Severity.INFO)
 #: Width of the report's label column.
 _LABEL = 15
 
-#: What ``--fit-clearance`` defaults to, on diameter: what a builder allows
-#: when drilling for a bushing. The flag exists because the interval that
-#: selects one seating is a property of the components rather than a law,
-#: not because this figure was tuned -- see "Fit clearance" in the spec.
-_FIT_CLEARANCE_MM = "0.1"
+#: What the insertion scan's two pitches default to, in millimetres. The
+#: coarse one is where the path is walked from the entry pose; the fine one
+#: is the width of the narrowest obstruction the search can see inside the
+#: bracket the coarse pass leaves. Neither is tuned to a fixture: their
+#: product is what a scan costs, and these are the pair that keeps a real
+#: enclosure's path affordable while still seeing a tenth-millimetre band.
+_SEAT_PITCH_MAX_MM = "2.0"
+_SEAT_PITCH_MIN_MM = "0.05"
 
 
 # ---------------------------------------------------------------------------
@@ -116,11 +121,19 @@ def build_parser() -> argparse.ArgumentParser:
         "pitch the drill document records, which is where it comes from",
     )
     parser.add_argument(
-        "--fit-clearance",
+        "--seat-pitch-max",
         metavar="MM",
-        default=_FIT_CLEARANCE_MM,
-        help="how much wider than a part its hole must be, on diameter, in "
-        f"millimetres; default {_FIT_CLEARANCE_MM}",
+        default=_SEAT_PITCH_MAX_MM,
+        help="the insertion scan's coarsest step, in millimetres; default "
+        f"{_SEAT_PITCH_MAX_MM}",
+    )
+    parser.add_argument(
+        "--seat-pitch-min",
+        metavar="MM",
+        default=_SEAT_PITCH_MIN_MM,
+        help="the insertion scan's finest step, in millimetres, and the width "
+        "of the narrowest obstruction it can see; default "
+        f"{_SEAT_PITCH_MIN_MM}",
     )
     parser.add_argument(
         "--place",
@@ -159,23 +172,21 @@ def parse_targets(args: argparse.Namespace) -> list[tuple[str, Path]]:
     return [(name, Path(value)) for name, value in requested if value is not None]
 
 
-def parse_length(text: str, flag: str, *, allow_zero: bool = False) -> Nanometre:
-    """A finite, non-negative millimetre value from the command line, in nanometres.
+def parse_length(text: str, flag: str) -> Nanometre:
+    """A finite, positive millimetre value from the command line, in nanometres.
 
-    ``allow_zero`` is the whole difference between the two flags that reach
-    here: a recognition tolerance of nothing would pair no part with any
-    hole, while a fit clearance of nothing is the strict fit the comparison
-    already is, so one refuses zero and the other admits it.
+    Every flag that reaches here names a length nothing can be zero of: a
+    recognition tolerance of nothing pairs no part with any hole, and a scan
+    pitch of nothing describes no scan.
     """
     try:
         millimetres = float(text)
     except ValueError:
         raise UsageError(f"{flag} expects a number of millimetres, got {text!r}") from None
-    floor = "a non-negative" if allow_zero else "a positive"
-    if not math.isfinite(millimetres) or millimetres < 0 or (
-        millimetres == 0 and not allow_zero
-    ):
-        raise UsageError(f"{flag} must be {floor}, finite number of millimetres, got {text!r}")
+    if not math.isfinite(millimetres) or millimetres <= 0:
+        raise UsageError(
+            f"{flag} must be a positive, finite number of millimetres, got {text!r}"
+        )
     return nm_from_mm(millimetres)
 
 
@@ -255,20 +266,45 @@ def _refuse_unhonoured(args: argparse.Namespace) -> None:
 
 def build_pipeline(
     tolerance_nm: Nanometre,
-    clearance_nm: Nanometre,
     case_solids: Sequence[StepSolid],
     board_solids: dict[int, tuple[StepSolid, ...]],
+    pitch_max_nm: Nanometre,
+    pitch_min_nm: Nanometre,
 ) -> Pipeline[DockData]:
     """Match, then seat, then clashes: the one statement of this order.
 
     Matching decides which face points at the panel and which holes each
-    protrusion pairs with; seating reduces those correspondences to a
-    depth; clashes need a seated placement to check. No stage asserts that
+    protrusion pairs with; seating reduces those correspondences to a depth
+    and then walks the enclosure to see whether the board really gets
+    there; clashes need a seated placement to check. No stage asserts that
     another ran, which is why the order lives here and not in a stage.
     """
+    cavity = CaseCavity(case_solids, board_solids, pitch_max_nm, pitch_min_nm)
     return Pipeline(
-        [Match(tolerance_nm, clearance_nm), Seat(), Clashes(case_solids, board_solids)]
+        [
+            Match(tolerance_nm),
+            Seat(cavity),
+            Clashes(case_solids, board_solids),
+        ]
     )
+
+
+def parse_pitches(args: argparse.Namespace) -> tuple[Nanometre, Nanometre]:
+    """The insertion scan's two steps, coarse first, checked against each other.
+
+    Each is a positive length on its own, and together they are an ordered
+    pair: a coarse step finer than the fine one describes no scan at all, so
+    it is a usage failure rather than a search that silently reverses them.
+    """
+    pitch_max_nm = parse_length(args.seat_pitch_max, "--seat-pitch-max")
+    pitch_min_nm = parse_length(args.seat_pitch_min, "--seat-pitch-min")
+    if pitch_max_nm < pitch_min_nm:
+        raise UsageError(
+            f"--seat-pitch-max is the insertion scan's coarsest step and "
+            f"--seat-pitch-min its finest, so {format_nm(pitch_max_nm)} mm cannot be "
+            f"finer than {format_nm(pitch_min_nm)} mm"
+        )
+    return pitch_max_nm, pitch_min_nm
 
 
 def board_geometry(scan: BoardScan, case: CaseRegistration) -> dict[int, BoardGeometry]:
@@ -598,15 +634,12 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         if args.match_tolerance is None
         else parse_length(args.match_tolerance, "--match-tolerance")
     )
-    clearance_nm = parse_length(args.fit_clearance, "--fit-clearance", allow_zero=True)
+    pitch_max_nm, pitch_min_nm = parse_pitches(args)
     _refuse_unhonoured(args)
 
     drill = Path(args.drill)
     source = BoardSource(
-        drill,
-        [Path(board) for board in args.boards],
-        Path(args.case_model),
-        clearance_nm,
+        drill, [Path(board) for board in args.boards], Path(args.case_model)
     )
     try:
         scan = source.scan()
@@ -617,9 +650,10 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         geometry = board_geometry(scan, case)
         pipeline = build_pipeline(
             tolerance_nm,
-            clearance_nm,
             scan.case.solids,
             {ordinal: board.solids for ordinal, board in geometry.items()},
+            pitch_max_nm,
+            pitch_min_nm,
         )
         data = _traced(pipeline, data, out if args.verbose else None)
     except KernelUnavailable:

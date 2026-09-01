@@ -28,7 +28,6 @@ from stompmodel.units import Nanometre, nm_from_mm
 __all__ = [
     "FIXTURE",
     "TOLERANCE",
-    "CLEARANCE",
     "PANEL_REFERENCE",
     "ADMITTED",
     "RV_CORRESPONDENCE",
@@ -49,10 +48,6 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
 #: Half the 250000 nm pitch the tar panel's drill document records, which is
 #: the recognition tolerance the command line derives for such a document.
 TOLERANCE = Nanometre(125_000)
-
-#: What ``--fit-clearance`` defaults to, on diameter: the number a run of
-#: this tool uses unless an operator says otherwise.
-CLEARANCE = nm_from_mm(0.1)
 
 #: The panel references of the tar build: both pot columns, both switches and
 #: the two indicator diodes, with the fifth pot deliberately struck out so a
@@ -127,7 +122,7 @@ def dock(document: StepDocument) -> DockData:
     be fabricated on disk to exercise the path a real run takes.
     """
     probes = tuple(
-        sorted({admitting_radius(hole.diameter_nm, CLEARANCE) for hole in holes()})
+        sorted({admitting_radius(hole.diameter_nm) for hole in holes()})
     )
     boards = tuple(
         _board(substrate, parts, FIXTURE, probes)

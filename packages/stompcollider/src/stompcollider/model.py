@@ -21,6 +21,9 @@ from stompmodel.model import CaseRegistration, Hole, StageRun
 from stompmodel.units import Nanometre, check_nanometres
 
 __all__ = [
+    "BOARD_KIND",
+    "CASE_KIND",
+    "CLOSURE_KIND",
     "admitting_radius",
     "Profile",
     "Protrusion",
@@ -33,23 +36,29 @@ __all__ = [
 ]
 
 
-def admitting_radius(diameter_nm: Nanometre, clearance_nm: Nanometre) -> Nanometre:
-    """The radius a hole of ``diameter_nm`` admits, given a fit clearance.
+#: The three kinds of clash this tool states. ``CASE_KIND`` is the enclosure
+#: a board is inserted into and ``CLOSURE_KIND`` what closes over it: only
+#: the first is a reason to prefer one seating of a board to another, which
+#: is why the two are told apart at all rather than both reading "case".
+CASE_KIND: str = "case"
+CLOSURE_KIND: str = "closure"
+BOARD_KIND: str = "board"
+
+
+def admitting_radius(diameter_nm: Nanometre) -> Nanometre:
+    """The radius a hole of ``diameter_nm`` admits.
 
     Stated once because two callers need the same number: the reader probes
     a solid at it and ``Match`` queries a profile with it, and two spellings
     of one rule would let a part be measured against one radius and judged
-    against another. The clearance is a diameter, as every other size in
-    this tool is, so it contributes half its value to a radius.
+    against another. The hole's own radius exactly -- how much wider than a
+    part its hole must be is not a number this tool is told any more, and
+    what really arrests a board is the enclosure it is searched against.
     """
-    check_nanometres(
-        "admitting_radius", diameter_nm=diameter_nm, clearance_nm=clearance_nm
-    )
+    check_nanometres("admitting_radius", diameter_nm=diameter_nm)
     if diameter_nm <= 0:
         raise ValueError(f"a hole has a positive diameter, not {diameter_nm}")
-    if clearance_nm < 0:
-        raise ValueError(f"a fit clearance is not negative, not {clearance_nm}")
-    return Nanometre(diameter_nm // 2 + clearance_nm // 2)
+    return Nanometre(diameter_nm // 2)
 
 
 @dataclass(frozen=True, slots=True)
