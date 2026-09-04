@@ -2,10 +2,10 @@
 
 No fixture file and no download: the kernel is unconditional here, so a
 document with the three features the writer normalises -- an assembly, so
-there are usage occurrences; a nameless leaf, so the translator generates its
-volatile wrapper product; and two coloured leaves, so the colour chains are
-reordered -- can be constructed outright. See ADR-0008 on each member
-proving itself alone.
+there are usage occurrences; a nameless leaf, so the translator synthesises
+a product name for it, which takes the dotted spelling in an assembly; and
+two coloured leaves, so the colour chains are reordered -- can be
+constructed outright. See ADR-0008 on each member proving itself alone.
 """
 
 from __future__ import annotations

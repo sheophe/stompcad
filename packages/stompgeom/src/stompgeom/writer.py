@@ -39,7 +39,7 @@ __all__ = ["render_step"]
 #: it out, so a rename cannot set one name and normalise to another.
 _PRODUCT_NAME = "stompcad"
 
-#: One physical-file entity, wrapped or not, that may carry a volatile
+#: One physical-file entity, line-wrapped or not, that may carry a volatile
 #: counter (see the module docstring). ``DOTALL`` so a line-wrapped entity
 #: matches as a whole; entity bodies here never contain a literal ``);``.
 _VOLATILE_ENTITY = re.compile(
