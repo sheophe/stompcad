@@ -238,11 +238,14 @@ ownership among the chains it does parse, which is what makes a repeated colour 
 edge.** Left at OCC's own default, the translator writes each such edge twice: once as
 a 3D curve, and again as a curve in the parameter space of each surface that edge
 borders, each with its own definitional representation and representation context. A
-pcurve restates what the 3D curve and its surface already fix, and a reader that finds
-none simply projects one back, so an artefact carries one representation of each edge
-rather than two. This is a fixed setting, not a flag: it is the kind of speculative
-switch this workspace declines to expose when nothing downstream would ever need the
-other position.
+pcurve restates what the 3D curve and its surface already fix, so an artefact carries
+one representation of each edge rather than two. This is verified for OCC's own reader
+only: it recovers the solid on read-back with no pcurve present. A seam edge is the
+historical exception among third-party readers — `SEAM_CURVE` goes to zero along with
+the rest — and FreeCAD shipping this same preference off is supporting evidence, not
+proof, for a reader this workspace has not measured. This is a fixed setting, not a
+flag: it is the kind of speculative switch this workspace declines to expose when
+nothing downstream would ever need the other position.
 
 `stompgeom` now owns the fourth verb too: **build**, assembling a document from placed,
 named, coloured solids. `stompgeom.build.build_document` does the assembling and

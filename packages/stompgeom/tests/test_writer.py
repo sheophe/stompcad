@@ -31,8 +31,8 @@ def test_write_step_is_gone_not_kept_as_a_wrapper() -> None:
     assert "write_step" not in writer.__all__
 
 
-def test_the_wrapper_product_name_is_the_workspace_not_a_package() -> None:
-    """It is load-bearing, not cosmetic: ``_normalise`` strips the volatile
+def test_the_synthesised_product_prefix_is_the_workspace_not_a_package() -> None:
+    """It is load-bearing, not cosmetic: ``_normalise`` renumbers the volatile
     counter appended to exactly this prefix, so the setter, the pattern and
     the replacement must all read one constant."""
     assert writer._PRODUCT_NAME == "stompcad"
@@ -48,12 +48,21 @@ def test_render_step_defaults_no_identity() -> None:
     assert parameters["replaced_labels"].default == frozenset()
 
 
-def test_normalise_erases_the_translator_version_suffix() -> None:
-    """Two writes of one document must not differ by a process counter."""
+def test_normalise_renumbers_the_dotted_synthesised_product() -> None:
+    """Two writes of one document must not differ by a process counter.
+
+    The dotted form appears for a shape synthesised as an assembly
+    component; it is renumbered to the same dotless ``stompcad <k>`` form
+    the dotless (top-level) case takes, from one counter, rather than
+    erased -- erasing it would collapse two distinct nameless components
+    of one assembly onto the one literal ``'stompcad'``.
+    """
     payload = b"#1 = PRODUCT('stompcad 1.2','stompcad 1.2',' ',(#2));\n"
 
-    assert b"'stompcad'" in writer._normalise(payload)
-    assert b"stompcad 1.2" not in writer._normalise(payload)
+    normalised = writer._normalise(payload)
+
+    assert b"'stompcad 1'" in normalised
+    assert b"stompcad 1.2" not in normalised
 
 
 def test_normalise_renumbers_assembly_usage_occurrences_from_one() -> None:
@@ -738,11 +747,12 @@ def test_two_writes_of_one_document_are_byte_identical(
 def _document_with_two_unnamed_solids() -> Any:
     """Two nameless leaves of different geometry, alongside one named one.
 
-    ``PlacedSolid(name="")`` reaches OCC as a shape with no XCAF name, so
-    the translator synthesises a product name for it from a process-global
-    counter -- ``'stompcad 42'``, with no dot, unlike the translator's own
-    wrapper product (``'stompcad 42.1'``) that ``_VOLATILE_VERSION``
-    matches. Different sizes so a reader can still tell the two apart.
+    ``PlacedSolid(name="")`` reaches OCC as a shape with no usable XCAF
+    name, so the translator synthesises a product name for it from a
+    process-global counter -- ``'stompcad 42'``, with no dot, because
+    ``build_document`` adds every solid as a *free* shape rather than an
+    assembly component. Different sizes so a reader can still tell the two
+    apart.
     """
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
@@ -762,11 +772,11 @@ def _document_with_two_unnamed_solids() -> Any:
 def test_two_writes_with_two_unnamed_solids_are_byte_identical() -> None:
     """Two writes of a document with two nameless solids must still agree.
 
-    OCC names each nameless leaf from a process-global counter with no dot
-    -- unlike the translator's own wrapper product, which ``_VOLATILE_VERSION``
-    already erases. ``xcaf.build_document``'s single nameless leaf happens to
-    take the dotted form instead and so proves nothing about this; a render
-    pair that only agrees on named solids is not evidence either.
+    OCC names each nameless leaf from a process-global counter with no dot,
+    because each reaches the translator as a free shape. ``xcaf.build_
+    document``'s single nameless leaf sits inside an assembly and so takes
+    the dotted form instead, proving nothing about this; a render pair that
+    only agrees on named solids is not evidence either.
     """
     document = _document_with_two_unnamed_solids()
 
@@ -780,12 +790,75 @@ def test_two_unnamed_solids_keep_distinct_synthesised_names() -> None:
     """The two nameless leaves' synthesised names must not collapse to one.
 
     Green today: OCC's own counter already keeps ``'stompcad 1'`` and
-    ``'stompcad 2'`` apart. Its job is to catch a fix that erases the
-    counter outright rather than renumbering it, which would rewrite both
-    unnamed products to the one literal ``'stompcad'`` and lose them as
-    distinct entities.
+    ``'stompcad 2'`` apart, and ``_normalise`` renumbers rather than erases
+    the dotless form. Its job is to catch a fix that erases the counter
+    outright, which would rewrite both unnamed products to the one literal
+    ``'stompcad'`` and lose them as distinct entities.
     """
     document = _document_with_two_unnamed_solids()
+
+    payload = _write(document)
+    synthesised = [
+        match.group(1)
+        for match in re.finditer(rb"PRODUCT\('([^']*)'", payload)
+        if match.group(1).startswith(writer._PRODUCT_NAME.encode())
+    ]
+
+    assert len(synthesised) == 2
+    assert len(set(synthesised)) == 2
+
+
+def _document_with_two_unnamed_assembly_components() -> Any:
+    """An assembly holding two nameless leaves, different geometry apart.
+
+    Neither leaf has a usable XCAF name, so each reaches the translator as a
+    component inside an assembly with no name of its own -- the case that
+    takes the *dotted* synthesised form (``stompcad <n>.<m>``), not the
+    dotless one ``_document_with_two_unnamed_solids`` exercises.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    app = XCAFApp_Application.GetApplication_s()
+    document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    app.InitDocument(document)
+    shapes = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+
+    def nameless_leaf(size: tuple[float, float, float]) -> Any:
+        box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), *size).Shape()
+        label = shapes.AddShape(box, False)
+        label.ForgetAttribute(TDataStd_Name.GetID_s())
+        return label
+
+    first = nameless_leaf((2.0, 2.0, 2.0))
+    second = nameless_leaf((3.0, 3.0, 3.0))
+
+    assembly = shapes.NewShape()
+    TDataStd_Name.Set_s(assembly, TCollection_ExtendedString("enclosure"))
+    for label in (first, second):
+        shapes.AddComponent(assembly, label, TopLoc_Location())
+    shapes.UpdateAssemblies()
+    return document
+
+
+def test_two_unnamed_assembly_components_keep_distinct_synthesised_names() -> None:
+    """Two nameless components of one assembly must not collapse onto one name.
+
+    Both reach the translator with no usable XCAF name, so OCC synthesises a
+    product for each -- the *dotted* form, because each sits inside an
+    assembly rather than at top level. Neither is a wrapper: the assembly's
+    own product carries the assembly's own name ('enclosure'), and nothing
+    is wrapped. Erasing the dotted counter to the bare literal 'stompcad'
+    instead of renumbering it would collapse these two distinct products
+    into one and lose them as separate entities.
+    """
+    document = _document_with_two_unnamed_assembly_components()
 
     payload = _write(document)
     synthesised = [
@@ -813,7 +886,7 @@ def test_the_first_write_in_a_fresh_process_already_carries_the_product_name() -
         "from stompgeom.writer import render_step\n"
         "data = render_step(build_document(), title='t',\n"
         "    timestamp='2020-01-01T00:00:00', originating_system='sys')\n"
-        "assert b\"PRODUCT('stompcad','stompcad'\" in data, 'missing configured name'\n"
+        "assert b\"PRODUCT('stompcad 1','stompcad 1'\" in data, 'missing configured name'\n"
         "assert b\"PRODUCT('Open CASCADE\" not in data, 'kept OCC default name'\n"
         "print('OK')\n"
     )
@@ -857,11 +930,14 @@ def test_the_written_file_names_no_consumer_of_this_package(written: bytes) -> N
     assert b"stompdrill" not in written
 
 
-def test_the_wrapper_products_volatile_counter_is_erased(written: bytes) -> None:
-    """The translator names its own wrapper product for the nameless leaf and
-    appends a per-write counter to it. The prefix is ours; the counter is
-    process history and must not survive into the file."""
-    assert b"PRODUCT('stompcad','stompcad'" in written
+def test_the_nameless_leafs_synthesised_product_is_renumbered_from_one(written: bytes) -> None:
+    """The translator synthesises a product for the assembly's nameless leaf
+    and appends a per-write, dotted counter to it. The prefix is ours; the
+    counter is process history and must not survive into the file -- it is
+    renumbered, not erased, so a second nameless leaf elsewhere in the
+    document would stay distinguishable rather than collapse onto this one.
+    """
+    assert b"PRODUCT('stompcad 1','stompcad 1'" in written
     assert re.search(rb"stompcad \d+\.\d+", written) is None
 
 
