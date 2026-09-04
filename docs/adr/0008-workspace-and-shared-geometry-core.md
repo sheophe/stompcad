@@ -234,6 +234,16 @@ one whose colour is a STEP pre-defined colour rather than an inline `COLOUR_RGB`
 neither of which anything in this workspace produces. The writer canonicalises colour
 ownership among the chains it does parse, which is what makes a repeated colour safe.
 
+**`render_step` also suppresses the parametric-curve representation of every trimmed
+edge.** Left at OCC's own default, the translator writes each such edge twice: once as
+a 3D curve, and again as a curve in the parameter space of each surface that edge
+borders, each with its own definitional representation and representation context. A
+pcurve restates what the 3D curve and its surface already fix, and a reader that finds
+none simply projects one back, so an artefact carries one representation of each edge
+rather than two. This is a fixed setting, not a flag: it is the kind of speculative
+switch this workspace declines to expose when nothing downstream would ever need the
+other position.
+
 `stompgeom` now owns the fourth verb too: **build**, assembling a document from placed,
 named, coloured solids. `stompgeom.build.build_document` does the assembling and
 `stompgeom.build.solid_colour` reads a solid's colour back, promoted once

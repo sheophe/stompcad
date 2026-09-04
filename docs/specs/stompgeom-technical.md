@@ -242,7 +242,12 @@ exactly.
 **The translator's wrapper product name stays inside the writer.** It is already the
 workspace's name rather than any package's, and it is load-bearing rather than
 cosmetic: `_normalise` strips the volatile counter appended to it, so the setter, the
-pattern and the replacement must all read one constant.
+pattern and the replacement must all read one constant. The translator writes that
+same constant a second way, too: an unnamed solid's own synthesised product takes a
+bare, dotless counter rather than the wrapper's dotted one, and `_normalise` handles
+the two separately — the wrapper's suffix is erased, the dotless counters are
+renumbered in file order — because collapsing several unnamed solids onto one erased
+name would make them indistinguishable in the written bytes.
 
 **`touched` is renamed `replaced_labels`.** The parameter states a fact about the
 kernel's writer — a shape whose colour was not serialised because `SetShape` replaced
@@ -250,6 +255,13 @@ it — without naming drilling. `stompcollider` does not cut, and takes the defa
 
 The colour-chain guard keeps raising `EmitterError`; its message names the new module.
 This is an error path and reaches no emitted artefact, so byte identity is unaffected.
+
+**`render_step` also turns off `write.surfacecurve.mode` before it writes.** Left
+at the translator's own default, every trimmed edge is written as both a 3D curve and
+a pcurve in each bordering surface's parameter space — a cache of what the 3D curve
+and surface already state, and one a reader that finds none simply reconstructs. The
+setting is fixed inside the writer rather than exposed as an option: nothing in this
+workspace reads the parametric form, so there is no caller this could vary for.
 
 ### 6. The kernel becomes unconditional
 

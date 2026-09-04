@@ -59,7 +59,16 @@ Two emitted-artefact identifiers change with the prefix, deliberately:
   once as `_PRODUCT_NAME` and read by both the writer that sets it and the
   pattern that erases the counter appended to it. Written twice, a later rename
   would silence the pattern and leave a volatile identifier in an artefact that
-  still looked correct.
+  still looked correct. The translator writes that same name in a second shape
+  too: a solid carrying no name of its own reaches the writer with no XCAF
+  name to give the product OCC synthesises for it, so that product takes a
+  bare, dotless counter — `stompcad <n>` rather than the wrapper's dotted
+  `stompcad <n>.<m>`. The two are normalised differently rather than alike:
+  the wrapper's suffix is erased outright, because one document has one such
+  wrapper and its counter carries no information worth keeping, while the
+  dotless counters are renumbered in file order, because a document can hold
+  several unnamed solids and they must stay distinguishable from each other in
+  the written bytes.
 
 ## Rationale
 
