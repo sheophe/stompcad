@@ -945,6 +945,30 @@ def test_a_coloured_part_holding_no_solid_is_still_counted_once() -> None:
     assert len(_STYLED_ITEM.findall(payload)) == 1
 
 
+def test_no_pcurves_are_written_for_a_curved_face() -> None:
+    """``render_step`` must not write the 2D-parameter-space half of a
+    trimmed edge -- it is a cache of the 3D curve and the surface, both
+    already written, so a reader with none simply projects it.
+
+    The ``CYLINDRICAL_SURFACE`` assertion is this test's own control: a
+    document with no curved geometry at all would pass the three absence
+    assertions below by finding nothing, which is not evidence.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+
+    from stompgeom.build import PlacedSolid, build_document
+
+    cylinder = BRepPrimAPI_MakeCylinder(2.0, 5.0).Shape()
+    document = build_document([PlacedSolid(cylinder, "post", None, None)])
+
+    payload = _write(document)
+
+    assert b"CYLINDRICAL_SURFACE(" in payload
+    assert b"PCURVE(" not in payload
+    assert b"SURFACE_CURVE(" not in payload
+    assert b"DEFINITIONAL_REPRESENTATION(" not in payload
+
+
 def test_two_writes_of_one_document_are_byte_identical_across_processes() -> None:
     """Sub-shape colours must not reintroduce process-history leakage.
 

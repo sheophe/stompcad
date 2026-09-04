@@ -62,8 +62,8 @@ _VOLATILE_VERSION = re.compile(rb"'" + _PRODUCT_NAME.encode() + rb" \d+\.\d+'")
 #: fields both carry the counter (``PRODUCT('stompcad 1','stompcad 1',...)``),
 #: so the backreference pins them to the *same* digits, rather than matching
 #: each independently and letting the two fields of one entity renumber
-#: apart. Applied after ``_VOLATILE_VERSION``: once the wrapper's own suffix
-#: is erased it carries no digits left to match here.
+#: apart. Applied after ``_VOLATILE_VERSION`` for clarity, not correctness:
+#: the two patterns cannot overlap either way round (see above).
 #: Built from ``_PRODUCT_NAME``, never spelled out, for the same reason as
 #: the pattern above: a real source part literally named "stompcad 7" would
 #: be renumbered too, and no fixture exercises that collision.
@@ -230,10 +230,9 @@ def _normalise(payload: bytes) -> bytes:
     Rewriting bytes after the fact is honest and fully deterministic; each
     affected entity is first rejoined onto one line, since the writer's own
     line-wrap column depends on how many digits the volatile counter had
-    that call, which would otherwise leak process history back in. The
-    dotted suffix is erased before the dotless counter is renumbered: after
-    erasure the wrapper product carries no digits and cannot also match the
-    dotless pattern.
+    that call, which would otherwise leak process history back in. The two
+    patterns cannot overlap by construction (see their own comments), so
+    erasing before renumbering is for clarity, not correctness.
     """
     payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
     payload = _VOLATILE_VERSION.sub(b"'" + _PRODUCT_NAME.encode() + b"'", payload)
@@ -564,6 +563,11 @@ def render_step(
     # translator's auto-generated wrapper product uses, which ``_normalise``
     # then strips the volatile "<counter>.1" suffix from.
     Interface_Static.SetCVal_s("write.step.product.name", _PRODUCT_NAME)
+    # A pcurve is a cache of what the 3D curve and the surface already
+    # state -- writing it doubles every artefact for no reader that needs
+    # it, since one absent is simply projected back. OCC's own default is
+    # On; FreeCAD ships this same preference off.
+    Interface_Static.SetIVal_s("write.surfacecurve.mode", 0)
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
     expected = _count_colour_assignments(document, replaced_labels)
