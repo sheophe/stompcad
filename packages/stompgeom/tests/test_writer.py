@@ -735,6 +735,69 @@ def test_two_writes_of_one_document_are_byte_identical(
     assert first.rstrip().endswith(b"END-ISO-10303-21;")
 
 
+def _document_with_two_unnamed_solids() -> Any:
+    """Two nameless leaves of different geometry, alongside one named one.
+
+    ``PlacedSolid(name="")`` reaches OCC as a shape with no XCAF name, so
+    the translator synthesises a product name for it from a process-global
+    counter -- ``'stompcad 42'``, with no dot, unlike the translator's own
+    wrapper product (``'stompcad 42.1'``) that ``_VOLATILE_VERSION``
+    matches. Different sizes so a reader can still tell the two apart.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompgeom.build import PlacedSolid, build_document
+
+    first = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 2.0, 2.0, 2.0).Shape()
+    second = BRepPrimAPI_MakeBox(gp_Pnt(10.0, 0.0, 0.0), 3.0, 3.0, 3.0).Shape()
+    named = BRepPrimAPI_MakeBox(gp_Pnt(20.0, 0.0, 0.0), 1.0, 1.0, 1.0).Shape()
+    return build_document([
+        PlacedSolid(shape=first, name="", colour=None, placement=None),
+        PlacedSolid(shape=second, name="", colour=None, placement=None),
+        PlacedSolid(shape=named, name="named", colour=None, placement=None),
+    ])
+
+
+def test_two_writes_with_two_unnamed_solids_are_byte_identical() -> None:
+    """Two writes of a document with two nameless solids must still agree.
+
+    OCC names each nameless leaf from a process-global counter with no dot
+    -- unlike the translator's own wrapper product, which ``_VOLATILE_VERSION``
+    already erases. ``xcaf.build_document``'s single nameless leaf happens to
+    take the dotted form instead and so proves nothing about this; a render
+    pair that only agrees on named solids is not evidence either.
+    """
+    document = _document_with_two_unnamed_solids()
+
+    first = _write(document)
+    second = _write(document)
+
+    assert first == second
+
+
+def test_two_unnamed_solids_keep_distinct_synthesised_names() -> None:
+    """The two nameless leaves' synthesised names must not collapse to one.
+
+    Green today: OCC's own counter already keeps ``'stompcad 1'`` and
+    ``'stompcad 2'`` apart. Its job is to catch a fix that erases the
+    counter outright rather than renumbering it, which would rewrite both
+    unnamed products to the one literal ``'stompcad'`` and lose them as
+    distinct entities.
+    """
+    document = _document_with_two_unnamed_solids()
+
+    payload = _write(document)
+    synthesised = [
+        match.group(1)
+        for match in re.finditer(rb"PRODUCT\('([^']*)'", payload)
+        if match.group(1).startswith(writer._PRODUCT_NAME.encode())
+    ]
+
+    assert len(synthesised) == 2
+    assert len(set(synthesised)) == 2
+
+
 def test_the_first_write_in_a_fresh_process_already_carries_the_product_name() -> None:
     """``STEPControl_Controller.Init_s()`` in ``render_step`` defines the
     ``Interface_Static`` keys the two ``SetCVal_s`` calls below it rely on;

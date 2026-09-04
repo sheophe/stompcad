@@ -1,8 +1,9 @@
-"""Four OCC process-global effects — a translator product-name suffix, the
-assembly usage occurrence ids, which numeric slot each colour is written
-into, and which chain of a shared colour carries its inline definition —
-are not controllable through any exposed API, so ``render_step`` normalises
-the written bytes afterwards instead.
+"""Five OCC process-global effects — a translator product-name suffix, the
+bare counter OCC gives an unnamed solid's own product, the assembly usage
+occurrence ids, which numeric slot each colour is written into, and which
+chain of a shared colour carries its inline definition — are not
+controllable through any exposed API, so ``render_step`` normalises the
+written bytes afterwards instead.
 """
 
 from __future__ import annotations
@@ -52,6 +53,23 @@ _VOLATILE_ENTITY = re.compile(
 #: Built from ``_PRODUCT_NAME``, never spelled out: written twice, a rename
 #: would silence this pattern and leave a volatile id in a plausible artefact.
 _VOLATILE_VERSION = re.compile(rb"'" + _PRODUCT_NAME.encode() + rb" \d+\.\d+'")
+#: A shape reaching the writer with no XCAF name (``PlacedSolid(name="")``):
+#: OCC synthesises this same prefix for its own product too, but with a
+#: bare counter and no dot, so it does not also match ``_VOLATILE_VERSION``
+#: above -- distinguishable, not interchangeable, since there is one wrapper
+#: product but many possible unnamed solids, which must stay distinguishable
+#: from each other rather than collapse onto one literal. The id and name
+#: fields both carry the counter (``PRODUCT('stompcad 1','stompcad 1',...)``),
+#: so the backreference pins them to the *same* digits, rather than matching
+#: each independently and letting the two fields of one entity renumber
+#: apart. Applied after ``_VOLATILE_VERSION``: once the wrapper's own suffix
+#: is erased it carries no digits left to match here.
+#: Built from ``_PRODUCT_NAME``, never spelled out, for the same reason as
+#: the pattern above: a real source part literally named "stompcad 7" would
+#: be renumbered too, and no fixture exercises that collision.
+_VOLATILE_PRODUCT_COUNTER = re.compile(
+    rb"'" + _PRODUCT_NAME.encode() + rb" (\d+)','" + _PRODUCT_NAME.encode() + rb" \1'"
+)
 _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 
 #: One colour presentation, the chain STEPCAFControl_Writer emits per
@@ -204,23 +222,37 @@ def _silence_stdout() -> Iterator[None]:
 # ``Interface_Static`` keys so those settings take effect at all — and it
 # still does nothing for the counters below.)
 def _normalise(payload: bytes) -> bytes:
-    """Erase the two process-global OCC counters from one written file.
+    """Erase the three process-global OCC counters from one written file.
 
-    Neither the translator's per-write product-name suffix nor the assembly
-    usage occurrence ids are resettable through any API this kernel exposes.
+    Neither the translator's per-write product-name suffix, the bare counter
+    it gives an unnamed solid's own product, nor the assembly usage
+    occurrence ids are resettable through any API this kernel exposes.
     Rewriting bytes after the fact is honest and fully deterministic; each
     affected entity is first rejoined onto one line, since the writer's own
     line-wrap column depends on how many digits the volatile counter had
-    that call, which would otherwise leak process history back in.
+    that call, which would otherwise leak process history back in. The
+    dotted suffix is erased before the dotless counter is renumbered: after
+    erasure the wrapper product carries no digits and cannot also match the
+    dotless pattern.
     """
     payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
     payload = _VOLATILE_VERSION.sub(b"'" + _PRODUCT_NAME.encode() + b"'", payload)
-    counter = itertools.count(1)
 
-    def renumber(match: re.Match[bytes]) -> bytes:
-        return match.group(1) + str(next(counter)).encode("ascii") + match.group(3)
+    product_counter = itertools.count(1)
 
-    return _VOLATILE_NAUO_ID.sub(renumber, payload)
+    def renumber_product(match: re.Match[bytes]) -> bytes:
+        number = str(next(product_counter)).encode("ascii")
+        name = b"'" + _PRODUCT_NAME.encode() + b" " + number + b"'"
+        return name + b"," + name
+
+    payload = _VOLATILE_PRODUCT_COUNTER.sub(renumber_product, payload)
+
+    nauo_counter = itertools.count(1)
+
+    def renumber_nauo(match: re.Match[bytes]) -> bytes:
+        return match.group(1) + str(next(nauo_counter)).encode("ascii") + match.group(3)
+
+    return _VOLATILE_NAUO_ID.sub(renumber_nauo, payload)
 
 
 def _defined_ids(text: bytes) -> list[int]:
