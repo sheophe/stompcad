@@ -226,13 +226,11 @@ def _normalise(payload: bytes) -> bytes:
 
     Neither the translator's per-write product-name suffix, the bare counter
     it gives an unnamed solid's own product, nor the assembly usage
-    occurrence ids are resettable through any API this kernel exposes.
-    Rewriting bytes after the fact is honest and fully deterministic; each
-    affected entity is first rejoined onto one line, since the writer's own
-    line-wrap column depends on how many digits the volatile counter had
-    that call, which would otherwise leak process history back in. The two
-    patterns cannot overlap by construction (see their own comments), so
-    erasing before renumbering is for clarity, not correctness.
+    occurrence ids are resettable through any API this kernel exposes, so
+    rewriting bytes afterwards is the only deterministic route left. Each
+    affected entity is first rejoined onto one line so the volatile
+    counter's digit count cannot shift the writer's own line-wrap column
+    between calls.
     """
     payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
     payload = _VOLATILE_VERSION.sub(b"'" + _PRODUCT_NAME.encode() + b"'", payload)
