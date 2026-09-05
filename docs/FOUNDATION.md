@@ -136,7 +136,7 @@ Options may change bytes. They may not change facts.
 
 > **T4 — Agreement** *(corollary of T2)*.
 > ```math
-> \pi_i\big(E_i(d, o)\big) \;=\; \pi_j\big(E_j(d, o')\big) \quad \text{on } \operatorname{dom}\pi_i \cap \operatorname{dom}\pi_j
+> \pi_i\big(E_i(d, o)\big) \;=\; \pi_j\big(E_j(d, o')\big) \quad \text{on } \text{dom}\,\pi_i \cap \text{dom}\,\pi_j
 > ```
 
 Two artefacts of one invocation never disagree about a fact they both state.
