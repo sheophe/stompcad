@@ -67,18 +67,17 @@ half-to-even selection to avoid directional bias. Neither rule may be substitute
 the other.
 
 Every numeric rule must establish an observable invariant in the model or an emitted
-artifact. Internal arithmetic alone is not an architectural guarantee. At this boundary,
+artefact. Internal arithmetic alone is not an architectural guarantee. At this boundary,
 the principal invariant is that every canonical length is an integer nanometre and every
-selected value belongs to its governing answer set; artifact representations must be
+selected value belongs to its governing answer set; artefact representations must be
 derived from those canonical values.
 
-An answer selected at the quantisation boundary is carried forward, not re-derived
-downstream from the measurement. Where a later stage must ask the same question the
-boundary already answered, it asks through the same rule, evaluated against the
-preserved measurement — never against a difference computed from a value the boundary
-has already rounded to a canonical length. A rounded difference can land on an answer
-the unrounded measurement did not occupy, and a second implementation of one rule is how
-two stages come to disagree about the same input.
+Later processing carries forward the selected answer without re-deriving it from the
+measurement. If a later stage must review the same question, it must use the same rule
+and the preserved measurement. It must not use a difference calculated from an already
+rounded canonical value: that difference can manufacture a tie that the original
+measurement did not contain. Sharing the rule also prevents two implementations from
+answering the same question differently.
 
 ## Rationale
 
@@ -94,7 +93,7 @@ reason for each exclusion without presenting the excluded geometry as drillable.
 
 Separate rounding policies are necessary because representation and placement have
 different semantics. Making their results observable ensures that model consumers and
-artifacts can verify the rule at the boundary where it matters.
+artefacts can verify the rule at the boundary where it matters.
 
 ## Consequences
 

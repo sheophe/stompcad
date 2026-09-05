@@ -1,66 +1,30 @@
-# Domain Docs
+# Using the domain documentation
 
-How the engineering skills should consume this repo's domain documentation when
-exploring the codebase.
+Read the relevant documentation before exploring or changing domain behaviour:
 
-One glossary serves the whole repository: `docs/GLOSSARY.md`, with `docs/adr/`
-beside it. There is no root `CONTEXT.md` and no `CONTEXT-MAP.md` — this repo
-keeps a single sectioned glossary rather than one per context, so do not go
-looking for either.
+- [CLAUDE.md](../../CLAUDE.md) collects agent instructions. Its domain invariants
+  and parsing constraints describe rules the code and tests rely on.
+- [The glossary](../GLOSSARY.md) defines enclosure, drilling and board-placement
+  terms.
+- [The architecture overview](../ARCHITECTURE.md) explains the packages and
+  processing steps.
+- [The ADRs](../adr/) record accepted decisions. Use the index in
+  [CLAUDE.md](../../CLAUDE.md#architecture) to find the decisions relevant to
+  your task.
 
-## Before exploring, read these
+This repository uses one sectioned glossary. There is no `CONTEXT.md` or
+`CONTEXT-MAP.md`. If a referenced domain document is absent, continue with the
+available context; `/domain-modeling` can create it when terms need resolving.
 
-- **`CLAUDE.md`** at the repo root — loaded automatically, and currently the
-  repo's working glossary. Its *Domain invariants* and *Parsing constraints*
-  sections define the vocabulary (canonical frame, answer set, quantisation
-  boundary, branded length units, reference outline, tool block) that the code
-  and its tests already speak.
-- **`docs/GLOSSARY.md`** — the glossary. Its Scope section states what belongs
-  in it and what does not.
-- **`docs/adr/`** — read the ADRs that touch the area you are about to work in.
-  There are seven, `0001`–`0007`; `CLAUDE.md`'s *Architecture* section lists
-  what each one decides, so read that list first and open only what is
-  relevant.
+Use the glossary's technical distinctions in issues, proposals, tests and
+explanations. You can explain a term in ordinary language without renaming the
+underlying concept. If a needed concept has no entry, check whether an existing
+term covers it before proposing an addition.
 
-If a document listed here does not exist, **proceed silently**. Don't flag its absence;
-don't suggest creating it upfront. The `/domain-modeling` skill (reached via
-`/grill-with-docs` and `/improve-codebase-architecture`) creates it lazily when
-terms actually get resolved.
+Follow the [writing conventions](../../CONTRIBUTING.md#writing-style). Prose
+uses British spelling; identifiers keep their established spelling.
 
-## File structure
-
-```
-/
-├── CLAUDE.md                          ← the rules that govern the vocabulary
-├── docs/GLOSSARY.md                   ← the glossary itself
-├── docs/adr/
-│   ├── 0001-pipeline-and-emitter-adapters.md
-│   ├── …
-│   └── 0009-shared-model-package-and-dependency-order.md
-└── packages/
-    ├── stompmodel/src/stompmodel/   ← the values both tools exchange
-    └── stompdrill/src/stompdrill/
-```
-
-## Use the glossary's vocabulary
-
-When your output names a domain concept (in an issue title, a refactor
-proposal, a hypothesis, a test name), use the term as the glossary defines it.
-Don't drift to synonyms it avoids.
-
-If the concept you need isn't in the glossary yet, that's a signal — either
-you're inventing language the project doesn't use (reconsider) or there's a
-real gap (note it for `/domain-modeling`).
-
-Prose uses British spelling; identifiers use established American spelling.
-`CLAUDE.md`'s *Documentation rules* is authoritative on this and on ADR
-formatting (figure numbering, the ten-line docstring cap).
-
-## Flag ADR conflicts
-
-`docs/adr/` is the authority for architectural decisions, and an ADR is
-updated and accepted *before* the architecture changes in code. So a
-contradiction is never something to resolve silently in your output — surface
-it:
-
-> _Contradicts ADR-0003 (quantisation boundary) — but worth reopening because…_
+When code or documentation conflicts with an ADR, identify the decision and
+explain the difference. Investigate which description is current. Architectural
+changes require an updated and accepted ADR before implementation; editing
+prose should preserve the decision.

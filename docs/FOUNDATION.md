@@ -4,24 +4,22 @@
      backslash-escaping before its maths renderer, so a bare $...$ loses \; \, \{ \}
      and MathJax then fails. The code span protects them. -->
 
-The model every `stompcad` tool is an instance of. It exists so that
-correctness obligations can be **derived** rather than enumerated: state the
-structure once, and what must hold follows from it.
+Each tool in this project computes one model and uses it to produce several
+artefacts. This document defines that structure and the properties needed to
+keep those artefacts consistent.
 
-Sections 1–7 are domain-free and describe any tool of this shape. Section 8 is
-the only place a concrete tool, format or rule appears; everything the domain
-contributes enters there.
+Sections 1–7 describe the general model. Section 8 maps it to the tools and
+formats used here, and section 9 describes the resulting test obligations.
 
-This document says what the system **is**. `docs/GLOSSARY.md` says what its
-terms **mean**, `docs/adr/` records the decisions **taken**, and `CLAUDE.md`
-holds the rules that **bind** the code. Where this document and an ADR
-disagree, the ADR is the authority and this document is stale — fix it.
+The [glossary](GLOSSARY.md) explains the terms, the [ADRs](adr/) record design
+decisions, and [CLAUDE.md](../CLAUDE.md) gives the implementation rules. If this
+document conflicts with an ADR, follow the ADR and update this document.
 
 ---
 
 ## 1. Notation
 
-Every symbol used anywhere below. Nothing is introduced in prose.
+The tables below define the symbols used in the model.
 
 ### Sets
 
@@ -57,8 +55,7 @@ Every symbol used anywhere below. Nothing is introduced in prose.
 
 $`c`$ is written explicitly only where it matters. Elsewhere $`P(x)`$ abbreviates
 $`P(x, c)`$ for a fixed $`c`$, and every statement is read as holding per
-configuration. This is a notational convenience, never a claim that behaviour
-is configuration-independent.
+configuration. Behaviour can depend on the configuration.
 
 ---
 
@@ -77,9 +74,8 @@ Its observable behaviour is the fan-out over a single model:
 T(x) \;=\; \big\{\, E_1(P(x), o_1),\ \ldots,\ E_n(P(x), o_n) \,\big\}
 ```
 
-$`P`$ runs **once**. Every artefact of one invocation is a function of the same
-$`d`$, which is what makes agreement between them a property to prove rather than
-a coincidence to hope for.
+$`P`$ runs once. Every artefact of one invocation is a function of the same
+$`d`$, so each can be checked against a common reference.
 
 ---
 
@@ -94,10 +90,10 @@ a coincidence to hope for.
 > the facts format $`i`$ can carry. $`\pi_i`$ is partial for the same reason: a
 > format states some of $`F`$ and is silent about the rest.
 
-$`\rho_i`$ and $`\pi_i`$ are the pair that makes fidelity checkable. Without them
-an artefact can only be judged *well-formed*; with them it can be judged
-*faithful*. They are the reason §7's instrument table has a semantic column at
-all.
+$`\rho_i`$ selects the facts a format should contain, and $`\pi_i`$ recovers the
+facts it actually contains. Comparing them checks fidelity as well as whether
+the artefact is well-formed. Section 7 describes where to use this semantic
+comparison.
 
 ---
 
@@ -106,8 +102,9 @@ all.
 > **T1 — Determinism.** $`P`$ is a pure function. For a fixed $`x`$ and $`c`$ it
 > yields the same $`d`$ in every run and every process.
 
-Not idempotence: $`P(P(x))`$ does not type-check, since $`D \not\subseteq X`$.
-Idempotence belongs to the stages (§5).
+Determinism concerns repeated runs on the same input. Stage idempotence (§5)
+concerns applying a stage to its own result. The expression $`P(P(x))`$ does not
+type-check, since $`D \not\subseteq X`$.
 
 > **T1′ — Denotational invariance.**
 > ```math
@@ -124,55 +121,55 @@ T1′ presupposes T1 and is strictly stronger.
 > \pi_i\big(E_i(d, o)\big) \;=\; \rho_i(d)
 > ```
 
-An artefact states exactly the facts the model holds, narrowed to what the
-format expresses — no more, no less, and independent of presentation.
+An artefact states exactly the model facts its format can express, regardless
+of presentation options.
 
 > **T3 — Presentation neutrality** *(corollary of T2, from its $`\forall o`$)*.
 > ```math
 > \pi_i\big(E_i(d, o)\big) \;=\; \pi_i\big(E_i(d, o')\big) \qquad \forall\, o, o' \in O_i
 > ```
 
-Options may change bytes. They may not change facts.
+Presentation options may change bytes while preserving the recovered facts.
 
 > **T4 — Agreement** *(corollary of T2)*.
 > ```math
 > \pi_i\big(E_i(d, o)\big) \;=\; \pi_j\big(E_j(d, o')\big) \quad \text{on } \text{dom}\,\pi_i \cap \text{dom}\,\pi_j
 > ```
 
-Two artefacts of one invocation never disagree about a fact they both state.
-They may differ in *which* facts they state; never in the value of a shared one.
+Two artefacts of one invocation agree on every fact they both state. Each
+format may express a different subset of the model's facts.
 
-**Remark (why the star, not the pairs).** T4 is derived, and that is the point.
-Verifying $`n`$ instances of T2 against the model is stronger than verifying
-$`\binom{n}{2}`$ pairwise agreements, because pairwise agreement can be
-*uniformly wrong*: every emitter agreeing about a fact the model never held
-satisfies all pairs and no instance of T2. It is also fewer tests, and it
-localises a failure to one emitter rather than to a pair. **The model is the
-reference; each artefact is checked against it.**
+**Checking against the model.** Verifying $`n`$ instances of T2 establishes T4
+and also checks fidelity. The $`\binom{n}{2}`$ pairwise comparisons alone cannot
+do that: every emitter could produce the same incorrect value. Checking each
+artefact against the model uses fewer comparisons and identifies the emitter
+responsible when one fails.
 
 ---
 
 ## 5. Stage idempotence
 
-Distinct from T1, one level down. For the stages composing $`P`$:
+Applying a stage a second time should leave its result unchanged. For the
+stages composing $`P`$:
 
 ```math
 S\big(S(d)\big) \;=\; S(d)
 ```
 
-> **Rule.** A property with no falsifying case is not verified by asserting it.
+> **Rule.** Test idempotence where reapplying a stage could plausibly change its
+> result.
 > Where a stage compares by exact equality on values it has itself made exact,
 > its idempotence is a theorem about the type rather than about the code: no
-> mutation can falsify it, and a test of it passes regardless. Assert
-> idempotence only where re-application could plausibly differ; elsewhere
-> record why it cannot and write no test.
+> mutation can falsify it, so an assertion would pass regardless. In that case,
+> record why the result cannot change and omit the test.
 
 ---
 
 ## 6. Composition
 
-Instances chain. Write $`P_k`$, $`E_{k,i}`$, $`\pi_{k,i}`$ for instance $`k`$. Two
-kinds of composition occur, and each imposes a condition.
+Tools can exchange artefacts or run under a shared orchestrator. Write $`P_k`$,
+$`E_{k,i}`$, $`\pi_{k,i}`$ for instance $`k`$. Each kind of composition has a
+condition to satisfy.
 
 **Chaining — one tool's artefact is another's input.**
 
@@ -184,10 +181,10 @@ d_2 \;=\; P_2\Big(\big\langle\, x_2,\ E_{1,i}\big(P_1(x_1), o\big) \,\big\rangle
 > format on the seam: instance 2 recovers from the artefact precisely the facts
 > instance 1 held.
 
-This is why T2 is not merely a testing convenience. A format that no $`\pi`$ can
-read is a dead end, and a $`\pi`$ that disagrees with $`\rho`$ silently corrupts
-every tool downstream of it. The recovery must exist and must be the inverse of
-the emitter **on facts**, though never on bytes.
+The receiving tool needs a recovery that preserves the producer's facts. If
+$`\pi`$ disagrees with $`\rho`$, the receiving tool works from incorrect data.
+Recovery must therefore invert the emitter on facts; it need not reproduce
+the original bytes.
 
 **Orchestration — one invocation drives several instances and reports once.**
 
@@ -198,26 +195,25 @@ the emitter **on facts**, though never on bytes.
 > **T6 — Uniform reduction.** The orchestrator's status is the reduction of the
 > worst finding across every instance it ran.
 
-For that maximum to be defined, $`\Sigma`$, its ordering, and $`\varepsilon`$ must
-be **one** definition shared by all instances rather than one per tool. A
-second copy of the ordering is a second chance to disagree about what a warning
-is. This is the obligation ADR-0009's shared contracts exist to discharge.
+For that maximum to be defined, all instances must share one definition of
+$`\Sigma`$, its ordering and $`\varepsilon`$. The shared contracts in
+[ADR-0009](adr/0009-shared-model-package-and-dependency-order.md) keep severity
+and exit-status reduction consistent across tools.
 
 ---
 
-## 7. Equivalence, not bytes
+## 7. Choosing a comparison
 
-T2, T4 and T5 are equalities in $`F`$, not in $`A_i`$. **Semantic equivalence is
-the requirement; byte equality is a sound instrument for it in some places and
-a false one in others.**
+T2, T4 and T5 compare facts in $`F`$. Byte equality in $`A_i`$ is useful only
+where it reliably represents that semantic comparison.
 
-Byte equality is unsound wherever an artefact records something incidental to
-its facts — a path, a timestamp, a tool version, a locale-dependent glyph, a
-counter the writing library appends. Such a value differs between two runs that
-are semantically identical, and is identical between two runs that are not.
+An artefact can include incidental values such as paths, timestamps, tool
+versions, locale-dependent glyphs or counters added by the writing library.
+These can change while the facts remain the same. Incidental values can also
+stay the same when the facts change, so they do not establish semantic
+agreement.
 
-The instrument follows from whether both sides of the comparison come from the
-same code:
+Choose the comparison according to the property being checked:
 
 | Property | Both sides from | Sound instrument |
 | --- | --- | --- |
@@ -229,39 +225,45 @@ same code:
 | T5 composability | producer's model versus consumer's read | **semantic** |
 | Regression against a reference | recorded expectation | **semantic** — a recorded $`\rho_i(d)`$, never a recorded $`a`$ |
 
-The last row is why a golden *artefact* rots and a golden *fact-set* does not: a
-change to presentation breaks the first and leaves the second alone, while a
-change to a value breaks both.
+For regression tests, a recorded fact set allows presentation to change without
+breaking the test. A changed fact still fails the comparison. A recorded
+artefact would fail for either kind of change.
 
 ---
 
 ## 8. Instances
 
-The only section in which the domain appears.
+The model applies to the two current tools and the proposed orchestrator:
 
 | | $`X`$ | $`D`$ | artefacts $`A_i`$ | $`\sim`$ |
 | --- | --- | --- | --- | --- |
 | `stompdrill` | vector artwork of a panel | the drill data | CNC files for the machine, dimensioned drawings for the operator, an interchange document, and the cut solid | same geometry regardless of the order elements appear in the file |
 | `stompcollider` | a board model and a drilled enclosure | the docking result | the assembled solid, and a report of what seated and what fouled | same geometry regardless of element order, and regardless of which of two identical parts is named first |
-| `stompcad` | a project | the orchestration result | the combined outputs of the instances it drove, and one report over all of them | inherited from the instances |
+| `stompcad` (proposed) | a project | the orchestration result | the combined outputs of the instances it drove, and one report over all of them | inherited from the instances |
 
 Chaining (§6, T5) occurs where `stompdrill`'s cut solid becomes part of
 `stompcollider`'s input, and where either tool's interchange document is read
-back. Orchestration (§6, T6) is `stompcad`'s whole purpose.
+back. The proposed `stompcad` command would provide orchestration (§6, T6).
+It is not implemented in this workspace; the currently installed commands are
+`stompdrill` and `stompcollider`.
 
-Where each tool's $`\sim`$, $`F`$ and stage set are fixed:
+The following decisions define each tool's $`\sim`$, $`F`$ and stages:
 
-- what $`P`$ may decide, and against which answer sets — ADR-0002, ADR-0003
-- what $`\sim`$ ignores, and the ordering that follows — ADR-0006
-- what $`F`$ holds in common across tools, and why — ADR-0009
+- What $`P`$ may decide, and which answer sets it uses:
+  [ADR-0002](adr/0002-domain-quantisers.md) and
+  [ADR-0003](adr/0003-quantisation-boundary-and-ordering.md).
+- What $`\sim`$ ignores, and the resulting ordering:
+  [ADR-0006](adr/0006-toolpath-ordering-and-hole-numbering.md).
+- Which facts in $`F`$ are shared across tools, and why:
+  [ADR-0009](adr/0009-shared-model-package-and-dependency-order.md).
 
-**The domain is not in the shape.** It is in the content of $`F`$, the definition
-of $`\sim`$, and the decisions inside $`P`$ — and only there. A tool that does not
-fit §§1–7 is not a tool of this system.
+Domain-specific behaviour belongs in the content of $`F`$, the definition of
+$`\sim`$ and the decisions inside $`P`$. Each tool in the system must satisfy
+the structure and properties in §§1–7.
 
 ---
 
-## 9. What this obliges
+## 9. Test obligations
 
 Each theorem is a family of tests, not a single one.
 
@@ -271,11 +273,9 @@ Each theorem is a family of tests, not a single one.
 | T1′ | transform an input within its $`\sim`$-class; compare bytes. Widen the transformation as the class widens. |
 | T2 | one $`\pi_i`$ per format, and one test per format against the model. |
 | T3 | for each emitter, vary its options; compare recovered facts. |
-| T4 | free, given T2. Assert only where a shared fact is easy to get wrong independently in two formats. |
+| T4 | follows from T2. Assert separately only where a shared fact is easy to get wrong independently in two formats. |
 | T5 | for each seam, round-trip the producer's model through the consumer's read. |
 | T6 | drive instances with findings of differing severity; assert one status. |
 
-Two standing rules govern all of them. **A test must fail when the behaviour it
-names is removed** — the obligation is falsifiability, not assertion. And where
-a theorem holds trivially because the code cannot express its violation, record
-why and omit the test rather than committing a tautology.
+A test must fail when the behaviour it names is removed. Where the code cannot
+express a violation of the property, record why and omit the test.

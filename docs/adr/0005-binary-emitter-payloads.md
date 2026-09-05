@@ -4,30 +4,32 @@
 
 ## Context
 
-`Emitter.emit` returned `str`, and the command line ended every artifact in
-`path.write_text(text, encoding="utf-8")`. Excellon, JSON and the SVG drawing are all
-text, so the contract and its single writing site agreed.
+`Emitter.emit` originally returned `str`, and the command line wrote every artefact with
+`path.write_text(text, encoding="utf-8")`. Excellon, JSON and SVG all use text, so they
+fit this contract.
 
-A PDF drawing does not. PDF is a byte format whose cross-reference table holds byte
-offsets, so it cannot travel a contract that promises text without the encoding step
-becoming part of the format's correctness.
+PDF needs a byte payload. Its cross-reference table contains byte offsets, so converting
+it through a text contract would make encoding part of the format's correctness.
 
 ## Decision
 
-The emitter payload is `Payload = str | bytes`. An emitter returns whichever its format
-is; a text emitter continues to return `str` and is unchanged.
+### Payloads and writes
 
-The dispatch on the value is `stompmodel.protocols.stage_payload`, which encodes the
-payload and writes it in full to a temporary beside its target. `StagedWrite.commit` is the
-only function in the emit path that puts bytes at a **caller-visible** path, and
-`StagedWrite.discard` the only one that abandons them; the command line owns the report it
-prints around the count `StagedWrite.commit` returns. The qualifier is load-bearing:
-`stompgeom.writer.render_step` writes its own STEP bytes through a scratch file first,
-because the kernel's writer exposes no in-memory target, only a path — but that write is
-forced by the kernel's path-only API, is invisible to callers, and is why the claim
-needed the qualifier at all. `render_step` returns finished bytes and leaves nothing on
-disk a caller can observe; `StagedWrite.commit` remains the only function whose file a caller
-asked for. As first taken, that dispatch was the command line's own:
+The emitter payload is `Payload = str | bytes`. Text emitters continue to return `str`;
+binary emitters return `bytes`.
+
+`stompmodel.protocols.stage_payload` handles both. It encodes text as UTF-8 and writes
+the complete payload to a temporary file beside the target. `StagedWrite.commit` is the
+only function in the emission path that writes to a caller-visible output path;
+`StagedWrite.discard` abandons a staged write. The command line builds its report from
+the byte count returned by `commit`.
+
+The restriction concerns requested output paths. `stompgeom.writer.render_step` also
+uses a scratch file because the kernel writer accepts only a path. `render_step` returns finished
+STEP bytes and leaves no file for the caller. Publishing those bytes to the requested
+path still goes through `StagedWrite.commit`.
+
+The original decision implemented payload dispatch directly in the command line:
 
 ```python
 def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
@@ -40,132 +42,109 @@ def _write(emitter: Emitter, path: Path, payload: Payload) -> str:
     return f"wrote {path}  ({emitter.name}, {size} bytes)"
 ```
 
-Every artifact is still rendered before any path is written, so a failure in one emitter
-withholds all of them.
+All artefacts are rendered before any output path is written. An emitter failure
+therefore withholds every output.
 
-`stage_payload` writes to a temporary file beside the target; `StagedWrite.commit` renames it
-into place. Afterwards the target holds either the complete payload or exactly what it
-held before, and the temporary survives neither outcome — `StagedWrite.discard` removes it
-explicitly when a caller abandons the write instead of committing it. A caller never
-observes a truncated artefact and never needs to know the mechanism that prevents it.
-The write is split across two calls, rather than made in one as it first was, because
-today's only caller must stage a whole set of artefacts before committing any of them —
-see ADR-0001 — and a single write-and-rename call cannot be paused between the two
-halves.
+`stage_payload` writes the temporary, then `StagedWrite.commit` renames it into place.
+Afterwards the target holds either the complete payload or exactly its previous
+contents, and no temporary remains. When abandoning a staged write, the caller removes
+the temporary with `StagedWrite.discard`. Callers never receive a truncated artefact.
 
-### The obligation is one verb on one value, and it is deliberately not enforced
+Staging and committing were split from the original single operation so that callers
+can stage an entire set before replacing any target. Both command lines now use this
+set-level transaction through the functions described in
+[ADR-0001](0001-pipeline-and-emitter-adapters.md).
 
-`stage_payload` hands back a `StagedWrite`, and exactly one of `StagedWrite.commit`
-and `StagedWrite.discard` is owed on every value it hands out. The verbs are the
-value's own methods because the temporary is the value's own state: a caller can no
-longer reach a verb without the value it applies to, and neither verb names the
-temporary. That narrows what the module publishes — `stage_payload` and the value
-it returns are the whole surface — without narrowing what it can do, because the
-split across two calls the paragraph above requires is unchanged.
+### Completing a staged write
 
-Nothing detects a `StagedWrite` a caller stages and then drops. That is a weighed
-decision rather than an omission, and these are the candidates it weighed:
+A caller must invoke exactly one of `StagedWrite.commit` and `StagedWrite.discard` on
+every value returned by `stage_payload`. These are methods because the temporary belongs
+to the value. Callers need the value to complete the write and never name its temporary.
+The per-path API consists of `stage_payload` and the value it returns.
 
-- A `__del__` raising `ResourceWarning` does not see the breach that raised this
-  question, because a value dropped on a path no test exercises has no destructor run
-  to report it. `ResourceWarning` is default-ignored, so making it bite would mean
-  promoting it to an error across every member's pytest configuration, which
-  immediately grades unrelated unclosed handles in `pikepdf` and the geometry kernel.
-  It also puts a filesystem probe inside a frozen value's finalisation, whose own
-  failure mode at interpreter shutdown is silence. It is refused on merit, not on
-  impossibility.
-- `weakref.finalize`, the deterministic form of the same idea, needs a `__weakref__`
-  slot that a slotted dataclass gains only above this workspace's declared Python
-  floor.
-- A required context manager cannot express a pause that spans two functions, so it is
-  reachable only through an exit stack threaded through every caller — restructuring
-  the set-level transaction ADR-0001 owns, for no change in behaviour.
-- A static gate over workspace source can only judge the shape a caller writes in the
-  frame that staged the write, and the shapes written here give it no work to do. A
-  call that discharges in the same expression that stages it is followed trivially and
-  can never be found wanting; a call that stages into a collection binds no name at the
-  staging site, and its discharge reaches the value only by iterating that collection,
-  so a gate has nothing to follow from the one to the other. Both shapes are in the
-  workspace today, so such a gate could pass only by finding nothing.
+The API does not detect a caller dropping an unfinished `StagedWrite`. The following
+options were considered and rejected:
 
-What does catch an abandoned temporary is the caller-side residue assertion a caller
-composing a set already makes: `stompdrill`'s command line asserts, at every failure
-position its suite injects, that no temporary survives. ADR-0001 owns the set-level
-rule that assertion checks, and a second tool inherits the convention together with the
-mechanism.
+- A `__del__` method raising `ResourceWarning` cannot detect a path that no test runs.
+  The warning is ignored by default; promoting it to an error in every member's pytest
+  configuration would also report unrelated unclosed handles in `pikepdf` and the
+  geometry kernel. It would put a filesystem probe in finalisation of a frozen value,
+  where failures at interpreter shutdown can go unreported.
+- `weakref.finalize` needs a `__weakref__` slot. Support for adding that slot to a
+  slotted dataclass requires a Python version above the workspace's declared minimum.
+- A required context manager cannot directly span the two functions. An exit stack
+  passed through callers could do so, but would restructure ADR-0001's transaction
+  without changing its behaviour.
+- A static source check cannot usefully follow the call patterns in this workspace.
+  Some calls stage and complete a write in one expression; others stage values into a
+  collection and complete them by iterating it elsewhere. The first pattern trivially
+  satisfies the check, while the second gives it no local binding to follow. A check
+  that finds no obligation to inspect would not provide evidence of cleanup.
 
-**Target domain.** `stage_payload` needs to create a fresh temporary beside the target,
-and `StagedWrite.commit` needs to rename onto it. Together they define the only domain a
-target must satisfy: its parent directory must already exist and accept a new file, and
-the target itself must not already be a directory, because a rename can never land bytes
-there. The mechanism states this domain and enforces every clause of it itself; no
-caller-side probe of these facts is needed or published.
+Caller-side tests check for abandoned temporaries. `stompdrill`'s command-line suite
+asserts that none remain at every injected failure position. This checks ADR-0001's
+set-level rule; a second tool inherits the testing convention with the mechanism.
 
-Exactly one of those two clauses is checked ahead of the write: a target that is already
-a directory is refused by `stage_payload` before any temporary is written, because the
-alternative — waiting for `StagedWrite.commit`'s rename to fail — surfaces the violation one
-target too late for a caller withholding a whole set to withhold it as a whole (test:
-`test_staging_at_a_directory_target_raises_before_any_temporary_exists`, in
-`stompmodel`'s own suite). Every other clause — a missing parent, a parent that is not a
-directory, a parent that refuses a new file — is answered by the filesystem itself, at
-the write attempt that actually needs the answer, so no caller repeats a probe of its own
-(tests: `test_a_target_whose_directory_is_missing_still_raises_an_os_error`,
-`test_a_target_whose_parent_is_not_a_directory_names_the_target`,
-`test_a_parent_that_refuses_a_new_file_names_the_target`). In every case the raised
-exception keeps its standard errno-mapped subclass, and its filename names the target —
-never the mechanism's own temporary, whose name a caller never otherwise learns.
+### Target requirements
 
-Nothing here requires the target to be a regular file: `StagedWrite.commit`'s rename replaces
-whatever non-directory node currently occupies the target's name, whatever type of node
-that is, rather than requiring it to already be an ordinary file — so a named pipe
-qualifies for this mechanism exactly as an ordinary file does, provided its parent will
-accept the sibling temporary (test:
-`test_committing_a_staged_write_can_replace_a_named_pipe_with_a_regular_file`). A target
-whose parent refuses new files, as an unprivileged caller usually finds `/dev` does,
-falls outside the domain for that reason alone, not because of what kind of node the
-target is.
+The target's parent directory must already exist and accept a new file. The target
+itself must not be a directory. These requirements allow `stage_payload` to create a
+sibling temporary and `StagedWrite.commit` to rename it onto the target. The mechanism
+enforces both requirements; callers need no separate probes.
 
-Committing replaces the target's *name*, not the file its name used to resolve to: a
-symlink standing where the target should be is afterwards a regular file holding the new
-payload, deliberately, and whatever file the link pointed at is left completely alone
-(test: `test_committing_a_staged_write_replaces_a_symlink_target_with_a_regular_file`).
+`stage_payload` rejects an existing directory target before creating a temporary.
+Deferring that check until rename would discover an invalid target only after the caller
+had begun committing the set. The test is
+`test_staging_at_a_directory_target_raises_before_any_temporary_exists` in
+`stompmodel`'s suite.
 
-A caller that needs to read a target before replacing it — to compare it against a
-supplied model before deciding whether to proceed, say — needs more of that target than
-this mechanism does: readability, and possibly more, neither of which staging or
-committing ever asks for. That further requirement belongs to the caller, not to this
-mechanism, and is stated where that caller's own pre-flight is: ADR-0001, for
-`stompdrill`'s command line.
+The filesystem detects other failures when the write is attempted: a missing parent,
+a parent that is not a directory, or a parent that refuses new files. These are checked
+by `test_a_target_whose_directory_is_missing_still_raises_an_os_error`,
+`test_a_target_whose_parent_is_not_a_directory_names_the_target` and
+`test_a_parent_that_refuses_a_new_file_names_the_target`. Every raised exception retains
+its standard errno-mapped subclass and names the target in its filename, rather than
+the private temporary.
+
+The per-path mechanism accepts any non-directory target, including a named pipe, if its
+parent accepts the temporary. Committing replaces that node with a regular file; see
+`test_committing_a_staged_write_can_replace_a_named_pipe_with_a_regular_file`.
+An unprivileged caller's `/dev` target usually fails because the parent refuses new
+files, independently of the target node's type.
+
+A symlink target also becomes a regular file containing the new payload. The file it
+previously pointed to is left unchanged, as checked by
+`test_committing_a_staged_write_replaces_a_symlink_target_with_a_regular_file`.
+The rename replaces the target's name.
+
+A caller that reads the target before replacement has additional requirements, including
+readability. Such a caller might compare a target with a supplied model or save previous
+bytes for rollback. These requirements belong to that caller's pre-flight policy;
+ADR-0001 records the command lines' stricter target checks.
 
 ## Rationale
 
-A `binary: ClassVar[bool]` alongside `media_type` and `extension` would match the
-protocol's existing shape, but it is a second claim about the payload that can contradict
-the payload itself. `isinstance` cannot disagree with the value it is given.
+Adding `binary: ClassVar[bool]` beside `media_type` and `extension` would duplicate a fact
+already expressed by the payload's type. The flag could disagree with the payload;
+`isinstance` uses the value itself.
 
-Requiring `bytes` from every emitter was rejected for the opposite reason: three existing
-emitters and their suites produce and assert text, and an artifact a person reads is
-legitimately a string.
+Requiring every emitter to return `bytes` was also rejected. The three existing emitters
+and their tests use text, and a text artefact can legitimately be represented as `str`.
 
 ## Consequences
 
-A binary format is now expressible without a parallel writing path. The cost is one
-branch at one site, and a union that every consumer of `Emitter` must accept: a caller
-that assumes `str` is now wrong, and `mypy` says so.
+Binary formats use the same write mechanism as text formats. Consumers of `Emitter` must
+accept the union; `mypy` detects callers that still assume every payload is `str`.
 
-The reporting line still counts encoded bytes, so its number means the same thing for
-both kinds of payload. Text payloads still keep their existing newline handling — nothing
-about writing through a temporary changes how a "\n" in the payload reaches disk — and
-the returned count remains the untranslated encoded length on every platform.
+The report counts encoded bytes for both payload types. Text is encoded as UTF-8 and
+written as bytes, without platform newline translation. The returned count is therefore
+the untranslated encoded length on every platform.
 
-This per-path guarantee is one half of a larger claim CLAUDE.md makes: "every artefact
-from one invocation must agree." Whether a whole invocation's artefacts land or withhold
-together as a set is a fact about the caller's loop over several paths, not about this
-one function, and stays out of this ADR's scope; ADR-0001 owns it.
+This per-path guarantee supports the requirement that every artefact from an invocation
+must agree. Whether the whole set is written or withheld belongs to ADR-0001's
+transaction, outside this ADR's scope.
 
-`stompcollider` inherits this counting convention from
-`stompmodel.protocols.stage_payload`/`StagedWrite.commit` rather than re-deriving it, which is
-what makes "means the same thing for both kinds of payload" hold across two tools rather
-than within one — the move satisfies ADR-0009's admission rule 2 (contract), naming
-`stompcad`'s dependence on one report and one byte-counting convention across both tools
-it orchestrates.
+`stompcollider` uses the byte count from
+`stompmodel.protocols.stage_payload`/`StagedWrite.commit`, so both tools report it by the
+same convention. This satisfies ADR-0009's admission rule 2 (contract): `stompcad`
+depends on consistent reporting and byte counts across the tools it orchestrates.

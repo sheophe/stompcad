@@ -1,31 +1,24 @@
 # stompcad
 
-Turn guitar-pedal panel artwork into fabrication artefacts, then check that the
-boards actually fit inside the enclosure you plan to drill.
+Create drill files and drawings from your guitar-pedal artwork, then check
+whether your boards fit inside the enclosure.
 
 [![CI](https://github.com/sheophe/stompcad/actions/workflows/ci.yml/badge.svg)](https://github.com/sheophe/stompcad/actions/workflows/ci.yml)
 
-Two command-line tools, sharing one geometry kernel:
+stompcad includes two command-line tools:
 
-- **`stompdrill`** reads drill geometry from an Adobe Illustrator file and emits
-  an Excellon program, a dimensioned drawing, a JSON drill document, and — given
-  a model of the enclosure — a STEP file of that enclosure with the holes cut.
-- **`stompcollider`** takes that drill document, the drilled enclosure and one or
-  more board models, seats each board on the holes its panel-mounted parts pass
-  through, and reports every place something clashes.
+- **`stompdrill`** reads Adobe Illustrator artwork and creates an Excellon drill
+  file, dimensioned drawings and a JSON drill document. With a STEP model of your
+  enclosure, it can also check hole clearance and create a drilled model.
+- **`stompcollider`** positions your board models inside the drilled enclosure
+  and reports clashes.
 
-The output is used to drill aluminium, so every artefact from one invocation
-must agree with every other. That constraint shapes most of the design.
+This is a personal project built around Hammond's 1590 enclosure family. It's
+used on real pedals, and the command-line interface is still evolving.
 
-## Status
+## Install
 
-A personal project, built around Hammond's 1590 enclosure family. It does real
-work on real pedals, but it is not a general-purpose CAD package and makes no
-attempt to be one. Interfaces change when the domain argues for it.
-
-## Installing
-
-Python 3.10 or later.
+You need Python 3.10 or later and `uv`. From a terminal:
 
 ```bash
 git clone https://github.com/sheophe/stompcad.git
@@ -35,57 +28,39 @@ uv sync --all-packages
 source .venv/bin/activate
 ```
 
-That is the whole install — there is no optional extra. The `cadquery-ocp`
-geometry kernel is an unconditional dependency, so the STEP features arrive with
-the command above. It is a large install: vtk and matplotlib come along
-transitively.
+STEP support is included. The geometry libraries make this a large installation;
+`cadquery-ocp` also brings in vtk and matplotlib.
 
-## Preparing the artwork
+## Prepare your artwork
 
-`stompdrill` reads an ordinary Illustrator file, but it only recognises geometry
-drawn a particular way. Two layers matter:
+In Illustrator, create two top-level layers:
 
-| Layer | Default name | Holds |
-| --- | --- | --- |
-| drill | `Drill` | one circle per hole, at the position and diameter you want drilled |
-| reference | `Background` | the panel outline, which fixes the coordinate frame and origin |
+| Layer name | What to draw |
+| --- | --- |
+| `Drill` | One circle per hole, at the position and diameter you want drilled |
+| `Background` | The panel outline, at the enclosure's published top-view or backplate dimensions |
 
-Rename them with `--drill-layer` and `--reference-layer` if you prefer.
+Use `--drill-layer` and `--reference-layer` if your layers have different names.
 
-Four things decide whether your artwork reads:
+**Give the drill circles a stroke.** Shapes with neither fill nor stroke are
+left out of the saved PDF data, so the tool cannot read them.
 
-**Give the drill circles a stroke.** Illustrator omits paths with neither fill
-nor stroke from the PDF stream entirely, so an unpainted circle is not merely
-ignored — it never reaches the file. This is the single most common reason a
-layer comes back empty.
+**Use the Ellipse tool to draw each hole.** Hold Shift, or enter equal width and
+height values, to make a circle. Rotated circles work too. Ellipses, rounded
+rectangles, compound shapes and traced outlines aren't recognised as holes.
 
-**Draw true circles.** A hole must be four cubic Béziers with equal radii and
-consistent control-point placement — what the Ellipse tool produces with Shift
-held, or with an equal width and height typed into its dialog. Rounded
-rectangles, ellipses, compound shapes and traced outlines all read as
-non-circular and are refused rather than guessed at. Recognition is
-rotation-invariant, so a rotated circle is still a circle.
+**Keep both layers at the top level.** The reader cannot recover sublayers or
+object names from the saved file. It uses layer names to identify the holes and
+outline.
 
-**Keep both layers at the top level.** Illustrator's sublayers are not
-recoverable from the saved file, so a drill layer nested inside another layer
-cannot be found. Object names are not recoverable either — the layer is the only
-channel through which artwork tells the tool what a shape is for.
+**Use the enclosure's published outline dimensions.** The smaller drilled face
+has different dimensions. The tool uses the largest non-circular path on the
+reference layer to identify the enclosure and set the coordinate origin.
 
-**Draw the outline at published enclosure dimensions.** The reference outline is
-the largest non-circular path on its layer, and it is matched against a
-catalogue of Hammond footprints to identify which enclosure you drew for. Use
-the published top-view or backplate dimensions, not the smaller drilled face.
+Save the file as `.ai` with PDF compatibility enabled. Illustrator doesn't need
+to be running when you use `stompdrill`.
 
-Save as `.ai` in Illustrator's normal way — its native save embeds the
-PDF-compatible stream that gets read, and Illustrator need not be running.
-
-If something is wrong, the error says which of the above it was: a layer that
-was found but held no circles reports how many paths it did hold, which
-distinguishes "nothing was painted" from "nothing was circular".
-
-## Drilling a panel
-
-Draw your holes as circles on one layer and the panel outline on another, then:
+## Generate drill files
 
 ```bash
 stompdrill PANEL.ai \
@@ -94,191 +69,99 @@ stompdrill PANEL.ai \
   --emit json=out.json
 ```
 
-Positions snap to a declared grid, diameters snap to a drill standard (metric or
-fractional sixty-fourths), and the outline is matched against a catalogue of
-Hammond footprints so the tool knows which enclosure you drew for. Anything it
-cannot resolve is a diagnostic rather than a guess.
+This creates a drill program, an SVG drawing and a JSON drill document. Add
+`--emit drawing-pdf=out.pdf` for a drawing at 1:1 scale.
 
-To cut the holes into a real enclosure and check clearance against its ribs,
-bosses and lettering, supply a model:
+Hole positions snap to a grid, which defaults to 0.25 mm. Diameters snap to the
+selected drill standard: metric by default, or fractional sixty-fourths of an
+inch with `--drill-standard fractional`. The panel outline is matched against
+the Hammond catalogue. If several enclosures match, specify the intended part
+with `--case`, for example `--case 1590B`.
+
+## Check hole clearance and create a drilled model
+
+Supply a STEP model to check the holes against the enclosure's walls, ribs and
+screw bosses. The repository includes a helper for downloading Hammond models:
 
 ```bash
-python tools/fetch_case_model.py 1590BB     # downloads and prints the cached path
+python tools/fetch_case_model.py 1590BB
 stompdrill PANEL.ai --case 1590BB \
   --case-model ~/.cache/stompcad/cases/1590BB.stp \
   --emit step=drilled.stp --emit json=drill.json
 ```
 
-`stompdrill` never synthesises an enclosure. It reads one you supply, to verify
-clearance and to cut holes it has already decided on. `tools/fetch_case_model.py`
-fetches published Hammond models; it is a convenience, not part of the package.
+The helper prints the cached model's path. You can also supply a model you
+already have. `stompdrill` cuts the holes into that model; it doesn't generate
+the enclosure itself.
 
-## Seating the boards
+Without `--case-model`, you can still create drill files and drawings, but hole
+clearance against the enclosure's solid geometry isn't checked.
+
+## Check whether the boards fit
+
+Use the drill document and drilled model from the previous step, along with a
+STEP model of your board:
 
 ```bash
 stompcollider drill.json board.stp \
   --case-model drilled.stp \
   --panel-reference 'RV*,SW*,D(3..4),!RV5' \
-  --report report.txt --assembly assembled.stp
+  --report report.json --assembly assembled.stp
 ```
 
-`--panel-reference` names the designators that mount through the panel — the
-pots, switches and jacks whose shafts pass through your holes. There is no
-default, because which parts those are is a fact about your pedal.
+`--panel-reference` selects the components that mount through the panel, such as
+pots, switches and jacks. Choose these for your pedal; there is no default. The
+example includes `RV*`, `SW*`, `D3` and `D4`, then excludes `RV5`. See the
+[filter syntax](docs/CLI.md#select-panel-components) for details.
 
-Each board is then inserted the way you would insert it by hand: aligned outside
-the open back, advanced along the panel normal, and stopped where it first meets
-metal. Where several seatings are possible, the one that goes furthest in wins,
-and among those the one whose boards foul each other least.
+The tool aligns each board outside the open back and moves it towards the panel
+until it first meets the enclosure. When several placements are possible, it
+prefers the ones that insert furthest, then those with the least interference
+between boards. The lid is excluded during insertion, but clashes with it are
+reported afterwards.
 
-**It resolves nothing.** A clash is the output, not a failure — seeing the
-interference is the entire point. If a bushing is drawn wider than the bore it
-must pass, `stompcollider` reports the board stopping short rather than quietly
-letting it through. Drilling tolerance belongs in your artwork, not in an
-allowance the tool applies to a model it is measuring.
+The terminal shows the findings. `report.json` records the placements and
+clashes, and `assembled.stp` lets you inspect the assembly in a CAD viewer. Pass
+several board files after `drill.json` to check them together.
 
-## Exit codes
+Use the findings to adjust your design. If a bushing is wider than its hole, the
+board stops short. Include the required drilling tolerance in your artwork;
+the tool measures the supplied geometry without adding an allowance.
 
-Both tools use the same contract:
+## Understand the result
+
+Both tools use these exit codes:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | clean |
-| `1` | warnings present |
-| `2` | errors |
-| `3` | usage or IO failure |
+| `0` | Completed without warnings or errors |
+| `1` | Completed with warnings or clash findings |
+| `2` | Processing errors; no requested output files are written |
+| `3` | Invalid arguments or an input/output failure |
 
-Any error withholds **every** requested artefact. A run that fails leaves each
-existing output exactly as it was.
+Warnings allow output files to be written. Processing errors prevent all
+requested outputs. If a write fails, the tools attempt to restore any files
+already replaced; see [output handling](docs/CLI.md#output-files-and-failures)
+for the limits of that recovery.
 
-## How it fits together
+If the drill layer comes back empty, check that its circles have a stroke and
+that the layer is at the top level. An error that reports paths but no circles
+usually means the shapes weren't recognised as circular.
 
-Both tools are the same four steps. Each **reads** an input into measured
-floats, **canonicalises** those once into exact integer nanometres, **folds** a
-sequence of stages over the resulting value, and **emits** artefacts from it.
-Only the stages differ; the shape does not. That is why both are drawn below at
-the same depth — [`docs/FOUNDATION.md`](docs/FOUNDATION.md) states the shape
-formally, and these are its two instances.
+## More documentation
 
-Both diagrams use one grammar, read left to right:
-
-| | means |
-| --- | --- |
-| slanted | a file on disk |
-| rounded | a **reader**, turning a file into measured floats |
-| hexagon | the **canonicalisation** boundary, where floats become exact integers |
-| double-barred | the **canonical value** every later step works from |
-| plain box | one **stage**, folded over that value in the order shown |
-| dashed | conditional |
-
-Emitters are not drawn. They only translate and serialise the finished value, so
-every artefact leaves the same node.
-
-**`stompdrill`** — artwork to fabrication artefacts:
-
-```mermaid
-flowchart LR
-    ai[/"PANEL.ai"/] --> src(["AiPdfSource"]) --> q{{"quantise()"}} --> m[["DrillData"]]
-    m --> s1["Deduplicate"] --> s2["ReviewGridTies"] --> s3["RouteHoles"] --> s4["CheckOutlineContainment"]
-    s4 -.-> s5["CheckCaseClearance"]
-    case[/"enclosure model"/] -.-> s5
-    s4 --> done[["routed, checked"]]
-    s5 -.-> done
-    done --> a1[/"excellon · drawing-svg<br>drawing-pdf · json"/]
-    done -.-> a2[/"step"/]
-```
-
-Everything dashed there depends on one flag: supply `--case-model` and the
-clearance stage runs and the `step` artefact becomes available; omit it and the
-panel is still fully drilled, just never checked against real metal.
-
-**`stompcollider`** — boards into that drilled enclosure:
-
-```mermaid
-flowchart LR
-    doc[/"drill document"/] --> dsrc(["codec"])
-    brd[/"BOARD.stp"/] --> src(["BoardSource"])
-    dsrc --> q{{"canonicalise()"}}
-    src --> q --> m[["DockData"]]
-    m --> s1["Match"] --> s2["Seat"] --> s3["Clashes"] --> done[["matched, seated, clashed"]]
-    case[/"drilled enclosure"/] --> s2
-    case --> s3
-    done --> a1[/"report · assembly"/]
-```
-
-The seam between the two is `stompdrill`'s own output: the drill document says
-where the holes are and which face they were cut in, and the `step` artefact is
-the enclosure the boards are seated into. Both are ordinary files, so either
-tool runs alone.
-
-Four packages, in dependency order:
-
-| Package | Holds |
-| --- | --- |
-| `stompmodel` | the values every tool exchanges: branded lengths, drill data, diagnostics, protocols |
-| `stompgeom` | the OpenCASCADE layer — reading, writing, intersecting and measuring solids |
-| `stompdrill` | artwork to fabrication artefacts |
-| `stompcollider` | boards into a drilled enclosure |
-
-Each installs and passes its own tests alone. `stompcollider` reaches the kernel
-only through `stompgeom`, and a test enforces it.
-
-Measurements enter as millimetre floats and become integer nanometres at one
-boundary; every canonical length is exact from there on. Two inputs describing
-the same geometry produce byte-identical artefacts whatever order their elements
-appear in — no rule consults input order.
-
-## Documentation
-
-- **[`docs/adr/`](docs/adr/)** — the authority for every architectural decision.
-  Start with [ADR-0001](docs/adr/0001-pipeline-and-emitter-adapters.md) for the
-  processing boundaries and [ADR-0003](docs/adr/0003-quantisation-boundary-and-ordering.md)
-  for why quantisation happens where it does.
-- **[`docs/FOUNDATION.md`](docs/FOUNDATION.md)** — the abstract model every tool
-  here is an instance of, so that correctness obligations can be derived rather
-  than listed.
-- **[`docs/GLOSSARY.md`](docs/GLOSSARY.md)** — the domain vocabulary, for terms
-  two people could reasonably read two ways.
-- **[`CLAUDE.md`](CLAUDE.md)** — the rules binding contributions, and the fullest
-  description of the command-line contract.
-
-Some documents referenced from commit messages are working records kept out of
-this repository: implementation plans, the backlog, and internal specifications.
-The ADRs carry the decisions that survived.
-
-## Development
-
-No single command proves everything — the root `testpaths` covers only
-`stompdrill`, and four test packages cannot share one interpreter:
-
-```bash
-.venv/bin/python -m pytest -o addopts= packages/stompmodel/tests -q
-cd packages/stompgeom && uv run --no-sync pytest -o addopts= -q
-cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q
-.venv/bin/python -m pytest -p no:cacheprovider -o addopts= packages/stompdrill/tests -q
-```
-
-Lint and types:
-
-```bash
-ruff check packages tools
-mypy packages
-cd packages/stompgeom && uv run --no-sync mypy      # and likewise for the others
-```
-
-Two suites are opt-in. `--hammond` runs `stompdrill`'s kernel tests against real
-Hammond models fetched at run time; `--boards` runs `stompcollider`'s against a
-committed board fixture. Neither is a kernel-availability switch — the kernel is
-always required, so failing to import it is a failure rather than a skip.
-
-Tests are written first, and a test that cannot fail is not evidence: a check
-that could pass by finding nothing has to be shown failing on a deliberate breach
-before it counts. `CLAUDE.md` states the rest.
+- [Command-line reference](docs/CLI.md): options, output formats and diagnostics.
+- [Glossary](docs/GLOSSARY.md): enclosure, drilling and board-fit terminology.
+- [Architecture overview](docs/ARCHITECTURE.md): packages and processing steps.
+- [Contributing](CONTRIBUTING.md): development commands and testing guidance.
+- [Architecture decisions](docs/adr/): decisions and their reasons.
+- [Foundation](docs/FOUNDATION.md): the formal model behind the processing and
+  output checks.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
-Hammond enclosure models fetched by `tools/fetch_case_model.py` are published by
-Hammond Manufacturing and are not part of this project. Dimensional data in
-`docs/parts/` is transcribed from their public datasheets.
+Downloaded Hammond enclosure models are published by Hammond Manufacturing and
+aren't part of this project. The [catalogue data](docs/parts/README.md) comes
+from their public datasheets.

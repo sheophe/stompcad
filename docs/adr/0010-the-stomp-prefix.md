@@ -4,116 +4,110 @@
 
 ## Context
 
-Every package in the workspace was prefixed `ai`, and the prefix means three
-different things depending on who reads it:
+Every package was prefixed `ai`, which had several possible readings:
 
-- **Adobe Illustrator**, the only input format `aidrill` currently read. This is
-  the reading the code invites, and it is the one guaranteed to expire — nothing
-  in the design ties the drill source to Illustrator, and a PDF or SVG source
-  would retire the prefix's meaning the day it landed.
-- **Artificial intelligence**, because most of the code was written by an agent.
-  True, and irrelevant to anyone using the tool.
-- A brand that does not exist.
+- Adobe Illustrator, the format `aidrill` read. The source interface could also
+  support PDF or SVG, so the name tied the tool to one input format.
+- Artificial intelligence, because an agent wrote most of the code. That says
+  little about what the tool does.
+- A brand, although none had been established.
 
-A prefix that means three things means none of them. With five packages about to
-be created and only one written, the rename is cheap now and triples in cost
-after `stompmodel` and `stompgeom` are extracted.
+At the time of this decision, five packages were planned and only `aidrill`
+existed. Renaming it before extracting `stompmodel` and `stompgeom` limited the
+number of imports, paths and documents to change.
 
 ## Decision
 
-The prefix is `stomp`, after the stompbox these tools exist to build.
+Use the prefix `stomp`, after the stompboxes these tools help build.
 
 | Package | Contents |
 | --- | --- |
-| `stompmodel` | lengths, `DrillData`, diagnostics, the pipeline contracts |
-| `stompgeom` | STEP reader and writer, coordinate frames, level analysis |
+| `stompmodel` | lengths, `DrillData`, diagnostics, pipeline contracts and frame values |
+| `stompgeom` | STEP reader and writer, kernel geometry, level analysis |
 | `stompdrill` | artwork in, fabrication artefacts out |
 | `stompcollider` | docking and collision |
 | `stompcad` | the composing CLI |
 
-The repository is named `stompcad`, per ADR-0008, and the user-facing command is
-`stomp`:
+The original package table placed coordinate frames in `stompgeom`.
+ADR-0009's amendment assigns the frame values to `stompmodel`, as shown here.
+
+The repository is named `stompcad`, following ADR-0008. The planned user-facing
+command is `stomp`:
 
 ```
     stomp drill tar.ai
     stomp dock tar.ai
 ```
 
-**`stomp` is a command, never a package identifier.** A console-script name is
-not a distribution name, so the bare command is available whatever the
-distribution is called — and nothing else takes it. Anything that names the
-project in code, in a path, or in an emitted artefact is `stompcad`: it says what
-the thing is, where a bare `stomp` says only that it is loud.
+`stomp` is reserved for the command and is never a package identifier. Console
+scripts can have a different name from their distribution. Project identifiers
+in code, paths and emitted artefacts use `stompcad`.
 
-**One `ai` survives, and it is the honest one.** `sources/ai_pdf.py` and
-`AiPdfSource` read Adobe Illustrator's PDF-compatible stream. There the letters
-mean exactly what they say, and a second vector source would sit beside that
-module rather than replace it.
+The `ai` in `sources/ai_pdf.py` and `AiPdfSource` remains: it identifies the
+Adobe Illustrator PDF-compatible stream those names represent. Another vector
+source would sit beside that module.
 
-Two emitted-artefact identifiers change with the prefix, deliberately:
+Two emitted identifiers change with the prefix:
 
-- the drill document's `format` becomes `stompcad-drill-data`, not
-  `stompdrill-drill-data` — ADR-0009 moves the document to `stompmodel`, so
-  naming it after the tool that happens to produce it would be wrong;
-- the STEP writer's product-name prefix becomes `stompcad`, spelled once as
-  `_PRODUCT_NAME` and read by both the writer that sets it and the pattern
-  that renumbers the counter appended to it. Written twice, a later rename
-  would silence the pattern and leave a volatile identifier in an artefact
-  that still looked correct. OCC's STEP translator synthesises a product
-  from this prefix for *any* shape reaching it with no usable XCAF name —
-  nothing here is a wrapper, and which of two spellings appears depends on
-  where that shape sits in the transfer, not on what it is. A top-level free
-  shape gets a bare, dotless counter (`stompcad <n>`); a shape reaching the
-  translator as a component inside an XCAF assembly gets a dotted one
-  (`stompcad <n>.<m>`), because the assembly's own product carries the
-  assembly's own name and nothing is wrapped around it. `stompgeom.build.
-  build_document` adds every solid as a free shape, so this workspace writes
-  the dotless form; the dotted form appears for the assemblies a supplied
-  case model, or this package's own test fixtures, build. Both spellings are
-  renumbered alike, in file order, to a fresh dotless `stompcad <k>`,
-  because a document can hold several nameless shapes and they must stay
-  distinguishable from each other in the written bytes.
+- The drill document's `format` becomes `stompcad-drill-data`. ADR-0009 moves
+  the document to `stompmodel`, so `stompdrill-drill-data` would incorrectly tie
+  it to one producer.
+- The STEP writer's product-name prefix becomes `stompcad`. `_PRODUCT_NAME`
+  defines it once for both the writer and the pattern that renumbers its
+  appended counter. Separate spellings could drift during a rename and leave
+  volatile identifiers in otherwise valid output.
+
+OCC's STEP translator uses that prefix for any shape without a usable XCAF name.
+The counter form depends on where the shape enters the transfer:
+
+- A top-level free shape gets a dotless counter: `stompcad <n>`.
+- A component inside an XCAF assembly gets a dotted counter:
+  `stompcad <n>.<m>`. The assembly keeps its own product name; this does not add
+  a wrapper around it.
+
+`stompgeom.build.build_document` adds each solid as a free shape, so documents
+assembled by this workspace use the dotless form. Supplied case assemblies and
+test fixtures can produce the dotted form. Both are renumbered in file order
+to fresh dotless names, `stompcad <k>`. Multiple unnamed shapes remain distinct
+in the resulting bytes.
 
 ## Rationale
 
-**Why a product name rather than a neutral one.** Neutral candidates were
-considered and one was preferred on paper: `kerf`, a machinist's term for the
-material a cut removes, which says nothing that can expire. `stomp` was chosen
-over it because the assembled system genuinely is domain-specific, and a neutral
-name would misdescribe it. `stompdrill` carries a Hammond 1590 catalogue.
-`stompcollider`'s Match phase pairs protruding control elements against holes in
-a flat drilled face — a shape that is true of a pedal and not of machined parts
-in general. Naming that `kerf` would have been an aspiration, not a description.
+### Name the domain the tools serve
 
-**The rule is not "no package knows about pedals".** That claim is false, was
-never enforceable, and appears in earlier wording that this ADR corrects. The
-rule is that **only the parts that must be domain-specific are**, and that domain
-knowledge arrives as data or as a caller-supplied parameter wherever it can
-rather than compiled in as a fact.
+A neutral name was considered. `kerf`, the machinist's term for material removed
+by a cut, was initially preferred because it was independent of input format.
+`stomp` was chosen because the assembled system is specific to pedals.
+`stompdrill` carries a Hammond 1590 catalogue, and `stompcollider`'s Match phase
+pairs protruding controls with holes in a flat drilled face. These are useful
+pedal-building assumptions, beyond general machining geometry.
 
-So `stompcollider` holds no component taxonomy and no part library, does not know
-what a potentiometer is for, and receives its panel-reference group from the
-caller — while knowing perfectly well that boards mount through a flat face on
-cylindrical protrusions, because that is the problem it was built for. The
-universal parts underneath — rigid transforms, radius-versus-depth profiles,
-boolean clash measurement — are universal because that is the cheapest correct
-way to write them, not because the system around them is.
+The earlier claim that no package knows about pedals is corrected here. The
+rule is that only the parts requiring domain knowledge should contain it, and
+that knowledge must arrive as data or a caller-supplied parameter wherever
+possible.
 
-**Why not defer.** `aidrill` is the only package written. Renaming it is
-mechanical and its 1248 tests verify it. Every day of delay adds another package
-to rename and another document to correct.
+`stompcollider` therefore has no component taxonomy or part library, does not
+need to know what a potentiometer does, and receives its panel-reference group
+from the caller. It does assume boards mount through a flat face using
+cylindrical protrusions. The supporting rigid transforms, radius-versus-depth
+profiles and boolean clash measurements remain general geometric operations.
+
+### Rename before extracting the packages
+
+Only `aidrill` existed when this decision was made. Its rename was mechanical
+and verifiable with the existing suite of 1248 tests. Deferring it would add
+packages and documentation to the migration.
 
 ## Consequences
 
-Import paths change throughout, `src/aidrill/` becomes `src/stompdrill/`, and the
-console script is `stompdrill` until `stompcad` exists to own `stomp`.
+Imports change throughout, and `src/aidrill/` becomes `src/stompdrill/`. The
+console script remains `stompdrill` until `stompcad` exists to provide `stomp`.
 
-**Byte identity is broken once, here, on purpose.** The drill document's `format`
-string and the STEP writer's product name both appear in emitted artefacts, so
-this rename changes them. ADR-0008's requirement that every artefact survive the
-`stompgeom` extraction unchanged is measured *after* this commit, not across it.
-No other emitted byte moves: positions, diameters, ordering and colour slots are
-untouched.
+The drill document's `format` string and the STEP product-name prefix change
+emitted bytes deliberately. ADR-0008's requirement for byte identity across the
+`stompgeom` extraction is measured after this rename commit. No other emitted
+bytes change: positions, diameters, ordering and colour slots remain identical.
 
-The cached case-model directory moves from `~/.cache/aidrill/cases/` to
-`~/.cache/stompcad/cases/`. Anything already downloaded is re-fetched once.
+The case-model cache moves from `~/.cache/aidrill/cases/` to
+`~/.cache/stompcad/cases/`. Previously downloaded models are fetched again once.

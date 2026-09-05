@@ -1,21 +1,18 @@
-# Triage Labels
+# Triage labels
 
-The skills speak in terms of five canonical triage roles. This file maps those
-roles to the actual label strings used in this repo's issue tracker.
+Use these status values when a triage skill assigns a role to an issue:
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+| Skill role | Local status | Meaning |
+| --- | --- | --- |
+| `needs-triage` | `needs-triage` | A maintainer needs to assess the issue |
+| `needs-info` | `needs-info` | More information is needed from the reporter |
+| `ready-for-agent` | `ready-for-agent` | Specified and ready for an agent to implement |
+| `ready-for-human` | `ready-for-human` | Needs human implementation |
+| `wontfix` | `wontfix` | The proposed work will not be taken on |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the
-corresponding label string from this table.
+These roles match `mattpocock/skills`. For example, a request to apply the
+AFK-ready label means `ready-for-agent`.
 
-This tracker is local markdown, so a "label" is the value of the `Status:` line
-near the top of the issue file — there is no label API to call. One status per
-issue.
-
-Edit the right-hand column to match whatever vocabulary you actually use.
+Set the issue's `Status:` line near the top of its local Markdown file. Each
+issue has one status; there is no label API to call. See the
+[issue-tracker conventions](issue-tracker.md) for file paths.

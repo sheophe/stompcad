@@ -1,55 +1,48 @@
-# Issue tracker: Local Markdown
+# Local issue tracker
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
+Store issues and working specs as Markdown files under `.scratch/`. Use these
+files for issue-tracker operations; this workflow does not publish external
+issues or pull requests.
 
-This repo has no git remote, so there is no GitHub or GitLab to talk to and no
-external pull requests to triage. `.scratch/` is **git-ignored**: it holds live
-working state — what is being decided right now — not a record to keep. A
-decision worth keeping graduates out of it, into a spec, an ADR, or
-`docs/GLOSSARY.md`.
+## File conventions
 
-## Conventions
+- Give each feature a directory: `.scratch/<feature-slug>/`.
+- Store its spec at `.scratch/<feature-slug>/spec.md`.
+- Give each implementation ticket a separate file:
+  `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`.
+- Put a `Status:` line near the top of each issue. Use the values in
+  [triage labels](triage-labels.md) for triage workflows.
+- Append comments and conversation history under a `## Comments` heading.
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at
-  `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` — never a
-  single combined tickets file
-- Triage state is recorded as a `Status:` line near the top of each issue file
-  (see `triage-labels.md` for the role strings)
-- Comments and conversation history append to the bottom of the file under a
-  `## Comments` heading
+When a skill asks you to publish an issue, create the corresponding local file.
+When it asks you to fetch a ticket, read the path or issue number supplied by
+the user.
 
-`.scratch/` is for issues, specs and wayfinder maps. It is not the Superpowers
-SDD workspace, which lives at `.superpowers/sdd/`. Nor is it
-`docs/superpowers/`, which holds that workflow's specs and plans. All three are
-git-ignored. Three directories, three purposes, none of them a durable record —
-that is what `docs/adr/` and `docs/GLOSSARY.md` are for.
+These working directories are ignored by Git:
 
-## When a skill says "publish to the issue tracker"
+| Directory | Contents |
+| --- | --- |
+| `.scratch/` | Issues, working specs and wayfinder maps |
+| `.superpowers/sdd/` | Superpowers subagent-development workspace |
+| `docs/superpowers/` | Superpowers specs and plans |
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if
-needed).
+Record lasting architectural decisions in [ADRs](../adr/) and domain
+definitions in the [glossary](../GLOSSARY.md).
 
-## When a skill says "fetch the relevant ticket"
+## Wayfinder operations
 
-Read the file at the referenced path. The user will normally pass the path or
-the issue number directly.
+A wayfinder effort has a map and one child file per ticket:
 
-## Wayfinding operations
+- Map: `.scratch/<effort>/map.md`, with Notes, Decisions-so-far and Fog sections.
+- Tickets: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the
+  question in the body. Use `Type: research`, `prototype`, `grilling` or `task`
+  to describe the ticket, and `Status: claimed` or `resolved` as work proceeds.
+- Dependencies: list ticket numbers in `Blocked by: NN, NN`. A ticket is
+  unblocked when every listed ticket is resolved.
 
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
+To find the next ticket, scan for open, unblocked and unclaimed tickets and
+choose the lowest number. Set `Status: claimed` and save before starting work.
 
-- **Map**: `.scratch/<effort>/map.md` — the Notes / Decisions-so-far / Fog body.
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`,
-  with the question in the body. A `Type:` line records the ticket type
-  (`research`/`prototype`/`grilling`/`task`); a `Status:` line records
-  `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked
-  when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open,
-  unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set
-  `Status: resolved`, then append a context pointer (gist + link) to the map's
-  Decisions-so-far in `map.md`.
+On completion, append the answer under `## Answer`, set `Status: resolved`, and
+append a short result and a link to the ticket in the map's Decisions-so-far
+section.

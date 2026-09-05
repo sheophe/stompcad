@@ -16,14 +16,13 @@ declared in whole microns, also an `int`.
 Nothing in those representations distinguishes them. A nanometre count and a micron count
 are both `int`, so a value in one unit can be passed, stored, or compared where the other
 is expected and the arithmetic will succeed with a result wrong by a factor of a thousand.
-The output is drilled into aluminium, so a length that is silently off by a scale factor is
-the expensive class of defect: it produces a well-formed artifact describing the wrong
-panel.
+That error can produce a well-formed artefact describing the wrong panel, which is
+costly when the output is used to drill aluminium.
 
-The hazard is specifically a **unit-scaled value crossing a boundary** — a length that has
-been multiplied or divided by a scale factor and then stored back where the unscaled value
-belongs. Mixing units inside a single expression is not how this arises; the conversions
-are deliberate and few, and the danger is that their result lands in the wrong slot.
+This decision addresses scaled values stored in the wrong unit: a length is multiplied
+or divided by a conversion factor, then assigned where the original unit is expected.
+The conversions themselves are few and deliberate. The risk arises when their results
+cross a boundary, rather than from mixing units within one expression.
 
 ## Decision
 
@@ -40,7 +39,7 @@ Millimetre = NewType("Millimetre", float) # an unquantised measurement
 Micron     = NewType("Micron", int)       # the effective grid pitch
 ```
 
-A brand is applied only where a value genuinely becomes that unit: at a source's
+A brand is applied only where a value becomes that unit: at a source's
 measurement, at a conversion in either `units` module, at a quantiser's selected
 answer, and at a re-wrap after arithmetic. Conversions run one way, from measurement
 toward the canonical unit, as ADR-0004, Figure 1 shows.
@@ -62,22 +61,21 @@ flowchart LR
     nm -->|format_nm| text
 ```
 
-Figure 1 — Unit boundaries and the direction each conversion runs. `nm_from_mm` and
-`format_nm` are `stompmodel.units`'; `mm_from_pt` and `nm_from_micron` stay in
-`stompdrill.units`, the first because only a PDF source measures in points and the
-second because it converts the pitch `Micron` types.
+Figure 1 — Unit boundaries and conversion directions.
+
+`stompmodel.units` owns `nm_from_mm` and `format_nm`. `mm_from_pt` and
+`nm_from_micron` remain in `stompdrill.units`: only the PDF source measures in
+points, and `Micron` describes that tool's effective grid pitch.
 
 Arithmetic on a branded value yields the underlying unbranded type. A scaled result must
 therefore be re-wrapped explicitly before it can be stored as a length again, and that
 re-wrap is the boundary this decision exists to make visible.
 
-`Micron` types the pitch **after** it has been clamped and validated, not at the argument
-where it arrives. The pitch is accepted in nanometres so that a request finer than a micron
-remains expressible and can be clamped with its own warning; a `Micron` argument would make
-that outcome unrepresentable and remove a diagnostic the operator depends on. The canonical
-nanometre pitch is then derived from the `Micron`, so wholeness is a property of how the
-pitch is built rather than a check whose result is discarded, and the two spellings of one
-pitch cannot disagree.
+`Micron` types the effective pitch after clamping and validation. The argument arrives
+in nanometres so that a request finer than a micron can be represented, clamped and
+reported with a warning. Accepting a `Micron` argument would remove that outcome.
+The canonical nanometre pitch is then derived from the validated `Micron`. This
+construction ensures a whole-micron pitch and keeps the two representations consistent.
 
 `Millimetre` converts only toward `Nanometre`. Presentation arithmetic inside an emitter —
 scale factors, sheet coordinates, arrowhead geometry — is not a length the model holds and
@@ -90,13 +88,11 @@ unit.
 
 ## Rationale
 
-Losing the brand under arithmetic is the property that makes this work rather than a
-weakness to be engineered away. A wrapper class with typed operators would preserve its own
-type through multiplication, so re-scaling a length and storing it back would type-check
-cleanly — which is precisely the boundary crossing that must not pass. Refusing scalar
-multiplication instead would reject the legitimate arithmetic the quantisers depend on:
-deriving a warning threshold from a pitch, generating a size table from a step, halving an
-outline to translate a frame.
+Losing the brand under arithmetic makes unit conversions visible. A wrapper class with
+typed operators would keep its type through multiplication, allowing a rescaled value
+to be stored in the original unit without a type error. Refusing scalar multiplication
+would also be unsuitable: quantisers need it to derive warning thresholds from pitches,
+generate size tables from steps, and halve outlines for frame translations.
 
 Applying the brand only at real conversions keeps the annotation honest. A brand attached
 everywhere would be noise; a brand attached where a unit is established marks the places a
@@ -111,34 +107,35 @@ A new length is annotated with the unit it is in. A value derived by arithmetic 
 re-wrapped where it becomes a length, and that re-wrap is a deliberate statement that the
 result is in the named unit.
 
-The brands are a boundary marker, not a proof. An explicit wrap launders any value, so a
-re-wrap that names the wrong unit type-checks. What the types provide is that every such
-place is written down and can be reviewed, rather than being indistinguishable from
-ordinary arithmetic.
+The brands identify boundaries but cannot prove a unit is correct. Explicitly wrapping
+a value in the wrong unit still type-checks. The benefit is that every conversion is
+visible for review.
 
 Runtime validation remains. The model still rejects a length that is not a plain integer,
 and `SnapPositions` still validates that its effective pitch is a whole number of microns;
 a brand describes intent and does not check a value that arrives from outside the type
 checker's reach.
 
-**Amended: the nanometre guard is published too.** `stompmodel.units` exports
-`check_millimetres` and `check_nanometres` as a pair, each refusing anything but its own
-plain representation — a finite `float` and a plain `int` respectively — and naming the
-owner and the member that failed. The nanometre side is public for the same reason the
-millimetre side already was: several `stompdrill` quantisers and stages applied this exact
-rule outside `stompmodel`, each with its own copy, and a shared rule left private would
-break every one of those callers with no `__all__`, ruff or mypy saying so.
+### Amendment: shared runtime guards
 
-**Amended: the guard covers every canonical length the emitted document carries, the case
-frame's origin included.** `CoordinateFrame.origin_nm` is a `Nanometre` triple like any
-other canonical length, so it is checked by `check_nanometres` at construction like every
-other one — not by the `Nanometre(...)` cast that produces it. A `NewType` cast is a
-runtime no-op: it returns its argument unchanged and cannot refuse a float any more than
-assigning it to a variable could, so a reader that treats the cast as validation is
-trusting a call that performs none. Before this amendment the case block was restored by
-exactly that cast, the one canonical value in the document not checked at the boundary
-that checks everything else; a float origin, a two-component basis, an all-zero basis, and
-a left-handed basis all restored silently as a result. The same construction guard also
-requires the basis to be orthonormal and right-handed within a measured tolerance, so a
-malformed or mirrored frame is refused there rather than corrupting every hole position an
-emitter later maps through it.
+`stompmodel.units` exports `check_millimetres` and `check_nanometres`. Each accepts only
+its plain representation: a finite `float` or a plain `int`, respectively. A failure
+names the owner and member.
+
+Several `stompdrill` quantisers and stages previously copied the nanometre check. Making
+it public, like the millimetre check, gives those callers one supported rule. Leaving
+it private would allow changes to break them without `__all__`, ruff or mypy detecting
+the dependency.
+
+### Amendment: coordinate-frame validation
+
+Every canonical length in an emitted document must pass the guard, including the
+`Nanometre` triple `CoordinateFrame.origin_nm`. Construction checks its components
+with `check_nanometres`; a `Nanometre(...)` cast alone cannot validate them because
+`NewType` returns its argument unchanged at runtime.
+
+Before this amendment, the case block restored its origin using only that cast. A float
+origin, two-component basis, all-zero basis and left-handed basis could all be restored
+without validation. Construction now also requires an orthonormal, right-handed basis
+within a measured tolerance. This rejects malformed or mirrored frames before an
+emitter maps hole positions through them.

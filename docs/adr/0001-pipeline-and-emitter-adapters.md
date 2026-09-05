@@ -1,108 +1,49 @@
-# ADR-0001: Processing architecture and artifact consistency
+# ADR-0001: Processing architecture and artefact consistency
 
 **Status:** Accepted, amended by
 [ADR-0009](0009-shared-model-package-and-dependency-order.md), which moves
 `Stage`, `Pipeline` and `Emitter` into `stompmodel` and makes them generic in
-the value they fold over. The reasoning here for one authority per fact and for
-computing shared facts once is unchanged. **Amended in place:** the grant
-below has been exercised — `stompmodel.protocols` now publishes the set-level
-target check as `target_key`/`check_target_set` and the set-level write
-transaction as `stage_all`/`commit_all`, and both command lines call that
-published surface rather than keeping private copies.
+the value they process. Shared facts still have one owner and are computed once.
+An amendment in place moves target validation (`target_key`/`check_target_set`)
+and write transactions (`stage_all`/`commit_all`) into `stompmodel.protocols`.
+`stompdrill.cli` and the `stompcollider` command line now use these published functions.
 
 ## Context
 
 `stompdrill` reads measured drill geometry and can emit several representations of the
-same panel. Every artifact from one invocation must describe the same accepted holes,
-tool set, ordering, diagnostics, and processing provenance. Computing any of those
-facts independently in an emitter would create multiple authorities for one panel.
+same panel. Every artefact from one invocation must describe the same accepted holes,
+tool set, ordering, diagnostics and processing provenance. Computing these facts
+independently in each emitter would allow the outputs to disagree.
 
-The architecture therefore needs an explicit boundary between measured source data,
-canonical drill data, processing that changes shared facts, and presentation that only
-changes how those facts are represented.
+The architecture needs clear boundaries between measured source data, canonical drill
+data, processing that changes shared facts, and presentation that represents those facts.
 
 ## Decision
 
-`AiPdfSource` produces unquantised `RawDrillData`. The `quantise()` processing phase
-turns that measured input into canonical `DrillData`. A `Pipeline` then groups
-`Deduplicate`, `ReviewGridTies`, `RouteHoles` and `CheckOutlineContainment` as
-independent stages, each accepting and returning `DrillData`.
+### Processing and emission
 
-All facts shared by more than one artifact are computed once before emission and travel
-on `DrillData`. This includes diagnostics and processing provenance. Emitters serialise
-the resulting document and may perform presentation-only transformations such as unit,
-coordinate-frame, or textual formatting. They do not quantise, deduplicate, classify,
-sort, or otherwise re-derive shared facts.
+`AiPdfSource` produces unquantised `RawDrillData`. `quantise()` turns those
+measurements into canonical `DrillData`. A `Pipeline` then applies `Deduplicate`,
+`ReviewGridTies`, `RouteHoles` and `CheckOutlineContainment` as independent stages,
+each accepting and returning `DrillData`. A supplied case model also enables
+`CheckCaseClearance`.
 
-An invocation selects any number of emitters, none included, through repeatable
-`--emit FORMAT=PATH` arguments; one format may be named more than once, so the count
-of requested artefacts is not bounded by the count of registered formats. Emitter
-payloads may be text or bytes; see ADR-0005.
-The processing blocks, aggregate boundaries, and typed transfers are shown in ADR-0001,
-Figure 1.
+All facts shared by more than one artefact are computed once before emission and
+carried on `DrillData`, including diagnostics and processing provenance. Emitters
+serialise that document. They may convert units and coordinate frames or format
+text, but must not quantise, deduplicate, classify, sort or re-derive shared facts.
+Presenting an already assigned drill sequence is covered by
+[ADR-0006](0006-toolpath-ordering-and-hole-numbering.md).
 
-One invocation's artefacts are one transaction: the command line writes every
-requested artefact or none of them. Before anything is rendered, the requested target
-set is validated once, as a set: no two targets may reach one file, and every target
-that already exists must be a regular file, because this command line reads a
-target's prior bytes before replacing it and a named pipe or character device would
-never return from that read. Reaching one file is decided on a comparison key rather
-than on the spelling the caller typed: each target's resolved path, canonically
-caseless-matched in the sense of UAX #15 D145. Resolving first refuses two spellings
-that reach one file through a symlink or a relative prefix; folding case and
-normalisation form refuses a pair that a volume unifying either would hold as one
-file, and it is applied unconditionally, because whether this host folds is not
-knowable before a target exists and `samefile` needs both targets to exist already.
-The key decides collisions and nothing else — the bytes still go to the path the
-caller named. `stompmodel.protocols`'s `target_key` and `check_target_set` are
-where this is enforced; `stompdrill.cli` calls them rather than keeping a
-private copy. The write mechanism's own preconditions are **not
-restated here** — ADR-0005 states them and `stage_payload` enforces them itself, and
-it runs before any target is replaced, so a target outside its domain still
-withholds the whole set; it costs a render first, and that price is stated rather
-than hidden. This pre-flight is not a guarantee that the commit will succeed. An
-ERROR diagnostic withholds all of them before rendering begins, as already stated
-above. Past both gates, every payload is rendered before any target path is touched;
-`stage_all` then stages every rendered payload to a temporary beside its own target,
-and only once every one of those writes has succeeded does `commit_all` replace each
-target from its temporary — reading a target's own prior bytes first, whenever the
-target already exists, so they can be put back. A failure anywhere in rendering,
-staging, or committing — an emitter's own fault, the operating system refusing a
-write, or a later target's replace failing after an earlier one has already
-succeeded — unwinds whatever this invocation had staged or already replaced and
-leaves every target exactly as it was before the run, whether that is absent or
-holding a previous invocation's artefact. Restoring an already-replaced target that
-held bytes before the run uses the same `stage_payload`/`StagedWrite.commit` mechanism
-as every other write in the loop, never a write path of its own: neither command line
-states any write path `stompmodel.protocols` does not already publish. A target that
-did not exist before the run is restored by removing it, which is a deletion rather
-than a write and is the one filesystem call this bookkeeping makes directly.
+Repeatable `--emit FORMAT=PATH` arguments select any number of outputs, including
+none. A format may be requested more than once, so the number of artefacts is not
+limited by the number of registered formats. Payloads may be text or bytes; see
+[ADR-0005](0005-binary-emitter-payloads.md).
 
-This guarantee carries one named exclusion: restoring a target already replaced
-depends on the bytes read from it before its own commit still describing what a
-correct restoration should write back — true unless another process changes that
-same target between the read and the rollback that later reaches for it, or the
-restoring write itself fails for a reason the pre-flight could not have seen. Either
-leaves that one target holding this run's bytes rather than restored, and the
-failure that triggered the rollback is what propagates rather than a second one
-about the failed restoration. Closing that race needs a lock this command line does
-not take, which is a durability question this document leaves out alongside fsync
-and power loss.
-
-ADR-0005 gives `stage_payload`/`StagedWrite.commit` the matching guarantee for one path in
-isolation; the transaction above is the set-level rule built on top of it. It is no
-longer this command line's own: `stompmodel.protocols` publishes it as `stage_all` and
-`commit_all` — staging every payload or none, then committing every target with the
-prior-bytes bookkeeping and the rollback described above — beside the `target_key`/
-`check_target_set` pre-flight it publishes for the same reason. `stompdrill`'s command
-line is no longer the only caller composing a set of several artefact paths for one
-invocation: `stompcollider`'s composes one too, and both now call the published pair
-instead of restating the loops. What each command line keeps is the sentence it prints
-from the count each commit returned.
-
-Emitter registration is extensible: a format maps to an emitter without changing the
-processing contract. The CLI explicitly composes the ordered post-quantisation stages;
-each stage remains independent, and `Pipeline` applies them in the supplied order.
+Emitter registration maps formats to emitters without changing the processing
+contract. The CLI explicitly composes the ordered post-quantisation stages;
+`Pipeline` applies them in that order, and each stage remains independent.
+ADR-0001, Figure 1 shows the processing blocks and transferred document types.
 
 ```mermaid
 flowchart LR
@@ -150,56 +91,104 @@ flowchart LR
 
 Figure 1 — Processing blocks, aggregate boundaries, and transferred document types.
 
+### Validating output targets
+
+One invocation's artefacts form one transaction: all requested artefacts are written,
+or every target is left as it was, subject to the restoration exclusion below.
+An ERROR diagnostic withholds all artefacts before rendering begins.
+
+Before rendering, `check_target_set` validates the requested paths together:
+
+- No two targets may reach the same file.
+- Every existing target must be a regular file. The transaction reads its previous
+  bytes before replacement; reading a named pipe or character device could block.
+
+`target_key` compares each target's resolved path using canonical caseless matching
+in the sense of UAX #15 D145. Resolution catches aliases through symlinks or relative
+prefixes. Folding case and normalisation catches spellings that a filesystem could
+hold as one file. This folding applies on every host: the filesystem's behaviour
+cannot be established before a target exists, and `samefile` requires both targets
+to exist. The key is used only for collision checks; output goes to the caller's
+original path.
+
+The per-path write requirements belong to `stage_payload`, as described in
+ADR-0005. It checks them during staging, before any target is replaced. A target
+outside that function's domain therefore withholds the whole set, though the
+payloads have already been rendered. Passing target validation does not guarantee
+that a later commit will succeed.
+
+### Rendering, staging and committing
+
+Every payload is rendered before any target path is touched. `stage_all` then
+stages each payload to a temporary file beside its target. Only after every staging
+write succeeds does `commit_all` replace the targets, in request order.
+
+Before each commit, `commit_all` reads that target's previous bytes if it exists.
+If rendering, staging, a read or a commit fails, the transaction discards pending
+writes and restores targets already replaced. This covers emitter faults, refused
+writes and a later replacement failing after an earlier one succeeded.
+
+Restoration uses `stage_payload` and `StagedWrite.commit`, the same mechanism as
+the original write. A target absent before the run is restored by deleting it;
+that deletion is the only filesystem operation the rollback performs directly.
+Neither command line implements a separate write mechanism or transaction loop.
+Each keeps only the report sentence built from the byte count returned by a commit.
+
+The pending set includes the write currently being attempted. A write leaves that
+set only after its commit returns successfully. On failure, `StagedWrite.discard`
+removes all remaining staged writes, including the one whose read or commit failed.
+Tickets 29 and 35 enforce this cleanup invariant.
+
+### Restoration exclusion and durability limits
+
+Restoring an already replaced target relies on its saved bytes still being the
+correct contents to restore. This guarantee excludes another process changing that
+target between the read and rollback, and a restoring write failing for a reason
+that pre-flight validation could not detect. In those cases, restoration of that
+target is not guaranteed; it may retain this run's bytes. The original failure
+that triggered rollback propagates, rather than a second restoration failure.
+
+Closing the race would require a lock that these command lines do not take.
+Atomicity against other processes, fsync and durability against power loss are
+outside this decision's guarantee.
+
+ADR-0005 defines the matching guarantee for one path. `stompmodel.protocols`
+publishes the set-level functions here because both `stompdrill` and
+`stompcollider` compose several artefact paths in one invocation.
+
 ## Rationale
 
-The typed transition from `RawDrillData` to `DrillData` makes the processing boundary
-visible. Keeping shared calculations before the emitter fan-out gives every artifact
-one authority and makes disagreement structurally difficult. Keeping the pipeline
-stages independent preserves their single responsibilities while allowing their fixed
-composition to be read at the invocation boundary.
+The transition from `RawDrillData` to `DrillData` makes the quantisation boundary
+visible in the types. Computing shared facts before selecting emitters gives all
+outputs the same answers. Independent stages keep their own responsibilities,
+while the invocation's composition shows their order.
 
-Diagnostics and provenance belong to the canonical document because they describe the
-same decisions as the accepted geometry. Carrying them with that geometry lets console,
-drawing, and machine-readable output present the same findings without recomputation.
+Diagnostics and provenance describe the same decisions as the accepted geometry.
+Carrying them together lets console, drawing and machine-readable output present
+the same findings without repeating the calculations.
 
 ## Consequences
 
-Every emitter receives the same fully processed `DrillData`, so artifact differences are
-limited to their intended presentation. A new emitter consumes the existing canonical
-contract and cannot require a parallel processing path.
+Every emitter receives the same fully processed `DrillData`. Differences between
+artefacts are limited to presentation. A new emitter consumes this contract and
+must not introduce a parallel processing path. Changes to shared facts belong
+before emission and must update the canonical document.
 
-Processing changes must occur before emission and update the canonical document. The
-extra separation between quantisation, independent pipeline stages, and emitters is a
-deliberate cost: callers and maintainers must preserve the typed flow and must not move
-domain decisions into format-specific code.
+The separation between quantisation, stages and emitters requires callers and
+maintainers to preserve the typed flow. Domain decisions must stay out of
+format-specific code.
 
-Staging every artefact before committing any of them costs one extra temporary file per
-target, briefly present beside it until the whole set commits. That is the deliberate
-price of never leaving a previous invocation's artefact replaced by only part of this
-one's. The set-level rule is composed from `stompmodel`'s per-path mechanism rather than
-restating it: `stage_all` calls `stage_payload` for every requested target, `commit_all`
-calls `StagedWrite.commit` for each in turn, and both call `StagedWrite.discard` for
-whatever they abandon; reading a target's prior bytes before its own commit, and
-restoring them through that same `stage_payload`/`StagedWrite.commit` pair on a later
-failure, is bookkeeping around that mechanism, never a second write path beside it.
-Neither command line states a temporary-file mechanism, or a set-level loop, of its
-own. The set commits in the order its targets
-were requested; when one target's own read or commit fails, or an earlier target's
-commit fails, every target already committed in the same loop is restored to what it
-held before this run, and every other staged write — the one whose own read or commit
-just failed, and every one not yet reached — is discarded through `StagedWrite.discard`,
-never left as a temporary. This is a stated invariant, not an index into the target
-list: the loop tracks the set of staged writes not yet committed, which includes the
-one currently being attempted, and a write leaves that set only once its own commit has
-returned — both stated above and enforced by tickets 29 and 35.
+Staging costs one temporary file per target, present briefly beside it until the
+set commits or is abandoned. `stage_all` uses `stage_payload`; `commit_all` uses
+`StagedWrite.commit`; both use `StagedWrite.discard` for abandoned writes. Saving
+and restoring prior bytes adds bookkeeping around that shared mechanism.
 
-Whatever this invocation leaves behind is one of two states per target and nothing
-else: this run's artefact, or exactly the bytes that target held before the run. **No
-temporary this invocation created survives it, on any path — committed, rolled back, or
-failed.** This is a claim about a *path*, not about a file: `StagedWrite.commit` replaces
-the name, so a target that was a symlink or a named pipe is afterwards a regular file
-(see ADR-0005). The set is not atomic against another process and it is not durable
-against power loss; those, and the one named exclusion above — unchanged, not upgraded
-— are outside the guarantee. The opening claim above, that one invocation's artefacts
-are one transaction, now holds of the code as shipped exactly to that extent, and no
-further.
+Subject to the restoration exclusion, each target ends with either this run's
+complete artefact or exactly its previous bytes. No temporary created by the
+invocation survives a commit, rollback or failure.
+
+This is a guarantee about paths. `StagedWrite.commit` replaces a name: at the
+per-path level, a symlink or named pipe becomes a regular file, as ADR-0005
+explains. The command lines apply the stricter regular-file pre-flight above.
+The transaction does not add concurrency or durability guarantees beyond those
+stated here.

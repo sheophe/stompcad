@@ -61,6 +61,7 @@ mutants.sqlite
 # docs/GLOSSARY.md carry the model and the vocabulary. Published code cites
 # those and never one of these.
 docs/BACKLOG.md
+docs/STYLE.md
 docs/specs/
 docs/plans/
 

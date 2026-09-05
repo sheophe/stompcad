@@ -1,261 +1,198 @@
 # Glossary
 
-The vocabulary of guitar-pedal enclosure fabrication as this workspace uses it:
-reading drill geometry from Illustrator artwork, cutting it into a real
-enclosure model, and seating the boards that mount through it.
+These terms describe reading drill geometry from Illustrator artwork, cutting
+holes into an enclosure model and checking how boards fit inside it.
 
-## Scope
-
-**Belongs here.** Terms whose meaning is specific to this domain, or general
-words this workspace has narrowed to one meaning. A term earns an entry the
-moment two people could reasonably read it two ways.
-
-**Does not belong here.** General programming vocabulary, however heavily used.
-Implementation detail of any kind — this is a glossary, not a specification.
-The *rules* that govern these terms live in `CLAUDE.md`; the *reasons* they were
-chosen live in `docs/adr/`. Neither is restated here.
-
-**Authority.** Where this file and an ADR disagree, the ADR wins and this file
-is wrong. Fix it rather than working around it.
-
-## Entry format
-
-```
-**Term**:
-What it is, in one or two sentences. Never what it does.
-_Avoid_: rejected synonyms — words that mean this, which we do not use
-_See also_: related terms, where the boundary between them matters
-```
-
-Entries are alphabetical within each section. A rejected synonym is not merely
-unfashionable: using one in code, prose, a commit message or a test name is a
-defect, because it reintroduces the ambiguity the entry exists to remove.
-
-## Packages
+## Packages and tools
 
 **stompcad**:
-The user-facing command-line tool. Drives `stompdrill` and `stompcollider` as
-libraries, manages the case model cache, and turns a diagnostic into an
-interactive question.
-_Avoid_: the CLI, the frontend, the driver
+The name of this project and its proposed command-line orchestrator. The design
+calls for an orchestrator that uses `stompdrill` and `stompcollider` as libraries,
+manages the case model cache and turns diagnostics into interactive questions.
+No orchestration command is implemented in this workspace. The available
+commands are `stompdrill` and `stompcollider`; see
+[ADR-0008](adr/0008-workspace-and-shared-geometry-core.md) for the orchestration
+design.
 
 **stompcollider**:
-The docking and collision engine. Seats boards inside a drilled case and
-reports where they clash. Domain-specific about how a board meets a panel;
-carries no component identity.
-_Avoid_: the solver, the physics engine
+The tool that docks boards inside a drilled case and reports clashes. Its docking
+rules describe how board geometry meets a panel, without assigning meanings to
+component types such as potentiometers or switches.
 
 **stompdrill**:
-Artwork in, fabrication artefacts out. Owns every decision about where a hole
-goes, though not the type the answer is carried in.
-_Avoid_: the parser, the extractor
+The tool that reads artwork and produces fabrication artefacts. It decides hole
+positions and diameters; the shared `DrillData` type carries those decisions.
 
 **stompgeom**:
-The kernel layer shared by the others — the STEP reader, the deterministic writer,
-and the geometry operations more than one package needs. Everything here needs
-OpenCASCADE; a value that does not lives in `stompmodel`.
-_Avoid_: core, common, utils
+The shared geometry package, including STEP reading and deterministic writing.
+Its operations use the OpenCASCADE kernel. Values that need no kernel belong in
+`stompmodel`.
 
 **stompmodel**:
-The values every package exchanges — lengths, coordinate frames, the drill data
-and its JSON, diagnostics, and the pipeline contracts. Pure Python; no kernel, no
-parser.
-_Avoid_: types, schema, dto
+The shared values and contracts: lengths, coordinate frames, drill data and its
+JSON representation, diagnostics and pipeline contracts. It is a pure Python
+package with no geometry kernel or artwork parser.
 
 ## Geometry
 
 **Canonicalisation**:
-Converting measured floats to integer nanometres, changing representation and
-nothing else.
-_Avoid_: normalisation, conversion
-_See also_: Quantisation, which also snaps to an answer set. Where there is no
-answer set there is no quantisation, only this.
+Converting measured floating-point lengths to integer nanometres. This changes
+the representation without selecting a drill size, grid position or other domain
+value. Quantisation also selects a value from an answer set.
 
 **Coordinate frame**:
-An origin and a right-handed basis. Carries no meaning about what it registers —
-that is the point. `CoordinateFrame` in `stompmodel`.
-_Avoid_: frame (this repo has used the word for three unrelated things), axes,
-basis
-_See also_: Face frame, which adds the meaning.
+An origin and a right-handed basis, represented by `CoordinateFrame` in
+`stompmodel`. The frame itself does not say what it registers. A face frame adds
+that meaning for a drilled face.
 
 ## Panel and drilling
 
 **Answer set**:
-A finite set of permitted values a measurement is snapped to — a drill
-standard, a grid pitch, or the enclosure catalogue.
-_Avoid_: lookup table, allowed values
-_See also_: Quantisation. The sets are not interchangeable with one another.
+A finite set of permitted values to which a measurement can snap, such as a
+drill standard, the positions on a declared grid or the enclosure catalogue.
+Each set answers a different question: a grid selects positions, while a drill
+standard selects diameters. See Quantisation.
 
 **Containment**:
-Whether a hole's whole extent lies inside a boundary. Two boundaries answer it:
-the reference outline, which warns, and the drilled face, which errors.
-_Avoid_: bounds check, inside test
-_See also_: Drilled face, Reference outline — the two boundaries.
+Whether the whole extent of a hole lies inside a boundary. Leaving the reference
+outline produces a warning; leaving the drilled face produces an error. The
+second check needs a case model because the artwork outline does not describe
+the drilled face.
 
 **Drill document**:
-The serialised form of one drill run: the holes, the frame they were cut in, and
-the enclosure they were cut for. What passes from `stompdrill` to `stompcollider`.
-_Avoid_: drill data (that is the type), hole pattern, drill file
+The serialised record of a drill run, including its holes, cutting frame and
+registered enclosure. It passes from `stompdrill` to `stompcollider`. `DrillData`
+is the in-memory value; the drill document is its JSON representation.
 
 **Drill layer**:
-The Illustrator layer whose circles are holes to be drilled.
-_Avoid_: hole layer, cut layer
+The Illustrator layer whose circles mark the holes to drill.
 
 **Quantisation**:
-Replacing measured floats with members of an answer set, producing canonical
-integer-nanometre data.
-_Avoid_: rounding
-_See also_: Answer set. Snapping is one step within quantisation, not a synonym
-for it; canonicalisation is what remains when no answer set exists.
+Selecting values from domain answer sets using measured floating-point lengths,
+then producing canonical integer-nanometre data. Snapping is the selection step;
+canonicalisation converts the representation. Where no answer set applies, only
+canonicalisation is needed.
 
 **Reference outline**:
-The largest non-circular path on the reference layer, whose centre is the
-origin of the canonical frame.
-_Avoid_: bounding box, artboard, MediaBox
+The largest non-circular path on the reference layer. Its centre is the origin
+of the canonical coordinate frame. The artboard and PDF MediaBox do not define
+this outline.
 
 **Tool block**:
-The contiguous run of holes sharing one drill diameter. Each tool occupies
-exactly one.
-_Avoid_: tool group, diameter batch
+A contiguous run of holes with the same drill diameter. Each tool has exactly
+one block in the drill sequence.
 
 ## Enclosure
 
 **Boss**:
-A thickened corner column carrying a screw. Confined to its corner; the walls
-elsewhere are thin.
-_Avoid_: pillar, post
-_See also_: a standoff is a separate physical part, not a boss.
+A thickened corner column that carries a screw. The enclosure walls away from
+these corners are thinner. A standoff is a separate physical part.
 
 **Case model**:
-A STEP model of a real enclosure. Never synthesised: one is supplied undrilled,
-and `stompdrill` emits the drilled one that `stompcollider` docks into.
-_Avoid_: enclosure model, case file, box model
+A STEP model of a real enclosure. You supply an undrilled model to `stompdrill`,
+which cuts the holes and emits the drilled model used by `stompcollider`. The
+tools do not synthesise an enclosure from catalogue dimensions.
 
 **Case registration**:
-The supplied case model a drill document's holes were decided against: the
-resolved part, the drilled face, the model file's name, and the face frame,
-carried as one fact rather than four. `CaseRegistration` in `stompmodel`.
-_Avoid_: case info, case metadata
-_See also_: Case model, which this names; Face frame, which it carries.
+The record of the case model used to decide a drill document's holes. It combines
+the resolved part, drilled face, model filename and face frame in one value,
+`CaseRegistration` in `stompmodel`.
 
 **Drilled face**:
-The face of the case that holes are cut through. Told to a tool, never guessed
-when a caller already knows it.
-_Avoid_: panel face, front face, working face
+The face of the enclosure through which the holes are cut. A caller that knows
+which face is being drilled supplies it explicitly.
 
 **Face frame**:
-The drilled face's registration: a coordinate frame whose third axis is that
-face's outward normal. `FaceFrame` in `stompmodel`.
-_Avoid_: frame, drill frame, case frame
-_See also_: Coordinate frame, Drilled face.
+The coordinate frame registered to the drilled face, with its third axis
+pointing along that face's outward normal. It is represented by `FaceFrame` in
+`stompmodel`.
 
 **Footprint**:
-An enclosure's published two-dimensional outline. Identifies a shape, not
-necessarily a single part number.
-_Avoid_: outline, size
+An enclosure's published two-dimensional outline. Several part numbers can share
+one footprint, so a matching outline does not always identify a single part.
 
 **Lettering**:
-Cast text on the enclosure surface. Never an obstruction — pedals drill
-straight through it.
-_Avoid_: embossing, markings
+Cast text on an enclosure surface. Clearance checks allow drilling through it
+and do not classify it as an obstruction.
 
 **Play area**:
 The flat, drillable region of the drilled face, inside the draft-angle taper
 and clear of the corner bosses.
-_Avoid_: usable area, drillable region
-_See also_: Boss, Drilled face.
 
 ## Boards and docking
 
 **Board**:
-One substrate and the components mounted to it, treated as a single rigid body.
-Several may arrive in one file, and each docks independently.
-_Avoid_: PCB, card, module
-_See also_: Substrate, which is the bare body alone.
+One substrate and its mounted components, treated as a single rigid body.
+Several boards can arrive in one model file, and each has its own docking
+placement. The substrate is the bare body alone.
 
 **Carrier plane**:
 The plane of a board's substrate. A placement keeps it parallel to the drilled
 face.
-_Avoid_: board plane, PCB surface
-_See also_: Substrate, whose plane this is; Drilled face.
 
 **Clash**:
-Two solids occupying the same space in a completed placement. A finding to be
-reported and shown, never a reason to compromise a placement.
-_Avoid_: interference, overlap
-_See also_: the engine *collides*; what it finds is a clash.
+Two solids occupying the same space in a completed placement. Clashes are
+reported and shown so you can adjust the design. The tool does not deform parts
+or shift a seated board to remove them.
 
 **Correspondence**:
-One protruding element paired with one hole. Match's primary output, and what
-lets the report name a part rather than a proximity.
-_Avoid_: pairing, mapping, assignment
-_See also_: Placement, which a set of correspondences implies.
+One protruding element paired with one hole. Match produces these pairs, which
+define candidate placements and let reports identify the part and hole involved.
 
 **Docking**:
-Determining where each board sits inside a drilled case. Two phases, Match then
-Seat.
-_Avoid_: mounting, fitting, assembly, placement solving
-_See also_: Placement is the result; docking is the act.
+Determining where each board sits inside a drilled case. Match recognises the
+hole pattern and Seat determines insertion depth; clash checks then report
+interference at the resulting placements.
 
 **Harness**:
-Soldered wire or ribbon joining two boards. Excluded from the model entirely:
-nothing represents a flexible part, and boards it joins are docked
-independently.
-_Avoid_: loom, cabling, flying leads
+Soldered wire or ribbon joining boards. Flexible parts are excluded from the
+model, so a harness does not constrain the docking of the boards it joins.
 
 **Manifest**:
-The record beside a project's artwork of how that pedal is built, making a run
-reproducible and a re-run quiet.
-_Avoid_: config, project file, settings
+The proposed record beside a project's artwork describing how the pedal is
+built. It is intended to make runs reproducible and retain choices for later
+runs. The current tools take their settings through command-line options or
+library calls.
 
 **Match**:
-The first docking phase, and a question: can this board dock into this case at
-all, judging by the hole pattern? Someone holding two parts up and deciding
-whether they are the same pattern.
-_Avoid_: stage A, alignment, registration
-_See also_: Seat. Match is deliberately more permissive than Seat — a board that
-nearly fits must still be recognised, so that Seat can report by how much it
-misses.
+The first docking phase, which checks whether a board's protruding elements
+match the case's hole pattern. It allows near fits so Seat can report how far a
+recognised board falls short. Recognition therefore uses a more permissive test
+than seating.
 
 **Panel-reference group**:
-The components whose reference designators mark them as user-facing hardware.
-Declares which face of a board points at the panel. Enumerated per project;
-`stompcad` owns the `RV*,SW*` default, and `stompcollider` holds none.
-_Avoid_: panel parts, through-hole group, controls
-_See also_: Protruding element, which is geometric; this is declared.
+The components whose reference designators identify them as hardware facing the
+panel. This declaration selects which side of the board faces the drilled
+face; protruding elements are then recognised geometrically. The current
+`stompcollider` command requires `--panel-reference` and supplies no default.
+The proposed design places the pedal-specific `RV*,SW*` default in `stompcad`.
 
 **Placement**:
-One rigid transform seating a board in the case: which face it presents to the
-panel, then x, y, z and rotation about the carrier plane's normal. A docking run
-may yield several.
-_Avoid_: position, pose, solution
-_See also_: Docking.
+One rigid transform seating a board in the case: which face points at the panel,
+its x, y and z coordinates, and its rotation about the carrier plane's normal.
+A docking run can produce several candidate placements.
 
 **Profile**:
-A protruding element's radius against depth from its tip. Not a diameter: the
-depth at which the profile first exceeds a hole's radius is how far it inserts.
-_Avoid_: diameter, shaft size, envelope
-_See also_: Protruding element.
+A protruding element's radius at each depth from its tip. The first depth where
+the profile exceeds a hole's radius predicts insertion depth from the hole
+geometry. Actual seating is determined by contact with the enclosure along the
+insertion path; the profile prediction is also the reference for reporting
+insertion shortfall.
 
 **Protruding element**:
-A solid standing proud of the carrier plane — a potentiometer, jack,
-footswitch, LED. Recognised by geometry, never by component identity.
-_Avoid_: component, part, through-panel hardware
-_See also_: Panel-reference group, which is declared where this is geometric;
-Profile, which is what a protruding element measures as.
+A solid extending beyond the carrier plane, such as a potentiometer, jack,
+footswitch or LED. Recognition uses geometry, without needing to know the
+component type. Its profile describes radius against depth; membership of the
+panel-reference group is a separate declaration.
 
 **Seat**:
-The second docking phase, and a question: how exactly do these boards sit, and
-does anything collide? Someone assembling the pedal, already expecting each
-individual board to fit.
-_Avoid_: stage B, settling, placement solving
-_See also_: Match. Because Seat runs only after a pattern matched, its value is
-mostly in everything a board can foul once it is in the case, not single-board
-fit.
+The second docking phase, which finds how far a matched board can enter the
+case. The board stops at the first enclosure contact along the insertion path.
+If the enclosure never touches it, the hole geometry determines the seat.
+Subsequent clash checks report interference with the case, lid and other boards.
 
 **Substrate**:
-A board's bare body, the solid its components are mounted to. Recognised by
-carrying no component identity, never by name.
-_Avoid_: PCB, panel
-_See also_: Board, which is this plus everything mounted to it; Carrier plane,
-which is this one's plane.
+A board's bare body, to which components are mounted. The reader selects solids
+without component identity and checks that they have slab geometry. It does not
+look for a particular board name. A board includes both this substrate and its
+components.

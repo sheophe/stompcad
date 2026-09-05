@@ -2,277 +2,259 @@
 
 **Status:** Accepted, amended by
 [ADR-0009](0009-shared-model-package-and-dependency-order.md), which adds a fifth
-package, `stompmodel`, and fixes the workspace's dependency order. The reasoning here
-for one repository and for extracting before the new tools is unchanged.
+package, `stompmodel`, and fixes the dependency order. The decisions to keep one
+repository and extract shared primitives before building the new tools remain.
 
-Two of the three primitives this ADR named as certainly shared have since settled in
-`stompmodel`: the length newtypes, and the frame values that replaced `Frame`'s rigid
-transform. That settles `stompdrill`'s own spatial need — canonical `(x, y)` on a drilled
-face — not the workspace's: `stompmodel` also publishes `RigidTransform` itself and the
-frame-to-frame composition that builds one (`CoordinateFrame.translated_nm`,
-`rotated_about_w`, `placement_onto`), and `stompgeom` publishes the kernel realisation
-that applies a composed transform to a shape (`shapes.placed`). What `stompgeom` holds is
-therefore the kernel layer — the STEP reader, the deterministic writer, and the
-operations that need OpenCASCADE — so read "shared geometry core" below as that layer
-rather than as one package holding every shared primitive.
+Of the three primitives originally assigned to `stompgeom`, lengths and frame
+values now belong to `stompmodel`. The latter replace `Frame`'s rigid transform
+for `stompdrill`'s canonical `(x, y)` coordinates on a drilled face.
+`stompmodel` also publishes `RigidTransform` and the frame operations used to
+compose one: `CoordinateFrame.translated_nm`, `rotated_about_w` and
+`placement_onto`. `stompgeom` applies a composed transform to a kernel shape
+through `shapes.placed`. The shared geometry core described below is now the
+kernel layer: STEP reading, deterministic writing and OpenCASCADE operations.
 
 ## Context
 
 `stompdrill` reads drill geometry from Illustrator artwork and emits fabrication
-artefacts. Two further tools are planned. `stompcollider` seats PCB models inside a
-drilled case and reports where they clash. `stompcad` is the user-facing CLI that
-drives both, manages the case-model cache, and turns a diagnostic into an
-interactive question.
+artefacts. At the time of this decision, two further tools were planned:
+`stompcollider`, to seat PCB models inside a drilled case and report clashes;
+and `stompcad`, a user-facing CLI to run both tools, manage the case-model cache
+and turn diagnostics into interactive questions.
 
-They share primitives. `stompcollider` needs the branded length newtypes of
-ADR-0004 exactly as `stompdrill` defines them, needs a rigid transform composed from two
-frames — placing one body against another, not `stompdrill`'s single canonical origin —
-and needs the level-based planar-face extraction that `cad/case.py` uses to find a
-drilled face — a PCB's carrier plane is the same problem with a different solid. Without
-a decision, each tool grows its own `Nanometre` and the three drift.
+The tools need shared primitives. `stompcollider` needs ADR-0004's branded length
+newtypes, a rigid transform composed from two frames to place one body against
+another, and the level-based planar-face extraction in `cad/case.py`. Finding a
+PCB's carrier plane uses the same geometric operation as finding a drilled face,
+although the solids differ. Separate implementations would allow definitions
+such as `Nanometre` to drift.
 
-The repository is currently the `stompdrill` package and nothing else, and is named
-after it.
-
-Three structures were available: three separate repositories; one repository
-holding every package; or an umbrella repository consuming the others.
+The repository contained only `stompdrill` and was named after it. The options
+were separate repositories, one repository holding every package, or an umbrella
+repository consuming the others.
 
 ## Decision
 
-This repository becomes a workspace and is renamed `stompcad`, after the
-user-facing tool. It holds four packages:
+Rename this repository `stompcad`, after the user-facing tool, and make it a
+workspace. The original four-package division was:
 
-- `stompgeom` — lengths, rigid transforms, and the geometry shared by the rest.
-- `stompdrill` — unchanged in scope: artwork in, fabrication artefacts out.
-- `stompcollider` — drilled case and PCB models in, placements and clashes out.
-- `stompcad` — the CLI that composes them.
+- `stompgeom`: lengths, rigid transforms and shared geometry.
+- `stompdrill`: artwork in, fabrication artefacts out.
+- `stompcollider`: drilled case and PCB models in, placements and clashes out.
+- `stompcad`: the CLI that composes them.
 
-Each package must install and pass its own tests **alone**. `stompdrill` stays
+ADR-0009 updates that division as noted in the status above.
+
+Each package must install and pass its own tests alone. `stompdrill` must remain
 usable without a collision engine, and `stompcollider` without an Illustrator
-parser. This extends to a structural rule a member owns, not only to its
-distribution's runtime dependencies: the gate enforcing that rule is run by
-the *owning* member's own documented command, never by a consumer's, so a
-breach of the rule inside the owner's own source fails the owner's own suite
-without any other member's tests having to run at all.
+parser. Each structural rule must also be enforced by its owning package's
+suite, run through that package's documented command. A breach in the owner's
+source must fail that suite without requiring a consumer's tests.
 
-`stompcad` consumes `stompdrill` and `stompcollider` as **libraries**, not subprocesses.
+`stompcad` consumes `stompdrill` and `stompcollider` as libraries.
 
-`stompgeom` is extracted **first**, before either new tool is written, starting
-with the length newtypes and the primitives whose sharing is already certain.
-It grows as real second consumers appear; its interface is not designed in
-advance.
+Extract `stompgeom` before writing either new tool, starting with the length
+newtypes and primitives already known to be shared. Extend its interface as
+real second consumers appear.
 
 ## Rationale
 
-**Why not three repositories.** The seams between these tools will move
-constantly in early life. Three repositories make every seam change a
-cross-repository version negotiation, paid on every commit, by one maintainer,
-for isolation nobody is asking for. One repository keeps those changes atomic.
+### Keep changes to package boundaries in one repository
 
-**Why not let `stompcollider` depend on `stompdrill`.** It is the cheapest way to
-share the primitives and the hardest to defend afterwards: a pure geometry
-engine would acquire a dependency on a PDF parser, and the dependency graph
-would stop describing anything real. The primitives are not `stompdrill`'s by
-right — it merely wrote them first.
+The boundaries between these tools will move frequently during early
+development. Separate repositories would require version coordination for each
+change, without providing isolation the sole maintainer needs. One repository
+lets those changes remain atomic.
 
-**Why extract upfront rather than at the second consumer.** The usual argument
-against early abstraction is that the second use case is unknown, so the seam is
-guessed. That argument is weaker here in one specific way: `stompdrill` has a large
-test suite, so the extraction is *verifiable* now — a move that breaks something
-says so immediately. Deferring the extraction does not make it safer; it makes
-it larger, and it invites `stompcollider` to define its own `Nanometre` in the
-meantime. Extraction is bounded to what is certainly shared, so the interface is
-still discovered rather than invented.
+Making `stompcollider` depend on `stompdrill` would share the primitives cheaply,
+but would also give a geometry engine a PDF-parser dependency. Extracting the
+primitives gives the dependency graph a clearer meaning.
 
-**Why "installs alone" is the governing test.** A boundary asserted in prose
-erodes. A boundary that must survive `pip install stompdrill` in a clean
-environment does not: an unjustified dependency stops being a design opinion and
-becomes a failing install. ADR-0007's optional `stompdrill[step]` extra already
-demonstrates the discipline, which is what let a STEP emitter arrive later
-without the base tool growing a geometry kernel. That extra is now retired — see
-ADR-0007's status — and the discipline it demonstrated is carried by the package
-boundary instead: the kernel is `stompgeom`'s declared dependency, and a member that
-must not take one does not depend on `stompgeom`.
+### Extract the known shared primitives first
+
+Early abstraction usually risks designing for an unknown second use case.
+Here, the shared primitives are already identifiable and `stompdrill` has a
+large suite that can verify their extraction. Waiting would enlarge the move
+and give `stompcollider` time to define duplicate types. Limiting extraction to
+known shared needs keeps the interface grounded in actual use.
+
+### Verify package independence by installing and testing it
+
+A clean `pip install stompdrill` provides a practical check of the package
+boundary. The original `stompdrill[step]` extra in ADR-0007 allowed the STEP
+emitter to arrive without adding a kernel to the base install. That extra is
+now retired, but dependencies remain explicit at the package boundary: the
+kernel is declared by `stompgeom`, and a member that must avoid the kernel must
+not depend on `stompgeom`.
 
 ## Consequences
 
-The repository is renamed, and the directory no longer shares a name with the
-package it contains.
+### Repository and documentation layout
 
-Documentation stays single-rooted. One sectioned `docs/GLOSSARY.md` serves every
-package, rather than a `CONTEXT-MAP.md` pointing at one glossary per context:
-these packages share most of their vocabulary, and splitting it would duplicate
-the shared half and invite the copies to drift. Per-package ADR directories
-become possible alongside the system-wide one, and `docs/adr/` keeps its
-existing numbering for decisions that span the workspace.
+The repository's name no longer matches its original package.
 
-`stompdrill` gains a dependency on `stompgeom`, and its own modules lose the
-primitives that move. Every artefact `stompdrill` emits must be byte-identical
-across the move; its suite is the instrument that proves it, and the extraction
-is not complete until it does.
+Documentation stays under one root. A sectioned `docs/GLOSSARY.md` serves every
+package because most vocabulary is shared. A `CONTEXT-MAP.md` pointing to
+separate glossaries would duplicate those definitions. Per-package ADR
+directories may be added; `docs/adr/` keeps its numbering for decisions that
+span the workspace.
 
-On the reading side, `stompgeom` now owns a document it can **read and enumerate
-faithfully**: `stompgeom.step` publishes the one rule for what XCAF recorded as a
-label's name, distinguishing "nobody named this" from "the kernel synthesised an
-indirection" — OCC's own placeholder for an unnamed component occurrence, which
-names nothing and reads back as empty like any other unnamed label. That rule has
-exactly one implementation; a caller reading a label's name, in `stompdrill` or a
-future consumer, goes through it rather than keeping a private copy that could
-drift from the reader's own.
+`stompdrill` gains a dependency on `stompgeom` and loses the primitives moved
+there. Every emitted artefact must remain byte-identical across the extraction.
+The move is complete only when its suite verifies that requirement.
 
-The reading side must also be **closed under its own round trip**: every value
-this layer writes into a document or a file is read back from the field it was
-actually written to, never from a second producer's labelling convention for
-that field, and a reader added for a field the writer sets arrives with the
-round trip that proves it. The timestamp was the counter-example that forced
-this paragraph: `stompgeom.writer.render_step` sets the timestamp into
-`FILE_NAME`'s own field, but `stompgeom.step.source_timestamp` matched only
-ST-Developer's `/* time_stamp */` comment annotation — a different producer's
-label for that field, which this workspace's own writer never emits — so a
-file this layer had just written read its own timestamp back as the epoch
-sentinel. The fix is one rule reading one field, positionally, tolerant of a
-conforming file's comment annotations and of the field's own quoted-quote
-escaping; the comment-only pattern is deleted rather than kept as a second,
-narrower reader for the same field, because two readers for one written field
-is this defect's exact shape.
+### Read names and fields consistently
 
-The document's **traversal** is owned on the same terms as its names:
-`stompgeom.step` publishes the one walk from a document to its leaf labels,
-`GetFreeShapes` prologue included, and a caller that must act on a leaf — read
-it, colour it, cut it — goes through that walk rather than re-deriving it. A
-consumer that can only reach `stompgeom`'s own enumeration through a private
-name is evidence that a rule is owned in the wrong place, not that the
-consumer was impolite.
+`stompgeom.step` owns the rule for reading a label's XCAF name. It distinguishes
+an unnamed label from OCC's placeholder for an unnamed component occurrence.
+The placeholder represents an indirection and provides no usable name, so it
+reads back as empty too. All consumers, including `stompdrill`, must use this
+implementation.
 
-The traversal's own labels were bare kernel handles too, alongside
-`StepSolid.shape` and `StepDocument.document` — **seven published names, and
-not one debt.** A shape is independently reference-counted and measures
-identically whether or not the document that produced it is still held; a
-document is the anchor and cannot dangle by being held. Only a label points
-into a document's own label tree, and only a label dangles — **silently**: a
-label drawn from a released document still answers not-null, and reports the
-document's own root entry and a null shape rather than faulting. Wrapping the
-shape or the document would buy nothing and would weaken the honest sentence
-that they owe nothing to a caller's discipline.
+The reader must also round-trip every value the layer writes, reading the field
+where the writer placed it. Each new reader for a written field must arrive
+with a round-trip test.
 
-`stompgeom.step` now publishes no bare label: one reaches a caller only
-inside `StepLabel`, which holds the `TDocStd_Document` it was drawn from —
-that object specifically, since neither the document's own `ShapeTool` nor
-its own root label (`document.Main()`) keeps a label valid — and which
-answers its own name and its own entry string, computed on access rather
-than cached. Two labels drawn for one node by separate kernel calls compare
-unequal by `==` (kernel object identity, not `IsEqual`) even though their
-entry strings agree and `IsEqual` answers true; this is why "the same label"
-is tested and carried as an entry string, not as a set of owned labels, in
-the one place a caller still needs it — `stompgeom.writer.render_step`'s
-`replaced_labels` parameter, unchanged in shape by this ticket.
+The timestamp exposed the need for this rule. `stompgeom.writer.render_step`
+writes the timestamp into `FILE_NAME`'s field, but
+`stompgeom.step.source_timestamp` originally matched ST-Developer's
+`/* time_stamp */` comment annotation. This workspace's writer emits no such
+comment, so its own output read back with the epoch sentinel. The replacement
+reads the field positionally, tolerating conforming comment annotations and
+quoted-quote escaping. It replaces the comment-only pattern completely, keeping
+one reader for the field.
 
-The other six kernel-typed names keep their bare kernel handle, now spelled
-with its real OCP type under a `TYPE_CHECKING` guard for readability.
-**This spelling documents intent and checks nothing:** `cadquery-ocp` ships
-no `py.typed` marker and both this workspace's mypy configurations already
-set `ignore_missing_imports` for `OCP.*`, so removing that override would
-make the gate red at the import for zero additional checking, and nobody
-should "fix" that later expecting it to buy safety.
+### Own leaf traversal and label lifetimes
 
-None of this is a claim that `stompgeom` owns kernel lifetimes in general —
-it owns a label's, by design — or that no `Any` crosses this boundary (the
-raw handle field, `StepSolid.shape` and `bounding_box_mm`'s parameter stay
-`Any` to mypy, honestly), or that the kernel handles generally are now
-type-checked (exactly one value is), or that a caller can no longer
-construct a dangling reference (one who keeps the raw handle and drops
-`StepLabel` still can). The true claim is narrower: **the *published
-surface* offers no route that hands out a label already dangling.**
-`StepLabel.label` stays a public, raw field for the same reason the ADR's
-build verb stays deferred — the cutting path needs four XCAF verbs this
-package does not yet wrap, and a private field plus a reach-in would be the
-same convention, unnamed, plus a lie about encapsulation.
+`stompgeom.step` publishes the walk from a document to its leaf labels,
+including the `GetFreeShapes` prologue. A consumer reading, colouring or cutting
+a leaf must use that walk. If the needed traversal is available only through a
+private name, its public ownership needs correcting.
 
-**A rule a member owns is enforced by that member's own tests, not by
-whichever member's suite happened to notice the duplication first.** Five
-structural gates enforce "this rule is stated once" — the whole-nanometre
-guard, the case-face vocabulary, this section's own XCAF leaf descent,
-ADR-0006's raw-measurement tie-break, and ADR-0005's atomic-write mechanism
-— and each now lives in the suite of the package that owns the rule it
-polices: four in `stompmodel`'s own suite, one (the leaf descent) in
-`stompgeom`'s. A gate may read a sibling's source as text to reach a rule's
-every possible violator; it may never *import* a package above its own,
-which is why a gate homed in `stompmodel` resolves `stompgeom` and
-`stompdrill` by reading their files rather than importing them. Every gate
-derives the packages it scans from one shared statement,
-`tools.workspace_membership.member_package_dirs` — a directory under
-`packages/` shipping its own `src` — so a package this workspace gains later
-is scanned by every existing gate with no edit to any of them.
+The published surface originally had seven names exposing bare kernel handles,
+including traversal labels, `StepSolid.shape` and `StepDocument.document`.
+Their lifetime requirements differ. Shapes are independently reference-counted
+and measure identically after their source document is released. A held
+document remains valid. A label, however, points into the document's label tree
+and can dangle silently: it still reports not-null, but returns the document's
+root entry and a null shape.
 
-**The claim above binds a gate's reach control too, not only its scan.**
-Deriving the scan from `member_package_dirs` is not enough on its own: each
-gate's reach control — the assertion that the scan reached something it
-could have missed, rather than nothing — must itself avoid naming the
-member set, or the scan is variable while the instrument that proves it
-reached anything is not. Each gate's reach control instead checks two
-properties: every member the scan discovered really ships the `src` it
-claims to, and the scan's own roots cover every `src` (and, where the
-gate's reach includes it, `tests`) directory an independent walk of
-`packages/` finds — `tools.workspace_membership.member_area_roots`, which
-never calls `member_package_dirs` and so can disagree with it if that
-function's own discovery narrows. The ownership-gate convention test
-(`packages/stompdrill/tests/test_ownership_gate_convention.py`) carries the
-same discipline one level up: it finds the gate family itself by the
-reach-control marker every gate defines, not by a literal list of gate
-files, and runs a matched pair of probe packages — one breaching every
-rule the family polices, one breaching none — so its own coverage of "every
-gate" cannot silently narrow either. A package or a gate this workspace
-gains later needs no edit to any existing gate or to this convention test.
-`stompgeom` now owns a document it can **render to bytes**:
-`stompgeom.writer.render_step` is the one serialising entry point, returning the
-finished STEP payload rather than a path — the scratch file its OCC-backed writer needs
-along the way is an implementation detail forced by that kernel's own path-only API, not
-part of this function's contract. Its determinism guarantee is scoped, not universal: it
-is byte-identical across processes for a document this workspace assembles, and it
-**refuses** a document carrying an unparsed presentation entity in its colour region, or
-one whose colour is a STEP pre-defined colour rather than an inline `COLOUR_RGB` —
-neither of which anything in this workspace produces. The writer canonicalises colour
-ownership among the chains it does parse, which is what makes a repeated colour safe.
+Labels therefore reach callers only inside `StepLabel`, which holds the
+`TDocStd_Document` they came from. Holding the document's `ShapeTool` or root
+label, `document.Main()`, is insufficient. `StepLabel` computes its name and
+entry string on access rather than caching them.
 
-**`render_step` also suppresses the parametric-curve representation of every trimmed
-edge.** Left at OCC's own default, the translator writes each such edge twice: once as
-a 3D curve, and again as a curve in the parameter space of each surface that edge
-borders, each with its own definitional representation and representation context. A
-pcurve restates what the 3D curve and its surface already fix, so an artefact carries
-one representation of each edge rather than two. This is verified for OCC's own reader
-only: it recovers the solid on read-back with no pcurve present. A seam edge is the
-historical exception among third-party readers — `SEAM_CURVE` goes to zero along with
-the rest — and FreeCAD shipping this same preference off is supporting evidence, not
-proof, for a reader this workspace has not measured. This is a fixed setting, not a
-flag: it is the kind of speculative switch this workspace declines to expose when
-nothing downstream would ever need the other position.
+Separate kernel calls can return labels for the same node that compare unequal
+with `==`, because that comparison uses kernel object identity. Their entry
+strings agree and `IsEqual` returns true. For this reason,
+`stompgeom.writer.render_step`'s `replaced_labels` parameter continues to use
+entry strings to identify nodes.
 
-`stompgeom` now owns the fourth verb too: **build**, assembling a document from placed,
-named, coloured solids. `stompgeom.build.build_document` does the assembling and
-`stompgeom.build.solid_colour` reads a solid's colour back, promoted once
-`stompcollider-technical.md`'s own build contract fixed the shape a real second caller —
-the assembly emitter — needs: a `placement` and a `colour`.
+The other six kernel-typed names retain bare handles. They are annotated with
+their OCP types under `TYPE_CHECKING`, which documents intent but adds no type
+checking: `cadquery-ocp` has no `py.typed` marker, and both workspace mypy
+configurations set `ignore_missing_imports` for `OCP.*`. Removing that override
+would fail imports without checking the handles more closely.
 
-Reading that colour back is not one lookup, because a file does not record colour in one
-place. `build_document` sets it on the label owning the whole shape, and asking XCAF for
-that shape answers directly. A real file mostly does neither: an assembly component's
-shape is its product's shape carried under a location while the colour sits on the
-product, and a component modelled face by face carries no whole-solid colour at all.
-`solid_colour` therefore asks for the shape as given, then for its unlocated base, and
-only then weighs the colours its faces carry — by **surface area**, since a part is the
-colour of its body rather than of its many small leads. Ties fall to the lowest RGB
-triple, so the answer never depends on the order the kernel walks a shape in (ADR-0006).
-A solid nothing coloured is still `None`; no default is invented for it.
+This ownership guarantee is specific to labels: the published surface never
+hands out an already-dangling label. It does not manage kernel lifetimes in
+general. The raw handle field, `StepSolid.shape` and `bounding_box_mm`'s parameter
+remain `Any` to mypy; only the owned label value gains checking. A caller can
+still create a dangling reference by retaining `StepLabel.label` and discarding
+the wrapper.
 
-One colour assignment is not one written colour chain, either. `STEPCAFControl_Writer`
-styles each solid of a coloured shape in its own right, so the writer's census counts
-solids per coloured label rather than labels — an ordinary board component reaches the
-reader as one leaf holding a dozen solids. A census counting assignments refuses a file
-it has just written correctly, which is what the guard exists to prevent.
+`StepLabel.label` remains public because the cutting path needs four XCAF
+operations the package does not yet wrap. At the time of the lifetime change,
+the build operation was also deferred; its later promotion is recorded below.
+Hiding the field while requiring callers to access it would not improve this
+boundary.
 
-The risk carried is that `stompgeom` accumulates whatever is convenient rather than
-what is universal. `Frame` is the live example: it is a rigid transform, which
-is universal, wrapped in a meaning — Y-up, originating at the reference-outline
-centre — that belongs to panel artwork and says nothing about a PCB. Primitives
-of that shape are split, not moved wholesale, and the test is whether the
-`stompgeom` type can be described without naming a panel.
+### Enforce each shared rule in its owner's suite
+
+Five structural gates enforce rules that must have one implementation:
+
+- The whole-nanometre guard.
+- The case-face vocabulary.
+- XCAF leaf traversal.
+- ADR-0006's raw-measurement tie-break.
+- ADR-0005's atomic-write mechanism.
+
+Four belong to `stompmodel`'s suite; leaf traversal belongs to `stompgeom`'s.
+A gate may read a sibling's source as text, but must never import a package
+above its owner in the dependency graph. Thus `stompmodel` gates locate and
+read `stompgeom` and `stompdrill` files without importing those packages.
+
+Every gate discovers its scan targets through
+`tools.workspace_membership.member_package_dirs`: directories under `packages/`
+that ship their own `src`. New workspace packages must be covered without edits
+to existing gates.
+
+A gate's reach control must also avoid a fixed list of members. It checks that
+each discovered member has the `src` it claims, and that its scan roots cover
+every relevant `src` and, where applicable, `tests` directory found by an
+independent walk. That walk is
+`tools.workspace_membership.member_area_roots`; it never calls
+`member_package_dirs`, so it can detect a narrowing of the latter's discovery.
+
+`packages/stompdrill/tests/test_ownership_gate_convention.py` checks this
+convention across the gate family. It discovers gates through their
+reach-control marker rather than a fixed list of files. It then runs two probe
+packages: one breaching every rule the family checks and one breaching none.
+Adding a package or a gate must require no edits to existing gates or this
+convention test.
+
+### Render deterministic STEP bytes
+
+`stompgeom.writer.render_step` is the single serialisation entry point. It
+returns the completed STEP payload. The scratch file needed by OCC's path-only
+writer API is an implementation detail.
+
+For a document assembled by this workspace, output is byte-identical across
+processes. The writer refuses documents with an unparsed presentation entity in
+the colour region or a STEP pre-defined colour instead of inline `COLOUR_RGB`.
+This workspace produces neither. Among supported colour chains, it
+canonicalises ownership so repeated colours remain deterministic.
+
+`render_step` suppresses the parametric-curve representation of every trimmed
+edge. OCC's default emits a 3D curve and a curve in the parameter space of each
+adjoining surface, each with a definitional representation and context. The
+3D curve and its surface already determine the pcurve, so the output keeps one
+representation.
+
+Only OCC's own reader has been verified to recover the solid without pcurves.
+Seam edges have historically been an exception for third-party readers, and
+`SEAM_CURVE` is suppressed too. FreeCAD ships with the same preference off,
+which supports the choice but does not verify untested readers. This is a fixed
+setting because no downstream need for a switch has been identified.
+
+### Build documents and recover colours
+
+`stompgeom` also owns document construction.
+`stompgeom.build.build_document` assembles placed, named, coloured solids;
+`stompgeom.build.solid_colour` reads a solid's colour. These operations were
+promoted when `stompcollider-technical.md` established the assembly emitter's
+need for `placement` and `colour`.
+
+Colour recovery needs several lookups. `build_document` assigns colour to the
+label owning the whole shape, so querying that shape answers directly. In a
+supplied assembly, a component's shape may be located while its colour belongs
+to the unlocated product. A component modelled face by face may have no
+whole-solid colour.
+
+`solid_colour` queries the given shape, then its unlocated base, then its faces.
+For face colours it weights by surface area, so a large body outweighs many
+small leads. Ties use the lowest RGB triple, keeping the result independent of
+kernel traversal order under ADR-0006. An uncoloured solid returns `None`.
+
+`STEPCAFControl_Writer` writes a separate style for each solid in a coloured
+shape. The writer's colour census must therefore count solids per coloured
+label, not assignments. A board component can be one leaf containing a dozen
+solids; counting labels would reject correctly written output.
+
+### Keep the geometry boundary narrow
+
+The risk is that `stompgeom` collects convenient helpers with tool-specific
+meaning. `Frame` illustrates the boundary: a rigid transform is general, but
+Y-up coordinates originating at a reference-outline centre belong to artwork.
+Split such primitives instead of moving them wholesale. A `stompgeom` type must
+be describable without naming a panel.
