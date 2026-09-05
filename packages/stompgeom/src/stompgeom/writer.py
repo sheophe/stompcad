@@ -1,8 +1,9 @@
-"""Four OCC process-global effects — a translator product-name suffix, the
-assembly usage occurrence ids, which numeric slot each colour is written
-into, and which chain of a shared colour carries its inline definition —
-are not controllable through any exposed API, so ``render_step`` normalises
-the written bytes afterwards instead.
+"""Four OCC process-global effects — the synthesised product name OCC gives
+any shape reaching the translator with no usable XCAF name, the assembly
+usage occurrence ids, which numeric slot each colour is written into, and
+which chain of a shared colour carries its inline definition — are not
+controllable through any exposed API, so ``render_step`` normalises the
+written bytes afterwards instead.
 """
 
 from __future__ import annotations
@@ -31,27 +32,43 @@ if TYPE_CHECKING:
 
 __all__ = ["render_step"]
 
-#: The translator's auto-generated wrapper product. Set at write time, and the
-#: volatile counter it appends is erased afterwards. All three uses -- the
-#: setter, the pattern, the replacement -- read it here rather than spelling it.
+#: The prefix OCC's STEP translator synthesises a product name from for any
+#: shape reaching it with no usable XCAF name. Set at write time through
+#: ``write.step.product.name``; all three uses of the literal -- the setter,
+#: the pattern below, the replacement -- read it here rather than spelling
+#: it out, so a rename cannot set one name and normalise to another.
 _PRODUCT_NAME = "stompcad"
 
-#: One physical-file entity, wrapped or not, that may carry a volatile
+#: One physical-file entity, line-wrapped or not, that may carry a volatile
 #: counter (see the module docstring). ``DOTALL`` so a line-wrapped entity
 #: matches as a whole; entity bodies here never contain a literal ``);``.
 _VOLATILE_ENTITY = re.compile(
     rb"(#\d+ = (?:NEXT_ASSEMBLY_USAGE_OCCURRENCE|PRODUCT)\(.*?\);)", re.DOTALL
 )
-#: The writer's own "<write.step.product.name> <counter>.1" wrapper product;
-#: never a real part name, which always keeps the name it was read with.
-#: Matches by *content*, not by entity id, because the wrapper's own id is
-#: itself one of the unstable counters this module exists to erase: a real
-#: source part literally named "stompcad 1.2" would be silently rewritten by
-#: this pattern too. No fixture exercises that collision and there is no
-#: id-based alternative available through this kernel's bindings.
-#: Built from ``_PRODUCT_NAME``, never spelled out: written twice, a rename
-#: would silence this pattern and leave a volatile id in a plausible artefact.
-_VOLATILE_VERSION = re.compile(rb"'" + _PRODUCT_NAME.encode() + rb" \d+\.\d+'")
+#: A shape reaching the writer with no usable XCAF name -- a
+#: ``PlacedSolid(name="")``, or an XCAF label whose name attribute is absent
+#: (``ForgetAttribute``) or set empty (``TDataStd_Name.Set_s(label, "")``,
+#: the same form) -- gets a product OCC synthesises from ``_PRODUCT_NAME``.
+#: Nothing here is a wrapper: which spelling appears depends on where the
+#: shape sits in the transfer, not on what it is. A top-level free shape
+#: gets a bare, dotless counter (``stompcad <n>``); a component inside an
+#: XCAF assembly gets a dotted one (``stompcad <n>.<m>``), because the
+#: assembly's own product carries the assembly's own name and nothing is
+#: wrapped around it. Both forms are renumbered alike, in file order, to a
+#: fresh dotless ``stompcad <k>`` -- distinguishable from every other
+#: synthesised name in the file, never collapsed onto one shared literal,
+#: because a document can carry several nameless shapes that must stay
+#: distinct in the written bytes. The id and name fields both carry the
+#: counter (``PRODUCT('stompcad 1','stompcad 1',...)``), so the
+#: backreference pins them to the *same* text, rather than matching each
+#: independently and letting the two fields of one entity renumber apart.
+#: Built from ``_PRODUCT_NAME``, never spelled out: a real source part
+#: literally named "stompcad 7" or "stompcad 1.2" would be renumbered too,
+#: and no fixture exercises that collision.
+_VOLATILE_PRODUCT = re.compile(
+    rb"'" + _PRODUCT_NAME.encode() + rb" (\d+(?:\.\d+)?)','"
+    + _PRODUCT_NAME.encode() + rb" \1'"
+)
 _VOLATILE_NAUO_ID = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\(')(\d+)(')")
 
 #: One colour presentation, the chain STEPCAFControl_Writer emits per
@@ -196,8 +213,8 @@ def _silence_stdout() -> Iterator[None]:
 # and a fresh ``XSControl_WorkSession`` per call both leave the counters
 # below unaffected, and no
 # ``Interface_Static`` key touches either one — ``write.step.product.name``
-# only substitutes the wrapper product's *prefix*, never the "<counter>.1"
-# suffix appended after it, and the NAUO counter has no exposed key at all.
+# only substitutes the synthesised product's *prefix*, never the counter
+# appended after it, and the NAUO counter has no exposed key at all.
 # Post-processing the written bytes is not a workaround pending a better
 # fix; it is the only route this kernel's bindings leave open. (``render_step``
 # does call ``Init_s()`` below, but for an unrelated reason — it defines the
@@ -206,21 +223,31 @@ def _silence_stdout() -> Iterator[None]:
 def _normalise(payload: bytes) -> bytes:
     """Erase the two process-global OCC counters from one written file.
 
-    Neither the translator's per-write product-name suffix nor the assembly
-    usage occurrence ids are resettable through any API this kernel exposes.
-    Rewriting bytes after the fact is honest and fully deterministic; each
-    affected entity is first rejoined onto one line, since the writer's own
-    line-wrap column depends on how many digits the volatile counter had
-    that call, which would otherwise leak process history back in.
+    Neither the translator's per-write, per-shape synthesised product name
+    -- dotted or dotless, see ``_VOLATILE_PRODUCT`` -- nor the assembly
+    usage occurrence ids are resettable through any API this kernel exposes,
+    so rewriting bytes afterwards is the only deterministic route left. Each
+    affected entity is first rejoined onto one line so the volatile
+    counter's digit count cannot shift the writer's own line-wrap column
+    between calls.
     """
     payload = _VOLATILE_ENTITY.sub(lambda m: re.sub(rb"\n[ \t]*", b"", m.group(1)), payload)
-    payload = _VOLATILE_VERSION.sub(b"'" + _PRODUCT_NAME.encode() + b"'", payload)
-    counter = itertools.count(1)
 
-    def renumber(match: re.Match[bytes]) -> bytes:
-        return match.group(1) + str(next(counter)).encode("ascii") + match.group(3)
+    product_counter = itertools.count(1)
 
-    return _VOLATILE_NAUO_ID.sub(renumber, payload)
+    def renumber_product(match: re.Match[bytes]) -> bytes:
+        number = str(next(product_counter)).encode("ascii")
+        name = b"'" + _PRODUCT_NAME.encode() + b" " + number + b"'"
+        return name + b"," + name
+
+    payload = _VOLATILE_PRODUCT.sub(renumber_product, payload)
+
+    nauo_counter = itertools.count(1)
+
+    def renumber_nauo(match: re.Match[bytes]) -> bytes:
+        return match.group(1) + str(next(nauo_counter)).encode("ascii") + match.group(3)
+
+    return _VOLATILE_NAUO_ID.sub(renumber_nauo, payload)
 
 
 def _defined_ids(text: bytes) -> list[int]:
@@ -528,10 +555,21 @@ def render_step(
     # call leaves an already-set value alone, so writes stay independent.
     STEPControl_Controller.Init_s()
     Interface_Static.SetCVal_s("write.step.schema", "AP214IS")
-    # Load-bearing for determinism, not just cosmetic: fixes the prefix the
-    # translator's auto-generated wrapper product uses, which ``_normalise``
-    # then strips the volatile "<counter>.1" suffix from.
+    # Load-bearing for determinism, not just cosmetic: fixes the prefix OCC
+    # synthesises a product name from for any shape reaching the translator
+    # with no usable XCAF name, which ``_normalise`` then renumbers the
+    # volatile counter of, in file order.
     Interface_Static.SetCVal_s("write.step.product.name", _PRODUCT_NAME)
+    # A pcurve is a cache of what the 3D curve and the surface already
+    # state -- writing it doubles every artefact for no reader that needs
+    # it; OCC itself recovers the solid without one on read-back. OCC's own
+    # default is On; FreeCAD ships this same preference off.
+    # ``write.surfacecurve.mode`` is process-global and never restored, so
+    # any other STEP writer later in the same interpreter inherits this
+    # suppression too -- unlike the naming keys above, this changes another
+    # writer's *geometry*, not just its naming. Reads are unaffected:
+    # ``read.surfacecurve.mode`` is a distinct key.
+    Interface_Static.SetIVal_s("write.surfacecurve.mode", 0)
     session = XSControl_WorkSession()
     writer = STEPCAFControl_Writer(session, False)
     expected = _count_colour_assignments(document, replaced_labels)

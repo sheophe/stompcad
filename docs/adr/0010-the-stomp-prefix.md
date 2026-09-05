@@ -55,11 +55,24 @@ Two emitted-artefact identifiers change with the prefix, deliberately:
 - the drill document's `format` becomes `stompcad-drill-data`, not
   `stompdrill-drill-data` — ADR-0009 moves the document to `stompmodel`, so
   naming it after the tool that happens to produce it would be wrong;
-- the STEP writer's product-name wrapper becomes `stompcad <version>`, spelled
-  once as `_PRODUCT_NAME` and read by both the writer that sets it and the
-  pattern that erases the counter appended to it. Written twice, a later rename
-  would silence the pattern and leave a volatile identifier in an artefact that
-  still looked correct.
+- the STEP writer's product-name prefix becomes `stompcad`, spelled once as
+  `_PRODUCT_NAME` and read by both the writer that sets it and the pattern
+  that renumbers the counter appended to it. Written twice, a later rename
+  would silence the pattern and leave a volatile identifier in an artefact
+  that still looked correct. OCC's STEP translator synthesises a product
+  from this prefix for *any* shape reaching it with no usable XCAF name —
+  nothing here is a wrapper, and which of two spellings appears depends on
+  where that shape sits in the transfer, not on what it is. A top-level free
+  shape gets a bare, dotless counter (`stompcad <n>`); a shape reaching the
+  translator as a component inside an XCAF assembly gets a dotted one
+  (`stompcad <n>.<m>`), because the assembly's own product carries the
+  assembly's own name and nothing is wrapped around it. `stompgeom.build.
+  build_document` adds every solid as a free shape, so this workspace writes
+  the dotless form; the dotted form appears for the assemblies a supplied
+  case model, or this package's own test fixtures, build. Both spellings are
+  renumbered alike, in file order, to a fresh dotless `stompcad <k>`,
+  because a document can hold several nameless shapes and they must stay
+  distinguishable from each other in the written bytes.
 
 ## Rationale
 

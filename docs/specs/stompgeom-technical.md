@@ -239,10 +239,21 @@ touched it. ADR-0009 already ruled on this pattern when it stopped
 call site, and keeps its own version constant, which is what reproduces today's bytes
 exactly.
 
-**The translator's wrapper product name stays inside the writer.** It is already the
-workspace's name rather than any package's, and it is load-bearing rather than
-cosmetic: `_normalise` strips the volatile counter appended to it, so the setter, the
-pattern and the replacement must all read one constant.
+**The translator's synthesised product prefix stays inside the writer.** It is already
+the workspace's name rather than any package's, and it is load-bearing rather than
+cosmetic: `_normalise` renumbers the volatile counter appended to it, so the setter,
+the pattern and the replacement must all read one constant. OCC's STEP translator
+synthesises a product from this prefix for any shape reaching it with no usable XCAF
+name — nothing here is a wrapper; which of two spellings appears depends on where the
+shape sits in the transfer, not on what it is. A top-level free shape gets a bare,
+dotless counter (`stompcad <n>`); a component inside an XCAF assembly gets a dotted
+one (`stompcad <n>.<m>`), because the assembly's own product carries the assembly's
+own name and nothing is wrapped around it. `build_document` adds every solid as a
+free shape, so this workspace writes the dotless form, while the dotted one appears
+for the assemblies the tests and a supplied enclosure model build. `_normalise`
+renumbers every such name alike, in file order, to a fresh dotless `stompcad <k>`,
+because collapsing several nameless shapes onto one literal would make them
+indistinguishable in the written bytes.
 
 **`touched` is renamed `replaced_labels`.** The parameter states a fact about the
 kernel's writer — a shape whose colour was not serialised because `SetShape` replaced
@@ -250,6 +261,19 @@ it — without naming drilling. `stompcollider` does not cut, and takes the defa
 
 The colour-chain guard keeps raising `EmitterError`; its message names the new module.
 This is an error path and reaches no emitted artefact, so byte identity is unaffected.
+
+**`render_step` also turns off `write.surfacecurve.mode` before it writes.** Left
+at the translator's own default, every trimmed edge is written as both a 3D curve and
+a pcurve in each bordering surface's parameter space — a cache of what the 3D curve
+and surface already state. This is verified for OCC's own reader only: it recovers
+the solid on read-back with no pcurve present. A seam edge is the historical
+exception among third-party readers, and FreeCAD shipping this same preference off is
+supporting evidence rather than proof for a reader this workspace has not measured.
+The setting is fixed inside the writer rather than exposed as an option: nothing in
+this workspace reads the parametric form, so there is no caller this could vary for.
+`write.surfacecurve.mode` is process-global and is never restored after the write, so
+a second STEP writer running later in the same interpreter inherits the suppression;
+`read.surfacecurve.mode` is a distinct key, so reads are unaffected.
 
 ### 6. The kernel becomes unconditional
 

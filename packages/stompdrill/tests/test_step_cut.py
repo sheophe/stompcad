@@ -564,25 +564,22 @@ def test_a_colour_chain_regex_that_stops_matching_raises_instead_of_passing_sile
         _emit(at(0, 0, 6 * MM, index=1))
 
 
-def test_the_wrapper_products_name_is_the_one_the_writer_set():
-    """The writer's product name and the two patterns that erase its counter
-    must name one thing.
-
-    They are three separate uses of ``_PRODUCT_NAME``. Spelled out rather
-    than read from it, a rename could set one name and normalise to another:
-    every determinism test still passes, because both are stable within a
-    run, and the artefact quietly carries two names for one wrapper. This
-    asserts the name that reaches the file, which is the only place the
-    disagreement is visible.
+def test_the_drilled_solids_synthesised_product_is_the_one_the_writer_set():
+    """The writer's product prefix and the pattern that renumbers its
+    counter must name one thing -- three separate uses of ``_PRODUCT_NAME``.
+    Spelled out rather than read from it, a rename could set one name and
+    normalise to another with every determinism test still passing. The
+    drilled solid replaces the case's own box inside an XCAF assembly and
+    carries no name of its own, so it takes the dotted synthesised form,
+    renumbered here to ``stompcad 1``.
     """
     from stompgeom.writer import _PRODUCT_NAME
     from tests.conftest import at
 
     payload = _emit(at(0, 0, 6 * MM, index=1))
 
-    wrapper = f"PRODUCT('{_PRODUCT_NAME}'".encode()
-    assert wrapper in payload
-    # The counter the translator appends must be gone, not merely stable.
+    assert f"PRODUCT('{_PRODUCT_NAME} 1','{_PRODUCT_NAME} 1'".encode() in payload
+    # The dotted counter the translator appends must be gone, not merely stable.
     assert re.search(rb"'" + _PRODUCT_NAME.encode() + rb" \d+\.\d+'", payload) is None
 
 
