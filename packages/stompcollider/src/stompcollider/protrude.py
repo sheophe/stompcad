@@ -87,20 +87,21 @@ def _cut(
 ) -> tuple[RawCylinder, ...]:
     """One band per probe radius the solid is wider than somewhere.
 
-    The cut says only that the material there is *strictly* wider than the
-    probe, never how much wider; in whole nanometres, strictly wider is at
-    least one nanometre wider, and that lower bound is exactly what the band
-    states. It is enough, because the radius a profile is asked about is a
-    radius it was probed at -- ``model.admitting_radius`` is the one
-    statement of that number, read by this module's caller and by ``Match``.
-    The band runs from where the material begins to the far end of the part,
-    which is the deepest anything it holds can be.
+    *Strictly* wider than the probe is, in whole nanometres, at least one
+    nanometre wider, and ``probe_nm + 1`` is both the radius the cut is
+    measured at and the radius the band records -- one number, not two.
+    The radius a profile is asked about is a radius it was probed at:
+    ``model.admitting_radius`` states it once, for this module's caller and
+    for ``Match``. Each band runs to the part's far end, the deepest depth.
     """
     ends_mm = tip_mm - axial_extent(solid.shape, outward)[0]
     bands = []
     for probe_nm in sorted(set(probes_nm)):
         reach_mm = radial_reach(
-            solid.shape, tipmost.axis_location_mm, outward, mm_from_nm(probe_nm)
+            solid.shape,
+            tipmost.axis_location_mm,
+            outward,
+            mm_from_nm(Nanometre(probe_nm + 1)),
         )
         if reach_mm is None:
             continue
