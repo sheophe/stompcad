@@ -1,8 +1,7 @@
 """Seats PCB models inside a drilled case and reports where they clash.
 
 The package root exposes the canonicalisation entry point and what it
-reads, so a caller never guesses a submodule -- see the module layout in
-``docs/specs/stompcollider-technical.md``. ``Match``, ``Seat``,
+reads, so a caller never guesses a submodule. ``Match``, ``Seat``,
 ``Clashes``, ``BoardSource``, the enclosure ``Seat`` searches a board's
 insertion path against, and both emitters land here; the command
 line does not, because a console script is how one is reached and

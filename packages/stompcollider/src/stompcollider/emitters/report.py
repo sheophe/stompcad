@@ -6,7 +6,7 @@ throughout except ``theta_deg``, the one float in the document, which is
 written to exactly six decimal places -- the standard library's JSON
 encoder always uses ``repr`` for a float and cannot be told otherwise, so
 this module marks a pre-formatted literal and unmarks it after ``json.dumps``
-has run. See ``docs/specs/stompcollider-technical.md``'s "The report".
+has run.
 """
 
 from __future__ import annotations

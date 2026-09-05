@@ -3,10 +3,26 @@ name = "stompgeom"
 version = "0.1.0"
 description = "The workspace's kernel layer: the STEP reader, the deterministic writer, and the kernel guard"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Paul Vakhnivskyi", email = "pvakhnivskyi@gmail.com" }]
+keywords = ["cad", "step", "opencascade", "cadquery", "geometry", "guitar-pedal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 # The kernel is unconditional here. A kernel-free configuration of this
 # package is one nobody runs, and ADR-0009 retired the optional extra that
 # pretended otherwise.
 dependencies = ["stompmodel", "cadquery-ocp==7.9.3.1.1"]
+
+[project.urls]
+Homepage = "https://github.com/sheophe/stompcad"
+Repository = "https://github.com/sheophe/stompcad"
+Issues = "https://github.com/sheophe/stompcad/issues"
 
 [build-system]
 requires = ["setuptools>=68"]

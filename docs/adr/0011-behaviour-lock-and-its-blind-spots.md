@@ -75,11 +75,11 @@ because a reviewer cannot tell an intended regeneration from an accidental one.
 *The reviewable form is already committed, and the refusal already recorded.*
 `packages/stompdrill/tests/golden/tar-1590b.json` is the fact-set golden a reviewer
 can read. `docs/FOUNDATION.md`'s instrument table admits regression against a
-reference only as a recorded response, never as a recorded artefact, and
-`docs/specs/verification-technical.md` states plainly that golden is a fact-set and
-not bytes, because the panel path is provenance in four of the five artefacts — the
-STEP writer falling back to a literal is the exception — so a byte-golden fails on
-legitimate change. Committing a digest would reverse both by side effect.
+reference only as a recorded response, never as a recorded artefact, and golden is
+a fact-set rather than bytes because the panel path is provenance in four of the
+five artefacts — the STEP writer falling back to a literal is the exception — so a
+byte-golden fails on legitimate change. Committing a digest would reverse both by
+side effect.
 
 *`.gitignore` cannot express the exception.* Git will not re-include a file whose
 parent directory is excluded, so a negation pattern is not available. The comment

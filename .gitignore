@@ -23,6 +23,13 @@ htmlcov/
 .tox/
 .nox/
 
+# Property-testing database. Hypothesis drops a self-ignoring `.gitignore` into
+# each directory it creates, but that file is its to delete and re-create, and
+# it invites deletion in its own comment. The rule belongs here, where this
+# repository states its own intent. No leading slash, so it matches at every
+# level: the workspace root, each member, and any mutants/ copy.
+.hypothesis/
+
 # Type checker / linter caches
 .mypy_cache/
 .ruff_cache/
@@ -46,6 +53,16 @@ mutants.sqlite
 # behaviour-lock reference lands here too (.scratch/lock/) and stays ignored: it
 # is a fact about one machine's kernel build, not about this repository -- ADR-0011.
 .scratch/
+
+# Internal working records. These drift: a plan describes one session's intent,
+# the backlog tracks what is not yet decided, and a technical specification is
+# written ahead of the code and amended behind it. The decisions that survived
+# are in docs/adr/, which is the authority; docs/FOUNDATION.md and
+# docs/GLOSSARY.md carry the model and the vocabulary. Published code cites
+# those and never one of these.
+docs/BACKLOG.md
+docs/specs/
+docs/plans/
 
 # Session docs that might go stale
 docs/superpowers/

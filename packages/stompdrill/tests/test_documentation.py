@@ -7,7 +7,6 @@ import warnings
 from pathlib import Path
 
 from stompdrill.emitters import available
-from stompmodel.codec import FORMAT
 from tools.check_docstrings import find_long_docstrings
 from tools.workspace_membership import member_area_roots, member_package_dirs
 
@@ -82,21 +81,6 @@ def test_the_repository_docstring_audit_reports_every_over_length_docstring():
         for item in violations
     )
     warnings.warn(f"docstrings over 10 lines:\n{details}", stacklevel=1)
-
-
-def test_the_collider_spec_names_the_format_string_the_codec_actually_writes():
-    """A plan-3 reader built to this spec must recognise stompdrill's document.
-
-    Compared mechanically against ``stompmodel.codec.FORMAT`` rather than by
-    eye, so the two cannot drift apart again the way they once did.
-    """
-    spec = REPO / "docs" / "specs" / "stompcollider-technical.md"
-    text = spec.read_text(encoding="utf-8")
-
-    found = re.search(r"Drill document \(`([^`]+)` v\d+\)", text)
-
-    assert found, f"{spec}: the drill-document row was not found as expected"
-    assert found.group(1) == FORMAT
 
 
 def test_the_lock_script_emits_every_registered_format():

@@ -4,9 +4,8 @@ Hole geometry says how deep a board *would* sit; the case is what really
 stops it, and the answer is where contact happens **first** along the path
 from the entry pose. Seat-then-retreat finds a clear depth rather than a
 reachable one -- a board can pass an obstruction and be clear beyond it --
-so this searches instead, over a path bounded by geometry rather than by
-that prediction. See "The case is what stops a board, and finding where is
-a search" in ``docs/specs/stompcollider-technical.md``.
+so this searches instead, over a path bounded by the last travel at which
+contact is geometrically possible rather than by that prediction.
 """
 
 from __future__ import annotations

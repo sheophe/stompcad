@@ -3,7 +3,7 @@
 Every class here is a frozen, slotted dataclass validated at construction --
 the same shape ``stompmodel.model`` gives ``DrillData``. Nothing below
 imports the kernel: ``Match`` and ``Seat`` fold over these values, never over
-solids -- see ``docs/specs/stompcollider-technical.md``.
+solids.
 """
 
 from __future__ import annotations

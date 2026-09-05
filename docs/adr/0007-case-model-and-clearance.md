@@ -2,10 +2,8 @@
 
 **Status:** Accepted, with one part superseded: the optional `stompdrill[step]` extra is
 **retired**. [ADR-0009](0009-shared-model-package-and-dependency-order.md) made the kernel
-`stompgeom`'s unconditional dependency, and
-`docs/plans/2026-08-22-stompgeom-extraction.md` carried that out — `stompdrill` depends on
-`stompgeom`, so it takes the kernel too, and this ADR's argument for the extra assumed
-`stompdrill` stood alone.
+`stompgeom`'s unconditional dependency — `stompdrill` depends on `stompgeom`, so it takes
+the kernel too, and this ADR's argument for the extra assumed `stompdrill` stood alone.
 
 The paragraphs below are left as the decision was taken, present tense and all; four of
 them argue from the extra and carry an **Amended** note saying where they no longer

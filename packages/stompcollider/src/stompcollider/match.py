@@ -2,11 +2,11 @@
 
 Registration precedes recognition. A board reaches this stage in the frame
 its CAD tool exported it in, so no protrusion lies near any hole until the
-rigid motion carrying that frame onto the panel is known. Every part pair is
-therefore seeded against every ordered hole pair -- separation is the one
-quantity comparable before a transform exists -- and each seeded transform
-is what pairing is then judged under. See "Match" and "Candidates" in
-``docs/specs/stompcollider-technical.md``.
+rigid motion carrying that frame onto the panel is known. Every part pair
+is therefore seeded against every ordered hole pair -- separation is the
+one quantity comparable before a transform exists -- and each seeded
+transform is what pairing is judged under. A candidate is a seed
+recognising as many protrusions as any other seed does; two is the floor.
 """
 
 from __future__ import annotations

@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python floors at 3.10; 3.12 is the interpreter the
+        # workspace is developed against. Both are tested because
+        # cadquery-ocp==7.9.3.1.1 (stompgeom's unconditional kernel
+        # dependency, see ADR-0007) ships manylinux wheels for both, so the
+        # matrix costs no source builds -- verified locally with
+        # `uv pip install --dry-run --python-platform x86_64-manylinux_2_31
+        # cadquery-ocp==7.9.3.1.1` against a 3.10 and a 3.12 interpreter.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        # Pinned to an exact release, not a floating major tag: setup-uv
+        # stopped publishing `@vN` and `@vN.M` tags at v8.0.0 so that a
+        # compromised upstream cannot silently move a tag under this
+        # workflow. Bumping it is a deliberate edit.
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: ${{ matrix.python-version }}
+          # The kernel dependency (cadquery-ocp) pulls in vtk and matplotlib
+          # transitively and is slow to download; caching uv's own store
+          # keyed on the lockfile and every member's pyproject.toml avoids
+          # repeating that download on every run.
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            packages/*/pyproject.toml
+
+      # Mirrors CLAUDE.md's "Development commands" install recipe exactly.
+      - name: Create the environment and install the workspace
+        run: |
+          uv venv
+          uv sync --all-packages
+
+      - name: Lint (ruff)
+        run: |
+          source .venv/bin/activate
+          ruff check packages tools
+
+      # `mypy packages` excludes every member's own `tests/` except
+      # stompdrill's, because four `tests` packages cannot share one scan
+      # (see CLAUDE.md's "Development commands" and "Testing rules"). That is
+      # why mypy runs four times in this workflow: once here for the root
+      # config, which reaches stompdrill's tests, and once more inside each
+      # of stompmodel, stompgeom and stompcollider for their own tests.
+      - name: "Type-check (root: packages, including stompdrill's tests)"
+        run: |
+          source .venv/bin/activate
+          mypy packages
+
+      - name: Type-check stompmodel's own tests
+        run: cd packages/stompmodel && uv run --no-sync mypy
+
+      - name: Test stompmodel
+        run: |
+          source .venv/bin/activate
+          python -m pytest -p no:cacheprovider -o addopts= packages/stompmodel/tests -q
+
+      - name: Test stompgeom
+        run: cd packages/stompgeom && uv run --no-sync pytest -o addopts= -q
+
+      - name: Type-check stompgeom's own tests
+        run: cd packages/stompgeom && uv run --no-sync mypy
+
+      # --boards enables the tests that read stompcollider's committed STEP
+      # board fixture; it is not a kernel-availability switch (the kernel is
+      # an unconditional dependency), so it is safe and required here.
+      - name: Test stompcollider (--boards)
+        run: cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q
+
+      - name: Type-check stompcollider's own tests
+        run: cd packages/stompcollider && uv run --no-sync mypy
+
+      # Deliberately NOT --hammond: those tests download real Hammond
+      # enclosure models from hammfg.com at run time, and CI must not depend
+      # on, or hammer, a third party's server. This is not an oversight --
+      # do not add --hammond here.
+      - name: Test stompdrill (without --hammond)
+        run: |
+          source .venv/bin/activate
+          python -m pytest -p no:cacheprovider -o addopts= packages/stompdrill/tests -q
+
+      # tools/verify-lock.sh is deliberately not run here: ADR-0011 records
+      # that it is not a gate on HEAD, it needs a pre-cached Hammond model
+      # (the same third-party dependency excluded above), and its digests
+      # carry the kernel build's own version string, so they are not
+      # portable across environments. Do not add it as a step later thinking
+      # its absence was an oversight.

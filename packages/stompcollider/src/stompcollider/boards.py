@@ -1,11 +1,12 @@
 """Finding the boards in a STEP assembly, and proving each one is a board.
 
 The first module in this package to read geometry, and it reads it through
-``stompgeom`` -- never through the kernel directly. Ruling 1 in
-``docs/specs/foundation-docket-rulings.md`` fixes the rule: an unnamed solid
-is a substrate *candidate*, and a candidate is a board only when its two
-largest levels are one slab's two faces. Holedness plays no part; it was
-measured and does not discriminate. See ADR-0008 for the layering.
+``stompgeom`` -- never through the kernel directly. An unnamed solid is a
+substrate *candidate*, and a candidate is a board only when its two largest
+levels are exactly opposed, of comparable area, and sum to a thickness
+small against the carrier's own extent -- one slab's two faces. Holedness
+plays no part; it was measured and does not discriminate. See ADR-0008 for
+the layering.
 """
 
 from __future__ import annotations
