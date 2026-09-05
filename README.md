@@ -40,6 +40,49 @@ geometry kernel is an unconditional dependency, so the STEP features arrive with
 the command above. It is a large install: vtk and matplotlib come along
 transitively.
 
+## Preparing the artwork
+
+`stompdrill` reads an ordinary Illustrator file, but it only recognises geometry
+drawn a particular way. Two layers matter:
+
+| Layer | Default name | Holds |
+| --- | --- | --- |
+| drill | `Drill` | one circle per hole, at the position and diameter you want drilled |
+| reference | `Background` | the panel outline, which fixes the coordinate frame and origin |
+
+Rename them with `--drill-layer` and `--reference-layer` if you prefer.
+
+Four things decide whether your artwork reads:
+
+**Give the drill circles a stroke.** Illustrator omits paths with neither fill
+nor stroke from the PDF stream entirely, so an unpainted circle is not merely
+ignored — it never reaches the file. This is the single most common reason a
+layer comes back empty.
+
+**Draw true circles.** A hole must be four cubic Béziers with equal radii and
+consistent control-point placement — what the Ellipse tool produces with Shift
+held, or with an equal width and height typed into its dialog. Rounded
+rectangles, ellipses, compound shapes and traced outlines all read as
+non-circular and are refused rather than guessed at. Recognition is
+rotation-invariant, so a rotated circle is still a circle.
+
+**Keep both layers at the top level.** Illustrator's sublayers are not
+recoverable from the saved file, so a drill layer nested inside another layer
+cannot be found. Object names are not recoverable either — the layer is the only
+channel through which artwork tells the tool what a shape is for.
+
+**Draw the outline at published enclosure dimensions.** The reference outline is
+the largest non-circular path on its layer, and it is matched against a
+catalogue of Hammond footprints to identify which enclosure you drew for. Use
+the published top-view or backplate dimensions, not the smaller drilled face.
+
+Save as `.ai` in Illustrator's normal way — its native save embeds the
+PDF-compatible stream that gets read, and Illustrator need not be running.
+
+If something is wrong, the error says which of the above it was: a layer that
+was found but held no circles reports how many paths it did hold, which
+distinguishes "nothing was painted" from "nothing was circular".
+
 ## Drilling a panel
 
 Draw your holes as circles on one layer and the panel outline on another, then:
