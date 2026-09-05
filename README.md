@@ -153,13 +153,63 @@ existing output exactly as it was.
 
 ## How it fits together
 
+Both tools are the same four steps. Each **reads** an input into measured
+floats, **canonicalises** those once into exact integer nanometres, **folds** a
+sequence of stages over the resulting value, and **emits** artefacts from it.
+Only the stages differ; the shape does not. That is why both are drawn below at
+the same depth — [`docs/FOUNDATION.md`](docs/FOUNDATION.md) states the shape
+formally, and these are its two instances.
+
+Both diagrams use one grammar, read left to right:
+
+| | means |
+| --- | --- |
+| slanted | a file on disk |
+| rounded | a **reader**, turning a file into measured floats |
+| hexagon | the **canonicalisation** boundary, where floats become exact integers |
+| double-barred | the **canonical value** every later step works from |
+| plain box | one **stage**, folded over that value in the order shown |
+| dashed | conditional |
+
+Emitters are not drawn. They only translate and serialise the finished value, so
+every artefact leaves the same node.
+
+**`stompdrill`** — artwork to fabrication artefacts:
+
+```mermaid
+flowchart LR
+    ai[/"PANEL.ai"/] --> src(["AiPdfSource"]) --> q{{"quantise()"}} --> m[["DrillData"]]
+    m --> s1["Deduplicate"] --> s2["ReviewGridTies"] --> s3["RouteHoles"] --> s4["CheckOutlineContainment"]
+    s4 -.-> s5["CheckCaseClearance"]
+    case[/"enclosure model"/] -.-> s5
+    s4 --> done[["routed, checked"]]
+    s5 -.-> done
+    done --> a1[/"excellon · drawing-svg<br>drawing-pdf · json"/]
+    done -.-> a2[/"step"/]
 ```
-PANEL.ai ──▶ AiPdfSource ──▶ quantise() ──▶ DrillData ──▶ Pipeline ──▶ Emitters
-                                                             │
-                                             drill.json ◀────┘
-                                                  │
-BOARD.stp ──────────────────────────────────▶ stompcollider ──▶ report, assembly
+
+Everything dashed there depends on one flag: supply `--case-model` and the
+clearance stage runs and the `step` artefact becomes available; omit it and the
+panel is still fully drilled, just never checked against real metal.
+
+**`stompcollider`** — boards into that drilled enclosure:
+
+```mermaid
+flowchart LR
+    doc[/"drill document"/] --> dsrc(["codec"])
+    brd[/"BOARD.stp"/] --> src(["BoardSource"])
+    dsrc --> q{{"canonicalise()"}}
+    src --> q --> m[["DockData"]]
+    m --> s1["Match"] --> s2["Seat"] --> s3["Clashes"] --> done[["matched, seated, clashed"]]
+    case[/"drilled enclosure"/] --> s2
+    case --> s3
+    done --> a1[/"report · assembly"/]
 ```
+
+The seam between the two is `stompdrill`'s own output: the drill document says
+where the holes are and which face they were cut in, and the `step` artefact is
+the enclosure the boards are seated into. Both are ordinary files, so either
+tool runs alone.
 
 Four packages, in dependency order:
 
