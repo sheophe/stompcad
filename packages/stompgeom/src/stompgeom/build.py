@@ -161,9 +161,8 @@ def solid_colour(document: TDocStd_Document, solid: Any) -> tuple[float, float, 
     """``solid``'s own surface colour in ``document``, or ``None`` if it has none.
 
     The published reading half of ``build_document``'s colouring, named
-    explicitly rather than left implicit -- see ``Order of work`` in
-    ``docs/specs/stompcollider-technical.md``. Reads by shape, not by label,
-    so ``solid`` is anything with a ``.shape`` -- a
+    explicitly rather than left implicit. Reads by shape, not by label, so
+    ``solid`` is anything with a ``.shape`` -- a
     :class:`stompgeom.step.StepSolid`, never a raw ``TDF_Label``. Three
     routes, because a file records a colour in three shapes; see
     :func:`_recorded_colour` and :func:`_broadest_colour`.

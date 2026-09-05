@@ -120,8 +120,8 @@ warn_redundant_casts = true
 warn_unreachable = true
 # Not `strict`. Measured at 18 further errors, almost all no-untyped-def on
 # internal helpers in ai_pdf.py and model.py's alternate constructors; adopting
-# it in one step would mean a gate that is red on arrival. docs/BACKLOG.md
-# carries it as scoped follow-up work.
+# it in one step would mean a gate that is red on arrival, so it is scoped
+# follow-up work rather than a setting to flip.
 
 [[tool.mypy.overrides]]
 # cadquery-ocp is a compiled extension with no py.typed marker, so every OCP

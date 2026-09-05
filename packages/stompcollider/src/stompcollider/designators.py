@@ -3,8 +3,7 @@
 Each term is a literal, glob or inclusive integer range, optionally negated.
 ``admit`` starts from the empty set and applies each term's polarity in
 order, so a later term overrides an earlier one -- there is no set algebra
-and no default admission. See ``docs/specs/stompcollider-technical.md``'s
-"The panel-reference filter".
+and no default admission.
 """
 
 from __future__ import annotations

@@ -1,0 +1,19 @@
+# Normalise line endings for text, so a clone on Windows does not rewrite the
+# bytes of files whose exact content is asserted by tests.
+* text=auto eol=lf
+
+# Fixture binaries. Marking them binary stops git attempting a textual diff or
+# a line-ending conversion; an Illustrator file is a PDF stream and a STEP file
+# is compared byte for byte by the behaviour lock.
+*.ai   binary
+*.stp  binary
+*.step binary
+*.pdf  binary
+*.drl  binary
+
+# Generated, and noisy in review. Still committed, for reproducible installs.
+uv.lock linguist-generated=true
+
+# The enclosure catalogue is generated from docs/parts/dimensions.tsv by
+# tools/build_catalogue.py; edit the TSV, never the module.
+packages/stompdrill/src/stompdrill/enclosures.py linguist-generated=true

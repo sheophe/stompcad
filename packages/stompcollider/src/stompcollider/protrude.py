@@ -7,8 +7,7 @@ face at all -- so the profile is the whole solid's radial extent about that
 axis, measured by an exact boolean at the radii the panel's own holes admit.
 Kernel-backed, but only through ``stompgeom``; nothing here imports OCP.
 Measurements only -- millimetre floats upstream of ``canonicalise``, which
-is the one place they become canonical lengths. See "Protrusions" in
-``docs/specs/stompcollider-technical.md``, ADR-0003 and ADR-0008.
+is the one place they become canonical lengths. See ADR-0003 and ADR-0008.
 """
 
 from __future__ import annotations

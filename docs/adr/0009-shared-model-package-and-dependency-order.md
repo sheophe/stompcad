@@ -2,9 +2,8 @@
 
 **Status:** Accepted, amended in place: `CoordinateFrame` and `FaceFrame` are
 `stompmodel`'s rather than `stompgeom`'s, and ADR-0007's optional extra is now retired
-rather than pending. Both amendments were decided in `docs/specs/stompgeom-technical.md`
-and landed with `docs/plans/2026-08-22-stompgeom-extraction.md`; the reasoning for the
-first is under "Why the frame values sit in `stompmodel`" below. **Amended again:** the
+rather than pending; the reasoning for the first is under "Why the frame values sit in
+`stompmodel`" below. **Amended again:** the
 document's version bump to 6 and the `CaseRegistration` member land now rather than in
 plan 3, the frame nests inside the registration rather than sitting bare on the
 document, and a fourth admission rule governs the promotion. See "The drill document
@@ -193,16 +192,15 @@ enclosure reasoning wearing a geometric coat, so it stays in `stompdrill` under 
 rule two paragraphs below. `stompmodel` owns the frame *type* and its transforms;
 `stompgeom` owns neither. A reader looking here for a frame builder will not find one.
 
-`levels()` arrived once `stompcollider`'s carrier-plane need shaped its interface, per
-`docs/specs/foundation-docket-rulings.md`'s Ruling 2 — which stood in for that consumer
-by measuring the repository's own fixtures rather than waiting for the consumer's code
-to exist. It partitions, keying each face's direction and offset to an integer bin
-rather than clustering them by a merge tolerance. ADR-0006's order-independence is what
-requires the bin: clustering by a merge tolerance would let the walk's own order decide
-which faces merged. The bin's price is that two faces whose true normals differ by less
-than its width land in different levels however narrowly they straddle it. The measured
-window this can affect is `5e-7`–`4.47e-5` radians of tilt, comfortably clear of every
-fixture measured.
+`levels()` arrived once `stompcollider`'s carrier-plane need shaped its interface,
+decided by measuring the repository's own fixtures rather than waiting for the
+consumer's code to exist. It partitions, keying each face's direction and offset to
+an integer bin rather than clustering them by a merge tolerance. ADR-0006's
+order-independence is what requires the bin: clustering by a merge tolerance would
+let the walk's own order decide which faces merged. The bin's price is that two
+faces whose true normals differ by less than its width land in different levels
+however narrowly they straddle it. The measured window this can affect is
+`5e-7`–`4.47e-5` radians of tilt, comfortably clear of every fixture measured.
 Holedness does not move with it: `_plates` and `_HOLED_FRACTION_LIMIT` stay in
 `stompdrill`, discriminating a casting plate from a casting ring, which is the same
 enclosure reasoning that keeps `build_frame` out of this package.

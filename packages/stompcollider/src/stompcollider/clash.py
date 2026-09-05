@@ -4,8 +4,9 @@ The pipeline's one impure stage. ``Match`` and ``Seat`` fold over values;
 this one folds over solids, reaching the kernel through ``stompgeom`` and
 never through OCP. Bounding boxes filter the pairs and an exact
 intersection decides every survivor, so no answer here is a proximity
-estimate. Seating an assembly is two stages, the first a filter -- see
-"Several boards" and "Clashes" in ``docs/specs/stompcollider-technical.md``.
+estimate. Seating an assembly is two stages: a filter that ranks each
+board against the case alone, then a choice among the survivors on
+mutual interference.
 """
 
 from __future__ import annotations

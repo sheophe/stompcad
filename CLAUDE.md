@@ -485,11 +485,8 @@ CLI.
   `stompdrill.units`, `emitters.drawing.sheet` or `emitters.drawing.layout` is the kind
   worth chasing: those hold cited constants and shared facts rather than placement.
 - `_kappa_consistent`'s survivors are settled: some were killed by new tests, the rest are
-  proved equivalent and not worth re-chasing. `docs/plans/2026-08-21-test-repairs.md` holds
-  that proof, and it covers nothing else. `geometry`'s residual beyond it is still
-  unclassified and each survivor needs its own analysis; they are named individually in
-  their own `docs/BACKLOG.md` entry. Read those records rather than re-deriving them, and
-  do not copy their figures into this file.
+  proved equivalent and not worth re-chasing. `geometry`'s residual beyond it is still
+  unclassified and each survivor needs its own analysis.
 - `cd packages/stompdrill && mutmut run` is what reaches `geometry`, `pipeline.dedupe`,
   `pipeline.validate`, `quantise` and `stompdrill.units`; `cd packages/stompmodel &&
   mutmut run` — its own `[tool.mutmut]`, resolving against its own tests — is what reaches

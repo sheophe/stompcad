@@ -3,8 +3,7 @@
 Measurements only: every length that leaves here is a millimetre float,
 upstream of ``canonicalise`` (ADR-0003). The kernel is reached through
 ``stompgeom``, never OCP, and the drill document through ``stompmodel``'s
-codec, never ``stompdrill``. See "Reading boards" in
-``docs/specs/stompcollider-technical.md``.
+codec, never ``stompdrill``.
 """
 
 from __future__ import annotations

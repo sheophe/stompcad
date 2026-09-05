@@ -6,8 +6,7 @@ insertion path; it arrives through a supplied
 hole geometry -- a reduction over what ``Match`` already found, with no
 kernel query and no descent -- is what answers a board the enclosure never
 touches, and what a shortfall is stated against. Anything else that would
-foul at the resting depth is a clash for a later stage to report. See
-"Seat" in ``docs/specs/stompcollider-technical.md``.
+foul at the resting depth is a clash for a later stage to report.
 """
 
 from __future__ import annotations

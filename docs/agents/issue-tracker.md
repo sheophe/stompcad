@@ -23,9 +23,8 @@ decision worth keeping graduates out of it, into a spec, an ADR, or
 `.scratch/` is for issues, specs and wayfinder maps. It is not the Superpowers
 SDD workspace, which lives at `.superpowers/sdd/`. Nor is it
 `docs/superpowers/`, which holds that workflow's specs and plans. All three are
-git-ignored (a couple of files under `docs/superpowers/` predate its rule and
-remain tracked). Three directories, three purposes, none of them a durable
-record — that is what `docs/adr/` and `docs/GLOSSARY.md` are for.
+git-ignored. Three directories, three purposes, none of them a durable record —
+that is what `docs/adr/` and `docs/GLOSSARY.md` are for.
 
 ## When a skill says "publish to the issue tracker"
 

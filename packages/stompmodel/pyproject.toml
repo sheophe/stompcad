@@ -3,9 +3,25 @@ name = "stompmodel"
 version = "0.1.0"
 description = "The values every stomp package exchanges: lengths, drill data, diagnostics, contracts"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Paul Vakhnivskyi", email = "pvakhnivskyi@gmail.com" }]
+keywords = ["cad", "drilling", "excellon", "kicad", "guitar-pedal", "enclosure"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 # Deliberately none. This package is the workspace's pure-Python leaf; a
 # dependency here would be inherited by everything.
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/sheophe/stompcad"
+Repository = "https://github.com/sheophe/stompcad"
+Issues = "https://github.com/sheophe/stompcad/issues"
 
 [build-system]
 requires = ["setuptools>=68"]

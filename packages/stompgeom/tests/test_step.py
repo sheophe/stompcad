@@ -295,7 +295,7 @@ def _new_shape_tool() -> tuple[object, Any]:
     not merely conventional: once the document is released, a label drawn
     from it dangles and answers silently wrong (empty name, the document's
     own root entry, a null shape) rather than raising -- see ``StepLabel``
-    below and ``docs/BACKLOG.md``'s corrected segfault-hazard entry.
+    below.
     """
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document

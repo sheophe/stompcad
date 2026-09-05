@@ -293,8 +293,9 @@ def test_a_shared_base_document_renders_identically_across_processes() -> None:
 
 
 def test_a_solids_colour_reads_back() -> None:
-    """The published reading half ``Order of work`` in
-    ``docs/specs/stompcollider-technical.md`` requires."""
+    """``solid_colour`` is the published reading half of ``build_document``'s
+    ``colour`` parameter -- the read-back a real consumer needed once one
+    existed."""
     document = build_document([PlacedSolid(_box(1, 1, 1), "A", (1.0, 0.0, 0.0), None)])
     solid = read_step_document(document).solids[0]
     assert solid_colour(document, solid) == (1.0, 0.0, 0.0)

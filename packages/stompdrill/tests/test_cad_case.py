@@ -136,11 +136,10 @@ def test_the_frame_basis_is_right_handed_about_the_outward_normal(document):
 
 
 def test_the_frame_origin_registers_the_inner_surface_not_the_drilled_one(document):
-    """docs/specs/stompcollider-technical.md's Seating-depth section measures
-    seating travel "against the inner surface of the drilled plate, which the
-    face frame registers". Compare the frame's own origin against the two
-    surface positions ``find_faces`` already measured, rather than
-    re-deriving a number from the code under test (ticket 20, AC1).
+    """Seating travel is measured against the inner surface of the drilled
+    plate, which the face frame registers. Compare the frame's own origin
+    against the two surface positions ``find_faces`` already measured,
+    rather than re-deriving a number from the code under test.
     """
     axis = drill_axis(document, FOOTPRINT)
     faces = find_faces(select_solid(document, CaseFace.BOX), axis)

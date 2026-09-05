@@ -3,11 +3,27 @@ name = "stompcollider"
 version = "0.1.0"
 description = "Seats PCB models inside a drilled case and reports where they clash"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Paul Vakhnivskyi", email = "pvakhnivskyi@gmail.com" }]
+keywords = ["cad", "step", "pcb", "collision-detection", "guitar-pedal", "enclosure"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 # stompmodel and stompgeom. The pure core still reaches neither the kernel
 # nor a sibling above it; `boards.py` is the first module here to read
 # geometry, and it reads it *through* stompgeom -- OCP itself stays foreign,
 # which tests/test_package_boundary.py enforces. See ADR-0008.
 dependencies = ["stompmodel", "stompgeom"]
+
+[project.urls]
+Homepage = "https://github.com/sheophe/stompcad"
+Repository = "https://github.com/sheophe/stompcad"
+Issues = "https://github.com/sheophe/stompcad/issues"
 
 [project.scripts]
 stompcollider = "stompcollider.cli:main"
