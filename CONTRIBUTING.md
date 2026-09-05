@@ -230,11 +230,6 @@ instructions and domain constraints.
 
 ### Writing style
 
-Write as an experienced pedal builder explaining the tools to another builder.
-Start with the action to take or the behaviour to expect, then explain the
-reason when it helps the reader. Use concrete language such as “writes files”
-and “checks clearance”, and explain unfamiliar terms where they first matter.
-
 Give each paragraph one main job. Keep instructions, examples and practical
 limits in user guides; put implementation details and design arguments in
 architecture notes. Use the glossary to explain technical distinctions.
