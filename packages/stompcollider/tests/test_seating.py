@@ -29,8 +29,8 @@ from tests import tar
 #: boards 10.000 and 17.000 mm below the drilled face. Written down because
 #: they are the numbers the probe radius and the tip subtraction produce, so
 #: a change to either moves one of them.
-RV_PROFILE_NM = Nanometre(-15_816_259)
-SW_PROFILE_NM = Nanometre(-28_385_633)
+RV_PROFILE_NM = Nanometre(-15_816_266)
+SW_PROFILE_NM = Nanometre(-16_892_748)
 
 
 def _seated(dock: DockData) -> tuple[DockData, dict[str, Nanometre]]:
@@ -87,10 +87,9 @@ def test_the_profile_alone_states_neither_boards_standoff(
     """What the hole geometry says here, and why it is reported not obeyed.
 
     The pot bushing measures 27 microns too fat for its ⌀7.000 hole and so
-    binds at the plate; the 3PDT bush is tangent to its ⌀12.000 bore, which
-    the radial cut answers two ways -- 20.992 mm for ``SW2`` and 9.499 for
-    ``SW1`` -- and the least of those puts that board 11 mm further out than
-    it goes. Against an assembly standing these boards 10 and 17 mm below
+    binds at the plate; the 3PDT bush is exactly as wide as its ⌀12.000
+    bore, so the radial cut states the material just past that radius, at
+    16.893 mm. Against an assembly standing these boards 10 and 17 mm below
     the face, neither figure is the standoff, which is exactly why the
     enclosure and not the profile fixes the depth. No cavity is supplied
     here, so these are the profile's own answers.

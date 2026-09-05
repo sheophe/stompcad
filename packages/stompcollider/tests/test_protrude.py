@@ -22,7 +22,7 @@ from stompcollider.protrude import admissible, protrusion_of
 from stompcollider.raw import RawComponent
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.step import StepDocument, StepSolid, read_step
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, mm_from_nm
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
 
@@ -538,3 +538,32 @@ def test_the_tip_is_measured_and_carried_beside_the_axis() -> None:
 
     assert measured.tip_mm == pytest.approx(10.0, abs=1e-9)
     assert _canonicalise_component(measured).protrusion.tip_nm == Nanometre(10_000_000)  # type: ignore[union-attr]
+
+
+# --------------------------------------------------------------------------
+# A probe landing exactly on a tangent face must not find more than a
+# narrower one. Reproduced only on the fixture's own geometry: a synthetic
+# cylinder of a known radius cuts cleanly at its own tangent point, so this
+# defect needs the footswitch's real bush.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.boards
+def test_a_probe_exactly_on_a_tangent_face_finds_no_more_than_a_narrower_one(
+    document: StepDocument,
+) -> None:
+    """``SW1``'s bush is tangent to the ⌀12 hole its own probe is drawn from.
+
+    A probe strictly narrower than that hole's radius must never be told
+    less material than the tangent probe itself: widening a probe can only
+    exclude material, never uncover more of it. Two bands from one cut, read
+    by the radius each was probed at rather than by stack position.
+    """
+    switch = _part(document, "SW1")
+    narrower, tangent = Nanometre(5_999_000), Nanometre(6_000_000)
+    stack = _measured_component(switch, _OUTWARD, (narrower, tangent)).stack
+    bands = {band.radius_mm: band for band in stack}
+    narrower_band = bands[mm_from_nm(Nanometre(narrower + 1))]
+    tangent_band = bands[mm_from_nm(Nanometre(tangent + 1))]
+
+    assert tangent_band.depth_from_tip_min_mm >= narrower_band.depth_from_tip_min_mm
