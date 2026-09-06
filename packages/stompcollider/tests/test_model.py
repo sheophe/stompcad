@@ -396,6 +396,41 @@ def test_placement_theta_must_be_a_float_not_an_int() -> None:
         Placement(1, Nanometre(0), Nanometre(0), Nanometre(0), 0, (), ())  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "given, canonical",
+    [
+        (-180.0, 180.0),
+        (180.0, 180.0),
+        (475.0, 115.0),
+        (-245.0, 115.0),
+        (-0.0, 0.0),
+        (115.0, 115.0),
+    ],
+)
+def test_placement_states_one_rotation_one_way(given: float, canonical: float) -> None:
+    """One rotation, one spelling. Each clause stands alone: a half turn
+    from either side, a value beyond one turn from either side, a negative
+    zero, and an ordinary angle the rule must leave untouched."""
+    placement = Placement(1, Nanometre(0), Nanometre(0), Nanometre(0), given, (), ())
+
+    assert placement.theta_deg == canonical
+    # ``-0.0 == 0.0`` is true, so the sign is asserted separately or the
+    # negative-zero clause above is satisfied by doing nothing.
+    assert math.copysign(1.0, placement.theta_deg) == math.copysign(1.0, canonical)
+
+
+@pytest.mark.parametrize("given", [0.1, -65.00000035779614, 1e-15, 179.9])
+def test_placement_leaves_an_in_range_angle_bit_identical(given: float) -> None:
+    """Canonicalising must reduce what is out of range and touch nothing
+    else. Every value here is awkward on purpose: none is exact in binary,
+    and the second is the shape ``atan2`` arithmetic really produces, so a
+    reduction applied unconditionally shifts it by an ulp. A case like 90.0
+    is exact and passes under either rule, so it would carry nothing."""
+    placement = Placement(1, Nanometre(0), Nanometre(0), Nanometre(0), given, (), ())
+
+    assert placement.theta_deg == given
+
+
 def test_placement_carries_every_correspondence_not_just_the_first() -> None:
     """Vacuity hazard: a single-correspondence placement passes an
     implementation that quietly drops every correspondence but the first."""

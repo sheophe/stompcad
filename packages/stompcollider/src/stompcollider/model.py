@@ -323,6 +323,22 @@ class Clash:
         )
 
 
+def _canonical_degrees(theta_deg: float) -> float:
+    """One rotation spelled one way: the half-open range (-180, 180].
+
+    Normalised rather than refused, and here rather than at any call site,
+    so the invariant holds however a ``Placement`` is built -- including the
+    codec reading back a document that recorded -180. Only what is out of
+    range is reduced: the modulo below perturbs an angle already in it by an
+    ulp, which would give back the bit-exactness the motion is computed
+    with. ``+ 0.0`` carries a negative zero to a positive one and leaves
+    every other in-range value alone; -180 falls through and returns +180.
+    """
+    if -180.0 < theta_deg <= 180.0:
+        return theta_deg + 0.0
+    return 180.0 - ((180.0 - theta_deg) % 360.0)
+
+
 @dataclass(frozen=True, slots=True)
 class Placement:
     """One candidate seating: its transform, correspondences, and clashes.
@@ -349,6 +365,7 @@ class Placement:
                 f"Placement.theta_deg must be a finite number of degrees, "
                 f"not {self.theta_deg!r}"
             )
+        object.__setattr__(self, "theta_deg", _canonical_degrees(self.theta_deg))
 
 
 @dataclass(frozen=True, slots=True)
