@@ -1,6 +1,3 @@
-# Upstream: Hammond's product website; published metric dimensions, one base part per row.
-# Length and width are top-view/backplate dimensions, not drilled-face dimensions.
-# source records human provenance only and is ignored by catalogue generation.
 part	length_mm	width_mm	height_mm	source
 1590LLB	50.50	50.50	25.00	extracted
 1590LB	50.55	50.60	31.00	maintainer
