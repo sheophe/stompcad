@@ -232,6 +232,13 @@ def test_ties_fall_through_to_the_transform_not_to_a_measured_quantity() -> None
     assert [round(p.theta_deg, 6) for p in ranked] == [0.0, 180.0]
 
 
+def test_two_spellings_of_one_half_turn_rank_equally() -> None:
+    """``theta_deg`` is a comparison field of the key, so two spellings of
+    one rotation would order apart if the value object admitted both. It
+    admits one, and this pins the consequence where it is observable."""
+    assert rank_key(_placement(theta_deg=-180.0)) == rank_key(_placement(theta_deg=180.0))
+
+
 def _one_clean_one_clashing() -> tuple[Placement, ...]:
     """The clashing placement has the smaller x_nm, so a comparator that
     checked position before clash count would (wrongly) rank it first."""

@@ -223,6 +223,14 @@ Update and accept an ADR before changing architecture in code. Other documents
 should link to the decision. Number diagrams within each ADR as `Figure 1`,
 `Figure 2`, and so on, and cite them as `ADR-000N, Figure N`.
 
+[docs/FOUNDATION.md](docs/FOUNDATION.md) is the one exception, and deliberately.
+It states an abstract model, so it cites nothing: no ADR, no module, no test, and
+nothing observed while building the software. Citation runs inward only — an ADR
+may appeal to the model, never the reverse — because a model carrying references
+to the thing it models cannot be read on its own terms. Where the software shows
+the model inaccurate, amend the model as mathematics rather than annotating it
+with the evidence.
+
 Working plans, specs and issues live in ignored directories. Keep durable
 architectural decisions in [docs/adr/](docs/adr/) and definitions in the
 [glossary](docs/GLOSSARY.md). [CLAUDE.md](CLAUDE.md) collects the agent-specific

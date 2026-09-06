@@ -154,11 +154,14 @@ def _exact(
 def _transform(first: _Anchor, second: _Anchor) -> _Transform | None:
     """``(x_mm, y_mm, theta_rad)`` taking both parts onto both holes.
 
-    ``None`` when the two parts coincide, which fixes no angle. Closed form:
-    the angle between the two separation vectors, then the translation that
-    lands the first part. A proper rotation is solved for, never a general
-    affine fit, so no reflected hypothesis can be seeded at all.
-    """
+    ``None`` when the two parts coincide, which fixes no angle. The angle
+    between the two separation vectors, then the translation carrying the
+    parts' midpoint onto the holes' midpoint: symmetric, so the pair fits
+    the same however it is ordered, and each anchor absorbs half of any
+    discrepancy between the separations rather than the second absorbing all
+    of it -- which is what makes the one-tolerance recognition budget agree
+    with the two-tolerance seeding budget. A proper rotation, never an affine
+    fit, so no reflected hypothesis can be seeded at all."""
     (part_a, hole_a), (part_b, hole_b) = first, second
     px, py = _mm(part_b[0] - part_a[0]), _mm(part_b[1] - part_a[1])
     hx, hy = _mm(hole_b[0] - hole_a[0]), _mm(hole_b[1] - hole_a[1])
@@ -166,10 +169,19 @@ def _transform(first: _Anchor, second: _Anchor) -> _Transform | None:
         return None
     theta = math.atan2(hy, hx) - math.atan2(py, px)
     cos, sin = math.cos(theta), math.sin(theta)
-    ax, ay = _mm(part_a[0]), _mm(part_a[1])
-    x = _mm(hole_a[0]) - (cos * ax - sin * ay)
-    y = _mm(hole_a[1]) - (sin * ax + cos * ay)
+    ax, ay = _midpoint_mm(part_a, part_b)
+    hxm, hym = _midpoint_mm(hole_a, hole_b)
+    x = hxm - (cos * ax - sin * ay)
+    y = hym - (sin * ax + cos * ay)
     return (x, y, theta)
+
+
+def _midpoint_mm(first: _Point, second: _Point) -> tuple[float, float]:
+    """Componentwise mean of two points, in panel millimetres."""
+    return (
+        0.5 * (_mm(first[0]) + _mm(second[0])),
+        0.5 * (_mm(first[1]) + _mm(second[1])),
+    )
 
 
 def _apply(transform: _Transform, point_mm: tuple[float, float]) -> tuple[float, float]:
@@ -208,20 +220,26 @@ def _recognise(
 
 def _widest_pair(designators: tuple[str, ...], axes: dict[str, _Point]) -> tuple[str, str]:
     """The two most widely separated corresponded protrusions, ties broken by
-    designator order -- the best-conditioned pair a candidate can report from.
+    where they stand -- the best-conditioned pair, chosen without reading a
+    name.
 
-    Enumerated over designator-sorted pairs, so the first pair to reach the
-    maximum distance is the one designator order prefers; only a strictly
-    greater distance replaces it.
+    ``_transform`` fits a pair symmetrically, so only the *set* of two
+    positions tells one candidate pair from another. Ranked on separation,
+    then on that set taken in sorted order (ADR-0006): pairs standing in the
+    same two places are interchangeable and either may win. Returned in that
+    same positional order, so the motion is a function of geometry alone.
     """
-    ordered = sorted(designators)
-    best = (ordered[0], ordered[1])
-    best_distance = -1.0
-    for a, b in combinations(ordered, 2):
-        distance = _distance_mm(axes[a], axes[b])
-        if distance > best_distance:
-            best_distance = distance
-            best = (a, b)
+    placed = {designator: axes[designator] for designator in sorted(designators)}
+    best: tuple[str, str] | None = None
+    best_rank: tuple[float, tuple[_Point, _Point]] | None = None
+    for a, b in combinations(placed, 2):
+        near, far = sorted((a, b), key=lambda designator: placed[designator])
+        rank = (_distance_mm(placed[a], placed[b]), (placed[near], placed[far]))
+        if best_rank is None or rank > best_rank:
+            best, best_rank = (near, far), rank
+    # ``designators`` names a candidate's correspondences, and a candidate
+    # carries at least two, so the loop above always runs.
+    assert best is not None
     return best
 
 

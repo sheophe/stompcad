@@ -671,6 +671,138 @@ def test_the_reported_transform_comes_from_the_widest_corresponded_pair() -> Non
 
 
 # --------------------------------------------------------------------------
+# Naming invariance: which of two identical parts carries which name is not
+# geometry, and FOUNDATION.md section 8 says so of this tool's `~`
+# --------------------------------------------------------------------------
+
+#: Two geometrically indistinguishable parts, and holes standing 0.2 mm
+#: further apart than they do. That residual is what makes the fixture bite:
+#: a fit landing one *named* anchor exactly leaves the whole discrepancy on
+#: the other, so exchanging the two names moves the board. Every placement
+#: fixture above has no residual at all, which is how the defect survived.
+_TWIN_A_MM = (0.0, 0.0)
+_TWIN_B_MM = (10.0, 0.0)
+_TWIN_RESIDUAL_MM = 0.2
+
+#: One seating, stripped of the names that legitimately differ between the
+#: two runs: where the board stands, and which hole each pairing missed by
+#: how much. Nothing here can be satisfied by renaming.
+_Seating = tuple[int, int, float, tuple[tuple[int, int], ...]]
+
+
+def _twin_holes() -> tuple[Hole, ...]:
+    """The twins' holes, pushed apart along the panel's own separation.
+
+    Numbered against part order, per the fixture rule."""
+    theta = math.radians(_REGISTRATION.theta_deg)
+    miss = (_TWIN_RESIDUAL_MM * math.cos(theta), _TWIN_RESIDUAL_MM * math.sin(theta))
+    return (
+        _hole(2, _Part("", *_TWIN_A_MM)),
+        _hole(1, _Part("", *_TWIN_B_MM), miss_mm=miss),
+    )
+
+
+def _twin_seatings(names: tuple[str, str], holes: tuple[Hole, ...]) -> list[_Seating]:
+    """Every seating ``Match`` reports for the twins under one naming."""
+    board = _board((_Part(names[0], *_TWIN_A_MM), _Part(names[1], *_TWIN_B_MM)))
+    data = Match(_TOLERANCE).apply(_dock(board, holes))
+    return sorted(
+        (
+            int(placement.x_nm),
+            int(placement.y_nm),
+            placement.theta_deg,
+            tuple(sorted(
+                (c.hole_index, int(c.offset_nm)) for c in placement.correspondence
+            )),
+        )
+        for placement in data.placements[1]
+    )
+
+
+def test_the_twin_fixture_really_carries_a_residual() -> None:
+    """The control for the invariance test below it.
+
+    A fixture whose holes stand exactly as far apart as its parts
+    distributes nothing, so it passes the asymmetric fit and proves
+    nothing. Asserted on the fixture's own arithmetic, and then on what
+    reaches the model: some pairing really does report a miss.
+    """
+    holes = _twin_holes()
+    part_gap_mm = math.hypot(
+        _TWIN_B_MM[0] - _TWIN_A_MM[0], _TWIN_B_MM[1] - _TWIN_A_MM[1]
+    )
+    hole_gap_mm = math.hypot(
+        _raw_mm(holes[1].x_nm - holes[0].x_nm),
+        _raw_mm(holes[1].y_nm - holes[0].y_nm),
+    )
+
+    assert abs(hole_gap_mm - part_gap_mm) == pytest.approx(_TWIN_RESIDUAL_MM, abs=1e-6)
+    offsets = [offset for *_, pairings in _twin_seatings(("SW1", "SW2"), holes)
+               for _hole_index, offset in pairings]
+    assert max(offsets) > 0
+
+
+def test_exchanging_two_identical_parts_names_moves_nothing() -> None:
+    """FOUNDATION.md section 8: this tool's ``~`` ignores how names are
+    assigned among geometrically indistinguishable parts, so the reported
+    seatings must be identical, not merely close. Compared name-free,
+    because the correspondence *designators* do legitimately differ."""
+    holes = _twin_holes()
+
+    assert _twin_seatings(("SW1", "SW2"), holes) == _twin_seatings(("SW2", "SW1"), holes)
+
+
+#: An isosceles fixture: arm and leg stand exactly 30 mm from the apex, so
+#: two different pairs tie at the widest separation, while the arm and leg
+#: stand nearer each other than either does to the apex. Chosen from a 3-4-5
+#: triple, so the tie is exact in integer nanometres rather than approximate.
+_TIE_APEX_MM = (0.0, 0.0)
+_TIE_ARM_MM = (30.0, 0.0)
+_TIE_LEG_MM = (18.0, 24.0)
+
+#: The leg's hole is out by this much, within tolerance, so which of the two
+#: tied pairs anchors the reported motion is observable at all.
+_TIE_MISS_MM = (0.4, 0.0)
+
+
+def _tied_seating(arm: str, leg: str) -> tuple[int, int, float]:
+    """The sole seating of the isosceles fixture, under one naming."""
+    apex = _Part("A0", *_TIE_APEX_MM)
+    arm_part = _Part(arm, *_TIE_ARM_MM)
+    leg_part = _Part(leg, *_TIE_LEG_MM)
+    board = _board((apex, arm_part, leg_part))
+    holes = (
+        _hole(3, apex),
+        _hole(1, arm_part),
+        _hole(2, leg_part, miss_mm=_TIE_MISS_MM),
+    )
+    (placement,) = Match(_TOLERANCE).apply(_dock(board, holes)).placements[1]
+    return (int(placement.x_nm), int(placement.y_nm), placement.theta_deg)
+
+
+def test_the_isosceles_fixture_really_ties_at_the_widest_separation() -> None:
+    """The control for the tie-break test below it: a fixture whose widest
+    pair is unique never reaches the tie-break at all."""
+    assert math.hypot(*_TIE_ARM_MM) == math.hypot(*_TIE_LEG_MM) == 30.0
+    assert math.hypot(
+        _TIE_LEG_MM[0] - _TIE_ARM_MM[0], _TIE_LEG_MM[1] - _TIE_ARM_MM[1]
+    ) < 30.0
+
+
+def test_pairs_tying_at_the_widest_separation_are_settled_by_geometry() -> None:
+    """Exchanging the two tied parts' names must not change which pair the
+    reported motion is anchored on. The apex-arm pair fits exactly and the
+    apex-leg pair does not, so the winner is visible in the answer: it is
+    the fixture's own registration, whichever way round the names went."""
+    assert _tied_seating("B1", "B2") == _tied_seating("B2", "B1")
+
+    x_nm, y_nm, theta_deg = _tied_seating("B1", "B2")
+    assert x_nm == pytest.approx(nm_from_mm(_REGISTRATION.x_mm), abs=100)
+    assert y_nm == pytest.approx(nm_from_mm(_REGISTRATION.y_mm), abs=100)
+    assert theta_deg == pytest.approx(_REGISTRATION.theta_deg, abs=1e-4)
+
+
+# --------------------------------------------------------------------------
 # Match's own contract beyond the algorithm: the Stage protocol
 # --------------------------------------------------------------------------
 

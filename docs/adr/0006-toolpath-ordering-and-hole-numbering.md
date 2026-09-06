@@ -1,6 +1,6 @@
 # ADR-0006: Toolpath ordering and hole numbering
 
-**Status:** Accepted, with five amendments in place:
+**Status:** Accepted, with six amendments in place:
 
 1. Remove the `RouteHoles(key=…)` argument.
 2. Require every pipeline selection rule to be total on geometry.
@@ -10,6 +10,8 @@
    returned through `DrillData.numbered()`.
 5. Establish `1…n` in `RouteHoles` and enforce it in `stompmodel.codec.from_document`,
    without auditing the set in `Hole`, `DrillData` or `DrillData.numbered()`.
+6. Extend the second amendment to `stompcollider`'s registration, and require one
+   canonical spelling for a placement's rotation.
 
 The decisions and their history are recorded below.
 
@@ -44,8 +46,9 @@ order until a winner is determined or the candidates are geometrically interchan
 Either interchangeable candidate may survive.
 
 This applies to `_largest_non_circular` in `sources/ai_pdf.py`, which compares candidate
-bounds; `Deduplicate` in `pipeline/dedupe.py`; `RouteHoles` in `pipeline/route.py`; and
-the within-row grouping in `stompmodel.model.DrillData.rows()`.
+bounds; `Deduplicate` in `pipeline/dedupe.py`; `RouteHoles` in `pipeline/route.py`; the
+within-row grouping in `stompmodel.model.DrillData.rows()`; and, by the sixth amendment,
+`_widest_pair` in `stompcollider`'s `match.py`.
 
 ### Shared raw-measurement tie-break
 
@@ -236,3 +239,45 @@ rejected instead of truncated.
 Each refusal has a test that violates its rule and a valid document that must still pass.
 In particular, a document numbered out of tuple order must remain valid: the check is
 on the set of numbers, not their positions.
+
+### Amendment 6: geometry alone decides a board's registration
+
+The second amendment's requirement was stated for every selection rule but its list named
+only `stompdrill` locations. `stompcollider` computes a board's placement from a pair of
+corresponded parts, and two rules there read a designator rather than the geometry, so
+exchanging the names of two geometrically indistinguishable parts moved the board.
+
+`match._transform` solved the translation landing the *first* anchor exactly on its hole,
+which left the whole discrepancy between the two separations on the second. Which anchor
+was first came from `_widest_pair`, enumerating designator-sorted pairs. `_seeds`
+enumerates the same way, so candidate discovery inherited the dependence as well as the
+reported motion.
+
+`_transform` now carries the parts' midpoint onto the holes' midpoint. The fit is
+symmetric, so a pair registers identically however it is ordered, and each anchor absorbs
+half of any discrepancy instead of the second absorbing all of it. That also reconciles
+two budgets which had disagreed: `_seeds` admits a pair whose separations agree within
+twice the tolerance, reasoning that two independent recognition errors are in play, while
+`_recognise` requires each offset within one tolerance. Under the asymmetric fit the
+second anchor could be pushed to twice the tolerance and refused; under the symmetric one
+each absorbs at most one, which is what `_seeds` already claimed.
+
+`_widest_pair` ranks candidate pairs on separation and then on the pair's two positions
+taken in sorted order, and returns them in that positional order. Pairs standing in the
+same two places are geometrically interchangeable and either may win, which is the shape
+the second amendment requires.
+
+Returning positionally rather than merely comparing positionally is load-bearing. The
+symmetric fit is symmetric in exact arithmetic, not in floating point: exchanging the
+anchors flips both `atan2` arguments, and `(a − π) − (b − π)` is not the same float as
+`a − b`. A residual one-ulp difference would leave the motion invariant only
+approximately, and artefacts are compared as bytes.
+
+A rotation also needed one spelling. `Placement.theta_deg` was a difference of two
+`atan2` results, so it ranged over two turns and recorded +180 and −180 for one motion;
+the two ordered differently where a rank compared them and printed differently in a
+report. `Placement` now canonicalises to (−180, 180] on construction, so no construction
+path can hold two spellings of one rotation — including the codec reading a document
+written before this amendment, which is why the angle is normalised rather than refused.
+Only an out-of-range angle is reduced, because reducing an in-range one perturbs it by an
+ulp and would give back the exactness the motion is computed with.
