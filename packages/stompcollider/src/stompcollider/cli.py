@@ -30,6 +30,7 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import CaseRegistration, DrillData, latest_run
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.protocols import (
     Emitter,
     Pipeline,
@@ -564,13 +565,19 @@ def format_stage(stage: Stage[DockData], before: DockData, after: DockData) -> s
 # ---------------------------------------------------------------------------
 
 
-def _traced(pipeline: Pipeline[DockData], data: DockData, out: TextIO | None) -> DockData:
+def _traced(
+    pipeline: Pipeline[DockData],
+    data: DockData,
+    out: TextIO | None,
+    scope: Scope = NO_PROGRESS,
+) -> DockData:
     """Run every stage, printing one line each when tracing is asked for."""
     if out is None:
-        return pipeline.run(data)
+        return pipeline.run(data, scope)
     print("PIPELINE", file=out)
-    for stage in pipeline:
-        before, data = data, Pipeline([stage]).run(data)
+    slots = scope.parts(*(stage.weight for stage in pipeline))
+    for stage, slot in zip(pipeline, slots, strict=True):
+        before, data = data, Pipeline([stage]).run(data, slot)
         print(format_stage(stage, before, data), file=out)
     return data
 
@@ -655,7 +662,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
             pitch_max_nm,
             pitch_min_nm,
         )
-        data = _traced(pipeline, data, out if args.verbose else None)
+        data = _traced(pipeline, data, out if args.verbose else None, NO_PROGRESS)
     except KernelUnavailable:
         raise
     except StompgeomError as failure:

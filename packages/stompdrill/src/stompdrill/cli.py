@@ -26,6 +26,7 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace, DrillData
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.protocols import (
     Emitter,
     Pipeline,
@@ -467,12 +468,14 @@ def run_pipeline(
     pipeline: Pipeline[DrillData],
     data: DrillData,
     trace: Callable[[Stage[DrillData], DrillData, DrillData], None] | None = None,
+    scope: Scope = NO_PROGRESS,
 ) -> DrillData:
     """Run every stage through :meth:`Pipeline.run`, optionally tracing each."""
     if trace is None:
-        return pipeline.run(data)
-    for stage in pipeline:
-        before, data = data, Pipeline([stage]).run(data)
+        return pipeline.run(data, scope)
+    slots = scope.parts(*(stage.weight for stage in pipeline))
+    for stage, slot in zip(pipeline, slots, strict=True):
+        before, data = data, Pipeline([stage]).run(data, slot)
         trace(stage, before, data)
     return data
 
@@ -801,7 +804,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         def trace(stage: Stage[DrillData], before: DrillData, after: DrillData) -> None:
             print(format_stage(stage, before, after), file=out)
 
-    data = run_pipeline(pipeline, data, trace)
+    data = run_pipeline(pipeline, data, trace, NO_PROGRESS)
 
     print(format_report(data), file=out)
 
