@@ -42,6 +42,7 @@ from stompmodel.model import (
     SourceInfo,
     StageRun,
 )
+from stompmodel.progress import NO_PROGRESS
 from stompmodel.protocols import Pipeline, Stage
 from stompmodel.units import Millimetre, Nanometre
 from tests.conftest import FakeCase, at, codes, holes, make_data, positions
@@ -743,11 +744,12 @@ class TestPipelineComposition:
 
         class Recorder:
             name = "recorder"
+            weight = 1.0
 
             def __init__(self, tag: str) -> None:
                 self.tag = tag
 
-            def apply(self, data: DrillData) -> DrillData:
+            def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 calls.append(self.tag)
                 return data.with_diagnostics(Diagnostic.info(self.tag, self.tag))
 
@@ -776,8 +778,9 @@ class TestPipelineComposition:
             stage order rather than anything about ``Deduplicate`` itself."""
 
             name = "widen-to-match"
+            weight = 1.0
 
-            def apply(self, data: DrillData) -> DrillData:
+            def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 target = data.holes[0].diameter_nm
                 return data.with_holes(hole.with_diameter(target) for hole in data.holes)
 
@@ -942,8 +945,9 @@ class TestPipelineRecordsProvenance:
         """The record says what a stage *did*, so it cannot exist before it acts."""
         class Nosy:
             name = "nosy"
+            weight = 1.0
 
-            def apply(self, data: DrillData) -> DrillData:
+            def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 return data.with_diagnostics(
                     Diagnostic.info(
                         "seen", "counted the history", data=(("runs", len(data.processing)),)
@@ -961,8 +965,9 @@ class TestPipelineRecordsProvenance:
     def test_a_stage_that_raises_records_nothing(self):
         class Explodes:
             name = "explodes"
+            weight = 1.0
 
-            def apply(self, data: DrillData) -> DrillData:
+            def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 raise RuntimeError("boom")
 
             def describe(self) -> StageRun:
