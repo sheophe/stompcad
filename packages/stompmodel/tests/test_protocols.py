@@ -20,6 +20,7 @@ from stompmodel.diagnostics import (
     worst_severity,
 )
 from stompmodel.model import DrillData, StageRun
+from stompmodel.progress import NO_PROGRESS
 from stompmodel.protocols import (
     Diagnosable,
     Pipeline,
@@ -43,11 +44,12 @@ class Counter:
 
 class Add:
     name: ClassVar[str] = "add"
+    weight: ClassVar[float] = 1.0
 
     def __init__(self, by: int) -> None:
         self.by = by
 
-    def apply(self, data: Counter) -> Counter:
+    def apply(self, data: Counter, scope=NO_PROGRESS) -> Counter:
         return replace(data, count=data.count + self.by)
 
     def describe(self) -> StageRun:
@@ -83,8 +85,9 @@ def test_a_stage_is_recorded_only_after_it_succeeds() -> None:
 
     class Boom:
         name: ClassVar[str] = "boom"
+        weight: ClassVar[float] = 1.0
 
-        def apply(self, data: Counter) -> Counter:
+        def apply(self, data: Counter, scope=NO_PROGRESS) -> Counter:
             raise RuntimeError("no")
 
         def describe(self) -> StageRun:
@@ -615,3 +618,89 @@ def test_missing_worst_severity_fails_the_protocol_check() -> None:
             return ()
 
     assert not isinstance(NoWorstSeverity(), Diagnosable)
+
+
+# --------------------------------------------------------------------------
+# Stage.weight and the scope a Pipeline opens for each stage.
+# --------------------------------------------------------------------------
+
+
+class _CountingStage:
+    """A stage that records nothing and folds the document unchanged."""
+
+    def __init__(self, name: str, weight: float) -> None:
+        self.name = name
+        self.weight = weight
+
+    def apply(self, data, scope=NO_PROGRESS):
+        return data
+
+    def describe(self) -> StageRun:
+        return StageRun(self.name)
+
+
+@dataclass(frozen=True)
+class _Doc:
+    """The smallest thing ``Pipeline`` can fold: it records processing and nothing else."""
+
+    processing: tuple[StageRun, ...] = ()
+
+    def with_processing(self, run: StageRun) -> _Doc:
+        return _Doc(self.processing + (run,))
+
+
+def test_pipeline_divides_its_span_by_stage_weight() -> None:
+    """A heavier stage takes proportionally more of the bar."""
+    from stompmodel.progress import track
+
+    seen: list[tuple[float, tuple[str, ...]]] = []
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            seen.append((position, path))
+
+    light = _CountingStage("light", 1.0)
+    heavy = _CountingStage("heavy", 3.0)
+    pipeline = Pipeline([light, heavy])
+
+    with track(Recorder()) as scope:
+        pipeline.run(_Doc(), scope)
+
+    named = [path for _position, path in seen if path]
+    assert ("light",) in named
+    assert ("heavy",) in named
+    # The light stage owns the first quarter, so the heavy one starts there.
+    starts = [position for position, path in seen if path == ("heavy",)]
+    assert starts[0] == 0.25
+
+
+def test_pipeline_run_still_works_with_no_scope() -> None:
+    """The default keeps every existing call site correct."""
+    pipeline = Pipeline([_CountingStage("only", 1.0)])
+    assert pipeline.run(_Doc()) is not None
+
+
+def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
+    from stompmodel.progress import track
+
+    received: list[object] = []
+
+    class Watcher:
+        name = "watcher"
+        weight = 1.0
+
+        def apply(self, data, scope):
+            received.append(scope)
+            return data
+
+        def describe(self):
+            return StageRun(self.name)
+
+    class Silent:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            return None
+
+    with track(Silent()) as scope:
+        Pipeline([Watcher()]).run(_Doc(), scope)
+
+    assert received and received[0] is not scope
