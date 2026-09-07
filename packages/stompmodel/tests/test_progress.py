@@ -6,6 +6,7 @@ the way ``stompcad`` will rather than through the fold's internals.
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -121,4 +122,10 @@ def test_weighted_children_partition_their_parent(weights: list[float]) -> None:
     with track(recorder) as root:
         for _slot in root.parts(*weights):
             pass
+    # Independent of the fold's own accumulation: each child closes with an
+    # advance to its cumulative share of the parent's span, computed here
+    # from ``sum()`` rather than replayed from ``_divide``'s running total.
+    total = sum(weights)
+    expected_boundaries = [sum(weights[: i + 1]) / total for i in range(len(weights))]
+    assert recorder.positions[: len(weights)] == pytest.approx(expected_boundaries, rel=1e-9)
     assert recorder.positions[-1] == 1.0

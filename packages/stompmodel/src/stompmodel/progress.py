@@ -128,11 +128,15 @@ class _Node:
 
         Positions are computed from a running total rather than from the
         previous child's end, so a long division does not accumulate float
-        error along the way. ``sum(weights)`` and the running ``done`` add
-        the same values in different orders, so they can disagree by a
-        rounding step; each bound is clamped to this node's own span so
-        that disagreement can never let a child claim territory past its
-        parent's end.
+        error along the way. ``sum(weights)`` uses CPython's compensated
+        summation for floats; the running ``done`` below adds one weight at
+        a time with plain float addition. Both walk ``weights`` in the same
+        order, but the two algorithms round differently, so ``done`` can
+        overtake ``total`` on the last weight. ``hi`` is clamped to this
+        node's own span so that disagreement can never let the last child
+        claim territory past its parent's end; ``lo`` cannot underflow
+        ``self._lo`` because ``done`` starts at 0 and no weight is negative,
+        so its clamp is there only to keep the two bounds computed alike.
         """
         total = float(sum(weights))
         span = self._hi - self._lo
