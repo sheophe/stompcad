@@ -2867,7 +2867,17 @@ def test_the_reported_hole_still_reaches_the_toolpath(tmp_path):
 
 
 def test_the_command_line_renders_no_progress(capsys, tmp_path) -> None:
-    """The tools carry the protocol and draw nothing: stompcad owns the bar."""
+    """The tools carry the protocol and draw nothing: stompcad owns the bar.
+
+    A progress bar's signature is the *mechanism* of in-place redraw, not any
+    particular character, and that mechanism is not confined to stdout --
+    tools such as tqdm write to stderr by default precisely so piped stdout
+    stays clean. So this guards both streams against a carriage return (every
+    in-place redraw uses one) and an ANSI CSI introducer (colour and cursor
+    movement both need one); a bare ``%`` is a weak extra check kept only on
+    stdout. It deliberately does not require stderr to be empty: a future
+    plain-text warning there is not a progress bar and must not trip this.
+    """
     from stompdrill.cli import main
 
     target = tmp_path / "out.json"
@@ -2883,4 +2893,7 @@ def test_the_command_line_renders_no_progress(capsys, tmp_path) -> None:
     captured = capsys.readouterr()
     assert code in (0, 1)
     assert "\r" not in captured.out
+    assert "\r" not in captured.err
+    assert "\x1b[" not in captured.out
+    assert "\x1b[" not in captured.err
     assert "%" not in captured.out
