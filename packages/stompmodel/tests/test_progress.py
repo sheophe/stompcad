@@ -1,0 +1,124 @@
+"""The weighted fold: partition, monotonicity, and early completion.
+
+A sink records what a renderer would draw, so these tests read the protocol
+the way ``stompcad`` will rather than through the fold's internals.
+"""
+
+from __future__ import annotations
+
+from hypothesis import given
+from hypothesis import strategies as st
+
+from stompmodel.progress import NO_PROGRESS, track
+
+__all__: list[str] = []
+
+
+class Recorder:
+    """Every update in order, for a test to read back."""
+
+    def __init__(self) -> None:
+        self.updates: list[tuple[float, tuple[str, ...]]] = []
+
+    def update(self, position: float, path: tuple[str, ...]) -> None:
+        self.updates.append((position, path))
+
+    @property
+    def positions(self) -> list[float]:
+        return [position for position, _path in self.updates]
+
+    @property
+    def paths(self) -> list[tuple[str, ...]]:
+        return [path for _position, path in self.updates]
+
+
+def test_a_run_that_divides_nothing_still_ends_complete() -> None:
+    recorder = Recorder()
+    with track(recorder):
+        pass
+    assert recorder.positions[-1] == 1.0
+
+
+def test_equal_steps_partition_the_run() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        for _slot in root.steps(4):
+            pass
+    assert recorder.positions[-1] == 1.0
+    assert 0.25 in recorder.positions
+    assert 0.5 in recorder.positions
+    assert 0.75 in recorder.positions
+
+
+def test_weights_divide_in_proportion() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        slots = root.parts(1.0, 3.0)
+        next(slots)
+        next(slots)
+        # The first slot completed when the second was drawn.
+        assert recorder.positions[-1] == 0.25
+        for _rest in slots:
+            pass
+    assert recorder.positions[-1] == 1.0
+
+
+def test_a_child_divides_only_its_own_slot() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        for index, slot in enumerate(root.steps(2)):
+            for _inner in slot.steps(2):
+                pass
+            if index == 0:
+                assert max(recorder.positions) == 0.5
+
+
+def test_labels_accumulate_into_a_path() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        for slot in root.steps(1):
+            slot.label("seat")
+            for inner in slot.steps(1):
+                inner.label("board 1")
+    assert ("seat", "board 1") in recorder.paths
+
+
+def test_abandoning_a_division_does_not_hold_the_run_back() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        for slot in root.steps(2):
+            for _inner in slot.steps(1000):
+                break  # a search that found its answer early
+    assert recorder.positions[-1] == 1.0
+
+
+def test_the_null_scope_reports_nothing_and_still_divides() -> None:
+    for slot in NO_PROGRESS.steps(3):
+        slot.label("ignored")
+        for _inner in slot.parts(1.0, 2.0):
+            pass
+
+
+@given(st.lists(st.integers(min_value=0, max_value=6), min_size=0, max_size=4))
+def test_the_position_never_decreases(shape: list[int]) -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        def walk(scope, remaining):
+            if not remaining:
+                return
+            for slot in scope.steps(remaining[0]):
+                walk(slot, remaining[1:])
+
+        walk(root, shape)
+    positions = recorder.positions
+    assert positions == sorted(positions)
+    assert positions[-1] == 1.0
+
+
+@given(st.lists(st.floats(min_value=0.1, max_value=100.0), min_size=1, max_size=8))
+def test_weighted_children_partition_their_parent(weights: list[float]) -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        for _slot in root.parts(*weights):
+            pass
+    assert recorder.positions[-1] == 1.0
