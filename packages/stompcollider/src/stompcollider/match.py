@@ -18,6 +18,7 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import Hole, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from .model import (
@@ -502,6 +503,7 @@ class Match:
     """
 
     name: ClassVar[str] = "match"
+    weight: ClassVar[float] = 1.0
 
     def __init__(self, tolerance_nm: Nanometre) -> None:
         self._tolerance_nm = tolerance_nm
@@ -510,7 +512,7 @@ class Match:
         """Record the recognition tolerance this stage ran with."""
         return StageRun(self.name, ((TOLERANCE_PARAMETER, int(self._tolerance_nm)),))
 
-    def apply(self, data: DockData) -> DockData:
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
         boards: list[Board] = []
         placements: dict[int, tuple[Placement, ...]] = {}
         diagnostics: list[Diagnostic] = []
