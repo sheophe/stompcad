@@ -11,6 +11,7 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, Hole, ReferenceOutline, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, check_nanometres, format_nm
 
 from ..tolerance import within
@@ -26,6 +27,7 @@ class CheckReferenceSize:
     """
 
     name: ClassVar[str] = "check-reference-size"
+    weight: ClassVar[float] = 1.0
 
     def __init__(
         self,
@@ -52,7 +54,7 @@ class CheckReferenceSize:
             ),
         )
 
-    def apply(self, data: DrillData) -> DrillData:
+    def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         expected_w, expected_h = self.expected_nm
         if data.reference is None:
             return data.with_diagnostics(
@@ -119,12 +121,13 @@ class CheckOutlineContainment:
     """
 
     name: ClassVar[str] = "check-outline-containment"
+    weight: ClassVar[float] = 1.0
 
     def describe(self) -> StageRun:
         """Record that parameter-free containment ran."""
         return StageRun(self.name, ())
 
-    def apply(self, data: DrillData) -> DrillData:
+    def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         outline = data.reference
         if outline is None:
             return data

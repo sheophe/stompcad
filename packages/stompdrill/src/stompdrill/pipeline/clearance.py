@@ -11,6 +11,7 @@ from typing import ClassVar
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseRegistration, DrillData, EnclosureMatch, Hole, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm
 
 from ..cad import CaseModel, Rejection
@@ -28,6 +29,7 @@ class CheckCaseClearance:
     """Diagnose every hole the supplied case model rejects. Drops nothing."""
 
     name: ClassVar[str] = "check-case-clearance"
+    weight: ClassVar[float] = 8.0
 
     def __init__(self, model: CaseModel) -> None:
         self.model = model
@@ -58,7 +60,7 @@ class CheckCaseClearance:
             ),
         )
 
-    def apply(self, data: DrillData) -> DrillData:
+    def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         frame = self._reconciled_frame(data)
         self._checked_frame = frame
         # Equality, not object identity: ``CaseModel`` declares ``frame`` a

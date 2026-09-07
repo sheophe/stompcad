@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from stompmodel.model import DrillData, Hole, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 
 __all__ = ["RouteHoles"]
 
@@ -101,11 +102,12 @@ class RouteHoles:
     """
 
     name: ClassVar[str] = "route"
+    weight: ClassVar[float] = 2.0
 
     def describe(self) -> StageRun:
         return StageRun(self.name, ())
 
-    def apply(self, data: DrillData) -> DrillData:
+    def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         ordered = _routed(data.holes)
         return data.with_holes(
             hole.with_number(number) for number, hole in enumerate(ordered, start=1)

@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData, Hole, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import format_nm
 
 __all__ = ["Deduplicate"]
@@ -25,12 +26,13 @@ class Deduplicate:
     """
 
     name: ClassVar[str] = "deduplicate"
+    weight: ClassVar[float] = 1.0
 
     def describe(self) -> StageRun:
         """Record that parameter-free exact deduplication ran."""
         return StageRun(self.name, ())
 
-    def apply(self, data: DrillData) -> DrillData:
+    def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         groups: list[list[Hole]] = []
 
         for hole in data.holes:
