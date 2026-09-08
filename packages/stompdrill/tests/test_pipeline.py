@@ -8,7 +8,7 @@ import itertools
 import random
 import typing
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from hypothesis import given, settings
@@ -744,7 +744,7 @@ class TestPipelineComposition:
 
         class Recorder:
             name = "recorder"
-            weight = 1.0
+            weight: ClassVar[float] = 1.0
 
             def __init__(self, tag: str) -> None:
                 self.tag = tag
@@ -778,7 +778,7 @@ class TestPipelineComposition:
             stage order rather than anything about ``Deduplicate`` itself."""
 
             name = "widen-to-match"
-            weight = 1.0
+            weight: ClassVar[float] = 1.0
 
             def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 target = data.holes[0].diameter_nm
@@ -945,7 +945,7 @@ class TestPipelineRecordsProvenance:
         """The record says what a stage *did*, so it cannot exist before it acts."""
         class Nosy:
             name = "nosy"
-            weight = 1.0
+            weight: ClassVar[float] = 1.0
 
             def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 return data.with_diagnostics(
@@ -965,7 +965,7 @@ class TestPipelineRecordsProvenance:
     def test_a_stage_that_raises_records_nothing(self):
         class Explodes:
             name = "explodes"
-            weight = 1.0
+            weight: ClassVar[float] = 1.0
 
             def apply(self, data: DrillData, scope=NO_PROGRESS) -> DrillData:
                 raise RuntimeError("boom")

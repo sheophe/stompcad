@@ -57,6 +57,9 @@ class NullScope:
         return iter([self] * count)
 
     def parts(self, *weights: float) -> Iterator[Scope]:
+        for weight in weights:
+            if weight < 0.0:
+                raise ValueError(f"a weight cannot be negative: {weight}")
         return iter([self] * len(weights))
 
     def label(self, name: str) -> None:
@@ -133,15 +136,18 @@ class _Node:
         reason: without it the last child could claim span past its parent's
         end. ``lo`` is computed alike. ADR-0012 records the partition.
         """
+        for weight in weights:
+            if weight < 0.0:
+                raise ValueError(f"a weight cannot be negative: {weight}")
         total = float(sum(weights))
         span = self._hi - self._lo
         try:
             if total <= 0.0:
+                for _weight in weights:
+                    yield _Node(self._run, self._lo, self._lo, self)
                 return
             done = 0.0
             for weight in weights:
-                if weight < 0.0:
-                    raise ValueError(f"a weight cannot be negative: {weight}")
                 lo = min(self._hi, self._lo + span * (done / total))
                 done += weight
                 hi = min(self._hi, self._lo + span * (done / total))

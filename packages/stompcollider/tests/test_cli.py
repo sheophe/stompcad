@@ -450,6 +450,33 @@ def test_a_malformed_filter_is_reported_before_the_input_is_opened(tmp_path, cap
     assert "nowhere.json" in opened
 
 
+def test_the_command_line_renders_no_progress(tmp_path, capsys) -> None:
+    """The tools carry the protocol and draw nothing: stompcad owns the bar.
+
+    Both streams are guarded against a carriage return and an ANSI CSI
+    introducer, the marks every in-place redraw and cursor move leave; a bare
+    ``%`` is a weak extra kept on stdout only. Stderr need not be empty: a
+    plain-text warning is not a progress bar. The malformed-filter path
+    refuses before opening any input, so it proves this as cheaply as a full
+    seating run would.
+    """
+    argv = [
+        str(tmp_path / "nowhere.json"), str(tmp_path / "nowhere.stp"),
+        "--case-model", str(tmp_path / "nowhere.stp"),
+        "--match-tolerance", "0.125",
+        "--panel-reference", "D(",
+    ]
+
+    code = main(argv)
+    captured = capsys.readouterr()
+    assert code == 3
+    assert "\r" not in captured.out
+    assert "\r" not in captured.err
+    assert "\x1b[" not in captured.out
+    assert "\x1b[" not in captured.err
+    assert "%" not in captured.out
+
+
 def test_a_pin_naming_an_impossible_ordinal_is_usage(tmp_path, monkeypatch, capsys) -> None:
     """Boards are numbered from one, so ordinal zero can name no board at all."""
     run = _prepare(tmp_path, monkeypatch)

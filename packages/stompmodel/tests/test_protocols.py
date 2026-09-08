@@ -704,3 +704,43 @@ def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
         Pipeline([Watcher()]).run(_Doc(), scope)
 
     assert received and received[0] is not scope
+
+
+def test_a_stage_with_zero_weight_runs_under_a_live_sink() -> None:
+    """Finding 1(a): ``Pipeline.run`` zips stages against ``scope.parts(...)``
+    with ``strict=True``, so a zero-weight stage must still get a slot -- a
+    real sink that returned none for a zero total raised ``ValueError`` here.
+    """
+    from stompmodel.progress import track
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            pass
+
+    pipeline = Pipeline([_CountingStage("free", 0.0)])
+    with track(Recorder()) as scope:
+        result = pipeline.run(_Doc(), scope)
+
+    assert [run.name for run in result.processing] == ["free"]
+
+
+def test_a_stage_with_zero_weight_runs_under_no_progress() -> None:
+    pipeline = Pipeline([_CountingStage("free", 0.0)])
+    result = pipeline.run(_Doc(), NO_PROGRESS)
+    assert [run.name for run in result.processing] == ["free"]
+
+
+def test_an_empty_pipeline_leaves_data_unchanged_and_completes_the_run() -> None:
+    from stompmodel.progress import track
+
+    updates: list[float] = []
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            updates.append(position)
+
+    with track(Recorder()) as scope:
+        result = Pipeline([]).run(_Doc(), scope)
+
+    assert result == _Doc()
+    assert updates[-1] == 1.0

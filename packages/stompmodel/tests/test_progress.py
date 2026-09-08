@@ -100,6 +100,68 @@ def test_the_null_scope_reports_nothing_and_still_divides() -> None:
             pass
 
 
+def test_a_zero_total_still_yields_one_child_per_weight_under_a_live_sink() -> None:
+    """Finding 1(a): a weight of 0.0 must not vanish under a real sink.
+
+    ``_Node._divide`` used to return early on a non-positive total, so a
+    single zero weight produced no child at all, diverging from
+    ``NullScope`` and breaking a pipeline whose stage weights summed to
+    ``0.0``.
+    """
+    recorder = Recorder()
+    with track(recorder) as root:
+        children = list(root.parts(0.0))
+    assert len(children) == 1
+
+
+def test_a_zero_weight_child_claims_no_share_of_the_bar() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        (only,) = root.parts(0.0)
+        for _inner in only.steps(3):
+            pass
+    assert recorder.positions[-1] == 1.0
+    assert set(recorder.positions) <= {0.0, 1.0}
+
+
+@given(st.lists(st.floats(min_value=0.0, max_value=100.0), min_size=0, max_size=8))
+def test_a_real_scope_and_the_null_scope_agree_on_child_count(
+    weights: list[float],
+) -> None:
+    """Finding 1: the docstring promise that ``NullScope`` divides like a
+    real scope, over weight vectors including all-zero ones."""
+    recorder = Recorder()
+    with track(recorder) as root:
+        real_children = list(root.parts(*weights))
+    null_children = list(NO_PROGRESS.parts(*weights))
+    assert len(real_children) == len(null_children) == len(weights)
+
+
+def test_a_negative_weight_raises_from_a_real_scope() -> None:
+    recorder = Recorder()
+    with track(recorder) as root:
+        with pytest.raises(ValueError, match="cannot be negative"):
+            list(root.parts(-1.0))
+
+
+def test_a_negative_weight_raises_from_the_null_scope() -> None:
+    """Finding 1(b): ``NullScope.parts`` accepted anything before this fix."""
+    with pytest.raises(ValueError, match="cannot be negative"):
+        list(NO_PROGRESS.parts(-1.0))
+
+
+def test_a_single_negative_weight_raises_even_though_the_total_is_negative() -> None:
+    """Finding 1(c): the old guard checked ``total <= 0.0`` before the
+    validating loop, so ``parts(-1.0)`` returned silently instead of
+    raising -- the negative-weight check fired only when some other
+    weight kept the total positive.
+    """
+    recorder = Recorder()
+    with track(recorder) as root:
+        with pytest.raises(ValueError, match="cannot be negative"):
+            list(root.parts(-1.0))
+
+
 @given(st.lists(st.integers(min_value=0, max_value=6), min_size=0, max_size=4))
 def test_the_position_never_decreases(shape: list[int]) -> None:
     recorder = Recorder()
