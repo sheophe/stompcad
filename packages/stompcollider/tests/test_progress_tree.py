@@ -28,7 +28,7 @@ from stompmodel.model import DrillData
 from stompmodel.progress import track
 from stompmodel.units import Nanometre
 from tests import tar
-from tests.test_seat import _Stopping
+from tests.conftest import _Stopping
 
 __all__: list[str] = []
 

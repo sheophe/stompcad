@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import pytest
 
+from stompcollider.insert import Insertion
+from stompmodel.progress import NO_PROGRESS, Scope
+from stompmodel.units import Nanometre
+
 __all__: list[str] = []
 
 
@@ -42,6 +46,30 @@ def pytest_collection_modifyitems(config, items) -> None:
     for item in items:
         if "boards" in item.keywords:
             item.add_marker(skip)
+
+
+class _Stopping:
+    """A cavity that answers one fixed insertion, whatever it is asked.
+
+    Shared between ``test_seat.py``, which drives it through most of
+    ``Seat``'s ranking rules, and ``test_progress_tree.py``, which uses it
+    as the cheapest possible search: it never touches the ``scope`` it is
+    handed, so a placement closing at 1.0 around it proves the parent's own
+    advance, not anything this double does.
+    """
+
+    def __init__(self, found: Insertion) -> None:
+        self.found = found
+        self.asked: list[tuple[int, Nanometre]] = []
+
+    def insertion(
+        self, board, placement, basis, scope: Scope = NO_PROGRESS
+    ) -> Insertion:
+        self.asked.append((board.ordinal, placement.z_nm))
+        return self.found
+
+    def parameters(self) -> tuple[tuple[str, int], ...]:
+        return (("seat_pitch_max_nm", 2_000_000), ("seat_pitch_min_nm", 50_000))
 
 
 @pytest.fixture(scope="session")
