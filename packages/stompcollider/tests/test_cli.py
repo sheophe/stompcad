@@ -454,12 +454,12 @@ def test_the_command_line_renders_no_progress(tmp_path, monkeypatch, capsys) -> 
     """The tools carry the protocol and draw nothing: stompcad owns the bar.
 
     A malformed filter refuses before any scope opens, so it cannot prove
-    this guard: the CLI's only progress-bearing call site is ``_traced``,
-    reached solely by a run that seats a board. This drives a real run
-    through ``_prepare`` and checks the terminal report it prints, so the
-    stream assertions below are watching the one path that could carry a
-    bar. ``captured.out`` is asserted non-empty so the guard cannot pass by
-    having nothing to inspect.
+    this guard: only a run that seats a board reaches ``_traced``, the
+    CLI's one progress-bearing call site. This drives that run through
+    ``_prepare`` and checks the printed report; ``captured.out`` is
+    asserted non-empty so the guard cannot pass by inspecting nothing.
+    ``%`` is a weak extra beside the real carriage-return and CSI-introducer
+    signatures, holding only while the report carries no percentage of its own.
     """
     run = _prepare(tmp_path, monkeypatch, post=True)
 

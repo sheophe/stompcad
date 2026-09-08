@@ -20,7 +20,7 @@ from stompmodel.diagnostics import (
     worst_severity,
 )
 from stompmodel.model import DrillData, StageRun
-from stompmodel.progress import NO_PROGRESS
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.protocols import (
     Diagnosable,
     Pipeline,
@@ -625,18 +625,27 @@ def test_missing_worst_severity_fails_the_protocol_check() -> None:
 # --------------------------------------------------------------------------
 
 
-class _CountingStage:
-    """A stage that records nothing and folds the document unchanged."""
+def _counting_stage(name: str, weight: float) -> Stage[_Doc]:
+    """Build a stage that records nothing and folds the document unchanged.
 
-    def __init__(self, name: str, weight: float) -> None:
-        self.name = name
-        self.weight = weight
+    A real stage fixes ``name`` and ``weight`` as ``ClassVar``s once, on the
+    class, never per instance -- see ``Add`` above. This returns a fresh
+    class per call so each one is a true ``ClassVar`` implementer of its
+    own constants, rather than an instance attribute merely shaped like one.
+    """
+    stage_name, stage_weight = name, weight
 
-    def apply(self, data, scope=NO_PROGRESS):
-        return data
+    class _Stage:
+        name: ClassVar[str] = stage_name
+        weight: ClassVar[float] = stage_weight
 
-    def describe(self) -> StageRun:
-        return StageRun(self.name)
+        def apply(self, data: _Doc, scope: Scope = NO_PROGRESS) -> _Doc:
+            return data
+
+        def describe(self) -> StageRun:
+            return StageRun(self.name)
+
+    return _Stage()
 
 
 @dataclass(frozen=True)
@@ -645,8 +654,8 @@ class _Doc:
 
     processing: tuple[StageRun, ...] = ()
 
-    def with_processing(self, run: StageRun) -> _Doc:
-        return _Doc(self.processing + (run,))
+    def with_processing(self, *runs: StageRun) -> _Doc:
+        return _Doc(self.processing + runs)
 
 
 def test_pipeline_divides_its_span_by_stage_weight() -> None:
@@ -659,8 +668,8 @@ def test_pipeline_divides_its_span_by_stage_weight() -> None:
         def update(self, position: float, path: tuple[str, ...]) -> None:
             seen.append((position, path))
 
-    light = _CountingStage("light", 1.0)
-    heavy = _CountingStage("heavy", 3.0)
+    light = _counting_stage("light", 1.0)
+    heavy = _counting_stage("heavy", 3.0)
     pipeline = Pipeline([light, heavy])
 
     with track(Recorder()) as scope:
@@ -676,7 +685,7 @@ def test_pipeline_divides_its_span_by_stage_weight() -> None:
 
 def test_pipeline_run_still_works_with_no_scope() -> None:
     """The default keeps every existing call site correct."""
-    pipeline = Pipeline([_CountingStage("only", 1.0)])
+    pipeline = Pipeline([_counting_stage("only", 1.0)])
     assert pipeline.run(_Doc()) is not None
 
 
@@ -686,14 +695,14 @@ def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
     received: list[object] = []
 
     class Watcher:
-        name = "watcher"
-        weight = 1.0
+        name: ClassVar[str] = "watcher"
+        weight: ClassVar[float] = 1.0
 
-        def apply(self, data, scope):
+        def apply(self, data: _Doc, scope: Scope = NO_PROGRESS) -> _Doc:
             received.append(scope)
             return data
 
-        def describe(self):
+        def describe(self) -> StageRun:
             return StageRun(self.name)
 
     class Silent:
@@ -717,7 +726,7 @@ def test_a_stage_with_zero_weight_runs_under_a_live_sink() -> None:
         def update(self, position: float, path: tuple[str, ...]) -> None:
             pass
 
-    pipeline = Pipeline([_CountingStage("free", 0.0)])
+    pipeline = Pipeline([_counting_stage("free", 0.0)])
     with track(Recorder()) as scope:
         result = pipeline.run(_Doc(), scope)
 
@@ -725,7 +734,7 @@ def test_a_stage_with_zero_weight_runs_under_a_live_sink() -> None:
 
 
 def test_a_stage_with_zero_weight_runs_under_no_progress() -> None:
-    pipeline = Pipeline([_CountingStage("free", 0.0)])
+    pipeline = Pipeline([_counting_stage("free", 0.0)])
     result = pipeline.run(_Doc(), NO_PROGRESS)
     assert [run.name for run in result.processing] == ["free"]
 
@@ -740,7 +749,7 @@ def test_an_empty_pipeline_leaves_data_unchanged_and_completes_the_run() -> None
             updates.append(position)
 
     with track(Recorder()) as scope:
-        result = Pipeline([]).run(_Doc(), scope)
+        result = Pipeline[_Doc]([]).run(_Doc(), scope)
         # ``track`` has not exited yet, so this position can only have come
         # from ``_divide``'s own ``finally`` closing the empty division.
         assert updates[-1] == 1.0
