@@ -13,7 +13,7 @@ from pathlib import Path
 from stompdrill import cli
 from stompdrill.quantise import RawDrillData, quantise
 from stompmodel.progress import track
-from tests.conftest import FakeCase
+from tests.conftest import FakeCase, build_pipeline_for_test
 
 __all__: list[str] = []
 
@@ -138,3 +138,29 @@ def test_no_labelled_phase_reopens_after_the_run_reports_done() -> None:
     assert empty_path_indices, "the run never closed its root division"
     last_root_close = empty_path_indices[-1]
     assert all(path == () for _position, path in settled[last_root_close:])
+
+
+def test_each_stage_reports_the_unit_it_walks(tar_quantised) -> None:
+    """Holes for the per-hole stages, tools for the router.
+
+    ``RouteHoles`` counts distinct diameters because ``_two_opt`` inside a
+    block has no bounded pass count, so a block is one leaf.
+    """
+    recorder = Recorder()
+    pipeline = build_pipeline_for_test()
+    with track(recorder) as scope:
+        pipeline.run(tar_quantised, scope)
+
+    named = {path[0] for path in recorder.paths if path}
+    assert {"deduplicate", "review-grid-ties", "route", "check-outline-containment"} <= named
+
+    under_route = [p for p in recorder.paths if len(p) > 1 and p[0] == "route"]
+    tools = {hole.diameter_nm for hole in tar_quantised.holes}
+    assert len({p[1] for p in under_route}) == len(tools)
+
+    # Not a set of labels: tar.ai carries one bit-identical raw-coordinate
+    # duplicate (test_quantise_reports_one_step_per_raw_hole's fixture fact),
+    # so two position labels collide by content. The count under test is
+    # slots opened, one per hole, not distinct label text.
+    under_dedupe = [p for p in recorder.paths if len(p) > 1 and p[0] == "deduplicate"]
+    assert len(under_dedupe) == len(tar_quantised.holes)

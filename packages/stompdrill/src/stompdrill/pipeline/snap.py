@@ -186,7 +186,13 @@ class ReviewGridTies:
         grid_nm = data.grid_nm
         if grid_nm is None:
             return data
-        tied = tuple((h.x_nm, h.y_nm) for h in data.holes if _is_tied(h, grid_nm))
+        tied_positions: list[tuple[Nanometre, Nanometre]] = []
+        slots = scope.steps(len(data.holes))
+        for hole, slot in zip(data.holes, slots, strict=True):
+            slot.label(f"hole {hole.raw.x:.3f},{hole.raw.y:.3f}")
+            if _is_tied(hole, grid_nm):
+                tied_positions.append((hole.x_nm, hole.y_nm))
+        tied = tuple(tied_positions)
         return data.with_diagnostics(*((_ambiguous(tied, grid_nm),) if tied else ()))
 
 
