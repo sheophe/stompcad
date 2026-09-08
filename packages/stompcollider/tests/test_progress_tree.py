@@ -19,16 +19,17 @@ from stompcollider import clash
 from stompcollider.clash import Clashes
 from stompcollider.insert import Insertion, contact_depth
 from stompcollider.match import Match
-from stompcollider.model import DockData
+from stompcollider.model import Board, DockData, Placement
 from stompcollider.seat import Seat
 from stompcollider.sources import BoardSource
 from stompcollider.sources import step as source_step
 from stompgeom.build import PlacedSolid, build_document
-from stompgeom.step import StepDocument, read_step_document
+from stompgeom.step import StepDocument, StepSolid, read_step_document
 from stompmodel.codec import to_document
-from stompmodel.model import DrillData
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace, CaseRegistration, DrillData
 from stompmodel.progress import track
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, nm_from_mm
 from tests import tar
 from tests.conftest import _Stopping
 
@@ -420,32 +421,164 @@ def test_clashes_reports_boards_then_placements(tar_seated: DockData, tar_solids
         assert len(under) == len(placements)
 
 
-@pytest.mark.boards
-def test_the_assembly_search_counts_distinct_pairs_not_combinations(
-    tar_seated: DockData, tar_solids, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Most of the product's iterations are cache hits in ``_between``.
+# --------------------------------------------------------------------------
+# Stage two needs a scene where a board pair genuinely recurs. The tar
+# fixture cannot give one: two boards is one pair, and product() over one
+# pair's own candidates never repeats a request, so every ``_between`` call
+# there is a first-ever (a miss) -- gating on the miss would look identical
+# to labelling every call. Three boards with two candidates each gives
+# three pairs and eight combinations; pair (1, 2) is asked again by every
+# combination that only varies board 3, which is what makes a hit real.
+# Built the same kernel-backed-but-synthetic way test_clash.py's own scenes
+# are (small OCP boxes, no STEP file, no --boards): with an empty case
+# tuple neither board ever meets the case, so every placement is cavity-
+# clean and both of a board's candidates tie on shortfall (rank_key falls
+# through to the transform, both at z = 0), which is what admits both.
+# --------------------------------------------------------------------------
 
-    Counting combinations would advance the bar through memory lookups.
-    The leaf count must follow the distinct seatings and must not move
-    when the enumeration limit does.
+
+def _three_board_two_candidate_scene() -> (
+    tuple[DockData, tuple[StepSolid, ...], dict[int, tuple[StepSolid, ...]]]
+):
+    """Three boards, two tied-shortfall candidates each, spaced apart on
+    ``y`` so no pair of boards ever shares a box -- what is counted is the
+    division, not which pairs happen to clash. Returns the raw solids
+    rather than a built ``Clashes``, because ``Clashes`` memoises: two
+    measurements against one instance would answer the second from cache
+    alone, with nothing left to label."""
+    frame = CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        u=(1.0, 0.0, 0.0),
+        v=(0.0, 1.0, 0.0),
+        w=(0.0, 0.0, 1.0),
+    )
+    boards = tuple(
+        Board(
+            ordinal=ordinal,
+            designators=(f"J{ordinal}",),
+            extent_nm=(nm_from_mm(10.0), nm_from_mm(10.0), nm_from_mm(2.0)),
+            carrier=frame,
+            components=(),
+        )
+        for ordinal in (1, 2, 3)
+    )
+    placements = {
+        ordinal: tuple(
+            Placement(
+                rank=rank,
+                x_nm=nm_from_mm(x_mm),
+                y_nm=Nanometre(0),
+                z_nm=Nanometre(0),
+                theta_deg=0.0,
+                correspondence=(),
+                clashes=(),
+            )
+            for rank, x_mm in enumerate((0.0, 50.0), start=1)
+        )
+        for ordinal in (1, 2, 3)
+    }
+    data = DockData(
+        case=CaseRegistration("1590BB", CaseFace.BOX, "case.stp", FaceFrame(frame)),
+        boards=boards,
+        placements=placements,
+    )
+    board_solids: dict[int, tuple[StepSolid, ...]] = {
+        ordinal: (StepSolid(f"B{ordinal}", _clash_box((0.0, 300.0 * ordinal, 0.0), 10, 10, 4)),)
+        for ordinal in (1, 2, 3)
+    }
+    case_solids: tuple[StepSolid, ...] = ()
+    return data, case_solids, board_solids
+
+
+def _clash_box(at: tuple[float, float, float], dx: float, dy: float, dz: float) -> Any:
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    return BRepPrimAPI_MakeBox(gp_Pnt(*at), dx, dy, dz).Shape()
+
+
+def _distinct_pair_leaves(
+    data: DockData,
+    case_solids: tuple[StepSolid, ...],
+    board_solids: dict[int, tuple[StepSolid, ...]],
+) -> set[str]:
+    """A fresh ``Clashes`` every call: its memo must not leak between
+    measurements, or a second call answers entirely from cache."""
+    recorder = Recorder()
+    with track(recorder) as scope:
+        for slot in scope.parts(Clashes.weight):
+            slot.label(Clashes.name)
+            Clashes(case_solids, board_solids).apply(data, slot)
+    return {
+        p[1]
+        for p in recorder.paths
+        if len(p) > 1 and p[0] == "clashes" and "×" in p[1]
+    }
+
+
+def test_the_assembly_leaves_match_the_distinct_candidate_pairs() -> None:
+    """Three boards, two candidates each, three pairs: 3 x (2 x 2) = 12.
+
+    Pinned against the independently-derived formula, not the fixture's own
+    ``_between`` call count (24, below) -- a wrong formula that still
+    happens to gate correctly would otherwise pass unnoticed.
     """
+    data, case_solids, board_solids = _three_board_two_candidate_scene()
 
-    def leaves() -> int:
-        return len({p[1] for p in _clashes_leaves(tar_seated, tar_solids) if "×" in p[1]})
+    assert len(_distinct_pair_leaves(data, case_solids, board_solids)) == 12
 
-    baseline = leaves()
-    assert baseline > 0
-    monkeypatch.setattr(clash, "_COMBINATION_LIMIT", 8)
-    assert leaves() == baseline
+
+def test_the_assembly_search_labels_only_cache_misses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The product tries 8 combinations across 3 pairs -- 24 pairwise
+    checks -- but 12 of those requests repeat a pair already answered.
+    Counting every call, not only the miss, would report 24 rather than the
+    12 this module's other test pins."""
+    data, case_solids, board_solids = _three_board_two_candidate_scene()
+    calls = 0
+    original = Clashes._between
+
+    def counting(self: Clashes, *args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Clashes, "_between", counting)
+    leaves = _distinct_pair_leaves(data, case_solids, board_solids)
+
+    assert calls == 24
+    assert len(leaves) == 12
+    assert calls != len(leaves)
+
+
+def test_the_assembly_search_advances_fewer_slots_when_the_product_is_truncated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``distinct`` is computed from ``candidates`` before the search runs
+    and does not depend on the limit; the *advances* do, because a
+    truncated product asks fewer of its 12 possible pairs. A limit of 4
+    (below the 8 possible combinations) tries only the four combinations
+    that fix board 1's first candidate, which touch 8 of the 12 pairs --
+    fewer, not the same 12, and not the 24 raw calls either."""
+    data, case_solids, board_solids = _three_board_two_candidate_scene()
+    baseline = len(_distinct_pair_leaves(data, case_solids, board_solids))
+    assert baseline == 12
+
+    monkeypatch.setattr(clash, "_COMBINATION_LIMIT", 4)
+    truncated = len(_distinct_pair_leaves(data, case_solids, board_solids))
+
+    assert truncated == 8
+    assert truncated < baseline
 
 
 @pytest.mark.boards
-def test_the_assembly_leaves_match_the_admitted_candidate_pairs(
+def test_the_assembly_search_reaches_the_tar_fixtures_one_real_pair(
     tar_seated: DockData, tar_solids
 ) -> None:
-    """The tar fixture's own fact, fixed per decision 4's "counts are
-    structural" property: both boards admit both mirror placements, so the
-    one board pair in this assembly contributes 2 x 2 distinct leaves."""
+    """The control against real geometry: the tar fixture has one board
+    pair with two admitted candidates each, so it cannot exercise a cache
+    hit (see the module note above) -- it can only show the formula still
+    gives 2 x 2 = 4 on real boards, not only on the synthetic scene."""
     pairs = {p[1] for p in _clashes_leaves(tar_seated, tar_solids) if "×" in p[1]}
     assert len(pairs) == 4

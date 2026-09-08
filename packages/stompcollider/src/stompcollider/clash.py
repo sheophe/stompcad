@@ -435,13 +435,15 @@ class Clashes:
     ) -> dict[int, tuple[Placement, ...]]:
         """Stage one's survivors: the seatings the cavity admits *and* that seat.
 
-        Two conditions, and the second is not redundant. A board the case arrests
-        well out of it clears the cavity by resting against it, and fouls a
-        neighbour less than the seating that really goes in -- on the tar
-        assembly a 14 mm shortfall wins stage two outright. A seating that
-        inserts less far than another of the same board is not a candidate,
-        exactly as one that fouls the enclosure is not; stage two then chooses
-        among boards that are all equally seated, on mutual interference alone.
+        Two conditions, and the second is not redundant. A board the case
+        arrests well out of it clears the cavity by resting against it, and
+        it fouls a neighbour less than the seating that really goes in --
+        precisely because it never went in. Measured on the tar assembly,
+        that is a 14 mm shortfall winning stage two outright. A seating
+        that inserts less far than another of the same board is not a
+        candidate, exactly as one that fouls the enclosure is not; stage
+        two then chooses among boards that are all equally seated, on
+        mutual interference alone.
         """
         candidates: dict[int, tuple[Placement, ...]] = {}
         for ordinal in sorted(ranked):
