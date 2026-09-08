@@ -690,6 +690,10 @@ def test_pipeline_run_still_works_with_no_scope() -> None:
 
 
 def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
+    """A stage handed ``NO_PROGRESS`` instead of its own slot would still
+    satisfy ``received[0] is not scope``, since the default is a distinct
+    object from the parent scope. The second assertion rules that out.
+    """
     from stompmodel.progress import track
 
     received: list[object] = []
@@ -713,6 +717,7 @@ def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
         Pipeline([Watcher()]).run(_Doc(), scope)
 
     assert received and received[0] is not scope
+    assert received[0] is not NO_PROGRESS
 
 
 def test_a_stage_with_zero_weight_runs_under_a_live_sink() -> None:
