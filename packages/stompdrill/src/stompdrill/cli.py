@@ -737,14 +737,18 @@ def _format_trace(
 
 
 def _write(
-    emitters: Sequence[tuple[Emitter[DrillData], Path]], data: DrillData
+    emitters: Sequence[tuple[Emitter[DrillData], Path]],
+    data: DrillData,
+    scope: Scope = NO_PROGRESS,
 ) -> list[str]:
     """Render every artefact, then stage every one, then commit every one.
 
     Every payload is rendered before any target is touched. Neither loop
     below is this file's own: staging and the whole-set transaction are
     ``stompmodel``'s, and this keeps only the sentence it prints from the
-    count each commit returned -- see ADR-0001 and ADR-0005.
+    count each commit returned -- see ADR-0001 and ADR-0005. ``scope`` is
+    not yet divided among targets; it is received so the caller's emit slot
+    has somewhere to go.
     """
     rendered = [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
     staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
@@ -764,7 +768,13 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
     ]
 
 
-def _run(args: argparse.Namespace, out: TextIO) -> int:
+#: The shape of a drill run: reading and quantisation are bounded by the
+#: artwork, the pipeline carries the only stage that consults a model, and
+#: emitting writes what the earlier three decided.
+_RUN_WEIGHTS = (1.0, 2.0, 6.0, 3.0)
+
+
+def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
     try:
         check_target_set([path for _format, path in targets])
@@ -784,17 +794,31 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     quantisers = build_quantisers(args)
     pipeline = build_pipeline(args)
+
+    read_slot, quantise_slot, pipeline_slot, emit_slot = scope.parts(*_RUN_WEIGHTS)
+    read_slot.label("read")
+    # The case model, when given, was already read above; this only records
+    # that its span belongs to reading, alongside the artwork parse that is
+    # about to run.
+    if args.case_model_object is not None:
+        artwork_slot, case_slot = read_slot.steps(2)
+        case_slot.label("case model")
+    else:
+        (artwork_slot,) = read_slot.steps(1)
+    artwork_slot.label("artwork")
     raw = read_source(args)
 
     if args.verbose:
         print("PIPELINE", file=out)
         print(f"  {'(source)':<20} {len(raw.holes):>3} holes", file=out)
 
+    quantise_slot.label("quantise")
     data = quantise(
         raw,
         enclosure=quantisers.enclosure,
         diameters=quantisers.diameters,
         positions=quantisers.positions,
+        scope=quantise_slot,
     )
 
     trace: Callable[[Stage[DrillData], DrillData, DrillData], None] | None = None
@@ -804,10 +828,12 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         def trace(stage: Stage[DrillData], before: DrillData, after: DrillData) -> None:
             print(format_stage(stage, before, after), file=out)
 
-    data = run_pipeline(pipeline, data, trace, NO_PROGRESS)
+    pipeline_slot.label("pipeline")
+    data = run_pipeline(pipeline, data, trace, pipeline_slot)
 
     print(format_report(data), file=out)
 
+    emit_slot.label("emit")
     if emitters:
         print(file=out)
         if data.worst_severity is Severity.ERROR:
@@ -815,7 +841,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
             # here, and one of them may legitimately refuse data this broken.
             print("\n".join(_withheld(emitters)), file=out)
         else:
-            for line in _write(emitters, data):
+            for line in _write(emitters, data, emit_slot):
                 print(line, file=out)
 
     print("\n".join(format_summary(data)), file=out)
@@ -833,7 +859,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Expected user-facing failures share one handler. Unexpected faults retain
     # their tracebacks rather than being classified as invalid input.
     try:
-        return _run(args, sys.stdout)
+        return _run(args, sys.stdout, NO_PROGRESS)
     except (UsageError, StompError, OSError) as failure:
         print(f"{parser.prog}: error: {failure}", file=sys.stderr)
         return EXIT_USAGE
