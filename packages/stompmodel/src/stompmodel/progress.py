@@ -125,17 +125,13 @@ class _Node:
     def _divide(self, weights: Sequence[float]) -> Iterator[Scope]:
         """Yield one child per weight, then close this node at its own end.
 
-        Positions are computed from a running total rather than from the
-        previous child's end, so a long division does not accumulate float
-        error along the way. ``sum(weights)`` uses CPython's compensated
-        summation for floats; the running ``done`` below adds one weight at
-        a time with plain float addition. Both walk ``weights`` in the same
-        order, but the two algorithms round differently, so ``done`` can
-        overtake ``total`` on the last weight. ``hi`` is clamped to this
-        node's own span so that disagreement can never let the last child
-        claim territory past its parent's end; ``lo`` cannot underflow
-        ``self._lo`` because ``done`` starts at 0 and no weight is negative,
-        so its clamp is there only to keep the two bounds computed alike.
+        Each bound comes from a running total, not from the previous child's
+        end, so a long division accumulates no float error. ``total`` uses
+        CPython's compensated summation while ``done`` adds one weight at a
+        time, so the two algorithms round differently and ``done`` can
+        overtake ``total`` on the last weight. ``hi`` is clamped for that
+        reason: without it the last child could claim span past its parent's
+        end. ``lo`` is computed alike. ADR-0012 records the partition.
         """
         total = float(sum(weights))
         span = self._hi - self._lo
