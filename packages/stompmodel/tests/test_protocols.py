@@ -658,6 +658,17 @@ class _Doc:
         return _Doc(self.processing + runs)
 
 
+def test_the_document_stand_in_records_runs_in_order() -> None:
+    """The stand-in must accumulate like the real documents do.
+
+    ``Processable`` is variadic, and a stand-in that dropped a run would
+    let a provenance test pass for the wrong reason.
+    """
+    first, second = StageRun("first"), StageRun("second")
+    assert _Doc().with_processing(first, second).processing == (first, second)
+    assert _Doc().with_processing().processing == ()
+
+
 def test_pipeline_divides_its_span_by_stage_weight() -> None:
     """A heavier stage takes proportionally more of the bar."""
     from stompmodel.progress import track
@@ -683,10 +694,18 @@ def test_pipeline_divides_its_span_by_stage_weight() -> None:
     assert starts[0] == 0.25
 
 
-def test_pipeline_run_still_works_with_no_scope() -> None:
-    """The default keeps every existing call site correct."""
-    pipeline = Pipeline([_counting_stage("only", 1.0)])
-    assert pipeline.run(_Doc()) is not None
+def test_pipeline_run_supplies_a_default_scope() -> None:
+    """A caller outside a pipeline must be able to omit the scope.
+
+    Asserted on the signature, not on the call: a one-argument call would
+    have succeeded before the parameter existed at all, so it cannot show
+    that the default is present.
+    """
+    import inspect
+
+    default = inspect.signature(Pipeline.run).parameters["scope"].default
+    assert default is NO_PROGRESS
+    assert Pipeline([_counting_stage("only", 1.0)]).run(_Doc()) is not None
 
 
 def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
