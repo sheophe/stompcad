@@ -25,6 +25,7 @@ from stompmodel.diagnostics import Diagnostic
 from stompmodel.errors import DocumentError
 from stompmodel.frames import dot
 from stompmodel.model import DrillData, EnclosureMatch
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from ..boards import basis_about, carrier_frame, group, negated, substrates
@@ -88,17 +89,25 @@ class BoardSource:
         """Just the measurements of :meth:`scan`, for a caller wanting no geometry."""
         return self.scan().raw
 
-    def scan(self) -> BoardScan:
+    def scan(self, scope: Scope = NO_PROGRESS) -> BoardScan:
         """Measure every board, having first checked the case model is the right one.
 
         Board files are read in sorted order, not the order the operator
         listed them: two spellings of one command line must reach the same
         artefact, which ADR-0006 requires of element order generally. Each
-        board's own solids come back beside its measurements, because the
-        clash check and the assembly need the geometry a second read of the
-        same files would only recover less reliably.
+        board's own solids come back beside its measurements, since a second
+        read would recover them less reliably. ``scope`` divides the run the
+        same way: the drill document, the case model, then each board file.
         """
+        paths = sorted(self.boards)
+        slots = scope.parts(1.0, 3.0, float(len(paths)) or 1.0)
+
+        drill_slot = next(slots)
+        drill_slot.label("drill document")
         drill = from_document(json.loads(self.drill.read_text(encoding="utf-8")))
+
+        case_slot = next(slots)
+        case_slot.label("case model")
         case = read_step(self.case_model)
 
         probes = _probes(drill)
@@ -110,7 +119,9 @@ class BoardSource:
 
         measured: list[RawBoard] = []
         geometry: list[BoardGeometry] = []
-        for path in sorted(self.boards):
+        boards_slot = next(slots)
+        for path, slot in zip(paths, boards_slot.steps(len(paths)), strict=True):
+            slot.label(path.name)
             try:
                 document = read_step(path)
             except DocumentError as failure:
@@ -124,6 +135,7 @@ class BoardSource:
             for substrate, parts in group(document, found):
                 measured.append(_board(substrate, parts, path, probes))
                 geometry.append(BoardGeometry(document, (substrate, *parts)))
+        next(slots, None)
 
         if len(measured) > 1:
             diagnostics.append(
