@@ -2869,14 +2869,13 @@ def test_the_reported_hole_still_reaches_the_toolpath(tmp_path):
 def test_the_command_line_renders_no_progress(capsys, tmp_path) -> None:
     """The tools carry the protocol and draw nothing: stompcad owns the bar.
 
-    A progress bar's signature is the *mechanism* of in-place redraw, not any
-    particular character, and that mechanism is not confined to stdout --
-    tools such as tqdm write to stderr by default precisely so piped stdout
-    stays clean. So this guards both streams against a carriage return (every
-    in-place redraw uses one) and an ANSI CSI introducer (colour and cursor
-    movement both need one); a bare ``%`` is a weak extra check kept only on
-    stdout. It deliberately does not require stderr to be empty: a future
-    plain-text warning there is not a progress bar and must not trip this.
+    A bar's signature is the mechanism of in-place redraw, not any particular
+    character, and tools such as tqdm write to stderr by default so that piped
+    stdout stays clean. Both streams are therefore guarded against a carriage
+    return and an ANSI CSI introducer, the marks every in-place redraw and every
+    cursor move leave; a bare ``%`` is a weak extra kept on stdout only. Stderr
+    is deliberately not required to be empty: a plain-text warning there is not
+    a progress bar and must not trip this.
     """
     from stompdrill.cli import main
 
