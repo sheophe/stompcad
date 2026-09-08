@@ -781,6 +781,17 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
     except ValueError as error:
         raise UsageError(str(error)) from error
 
+    read_slot, quantise_slot, pipeline_slot, emit_slot = scope.parts(*_RUN_WEIGHTS)
+    read_slot.label("read")
+    # A run always reads the artwork; a case model is a second, equally
+    # weighted STEP read only when --case-model names one. The leaf opens
+    # here, immediately before the read it names, so its span is the read.
+    if args.case_model is not None:
+        case_slot, artwork_slot = read_slot.steps(2)
+        case_slot.label("case model")
+    else:
+        (artwork_slot,) = read_slot.steps(1)
+
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
     # part number in no catalogue, an unloadable case model and a form depth
@@ -795,16 +806,6 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
     quantisers = build_quantisers(args)
     pipeline = build_pipeline(args)
 
-    read_slot, quantise_slot, pipeline_slot, emit_slot = scope.parts(*_RUN_WEIGHTS)
-    read_slot.label("read")
-    # The case model, when given, was already read above; this only records
-    # that its span belongs to reading, alongside the artwork parse that is
-    # about to run.
-    if args.case_model_object is not None:
-        artwork_slot, case_slot = read_slot.steps(2)
-        case_slot.label("case model")
-    else:
-        (artwork_slot,) = read_slot.steps(1)
     artwork_slot.label("artwork")
     raw = read_source(args)
 
