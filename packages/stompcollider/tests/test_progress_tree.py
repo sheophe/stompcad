@@ -13,6 +13,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from stompcollider.match import Match
+from stompcollider.model import DockData
 from stompcollider.sources import BoardSource
 from stompcollider.sources import step as source_step
 from stompgeom.build import PlacedSolid, build_document
@@ -20,6 +24,7 @@ from stompgeom.step import StepDocument, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.model import DrillData
 from stompmodel.progress import track
+from tests import tar
 
 __all__: list[str] = []
 
@@ -222,3 +227,20 @@ def test_no_labelled_phase_reopens_after_the_run_reports_done(tmp_path, monkeypa
     assert empty_path_indices, "the run never closed its root division"
     last_root_close = empty_path_indices[-1]
     assert all(path == () for _position, path in settled[last_root_close:])
+
+
+# --------------------------------------------------------------------------
+# ``Match`` divides by board: Task 6.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.boards
+def test_match_reports_one_step_per_board(tar_dock: DockData) -> None:
+    """The count is ``data.boards``, known when the stage opens."""
+    recorder = Recorder()
+    with track(recorder) as scope:
+        Match(tar.TOLERANCE).apply(tar_dock, scope)
+
+    under_match = {p[1] for p in recorder.paths if len(p) > 1 and p[0] == "match"}
+    assert len(under_match) == len(tar_dock.boards)
+    assert recorder.positions == sorted(recorder.positions)

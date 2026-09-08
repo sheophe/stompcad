@@ -513,12 +513,15 @@ class Match:
         return StageRun(self.name, ((TOLERANCE_PARAMETER, int(self._tolerance_nm)),))
 
     def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
+        scope.label(self.name)
         boards: list[Board] = []
         placements: dict[int, tuple[Placement, ...]] = {}
         diagnostics: list[Diagnostic] = []
         claimed_hole_indices: set[int] = set()
 
-        for board in data.boards:
+        slots = scope.steps(len(data.boards))
+        for board, slot in zip(data.boards, slots, strict=True):
+            slot.label(f"board {board.ordinal}")
             new_board, board_placements, board_diagnostics, claimed = _match_board(
                 board, data.holes, self._tolerance_nm
             )
