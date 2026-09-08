@@ -11,8 +11,12 @@ import io
 from pathlib import Path
 
 from stompdrill import cli
+from stompdrill.emitters.excellon import ExcellonEmitter
+from stompdrill.emitters.json_out import JsonEmitter
 from stompdrill.quantise import RawDrillData, quantise
+from stompmodel.model import DrillData
 from stompmodel.progress import track
+from stompmodel.protocols import Emitter
 from tests.conftest import FakeCase, build_pipeline_for_test
 
 __all__: list[str] = []
@@ -164,3 +168,45 @@ def test_each_stage_reports_the_unit_it_walks(tar_quantised) -> None:
     # slots opened, one per hole, not distinct label text.
     under_dedupe = [p for p in recorder.paths if len(p) > 1 and p[0] == "deduplicate"]
     assert len(under_dedupe) == len(tar_quantised.holes)
+
+
+def test_the_emit_span_divides_by_requested_target(tar_routed, tmp_path) -> None:
+    """One leaf per target, whatever each emitter does inside.
+
+    ``_write`` is exercised directly, standing in for the ``emit`` slot
+    ``_run`` opens and passes to it; the scope this test tracks plays that
+    slot's part.
+    """
+    recorder = Recorder()
+    emitters: list[tuple[Emitter[DrillData], Path]] = [
+        (ExcellonEmitter(), tmp_path / "a.drl"),
+        (JsonEmitter(), tmp_path / "b.json"),
+    ]
+    with track(recorder) as scope:
+        cli._write(emitters, tar_routed, scope)
+        # Snapshot before track()'s own trailing close forces the root to
+        # 1.0 regardless -- this reads only what the division itself left
+        # behind once the loop finished.
+        settled = list(recorder.updates)
+
+    # Not a set: two labels could collide on the emitter name if a future
+    # emitter reused another's, and a set would hide that. Count recorded
+    # events instead.
+    labelled = [path[0] for path in recorder.paths if path]
+    assert labelled.count("excellon") == 1
+    assert labelled.count("json") == 1
+
+    # A third target must add a third leaf, not reuse one of the first two.
+    recorder_three = Recorder()
+    three = emitters + [(ExcellonEmitter(), tmp_path / "c.drl")]
+    with track(recorder_three) as scope_three:
+        cli._write(three, tar_routed, scope_three)
+    labelled_three = [path[0] for path in recorder_three.paths if path]
+    assert labelled_three.count("excellon") == 2
+    assert labelled_three.count("json") == 1
+
+    # The zip(..., strict=True) loop must exhaust the division as its last
+    # target is drawn, not leave it suspended for a later ``next()`` -- so
+    # the position it left behind is already at the scope's own end before
+    # track()'s own exit forces one.
+    assert settled[-1][0] == 1.0

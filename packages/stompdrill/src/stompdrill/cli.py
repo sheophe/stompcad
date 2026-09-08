@@ -743,14 +743,17 @@ def _write(
 ) -> list[str]:
     """Render every artefact, then stage every one, then commit every one.
 
-    Every payload is rendered before any target is touched. Neither loop
-    below is this file's own: staging and the whole-set transaction are
-    ``stompmodel``'s, and this keeps only the sentence it prints from the
-    count each commit returned -- see ADR-0001 and ADR-0005. ``scope`` is
-    not yet divided among targets; it is received so the caller's emit slot
-    has somewhere to go.
+    Rendering divides ``scope`` one leaf per emitter, each where that
+    emitter does its own work. Staging writes temporaries and committing
+    renames them, both after every render is done, inside this function's
+    own span and undivided -- honest about where the time goes without
+    inventing leaves for two fast steps. Staging and the whole-set
+    transaction are ``stompmodel``'s; see ADR-0001 and ADR-0005.
     """
-    rendered = [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
+    rendered = []
+    for (emitter, path), slot in zip(emitters, scope.steps(len(emitters)), strict=True):
+        slot.label(emitter.name)
+        rendered.append((emitter, path, emitter.emit(data)))
     staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
     sizes = commit_all(staged)
     return [
