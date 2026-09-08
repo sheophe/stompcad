@@ -10,6 +10,7 @@ is never in question here -- only how the division counts the files.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,7 @@ from stompgeom.step import StepDocument, StepSolid, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, DrillData
-from stompmodel.progress import track
+from stompmodel.progress import Scope, track
 from stompmodel.units import Nanometre, nm_from_mm
 from tests import tar
 from tests.conftest import _Stopping
@@ -549,7 +550,6 @@ def test_the_assembly_search_labels_only_cache_misses(
 
     assert calls == 24
     assert len(leaves) == 12
-    assert calls != len(leaves)
 
 
 def test_the_assembly_search_advances_fewer_slots_when_the_product_is_truncated(
@@ -570,6 +570,76 @@ def test_the_assembly_search_advances_fewer_slots_when_the_product_is_truncated(
 
     assert truncated == 8
     assert truncated < baseline
+
+
+class _StepsRecordingScope:
+    """A pass-through ``Scope`` that records every ``steps(n)`` call's ``n``.
+
+    Recording rather than inferring: a mutant can size a division wrongly
+    and still land on the same *observed* leaf count on one particular
+    scene (a truncated product can coincidentally touch as many distinct
+    pairs as a correctly-sized-but-truncated search leaves undrawn), so
+    the size fed to ``scope.steps(...)`` has to be read directly, not
+    guessed back from how many labels happened to land.
+    """
+
+    def __init__(self, inner: Scope, calls: list[int]) -> None:
+        self._inner = inner
+        self._calls = calls
+
+    def steps(self, count: int) -> Iterator[Scope]:
+        self._calls.append(count)
+        return (_StepsRecordingScope(child, self._calls) for child in self._inner.steps(count))
+
+    def parts(self, *weights: float) -> Iterator[Scope]:
+        return (
+            _StepsRecordingScope(child, self._calls) for child in self._inner.parts(*weights)
+        )
+
+    def label(self, name: str) -> None:
+        self._inner.label(name)
+
+
+def _stage_two_division_size(
+    data: DockData,
+    case_solids: tuple[StepSolid, ...],
+    board_solids: dict[int, tuple[StepSolid, ...]],
+) -> int:
+    """The ``n`` stage two's own ``scope.steps(n)`` call was opened with.
+
+    The *last* recorded ``steps()`` call: ``apply`` always finishes stage
+    one's board division (one call, size 3) and every board's placement
+    division (three calls, size 2 each) before stage two ever calls
+    ``steps`` at all, so the final entry in call order is always this one,
+    whatever value it carries.
+    """
+    calls: list[int] = []
+    recorder = Recorder()
+    with track(recorder) as scope:
+        for slot in scope.parts(Clashes.weight):
+            wrapped = _StepsRecordingScope(slot, calls)
+            wrapped.label(Clashes.name)
+            Clashes(case_solids, board_solids).apply(data, wrapped)
+    return calls[-1]
+
+
+def test_the_assembly_divisions_size_is_fixed_by_candidates_not_by_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The division's size -- what ``scope.steps(...)`` is opened with, 3 x
+    (2 x 2) = 12 -- must come from ``candidates`` alone and stay the same
+    whether or not the product is truncated; only the *advances* (proved
+    above) may differ. A mutant that sizes the division from the truncated
+    ``tried`` list instead reproduces this scene's 12-then-8 leaf counts
+    exactly, which is why the size itself has to be read directly rather
+    than inferred from how many labels landed."""
+    data, case_solids, board_solids = _three_board_two_candidate_scene()
+
+    untruncated = _stage_two_division_size(data, case_solids, board_solids)
+    monkeypatch.setattr(clash, "_COMBINATION_LIMIT", 4)
+    truncated = _stage_two_division_size(data, case_solids, board_solids)
+
+    assert untruncated == truncated == 12
 
 
 @pytest.mark.boards
