@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations, islice, product
@@ -28,7 +28,7 @@ from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .errors import StompcolliderError
-from .insert import CavitySplit
+from .insert import CavitySplit, _drain
 from .model import CASE_KIND, CLOSURE_KIND, Board, Clash, DockData, Placement
 from .seat import rank_key, shortfall_nm
 from .solids import (
@@ -58,6 +58,11 @@ _NM3_PER_MM3 = Decimal(10) ** 18
 #: single element, but nothing in the geometry bounds it, so this does --
 #: and a run that reaches it says so rather than truncating in silence.
 _COMBINATION_LIMIT = 4096
+
+#: Stage one checks every placement of every board; stage two then searches
+#: among the survivors. A fixed approximation of relative cost, like
+#: ``contact_depth``'s own phase weights, not a count computed from the data.
+_STAGE_WEIGHTS = (2.0, 1.0)
 
 
 def _nm3_from_mm3(volume_mm3_: float) -> int:
@@ -152,15 +157,13 @@ def _clash_key(clash: Clash) -> tuple[str, str, str, int, tuple[Nanometre, ...]]
 class Clashes:
     """Fills each placement's ``clashes`` and re-ranks on what it found.
 
-    Satisfies ``stompmodel.protocols.Stage[DockData]``. Each board is
-    checked against **the whole of the rest of the assembly**. Seating is
-    two stages: stage one ranks each board against the case alone and keeps
-    every seating the cavity itself admits -- asked with the predicate the
-    insertion search uses, so a board resting at contact passes; stage two
-    picks, over the combinations of those, the assembly of least inter-board
-    material. Reads only ``DockData.placements`` and ``.boards``, so it
-    asserts no other stage ran, and ``describe()`` is ``Pipeline.run``'s to
-    record.
+    Satisfies ``stompmodel.protocols.Stage[DockData]``, checking each board
+    against **the whole rest of the assembly**. Stage one ranks each board
+    against the case alone, keeping every seating the insertion search's
+    own predicate admits; stage two then picks, among those, the assembly
+    of least inter-board material. Reads only ``.placements`` and
+    ``.boards``, so it asserts no other stage ran; ``describe()`` is
+    ``Pipeline.run``'s job.
     """
 
     name: ClassVar[str] = "clashes"
@@ -194,20 +197,32 @@ class Clashes:
     def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
         basis = data.case.frame.basis
         boards = {board.ordinal: board for board in data.boards}
+        ordinals = sorted(data.placements)
 
         ranked: dict[int, tuple[Placement, ...]] = {}
         clean: dict[int, tuple[Placement, ...]] = {}
-        for ordinal in sorted(data.placements):
+        phases = scope.parts(*_STAGE_WEIGHTS)
+        per_board = next(phases)
+        board_slots = per_board.steps(len(ordinals))
+        for ordinal, board_scope in zip(ordinals, board_slots, strict=True):
+            board_scope.label(f"board {ordinal}")
             board = self._board_for(ordinal, boards)
-            filled = [
-                (
-                    replace(
-                        placement, clashes=self._against_case(board, placement, basis)
-                    ),
-                    self._clears_the_cavity(board, placement, basis),
+            placements = data.placements[ordinal]
+            placement_scopes = board_scope.steps(len(placements))
+            filled = []
+            for index, (placement, placement_scope) in enumerate(
+                zip(placements, placement_scopes, strict=True)
+            ):
+                placement_scope.label(f"placement {index}")
+                filled.append(
+                    (
+                        replace(
+                            placement,
+                            clashes=self._against_case(board, placement, basis),
+                        ),
+                        self._clears_the_cavity(board, placement, basis),
+                    )
                 )
-                for placement in data.placements[ordinal]
-            ]
             order = sorted(filled, key=lambda pair: rank_key(pair[0]))
             numbered = [
                 replace(placement, rank=rank)
@@ -220,7 +235,9 @@ class Clashes:
                 if clear
             )
 
-        seated, notes = self._assembly(ranked, clean, boards, basis)
+        assembly_scope = next(phases)
+        seated, notes = self._assembly(ranked, clean, boards, basis, assembly_scope)
+        _drain(phases)
         return replace(
             data,
             placements=seated,
@@ -260,14 +277,13 @@ class Clashes:
     ) -> tuple[Clash, ...]:
         """Every case solid this placement meets. None is privileged or exempt.
 
-        Stated per case solid rather than per pair of solids: a wall is one
-        thing to move the board away from, however many of its parts reach
-        into it. Only the parts whose boxes reach that solid are compounded
-        for the boolean, which is rule 2's own filter and changes no answer
-        -- a solid whose box misses cannot contribute to the shared region.
-        Each finding carries whether it is against the cavity or against
-        what closes over it, which decides nothing about what is reported
-        and everything about what may rank a seating.
+        Stated per case solid rather than per pair: a wall is one thing to
+        move the board away from, however many of its parts reach into it.
+        Only the parts whose boxes reach that solid are compounded for the
+        boolean -- rule 2's own filter, changing no answer, since a solid
+        whose box misses cannot contribute to the shared region. Each
+        finding notes whether it is against the cavity or what closes over
+        it, deciding nothing reported but everything about ranking a seating.
         """
         inside, beyond = self._split.of(basis, board.extent_nm)
         bodies = self._bodies(board, placement, basis)
@@ -292,20 +308,13 @@ class Clashes:
     ) -> bool:
         """Whether the enclosure this board is inserted into admits this seating.
 
-        **The predicate the insertion search asks**, not the exact
-        intersection the findings are measured with, and one coherent rule
-        rather than a threshold laid over two. A board the search advanced
-        to rest at first contact lies within a nanometre of what stopped it,
-        and the exact boolean finds a sliver there; asking a second
-        definition here left every real seating failing this filter, and the
-        mutual-interference stage behind it never ran at all.
-
-        What closes over the cavity takes no part: the board is inserted
-        into an open case and the backplate goes on afterwards, so a lid
-        that will not close is a finding rather than a seating refused.
-
-        The case solids go as a sequence, for the reason ``CaseCavity``'s
-        own predicate passes them that way.
+        **The predicate the insertion search asks**, not the exact intersection
+        findings are measured with: a board resting at first contact lies within
+        a nanometre of what stopped it, and the boolean finds a sliver there. A
+        second definition failed every real seating, and the mutual-interference
+        stage never ran. What closes over the cavity takes no part -- the
+        backplate goes on afterwards, so a lid that will not close is a finding,
+        not a refusal. Case solids go as a sequence, as ``CaseCavity`` takes them.
         """
         inside, _beyond = self._split.of(basis, board.extent_nm)
         bodies = self._bodies(board, placement, basis)
@@ -330,16 +339,24 @@ class Clashes:
         second: Board,
         second_placement: Placement,
         basis: CoordinateFrame,
+        slots: Iterator[Scope],
     ) -> tuple[Clash, ...]:
         """Every pair of solids of two boards that meets, named on both sides.
 
         Per solid rather than per board: "board 1 clashes with board 2" is
         not something a person can act on, and the aggregate that is worth
-        stating is a sum over exactly these.
+        stating is a sum over exactly these. A slot is drawn from ``slots``
+        and labelled only on a genuine cache miss -- the honest unit of
+        stage two's work, not the combination that happened to ask for it.
         """
         key = (first.ordinal, first_placement, second.ordinal, second_placement)
         cached = self._pairs.get(key)
         if cached is None:
+            slot = next(slots, NO_PROGRESS)
+            slot.label(
+                f"{first.ordinal}:{first_placement.rank}"
+                f"×{second.ordinal}:{second_placement.rank}"
+            )
             found = [
                 clash
                 for mine in self._bodies(first, first_placement, basis)
@@ -357,15 +374,17 @@ class Clashes:
         clean: Mapping[int, tuple[Placement, ...]],
         boards: Mapping[int, Board],
         basis: CoordinateFrame,
+        scope: Scope = NO_PROGRESS,
     ) -> tuple[dict[int, tuple[Placement, ...]], tuple[Diagnostic, ...]]:
         """Stage two: which of the cavity-clean seatings this assembly is made of.
 
-        The case takes no part here, having already been answered in stage
-        one. A board no seating clears the cavity for is fixed at its
-        stage-one rank 1 and says so, because a seating that fouls the
-        enclosure cannot be improved by anything a neighbour does -- and
-        because a reader could not otherwise tell a chosen seating from a
-        defaulted one.
+        The case takes no part here, already answered in stage one. A board
+        no seating clears the cavity for is fixed at its stage-one rank 1,
+        because a seating that fouls the enclosure cannot be improved by a
+        neighbour, and a reader could not otherwise tell a chosen seating
+        from a defaulted one. ``scope`` divides on the distinct board-pair
+        seatings, not the combinations tried -- ``_between`` memoises most
+        of those as cache hits.
         """
         notes: list[Diagnostic] = []
         candidates = self._candidates(ranked, clean, notes)
@@ -387,7 +406,13 @@ class Clashes:
                     data=(("limit", _COMBINATION_LIMIT), ("combinations", possible)),
                 )
             )
-        chosen, pairs = self._least_interference(ordinals, tried, boards, basis)
+        distinct = sum(
+            len(candidates[first]) * len(candidates[second])
+            for first, second in combinations(ordinals, 2)
+        )
+        slots = scope.steps(distinct)
+        chosen, pairs = self._least_interference(ordinals, tried, boards, basis, slots)
+        _drain(slots)
         extra: dict[int, list[Clash]] = {ordinal: [] for ordinal in ordinals}
         for (first, second), found in sorted(pairs.items()):
             if not found:
@@ -410,15 +435,13 @@ class Clashes:
     ) -> dict[int, tuple[Placement, ...]]:
         """Stage one's survivors: the seatings the cavity admits *and* that seat.
 
-        Two conditions, and the second is not redundant. A board the case
-        arrests well out of it clears the cavity by resting against it, and
-        it fouls a neighbour less than the seating that really goes in --
-        precisely because it never went in. Measured on the tar assembly,
-        that is a 14 mm shortfall winning stage two outright. So a seating
-        that inserts less far than another of the same board is not a
-        candidate, exactly as one that fouls the enclosure is not; what
-        stage two then chooses among is boards that are all equally seated,
-        and mutual interference alone decides between them.
+        Two conditions, and the second is not redundant. A board the case arrests
+        well out of it clears the cavity by resting against it, and fouls a
+        neighbour less than the seating that really goes in -- on the tar
+        assembly a 14 mm shortfall wins stage two outright. A seating that
+        inserts less far than another of the same board is not a candidate,
+        exactly as one that fouls the enclosure is not; stage two then chooses
+        among boards that are all equally seated, on mutual interference alone.
         """
         candidates: dict[int, tuple[Placement, ...]] = {}
         for ordinal in sorted(ranked):
@@ -445,6 +468,7 @@ class Clashes:
         tried: Sequence[tuple[Placement, ...]],
         boards: Mapping[int, Board],
         basis: CoordinateFrame,
+        slots: Iterator[Scope],
     ) -> tuple[dict[int, Placement], dict[tuple[int, int], tuple[Clash, ...]]]:
         """The assembly of least inter-board material among those tried.
 
@@ -460,7 +484,7 @@ class Clashes:
                 zip(ordinals, combination, strict=True), 2
             ):
                 pairs[(first, second)] = self._between(
-                    boards[first], mine, boards[second], theirs, basis
+                    boards[first], mine, boards[second], theirs, basis, slots
                 )
             total = sum(
                 clash.common_volume_nm3 for found in pairs.values() for clash in found

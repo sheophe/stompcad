@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 
+from stompcollider import clash
+from stompcollider.clash import Clashes
 from stompcollider.insert import Insertion, contact_depth
 from stompcollider.match import Match
 from stompcollider.model import DockData
@@ -385,3 +387,65 @@ def test_a_full_search_still_visits_all_three_phases_directly() -> None:
 
     names = {p[0] for p in recorder.paths if len(p) == 1}
     assert {"coarse", "fine", "bisect"} <= names
+
+
+# --------------------------------------------------------------------------
+# ``Clashes`` divides both its stages: Task 8. Stage one is boards then
+# placements, exactly as ``Seat``'s own division reads; stage two is the
+# subtle one -- the *distinct* board-pair seatings ``candidates`` admits,
+# not the combinations the product tries, because ``_between`` memoises
+# and most of those are cache hits.
+# --------------------------------------------------------------------------
+
+
+def _clashes_leaves(dock: DockData, solids) -> list[tuple[str, ...]]:
+    """Every path recorded under a pipeline-style ``clashes`` slot."""
+    recorder = Recorder()
+    with track(recorder) as scope:
+        for slot in scope.parts(Clashes.weight):
+            slot.label(Clashes.name)
+            Clashes(*solids).apply(dock, slot)
+    return [p for p in recorder.paths if len(p) > 1 and p[0] == "clashes"]
+
+
+@pytest.mark.boards
+def test_clashes_reports_boards_then_placements(tar_seated: DockData, tar_solids) -> None:
+    """Stage one: both counts are known at entry, exactly as ``Seat``'s are."""
+    paths = _clashes_leaves(tar_seated, tar_solids)
+
+    boards = {p[1] for p in paths if "×" not in p[1]}
+    assert len(boards) == len(tar_seated.placements)
+    for ordinal, placements in tar_seated.placements.items():
+        under = {p[2] for p in paths if len(p) > 2 and p[1] == f"board {ordinal}"}
+        assert len(under) == len(placements)
+
+
+@pytest.mark.boards
+def test_the_assembly_search_counts_distinct_pairs_not_combinations(
+    tar_seated: DockData, tar_solids, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Most of the product's iterations are cache hits in ``_between``.
+
+    Counting combinations would advance the bar through memory lookups.
+    The leaf count must follow the distinct seatings and must not move
+    when the enumeration limit does.
+    """
+
+    def leaves() -> int:
+        return len({p[1] for p in _clashes_leaves(tar_seated, tar_solids) if "×" in p[1]})
+
+    baseline = leaves()
+    assert baseline > 0
+    monkeypatch.setattr(clash, "_COMBINATION_LIMIT", 8)
+    assert leaves() == baseline
+
+
+@pytest.mark.boards
+def test_the_assembly_leaves_match_the_admitted_candidate_pairs(
+    tar_seated: DockData, tar_solids
+) -> None:
+    """The tar fixture's own fact, fixed per decision 4's "counts are
+    structural" property: both boards admit both mirror placements, so the
+    one board pair in this assembly contributes 2 x 2 distinct leaves."""
+    pairs = {p[1] for p in _clashes_leaves(tar_seated, tar_solids) if "×" in p[1]}
+    assert len(pairs) == 4
