@@ -126,6 +126,7 @@ are in [docs/adr/](docs/adr/):
 | [0009](docs/adr/0009-shared-model-package-and-dependency-order.md) | Shared model package and dependencies |
 | [0010](docs/adr/0010-the-stomp-prefix.md) | Package naming |
 | [0011](docs/adr/0011-behaviour-lock-and-its-blind-spots.md) | Output-preservation checks and their limits |
+| [0012](docs/adr/0012-progress-protocol-and-optional-kernel-capability.md) | Progress reporting and optional kernel capabilities |
 
 Keep `stompcollider` independent of `stompdrill` and direct OCP imports. Read
 shared drill documents through `stompmodel` and use kernel operations through
