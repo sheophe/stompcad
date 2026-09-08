@@ -63,6 +63,14 @@ assumed:
   twice and none is lost.
 - **Monotonicity.** The folded position never decreases.
 
+Weights are non-negative; both implementations reject a negative weight with
+`ValueError`. A division whose weights sum to zero is Partition's degenerate
+case: it yields one zero-width child per weight, each positioned at the
+node's start, and the node's own close reclaims the span they never claimed.
+A caller pairing stages to slots must receive one slot per stage, and a stage
+that declared no share of the work must not advance the bar; the degenerate
+case delivers both.
+
 **Progress describes work completed, not time.** No part of this design measures
 elapsed time, estimates a remaining duration, or consults a previous run.
 

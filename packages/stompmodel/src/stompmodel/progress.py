@@ -123,6 +123,9 @@ class _Node:
         return self._divide([1.0] * count)
 
     def parts(self, *weights: float) -> Iterator[Scope]:
+        for weight in weights:
+            if weight < 0.0:
+                raise ValueError(f"a weight cannot be negative: {weight}")
         return self._divide(weights)
 
     def _divide(self, weights: Sequence[float]) -> Iterator[Scope]:
@@ -136,9 +139,6 @@ class _Node:
         reason: without it the last child could claim span past its parent's
         end. ``lo`` is computed alike. ADR-0012 records the partition.
         """
-        for weight in weights:
-            if weight < 0.0:
-                raise ValueError(f"a weight cannot be negative: {weight}")
         total = float(sum(weights))
         span = self._hi - self._lo
         try:

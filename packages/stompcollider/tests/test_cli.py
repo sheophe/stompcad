@@ -450,26 +450,23 @@ def test_a_malformed_filter_is_reported_before_the_input_is_opened(tmp_path, cap
     assert "nowhere.json" in opened
 
 
-def test_the_command_line_renders_no_progress(tmp_path, capsys) -> None:
+def test_the_command_line_renders_no_progress(tmp_path, monkeypatch, capsys) -> None:
     """The tools carry the protocol and draw nothing: stompcad owns the bar.
 
-    Both streams are guarded against a carriage return and an ANSI CSI
-    introducer, the marks every in-place redraw and cursor move leave; a bare
-    ``%`` is a weak extra kept on stdout only. Stderr need not be empty: a
-    plain-text warning is not a progress bar. The malformed-filter path
-    refuses before opening any input, so it proves this as cheaply as a full
-    seating run would.
+    A malformed filter refuses before any scope opens, so it cannot prove
+    this guard: the CLI's only progress-bearing call site is ``_traced``,
+    reached solely by a run that seats a board. This drives a real run
+    through ``_prepare`` and checks the terminal report it prints, so the
+    stream assertions below are watching the one path that could carry a
+    bar. ``captured.out`` is asserted non-empty so the guard cannot pass by
+    having nothing to inspect.
     """
-    argv = [
-        str(tmp_path / "nowhere.json"), str(tmp_path / "nowhere.stp"),
-        "--case-model", str(tmp_path / "nowhere.stp"),
-        "--match-tolerance", "0.125",
-        "--panel-reference", "D(",
-    ]
+    run = _prepare(tmp_path, monkeypatch, post=True)
 
-    code = main(argv)
+    code = main(run.argv)
     captured = capsys.readouterr()
-    assert code == 3
+    assert code == 1
+    assert captured.out
     assert "\r" not in captured.out
     assert "\r" not in captured.err
     assert "\x1b[" not in captured.out

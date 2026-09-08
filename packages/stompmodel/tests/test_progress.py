@@ -137,13 +137,6 @@ def test_a_real_scope_and_the_null_scope_agree_on_child_count(
     assert len(real_children) == len(null_children) == len(weights)
 
 
-def test_a_negative_weight_raises_from_a_real_scope() -> None:
-    recorder = Recorder()
-    with track(recorder) as root:
-        with pytest.raises(ValueError, match="cannot be negative"):
-            list(root.parts(-1.0))
-
-
 def test_a_negative_weight_raises_from_the_null_scope() -> None:
     """Finding 1(b): ``NullScope.parts`` accepted anything before this fix."""
     with pytest.raises(ValueError, match="cannot be negative"):

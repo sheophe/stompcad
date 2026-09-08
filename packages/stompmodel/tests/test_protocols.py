@@ -741,6 +741,8 @@ def test_an_empty_pipeline_leaves_data_unchanged_and_completes_the_run() -> None
 
     with track(Recorder()) as scope:
         result = Pipeline([]).run(_Doc(), scope)
+        # ``track`` has not exited yet, so this position can only have come
+        # from ``_divide``'s own ``finally`` closing the empty division.
+        assert updates[-1] == 1.0
 
     assert result == _Doc()
-    assert updates[-1] == 1.0
