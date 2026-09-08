@@ -6,11 +6,12 @@ process; ``stompcollider`` has its own copy for the same reason.
 
 from __future__ import annotations
 
+import argparse
 import io
 from pathlib import Path
 
 from stompdrill import cli
-from stompdrill.quantise import quantise
+from stompdrill.quantise import RawDrillData, quantise
 from stompmodel.progress import track
 from tests.conftest import FakeCase
 
@@ -81,3 +82,33 @@ def test_the_case_model_slot_spans_the_real_read(monkeypatch) -> None:
     case_index = recorder.paths.index(("read", "case model"))
     artwork_index = recorder.paths.index(("read", "artwork"))
     assert artwork_index > case_index
+
+
+def test_the_root_position_stays_below_one_until_the_artwork_is_read(monkeypatch) -> None:
+    """A slot's position must still be open when its own work starts.
+
+    Drawing every slot from one division in a single statement -- rather
+    than one ``next()`` per slot, immediately before that slot's work -- pulls
+    them all back to back with no work between them, so the position races to
+    1.0 before anything has actually run. ``read_source`` is watched here
+    because it is the first read this run performs.
+    """
+    recorder = Recorder()
+    seen_on_entry: list[tuple[float, tuple[str, ...]]] = []
+    real_read_source = cli.read_source
+
+    def watching_read_source(args: argparse.Namespace) -> RawDrillData:
+        seen_on_entry.append(recorder.updates[-1])
+        return real_read_source(args)
+
+    monkeypatch.setattr(cli, "read_source", watching_read_source)
+
+    args = cli.build_parser().parse_args([str(FIXTURE), "--case", "1590B"])
+    with track(recorder) as scope:
+        cli._run(args, io.StringIO(), scope)
+
+    assert seen_on_entry, "the artwork read never ran"
+    position_on_entry, _path = seen_on_entry[0]
+    assert position_on_entry < 1.0
+
+    assert recorder.positions[-1] == 1.0

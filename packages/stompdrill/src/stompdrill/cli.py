@@ -781,16 +781,23 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
     except ValueError as error:
         raise UsageError(str(error)) from error
 
-    read_slot, quantise_slot, pipeline_slot, emit_slot = scope.parts(*_RUN_WEIGHTS)
+    # Division is a generator: a slot closes when the *next* one is drawn, so
+    # each is pulled with ``next()`` immediately before its own work begins --
+    # never all at once, which would draw and close every slot back to back
+    # with no work between them.
+    slots = scope.parts(*_RUN_WEIGHTS)
+
+    read_slot = next(slots)
     read_slot.label("read")
     # A run always reads the artwork; a case model is a second, equally
-    # weighted STEP read only when --case-model names one. The leaf opens
-    # here, immediately before the read it names, so its span is the read.
+    # weighted STEP read only when --case-model names one. Each leaf is drawn
+    # lazily too, immediately before the read it names, for the same reason.
     if args.case_model is not None:
-        case_slot, artwork_slot = read_slot.steps(2)
+        read_leaves = read_slot.steps(2)
+        case_slot = next(read_leaves)
         case_slot.label("case model")
     else:
-        (artwork_slot,) = read_slot.steps(1)
+        read_leaves = read_slot.steps(1)
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
@@ -806,6 +813,7 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
     quantisers = build_quantisers(args)
     pipeline = build_pipeline(args)
 
+    artwork_slot = next(read_leaves)
     artwork_slot.label("artwork")
     raw = read_source(args)
 
@@ -813,6 +821,7 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
         print("PIPELINE", file=out)
         print(f"  {'(source)':<20} {len(raw.holes):>3} holes", file=out)
 
+    quantise_slot = next(slots)
     quantise_slot.label("quantise")
     data = quantise(
         raw,
@@ -829,11 +838,13 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
         def trace(stage: Stage[DrillData], before: DrillData, after: DrillData) -> None:
             print(format_stage(stage, before, after), file=out)
 
+    pipeline_slot = next(slots)
     pipeline_slot.label("pipeline")
     data = run_pipeline(pipeline, data, trace, pipeline_slot)
 
     print(format_report(data), file=out)
 
+    emit_slot = next(slots)
     emit_slot.label("emit")
     if emitters:
         print(file=out)
@@ -844,6 +855,7 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
         else:
             for line in _write(emitters, data, emit_slot):
                 print(line, file=out)
+    next(slots, None)  # exhaust: this is what closes the emit slot
 
     print("\n".join(format_summary(data)), file=out)
     return exit_for_severity(data.worst_severity)
