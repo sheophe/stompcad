@@ -1,13 +1,12 @@
 """Progress as a weighted tree, folded to one position.
 
-A run is a tree: the root spans the whole invocation, each node divides its
-span among its children, and each leaf is one countable piece of work.
-Accumulating completed spans left to right gives a single number between 0
-and 1, which is what a bar draws. Nothing here measures time, and no value
-depends on a previous run -- see ``docs/specs/stompcad-technical.md``.
+A run is a tree: the root spans the invocation, each node divides its span
+among its children, and each leaf is one countable piece of work. Summing
+completed spans gives one number between 0 and 1, the position a bar draws.
 
-Both tools report into one tree because ``stompcad`` renders one bar over
-both, which is the ADR-0009 rule 2 behaviour admitting this module.
+It reports work completed, never elapsed or estimated time, and no value
+depends on a previous run -- see ADR-0012. Both tools report into one tree
+because ``stompcad`` draws one bar over both, ADR-0009's rule 2 behaviour.
 """
 
 from __future__ import annotations
