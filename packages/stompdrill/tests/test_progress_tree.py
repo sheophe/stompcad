@@ -112,3 +112,29 @@ def test_the_root_position_stays_below_one_until_the_artwork_is_read(monkeypatch
     assert position_on_entry < 1.0
 
     assert recorder.positions[-1] == 1.0
+
+
+def test_no_labelled_phase_reopens_after_the_run_reports_done() -> None:
+    """Every ``next()``-drawn division must be exhausted, not only the root's.
+
+    A division left un-exhausted stays suspended at its last ``yield``; its
+    own ``finally`` fires only when the generator is garbage-collected --
+    here, when ``_run`` returns -- advancing under its *parent's* name after
+    the run has already told the sink it is done. ``_Run.advance`` keeps a
+    maximum, so this never shows up as a position regression: it only shows
+    up as a labelled path appearing again after the root's own closing
+    updates, which is what this reads for directly.
+    """
+    recorder = Recorder()
+    args = cli.build_parser().parse_args([str(FIXTURE), "--case", "1590B"])
+
+    with track(recorder) as scope:
+        cli._run(args, io.StringIO(), scope)
+        # Snapshot before the ``with`` block's own exit adds track()'s
+        # trailing close, so this reads only what ``_run`` itself reported.
+        settled = list(recorder.updates)
+
+    empty_path_indices = [i for i, (_position, path) in enumerate(settled) if path == ()]
+    assert empty_path_indices, "the run never closed its root division"
+    last_root_close = empty_path_indices[-1]
+    assert all(path == () for _position, path in settled[last_root_close:])

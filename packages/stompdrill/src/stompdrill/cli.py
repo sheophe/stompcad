@@ -816,6 +816,7 @@ def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> i
     artwork_slot = next(read_leaves)
     artwork_slot.label("artwork")
     raw = read_source(args)
+    next(read_leaves, None)  # exhaust: this is what closes the artwork leaf
 
     if args.verbose:
         print("PIPELINE", file=out)
