@@ -236,10 +236,18 @@ def test_no_labelled_phase_reopens_after_the_run_reports_done(tmp_path, monkeypa
 
 @pytest.mark.boards
 def test_match_reports_one_step_per_board(tar_dock: DockData) -> None:
-    """The count is ``data.boards``, known when the stage opens."""
+    """The count is ``data.boards``, known when the stage opens.
+
+    Labels the slot itself before calling ``apply``, standing in for what
+    ``Pipeline.run`` does at its call site -- that labelling is the
+    pipeline's job, not ``Match``'s, so it must not move back into
+    ``Match.apply``.
+    """
     recorder = Recorder()
     with track(recorder) as scope:
-        Match(tar.TOLERANCE).apply(tar_dock, scope)
+        for slot in scope.parts(Match.weight):
+            slot.label(Match.name)
+            Match(tar.TOLERANCE).apply(tar_dock, slot)
 
     under_match = {p[1] for p in recorder.paths if len(p) > 1 and p[0] == "match"}
     assert len(under_match) == len(tar_dock.boards)

@@ -55,7 +55,6 @@ class CheckReferenceSize:
         )
 
     def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
-        scope.label(self.name)
         expected_w, expected_h = self.expected_nm
         if data.reference is None:
             return data.with_diagnostics(

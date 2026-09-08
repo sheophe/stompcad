@@ -513,7 +513,6 @@ class Match:
         return StageRun(self.name, ((TOLERANCE_PARAMETER, int(self._tolerance_nm)),))
 
     def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
-        scope.label(self.name)
         boards: list[Board] = []
         placements: dict[int, tuple[Placement, ...]] = {}
         diagnostics: list[Diagnostic] = []
