@@ -17,6 +17,7 @@ from stompcollider.seat import Seat, rank_key
 from stompmodel.diagnostics import Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.protocols import Stage
 from stompmodel.units import Nanometre
 
@@ -536,7 +537,9 @@ class _Stopping:
         self.found = found
         self.asked: list[tuple[int, Nanometre]] = []
 
-    def insertion(self, board, placement, basis) -> Insertion:
+    def insertion(
+        self, board, placement, basis, scope: Scope = NO_PROGRESS
+    ) -> Insertion:
         self.asked.append((board.ordinal, placement.z_nm))
         return self.found
 

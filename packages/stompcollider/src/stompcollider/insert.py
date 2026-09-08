@@ -17,6 +17,7 @@ from typing import Protocol, runtime_checkable
 from stompgeom.shapes import centre_of_mass_mm, common, compound, interferes, placed
 from stompgeom.step import BoxMm, StepSolid, bounding_box_mm
 from stompmodel.frames import CoordinateFrame, RigidTransform
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
@@ -100,10 +101,25 @@ class Cavity(Protocol):
     """
 
     def insertion(
-        self, board: Board, placement: Placement, basis: CoordinateFrame
+        self,
+        board: Board,
+        placement: Placement,
+        basis: CoordinateFrame,
+        scope: Scope = NO_PROGRESS,
     ) -> Insertion: ...
 
     def parameters(self) -> tuple[tuple[str, int], ...]: ...
+
+
+#: The insertion search's three phases. The coarse sweep spans the whole
+#: travel, but its early samples are box-filtered and never reach the
+#: kernel; the fine sweep and the bisection work entirely near contact.
+_PHASE_WEIGHTS = (3.0, 2.0, 1.0)
+
+#: The phase names, one per weight above and in the order the search runs
+#: them -- paired through ``zip`` so the division and the labels naming it
+#: cannot drift apart.
+_PHASE_NAMES = ("coarse", "fine", "bisect")
 
 
 def contact_depth(
@@ -112,6 +128,7 @@ def contact_depth(
     limit_nm: Nanometre,
     pitch_max_nm: Nanometre,
     pitch_min_nm: Nanometre,
+    scope: Scope = NO_PROGRESS,
 ) -> Nanometre | None:
     """The deepest reachable travel, or ``None`` when the entry pose is blocked.
 
@@ -124,30 +141,52 @@ def contact_depth(
     last travel at which contact is possible at all, and it is returned
     unchanged where the whole path is clear -- which is the caller's signal
     that this enclosure says nothing about where the board rests.
+
+    ``scope`` always divides into all three phases, labelled every time, so
+    a shortcut still closes at its own span rather than stalling short.
     """
-    if entry_nm >= limit_nm:
-        return limit_nm
-    if blocked(entry_nm):
-        return None
     clear, found = entry_nm, None
-    for depth in _samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True):
-        if blocked(depth):
-            found = depth
-            break
-        clear = depth
-    if found is None:
+    blocked_at_entry = False
+    exhausted = False
+    for name, phase in zip(_PHASE_NAMES, scope.parts(*_PHASE_WEIGHTS), strict=True):
+        phase.label(name)
+        if name == "coarse":
+            if entry_nm >= limit_nm:
+                exhausted = True
+                continue
+            if blocked(entry_nm):
+                blocked_at_entry = True
+                continue
+            for depth in _samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True):
+                if blocked(depth):
+                    found = depth
+                    break
+                clear = depth
+            if found is None:
+                exhausted = True
+        elif name == "fine":
+            if blocked_at_entry or exhausted:
+                continue
+            assert found is not None  # coarse found a blocked sample to reach here
+            for depth in _samples(clear, found, pitch_min_nm, inclusive=False):
+                if blocked(depth):
+                    found = depth
+                    break
+                clear = depth
+        else:  # "bisect"
+            if blocked_at_entry or exhausted:
+                continue
+            assert found is not None  # coarse found a blocked sample to reach here
+            while found - clear > 1:
+                middle = Nanometre((clear + found) // 2)
+                if blocked(middle):
+                    found = middle
+                else:
+                    clear = middle
+    if blocked_at_entry:
+        return None
+    if exhausted:
         return limit_nm
-    for depth in _samples(clear, found, pitch_min_nm, inclusive=False):
-        if blocked(depth):
-            found = depth
-            break
-        clear = depth
-    while found - clear > 1:
-        middle = Nanometre((clear + found) // 2)
-        if blocked(middle):
-            found = middle
-        else:
-            clear = middle
     return clear
 
 
@@ -302,13 +341,19 @@ class CaseCavity:
         )
 
     def insertion(
-        self, board: Board, placement: Placement, basis: CoordinateFrame
+        self,
+        board: Board,
+        placement: Placement,
+        basis: CoordinateFrame,
+        scope: Scope = NO_PROGRESS,
     ) -> Insertion:
         """How far ``board`` travels toward the seat ``placement`` states.
 
         The travel is ``+w``, from outside the open end toward the drilled
         face: a board is inserted through the cavity mouth and its controls
-        emerge through the holes, never the other way about.
+        emerge through the holes, never the other way about. ``scope``
+        passes straight through to the search: nothing else this method
+        does is worth its own division against the search it surrounds.
         """
         seat_nm = placement.z_nm
         inside, beyond = self._split.of(basis, board.extent_nm)
@@ -327,6 +372,7 @@ class CaseCavity:
             limit_nm,
             self._pitch_max_nm,
             self._pitch_min_nm,
+            scope,
         )
         if depth_nm == limit_nm:
             # The whole path is clear, so this enclosure states nothing about

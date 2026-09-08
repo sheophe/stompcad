@@ -15,8 +15,10 @@ from typing import Any
 
 import pytest
 
+from stompcollider.insert import Insertion
 from stompcollider.match import Match
 from stompcollider.model import DockData
+from stompcollider.seat import Seat
 from stompcollider.sources import BoardSource
 from stompcollider.sources import step as source_step
 from stompgeom.build import PlacedSolid, build_document
@@ -25,6 +27,7 @@ from stompmodel.codec import to_document
 from stompmodel.model import DrillData
 from stompmodel.progress import track
 from tests import tar
+from tests.test_seat import _Stopping
 
 __all__: list[str] = []
 
@@ -251,4 +254,70 @@ def test_match_reports_one_step_per_board(tar_dock: DockData) -> None:
 
     under_match = {p[1] for p in recorder.paths if len(p) > 1 and p[0] == "match"}
     assert len(under_match) == len(tar_dock.boards)
+    assert recorder.positions == sorted(recorder.positions)
+
+
+# --------------------------------------------------------------------------
+# ``Seat`` divides boards, then placements, then the insertion search's own
+# three phases: Task 7.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.boards
+def test_seat_reports_boards_then_placements(tar_matched: DockData, tar_cavity) -> None:
+    """Both counts are known at entry: boards from the input, placements
+    from ``Match``. Labelled the way a pipeline would, per Decision 3 --
+    ``Seat`` never labels its own top slot."""
+    recorder = Recorder()
+    with track(recorder) as scope:
+        for slot in scope.parts(Seat.weight):
+            slot.label(Seat.name)
+            Seat(tar_cavity).apply(tar_matched, slot)
+
+    boards = {p[1] for p in recorder.paths if len(p) > 1 and p[0] == "seat"}
+    assert len(boards) == len(tar_matched.placements)
+    for ordinal, placements in tar_matched.placements.items():
+        under = {
+            p[2]
+            for p in recorder.paths
+            if len(p) > 2 and p[0] == "seat" and p[1] == f"board {ordinal}"
+        }
+        assert len(under) == len(placements)
+
+
+@pytest.mark.boards
+def test_the_insertion_search_divides_into_its_three_phases(
+    tar_matched: DockData, tar_cavity
+) -> None:
+    """Coarse, fine and bisection, weighted by shape rather than duration."""
+    recorder = Recorder()
+    with track(recorder) as scope:
+        for slot in scope.parts(Seat.weight):
+            slot.label(Seat.name)
+            Seat(tar_cavity).apply(tar_matched, slot)
+
+    phases = {p[3] for p in recorder.paths if len(p) > 3 and p[0] == "seat"}
+    assert {"coarse", "fine", "bisect"} <= phases
+
+
+@pytest.mark.boards
+def test_a_search_that_stops_early_still_closes_its_placement(
+    tar_matched: DockData,
+) -> None:
+    """The counts are upper bounds, so a node must not stall short of its end.
+
+    ``_Stopping`` answers every query with a single fixed ``Insertion`` and
+    never touches the ``scope`` it is handed -- the cheapest possible
+    stand-in for a search that returns almost at once. The parent's own
+    advance is what still carries each placement's position to its span's
+    end, and this is the branch where that rule earns its place.
+    """
+    recorder = Recorder()
+    stopping = _Stopping(Insertion(None, obstruction="wall"))  # blocked at entry
+    with track(recorder) as scope:
+        for slot in scope.parts(Seat.weight):
+            slot.label(Seat.name)
+            Seat(stopping).apply(tar_matched, slot)
+
+    assert recorder.positions[-1] == 1.0
     assert recorder.positions == sorted(recorder.positions)

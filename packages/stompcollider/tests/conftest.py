@@ -64,3 +64,45 @@ def tar_dock(tar_document):
     from tests import tar
 
     return tar.dock(tar_document)
+
+
+@pytest.fixture(scope="session")
+def tar_matched(tar_dock):
+    """``tar_dock`` after ``Match``: every board carries its own placements."""
+    from stompcollider.match import Match
+    from tests import tar
+
+    return Match(tar.TOLERANCE).apply(tar_dock)
+
+
+@pytest.fixture(scope="session")
+def tar_cavity(tar_document, tar_dock):
+    """A ``CaseCavity`` over the fixture's own board solids and a stand-in wall.
+
+    No case model is committed beside this fixture, so the enclosure is one
+    plate: wide enough to span the whole panel and thick enough that every
+    board's insertion search meets it partway through its travel, the same
+    way ``test_insert.py``'s synthetic shells stand in for a case file.
+    Board solids are the fixture's real geometry, grouped exactly as
+    ``BoardSource.scan`` groups them and matched to a canonical ``Board`` by
+    the designators the two share.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompcollider.boards import group, substrates
+    from stompcollider.insert import CaseCavity
+    from stompgeom.step import StepSolid
+    from stompmodel.units import nm_from_mm
+
+    board_solids: dict[int, tuple[StepSolid, ...]] = {}
+    for substrate, parts in group(tar_document, substrates(tar_document)):
+        names = {part.name for part in parts}
+        for board in tar_dock.boards:
+            if names & set(board.designators):
+                board_solids[board.ordinal] = (substrate, *parts)
+                break
+
+    wall = BRepPrimAPI_MakeBox(gp_Pnt(-80.0, -15.0, -50.0), 160.0, 30.0, 100.0).Shape()
+    plate = StepSolid("WALL", wall)
+    return CaseCavity((plate,), board_solids, nm_from_mm(2.0), nm_from_mm(0.05))
