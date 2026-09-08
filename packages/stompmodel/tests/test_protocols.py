@@ -20,6 +20,7 @@ from stompmodel.diagnostics import (
     worst_severity,
 )
 from stompmodel.model import DrillData, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.protocols import (
     Diagnosable,
     Pipeline,
@@ -43,11 +44,12 @@ class Counter:
 
 class Add:
     name: ClassVar[str] = "add"
+    weight: ClassVar[float] = 1.0
 
     def __init__(self, by: int) -> None:
         self.by = by
 
-    def apply(self, data: Counter) -> Counter:
+    def apply(self, data: Counter, scope=NO_PROGRESS) -> Counter:
         return replace(data, count=data.count + self.by)
 
     def describe(self) -> StageRun:
@@ -83,8 +85,9 @@ def test_a_stage_is_recorded_only_after_it_succeeds() -> None:
 
     class Boom:
         name: ClassVar[str] = "boom"
+        weight: ClassVar[float] = 1.0
 
-        def apply(self, data: Counter) -> Counter:
+        def apply(self, data: Counter, scope=NO_PROGRESS) -> Counter:
             raise RuntimeError("no")
 
         def describe(self) -> StageRun:
@@ -615,3 +618,145 @@ def test_missing_worst_severity_fails_the_protocol_check() -> None:
             return ()
 
     assert not isinstance(NoWorstSeverity(), Diagnosable)
+
+
+# --------------------------------------------------------------------------
+# Stage.weight and the scope a Pipeline opens for each stage.
+# --------------------------------------------------------------------------
+
+
+def _counting_stage(name: str, weight: float) -> Stage[_Doc]:
+    """Build a stage that records nothing and folds the document unchanged.
+
+    A real stage fixes ``name`` and ``weight`` as ``ClassVar``s once, on the
+    class, never per instance -- see ``Add`` above. This returns a fresh
+    class per call so each one is a true ``ClassVar`` implementer of its
+    own constants, rather than an instance attribute merely shaped like one.
+    """
+    stage_name, stage_weight = name, weight
+
+    class _Stage:
+        name: ClassVar[str] = stage_name
+        weight: ClassVar[float] = stage_weight
+
+        def apply(self, data: _Doc, scope: Scope = NO_PROGRESS) -> _Doc:
+            return data
+
+        def describe(self) -> StageRun:
+            return StageRun(self.name)
+
+    return _Stage()
+
+
+@dataclass(frozen=True)
+class _Doc:
+    """The smallest thing ``Pipeline`` can fold: it records processing and nothing else."""
+
+    processing: tuple[StageRun, ...] = ()
+
+    def with_processing(self, *runs: StageRun) -> _Doc:
+        return _Doc(self.processing + runs)
+
+
+def test_pipeline_divides_its_span_by_stage_weight() -> None:
+    """A heavier stage takes proportionally more of the bar."""
+    from stompmodel.progress import track
+
+    seen: list[tuple[float, tuple[str, ...]]] = []
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            seen.append((position, path))
+
+    light = _counting_stage("light", 1.0)
+    heavy = _counting_stage("heavy", 3.0)
+    pipeline = Pipeline([light, heavy])
+
+    with track(Recorder()) as scope:
+        pipeline.run(_Doc(), scope)
+
+    named = [path for _position, path in seen if path]
+    assert ("light",) in named
+    assert ("heavy",) in named
+    # The light stage owns the first quarter, so the heavy one starts there.
+    starts = [position for position, path in seen if path == ("heavy",)]
+    assert starts[0] == 0.25
+
+
+def test_pipeline_run_still_works_with_no_scope() -> None:
+    """The default keeps every existing call site correct."""
+    pipeline = Pipeline([_counting_stage("only", 1.0)])
+    assert pipeline.run(_Doc()) is not None
+
+
+def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
+    """A stage handed ``NO_PROGRESS`` instead of its own slot would still
+    satisfy ``received[0] is not scope``, since the default is a distinct
+    object from the parent scope. The second assertion rules that out.
+    """
+    from stompmodel.progress import track
+
+    received: list[object] = []
+
+    class Watcher:
+        name: ClassVar[str] = "watcher"
+        weight: ClassVar[float] = 1.0
+
+        def apply(self, data: _Doc, scope: Scope = NO_PROGRESS) -> _Doc:
+            received.append(scope)
+            return data
+
+        def describe(self) -> StageRun:
+            return StageRun(self.name)
+
+    class Silent:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            return None
+
+    with track(Silent()) as scope:
+        Pipeline([Watcher()]).run(_Doc(), scope)
+
+    assert received and received[0] is not scope
+    assert received[0] is not NO_PROGRESS
+
+
+def test_a_stage_with_zero_weight_runs_under_a_live_sink() -> None:
+    """Finding 1(a): ``Pipeline.run`` zips stages against ``scope.parts(...)``
+    with ``strict=True``, so a zero-weight stage must still get a slot -- a
+    real sink that returned none for a zero total raised ``ValueError`` here.
+    """
+    from stompmodel.progress import track
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            pass
+
+    pipeline = Pipeline([_counting_stage("free", 0.0)])
+    with track(Recorder()) as scope:
+        result = pipeline.run(_Doc(), scope)
+
+    assert [run.name for run in result.processing] == ["free"]
+
+
+def test_a_stage_with_zero_weight_runs_under_no_progress() -> None:
+    pipeline = Pipeline([_counting_stage("free", 0.0)])
+    result = pipeline.run(_Doc(), NO_PROGRESS)
+    assert [run.name for run in result.processing] == ["free"]
+
+
+def test_an_empty_pipeline_leaves_data_unchanged_and_completes_the_run() -> None:
+    from stompmodel.progress import track
+
+    updates: list[float] = []
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            updates.append(position)
+
+    with track(Recorder()) as scope:
+        result = Pipeline[_Doc]([]).run(_Doc(), scope)
+        # ``track`` has not exited yet, so this position can only have come
+        # from ``_divide``'s own ``finally`` closing the empty division.
+        assert updates[-1] == 1.0
+
+    assert result == _Doc()

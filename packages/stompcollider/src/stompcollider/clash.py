@@ -24,6 +24,7 @@ from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.frames import CoordinateFrame
 from stompmodel.model import StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
 from .errors import StompcolliderError
@@ -163,6 +164,7 @@ class Clashes:
     """
 
     name: ClassVar[str] = "clashes"
+    weight: ClassVar[float] = 3.0
 
     def __init__(
         self,
@@ -189,7 +191,7 @@ class Clashes:
         """Report the (parameterless) configuration this stage ran with."""
         return StageRun(self.name)
 
-    def apply(self, data: DockData) -> DockData:
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
         basis = data.case.frame.basis
         boards = {board.ordinal: board for board in data.boards}
 

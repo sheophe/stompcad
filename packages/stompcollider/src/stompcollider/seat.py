@@ -17,6 +17,7 @@ from typing import ClassVar
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.frames import CoordinateFrame
 from stompmodel.model import StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm
 
 from .insert import Cavity, Insertion
@@ -209,6 +210,7 @@ class Seat:
     """
 
     name: ClassVar[str] = "seat"
+    weight: ClassVar[float] = 16.0
 
     def __init__(self, cavity: Cavity | None = None) -> None:
         self._cavity = cavity
@@ -224,7 +226,7 @@ class Seat:
             return StageRun(self.name)
         return StageRun(self.name, self._cavity.parameters())
 
-    def apply(self, data: DockData) -> DockData:
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
         boards = {board.ordinal: board for board in data.boards}
         basis = data.case.frame.basis
         placements: dict[int, tuple[Placement, ...]] = {}

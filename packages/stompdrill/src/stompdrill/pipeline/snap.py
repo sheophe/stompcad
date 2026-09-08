@@ -20,6 +20,7 @@ from stompmodel.model import (
     RawHole,
     StageRun,
 )
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import (
     Millimetre,
     Nanometre,
@@ -175,12 +176,13 @@ class ReviewGridTies:
     """
 
     name: ClassVar[str] = "review-grid-ties"
+    weight: ClassVar[float] = 1.0
 
     def describe(self) -> StageRun:
         """Record a parameter-free review whose effective pitch comes from data."""
         return StageRun(self.name, ())
 
-    def apply(self, data: DrillData) -> DrillData:
+    def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         grid_nm = data.grid_nm
         if grid_nm is None:
             return data

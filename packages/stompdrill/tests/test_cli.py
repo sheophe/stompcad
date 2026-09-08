@@ -2864,3 +2864,35 @@ def test_the_reported_hole_still_reaches_the_toolpath(tmp_path):
     lines = drl.read_text().splitlines()
     assert "T1C22.000" in lines, "the drilled 22.0 mm bit has a tool definition"
     assert lines.count("T1") == 1, "the one hole reaches the toolpath under that tool"
+
+
+def test_the_command_line_renders_no_progress(capsys, tmp_path) -> None:
+    """The tools carry the protocol and draw nothing: stompcad owns the bar.
+
+    A bar's signature is the mechanism of in-place redraw, not any particular
+    character, and tools such as tqdm write to stderr by default so that piped
+    stdout stays clean. Both streams are therefore guarded against a carriage
+    return and an ANSI CSI introducer, the marks every in-place redraw and every
+    cursor move leave; a bare ``%`` is a weak extra kept on stdout only. Stderr
+    is deliberately not required to be empty: a plain-text warning there is not
+    a progress bar and must not trip this.
+    """
+    from stompdrill.cli import main
+
+    target = tmp_path / "out.json"
+    code = main(
+        [
+            str(FIXTURE),
+            "--case",
+            "1590B",
+            "--emit",
+            f"json={target}",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code in (0, 1)
+    assert "\r" not in captured.out
+    assert "\r" not in captured.err
+    assert "\x1b[" not in captured.out
+    assert "\x1b[" not in captured.err
+    assert "%" not in captured.out

@@ -14,6 +14,9 @@ This ADR adds `stompmodel` to the four packages decided in
   `CaseFace` vocabulary and the sense of `FaceFrame.basis.w`.
 - Define completion conditions for the behaviour and provenance rules, and
   require the human-facing report to be reproducible from the document alone.
+- Admit `stompmodel.progress` under rule 2, with the single bar named as the
+  `stompcad` behaviour requiring uniformity. The protocol itself is
+  [ADR-0012](0012-progress-protocol-and-optional-kernel-capability.md).
 
 The decisions and their reasons are set out below.
 
@@ -72,6 +75,9 @@ It holds:
   `worst_severity` reductions, and the severity-to-exit-code reduction.
 - `Processable`, `Diagnosable`, `Stage[T]`, `Pipeline[T]`, `Emitter[T]`,
   `Payload`, `StageRun` and the plain-tuple `latest_run` reduction.
+- `Sink`, `Scope`, `NullScope`, `NO_PROGRESS` and `track`, the progress
+  protocol ADR-0012 describes. `Stage` declares a `weight` and takes a `Scope`
+  for the same reason.
 - `SNAP_STAGE` and `SNAP_GRID_PARAMETER`, naming the snapping stage and its
   effective-pitch parameter, with `DrillData.grid_nm` as their single accessor.
 - `StompError`, with `EmitterError` and `DocumentError` beneath it. Each tool's
@@ -279,6 +285,16 @@ failures and produce one report and exit code. Every tool-specific base must
 descend from it, so adding a tool preserves the completeness of
 `except StompError`. `EmitterError` and `DocumentError` belong beside it because
 any member can fail to produce an artefact or refuse a foreign document.
+
+`stompmodel.progress` qualifies under rule 2. The named behaviour is the single
+bar: `stompcad` drives both tools in one invocation and shows one position
+across both, so the position semantics, the partition rule and the label path
+must have one definition. Two private progress models would leave the outer fold
+undefined, as two private severity spaces would leave the outer maximum of
+[docs/FOUNDATION.md](../FOUNDATION.md) §6's T6 undefined.
+[ADR-0012](0012-progress-protocol-and-optional-kernel-capability.md) records the
+protocol, the widened `Stage` and the rule that a kernel capability which cannot
+be bound is optional and probed by behaviour.
 
 ### Publish the frame used to cut the holes
 

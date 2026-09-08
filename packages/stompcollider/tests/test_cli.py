@@ -450,6 +450,30 @@ def test_a_malformed_filter_is_reported_before_the_input_is_opened(tmp_path, cap
     assert "nowhere.json" in opened
 
 
+def test_the_command_line_renders_no_progress(tmp_path, monkeypatch, capsys) -> None:
+    """The tools carry the protocol and draw nothing: stompcad owns the bar.
+
+    A malformed filter refuses before any scope opens, so it cannot prove
+    this guard: only a run that seats a board reaches ``_traced``, the
+    CLI's one progress-bearing call site. This drives that run through
+    ``_prepare`` and checks the printed report; ``captured.out`` is
+    asserted non-empty so the guard cannot pass by inspecting nothing.
+    ``%`` is a weak extra beside the real carriage-return and CSI-introducer
+    signatures, holding only while the report carries no percentage of its own.
+    """
+    run = _prepare(tmp_path, monkeypatch, post=True)
+
+    code = main(run.argv)
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out
+    assert "\r" not in captured.out
+    assert "\r" not in captured.err
+    assert "\x1b[" not in captured.out
+    assert "\x1b[" not in captured.err
+    assert "%" not in captured.out
+
+
 def test_a_pin_naming_an_impossible_ordinal_is_usage(tmp_path, monkeypatch, capsys) -> None:
     """Boards are numbered from one, so ordinal zero can name no board at all."""
     run = _prepare(tmp_path, monkeypatch)

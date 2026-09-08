@@ -19,6 +19,7 @@ from typing import ClassVar, Protocol, TypeVar, overload, runtime_checkable
 
 from .diagnostics import Diagnostic, Severity
 from .model import StageRun
+from .progress import NO_PROGRESS, Scope
 
 __all__ = [
     "Processable",
@@ -80,11 +81,19 @@ T_contra = TypeVar("T_contra", bound=Processable, contravariant=True)
 
 @runtime_checkable
 class Stage(Protocol[T]):
-    """A deterministic preprocessing step independent of pipeline position."""
+    """A deterministic preprocessing step independent of pipeline position.
+
+    ``weight`` is this stage's share of its pipeline's span, a declared
+    constant describing the shape of the work rather than its duration on
+    any machine. ``scope`` is where the stage reports what it is doing; it
+    defaults to the null scope so that a caller outside a pipeline, and any
+    stage published beyond this workspace, is unaffected.
+    """
 
     name: ClassVar[str]
+    weight: ClassVar[float]
 
-    def apply(self, data: T) -> T: ...
+    def apply(self, data: T, scope: Scope = NO_PROGRESS) -> T: ...
 
     def describe(self) -> StageRun:
         """Report the effective configuration applied by this stage."""
@@ -314,11 +323,15 @@ class Pipeline(Sequence[Stage[T]]):
         """Return a new pipeline with ``stage`` appended."""
         return Pipeline(self._stages + (stage,))
 
-    def run(self, data: T) -> T:
+    def run(self, data: T, scope: Scope = NO_PROGRESS) -> T:
         """Fold the stages over ``data``, recording each one as it succeeds.
 
         A record is appended only after ``apply`` returns successfully.
+        The span divides by the stages' declared weights, so a pipeline
+        holding one heavy stage does not advance in equal jumps.
         """
-        for stage in self._stages:
-            data = stage.apply(data).with_processing(stage.describe())
+        slots = scope.parts(*(stage.weight for stage in self._stages))
+        for stage, slot in zip(self._stages, slots, strict=True):
+            slot.label(stage.name)
+            data = stage.apply(data, slot).with_processing(stage.describe())
         return data
