@@ -126,9 +126,9 @@ class _Node:
         """Yield one child per weight, then close this node at its own end.
 
         Each bound comes from a running total, not from the previous child's
-        end, so a long division accumulates no float error. ``total`` uses
-        CPython's compensated summation while ``done`` adds one weight at a
-        time, so the two algorithms round differently and ``done`` can
+        end, so a long division accumulates no float error. ``total`` and
+        ``done`` may round differently: on newer CPythons ``sum()`` is
+        compensated while ``done`` adds one weight at a time, and ``done`` can
         overtake ``total`` on the last weight. ``hi`` is clamped for that
         reason: without it the last child could claim span past its parent's
         end. ``lo`` is computed alike. ADR-0012 records the partition.

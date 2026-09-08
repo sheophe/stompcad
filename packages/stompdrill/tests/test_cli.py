@@ -2882,7 +2882,7 @@ def test_the_command_line_renders_no_progress(capsys, tmp_path) -> None:
     target = tmp_path / "out.json"
     code = main(
         [
-            "packages/stompdrill/tests/fixtures/tar.ai",
+            str(FIXTURE),
             "--case",
             "1590B",
             "--emit",

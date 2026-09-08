@@ -35,14 +35,13 @@ except Exception as error: print(error)
 "
 ```
 
-The classes without a Python constructor are those whose OpenCASCADE
-constructors are protected. Binding one needs pybind11's publicist idiom, which
-the binding's generator does not apply. This explanation fits every class
-observed and OpenCASCADE's declarations; confirm it against the headers for the
-pinned version before relying on it in a build. A scope built on a default range
-is inert: advancing it leaves its value unchanged. One kernel call is therefore
-the smallest piece of work the workspace can report on, unless the missing side
-is supplied separately.
+`Message_ProgressIndicator` has no Python constructor because its OpenCASCADE
+constructor is protected, and the binding's generator does not apply
+pybind11's publicist idiom needed to bind one. Confirm this against the
+headers for the pinned version before relying on it in a build. A scope built
+on a default range is inert: advancing it leaves its value unchanged. One
+kernel call is therefore the smallest piece of work the workspace can report
+on, unless the missing side is supplied separately.
 
 ## Decision
 
@@ -243,9 +242,9 @@ what notices.
 ### Fold a tree rather than estimate a total
 
 A single global percentage needs an estimate of total work before the run
-starts. The only honest source for such an estimate is memory of previous runs,
-and this design keeps none: a bar derived from earlier runs would report a
-machine's history rather than this run's work.
+starts. Such an estimate has to come from memory of previous runs, and this
+design keeps none: a bar derived from earlier runs would report a machine's
+history rather than this run's work.
 
 A weighted tree needs no estimate. Every count is read from the value in hand at
 the moment its span opens, and a branch that subdivides further does so inside a

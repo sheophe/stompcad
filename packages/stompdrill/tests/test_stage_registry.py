@@ -4,6 +4,9 @@ A stage added later that misses the protocol would silently take no share
 of the bar and report nothing. The pinned set is what makes adding one a
 deliberate act: the count changes, this fails, and the author chooses a
 weight rather than inheriting a default.
+
+Written per package because ``test_package_boundary.py`` forbids importing
+``stompdrill``, so no one process may enumerate both packages' stages.
 """
 
 from __future__ import annotations
