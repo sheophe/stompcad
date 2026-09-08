@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from stompcollider.insert import Insertion
+from stompcollider.insert import Insertion, contact_depth
 from stompcollider.match import Match
 from stompcollider.model import DockData
 from stompcollider.seat import Seat
@@ -26,6 +26,7 @@ from stompgeom.step import StepDocument, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.model import DrillData
 from stompmodel.progress import track
+from stompmodel.units import Nanometre
 from tests import tar
 from tests.test_seat import _Stopping
 
@@ -321,3 +322,66 @@ def test_a_search_that_stops_early_still_closes_its_placement(
 
     assert recorder.positions[-1] == 1.0
     assert recorder.positions == sorted(recorder.positions)
+
+
+# --------------------------------------------------------------------------
+# ``contact_depth``'s own per-sample subdivision, exercised directly and
+# without a kernel: each bound phase's slot count comes from its own
+# materialised sample list, so a wrong count is a ``ValueError`` from
+# ``strict=True`` before any assertion runs, never a silent miscount.
+# --------------------------------------------------------------------------
+
+
+def _blocked_partway(depth: Nanometre) -> bool:
+    return depth >= Nanometre(5_000_000)
+
+
+def _never_blocked(_depth: Nanometre) -> bool:
+    return False
+
+
+def _always_blocked(_depth: Nanometre) -> bool:
+    return True
+
+
+def test_contact_depth_closes_its_own_span_whichever_phase_stops_it() -> None:
+    """Each of the search's early exits still reaches the call's own end.
+
+    Proved directly against ``contact_depth`` rather than through ``Seat``:
+    ``_Stopping`` never calls it at all, so it cannot speak to whether the
+    phases *this* function now subdivides still close correctly. The three
+    rows are the three exits the brief names, in the same order.
+    """
+    cases = (
+        ("entry at the limit", _never_blocked, Nanometre(10_000_000), Nanometre(10_000_000)),
+        ("blocked entry pose", _always_blocked, Nanometre(0), Nanometre(10_000_000)),
+        ("clear path", _never_blocked, Nanometre(0), Nanometre(10_000_000)),
+        ("runs all three phases", _blocked_partway, Nanometre(0), Nanometre(10_000_000)),
+    )
+    for label, blocked, entry_nm, limit_nm in cases:
+        recorder = Recorder()
+        with track(recorder) as scope:
+            contact_depth(
+                blocked, entry_nm, limit_nm, Nanometre(2_000_000), Nanometre(50_000), scope
+            )
+        assert recorder.positions[-1] == 1.0, label
+        assert recorder.positions == sorted(recorder.positions), label
+
+
+def test_a_full_search_still_visits_all_three_phases_directly() -> None:
+    """The control beside it: the run above must actually reach every phase,
+    not merely finish -- a call that skipped ``fine``/``bisect`` outright
+    would still satisfy "closes at 1.0" for the wrong reason."""
+    recorder = Recorder()
+    with track(recorder) as scope:
+        contact_depth(
+            _blocked_partway,
+            Nanometre(0),
+            Nanometre(10_000_000),
+            Nanometre(2_000_000),
+            Nanometre(50_000),
+            scope,
+        )
+
+    names = {p[0] for p in recorder.paths if len(p) == 1}
+    assert {"coarse", "fine", "bisect"} <= names

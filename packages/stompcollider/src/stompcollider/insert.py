@@ -122,6 +122,19 @@ _PHASE_WEIGHTS = (3.0, 2.0, 1.0)
 _PHASE_NAMES = ("coarse", "fine", "bisect")
 
 
+def _drain(slots: Iterator[Scope]) -> None:
+    """Exhaust a per-sample division a loop may have ``break``-ed out of early.
+
+    A ``for``/``zip`` loop that runs to its own end needs nothing further:
+    its own last pull already reaches the division's closing advance. One
+    that ``break``s leaves that pull unmade, and this makes it now rather
+    than leaving a generator for garbage collection to close later, out of
+    order.
+    """
+    for _ in slots:
+        pass
+
+
 def contact_depth(
     blocked: Callable[[Nanometre], bool],
     entry_nm: Nanometre,
@@ -144,6 +157,8 @@ def contact_depth(
 
     ``scope`` always divides into all three phases, labelled every time, so
     a shortcut still closes at its own span rather than stalling short.
+    Each bound phase divides again over its own materialised sample list,
+    an exact count with no formula to get wrong.
     """
     clear, found = entry_nm, None
     blocked_at_entry = False
@@ -157,32 +172,53 @@ def contact_depth(
             if blocked(entry_nm):
                 blocked_at_entry = True
                 continue
-            for depth in _samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True):
+            samples = list(_samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True))
+            slots = phase.steps(len(samples))
+            for depth, _slot in zip(samples, slots, strict=True):
                 if blocked(depth):
                     found = depth
                     break
                 clear = depth
+            _drain(slots)
             if found is None:
                 exhausted = True
         elif name == "fine":
             if blocked_at_entry or exhausted:
                 continue
             assert found is not None  # coarse found a blocked sample to reach here
-            for depth in _samples(clear, found, pitch_min_nm, inclusive=False):
+            samples = list(_samples(clear, found, pitch_min_nm, inclusive=False))
+            slots = phase.steps(len(samples))
+            for depth, _slot in zip(samples, slots, strict=True):
                 if blocked(depth):
                     found = depth
                     break
                 clear = depth
+            _drain(slots)
         else:  # "bisect"
             if blocked_at_entry or exhausted:
                 continue
             assert found is not None  # coarse found a blocked sample to reach here
-            while found - clear > 1:
+            # The number of halvings any bracket of this width could ever
+            # need, from the width alone -- never fewer than the real count,
+            # which is data-dependent and often smaller. An upper bound
+            # rather than a materialised list: unlike the two sweeps above,
+            # each midpoint here depends on the previous query's answer, so
+            # the sequence cannot be listed before the search runs it.
+            bracket_nm = max(int(found) - int(clear) - 1, 0)
+            count = bracket_nm.bit_length()
+            slots = phase.steps(count)
+            for _slot in slots:
+                if found - clear <= 1:
+                    break
                 middle = Nanometre((clear + found) // 2)
                 if blocked(middle):
                     found = middle
                 else:
                     clear = middle
+            _drain(slots)
+            assert found - clear <= 1, (
+                "the bisection outran its own derived upper bound"
+            )
     if blocked_at_entry:
         return None
     if exhausted:
