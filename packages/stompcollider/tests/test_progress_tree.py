@@ -417,14 +417,11 @@ def _blocked_above_one_million(depth: Nanometre) -> bool:
 def test_a_short_yielding_scope_cannot_shorten_the_bisection() -> None:
     """The bisection's own convergence must bound its iterations, not ``steps``.
 
-    ``bracket_nm.bit_length()`` is only ever an upper bound on how many
-    halvings a bisection of that width could need; the loop must keep
-    halving until ``found - clear <= 1`` regardless of how many scopes the
-    observer handed back. The fixture gives the coarse and fine phases
-    exactly one sample each -- so ``min(count, 1)`` still matches what they
-    ask for and neither raises -- and leaves only the bisect phase needing
-    more than the single scope this double ever yields. A double that
-    starves it must still leave the two runs' answers equal.
+    ``bracket_nm.bit_length()`` is only ever an upper bound on the halvings
+    needed; the loop must keep halving until ``found - clear <= 1`` however
+    many scopes the observer handed back. The fixture gives coarse and fine
+    exactly one sample each, so ``min(count, 1)`` still matches what they
+    ask for; only bisect needs more than this double's single scope.
     """
     args = (
         _blocked_above_one_million,
