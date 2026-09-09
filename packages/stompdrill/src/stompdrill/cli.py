@@ -771,9 +771,12 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
     ]
 
 
-#: The shape of a drill run: reading and quantisation are bounded by the
-#: artwork, the pipeline carries the only stage that consults a model, and
-#: emitting writes what the earlier three decided.
+#: The shape of a drill run: reading is bounded by the artwork and, when
+#: ``--case-model`` names one, a second read that loads the case model;
+#: quantisation stays bounded by the artwork alone. Model work is not
+#: confined to the pipeline's clearance stage -- ``build_case_model`` already
+#: read the model during the read slot, and ``StepEmitter.emit`` cuts that
+#: same model again during the emit slot.
 _RUN_WEIGHTS = (1.0, 2.0, 6.0, 3.0)
 
 
