@@ -771,12 +771,13 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
     ]
 
 
-#: The shape of a drill run: reading is bounded by the artwork and, when
-#: ``--case-model`` names one, a second read that loads the case model;
-#: quantisation stays bounded by the artwork alone. Model work is not
-#: confined to the pipeline's clearance stage -- ``build_case_model`` already
-#: read the model during the read slot, and ``StepEmitter.emit`` cuts that
-#: same model again during the emit slot.
+#: The shape of a drill run: each slot's share reflects the kernel work it
+#: carries. Reading loads the artwork and, under ``--case-model``, the case
+#: model too; quantisation touches no model at all, so it stays cheap.
+#: The pipeline takes the largest share because its clearance stage queries
+#: the model once per hole, and emitting takes the next largest because
+#: ``StepEmitter.emit`` cuts that model again. Model work spans three of
+#: the four slots; the pipeline's stage is the heaviest, not the only one.
 _RUN_WEIGHTS = (1.0, 2.0, 6.0, 3.0)
 
 
