@@ -29,7 +29,7 @@ from stompgeom.step import StepDocument, StepSolid, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, DrillData
-from stompmodel.progress import Scope, track
+from stompmodel.progress import NO_PROGRESS, Scope, track
 from stompmodel.units import Nanometre, nm_from_mm
 from tests import tar
 from tests.conftest import _Stopping
@@ -389,6 +389,53 @@ def test_a_full_search_still_visits_all_three_phases_directly() -> None:
 
     names = {p[0] for p in recorder.paths if len(p) == 1}
     assert {"coarse", "fine", "bisect"} <= names
+
+
+class _ShortYieldingScope:
+    """A ``Scope`` double whose ``steps`` starves any loop needing more than one slot.
+
+    ``parts`` and ``label`` behave exactly like ``NullScope``; only ``steps``
+    under-yields. A progress observer is not allowed to change the geometric
+    answer, so a search driven by "does the scope still have slots left"
+    rather than by its own convergence would be shortened by this double.
+    """
+
+    def steps(self, count: int) -> Iterator[Scope]:
+        return iter([self] * min(count, 1))
+
+    def parts(self, *weights: float) -> Iterator[Scope]:
+        return iter([self] * len(weights))
+
+    def label(self, name: str) -> None:
+        return None
+
+
+def _blocked_above_one_million(depth: Nanometre) -> bool:
+    return depth >= Nanometre(1_000_000)
+
+
+def test_a_short_yielding_scope_cannot_shorten_the_bisection() -> None:
+    """The bisection's own convergence must bound its iterations, not ``steps``.
+
+    ``bracket_nm.bit_length()`` is only ever an upper bound on how many
+    halvings a bisection of that width could need; the loop must keep
+    halving until ``found - clear <= 1`` regardless of how many scopes the
+    observer handed back. The fixture gives the coarse and fine phases
+    exactly one sample each -- so ``min(count, 1)`` still matches what they
+    ask for and neither raises -- and leaves only the bisect phase needing
+    more than the single scope this double ever yields. A double that
+    starves it must still leave the two runs' answers equal.
+    """
+    args = (
+        _blocked_above_one_million,
+        Nanometre(0),
+        Nanometre(10_000_000),
+        Nanometre(10_000_000),
+        Nanometre(6_000_000),
+    )
+    baseline = contact_depth(*args, NO_PROGRESS)
+    starved = contact_depth(*args, _ShortYieldingScope())
+    assert starved == baseline
 
 
 # --------------------------------------------------------------------------

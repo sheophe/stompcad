@@ -196,16 +196,14 @@ def contact_depth(
     # sequence cannot be listed ahead of the search that runs it.
     bracket_nm = max(int(found) - int(clear) - 1, 0)
     slots = bisect_scope.steps(bracket_nm.bit_length())
-    for _slot in slots:
-        if found - clear <= 1:
-            break
+    while found - clear > 1:
+        next(slots, NO_PROGRESS)
         middle = Nanometre((clear + found) // 2)
         if blocked(middle):
             found = middle
         else:
             clear = middle
     _drain(slots)
-    assert found - clear <= 1, "the bisection outran its own derived upper bound"
 
     _drain(phases)
     return clear
