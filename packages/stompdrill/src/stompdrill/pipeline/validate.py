@@ -132,7 +132,9 @@ class CheckOutlineContainment:
         if outline is None:
             return data
         findings = []
-        for hole in data.holes:
+        slots = scope.steps(len(data.holes))
+        for hole, slot in zip(data.holes, slots, strict=True):
+            slot.label(f"hole {hole.raw.x:.3f},{hole.raw.y:.3f}")
             # Doubled, so the decision needs no halving. A hole centred at ``x``
             # spans ``2|x| + d`` across that axis, and comparing that with the
             # full dimension keeps the boundary exact -- rounding a half-nanometre

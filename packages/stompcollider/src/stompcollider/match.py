@@ -518,7 +518,9 @@ class Match:
         diagnostics: list[Diagnostic] = []
         claimed_hole_indices: set[int] = set()
 
-        for board in data.boards:
+        slots = scope.steps(len(data.boards))
+        for board, slot in zip(data.boards, slots, strict=True):
+            slot.label(f"board {board.ordinal}")
             new_board, board_placements, board_diagnostics, claimed = _match_board(
                 board, data.holes, self._tolerance_nm
             )

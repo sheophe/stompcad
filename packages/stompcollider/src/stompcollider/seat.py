@@ -231,11 +231,26 @@ class Seat:
         basis = data.case.frame.basis
         placements: dict[int, tuple[Placement, ...]] = {}
         diagnostics: list[Diagnostic] = []
-        for ordinal in sorted(data.placements):
-            seated = [
-                self._seat(ordinal, boards.get(ordinal), placement, basis, diagnostics)
-                for placement in data.placements[ordinal]
-            ]
+        ordinals = sorted(data.placements)
+        for ordinal, board_scope in zip(ordinals, scope.steps(len(ordinals)), strict=True):
+            board_scope.label(f"board {ordinal}")
+            board_placements = data.placements[ordinal]
+            placement_scopes = board_scope.steps(len(board_placements))
+            seated = []
+            for index, (placement, placement_scope) in enumerate(
+                zip(board_placements, placement_scopes, strict=True)
+            ):
+                placement_scope.label(f"placement {index}")
+                seated.append(
+                    self._seat(
+                        ordinal,
+                        boards.get(ordinal),
+                        placement,
+                        basis,
+                        diagnostics,
+                        placement_scope,
+                    )
+                )
             ranked = sorted(seated, key=rank_key)
             placements[ordinal] = tuple(
                 replace(placement, rank=index)
@@ -250,6 +265,7 @@ class Seat:
         placement: Placement,
         basis: CoordinateFrame,
         diagnostics: list[Diagnostic],
+        scope: Scope = NO_PROGRESS,
     ) -> Placement:
         """One placement brought to rest, and what the enclosure did to it.
 
@@ -261,7 +277,7 @@ class Seat:
         at_holes = replace(placement, z_nm=_seated_z_nm(placement))
         if self._cavity is None or board is None:
             return at_holes
-        found = self._cavity.insertion(board, at_holes, basis)
+        found = self._cavity.insertion(board, at_holes, basis, scope)
         diagnostics.extend(_findings(ordinal, at_holes, found))
         if found.depth_nm is None:
             # No travel exists, so none is recorded: the depth stays the one

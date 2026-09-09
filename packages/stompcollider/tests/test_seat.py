@@ -19,6 +19,7 @@ from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, StageRun
 from stompmodel.protocols import Stage
 from stompmodel.units import Nanometre
+from tests.conftest import _Stopping
 
 # --------------------------------------------------------------------------
 # Shared builders
@@ -527,21 +528,6 @@ def test_the_box_volumes_alone_would_have_ranked_that_pair_the_other_way() -> No
 # what lets these state the seating rules rather than the geometry: the
 # search itself is exercised in ``test_insert.py``, against solids.
 # --------------------------------------------------------------------------
-
-
-class _Stopping:
-    """A cavity that answers one fixed insertion, whatever it is asked."""
-
-    def __init__(self, found: Insertion) -> None:
-        self.found = found
-        self.asked: list[tuple[int, Nanometre]] = []
-
-    def insertion(self, board, placement, basis) -> Insertion:
-        self.asked.append((board.ordinal, placement.z_nm))
-        return self.found
-
-    def parameters(self) -> tuple[tuple[str, int], ...]:
-        return (("seat_pitch_max_nm", 2_000_000), ("seat_pitch_min_nm", 50_000))
 
 
 def _board(ordinal: int = 1) -> Board:

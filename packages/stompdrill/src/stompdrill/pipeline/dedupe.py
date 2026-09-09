@@ -35,7 +35,9 @@ class Deduplicate:
     def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
         groups: list[list[Hole]] = []
 
-        for hole in data.holes:
+        slots = scope.steps(len(data.holes))
+        for hole, slot in zip(data.holes, slots, strict=True):
+            slot.label(f"hole {hole.raw.x:.3f},{hole.raw.y:.3f}")
             for group in groups:
                 if self._same_hole(hole, group[0]):
                     group.append(hole)

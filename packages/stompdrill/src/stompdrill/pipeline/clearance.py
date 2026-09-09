@@ -76,7 +76,9 @@ class CheckCaseClearance:
             for d in (self._cross_check(data), self._orientation_notice(data.enclosure))
             if d is not None
         ]
-        for hole in data.holes:
+        slots = scope.steps(len(data.holes))
+        for hole, slot in zip(data.holes, slots, strict=True):
+            slot.label(f"hole {hole.raw.x:.3f},{hole.raw.y:.3f}")
             # Ceiling, not floor: an odd-nanometre diameter must round the bit
             # radius up, never down. Floor division is optimistic by half a
             # nanometre, biasing a marginal hole towards passing -- the wrong

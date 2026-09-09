@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 import pikepdf
 import pytest
@@ -11,8 +13,20 @@ from pikepdf import Array, Dictionary, Name, String
 from stompdrill.cad import Rejection
 from stompdrill.emitters import base
 from stompdrill.geometry import KAPPA
+from stompdrill.pipeline import (
+    CheckOutlineContainment,
+    Deduplicate,
+    IdentifyHammondFootprint,
+    ReviewGridTies,
+    RouteHoles,
+    SnapDiametersToDrillTable,
+    SnapPositions,
+)
+from stompdrill.quantise import RawDrillData, quantise
+from stompdrill.sources import AiPdfSource
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, ReferenceOutline, SourceInfo
+from stompmodel.protocols import Pipeline
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
 
@@ -30,7 +44,64 @@ __all__ = [
     "image_ending_form",
     "build_pdf",
     "FakeCase",
+    "TarRaw",
+    "QuantiserKwargs",
+    "tar_raw",
+    "tar_quantised",
+    "tar_routed",
+    "build_pipeline_for_test",
 ]
+
+_TAR_FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
+
+
+class QuantiserKwargs(TypedDict):
+    """The keyword bundle ``quantise()`` takes, so ``**`` unpacking stays typed."""
+
+    enclosure: IdentifyHammondFootprint
+    diameters: SnapDiametersToDrillTable
+    positions: SnapPositions
+
+
+@dataclass(frozen=True)
+class TarRaw:
+    """The tar artwork read but not yet quantised, with its three quantisers."""
+
+    raw: RawDrillData
+    quantisers: QuantiserKwargs
+
+
+@pytest.fixture
+def tar_raw() -> TarRaw:
+    """``tar.ai`` read into millimetres, and the quantisers a 1590B run uses."""
+    source = AiPdfSource(_TAR_FIXTURE)
+    return TarRaw(
+        raw=source.read(),
+        quantisers={
+            "enclosure": IdentifyHammondFootprint(expected_part="1590B"),
+            "diameters": SnapDiametersToDrillTable(),
+            "positions": SnapPositions(Nanometre(250_000)),
+        },
+    )
+
+
+@pytest.fixture
+def tar_quantised(tar_raw: TarRaw) -> DrillData:
+    """The same artwork quantised, ready for the pipeline stages."""
+    return quantise(tar_raw.raw, **tar_raw.quantisers)
+
+
+@pytest.fixture
+def tar_routed(tar_quantised: DrillData) -> DrillData:
+    """Quantised and routed, so ``numbered()`` is available to emitters."""
+    return build_pipeline_for_test().run(tar_quantised)
+
+
+def build_pipeline_for_test() -> Pipeline[DrillData]:
+    """The four stages ``cli.build_pipeline`` composes without a case model."""
+    return Pipeline(
+        [Deduplicate(), ReviewGridTies(), RouteHoles(), CheckOutlineContainment()]
+    )
 
 _MM = 1_000_000
 

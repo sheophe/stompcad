@@ -17,6 +17,7 @@ from typing import Protocol, runtime_checkable
 from stompgeom.shapes import centre_of_mass_mm, common, compound, interferes, placed
 from stompgeom.step import BoxMm, StepSolid, bounding_box_mm
 from stompmodel.frames import CoordinateFrame, RigidTransform
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
@@ -100,10 +101,33 @@ class Cavity(Protocol):
     """
 
     def insertion(
-        self, board: Board, placement: Placement, basis: CoordinateFrame
+        self,
+        board: Board,
+        placement: Placement,
+        basis: CoordinateFrame,
+        scope: Scope = NO_PROGRESS,
     ) -> Insertion: ...
 
     def parameters(self) -> tuple[tuple[str, int], ...]: ...
+
+
+#: The insertion search's three phases. The coarse sweep spans the whole
+#: travel, but its early samples are box-filtered and never reach the
+#: kernel; the fine sweep and the bisection work entirely near contact.
+_PHASE_WEIGHTS = (3.0, 2.0, 1.0)
+
+
+def _drain(slots: Iterator[Scope]) -> None:
+    """Exhaust a division a loop may have ``break``-ed, or never drawn from.
+
+    A ``for``/``zip`` loop that runs to its own end needs nothing further:
+    its own last pull already reaches the division's closing advance. One
+    that ``break``s, or a phase skipped outright, leaves that pull unmade,
+    and this makes it now rather than leaving a generator for garbage
+    collection to close later, out of order.
+    """
+    for _ in slots:
+        pass
 
 
 def contact_depth(
@@ -112,42 +136,76 @@ def contact_depth(
     limit_nm: Nanometre,
     pitch_max_nm: Nanometre,
     pitch_min_nm: Nanometre,
+    scope: Scope = NO_PROGRESS,
 ) -> Nanometre | None:
     """The deepest reachable travel, or ``None`` when the entry pose is blocked.
 
     Coarse to fine, bounded from above: a blocked sample bounds the answer,
-    so nothing beyond the first one is sampled again. The bracket it leaves
-    is swept once at the finest pitch -- which subsumes every intermediate
-    halving -- and then bisected over whole nanometres. Exact rather than
-    convergent: canonical lengths are a finite ordered set, so the last
-    step lands on an integer and not at a tolerance. ``limit_nm`` is the
-    last travel at which contact is possible at all, and it is returned
-    unchanged where the whole path is clear -- which is the caller's signal
-    that this enclosure says nothing about where the board rests.
+    so nothing beyond the first one is sampled again. The bracket left is
+    swept once at the finest pitch and then bisected over whole nanometres,
+    exact rather than convergent. ``limit_nm`` is returned unchanged where
+    the whole path is clear. See ADR-0012 for why ``scope`` always opens
+    all three phases, whichever one this returns from.
     """
+    phases = scope.parts(*_PHASE_WEIGHTS)
+
+    coarse = next(phases)
+    coarse.label("coarse")
     if entry_nm >= limit_nm:
+        _drain(phases)
         return limit_nm
     if blocked(entry_nm):
+        _drain(phases)
         return None
+
     clear, found = entry_nm, None
-    for depth in _samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True):
+    count = sum(1 for _ in _samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True))
+    slots = coarse.steps(count)
+    for depth, _slot in zip(
+        _samples(entry_nm, limit_nm, pitch_max_nm, inclusive=True), slots, strict=True
+    ):
         if blocked(depth):
             found = depth
             break
         clear = depth
+    _drain(slots)
+
     if found is None:
+        _drain(phases)
         return limit_nm
-    for depth in _samples(clear, found, pitch_min_nm, inclusive=False):
+
+    fine = next(phases)
+    fine.label("fine")
+    count = sum(1 for _ in _samples(clear, found, pitch_min_nm, inclusive=False))
+    slots = fine.steps(count)
+    for depth, _slot in zip(
+        _samples(clear, found, pitch_min_nm, inclusive=False), slots, strict=True
+    ):
         if blocked(depth):
             found = depth
             break
         clear = depth
+    _drain(slots)
+
+    bisect_scope = next(phases)
+    bisect_scope.label("bisect")
+    # The number of halvings any bracket of this width could ever need --
+    # never fewer than the real count, which is data-dependent and often
+    # smaller. Not a materialised list: unlike the two sweeps above, each
+    # midpoint here depends on the previous query's answer, so the
+    # sequence cannot be listed ahead of the search that runs it.
+    bracket_nm = max(int(found) - int(clear) - 1, 0)
+    slots = bisect_scope.steps(bracket_nm.bit_length())
     while found - clear > 1:
+        next(slots, NO_PROGRESS)
         middle = Nanometre((clear + found) // 2)
         if blocked(middle):
             found = middle
         else:
             clear = middle
+    _drain(slots)
+
+    _drain(phases)
     return clear
 
 
@@ -302,13 +360,19 @@ class CaseCavity:
         )
 
     def insertion(
-        self, board: Board, placement: Placement, basis: CoordinateFrame
+        self,
+        board: Board,
+        placement: Placement,
+        basis: CoordinateFrame,
+        scope: Scope = NO_PROGRESS,
     ) -> Insertion:
         """How far ``board`` travels toward the seat ``placement`` states.
 
         The travel is ``+w``, from outside the open end toward the drilled
         face: a board is inserted through the cavity mouth and its controls
-        emerge through the holes, never the other way about.
+        emerge through the holes, never the other way about. ``scope``
+        passes straight through to the search: nothing else this method
+        does is worth its own division against the search it surrounds.
         """
         seat_nm = placement.z_nm
         inside, beyond = self._split.of(basis, board.extent_nm)
@@ -327,6 +391,7 @@ class CaseCavity:
             limit_nm,
             self._pitch_max_nm,
             self._pitch_min_nm,
+            scope,
         )
         if depth_nm == limit_nm:
             # The whole path is clear, so this enclosure states nothing about

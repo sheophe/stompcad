@@ -737,16 +737,23 @@ def _format_trace(
 
 
 def _write(
-    emitters: Sequence[tuple[Emitter[DrillData], Path]], data: DrillData
+    emitters: Sequence[tuple[Emitter[DrillData], Path]],
+    data: DrillData,
+    scope: Scope = NO_PROGRESS,
 ) -> list[str]:
     """Render every artefact, then stage every one, then commit every one.
 
-    Every payload is rendered before any target is touched. Neither loop
-    below is this file's own: staging and the whole-set transaction are
-    ``stompmodel``'s, and this keeps only the sentence it prints from the
-    count each commit returned -- see ADR-0001 and ADR-0005.
+    Rendering divides ``scope`` one leaf per emitter, each where that
+    emitter does its own work. Staging writes temporaries and committing
+    renames them, both after every render is done, inside this function's
+    own span and undivided -- honest about where the time goes without
+    inventing leaves for two fast steps. Staging and the whole-set
+    transaction are ``stompmodel``'s; see ADR-0001 and ADR-0005.
     """
-    rendered = [(emitter, path, emitter.emit(data)) for emitter, path in emitters]
+    rendered = []
+    for (emitter, path), slot in zip(emitters, scope.steps(len(emitters)), strict=True):
+        slot.label(emitter.name)
+        rendered.append((emitter, path, emitter.emit(data)))
     staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
     sizes = commit_all(staged)
     return [
@@ -764,12 +771,40 @@ def _withheld(targets: Iterable[tuple[Emitter[DrillData], Path]]) -> list[str]:
     ]
 
 
-def _run(args: argparse.Namespace, out: TextIO) -> int:
+#: The shape of a drill run: each slot's share reflects the kernel work it
+#: carries. Reading loads the artwork and, under ``--case-model``, the case
+#: model too; quantisation touches no model at all, so it stays cheap.
+#: The pipeline takes the largest share because its clearance stage queries
+#: the model once per hole, and emitting takes the next largest because
+#: ``StepEmitter.emit`` cuts that model again. Model work spans three of
+#: the four slots; the pipeline's stage is the heaviest, not the only one.
+_RUN_WEIGHTS = (1.0, 2.0, 6.0, 3.0)
+
+
+def _run(args: argparse.Namespace, out: TextIO, scope: Scope = NO_PROGRESS) -> int:
     targets = [parse_emit(spec) for spec in args.emit]
     try:
         check_target_set([path for _format, path in targets])
     except ValueError as error:
         raise UsageError(str(error)) from error
+
+    # Division is a generator: a slot closes when the *next* one is drawn, so
+    # each is pulled with ``next()`` immediately before its own work begins --
+    # never all at once, which would draw and close every slot back to back
+    # with no work between them.
+    slots = scope.parts(*_RUN_WEIGHTS)
+
+    read_slot = next(slots)
+    read_slot.label("read")
+    # A run always reads the artwork; a case model is a second, equally
+    # weighted STEP read only when --case-model names one. Each leaf is drawn
+    # lazily too, immediately before the read it names, for the same reason.
+    if args.case_model is not None:
+        read_leaves = read_slot.steps(2)
+        case_slot = next(read_leaves)
+        case_slot.label("case model")
+    else:
+        read_leaves = read_slot.steps(1)
 
     # Everything the command line can get wrong is resolved before the input is
     # opened: a bad standard, an unstocked size, a grid that is not a number, a
@@ -784,17 +819,24 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     quantisers = build_quantisers(args)
     pipeline = build_pipeline(args)
+
+    artwork_slot = next(read_leaves)
+    artwork_slot.label("artwork")
     raw = read_source(args)
+    next(read_leaves, None)  # exhaust: this is what closes the artwork leaf
 
     if args.verbose:
         print("PIPELINE", file=out)
         print(f"  {'(source)':<20} {len(raw.holes):>3} holes", file=out)
 
+    quantise_slot = next(slots)
+    quantise_slot.label("quantise")
     data = quantise(
         raw,
         enclosure=quantisers.enclosure,
         diameters=quantisers.diameters,
         positions=quantisers.positions,
+        scope=quantise_slot,
     )
 
     trace: Callable[[Stage[DrillData], DrillData, DrillData], None] | None = None
@@ -804,10 +846,14 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         def trace(stage: Stage[DrillData], before: DrillData, after: DrillData) -> None:
             print(format_stage(stage, before, after), file=out)
 
-    data = run_pipeline(pipeline, data, trace, NO_PROGRESS)
+    pipeline_slot = next(slots)
+    pipeline_slot.label("pipeline")
+    data = run_pipeline(pipeline, data, trace, pipeline_slot)
 
     print(format_report(data), file=out)
 
+    emit_slot = next(slots)
+    emit_slot.label("emit")
     if emitters:
         print(file=out)
         if data.worst_severity is Severity.ERROR:
@@ -815,8 +861,9 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
             # here, and one of them may legitimately refuse data this broken.
             print("\n".join(_withheld(emitters)), file=out)
         else:
-            for line in _write(emitters, data):
+            for line in _write(emitters, data, emit_slot):
                 print(line, file=out)
+    next(slots, None)  # exhaust: this is what closes the emit slot
 
     print("\n".join(format_summary(data)), file=out)
     return exit_for_severity(data.worst_severity)
@@ -833,7 +880,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Expected user-facing failures share one handler. Unexpected faults retain
     # their tracebacks rather than being classified as invalid input.
     try:
-        return _run(args, sys.stdout)
+        return _run(args, sys.stdout, NO_PROGRESS)
     except (UsageError, StompError, OSError) as failure:
         print(f"{parser.prog}: error: {failure}", file=sys.stderr)
         return EXIT_USAGE

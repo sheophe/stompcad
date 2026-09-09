@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from stompmodel.model import DrillData, Hole, StageRun
 from stompmodel.progress import NO_PROGRESS, Scope
+from stompmodel.units import mm_from_nm
 
 __all__ = ["RouteHoles"]
 
@@ -82,10 +83,17 @@ def _two_opt(route: list[Hole]) -> list[Hole]:
     return route
 
 
-def _routed(holes: Sequence[Hole]) -> list[Hole]:
-    """Tool-major blocks, ascending by size, each routed on its own."""
+def _routed(holes: Sequence[Hole], scope: Scope = NO_PROGRESS) -> list[Hole]:
+    """Tool-major blocks, ascending by size, each routed on its own.
+
+    One leaf per diameter, not per hole: ``_two_opt``'s pass count inside a
+    block follows from the geometry and is not knowable beforehand, so the
+    holes within a block are not visited once each.
+    """
     ordered: list[Hole] = []
-    for diameter in sorted({hole.diameter_nm for hole in holes}):
+    diameters = sorted({hole.diameter_nm for hole in holes})
+    for diameter, slot in zip(diameters, scope.steps(len(diameters)), strict=True):
+        slot.label(f"tool {mm_from_nm(diameter):.3f}")
         block = [hole for hole in holes if hole.diameter_nm == diameter]
         ordered += _two_opt(_nearest_neighbour(block))
     return ordered
@@ -108,7 +116,7 @@ class RouteHoles:
         return StageRun(self.name, ())
 
     def apply(self, data: DrillData, scope: Scope = NO_PROGRESS) -> DrillData:
-        ordered = _routed(data.holes)
+        ordered = _routed(data.holes, scope)
         return data.with_holes(
             hole.with_number(number) for number, hole in enumerate(ordered, start=1)
         )

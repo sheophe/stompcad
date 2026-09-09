@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import DrillData, Hole, RawHole, RawOutline, SourceInfo, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Millimetre, check_millimetres
 
 from .pipeline import IdentifyHammondFootprint, SnapDiametersToDrillTable, SnapPositions
@@ -45,11 +46,14 @@ def quantise(
     enclosure: IdentifyHammondFootprint,
     diameters: SnapDiametersToDrillTable,
     positions: SnapPositions,
+    scope: Scope = NO_PROGRESS,
 ) -> DrillData:
     """Apply enclosure, diameter, and position quantisers in that order.
 
     Source diagnostics precede quantisation findings. An enclosure error stops
     the phase before holes, diameter records, or position records are produced.
+    ``scope`` divides one step per measurement; the enclosure match runs once
+    for the panel and is not a step of that division.
     """
     findings: list[Diagnostic] = list(raw.diagnostics)
     runs: list[StageRun] = []
@@ -78,7 +82,9 @@ def quantise(
     findings.extend(positions.diagnostics)
 
     holes: list[Hole] = []
-    for measurement in measurements:
+    slots = scope.steps(len(measurements))
+    for measurement, slot in zip(measurements, slots, strict=True):
+        slot.label(f"hole {measurement.x:.3f},{measurement.y:.3f}")
         diameter_nm, refused = diameters.quantise(measurement)
         findings.extend(refused)
         if diameter_nm is None:
