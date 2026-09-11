@@ -517,6 +517,20 @@ def test_a_value_implementing_the_four_members_is_diagnosable_and_reaches_the_sh
     assert exit_for_severity(data.worst_severity) == EXIT_ERRORS
 
 
+def test_a_frozen_value_satisfies_diagnosable_where_one_is_required() -> None:
+    """Every value in this workspace is frozen, so the protocol must admit one.
+
+    ``isinstance`` cannot see settability, so a protocol no frozen value
+    satisfies statically passes every runtime check in the suite while
+    rejecting each of those values at the type gate. Passing one where
+    ``Diagnosable`` is *required* is what puts that under mypy: the call
+    below is the assertion, and the returned severity only proves it ran.
+    """
+    data = MinimalDockData().with_diagnostics(Diagnostic.error("dock-fouled", "clash"))
+
+    assert _read_worst_severity(data) is Severity.ERROR
+
+
 def test_drill_data_satisfies_both_processable_and_diagnosable() -> None:
     assert isinstance(DrillData(), Processable)
     assert isinstance(DrillData(), Diagnosable)

@@ -53,6 +53,7 @@ from stompmodel.diagnostics import Severity
 from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import Scope
 from stompmodel.protocols import (
+    Diagnosable,
     Emitter,
     Payload,
     Pipeline,
@@ -124,17 +125,14 @@ _STEP_HOLDS: dict[str, tuple[str, ...]] = {
 }
 
 
-class _Written(Processable, Protocol):
-    """What a write step folds over: a pipeline's value, and its worst finding.
+class _Written(Processable, Diagnosable, Protocol):
+    """What a write step folds over: a pipeline's value, and its findings.
 
-    ``Emitter`` binds ``Processable``, and the withhold rule reads the
-    severity alone. Deliberately not ``Diagnosable``: that protocol
-    declares ``diagnostics`` a settable variable, which no frozen value in
-    this workspace satisfies.
+    ``Emitter`` binds ``Processable`` and the withhold rule reads the worst
+    severity, so a write step's value is both of the shared protocols at
+    once. Declared here because a ``TypeVar`` takes one bound, and neither
+    protocol is restated: both halves' values satisfy them already.
     """
-
-    @property
-    def worst_severity(self) -> Severity | None: ...
 
 
 _DataT = TypeVar("_DataT", bound=_Written)
