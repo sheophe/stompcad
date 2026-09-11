@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,65 @@ async def test_a_question_blocks_the_worker_until_it_is_answered() -> None:
         await pilot.pause()
 
     assert answers == ["1590BB"]
+
+
+def _asking(
+    presentation: TerminalPresentation, results: list[tuple[str, str | None]]
+) -> Callable[[], None]:
+    """A worker body that turns ``ask``'s outcome into one recorded tuple."""
+
+    def run() -> None:
+        try:
+            results.append(
+                ("answer", presentation.ask(Choice(prompt="which enclosure?", candidates=("1590B", "1590BB"))))
+            )
+        except Cancelled:
+            results.append(("cancelled", None))
+
+    return run
+
+
+async def _await_result(results: list[tuple[str, str | None]], timeout: float = 5.0) -> None:
+    """Poll for the worker's recorded outcome, bounded so a stall fails fast."""
+
+    async def poll() -> None:
+        while not results:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout=timeout)
+
+
+@pytest.mark.asyncio
+async def test_pressing_q_on_the_modal_abandons_the_question() -> None:
+    """``q`` means the same thing everywhere: the modal's own binding stops it."""
+    app = InlineApp()
+    results: list[tuple[str, str | None]] = []
+
+    async with app.run_test() as pilot:
+        presentation = TerminalPresentation(app)
+        app.run_worker(_asking(presentation, results), thread=True)
+        await pilot.pause()
+        assert results == []
+
+        await pilot.press("q")
+        await _await_result(results)
+
+    assert results == [("cancelled", None)]
+
+
+@pytest.mark.asyncio
+async def test_the_app_going_away_abandons_a_pending_question() -> None:
+    """A screen popped by shutdown never calls back; the wait must still end."""
+    app = InlineApp()
+    results: list[tuple[str, str | None]] = []
+
+    async with app.run_test() as pilot:
+        presentation = TerminalPresentation(app)
+        app.run_worker(_asking(presentation, results), thread=True)
+        await pilot.pause()
+        assert results == []
+
+        app.exit()
+        await _await_result(results)
+
+    assert results == [("cancelled", None)]

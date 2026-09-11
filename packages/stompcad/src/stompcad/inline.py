@@ -19,6 +19,7 @@ from textual.widgets import OptionList, Static
 
 from stompmodel.diagnostics import EXIT_USAGE
 
+from .cancel import Cancelled
 from .plan import RunPlan, Step
 from .present import Question, step_line
 
@@ -80,21 +81,15 @@ class InlineApp(App[int]):
         """
         self.stopping = True
 
-    def enquire(self, question: Question, chosen: Callable[[str], None]) -> None:
+    def enquire(self, question: Question, chosen: Callable[[str | None], None]) -> None:
         """Put the question on screen, and hand the answer back when it comes.
 
         Called across ``call_from_thread`` and returns at once: the worker
         waiting for ``chosen`` must not be waiting while this runs, or the
         app thread would be blocked on the thread that is blocked on it.
-        ``push_screen``'s callback type admits ``None`` for screens in
-        general; ``ChoiceScreen`` never dismisses with one.
+        ``None`` means nobody chose, which ``ask`` treats as a stop.
         """
-
-        def handle(answer: str | None) -> None:
-            assert answer is not None
-            chosen(answer)
-
-        self.push_screen(ChoiceScreen(question), handle)
+        self.push_screen(ChoiceScreen(question), chosen)
 
     def watch_level(self) -> None:
         self._redraw()
@@ -239,6 +234,8 @@ class ChoiceScreen(ModalScreen[str]):
     to them nor reorders them.
     """
 
+    BINDINGS = [("q", "abandon", "stop")]
+
     def __init__(self, question: Question) -> None:
         super().__init__()
         self._question = question
@@ -249,6 +246,10 @@ class ChoiceScreen(ModalScreen[str]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(str(event.option.prompt))
+
+    def action_abandon(self) -> None:
+        """Give up on the question, so ``q`` means one thing everywhere."""
+        self.dismiss(None)
 
 
 class TerminalPresentation:
@@ -281,18 +282,24 @@ class TerminalPresentation:
         is only the pushing of the modal -- the answer comes later, from a
         keypress, so the worker waits on an event the modal sets. Waiting
         must happen after the crossing, never during it, or the app thread
-        would be blocked on the thread waiting for it.
+        would be blocked on the thread waiting for it. A screen popped
+        without an answer never calls back at all, so the wait is bounded.
         """
         answered = Event()
-        box: list[str] = []
+        box: list[str | None] = []
 
-        def chosen(answer: str) -> None:
+        def chosen(answer: str | None) -> None:
             box.append(answer)
             answered.set()
 
         self._app.call_from_thread(self._app.enquire, question, chosen)
-        answered.wait()
-        return box[0]
+        while not answered.wait(0.05):
+            if self._app.stopping or not self._app.is_running:
+                raise Cancelled
+        answer = box[0]
+        if answer is None:
+            raise Cancelled
+        return answer
 
     def report(self, lines: Sequence[str]) -> None:
         self._app.call_from_thread(self._app.record, list(lines))
