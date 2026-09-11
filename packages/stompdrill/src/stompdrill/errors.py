@@ -15,11 +15,16 @@ __all__ = [
     "SourceError",
     "LayerNotFoundError",
     "EmptyLayerError",
+    "UsageError",
 ]
 
 
 class StompdrillError(StompError):
     """Base for every error raised by stompdrill alone."""
+
+
+class UsageError(Exception):
+    """A bad argument, or an input we cannot even begin to process. Exit 3."""
 
 
 class SourceError(StompdrillError):

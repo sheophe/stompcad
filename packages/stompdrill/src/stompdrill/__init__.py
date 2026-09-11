@@ -18,6 +18,7 @@ from .pipeline import (
 )
 from .enclosures import Enclosure, HAMMOND_1590, footprints
 from .cad import CaseModel, OcpCaseModel, Rejection, load_case_model
+from .emitters.build import OutputSettings, make_emitter
 from .errors import StompdrillError, EmptyLayerError, LayerNotFoundError, SourceError
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "DEFAULT_STANDARD", "CheckCaseClearance", "CheckOutlineContainment",
     "Enclosure", "HAMMOND_1590", "footprints",
     "CaseModel", "OcpCaseModel", "Rejection", "load_case_model",
+    "OutputSettings", "make_emitter",
     "StompdrillError", "EmptyLayerError", "LayerNotFoundError", "SourceError",
 ]
