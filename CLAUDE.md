@@ -49,6 +49,7 @@ Run each suite in a separate process, from the repository root:
 (cd packages/stompgeom && uv run --no-sync pytest -o addopts= -q)
 (cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
+(cd packages/stompcad && uv run --no-sync pytest -o addopts= --boards --hammond -q)
 ```
 
 Run lint and types as documented in [Contributing](CONTRIBUTING.md#run-the-checks).
