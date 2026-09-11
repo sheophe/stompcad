@@ -66,7 +66,7 @@ from stompmodel.units import nm_from_mm
 from .plan import RunPlan, Step
 from .present import Presentation
 
-__all__ = ["RunOptions", "Driver"]
+__all__ = ["DOCK_TARGET_NAMES", "RunOptions", "Driver"]
 
 #: Every stompdrill CLI default this driver stands in for, since RunOptions
 #: carries only what a run's caller resolves and stompdrill resolves the
@@ -87,7 +87,10 @@ _SEAT_PITCH_MIN_MM = 0.05
 #: can ask for a drill format and a dock format in the one run without
 #: either half choking on the other's name. Matches
 #: ``stompcollider.cli``'s own fixed ``_REPORT``/``_ASSEMBLY`` pair.
-_DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
+#: Published rather than private: ``cli`` validates every requested target
+#: against the union of both halves' names, and a name another module needs
+#: is part of this one's surface.
+DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
 
 #: Where the dock half's steps begin in the nine-step plan. One number,
 #: because the two halves are drawn from one plan and one division of the
@@ -183,7 +186,7 @@ class Driver:
         if not docking:
             return drilled, None
         if drilled.worst_severity is Severity.ERROR:
-            self._presentation.report(_undocked(self._targets_for(_DOCK_TARGET_NAMES)))
+            self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES)))
             return drilled, None
         return drilled, self._dock_steps(drilled, slots)
 
@@ -447,7 +450,7 @@ class Driver:
         scope: Scope,
     ) -> list[str]:
         """Render, stage and commit the dock half's own targets."""
-        targets = self._targets_for(_DOCK_TARGET_NAMES)
+        targets = self._targets_for(DOCK_TARGET_NAMES)
         return self._write(data, targets, lambda: _dock_emitters(targets, scan, geometry), scope)
 
     def _write(

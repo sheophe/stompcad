@@ -23,11 +23,19 @@ from stompmodel.progress import track
 from stompmodel.protocols import check_target_set
 
 from .cancel import EXIT_CANCELLED, Cancelled
-from .drive import _DOCK_TARGET_NAMES, Driver, RunOptions
+from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
 from .plan import DRILL_AND_DOCK
 from .present import NoTerminal, PlainWriter
 
-__all__ = ["UsageError", "build_parser", "parse_emit", "resolve", "main"]
+__all__ = [
+    "UsageError",
+    "build_parser",
+    "parse_emit",
+    "validate_targets",
+    "resolve",
+    "worst_severity",
+    "main",
+]
 
 
 class UsageError(Exception):
@@ -93,7 +101,7 @@ def parse_emit(spec: str) -> tuple[str, Path]:
 
 def _known_targets() -> frozenset[str]:
     """Every format either half can render -- the union the two write steps split."""
-    return frozenset(available()) | _DOCK_TARGET_NAMES
+    return frozenset(available()) | DOCK_TARGET_NAMES
 
 
 def validate_targets(targets: Sequence[tuple[str, Path]]) -> None:
