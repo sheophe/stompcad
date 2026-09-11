@@ -1,12 +1,12 @@
 """The driver: executes a run's steps, holding each intermediate between them.
 
-Spec decision 7: `stompcad` calls each phase separately -- the same calls,
-same order, same arguments `stompdrill.cli._run` and `stompcollider.cli._run`
-make -- rather than one entry point per tool. Holding intermediates as
-attributes, not locals, is what lets plan C run a single step again once an
-answer arrives (decision 4), and decision 8 is why that rerun never retreats
-a position already reported. This module is the drill half; a later task
-extends the same class with the dock half.
+Spec decision 7: `stompcad` calls each phase separately, the same calls and
+order `stompdrill.cli._run` and `stompcollider.cli._run` make. Holding
+intermediates as attributes lets plan C run one step again once an answer
+arrives (decision 4), never retreating a reported position (decision 8).
+This module also loads the CAD kernel transitively, through `stompdrill`'s
+own emitters -- unlike `plan.py`'s pure-data promise, its job is running
+kernel-backed tools, and it names no kernel package of its own.
 """
 
 from __future__ import annotations
