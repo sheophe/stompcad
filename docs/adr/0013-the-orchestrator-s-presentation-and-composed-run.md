@@ -90,6 +90,20 @@ every one of its own targets and names them, and a drill half that errored stops
 the run before a board is read. Nothing is rendered on that path, because an
 emitter may legitimately refuse data this broken.
 
+That rule binds each half's target set, not the run's whole timeline. The drill
+half's write step commits when that step completes, before a board is read, so a
+run whose dock half errors leaves the drill artefacts on disk beside a report of
+the failure. This is a deliberate limit. A completed step has written what it
+computed, and the drill artefacts describe exactly that, so the set left behind
+is incomplete rather than inconsistent. Byte identity does not require it: the
+dock half reads the drill document from a private temporary and never from a
+committed target, so one transaction spanning both halves would be feasible. It
+is declined because deferring would hold every drill payload through minutes of
+kernel work only to report a write that had already been decided, and would
+leave the `write case` step line describing something not yet on disk. The cost
+is that drill artefacts are no evidence the run succeeded; the exit code, which
+reduces both halves, is the only status.
+
 The acceptance criterion is byte identity. Every artefact the composed run
 writes is compared against what the wrapped tool's own command line writes from
 the same inputs, and the comparison stands as a test rather than as a claim.

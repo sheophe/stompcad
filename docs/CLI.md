@@ -233,6 +233,13 @@ bytes, and newly created targets are removed. Temporary files are cleaned up.
 `stompcad` writes through the same mechanism, so a run of either tool and the
 same run under `stompcad` fail the same way.
 
+Under `stompcad`, exit `2` binds each half's own outputs. The drill half commits
+its targets when its write step completes, before a board is read, so a run
+whose dock half errors exits `2` having written the drill artefacts and none of
+the dock ones. Those artefacts describe what the drill half computed; the exit
+code, not the contents of the output directory, is the run's status. See
+[ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
+
 Recovery can fail if another process changes a target during the run or if a
 restoring write fails. The tools do not lock the output set or guarantee
 recovery after power loss. See [ADR-0001](adr/0001-pipeline-and-emitter-adapters.md)
