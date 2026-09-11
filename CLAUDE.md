@@ -162,6 +162,10 @@ depends only on the `Stage` protocol.
   sets separate.
 - An enclosure error stops quantisation. A rejected diameter records its
   diagnostic and omits only that hole. Any error prevents every requested output.
+  `stompcad` composes two tools in one run, so it applies that rule per half and
+  commits the drill artefacts before docking begins; a dock-half error therefore
+  leaves them written. [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md)
+  records why that is a deliberate limit rather than a necessity.
 - Artwork uses published top-view/backplate dimensions. A footprint may identify
   several parts; require `--case` when ambiguous and verify a declared part.
 - A hole outside the reference outline produces a warning. Use the matched
