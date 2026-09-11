@@ -1,0 +1,75 @@
+[project]
+name = "stompcad"
+version = "0.1.0"
+description = "The user-facing orchestrator over stompdrill and stompcollider"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Paul Vakhnivskyi", email = "pvakhnivskyi@gmail.com" }]
+keywords = ["cad", "cnc", "step", "guitar-pedal", "enclosure"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+# stompmodel, stompdrill and stompcollider. No stompgeom and no OCP: this
+# package composes the other two tools as libraries and computes no geometry
+# of its own, which tests/test_cli.py enforces. See ADR-0008 and ADR-0009.
+# textual draws the run above the prompt; it reaches the kernel through
+# neither, and a headless run never imports it.
+dependencies = ["stompmodel", "stompdrill", "stompcollider", "textual>=8.2"]
+
+[project.urls]
+Homepage = "https://github.com/sheophe/stompcad"
+Repository = "https://github.com/sheophe/stompcad"
+Issues = "https://github.com/sheophe/stompcad/issues"
+
+[project.scripts]
+stompcad = "stompcad.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: without this marker a downstream type checker discards every
+# annotation this distribution ships.
+[tool.setuptools.package-data]
+stompcad = ["py.typed"]
+
+[tool.uv.sources]
+stompmodel = { workspace = true }
+stompdrill = { workspace = true }
+stompcollider = { workspace = true }
+
+# So ADR-0008's sentence -- change into the member, sync, test -- runs a real
+# suite rather than an import check. `mypy` is here because the root gate
+# excludes this member's tests: five `tests` packages cannot share one scan.
+# `hypothesis` matches the other members' dev groups even though this
+# package's own tests are not yet generative.
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "hypothesis", "mypy", "ruff"]
+
+# `pythonpath` reaches the repo root: `tests/conftest.py` reads
+# `tools.fetch_case_model.cache_dir`, mirroring the reason every other
+# member's `pythonpath` gives for the same setting.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["../.."]
+
+# `mypy_path` gains the repo root for the same reason `pythonpath` does above:
+# `tests/conftest.py` imports `tools.fetch_case_model`.
+[tool.mypy]
+files = ["src", "tests"]
+# The root config's own comment defers `strict` as scoped follow-up work
+# against 18 errors in legacy source, not a rejection of it. This member has
+# no legacy to carry, so it starts where the others are still ratcheting
+# towards.
+strict = true
+python_version = "3.10"
+mypy_path = ["src", "../.."]

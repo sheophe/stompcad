@@ -184,3 +184,22 @@ def test_weighted_children_partition_their_parent(weights: list[float]) -> None:
     expected_boundaries = [sum(weights[: i + 1]) / total for i in range(len(weights))]
     assert recorder.positions[: len(weights)] == pytest.approx(expected_boundaries, rel=1e-9)
     assert recorder.positions[-1] == 1.0
+
+
+def test_an_abandoned_run_does_not_report_as_finished() -> None:
+    """A body that raised leaves the position where the run reached."""
+    seen: list[float] = []
+
+    class Recorder:
+        def update(self, position: float, path: tuple[str, ...]) -> None:
+            seen.append(position)
+
+    with pytest.raises(ValueError):
+        with track(Recorder()) as scope:
+            for index, slot in enumerate(scope.parts(1.0, 1.0, 2.0)):
+                slot.label(f"step {index}")
+                if index == 1:
+                    raise ValueError("abandoned")
+
+    assert seen[-1] < 1.0
+    assert seen[-1] == pytest.approx(0.25)

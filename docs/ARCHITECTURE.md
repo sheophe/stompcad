@@ -15,10 +15,12 @@ describes the formal model and the properties checked by tests.
 | `stompgeom` | OpenCASCADE operations: reading, writing, building, intersecting and measuring solids |
 | `stompdrill` | Illustrator artwork to drill files, drawings and a drilled enclosure model |
 | `stompcollider` | Board placement and clash reporting inside a drilled enclosure |
+| `stompcad` | The orchestrator: both tools composed into one run, one record and one status |
 
 Each package installs and passes its own tests independently. `stompcollider`
 uses `stompmodel` and `stompgeom`; it does not depend on `stompdrill` or import
-OCP directly. Package-boundary tests check these dependencies.
+OCP directly. `stompcad` uses both tools as libraries and imports neither the
+kernel nor `stompgeom` itself. Package-boundary tests check these dependencies.
 
 `stompmodel` is pure Python. `stompgeom` requires `cadquery-ocp`, so both tools
 include the geometry kernel when installed.
@@ -77,6 +79,15 @@ assembly emitters read the finished data.
 
 The tools exchange ordinary JSON and STEP files. This allows `stompcollider` to
 read the drill document through `stompmodel` without importing `stompdrill`.
+
+`stompcad` calls each phase of both tools directly, in the order their own
+command lines call them, and holds each result between the steps. It reports
+the run as nine named steps, writes through the same staged-write transaction
+both tools use, and produces artefacts byte-identical to theirs. On a
+terminal, a Textual app draws that same report inline above the prompt while
+the run continues on a worker thread; without one, a run gets the plain
+step-line log a pipe reads as a log of what happened. See
+[ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 ## Shared data and output
 

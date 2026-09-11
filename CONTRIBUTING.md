@@ -13,6 +13,7 @@ command in its own working directory, so you can run the block as written.
 (cd packages/stompgeom && uv run --no-sync pytest -o addopts= -q)
 (cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
+(cd packages/stompcad && uv run --no-sync pytest -o addopts= --boards --hammond -q)
 ```
 
 The root pytest configuration covers only `stompdrill`. Each package has a
@@ -37,6 +38,7 @@ mypy packages
 (cd packages/stompmodel && uv run --no-sync mypy)
 (cd packages/stompgeom && uv run --no-sync mypy)
 (cd packages/stompcollider && uv run --no-sync mypy)
+(cd packages/stompcad && uv run --no-sync mypy)
 ```
 
 The root mypy run includes `stompdrill`'s tests. Each other package's mypy
@@ -61,6 +63,8 @@ Measure each package with its own tests:
   --cov=stompgeom --cov-report=term-missing)
 (cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards \
   --cov=stompcollider --cov-report=term-missing)
+(cd packages/stompcad && uv run --no-sync pytest -o addopts= --boards --hammond \
+  --cov=stompcad --cov-report=term-missing)
 ```
 
 Targets are 90% for each package and 100% for quantisers, stages, emitters and

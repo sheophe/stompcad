@@ -657,7 +657,7 @@ def test_a_kernel_failure_is_reported_as_degenerate_geometry(
 
     run = _prepare(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "stompcollider.cli.canonicalise",
+        "stompcollider.compose.canonicalise",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(StompgeomError("no common region")),
     )
 
@@ -676,7 +676,7 @@ def test_a_missing_kernel_stays_a_usage_failure(tmp_path, monkeypatch) -> None:
 
     run = _prepare(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "stompcollider.cli.canonicalise",
+        "stompcollider.compose.canonicalise",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(KernelUnavailable("no kernel")),
     )
 

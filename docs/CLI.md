@@ -156,6 +156,75 @@ by this build. Both are validated and then rejected with a usage error. No
 stage implements explicit placement, and clash processing can change placement
 ranks.
 
+## stompcad
+
+```bash
+stompcad PANEL.ai BOARD.stp --case 1590B --case-model 1590B.stp \
+    --panel-reference 'RV*,SW*' --emit excellon=out.drl --emit report=report.json
+```
+
+`stompcad` runs `stompdrill` and `stompcollider` together as one invocation. It
+drills `PANEL.ai`, then seats each `BOARD.stp` inside the case it has just
+drilled and reports the clashes. Naming no board runs the drill half alone.
+Each of the run's steps prints one line as it completes, so a piped run reads
+as a log of what happened.
+
+On a terminal, the run is instead drawn inline above the prompt. `--progress`
+picks the starting level of detail -- `bar` draws one progress bar and the
+deepest live branch, `steps` draws the nine steps and their outcomes, `tree`
+expands each step into the divisions it reports. Pressing `v` cycles the
+level while the run continues, without restarting anything. Pressing `q`
+stops the run, which then exits `130`. While a question is on screen, `q`
+abandons it instead -- the picker binds its own `q` -- and abandoning a
+question likewise stops the run. `--progress` is ignored without a
+terminal; a piped or redirected run always gets the plain step-line log.
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--case PART` | Base designator the panel is drawn for, e.g. `1590B` | Identified from the footprint |
+| `--case-model PATH` | STEP model of the enclosure; required to dock a board | None |
+| `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
+| `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
+| `--progress bar\|steps\|tree` | Starting detail level for the inline run; `v` cycles it | `bar` |
+
+`--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
+`excellon`, `json` and `step` from the drill half, `report` and `assembly`
+from the dock half. Every requested target is validated together, before
+anything is opened for writing: a name neither half can render is a usage
+error naming it, and two targets naming one file are refused exactly as both
+tools refuse them.
+
+Neither fact docking needs has a default. `--panel-reference` names the
+components chosen for this particular pedal, and `--case-model` supplies the
+enclosure the boards are seated in; naming a board without either is a usage
+error rather than a guess.
+
+An error anywhere stops the whole run. The drill half's errors withhold its
+artefacts and leave the boards unread, and the dock half's withhold the report
+and the assembly. Both halves name what they did not write.
+
+A run stopped before it finishes exits `130`, and nothing it was about to write
+survives. Every artefact is rendered before any target is touched, so at the
+moment a run can be stopped there is nothing half-written on disk to remove.
+
+### Exit codes
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No warnings or errors |
+| `1` | Warnings or clash findings; requested outputs may be written |
+| `2` | Processing errors; no requested outputs are written |
+| `3` | Invalid arguments, an unrecognised `--emit` format, an input/output failure, or a question with no terminal to ask it on |
+| `130` | The run was cancelled |
+
+The code is the worse of the two halves' findings, so one run reports one
+status. `130` is the shell's own convention for a process ended by `SIGINT`:
+`128` plus the signal number `2`, the same code a shell reports for any command
+stopped with Ctrl-C — so a script already checking for that convention needs no
+special case for `stompcad`. It is reserved for a run the user stopped; no
+other path produces it. On a terminal that status is now also reachable by
+pressing `q`, not only by the signal.
+
 ## Output files and failures
 
 | Exit code | Meaning |
@@ -165,7 +234,7 @@ ranks.
 | `2` | Processing errors; no requested outputs are written |
 | `3` | Invalid arguments or an input/output failure |
 
-Both tools validate the requested paths together before rendering. Two outputs
+All three commands validate the requested paths together before rendering. Two outputs
 cannot refer to the same file, including paths that resolve through symlinks or
 match after case and Unicode normalisation. Existing targets must be regular
 files.
@@ -173,6 +242,15 @@ files.
 All requested outputs are rendered and staged before any target is replaced.
 If a later write fails, previously replaced files are restored from their saved
 bytes, and newly created targets are removed. Temporary files are cleaned up.
+`stompcad` writes through the same mechanism, so a run of either tool and the
+same run under `stompcad` fail the same way.
+
+Under `stompcad`, exit `2` binds each half's own outputs. The drill half commits
+its targets when its write step completes, before a board is read, so a run
+whose dock half errors exits `2` having written the drill artefacts and none of
+the dock ones. Those artefacts describe what the drill half computed; the exit
+code, not the contents of the output directory, is the run's status. See
+[ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 Recovery can fail if another process changes a target during the run or if a
 restoring write fails. The tools do not lock the output set or guarantee

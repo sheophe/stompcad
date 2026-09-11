@@ -58,10 +58,13 @@ class Diagnosable(Protocol):
     values carry no diagnostics of their own, and folding this vocabulary
     into ``Processable`` would make every one of them carry it. A second
     tool's value type implements this to reach the shared exit-code
-    reduction with no tool-specific glue. See ADR-0009.
+    reduction with no tool-specific glue (ADR-0009). ``diagnostics`` is
+    read-only, because every value in this workspace is frozen and a
+    settable member is one no frozen value satisfies.
     """
 
-    diagnostics: tuple[Diagnostic, ...]
+    @property
+    def diagnostics(self) -> tuple[Diagnostic, ...]: ...
 
     def with_diagnostics(self: SelfT, *diagnostics: Diagnostic) -> SelfT: ...
 

@@ -17,6 +17,14 @@ It seats boards using the holes matched to their panel-reference components,
 then reports clashes. It does not drill the case or modify geometry to eliminate
 clashes.
 
+`stompcad` is the orchestrator over both. It composes them as libraries into
+one run: nine named steps, one position, one status, and artefacts that match
+what either tool writes from its own command line, byte for byte. It computes no
+geometry and imports neither the kernel nor `stompgeom`. Its presentation and
+composed run are [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md);
+[docs/specs/stompcad-tui.md](docs/specs/stompcad-tui.md) is the binding
+specification, and its decisions 3, 6, 8 and 10 are later plans.
+
 Enclosure geometry comes from a supplied model. `stompdrill` uses it to verify
 clearance and cut the selected holes. Model acquisition is handled separately
 by `tools/fetch_case_model.py`.
@@ -49,6 +57,7 @@ Run each suite in a separate process, from the repository root:
 (cd packages/stompgeom && uv run --no-sync pytest -o addopts= -q)
 (cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards -q)
 .venv/bin/python -m pytest -p no:cacheprovider -o addopts= --hammond packages/stompdrill/tests -q
+(cd packages/stompcad && uv run --no-sync pytest -o addopts= --boards --hammond -q)
 ```
 
 Run lint and types as documented in [Contributing](CONTRIBUTING.md#run-the-checks).
@@ -127,6 +136,7 @@ are in [docs/adr/](docs/adr/):
 | [0010](docs/adr/0010-the-stomp-prefix.md) | Package naming |
 | [0011](docs/adr/0011-behaviour-lock-and-its-blind-spots.md) | Output-preservation checks and their limits |
 | [0012](docs/adr/0012-progress-protocol-and-optional-kernel-capability.md) | Progress reporting and optional kernel capabilities |
+| [0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md) | The orchestrator's presentation and composed run |
 
 Keep `stompcollider` independent of `stompdrill` and direct OCP imports. Read
 shared drill documents through `stompmodel` and use kernel operations through
@@ -152,6 +162,10 @@ depends only on the `Stage` protocol.
   sets separate.
 - An enclosure error stops quantisation. A rejected diameter records its
   diagnostic and omits only that hole. Any error prevents every requested output.
+  `stompcad` composes two tools in one run, so it applies that rule per half and
+  commits the drill artefacts before docking begins; a dock-half error therefore
+  leaves them written. [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md)
+  records why that is a deliberate limit rather than a necessity.
 - Artwork uses published top-view/backplate dimensions. A footprint may identify
   several parts; require `--case` when ambiguous and verify a declared part.
 - A hole outside the reference outline produces a warning. Use the matched

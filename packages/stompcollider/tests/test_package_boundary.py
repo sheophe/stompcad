@@ -146,6 +146,7 @@ def test_the_scan_reaches_every_module_the_package_ships() -> None:
 
     assert scanned == {
         "__init__.py", "boards.py", "canonicalise.py", "clash.py", "cli.py",
+        "compose.py",
         "designators.py", "emitters/__init__.py", "emitters/assembly.py",
         "emitters/report.py",
         "errors.py", "insert.py", "match.py", "model.py", "protrude.py",

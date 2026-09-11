@@ -13,6 +13,15 @@ from __future__ import annotations
 
 from .canonicalise import canonicalise
 from .clash import Clashes
+from .compose import (
+    admit,
+    board_geometry,
+    build_pipeline,
+    derived_tolerance,
+    docked,
+    registration,
+)
+from .designators import parse_filter
 from .emitters import AssemblyEmitter, ReportEmitter
 from .insert import CaseCavity, Cavity
 from .match import Match
@@ -23,11 +32,18 @@ from .sources import BoardSource
 __all__ = [
     "BoardSource",
     "canonicalise",
+    "registration",
+    "docked",
+    "derived_tolerance",
+    "admit",
+    "board_geometry",
     "Match",
+    "build_pipeline",
     "Seat",
     "Cavity",
     "CaseCavity",
     "Clashes",
+    "parse_filter",
     "ReportEmitter",
     "AssemblyEmitter",
     "RawCylinder",

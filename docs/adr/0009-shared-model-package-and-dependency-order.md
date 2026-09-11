@@ -17,6 +17,9 @@ This ADR adds `stompmodel` to the four packages decided in
 - Admit `stompmodel.progress` under rule 2, with the single bar named as the
   `stompcad` behaviour requiring uniformity. The protocol itself is
   [ADR-0012](0012-progress-protocol-and-optional-kernel-capability.md).
+- Record `stompcad` as a built member rather than a planned one. Its own
+  decisions are
+  [ADR-0013](0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 The decisions and their reasons are set out below.
 
@@ -57,7 +60,9 @@ The first four were built in this order: `stompmodel`, `stompgeom`, `stompdrill`
 then `stompcollider`. `stompcollider` depends on `stompmodel` and `stompgeom`.
 It reads drill documents through `stompmodel`'s codec and does not depend on
 `stompdrill` or `stompcad`. Like every member, it has its own test, type and
-mutation commands. `stompcad` remains planned.
+mutation commands. `stompcad` is the fifth member, built on both tools; its
+presentation and composed run are
+[ADR-0013](0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 ### `stompmodel`
 

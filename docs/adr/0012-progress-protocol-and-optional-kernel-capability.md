@@ -97,22 +97,26 @@ previous slot and opens the next, so the partition holds by construction and a
 caller cannot advance backwards. A scope that is never divided completes when
 its parent's iterator moves on.
 
-**An abandoned iterator claims the rest of its span.** A caller that leaves a
-loop early — because a search found its answer, or because a count was an upper
-bound — must not leave the node short of its end, which would stall the bar.
-Three mechanisms provide this:
+**An abandoned iterator claims the rest of its span, unless the abandonment is a
+raised exception.** A caller that leaves a loop early — because a search found
+its answer, or because a count was an upper bound — must not leave the node
+short of its end, which would stall the bar. Two mechanisms provide this:
 
 1. Completing a slot advances to that slot's end, and the recorded position is a
    maximum. A shortfall left inside a slot is absorbed when its parent moves on,
    so a child that under-reported cannot hold the bar back.
-2. Division is a generator whose `finally` advances to the divided node's end,
-   closing a node whose own iterator was abandoned.
-3. `track()` is a context manager whose exit advances the run to 1.0, so a run
-   ends complete however it was left.
+2. Division is a generator whose `else` clause, not a bare `finally`, advances
+   to the divided node's end once its own weights are exhausted normally. A
+   `GeneratorExit` arriving because an exception is unwinding the caller's loop
+   takes the `except` branch instead and claims nothing, leaving the reclaim to
+   whichever ancestor resumes without raising. `track()`'s own exit mirrors
+   this, advancing the run to 1.0 only when the body completed.
 
-Correctness rests on the first. A generator's `finally` runs when the generator
+Correctness rests on the first. A generator's cleanup runs when the generator
 is closed or collected, which is not a moment the caller controls. The second
-and third are cheap and are kept as defence in depth.
+is cheap and is kept as defence in depth for a run that succeeds; a run that
+raises relies on the first mechanism alone, which is why the position it leaves
+is wherever the last completed slot put it, not the divided node's own end.
 
 ### `Stage` carries a weight and receives a scope
 
@@ -301,6 +305,10 @@ implementer must add. Recording the change here gives a later implementer one
 place to read for both parts.
 
 ## Consequences
+
+A run that raised leaves the position where it reached. 1.0 states that the
+output is ready, so it is reported only on a completed body. A scope may stop
+a run; it may never change what a completed run produces.
 
 Nine classes implement `Stage` and change signature: `Deduplicate`,
 `ReviewGridTies`, `RouteHoles`, `CheckOutlineContainment`, `CheckReferenceSize`
