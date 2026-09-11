@@ -9,14 +9,16 @@ renders positions and strings a driver hands it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
 from textual.widgets import Static
 
 from .plan import RunPlan, Step
-from .present import step_line
+from .present import Question, step_line
 
-__all__ = ["InlineApp"]
+__all__ = ["InlineApp", "TerminalPresentation"]
 
 
 class InlineApp(App[int]):
@@ -83,3 +85,33 @@ class InlineApp(App[int]):
             "\n".join(self.settled + [f"  [{'#' * filled}{'.' * (30 - filled)}] {self.position:.0%}"])
         )
         self.query_one("#branch", Static).update(f"  {self.branch}")
+
+
+class TerminalPresentation:
+    """The boundary plan A pinned, forwarded to an app on another thread.
+
+    Every method crosses back through ``call_from_thread``: Textual forbids
+    touching the UI from a worker, and the run that drives this lives on
+    one. ``update`` also serves as the progress ``Sink``, the same double
+    duty ``PlainWriter`` does, because the two signatures are one.
+    """
+
+    __slots__ = ("_app",)
+
+    def __init__(self, app: InlineApp) -> None:
+        self._app = app
+
+    def begin(self, plan: RunPlan) -> None:
+        self._app.call_from_thread(self._app.show, plan)
+
+    def update(self, position: float, path: tuple[str, ...]) -> None:
+        self._app.call_from_thread(self._app.advance, position, path)
+
+    def finish_step(self, step: Step, outcome: str) -> None:
+        self._app.call_from_thread(self._app.settle, step, outcome)
+
+    def ask(self, question: Question) -> str:
+        raise NotImplementedError("Task 7 implements the picker")
+
+    def report(self, lines: Sequence[str]) -> None:
+        self._app.call_from_thread(self._app.record, list(lines))
