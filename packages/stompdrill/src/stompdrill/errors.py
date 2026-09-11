@@ -2,6 +2,12 @@
 
 ``EmitterError`` moved to ``stompmodel.errors``: ``DrillData.numbered()``
 raises it and ``DrillData`` lives there too. See ADR-0009.
+
+``UsageError`` stays a plain ``Exception`` rather than joining the base
+below. ``cli.py`` resolves ``--case-model`` inside a ``try`` that turns any
+``StompError`` into ``UsageError("--case-model: ...")``, and it parses
+``--case`` within that same block; were ``UsageError`` a ``StompError``, a bad
+``--case`` would be caught there and reported against the wrong flag.
 """
 
 from __future__ import annotations
