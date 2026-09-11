@@ -2,8 +2,8 @@
 
 Spec decision 7: `stompcad` calls each phase separately, the same calls and
 order `stompdrill.cli._run` and `stompcollider.cli._run` make. Holding
-intermediates as attributes lets plan C run one step again once an answer
-arrives (decision 4), never retreating a reported position (decision 8).
+intermediates as attributes is what lets `retry` run one step again once an
+answer arrives (decision 4), never retreating a reported position (decision 8).
 Importing this module loads `stompgeom`, and through it OCP, by way of
 `stompdrill`'s own emitters. That is not a leak: the constraint binds what
 `stompcad` reaches for, and it imports neither. Only `plan.py` promises to
@@ -13,9 +13,10 @@ stay kernel-free, because plan B renders it.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, TypeVar
 
 from stompcollider import (
     AssemblyEmitter,
@@ -52,10 +53,18 @@ from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Severity
 from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import Scope
-from stompmodel.protocols import Emitter, Payload, Pipeline, Stage, stage_all
+from stompmodel.protocols import (
+    Emitter,
+    Payload,
+    Pipeline,
+    Processable,
+    Stage,
+    commit_all,
+    stage_all,
+)
 from stompmodel.units import nm_from_mm
 
-from .plan import RunPlan
+from .plan import RunPlan, Step
 from .present import Presentation
 
 __all__ = ["RunOptions", "Driver"]
@@ -81,6 +90,26 @@ _SEAT_PITCH_MIN_MM = 0.05
 #: ``stompcollider.cli``'s own fixed ``_REPORT``/``_ASSEMBLY`` pair.
 _DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
 
+#: Where the dock half's steps begin in the nine-step plan. One number,
+#: because the two halves are drawn from one plan and one division of the
+#: run's span -- see ``Driver._open``.
+_DOCK_FROM = 4
+
+class _Written(Processable, Protocol):
+    """What a write step folds over: a pipeline's value, and its worst finding.
+
+    ``Emitter`` binds ``Processable``, and the withhold rule reads the
+    severity alone. Deliberately not ``Diagnosable``: that protocol
+    declares ``diagnostics`` a settable variable, which no frozen value in
+    this workspace satisfies.
+    """
+
+    @property
+    def worst_severity(self) -> Severity | None: ...
+
+
+_DataT = TypeVar("_DataT", bound=_Written)
+
 
 @dataclass(frozen=True, slots=True)
 class RunOptions:
@@ -99,7 +128,7 @@ class Driver:
 
     Each phase's result is kept on ``self`` rather than returned and
     discarded, so a later call can read what an earlier one produced
-    without recomputing it.
+    without recomputing it -- which is what ``retry`` spends.
     """
 
     def __init__(self, plan: RunPlan, presentation: Presentation, options: RunOptions) -> None:
@@ -111,16 +140,87 @@ class Driver:
         self._quantised: DrillData | None = None
         self._drilled: DrillData | None = None
 
-    def run_drill(self, scope: Scope) -> DrillData:
-        """Read, quantise and drill the panel, then write its case artefacts.
+    def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
+        """Drill the panel, then dock its boards against it when any were asked for.
 
-        Draws the plan's slots lazily, one ``next()`` immediately before the
-        step it belongs to -- a slot closes when the next is drawn, so
-        drawing them all at once would close every one with no work done.
+        The drill document ``run_dock`` reads is the one the drill steps
+        just held in memory, never written for this handoff alone -- see
+        the task report for the one case that forces a temporary file.
+        An errored drill half stops the run there: CLAUDE.md's "any error
+        prevents every requested output" binds the run between the two
+        write steps as well as each of them.
         """
-        self._presentation.begin(self._plan)
-        slots = scope.parts(*self._plan.weights())
+        docking = bool(self._options.boards)
+        steps = self._plan.steps if docking else self._plan.steps[:_DOCK_FROM]
+        slots = self._open(steps, scope)
+        drilled = self._drill_steps(slots)
+        if not docking:
+            return drilled, None
+        if drilled.worst_severity is Severity.ERROR:
+            self._presentation.report(_undocked(self._targets_for(_DOCK_TARGET_NAMES)))
+            return drilled, None
+        return drilled, self._dock_steps(drilled, slots)
 
+    def run_drill(self, scope: Scope) -> DrillData:
+        """Read, quantise and drill the panel, then write its case artefacts."""
+        return self._drill_steps(self._open(self._plan.steps[:_DOCK_FROM], scope))
+
+    def run_dock(self, drill: DrillData, scope: Scope) -> DockData:
+        """Read the boards, match, seat and report clashes against the drilled case."""
+        return self._dock_steps(drill, self._open(self._plan.steps[_DOCK_FROM:], scope))
+
+    def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData:
+        """Run one step again under revised options, from the intermediates held.
+
+        Decision 4: a step that stopped to ask credits nothing, so when the
+        answer arrives that step alone runs again -- the artwork and the
+        case model are not read a second time. Only a step whose input this
+        driver still holds can be retried; the dock half's inputs live
+        inside ``run_dock`` and are not held, so naming one of its steps is
+        refused rather than quietly re-read. ``options`` replaces this
+        driver's own, so a later step sees the revised answer too.
+        """
+        self._options = options
+        if key == "quantise":
+            if self._raw is None:
+                raise ValueError("quantise cannot run again before the panel is read")
+            self._quantised = self._quantise(scope)
+            self._presentation.finish_step(self._step(key), _quantise_outcome(self._quantised))
+            return self._quantised
+        if key == "drill":
+            if self._quantised is None:
+                raise ValueError("drill cannot run again before quantisation")
+            self._drilled = self._drill(self._quantised, scope)
+            self._presentation.finish_step(self._step(key), _drill_outcome(self._drilled))
+            return self._drilled
+        raise ValueError(f"{key!r} is not a step this driver can run again")
+
+    def _open(self, steps: tuple[Step, ...], scope: Scope) -> Iterator[Scope]:
+        """Announce the steps about to run, and divide the span among them once.
+
+        One division and one ``begin`` per run, whichever halves it runs:
+        dividing the same scope twice would leave the bar relying on
+        ``_Run.advance``'s maximum to stay monotonic, and would weigh a
+        drill-only run against five steps it never intends to take.
+        """
+        plan = RunPlan(steps)
+        self._presentation.begin(plan)
+        return scope.parts(*plan.weights())
+
+    def _step(self, key: str) -> Step:
+        """The plan's step with this key. Raises ``KeyError`` for an unknown one."""
+        for step in self._plan.steps:
+            if step.key == key:
+                return step
+        raise KeyError(key)
+
+    def _drill_steps(self, slots: Iterator[Scope]) -> DrillData:
+        """The drill half's four steps, each drawing its slot as it starts.
+
+        Slots are drawn lazily, one ``next()`` immediately before the step
+        it belongs to -- a slot closes when the next is drawn, so drawing
+        them all at once would close every one with no work done.
+        """
         read_step = self._plan.steps[0]
         read_slot = next(slots)
         read_slot.label(read_step.label)
@@ -131,16 +231,13 @@ class Driver:
         quantise_slot = next(slots)
         quantise_slot.label(quantise_step.label)
         self._quantised = self._quantise(quantise_slot)
-        self._presentation.finish_step(
-            quantise_step,
-            f"{len(self._quantised.holes)} holes, {len(self._quantised.tools())} tools",
-        )
+        self._presentation.finish_step(quantise_step, _quantise_outcome(self._quantised))
 
         drill_step = self._plan.steps[2]
         drill_slot = next(slots)
         drill_slot.label(drill_step.label)
         self._drilled = self._drill(self._quantised, drill_slot)
-        self._presentation.finish_step(drill_step, f"{len(self._drilled.holes)} holes")
+        self._presentation.finish_step(drill_step, _drill_outcome(self._drilled))
 
         write_step = self._plan.steps[3]
         write_slot = next(slots)
@@ -150,33 +247,8 @@ class Driver:
 
         return self._drilled
 
-    def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
-        """Drill the panel, then dock its boards against it when any were asked for.
-
-        The drill document ``run_dock`` reads is the one ``run_drill`` just
-        held in memory, never written for this handoff alone -- see the
-        task report for the one case that forces a temporary file anyway.
-        Docking is skipped entirely, not merely skipped in its steps, when
-        no board was named.
-        """
-        drilled = self.run_drill(scope)
-        if not self._options.boards:
-            return drilled, None
-        return drilled, self.run_dock(drilled, scope)
-
-    def run_dock(self, drill: DrillData, scope: Scope) -> DockData:
-        """Read the boards, match, seat and report clashes against the drilled case.
-
-        Draws the same nine-weight division ``run_drill`` does, skipping
-        the four slots that belong to it before drawing its own five, so
-        the two halves share one bar rather than each claiming the whole
-        of it.
-        """
-        self._presentation.begin(self._plan)
-        slots = scope.parts(*self._plan.weights())
-        for _ in self._plan.steps[:4]:
-            next(slots)
-
+    def _dock_steps(self, drill: DrillData, slots: Iterator[Scope]) -> DockData:
+        """The dock half's five steps, drawn from the same division the drill half was."""
         read_step = self._plan.steps[4]
         read_slot = next(slots)
         read_slot.label(read_step.label)
@@ -233,48 +305,6 @@ class Driver:
             )
             return scan, geometry, data, pipeline
 
-    def _write_dock(
-        self,
-        data: DockData,
-        scan: BoardScan,
-        geometry: dict[int, BoardGeometry],
-        scope: Scope,
-    ) -> list[str]:
-        """Render the report and assembly, then stage and commit through ``stage_all``.
-
-        Renders only the targets named for this half -- ``RunOptions.targets``
-        may also carry drill-format names meant for ``_write_case``. Withholds
-        every target on an error severity, the same rule ``_write_case``
-        applies to the drill half: CLAUDE.md's "any error prevents every
-        requested output" binds both halves of one run.
-        """
-        targets = [(name, path) for name, path in self._options.targets if name in _DOCK_TARGET_NAMES]
-        if not targets:
-            return []
-        if data.worst_severity is Severity.ERROR:
-            self._presentation.report(_withheld(targets))
-            return []
-        case = Solids(scan.case.document, scan.case.solids)
-        boards = {
-            ordinal: Solids(board.document.document, board.solids)
-            for ordinal, board in geometry.items()
-        }
-        emitters: list[tuple[Emitter[DockData], Path]] = []
-        for name, path in targets:
-            if name == "report":
-                emitters.append((ReportEmitter(), path))
-            else:
-                emitters.append((AssemblyEmitter(case, boards, timestamp=scan.case.timestamp), path))
-        rendered: list[tuple[Path, Payload]] = []
-        for (emitter, path), slot in zip(emitters, scope.steps(len(emitters)), strict=True):
-            slot.label(emitter.name)
-            rendered.append((path, emitter.emit(data)))
-        staged = stage_all(rendered)
-        for written in staged:
-            written.commit()
-        self._presentation.report([f"wrote {written.path}" for written in staged])
-        return [str(written.path) for written in staged]
-
     def _read_panel(self, scope: Scope) -> None:
         """Load the artwork and, when named, the case model -- the read step's leaves."""
         read_leaves = scope.steps(2 if self._options.case_model is not None else 1)
@@ -317,35 +347,91 @@ class Driver:
             stages.append(CheckCaseClearance(self._case_model))
         return Pipeline(stages).run(data, scope)
 
-    def _write_case(self, data: DrillData, scope: Scope) -> list[str]:
-        """Render every target, then stage and commit through ``stage_all``.
+    def _targets_for(self, names: frozenset[str]) -> list[tuple[str, Path]]:
+        """This run's targets whose format one half owns, in the order requested."""
+        return [(name, path) for name, path in self._options.targets if name in names]
 
-        Renders only the targets named for this half -- ``RunOptions.targets``
-        may also carry dock-format names meant for ``_write_dock``. Withholds
-        every target on an error severity: CLAUDE.md states "any error
-        prevents every requested output," and an emitter may legitimately
-        refuse data this broken, so nothing is rendered at all rather than
-        rendered and discarded. The one write mechanism this workspace
-        owns (ADR-0001, ADR-0005); no second one is added.
+    def _write_case(self, data: DrillData, scope: Scope) -> list[str]:
+        """Render, stage and commit the drill half's own targets."""
+        targets = self._targets_for(frozenset(available()))
+        settings = OutputSettings(title=_DEFAULT_TITLE, case_model=self._case_model)
+        return self._write(
+            data,
+            targets,
+            lambda: [(make_emitter(name, settings), path) for name, path in targets],
+            scope,
+        )
+
+    def _write_dock(
+        self,
+        data: DockData,
+        scan: BoardScan,
+        geometry: dict[int, BoardGeometry],
+        scope: Scope,
+    ) -> list[str]:
+        """Render, stage and commit the dock half's own targets."""
+        targets = self._targets_for(_DOCK_TARGET_NAMES)
+        return self._write(data, targets, lambda: _dock_emitters(targets, scan, geometry), scope)
+
+    def _write(
+        self,
+        data: _DataT,
+        targets: Sequence[tuple[str, Path]],
+        emitters: Callable[[], Sequence[tuple[Emitter[_DataT], Path]]],
+        scope: Scope,
+    ) -> list[str]:
+        """Render every target of one half, then stage and commit the whole set.
+
+        Withholds every target on an error severity, before ``emitters`` is
+        even called: CLAUDE.md states "any error prevents every requested
+        output", and an emitter may legitimately refuse data this broken, so
+        nothing is rendered rather than rendered and discarded. Staging and
+        the whole-set transaction are ``stompmodel``'s (ADR-0001, ADR-0005);
+        both halves reach them here, so no second write mechanism exists to
+        lose the rollback ``commit_all`` provides.
         """
-        drill_formats = available()
-        targets = [(name, path) for name, path in self._options.targets if name in drill_formats]
         if not targets:
             return []
         if data.worst_severity is Severity.ERROR:
             self._presentation.report(_withheld(targets))
             return []
-        settings = OutputSettings(title=_DEFAULT_TITLE, case_model=self._case_model)
-        emitters = [(make_emitter(name, settings), path) for name, path in targets]
-        rendered: list[tuple[Path, Payload]] = []
-        for (emitter, path), slot in zip(emitters, scope.steps(len(emitters)), strict=True):
+        rendered: list[tuple[Emitter[_DataT], Path, Payload]] = []
+        built = emitters()
+        for (emitter, path), slot in zip(built, scope.steps(len(built)), strict=True):
             slot.label(emitter.name)
-            rendered.append((path, emitter.emit(data)))
-        staged = stage_all(rendered)
-        for written in staged:
-            written.commit()
-        self._presentation.report([f"wrote {written.path}" for written in staged])
+            rendered.append((emitter, path, emitter.emit(data)))
+        staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
+        sizes = commit_all(staged)
+        self._presentation.report([
+            f"wrote {written.path}  ({emitter.name}, {size} bytes)"
+            for (emitter, _path, _payload), written, size in zip(
+                rendered, staged, sizes, strict=True
+            )
+        ])
         return [str(written.path) for written in staged]
+
+
+def _dock_emitters(
+    targets: Sequence[tuple[str, Path]], scan: BoardScan, geometry: dict[int, BoardGeometry]
+) -> list[tuple[Emitter[DockData], Path]]:
+    """One emitter per dock target, each given the geometry it writes.
+
+    Mirrors ``stompcollider.cli._emitters``, including the assembly's
+    timestamp: the case model's own, never a clock reading, because two
+    runs over one input must agree byte for byte (ADR-0006).
+    """
+    case = Solids(scan.case.document, scan.case.solids)
+    boards = {
+        ordinal: Solids(board.document.document, board.solids)
+        for ordinal, board in geometry.items()
+    }
+    built: list[tuple[Emitter[DockData], Path]] = []
+    for name, path in targets:
+        if name == "report":
+            built.append((ReportEmitter(), path))
+        else:
+            built.append((AssemblyEmitter(case, boards, timestamp=scan.case.timestamp), path))
+    return built
 
 
 def _withheld(targets: Sequence[tuple[str, Path]]) -> list[str]:
@@ -359,6 +445,28 @@ def _withheld(targets: Sequence[tuple[str, Path]]) -> list[str]:
     return ["wrote nothing: this run has errors, so these were not written:"] + [
         f"  {path}  ({name})" for name, path in targets
     ]
+
+
+def _undocked(targets: Sequence[tuple[str, Path]]) -> list[str]:
+    """Say why no board was read: the drill half's errors bind the whole run.
+
+    Each write step already withholds its own targets, but a dock run over
+    refused drill data would still read every board and seat it -- work
+    whose only product is output this run may not write.
+    """
+    return ["docked nothing: this run's drill half has errors, so no board was read:"] + [
+        f"  {path}  ({name})" for name, path in targets
+    ]
+
+
+def _quantise_outcome(data: DrillData) -> str:
+    """What quantisation produced: the holes it accepted and the tools they need."""
+    return f"{len(data.holes)} holes, {len(data.tools())} tools"
+
+
+def _drill_outcome(data: DrillData) -> str:
+    """What the drill pipeline left: the holes that survived every stage."""
+    return f"{len(data.holes)} holes"
 
 
 def _stage_outcome(before: DockData, after: DockData) -> str:

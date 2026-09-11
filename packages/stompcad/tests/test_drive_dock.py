@@ -23,7 +23,7 @@ from stompcollider import cli as stompcollider_cli
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill import cli as stompdrill_cli
-from stompmodel.diagnostics import Diagnostic
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, DrillData
 from stompmodel.progress import track
@@ -177,3 +177,36 @@ def test_write_dock_withholds_every_target_on_an_error_severity(tmp_path: Path) 
     assert written == []
     assert not target.exists()
     assert any("wrote nothing" in line for lines in presentation.reported for line in lines)
+
+
+def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> None:
+    """CLAUDE.md's "any error prevents every requested output" binds the run too.
+
+    A genuine ERROR rather than a constructed one: the tar fixture's
+    footprint matches three catalogue parts, so a run declaring no case
+    raises ``ambiguous-enclosure`` out of quantisation. Docking such a run
+    would read every board and seat it for output it may not write.
+    """
+    presentation = _RecordingPresentation()
+    target = tmp_path / "report.json"
+    options = RunOptions(
+        panel=TAR_AI,
+        boards=(TAR_PCB,),
+        case=None,
+        case_model=None,
+        panel_reference=PANEL_REFERENCE,
+        targets=(("report", target),),
+    )
+    driver = Driver(DRILL_AND_DOCK, presentation, options)
+
+    with track(NullSink()) as scope:
+        drilled, dock = driver.run(scope)
+
+    assert drilled.worst_severity is Severity.ERROR
+    assert [finding.code for finding in drilled.diagnostics] == ["ambiguous-enclosure"]
+    assert dock is None
+    assert [step.key for step, _outcome in presentation.finished] == [
+        "read-panel", "quantise", "drill", "write-case",
+    ]
+    assert not target.exists()
+    assert any("docked nothing" in line for lines in presentation.reported for line in lines)

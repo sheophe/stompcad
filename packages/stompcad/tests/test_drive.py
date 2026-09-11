@@ -70,14 +70,20 @@ def test_run_options_survives_replace() -> None:
 
 
 def test_presentation_sees_each_drill_step_finish_once_in_plan_order() -> None:
-    """Spec decision 4: a step credits its span only once, on completion."""
+    """Spec decision 4: a step credits its span only once, on completion.
+
+    The plan announced is the one about to run, not the nine-step plan the
+    driver was built with: a drill half divides the span among its own four
+    steps, so the bar is not weighed against five it never intends to take.
+    """
     presentation = _RecordingPresentation()
     driver = Driver(DRILL_AND_DOCK, presentation, _options())
 
     with track(NullSink()) as scope:
         driver.run_drill(scope)
 
-    assert presentation.began is DRILL_AND_DOCK
+    assert presentation.began is not None
+    assert presentation.began.steps == DRILL_AND_DOCK.steps[:4]
     finished_keys = [step.key for step, _outcome in presentation.finished]
     assert finished_keys == ["read-panel", "quantise", "drill", "write-case"]
 
