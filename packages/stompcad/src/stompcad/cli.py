@@ -14,17 +14,17 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TextIO
 
 from stompdrill.emitters import available
 from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, Severity, exit_for_severity
 from stompmodel.errors import StompError
-from stompmodel.progress import track
+from stompmodel.progress import Sink, track
 from stompmodel.protocols import check_target_set
 
-from .cancel import EXIT_CANCELLED, Cancelled
+from .cancel import EXIT_CANCELLED, Cancelled, CancellingSink
 from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
 from .inline import InlineApp, TerminalPresentation
 from .plan import DRILL_AND_DOCK
@@ -212,14 +212,20 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     if not choose_presentation(out):
         return _compose(options, PlainWriter(out))
     app = InlineApp(level=args.progress)
-    app.drive(lambda: _compose(options, TerminalPresentation(app)))
-    return app.run(inline=True, inline_no_clear=True) or EXIT_CLEAN
+    app.drive(lambda: _compose(options, TerminalPresentation(app), stop=lambda: app.stopping))
+    code = app.run(inline=True, inline_no_clear=True) or EXIT_CLEAN
+    if app.failure is not None:
+        raise app.failure
+    return code
 
 
-def _compose(options: RunOptions, presentation: Presentation) -> int:
+def _compose(
+    options: RunOptions, presentation: Presentation, stop: Callable[[], bool] | None = None
+) -> int:
     """One run, against whichever presentation is drawing it."""
     driver = Driver(DRILL_AND_DOCK, presentation, options)
-    with track(presentation) as scope:
+    sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
+    with track(sink) as scope:
         drill, dock = driver.run(scope)
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])

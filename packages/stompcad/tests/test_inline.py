@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
+from stompcad import cli
+from stompcad.cancel import Cancelled
 from stompcad.inline import InlineApp, TerminalPresentation
 from stompcad.plan import DRILL_AND_DOCK
 from stompcad.present import Presentation
+from tests.conftest import TAR_AI
 
 __all__: list[str] = []
+
+
+class _AlwaysATerminal:
+    """Stands in for ``out`` so ``choose_presentation`` picks the inline app."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 @pytest.mark.asyncio
@@ -84,6 +97,72 @@ async def test_the_worker_runs_the_composed_run_and_its_code_comes_back() -> Non
             if app.return_value is not None:
                 break
     assert app.return_value == 7
+
+
+@pytest.mark.asyncio
+async def test_q_asks_the_run_to_stop() -> None:
+    """Decision 9: the key sets a flag; the sink is what raises."""
+    app = InlineApp()
+    async with app.run_test() as pilot:
+        assert app.stopping is False
+        await pilot.press("q")
+        assert app.stopping is True
+
+
+def test_the_stop_flag_wired_by_run_cancels_the_composed_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Proves the guard: ``_run`` must wire ``stop=lambda: app.stopping`` in.
+
+    ``InlineApp.run`` is replaced with a stand-in that drives the same app
+    through the pilot instead of a real terminal, setting ``stopping``
+    before ``on_mount`` starts the worker -- the state ``q`` leaves it in.
+    Everything else is ``_run`` itself, unmodified.
+    """
+
+    def fake_run(self: InlineApp, **_: object) -> int | None:
+        self.stopping = True
+
+        async def drive_via_pilot() -> int | None:
+            async with self.run_test() as pilot:
+                for _ in range(50):
+                    await pilot.pause()
+                    if self.return_value is not None:
+                        break
+            return self.return_value
+
+        return asyncio.run(drive_via_pilot())
+
+    monkeypatch.setattr(InlineApp, "run", fake_run)
+    monkeypatch.setenv("TERM", "xterm")
+    args = cli.build_parser().parse_args(
+        [str(TAR_AI), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"]
+    )
+
+    with pytest.raises(Cancelled):
+        cli._run(args, _AlwaysATerminal())  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_a_fault_on_the_worker_reaches_the_main_thread() -> None:
+    """A failing run must not come back as a success.
+
+    The fault is raised on the worker, where nothing can print it, so it
+    travels out on the app and is raised again where ``main`` can map it.
+    """
+    app = InlineApp()
+
+    def boom() -> int:
+        raise OSError("disk full")
+
+    app.drive(boom)
+    async with app.run_test() as pilot:
+        for _ in range(50):
+            await pilot.pause()
+            if app.return_value is not None:
+                break
+
+    assert isinstance(app.failure, OSError)
 
 
 @pytest.mark.asyncio

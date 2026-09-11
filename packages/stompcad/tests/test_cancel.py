@@ -132,3 +132,30 @@ def test_main_exits_3_for_a_gap_with_no_terminal(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(cli, "_run", _raise)
 
     assert cli.main([str(TAR_AI)]) == EXIT_USAGE
+
+
+class _StoppedPresentation(PlainWriter):
+    """The state a stopped app leaves ``track`` in, without needing a terminal."""
+
+    def update(self, position: float, path: tuple[str, ...]) -> None:
+        raise Cancelled("stopped")
+
+
+def test_a_cancelled_run_exits_130(tmp_path: Path) -> None:
+    """The fifth code, reserved for a stop the user asked for.
+
+    Driven through ``_compose`` with a presentation whose stop flag is
+    already set, which is the state ``q`` leaves the app in.
+    """
+    options = RunOptions(
+        panel=TAR_AI,
+        boards=(),
+        case="1590B",
+        case_model=None,
+        panel_reference="",
+        targets=(("excellon", tmp_path / "out.drl"),),
+    )
+    with pytest.raises(Cancelled):
+        cli._compose(options, _StoppedPresentation(io.StringIO()))
+
+    assert list(tmp_path.iterdir()) == []

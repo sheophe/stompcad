@@ -15,6 +15,8 @@ from textual.app import App, ComposeResult
 from textual.reactive import reactive
 from textual.widgets import Static
 
+from stompmodel.diagnostics import EXIT_USAGE
+
 from .plan import RunPlan, Step
 from .present import Question, step_line
 
@@ -36,7 +38,7 @@ class InlineApp(App[int]):
     }
     """
 
-    BINDINGS = [("v", "cycle_level", "detail")]
+    BINDINGS = [("v", "cycle_level", "detail"), ("q", "stop", "stop")]
 
     LEVELS = ("bar", "steps", "tree")
 
@@ -56,6 +58,8 @@ class InlineApp(App[int]):
         self.seen: list[tuple[str, ...]] = []
         self._paths: set[tuple[str, ...]] = set()
         self.level = level
+        self.stopping = False
+        self.failure: BaseException | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(id="bar")
@@ -64,6 +68,15 @@ class InlineApp(App[int]):
     def action_cycle_level(self) -> None:
         """Cycle the detail while work continues; decision 3's one key."""
         self.level = self.LEVELS[(self.LEVELS.index(self.level) + 1) % len(self.LEVELS)]
+
+    def action_stop(self) -> None:
+        """Ask the run to stop. The sink notices at its next reported leaf.
+
+        Decision 9: a thread worker cannot be cancelled from outside, so
+        this sets a flag ``CancellingSink`` polls rather than trying to
+        interrupt the work directly.
+        """
+        self.stopping = True
 
     def watch_level(self) -> None:
         self._redraw()
@@ -81,7 +94,20 @@ class InlineApp(App[int]):
     def on_mount(self) -> None:
         run = self._run
         if run is not None:
-            self.run_worker(lambda: self._finish(run()), thread=True)
+            self.run_worker(lambda: self._finish(self._attempt(run)), thread=True)
+
+    def _attempt(self, run: Callable[[], int]) -> int:
+        """Run the work, keeping any fault for the main thread to raise.
+
+        An exception here would otherwise die on the worker, leaving the
+        run reporting success. ``main`` already maps every fault to an exit
+        code, so the fault is carried out rather than mapped a second time.
+        """
+        try:
+            return run()
+        except BaseException as error:  # noqa: BLE001 - re-raised in ``_run``
+            self.failure = error
+            return EXIT_USAGE
 
     def _finish(self, code: int) -> None:
         self.call_from_thread(self.exit, code)
