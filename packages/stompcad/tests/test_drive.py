@@ -10,13 +10,21 @@ from __future__ import annotations
 import io
 from dataclasses import replace
 
+import pytest
+
+from stompcad import drive
 from stompcad.drive import Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import PlainWriter
-from stompmodel.progress import track
+from stompmodel.progress import NO_PROGRESS, track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, NullSink
 
 __all__: list[str] = []
+
+
+def _refuse_to_read(panel: object) -> object:
+    """Stands in for the artwork reader, where reading again would be the defect."""
+    raise AssertionError(f"the artwork was read again: {panel}")
 
 
 def _options() -> RunOptions:
@@ -102,3 +110,44 @@ def test_the_driver_holds_its_intermediates() -> None:
     assert driver._raw is not None
     assert driver._quantised is not None
     assert driver._drilled is result
+
+
+def test_retry_runs_one_step_again_over_the_intermediates_already_held(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 4's retry, and the reason the driver holds its intermediates.
+
+    Plan C feeds an answer back through ``dataclasses.replace`` and asks for
+    the step that stopped. A fresh ``Driver`` over the replaced options would
+    re-parse the artwork and reload the case model instead -- the cost these
+    attributes exist to avoid -- so reading the artwork again is made a
+    failure here rather than merely unexpected.
+    """
+    presentation = _RecordingPresentation()
+    driver = Driver(DRILL_AND_DOCK, presentation, _options())
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+    raw, quantised = driver._raw, driver._quantised
+    presentation.finished.clear()
+    monkeypatch.setattr(drive, "AiPdfSource", _refuse_to_read)
+
+    with track(NullSink()) as scope:
+        again = driver.retry("quantise", replace(_options(), case="1590BB"), scope)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["quantise"]
+    assert driver._raw is raw, "the artwork was parsed again"
+    assert again is driver._quantised and again is not quantised
+    # The revised option was consumed, not merely accepted: the tar footprint
+    # is no 1590BB, and only the retried quantiser could say so.
+    assert [finding.code for finding in again.diagnostics] == ["unmatched-enclosure"]
+
+
+def test_retry_refuses_a_step_whose_input_the_driver_does_not_hold() -> None:
+    """The dock half's inputs live inside ``run_dock``, so its steps are not retryable."""
+    driver = Driver(DRILL_AND_DOCK, _RecordingPresentation(), _options())
+
+    with pytest.raises(ValueError):
+        driver.retry("seat", _options(), NO_PROGRESS)
+
+    with pytest.raises(ValueError):
+        driver.retry("quantise", _options(), NO_PROGRESS)

@@ -1,13 +1,12 @@
 """The driver: executes a run's steps, holding each intermediate between them.
 
-Spec decision 7: `stompcad` calls each phase separately, the same calls and
-order `stompdrill.cli._run` and `stompcollider.cli._run` make. Holding
-intermediates as attributes is what lets `retry` run one step again once an
-answer arrives (decision 4), never retreating a reported position (decision 8).
+Spec decision 7 and ADR-0013: `stompcad` calls each phase separately, the same
+calls and order `stompdrill.cli._run` and `stompcollider.cli._run` make.
+Holding intermediates is what lets `retry` run one step again once an answer
+arrives (decision 4), never retreating a reported position (decision 8).
 Importing this module loads `stompgeom`, and through it OCP, by way of
-`stompdrill`'s own emitters. That is not a leak: the constraint binds what
-`stompcad` reaches for, and it imports neither. Only `plan.py` promises to
-stay kernel-free, because plan B renders it.
+`stompdrill`'s own emitters -- not a leak: the constraint binds what `stompcad`
+reaches for, and it imports neither. Only `plan.py` stays tool-free.
 """
 
 from __future__ import annotations
