@@ -187,3 +187,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])
     )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
