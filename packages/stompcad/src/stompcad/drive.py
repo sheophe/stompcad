@@ -171,24 +171,25 @@ class Driver:
     def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData:
         """Run one step again under revised options, from the intermediates held.
 
-        Decision 4: a step that stopped to ask credits nothing, so when the
-        answer arrives that step alone runs again -- the artwork and the
-        case model are not read a second time. Only a step whose input this
-        driver still holds can be retried; the dock half's inputs live
-        inside ``run_dock`` and are not held, so naming one of its steps is
-        refused rather than quietly re-read. ``options`` replaces this
-        driver's own, so a later step sees the revised answer too.
+        Decision 4: a step that stopped to ask credits nothing, so that step
+        alone runs again when the answer arrives -- neither the artwork nor
+        the case model is read a second time. Only a step whose input this
+        driver holds can be retried; the dock half's live inside
+        ``run_dock``, so naming one is refused rather than quietly re-read.
+        ``options`` replaces this driver's own once the step is accepted, so
+        a refusal leaves the driver exactly as it was.
         """
-        self._options = options
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
+            self._options = options
             self._quantised = self._quantise(scope)
             self._presentation.finish_step(self._step(key), _quantise_outcome(self._quantised))
             return self._quantised
         if key == "drill":
             if self._quantised is None:
                 raise ValueError("drill cannot run again before quantisation")
+            self._options = options
             self._drilled = self._drill(self._quantised, scope)
             self._presentation.finish_step(self._step(key), _drill_outcome(self._drilled))
             return self._drilled
