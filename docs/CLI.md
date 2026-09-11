@@ -156,6 +156,38 @@ by this build. Both are validated and then rejected with a usage error. No
 stage implements explicit placement, and clash processing can change placement
 ranks.
 
+## stompcad
+
+```bash
+stompcad PANEL.ai --emit excellon=out.drl --emit report=report.json
+```
+
+`stompcad` runs `stompdrill` and `stompcollider` together as one invocation over
+`PANEL.ai`. Repeat `--emit FORMAT=PATH` for either half's formats; a name
+neither half can render is a usage error naming it, and every requested
+target is validated together, before anything is opened for writing.
+
+A run stopped before it finishes exits `130`. Nothing it was about to write
+survives: staged writes discard their temporaries the same way an ordinary
+processing error does, so a stopped run leaves neither a finished output nor
+a leftover file behind.
+
+### Exit codes
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No warnings or errors |
+| `1` | Warnings or clash findings; requested outputs may be written |
+| `2` | Processing errors; no requested outputs are written |
+| `3` | Invalid arguments, an unrecognised `--emit` format, an input/output failure, or a question with no terminal to ask it on |
+| `130` | The run was cancelled |
+
+`130` is the shell's own convention for a process ended by `SIGINT`: `128` plus
+the signal number `2`, the same code a shell reports for any command stopped
+with Ctrl-C — so a script already checking for that convention needs no
+special case for `stompcad`. It is reserved for a run the user stopped; no
+other path produces it.
+
 ## Output files and failures
 
 | Exit code | Meaning |

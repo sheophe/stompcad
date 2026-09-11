@@ -12,7 +12,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from stompcad import cli
+from stompmodel.diagnostics import EXIT_USAGE
 from tests.conftest import TAR_AI, TAR_PCB
 
 __all__: list[str] = []
@@ -50,3 +53,35 @@ def test_help_exits_clean() -> None:
 def test_the_fixtures_are_where_the_tests_expect() -> None:
     assert TAR_AI.is_file()
     assert TAR_PCB.is_file()
+
+
+def test_an_unknown_emit_format_is_a_usage_error() -> None:
+    """CLAUDE.md: an unrecognised target is invalid input, not a silent no-op."""
+    code = cli.main([str(TAR_AI), "--emit", "bogus=out.bin"])
+    assert code == EXIT_USAGE
+
+
+def test_validate_targets_reports_every_bad_name_together(capsys: pytest.CaptureFixture[str]) -> None:
+    """CLAUDE.md: 'Validate all requested targets together', not one round trip each."""
+    code = cli.main([
+        str(TAR_AI), "--emit", "bogus=a.bin", "--emit", "alsobogus=b.bin",
+    ])
+    assert code == EXIT_USAGE
+    error = capsys.readouterr().err
+    assert "bogus" in error
+    assert "alsobogus" in error
+
+
+def test_a_bad_target_leaves_a_good_target_unwritten(tmp_path: Path) -> None:
+    """Validation happens before rendering, so a bad name spoils the good one too."""
+    good = tmp_path / "good.drl"
+    code = cli.main([
+        str(TAR_AI), "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
+    ])
+    assert code == EXIT_USAGE
+    assert not good.exists()
+
+
+def test_parse_emit_rejects_a_spec_with_no_separator() -> None:
+    with pytest.raises(cli.UsageError):
+        cli.parse_emit("no-equals-sign")
