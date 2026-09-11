@@ -2,10 +2,11 @@
 
 Spec decision 9. `Cancelled` derives from `BaseException`, not `Exception`,
 for the reason `KeyboardInterrupt` does: a handler written for a fault must
-not absorb it. ADR-0001's staged writes discard their temporaries as the
-stack unwinds, which is what makes a cancelled run leave nothing behind.
-The progress protocol itself does not change; `CancellingSink` is
-`stompcad`'s own wrapper around whatever sink a run was already using.
+not absorb it. A cancelled run leaves no temporary because none exists yet
+when one can be cancelled: a scope reports per rendered target, and staging
+begins only once every target is rendered. ADR-0001's rollback covers a
+fault during staging, which a raising sink cannot cause. The progress
+protocol does not change; `CancellingSink` wraps the sink a run already had.
 """
 
 from __future__ import annotations
