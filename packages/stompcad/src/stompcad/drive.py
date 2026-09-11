@@ -4,9 +4,10 @@ Spec decision 7: `stompcad` calls each phase separately, the same calls and
 order `stompdrill.cli._run` and `stompcollider.cli._run` make. Holding
 intermediates as attributes lets plan C run one step again once an answer
 arrives (decision 4), never retreating a reported position (decision 8).
-This module also loads the CAD kernel transitively, through `stompdrill`'s
-own emitters -- unlike `plan.py`'s pure-data promise, its job is running
-kernel-backed tools, and it names no kernel package of its own.
+Importing this module loads `stompgeom`, and through it OCP, by way of
+`stompdrill`'s own emitters. That is not a leak: the constraint binds what
+`stompcad` reaches for, and it imports neither. Only `plan.py` promises to
+stay kernel-free, because plan B renders it.
 """
 
 from __future__ import annotations

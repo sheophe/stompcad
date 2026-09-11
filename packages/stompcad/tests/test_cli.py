@@ -9,6 +9,7 @@ rather than inside a three-minute dock test.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from stompcad import cli
@@ -17,17 +18,29 @@ from tests.conftest import TAR_AI, TAR_PCB
 __all__: list[str] = []
 
 
+def _imported_roots(source: Path) -> set[str]:
+    """Every top-level package name imported anywhere under ``source``.
+
+    Parsed rather than grepped: a raw text scan cannot tell an import from
+    a docstring naming the kernel, so it silently forbids the prose that
+    explains why a module does not import one.
+    """
+    roots: set[str] = set()
+    for path in source.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                roots.add(node.module.split(".")[0])
+    return roots
+
+
 def test_the_package_imports_no_kernel() -> None:
     """Spec constraint: stompcad computes no geometry and never imports OCP."""
     import stompcad
 
-    source = Path(stompcad.__file__).parent
-    offenders = [
-        path.name
-        for path in source.rglob("*.py")
-        if "OCP" in path.read_text() or "stompgeom" in path.read_text()
-    ]
-    assert offenders == []
+    roots = _imported_roots(Path(stompcad.__file__).parent)
+    assert {"OCP", "stompgeom"} & roots == set()
 
 
 def test_help_exits_clean() -> None:
