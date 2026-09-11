@@ -63,6 +63,8 @@ Measure each package with its own tests:
   --cov=stompgeom --cov-report=term-missing)
 (cd packages/stompcollider && uv run --no-sync pytest -o addopts= --boards \
   --cov=stompcollider --cov-report=term-missing)
+(cd packages/stompcad && uv run --no-sync pytest -o addopts= --boards --hammond \
+  --cov=stompcad --cov-report=term-missing)
 ```
 
 Targets are 90% for each package and 100% for quantisers, stages, emitters and

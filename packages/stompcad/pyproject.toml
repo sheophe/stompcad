@@ -64,6 +64,10 @@ pythonpath = ["../.."]
 # `tests/conftest.py` imports `tools.fetch_case_model`.
 [tool.mypy]
 files = ["src", "tests"]
+# The root config's own comment defers `strict` as scoped follow-up work
+# against 18 errors in legacy source, not a rejection of it. This member has
+# no legacy to carry, so it starts where the others are still ratcheting
+# towards.
 strict = true
 python_version = "3.10"
 mypy_path = ["src", "../.."]
