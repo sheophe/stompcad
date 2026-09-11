@@ -169,12 +169,21 @@ drilled and reports the clashes. Naming no board runs the drill half alone.
 Each of the run's steps prints one line as it completes, so a piped run reads
 as a log of what happened.
 
+On a terminal, the run is instead drawn inline above the prompt. `--progress`
+picks the starting level of detail -- `bar` draws one progress bar and the
+deepest live branch, `steps` draws the nine steps and their outcomes, `tree`
+expands each step into the divisions it reports. Pressing `v` cycles the
+level while the run continues, without restarting anything. `--progress` is
+ignored without a terminal; a piped or redirected run always gets the plain
+step-line log.
+
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--case PART` | Base designator the panel is drawn for, e.g. `1590B` | Identified from the footprint |
 | `--case-model PATH` | STEP model of the enclosure; required to dock a board | None |
 | `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
 | `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
+| `--progress bar\|steps\|tree` | Starting detail level for the inline run; `v` cycles it | `bar` |
 
 `--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
 `excellon`, `json` and `step` from the drill half, `report` and `assembly`

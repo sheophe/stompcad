@@ -36,18 +36,37 @@ class InlineApp(App[int]):
     }
     """
 
+    BINDINGS = [("v", "cycle_level", "detail")]
+
+    LEVELS = ("bar", "steps", "tree")
+
+    CHILDREN_PER_NODE = 8
+    TREE_LINES = 60
+
     position: reactive[float] = reactive(0.0)
     branch: reactive[str] = reactive("")
+    level: reactive[str] = reactive("bar")
 
-    def __init__(self) -> None:
+    def __init__(self, level: str = "bar") -> None:
         super().__init__()
         self.plan: RunPlan | None = None
         self.settled: list[str] = []
         self._run: Callable[[], int] | None = None
+        self.outcomes: dict[str, str] = {}
+        self.seen: list[tuple[str, ...]] = []
+        self._paths: set[tuple[str, ...]] = set()
+        self.level = level
 
     def compose(self) -> ComposeResult:
         yield Static(id="bar")
         yield Static(id="branch")
+
+    def action_cycle_level(self) -> None:
+        """Cycle the detail while work continues; decision 3's one key."""
+        self.level = self.LEVELS[(self.LEVELS.index(self.level) + 1) % len(self.LEVELS)]
+
+    def watch_level(self) -> None:
+        self._redraw()
 
     def drive(self, run: Callable[[], int]) -> None:
         """Hold the run until there is a loop to start it on.
@@ -74,10 +93,14 @@ class InlineApp(App[int]):
     def advance(self, position: float, path: tuple[str, ...]) -> None:
         self.position = position
         self.branch = " / ".join(path)
+        if path and path not in self._paths:
+            self._paths.add(path)
+            self.seen.append(path)
 
     def settle(self, step: Step, outcome: str) -> None:
         """Keep the finished line in the form a pipe would have received."""
         self.settled.append(step_line(step.label, outcome, self._width()))
+        self.outcomes[step.label] = outcome
         self._redraw()
 
     def record(self, lines: list[str]) -> None:
@@ -99,11 +122,69 @@ class InlineApp(App[int]):
     def _redraw(self) -> None:
         if not self.is_running:
             return
+        self.query_one("#bar", Static).update(self.rendered())
+        self.query_one("#branch", Static).update("")
+
+    def rendered(self) -> str:
+        """What this level draws from the state the app already holds."""
         filled = int(self.position * 30)
-        self.query_one("#bar", Static).update(
-            "\n".join(self.settled + [f"  [{'#' * filled}{'.' * (30 - filled)}] {self.position:.0%}"])
-        )
-        self.query_one("#branch", Static).update(f"  {self.branch}")
+        bar = f"  [{'#' * filled}{'.' * (30 - filled)}] {self.position:.0%}"
+        if self.level == "bar":
+            return "\n".join([bar, f"  {self.branch}"])
+        if self.level == "steps":
+            return "\n".join([*self._step_lines(), bar])
+        return "\n".join([*self._tree_lines(), bar])
+
+    def _step_lines(self) -> list[str]:
+        """The nine steps, each gaining its outcome as it completes."""
+        if self.plan is None:
+            return list(self.settled)
+        width = self._width()
+        return [
+            step_line(step.label, self.outcomes.get(step.label, ""), width).rstrip()
+            for step in self.plan.steps
+        ]
+
+    def _divisions(self) -> dict[tuple[str, ...], list[str]]:
+        """Every observed path split into the children each prefix reported."""
+        children: dict[tuple[str, ...], list[str]] = {}
+        for path in self.seen:
+            for depth in range(1, len(path) + 1):
+                bucket = children.setdefault(path[: depth - 1], [])
+                if path[depth - 1] not in bucket:
+                    bucket.append(path[depth - 1])
+        return children
+
+    def _branches(
+        self, prefix: tuple[str, ...], indent: int, children: dict[tuple[str, ...], list[str]]
+    ) -> list[str]:
+        """One node's divisions, or a count where they are per-item leaves.
+
+        Decision 3 wants the divisions a step reports, not its every hole,
+        so a fan-out wider than ``CHILDREN_PER_NODE`` is counted rather
+        than listed: ``drill``'s six stages show, their holes do not.
+        """
+        bucket = children.get(prefix, [])
+        if len(bucket) > self.CHILDREN_PER_NODE:
+            return ["  " + "  " * indent + f"{len(bucket)} items"]
+        lines: list[str] = []
+        for name in bucket:
+            lines.append("  " + "  " * indent + name)
+            lines.extend(self._branches((*prefix, name), indent + 1, children))
+        return lines
+
+    def _tree_lines(self) -> list[str]:
+        """Each step, and beneath it the divisions its scope reported."""
+        if self.plan is None:
+            return list(self.settled)
+        children = self._divisions()
+        lines: list[str] = []
+        for line, step in zip(self._step_lines(), self.plan.steps, strict=True):
+            lines.append(line)
+            lines.extend(self._branches((step.label,), 1, children))
+        if len(lines) > self.TREE_LINES:
+            return [*lines[: self.TREE_LINES], f"  ... {len(lines) - self.TREE_LINES} more"]
+        return lines
 
 
 class TerminalPresentation:

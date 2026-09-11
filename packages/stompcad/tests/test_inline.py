@@ -84,3 +84,63 @@ async def test_the_worker_runs_the_composed_run_and_its_code_comes_back() -> Non
             if app.return_value is not None:
                 break
     assert app.return_value == 7
+
+
+@pytest.mark.asyncio
+async def test_v_cycles_the_level_without_disturbing_the_run() -> None:
+    """Decision 3: the key redraws in place; it restarts nothing."""
+    app = InlineApp(level="bar")
+    async with app.run_test() as pilot:
+        app.show(DRILL_AND_DOCK)
+        app.advance(0.4, ("seat", "board 1"))
+        app.settle(DRILL_AND_DOCK.steps[0], "tar.ai")
+        await pilot.pause()
+
+        await pilot.press("v")
+        assert app.level == "steps"
+        await pilot.press("v")
+        assert app.level == "tree"
+        await pilot.press("v")
+        assert app.level == "bar"
+
+        assert app.position == pytest.approx(0.4)
+        assert app.settled == ["  read panel      tar.ai"]
+
+
+@pytest.mark.asyncio
+async def test_every_level_renders_the_same_recorded_run() -> None:
+    """Each level is a projection of one state, not a separate record."""
+    frames = {}
+    for level in ("bar", "steps", "tree"):
+        app = InlineApp(level=level)
+        async with app.run_test() as pilot:
+            app.show(DRILL_AND_DOCK)
+            app.settle(DRILL_AND_DOCK.steps[0], "tar.ai")
+            app.advance(0.4, ("quantise", "hole 3"))
+            await pilot.pause()
+            frames[level] = app.rendered()
+
+    assert "  read panel      tar.ai" in frames["steps"]
+    assert "  read panel      tar.ai" in frames["tree"]
+    assert "quantise" in frames["bar"]
+    assert "hole 3" in frames["tree"]
+    assert "hole 3" not in frames["steps"]
+
+
+@pytest.mark.asyncio
+async def test_the_tree_expands_divisions_and_counts_per_item_leaves() -> None:
+    """Decision 3: the divisions a step reports, not its every hole."""
+    app = InlineApp(level="tree")
+    async with app.run_test() as pilot:
+        app.show(DRILL_AND_DOCK)
+        for hole in range(25):
+            app.advance(0.5, ("drill", "route", f"hole {hole}.000,0.000"))
+        for phase in ("coarse", "fine", "settle"):
+            app.advance(0.6, ("seat", "board 1", phase))
+        await pilot.pause()
+        drawn = app.rendered()
+
+    assert "    route" in drawn
+    assert "25 items" in drawn
+    assert "hole 0.000,0.000" not in drawn
+    assert "      coarse" in drawn

@@ -92,6 +92,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="write an artifact; repeatable. FORMAT is one of: " + ", ".join(sorted(_known_targets())),
     )
+    parser.add_argument(
+        "--progress",
+        choices=("bar", "steps", "tree"),
+        default="bar",
+        help="how much of the run to draw; 'v' cycles it while a run works; "
+        "ignored without a terminal",
+    )
     return parser
 
 
@@ -204,7 +211,7 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     options = resolve(args)
     if not choose_presentation(out):
         return _compose(options, PlainWriter(out))
-    app = InlineApp()
+    app = InlineApp(level=args.progress)
     app.drive(lambda: _compose(options, TerminalPresentation(app)))
     return app.run(inline=True, inline_no_clear=True) or EXIT_CLEAN
 
