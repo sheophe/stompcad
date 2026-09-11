@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -151,3 +152,48 @@ def test_retry_refuses_a_step_whose_input_the_driver_does_not_hold() -> None:
 
     with pytest.raises(ValueError):
         driver.retry("quantise", _options(), NO_PROGRESS)
+
+
+def test_retry_refuses_a_revised_field_the_named_step_cannot_honour() -> None:
+    """A revision the step cannot apply is a usage error, not a silent no-op.
+
+    ``retry`` takes a whole ``RunOptions`` but one step reads only part of
+    it: ``drill`` never looks at ``case_model``, so accepting a revised one
+    would leave plan C believing an answer took effect when nothing read it.
+    Refused the way ``stompcollider`` refuses ``--place`` -- parsed, judged,
+    rejected with the reason -- and the driver is left exactly as it was.
+    """
+    presentation = _RecordingPresentation()
+    driver = Driver(DRILL_AND_DOCK, presentation, _options())
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+    held, drilled = driver._options, driver._drilled
+    presentation.finished.clear()
+
+    with pytest.raises(ValueError) as refusal:
+        driver.retry("drill", replace(_options(), case_model=Path("enclosure.stp")), NO_PROGRESS)
+
+    assert "case_model" in str(refusal.value)
+    assert "read-panel" in str(refusal.value), "the refusal must name the step that reads it"
+    assert driver._options is held, "the refused options replaced the ones the driver holds"
+    assert driver._drilled is drilled
+    assert presentation.finished == [], "a refused retry reported a step as finished"
+
+
+def test_retrying_a_step_discards_what_a_later_step_produced() -> None:
+    """Re-running a step supersedes every intermediate computed after it.
+
+    ``_drilled`` was computed from the options this retry replaces, so a
+    later ``run_dock`` reading it would dock boards against a drill document
+    the revised options contradict. Dropping it makes the staleness a
+    missing value rather than a wrong one.
+    """
+    driver = Driver(DRILL_AND_DOCK, _RecordingPresentation(), _options())
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+    assert driver._drilled is not None, "the control: run_drill must leave one to discard"
+
+    with track(NullSink()) as scope:
+        driver.retry("quantise", replace(_options(), case="1590BB"), scope)
+
+    assert driver._drilled is None, "the drilled data still describes the superseded options"

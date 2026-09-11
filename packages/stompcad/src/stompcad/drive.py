@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Protocol, TypeVar
 
@@ -94,6 +94,33 @@ _DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
 #: run's span -- see ``Driver._open``.
 _DOCK_FROM = 4
 
+#: What each step reads from ``RunOptions``. ``retry`` consults it to refuse
+#: a revision the named step would never consult, and to name the step that
+#: would have to run again for it to take effect. A step added to a plan is
+#: a row added here; a field named by no row is honoured by no step.
+_STEP_INPUTS: dict[str, frozenset[str]] = {
+    "read-panel": frozenset({"panel", "case", "case_model"}),
+    "quantise": frozenset({"case"}),
+    "drill": frozenset(),
+    "write-case": frozenset({"targets"}),
+    "read-boards": frozenset({"boards", "panel_reference"}),
+    "match": frozenset(),
+    "seat": frozenset(),
+    "clash": frozenset(),
+    "write-assembly": frozenset({"targets"}),
+}
+
+#: What each step leaves on the driver. Only the drill half holds anything:
+#: the dock half's intermediates live inside ``run_dock``, which is why its
+#: steps are not retryable. ``retry`` clears every attribute a step later
+#: than the retried one left, reading the order from the plan itself.
+_STEP_HOLDS: dict[str, tuple[str, ...]] = {
+    "read-panel": ("_case_model", "_raw"),
+    "quantise": ("_quantised",),
+    "drill": ("_drilled",),
+}
+
+
 class _Written(Processable, Protocol):
     """What a write step folds over: a pipeline's value, and its worst finding.
 
@@ -171,29 +198,79 @@ class Driver:
     def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData:
         """Run one step again under revised options, from the intermediates held.
 
-        Decision 4: a step that stopped to ask credits nothing, so that step
-        alone runs again when the answer arrives -- neither the artwork nor
-        the case model is read a second time. Only a step whose input this
-        driver holds can be retried; the dock half's live inside
-        ``run_dock``, so naming one is refused rather than quietly re-read.
-        ``options`` replaces this driver's own once the step is accepted, so
-        a refusal leaves the driver exactly as it was.
+        Decision 4: the step that stopped to ask runs again when the answer
+        arrives, reading neither the artwork nor the case model a second time.
+        Only a step whose input this driver holds is retryable, only a revision
+        that step actually reads is honoured, and an accepted one discards every
+        intermediate a later step produced -- so nothing the new options
+        contradict survives. Every refusal leaves the driver as it was.
         """
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
-            self._options = options
+            self._accept(key, options)
             self._quantised = self._quantise(scope)
-            self._presentation.finish_step(self._step(key), _quantise_outcome(self._quantised))
-            return self._quantised
-        if key == "drill":
+            retried, outcome = self._quantised, _quantise_outcome(self._quantised)
+        elif key == "drill":
             if self._quantised is None:
                 raise ValueError("drill cannot run again before quantisation")
-            self._options = options
+            self._accept(key, options)
             self._drilled = self._drill(self._quantised, scope)
-            self._presentation.finish_step(self._step(key), _drill_outcome(self._drilled))
-            return self._drilled
-        raise ValueError(f"{key!r} is not a step this driver can run again")
+            retried, outcome = self._drilled, _drill_outcome(self._drilled)
+        else:
+            raise ValueError(f"{key!r} is not a step this driver can run again")
+        self._presentation.finish_step(self._step(key), outcome)
+        return retried
+
+    def _accept(self, key: str, options: RunOptions) -> None:
+        """Take revised options for one step, once it is settled they can take effect."""
+        self._refuse_unhonoured(key, options)
+        self._discard_after(key)
+        self._options = options
+
+    def _refuse_unhonoured(self, key: str, options: RunOptions) -> None:
+        """Refuse a revised field the named step does not read.
+
+        ``retry`` takes a whole ``RunOptions``; a step reads part of it, so a
+        field it never consults would be accepted and then ignored. Refused
+        the way ``stompcollider`` refuses ``--place``: parsed, judged and
+        rejected with the reason, naming the step that would have to run again
+        for the revision to take effect. Every unhonourable field is named at
+        once, as the target check names every bad format at once.
+        """
+        read = _STEP_INPUTS.get(key, frozenset())
+        unhonoured = [
+            f"{field.name} ({self._reader(field.name)})"
+            for field in fields(options)
+            if field.name not in read
+            and getattr(options, field.name) != getattr(self._options, field.name)
+        ]
+        if unhonoured:
+            raise ValueError(
+                f"{key!r} does not read {', '.join(unhonoured)}: a revision this step "
+                "cannot honour is refused rather than accepted and ignored"
+            )
+
+    def _reader(self, name: str) -> str:
+        """Which step of this run reads one option field, for a refusal to name."""
+        for step in self._plan.steps:
+            if name in _STEP_INPUTS.get(step.key, frozenset()):
+                return f"read by {step.key!r}"
+        return "read by no step in this run"
+
+    def _discard_after(self, key: str) -> None:
+        """Drop every intermediate a step later than this one left behind.
+
+        Re-running a step supersedes what followed it: a value computed under
+        the options being replaced would otherwise be read by a later call as
+        though it agreed with them. The order is the plan's own step sequence,
+        so a step inserted into ``RunPlan`` falls under the rule rather than
+        quietly escaping a list written out here.
+        """
+        keys = [step.key for step in self._plan.steps]
+        for later in keys[keys.index(key) + 1 :]:
+            for attribute in _STEP_HOLDS.get(later, ()):
+                setattr(self, attribute, None)
 
     def _open(self, steps: tuple[Step, ...], scope: Scope) -> Iterator[Scope]:
         """Announce the steps about to run, and divide the span among them once.
