@@ -132,12 +132,11 @@ class _Node:
         """Yield one child per weight, then close this node at its own end.
 
         Each bound comes from a running total, not from the previous child's
-        end, so a long division accumulates no float error. ``total`` and
-        ``done`` may round differently: on newer CPythons ``sum()`` is
-        compensated while ``done`` adds one weight at a time, and ``done`` can
-        overtake ``total`` on the last weight. ``hi`` is clamped for that
-        reason: without it the last child could claim span past its parent's
-        end. ``lo`` is computed alike. ADR-0012 records the partition.
+        end, so a long division accumulates no float error; ``hi`` clamps the
+        last child, since ``done`` can overtake ``total``, and ``lo`` is alike.
+        Closing reclaims what the weights left unclaimed only when the
+        division is exhausted normally -- an exception skips it, matching
+        ``track()`` and ADR-0012.
         """
         total = float(sum(weights))
         span = self._hi - self._lo
@@ -145,15 +144,19 @@ class _Node:
             if total <= 0.0:
                 for _weight in weights:
                     yield _Node(self._run, self._lo, self._lo, self)
-                return
-            done = 0.0
-            for weight in weights:
-                lo = min(self._hi, self._lo + span * (done / total))
-                done += weight
-                hi = min(self._hi, self._lo + span * (done / total))
-                yield _Node(self._run, lo, hi, self)
-                self._run.advance(hi, self._path())
-        finally:
+            else:
+                done = 0.0
+                for weight in weights:
+                    lo = min(self._hi, self._lo + span * (done / total))
+                    done += weight
+                    hi = min(self._hi, self._lo + span * (done / total))
+                    yield _Node(self._run, lo, hi, self)
+                    self._run.advance(hi, self._path())
+        except BaseException:
+            # Mirrors track()'s rule: a division abandoned by a raised
+            # exception must not claim the span it never finished.
+            raise
+        else:
             self._run.advance(self._hi, self._path())
 
 
@@ -161,13 +164,18 @@ class _Node:
 def track(sink: Sink) -> Iterator[Scope]:
     """Open a run reporting into ``sink``, and complete it on the way out.
 
-    The exit advances to 1.0 whatever the body did, so a run that raised
-    or returned early still leaves the sink at a finished position rather
-    than at whatever fraction it had reached.
+    The exit advances to 1.0 only when the body completed. A run that raised
+    leaves the position where it reached, because 1.0 states that the output
+    is ready.
     """
     run = _Run(sink)
     root = _Node(run, 0.0, 1.0, None)
     try:
         yield root
-    finally:
+    except BaseException:
+        # Spec decision 4: 1.0 means the output is ready. A run that raised --
+        # a fault, or the cancellation of decision 9 -- produced nothing, and a
+        # finished bar over it would be a lie the renderer cannot detect.
+        raise
+    else:
         run.advance(1.0, ())
