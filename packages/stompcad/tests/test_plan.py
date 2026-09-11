@@ -2,9 +2,32 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from stompcad.plan import DRILL_AND_DOCK
 
 __all__: list[str] = []
+
+
+def test_importing_the_plan_loads_no_kernel() -> None:
+    """``plan.py`` is a pure data structure; nothing it imports may reach the kernel.
+
+    Checked against both ``OCP`` and ``stompgeom`` -- the kernel binding
+    imports OCP lazily throughout this codebase (functions, not module top),
+    so an eager ``import stompgeom`` is the fact that would actually catch a
+    regression here; ``OCP`` is kept alongside it in case that changes.
+    """
+    probe = (
+        "import stompcad.plan, sys; "
+        "loaded = sorted("
+        "m for m in sys.modules "
+        "if m == 'OCP' or m.startswith('OCP.') "
+        "or m == 'stompgeom' or m.startswith('stompgeom.')); "
+        "assert not loaded, loaded"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_the_plan_is_the_nine_steps_in_order() -> None:

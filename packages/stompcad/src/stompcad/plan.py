@@ -1,18 +1,21 @@
 """The run's nine steps, and the share of the bar each one carries.
 
 Spec decision 2 names the nine steps; decision 5 states how a weight is
-derived, not guessed. ``weights.py`` holds the counting command and the
-counts it produced; this module only declares the plan those counts fill
-in. Renders in Plan B, driven in a later task -- nothing here runs a step.
+derived, not guessed. ``tools/count_leaves.py`` holds the counting command
+and the counts it produced; this module only declares the plan those counts
+fill in. A pure data structure -- Plan B renders it, a later task drives
+it -- so it imports nothing beyond ``dataclasses``: neither tool it
+orchestrates, and so no CAD kernel.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .weights import KERNEL_LEAF_WEIGHT
+__all__ = ["KERNEL_LEAF_WEIGHT", "Step", "RunPlan", "DRILL_AND_DOCK"]
 
-__all__ = ["Step", "RunPlan", "DRILL_AND_DOCK", "KERNEL_LEAF_WEIGHT"]
+#: Spec decision 5's one stated judgement: a kernel leaf's multiplier.
+KERNEL_LEAF_WEIGHT: int = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,15 +42,19 @@ class RunPlan:
 # packages/stompcollider/tests/fixtures/tar-pcb.stp against the cached
 # 1590B model, --panel-reference "RV*,SW*,D(3..4),!RV5". Regenerate with:
 #
-#   .venv/bin/python -c "
-#   from pathlib import Path
-#   from stompcad.weights import count_leaves
-#   cases = Path.home() / '.cache' / 'stompcad' / 'cases'
-#   t = count_leaves(
-#       Path('packages/stompdrill/tests/fixtures/tar.ai'),
-#       Path('packages/stompcollider/tests/fixtures/tar-pcb.stp'),
-#       cases / '1590B.stp', 'RV*,SW*,D(3..4),!RV5')
-#   for k, v in t.items(): print(k, v.plain, v.kernel, v.weight)"
+#   .venv/bin/python tools/count_leaves.py \
+#       packages/stompdrill/tests/fixtures/tar.ai \
+#       packages/stompcollider/tests/fixtures/tar-pcb.stp \
+#       ~/.cache/stompcad/cases/1590B.stp \
+#       'RV*,SW*,D(3..4),!RV5'
+#
+# quantise, drill, read-boards, match, seat and clash are measured: each
+# phase took a real counting Scope and reported its own division; see
+# tools/count_leaves.py. read-panel, write-case and write-assembly are
+# declared, because Source.read and Emitter.emit take no scope at all
+# (packages/stompdrill/src/stompdrill/protocols.py:25 and
+# packages/stompmodel/src/stompmodel/protocols.py:295) -- there is nothing
+# for a Scope to be passed into.
 #
 # step            plain  kernel  weight (= plain + kernel * KERNEL_LEAF_WEIGHT)
 # read-panel          1       1      11
