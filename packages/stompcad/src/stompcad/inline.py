@@ -2,9 +2,10 @@
 
 Decision 1: inline rather than full screen, so scrollback survives and the
 record stays behind. The app owns the terminal and the main thread; the run
-happens on a worker (Task 4), which reaches these methods only through
-``call_from_thread``. Nothing here knows what a hole or a board is -- it
-renders positions and strings a driver hands it.
+happens on a worker, because a kernel query can hold that thread for minutes
+and the display must still answer a key while it does. The worker reaches
+these methods only through ``call_from_thread``. Nothing here knows what a
+hole or a board is -- it renders positions and strings a driver hands it.
 """
 
 from __future__ import annotations
@@ -41,7 +42,12 @@ class InlineApp(App[int]):
     }
     """
 
-    BINDINGS = [("v", "cycle_level", "detail"), ("q", "stop", "stop")]
+    BINDINGS = [
+        ("v", "cycle_level", "detail"),
+        ("q", "stop", "stop"),
+        ("ctrl+q", "stop", "stop"),
+        ("ctrl+c", "stop", "stop"),
+    ]
 
     LEVELS = ("bar", "steps", "tree")
 
@@ -62,11 +68,11 @@ class InlineApp(App[int]):
         self._paths: set[tuple[str, ...]] = set()
         self.level = level
         self.stopping = False
+        self.finished = False
         self.failure: BaseException | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(id="bar")
-        yield Static(id="branch")
 
     def action_cycle_level(self) -> None:
         """Cycle the detail while work continues; decision 3's one key."""
@@ -123,7 +129,27 @@ class InlineApp(App[int]):
             return EXIT_USAGE
 
     def _finish(self, code: int) -> None:
-        self.call_from_thread(self.exit, code)
+        """Cross to the app thread to leave the finished record behind.
+
+        ``call_from_thread`` raises ``RuntimeError`` once the app has
+        already gone -- reachable when a quit outraces the worker noticing
+        it stopped -- so the worker ends quietly rather than unhandled.
+        """
+        try:
+            self.call_from_thread(self._settle, code)
+        except RuntimeError:
+            pass
+
+    def _settle(self, code: int) -> None:
+        """Leave the finished record behind, whatever level drew the run.
+
+        Decision 2: a terminal settles into the same lines a pipe receives,
+        so the last frame is the record rather than whichever level was
+        live when the run ended. The exit waits for that frame to paint.
+        """
+        self.finished = True
+        self._redraw()
+        self.call_after_refresh(self.exit, code)
 
     def show(self, plan: RunPlan) -> None:
         """Record the plan, so a label can be padded to the widest it holds."""
@@ -162,12 +188,15 @@ class InlineApp(App[int]):
         if not self.is_running:
             return
         self.query_one("#bar", Static).update(self.rendered())
-        self.query_one("#branch", Static).update("")
 
     def rendered(self) -> str:
         """What this level draws from the state the app already holds."""
+        if self.finished:
+            return "\n".join(self.settled)
         filled = int(self.position * 30)
         bar = f"  [{'#' * filled}{'.' * (30 - filled)}] {self.position:.0%}"
+        if self.stopping:
+            bar += "  stopping..."
         if self.level == "bar":
             return "\n".join([bar, f"  {self.branch}"])
         if self.level == "steps":

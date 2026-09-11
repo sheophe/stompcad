@@ -277,9 +277,10 @@ class Driver:
         """Announce the steps about to run, and divide the span among them once.
 
         One division and one ``begin`` per run, whichever halves it runs:
-        dividing the same scope twice would leave the bar relying on
-        ``_Run.advance``'s maximum to stay monotonic, and would weigh a
-        drill-only run against five steps it never intends to take.
+        dividing the same scope twice would leave the bar relying on the
+        running maximum ``track()``'s scope keeps to stay monotonic, and
+        would weigh a drill-only run against five steps it never intends
+        to take.
         """
         plan = RunPlan(steps)
         self._presentation.begin(plan)

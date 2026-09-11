@@ -185,6 +185,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run(args, sys.stdout)
     except Cancelled:
         return EXIT_CANCELLED
+    except KeyboardInterrupt:
+        return EXIT_CANCELLED
     except (UsageError, NoTerminal, StompError, OSError) as error:
         print(f"{parser.prog}: error: {error}", file=sys.stderr)
         return EXIT_USAGE
@@ -213,9 +215,17 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         return _compose(options, PlainWriter(out))
     app = InlineApp(level=args.progress)
     app.drive(lambda: _compose(options, TerminalPresentation(app), stop=lambda: app.stopping))
-    code = app.run(inline=True, inline_no_clear=True) or EXIT_CLEAN
+    code = app.run(inline=True, inline_no_clear=True)
     if app.failure is not None:
+        # A fault carried out from the worker: raised here, unconditionally,
+        # regardless of what ``code`` holds.
         raise app.failure
+    if code is None:
+        # The app exited without the run's own exit code -- a quit that
+        # outraced the worker, not a run that finished. That is a stop,
+        # not a success, so it earns the same code a stop always does.
+        return EXIT_CANCELLED
+    # A code the run itself earned.
     return code
 
 

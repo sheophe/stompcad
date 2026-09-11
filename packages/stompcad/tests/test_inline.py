@@ -111,6 +111,24 @@ async def test_q_asks_the_run_to_stop() -> None:
         assert app.stopping is True
 
 
+@pytest.mark.asyncio
+async def test_ctrl_q_stops_the_run_rather_than_quitting_the_app() -> None:
+    """Textual's own priority ``ctrl+q -> quit`` must not reach the app.
+
+    Left unbound here, ``ctrl+q`` would exit the app while the worker still
+    ran: ``app.run()`` would return ``None`` with ``app.failure`` unset, and
+    a run that never finished would read as a clean exit. Binding it to
+    ``action_stop`` keeps it behind the same flag ``q`` sets.
+    """
+    app = InlineApp()
+    async with app.run_test() as pilot:
+        assert app.stopping is False
+        await pilot.press("ctrl+q")
+        assert app.stopping is True
+        assert app.is_running is True
+        assert app.return_value is None
+
+
 def test_the_stop_flag_wired_by_run_cancels_the_composed_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -319,26 +337,61 @@ async def test_the_settled_lines_are_the_lines_a_pipe_receives() -> None:
 
     Both are driven with the same calls in the same order, so any divergence
     is a formatting difference between the two writers rather than a
-    difference in what the run reported.
+    difference in what the run reported. ``report`` is part of the driven
+    sequence, and ``rendered()`` -- not only ``app.settled`` -- is compared,
+    because that is what a person watching the terminal actually sees once
+    the run has settled; ``app.settled`` alone let fix 2's defect through
+    review, since a real run never reaches ``rendered()``'s ``plan is None``
+    branches that used to consult it.
     """
     calls = [
         (DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp"),
         (DRILL_AND_DOCK.steps[1], "8 holes, 2 tools"),
         (DRILL_AND_DOCK.steps[2], "7 holes"),
     ]
+    report = ["  pitch          1.00 mm, half the drill grid"]
 
     piped = io.StringIO()
     writer = PlainWriter(piped)
     writer.begin(DRILL_AND_DOCK)
     for step, outcome in calls:
         writer.finish_step(step, outcome)
+    writer.report(report)
 
     app = InlineApp(level="steps")
     async with app.run_test() as pilot:
         app.show(DRILL_AND_DOCK)
         for step, outcome in calls:
             app.settle(step, outcome)
+        app.record(report)
+        app._settle(0)
         await pilot.pause()
         settled = list(app.settled)
+        rendered = app.rendered()
 
-    assert settled == piped.getvalue().splitlines()
+    piped_lines = piped.getvalue().splitlines()
+    assert settled == piped_lines
+    assert rendered == "\n".join(piped_lines)
+
+
+@pytest.mark.asyncio
+async def test_a_settled_run_renders_its_full_record_at_bar_level() -> None:
+    """Decision 2: the terminal settles into the record whatever level drew it.
+
+    ``bar`` is the default level, and the one that draws neither the steps
+    nor the report line while a run continues -- exactly where fix 2's
+    defect hid.
+    """
+    app = InlineApp(level="bar")
+    async with app.run_test() as pilot:
+        app.show(DRILL_AND_DOCK)
+        app.settle(DRILL_AND_DOCK.steps[0], "tar.ai")
+        app.record(["  pitch          1.00 mm, half the drill grid"])
+        app._settle(0)
+        await pilot.pause()
+
+        rendered = app.rendered()
+
+    assert rendered == "\n".join(app.settled)
+    assert "read panel" in rendered
+    assert "pitch" in rendered

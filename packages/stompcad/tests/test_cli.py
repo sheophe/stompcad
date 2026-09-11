@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from stompcad import cli
+from stompcad.cancel import EXIT_CANCELLED
 from stompmodel.diagnostics import EXIT_USAGE
 from tests.conftest import TAR_AI, TAR_PCB
 
@@ -94,3 +95,18 @@ def test_a_bad_target_leaves_a_good_target_unwritten(tmp_path: Path) -> None:
 def test_parse_emit_rejects_a_spec_with_no_separator() -> None:
     with pytest.raises(cli.UsageError):
         cli.parse_emit("no-equals-sign")
+
+
+def test_a_keyboard_interrupt_exits_130(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spec decision 9: an interrupt stops the run exactly as ``q`` does.
+
+    Docs/CLI.md documents 130 as reachable by a signal; nothing under
+    ``main`` used to catch ``KeyboardInterrupt``, so a headless Ctrl-C
+    escaped as a traceback instead.
+    """
+
+    def raises_interrupt(args: object, out: object) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_run", raises_interrupt)
+    assert cli.main([str(TAR_AI)]) == EXIT_CANCELLED
