@@ -19,7 +19,13 @@ from pathlib import Path
 from typing import TextIO
 
 from stompdrill.emitters import available
-from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, Severity, exit_for_severity
+from stompmodel.diagnostics import (
+    EXIT_CLEAN,
+    EXIT_ERRORS,
+    EXIT_USAGE,
+    Severity,
+    exit_for_severity,
+)
 from stompmodel.errors import StompError
 from stompmodel.progress import Sink, track
 from stompmodel.protocols import check_target_set
@@ -221,10 +227,10 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
         # regardless of what ``code`` holds.
         raise app.failure
     if code is None:
-        # The app exited without the run's own exit code -- a quit that
-        # outraced the worker, not a run that finished. That is a stop,
-        # not a success, so it earns the same code a stop always does.
-        return EXIT_CANCELLED
+        # The app exited without the run's own exit code. A stop the user
+        # asked for earns 130; the app failing under the run is a processing
+        # error, because decision 9 reserves 130 for the stop alone.
+        return EXIT_CANCELLED if app.stopping else EXIT_ERRORS
     # A code the run itself earned.
     return code
 

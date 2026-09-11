@@ -14,6 +14,7 @@ from stompcad.cancel import Cancelled
 from stompcad.inline import InlineApp, TerminalPresentation
 from stompcad.plan import DRILL_AND_DOCK
 from stompcad.present import Choice, PlainWriter, Presentation
+from stompmodel.diagnostics import EXIT_ERRORS
 from tests.conftest import TAR_AI
 
 __all__: list[str] = []
@@ -161,6 +162,28 @@ def test_the_stop_flag_wired_by_run_cancels_the_composed_run(
 
     with pytest.raises(Cancelled):
         cli._run(args, _AlwaysATerminal())  # type: ignore[arg-type]
+
+
+def test_an_app_that_fails_under_the_run_is_not_reported_as_a_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Decision 9 reserves 130 for a stop the user asked for.
+
+    An app that exits with no result has not run to a code, but neither has
+    anybody pressed ``q``; reporting a stop would put 130 on a path the
+    specification says may not produce it, so it earns the processing code.
+    """
+
+    def fake_run(self: InlineApp, **_: object) -> int | None:
+        return None
+
+    monkeypatch.setattr(InlineApp, "run", fake_run)
+    monkeypatch.setenv("TERM", "xterm")
+    args = cli.build_parser().parse_args(
+        [str(TAR_AI), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"]
+    )
+
+    assert cli._run(args, _AlwaysATerminal()) == EXIT_ERRORS  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -337,12 +360,10 @@ async def test_the_settled_lines_are_the_lines_a_pipe_receives() -> None:
 
     Both are driven with the same calls in the same order, so any divergence
     is a formatting difference between the two writers rather than a
-    difference in what the run reported. ``report`` is part of the driven
-    sequence, and ``rendered()`` -- not only ``app.settled`` -- is compared,
-    because that is what a person watching the terminal actually sees once
-    the run has settled; ``app.settled`` alone let fix 2's defect through
-    review, since a real run never reaches ``rendered()``'s ``plan is None``
-    branches that used to consult it.
+    difference in what the run reported. ``rendered()`` is compared rather
+    than ``app.settled`` alone, because the settled frame is what a person
+    watching the terminal is left with, and ``report`` is in the driven
+    sequence so the provenance lines are part of what must match.
     """
     calls = [
         (DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp"),
