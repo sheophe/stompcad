@@ -7,9 +7,27 @@ import io
 import pytest
 
 from stompcad.plan import DRILL_AND_DOCK
-from stompcad.present import Choice, NoTerminal, PlainWriter
+from stompcad.present import Choice, NoTerminal, PlainWriter, Presentation, Question
 
 __all__: list[str] = []
+
+
+def _accepts_presentation(presentation: Presentation) -> None:
+    """Structural conformance, enforced by mypy rather than at runtime."""
+
+
+def _accepts_question(question: Question) -> None:
+    """As above, for the question protocol plan C constructs."""
+
+
+def test_plain_writer_satisfies_presentation() -> None:
+    """Plan B is written against ``Presentation``; mypy must check ``PlainWriter`` here."""
+    _accepts_presentation(PlainWriter(io.StringIO()))
+
+
+def test_choice_satisfies_question() -> None:
+    """Plan C constructs ``Choice`` and passes it where ``Question`` is expected."""
+    _accepts_question(Choice(prompt="which enclosure?", candidates=("1590B",)))
 
 
 def test_a_step_prints_when_it_finishes_not_when_it_starts() -> None:
@@ -22,6 +40,25 @@ def test_a_step_prints_when_it_finishes_not_when_it_starts() -> None:
 
     writer.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp")
     assert out.getvalue() == "  read panel      tar.ai, 1590B.stp\n"
+
+
+def test_finish_step_before_begin_leaves_the_label_unpadded() -> None:
+    """No plan means no known widest label, so the column simply does not exist."""
+    out = io.StringIO()
+    writer = PlainWriter(out)
+
+    writer.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp")
+
+    assert out.getvalue() == "  read panel  tar.ai, 1590B.stp\n"
+
+
+def test_report_writes_each_line_terminated_and_nothing_else() -> None:
+    out = io.StringIO()
+    writer = PlainWriter(out)
+
+    writer.report(["holes: 6", "tools: 2"])
+
+    assert out.getvalue() == "holes: 6\ntools: 2\n"
 
 
 def test_asking_without_a_terminal_is_a_usage_failure() -> None:

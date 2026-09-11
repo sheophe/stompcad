@@ -62,7 +62,8 @@ class PlainWriter:
 
     ``update`` does nothing -- there is no bar without a terminal.
     ``begin`` records the plan so ``finish_step`` can pad its label to the
-    widest one the plan holds.
+    widest one the plan holds. Called before ``begin``, there is no known
+    width yet, so the label is simply unpadded rather than guessed at.
     """
 
     def __init__(self, out: TextIO) -> None:
