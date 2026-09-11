@@ -1,9 +1,11 @@
 """Cancellation, and the exit contract that unwinds a stopped run.
 
 Spec decision 9: a sink that raises is the whole mechanism. The first test
-is the guard ADR-0001's rollback exists to satisfy -- a cancelled run
-leaves neither artefact nor temporary; the rest pin the exit-code mapping
-``cli.main`` applies once ``Cancelled`` or ``NoTerminal`` reaches it.
+is the guard that a cancelled run leaves neither artefact nor temporary,
+which holds because nothing is staged at any moment a sink can raise rather
+than because rollback removes one; the second drives that rollback where it
+can actually fire, and the rest pin the exit-code mapping ``cli.main``
+applies once ``Cancelled`` or ``NoTerminal`` reaches it.
 """
 
 from __future__ import annotations
@@ -41,7 +43,13 @@ class _StopAfter:
 @pytest.mark.boards
 @pytest.mark.hammond
 def test_a_cancelled_run_leaves_neither_artefact_nor_temporary(tmp_path: Path) -> None:
-    """Spec decision 9: ADR-0001's rollback is what makes cancelling safe."""
+    """Spec decision 9: a stopped run leaves nothing, because nothing is staged yet.
+
+    Both write steps render every target before staging begins, so a sink
+    has no moment to raise between a staged temporary and its commit. The
+    rollback ADR-0001 states covers a fault *during* staging, which a
+    raising sink cannot cause -- the test below drives that directly.
+    """
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")
@@ -109,7 +117,7 @@ def test_cancelling_sink_delegates_until_stopped() -> None:
 
 
 def test_main_exits_130_for_a_run_the_user_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(args: object) -> None:
+    def _raise(args: object, out: object) -> None:
         raise Cancelled("cancelled at 30%")
 
     monkeypatch.setattr(cli, "_run", _raise)
@@ -118,7 +126,7 @@ def test_main_exits_130_for_a_run_the_user_cancelled(monkeypatch: pytest.MonkeyP
 
 
 def test_main_exits_3_for_a_gap_with_no_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(args: object) -> None:
+    def _raise(args: object, out: object) -> None:
         raise NoTerminal("which enclosure?")
 
     monkeypatch.setattr(cli, "_run", _raise)

@@ -73,11 +73,20 @@ def test_validate_targets_reports_every_bad_name_together(capsys: pytest.Capture
 
 
 def test_a_bad_target_leaves_a_good_target_unwritten(tmp_path: Path) -> None:
-    """Validation happens before rendering, so a bad name spoils the good one too."""
-    good = tmp_path / "good.drl"
+    """Validation happens before rendering, so a bad name spoils the good one too.
+
+    The control is the point: the same invocation without the bad name does
+    write that artefact, so the assertion below is about validation rather
+    than about a command line that writes nothing whatever it is asked.
+    """
+    good, control = tmp_path / "good.drl", tmp_path / "control.drl"
+    assert cli.main([str(TAR_AI), "--case", "1590B", "--emit", f"excellon={control}"]) != EXIT_USAGE
+    assert control.is_file(), "the control wrote nothing; the assertion below proves nothing"
+
     code = cli.main([
-        str(TAR_AI), "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
+        str(TAR_AI), "--case", "1590B", "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
     ])
+
     assert code == EXIT_USAGE
     assert not good.exists()
 

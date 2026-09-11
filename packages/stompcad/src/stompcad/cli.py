@@ -1,30 +1,33 @@
-"""``stompcad``'s command line: the orchestrator's own surface.
+"""``stompcad``'s command line: one composed run over both tools.
 
-Later tasks add the stages that actually run ``stompdrill`` and
-``stompcollider``; this module holds the argument surface, target
-validation and the exit convention every member shares (0 clean, 3 usage),
-plus spec decision 9's fifth code, 130, for a run the user cancelled.
-``_run`` is the seam later work attaches a real pipeline to; today it only
-parses and validates ``--emit``, so ``Cancelled`` never fires outside a
-test that drives the mapping directly.
+Resolves the arguments a run needs, validates every requested target
+together, then drives ``Driver`` under ``track()`` with the plain writer as
+both presentation and sink -- decision 11's headless path, and the only one
+until plan B brings a terminal. The exit convention is the four codes both
+tools share, reduced from the worse of the two halves' findings, plus spec
+decision 9's fifth code, 130, for a run the user cancelled.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import TextIO
 
 from stompdrill.emitters import available
-from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE
+from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, Severity, exit_for_severity
 from stompmodel.errors import StompError
+from stompmodel.progress import track
+from stompmodel.protocols import check_target_set
 
 from .cancel import EXIT_CANCELLED, Cancelled
-from .drive import _DOCK_TARGET_NAMES
-from .present import NoTerminal
+from .drive import _DOCK_TARGET_NAMES, Driver, RunOptions
+from .plan import DRILL_AND_DOCK
+from .present import NoTerminal, PlainWriter
 
-__all__ = ["UsageError", "build_parser", "parse_emit", "main"]
+__all__ = ["UsageError", "build_parser", "parse_emit", "resolve", "main"]
 
 
 class UsageError(Exception):
@@ -38,9 +41,38 @@ class UsageError(Exception):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The orchestrator's surface. Options arrive with the tasks that need them."""
-    parser = argparse.ArgumentParser(prog="stompcad")
-    parser.add_argument("panel", help="the Illustrator artwork to drill from")
+    """The orchestrator's surface: one panel, any number of boards, the targets."""
+    parser = argparse.ArgumentParser(
+        prog="stompcad",
+        description="Drill a panel and dock its boards inside the drilled case, in one run.",
+    )
+    parser.add_argument("panel", metavar="PANEL.ai", help="Illustrator file to read")
+    parser.add_argument(
+        "boards",
+        metavar="BOARD.stp",
+        nargs="*",
+        help="board models to seat in the drilled case; docking is skipped with none",
+    )
+    parser.add_argument(
+        "--case",
+        metavar="PART",
+        default=None,
+        help="the catalogue base designator the panel is drawn for, e.g. 1590B",
+    )
+    parser.add_argument(
+        "--case-model",
+        metavar="PATH",
+        default=None,
+        help="a STEP model of the enclosure; required to dock a board "
+        "(see tools/fetch_case_model.py)",
+    )
+    parser.add_argument(
+        "--panel-reference",
+        metavar="EXPR",
+        default=None,
+        help="which designators are panel references, e.g. 'RV*,SW*,D(3..4),!RV5'; "
+        "required to dock a board, because a default would be a pedal-specific fact",
+    )
     parser.add_argument(
         "--emit",
         metavar="FORMAT=PATH",
@@ -82,6 +114,47 @@ def validate_targets(targets: Sequence[tuple[str, Path]]) -> None:
         )
 
 
+def resolve(args: argparse.Namespace) -> RunOptions:
+    """One run's inputs, with everything a command line can get wrong settled first.
+
+    Both tools resolve their arguments before opening an input, and both
+    refuse a target set two of whose members reach one file. Docking needs
+    two facts nothing can supply on a run's behalf: the case the boards go
+    into, and which designators are panel references. A run with no board
+    needs neither, so neither is required until one is named.
+    """
+    targets = [parse_emit(spec) for spec in args.emit]
+    validate_targets(targets)
+    try:
+        check_target_set([path for _name, path in targets])
+    except ValueError as failure:
+        raise UsageError(str(failure)) from failure
+    boards = tuple(Path(board) for board in args.boards)
+    if boards and args.panel_reference is None:
+        raise UsageError(
+            "--panel-reference is required to dock a board: it names the components "
+            "chosen for this pedal, which no default can know"
+        )
+    if boards and args.case_model is None:
+        raise UsageError("--case-model is required to dock a board: a board is seated in the case")
+    return RunOptions(
+        panel=Path(args.panel),
+        boards=boards,
+        case=args.case,
+        case_model=None if args.case_model is None else Path(args.case_model),
+        # Never parsed when no board is named: the dock half is the only
+        # reader, and a run without one does not reach it.
+        panel_reference=args.panel_reference or "",
+        targets=tuple(targets),
+    )
+
+
+def worst_severity(severities: Iterable[Severity | None]) -> Severity | None:
+    """The worse finding of the halves that ran -- one run reports one status."""
+    found = [severity for severity in severities if severity is not None]
+    return max(found) if found else None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point. Returns the process exit code; never raises for bad input."""
     parser = build_parser()
@@ -90,16 +163,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_:  # --help exits 0; argparse usage errors do not
         return EXIT_CLEAN if not exit_.code else EXIT_USAGE
     try:
-        _run(args)
+        return _run(args, sys.stdout)
     except Cancelled:
         return EXIT_CANCELLED
     except (UsageError, NoTerminal, StompError, OSError) as error:
         print(f"{parser.prog}: error: {error}", file=sys.stderr)
         return EXIT_USAGE
-    return EXIT_CLEAN
 
 
-def _run(args: argparse.Namespace) -> None:
-    """Validate the requested targets. A later task drives ``Driver`` from here."""
-    targets = [parse_emit(spec) for spec in args.emit]
-    validate_targets(targets)
+def _run(args: argparse.Namespace, out: TextIO) -> int:
+    """Drive one composed run, and return the exit code its findings earned.
+
+    The plain writer is both the presentation the driver reports steps to
+    and the sink ``track`` folds positions into; without a terminal there is
+    no bar for the second half to draw, and decision 2's step lines are the
+    whole record either way.
+    """
+    options = resolve(args)
+    writer = PlainWriter(out)
+    driver = Driver(DRILL_AND_DOCK, writer, options)
+    with track(writer) as scope:
+        drill, dock = driver.run(scope)
+    return exit_for_severity(
+        worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])
+    )

@@ -159,18 +159,42 @@ ranks.
 ## stompcad
 
 ```bash
-stompcad PANEL.ai --emit excellon=out.drl --emit report=report.json
+stompcad PANEL.ai BOARD.stp --case 1590B --case-model 1590B.stp \
+    --panel-reference 'RV*,SW*' --emit excellon=out.drl --emit report=report.json
 ```
 
-`stompcad` runs `stompdrill` and `stompcollider` together as one invocation over
-`PANEL.ai`. Repeat `--emit FORMAT=PATH` for either half's formats; a name
-neither half can render is a usage error naming it, and every requested
-target is validated together, before anything is opened for writing.
+`stompcad` runs `stompdrill` and `stompcollider` together as one invocation. It
+drills `PANEL.ai`, then seats each `BOARD.stp` inside the case it has just
+drilled and reports the clashes. Naming no board runs the drill half alone.
+Each of the run's steps prints one line as it completes, so a piped run reads
+as a log of what happened.
 
-A run stopped before it finishes exits `130`. Nothing it was about to write
-survives: staged writes discard their temporaries the same way an ordinary
-processing error does, so a stopped run leaves neither a finished output nor
-a leftover file behind.
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--case PART` | Base designator the panel is drawn for, e.g. `1590B` | Identified from the footprint |
+| `--case-model PATH` | STEP model of the enclosure; required to dock a board | None |
+| `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
+| `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
+
+`--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
+`excellon`, `json` and `step` from the drill half, `report` and `assembly`
+from the dock half. Every requested target is validated together, before
+anything is opened for writing: a name neither half can render is a usage
+error naming it, and two targets naming one file are refused exactly as both
+tools refuse them.
+
+Neither fact docking needs has a default. `--panel-reference` names the
+components chosen for this particular pedal, and `--case-model` supplies the
+enclosure the boards are seated in; naming a board without either is a usage
+error rather than a guess.
+
+An error anywhere stops the whole run. The drill half's errors withhold its
+artefacts and leave the boards unread, and the dock half's withhold the report
+and the assembly. Both halves name what they did not write.
+
+A run stopped before it finishes exits `130`, and nothing it was about to write
+survives. Every artefact is rendered before any target is touched, so at the
+moment a run can be stopped there is nothing half-written on disk to remove.
 
 ### Exit codes
 
@@ -182,9 +206,10 @@ a leftover file behind.
 | `3` | Invalid arguments, an unrecognised `--emit` format, an input/output failure, or a question with no terminal to ask it on |
 | `130` | The run was cancelled |
 
-`130` is the shell's own convention for a process ended by `SIGINT`: `128` plus
-the signal number `2`, the same code a shell reports for any command stopped
-with Ctrl-C — so a script already checking for that convention needs no
+The code is the worse of the two halves' findings, so one run reports one
+status. `130` is the shell's own convention for a process ended by `SIGINT`:
+`128` plus the signal number `2`, the same code a shell reports for any command
+stopped with Ctrl-C — so a script already checking for that convention needs no
 special case for `stompcad`. It is reserved for a run the user stopped; no
 other path produces it.
 
@@ -197,7 +222,7 @@ other path produces it.
 | `2` | Processing errors; no requested outputs are written |
 | `3` | Invalid arguments or an input/output failure |
 
-Both tools validate the requested paths together before rendering. Two outputs
+All three commands validate the requested paths together before rendering. Two outputs
 cannot refer to the same file, including paths that resolve through symlinks or
 match after case and Unicode normalisation. Existing targets must be regular
 files.
@@ -205,6 +230,8 @@ files.
 All requested outputs are rendered and staged before any target is replaced.
 If a later write fails, previously replaced files are restored from their saved
 bytes, and newly created targets are removed. Temporary files are cleaned up.
+`stompcad` writes through the same mechanism, so a run of either tool and the
+same run under `stompcad` fail the same way.
 
 Recovery can fail if another process changes a target during the run or if a
 restoring write fails. The tools do not lock the output set or guarantee
