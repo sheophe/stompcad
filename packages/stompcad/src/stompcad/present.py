@@ -18,7 +18,18 @@ from typing import Protocol, TextIO
 from stompcad.plan import RunPlan, Step
 from stompmodel.errors import StompError
 
-__all__ = ["Question", "Choice", "Presentation", "PlainWriter", "NoTerminal"]
+__all__ = ["step_line", "Question", "Choice", "Presentation", "PlainWriter", "NoTerminal"]
+
+
+def step_line(label: str, outcome: str, width: int = 0) -> str:
+    """The one line a finished step leaves, wherever it is written.
+
+    Decision 2: a terminal's settled scrollback and a pipe's stream are the
+    same lines, so both writers render through this rather than each
+    formatting its own. ``width`` pads the label into a column; zero means
+    no plan is known yet and the label is simply unpadded.
+    """
+    return f"  {label:<{width}}  {outcome}"
 
 
 class Question(Protocol):
@@ -77,7 +88,7 @@ class PlainWriter:
         return None
 
     def finish_step(self, step: Step, outcome: str) -> None:
-        self._out.write(f"  {step.label:<{self._label_width}}  {outcome}\n")
+        self._out.write(step_line(step.label, outcome, self._label_width) + "\n")
 
     def ask(self, question: Question) -> str:
         raise NoTerminal(question.prompt)

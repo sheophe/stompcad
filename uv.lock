@@ -2291,6 +2291,7 @@ dependencies = [
     { name = "stompcollider" },
     { name = "stompdrill" },
     { name = "stompmodel" },
+    { name = "textual" },
 ]
 
 [package.dev-dependencies]
@@ -2306,6 +2307,7 @@ requires-dist = [
     { name = "stompcollider", editable = "packages/stompcollider" },
     { name = "stompdrill", editable = "packages/stompdrill" },
     { name = "stompmodel", editable = "packages/stompmodel" },
+    { name = "textual", specifier = ">=8.2" },
 ]
 
 [package.metadata.requires-dev]

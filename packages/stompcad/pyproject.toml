@@ -17,7 +17,9 @@ classifiers = [
 # stompmodel, stompdrill and stompcollider. No stompgeom and no OCP: this
 # package composes the other two tools as libraries and computes no geometry
 # of its own, which tests/test_cli.py enforces. See ADR-0008 and ADR-0009.
-dependencies = ["stompmodel", "stompdrill", "stompcollider"]
+# textual draws the run above the prompt; it reaches the kernel through
+# neither, and a headless run never imports it.
+dependencies = ["stompmodel", "stompdrill", "stompcollider", "textual>=8.2"]
 
 [project.urls]
 Homepage = "https://github.com/sheophe/stompcad"

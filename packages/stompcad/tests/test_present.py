@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import io
+import re
+from pathlib import Path
 
 import pytest
 
 from stompcad.plan import DRILL_AND_DOCK
-from stompcad.present import Choice, NoTerminal, PlainWriter, Presentation, Question
+from stompcad.present import (
+    Choice,
+    NoTerminal,
+    PlainWriter,
+    Presentation,
+    Question,
+    step_line,
+)
 
 __all__: list[str] = []
 
@@ -70,3 +79,21 @@ def test_asking_without_a_terminal_is_a_usage_failure() -> None:
         writer.ask(question)
 
     assert "which enclosure?" in str(raised.value)
+
+
+def test_textual_is_declared_not_merely_installed() -> None:
+    """It reaches this venv through mutmut's own dependencies, not ours.
+
+    A presentation built on an undeclared import would pass every test here
+    and fail for anyone who installed this package on its own.
+    """
+    manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    block = re.search(r"^dependencies = \[(.*?)\]", manifest.read_text(), re.S | re.M)
+    assert block is not None, "no dependencies block in pyproject.toml"
+    assert "textual" in block.group(1)
+
+
+def test_one_format_serves_both_writers() -> None:
+    """Decision 2: the settled terminal lines and the piped lines are the same."""
+    assert step_line("quantise", "8 holes, 2 tools", width=10) == "  quantise    8 holes, 2 tools"
+    assert step_line("quantise", "8 holes, 2 tools") == "  quantise  8 holes, 2 tools"
