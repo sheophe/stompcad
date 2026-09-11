@@ -10,17 +10,19 @@ renders positions and strings a driver hands it.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from threading import Event
 
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
-from textual.widgets import Static
+from textual.screen import ModalScreen
+from textual.widgets import OptionList, Static
 
 from stompmodel.diagnostics import EXIT_USAGE
 
 from .plan import RunPlan, Step
 from .present import Question, step_line
 
-__all__ = ["InlineApp", "TerminalPresentation"]
+__all__ = ["InlineApp", "ChoiceScreen", "TerminalPresentation"]
 
 
 class InlineApp(App[int]):
@@ -77,6 +79,22 @@ class InlineApp(App[int]):
         interrupt the work directly.
         """
         self.stopping = True
+
+    def enquire(self, question: Question, chosen: Callable[[str], None]) -> None:
+        """Put the question on screen, and hand the answer back when it comes.
+
+        Called across ``call_from_thread`` and returns at once: the worker
+        waiting for ``chosen`` must not be waiting while this runs, or the
+        app thread would be blocked on the thread that is blocked on it.
+        ``push_screen``'s callback type admits ``None`` for screens in
+        general; ``ChoiceScreen`` never dismisses with one.
+        """
+
+        def handle(answer: str | None) -> None:
+            assert answer is not None
+            chosen(answer)
+
+        self.push_screen(ChoiceScreen(question), handle)
 
     def watch_level(self) -> None:
         self._redraw()
@@ -213,6 +231,26 @@ class InlineApp(App[int]):
         return lines
 
 
+class ChoiceScreen(ModalScreen[str]):
+    """One finite choice, dismissed with the candidate somebody picked.
+
+    ``ModalScreen[str]`` so ``dismiss`` carries the answer back to whoever
+    pushed it. The candidates are the tool's own; this screen neither adds
+    to them nor reorders them.
+    """
+
+    def __init__(self, question: Question) -> None:
+        super().__init__()
+        self._question = question
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._question.prompt)
+        yield OptionList(*self._question.candidates)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
+
+
 class TerminalPresentation:
     """The boundary plan A pinned, forwarded to an app on another thread.
 
@@ -237,7 +275,24 @@ class TerminalPresentation:
         self._app.call_from_thread(self._app.settle, step, outcome)
 
     def ask(self, question: Question) -> str:
-        raise NotImplementedError("Task 7 implements the picker")
+        """Block this worker until somebody chooses, then return their answer.
+
+        ``call_from_thread`` returns what its callable returned, which here
+        is only the pushing of the modal -- the answer comes later, from a
+        keypress, so the worker waits on an event the modal sets. Waiting
+        must happen after the crossing, never during it, or the app thread
+        would be blocked on the thread waiting for it.
+        """
+        answered = Event()
+        box: list[str] = []
+
+        def chosen(answer: str) -> None:
+            box.append(answer)
+            answered.set()
+
+        self._app.call_from_thread(self._app.enquire, question, chosen)
+        answered.wait()
+        return box[0]
 
     def report(self, lines: Sequence[str]) -> None:
         self._app.call_from_thread(self._app.record, list(lines))

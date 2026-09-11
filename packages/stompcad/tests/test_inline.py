@@ -11,7 +11,7 @@ from stompcad import cli
 from stompcad.cancel import Cancelled
 from stompcad.inline import InlineApp, TerminalPresentation
 from stompcad.plan import DRILL_AND_DOCK
-from stompcad.present import Presentation
+from stompcad.present import Choice, Presentation
 from tests.conftest import TAR_AI
 
 __all__: list[str] = []
@@ -223,3 +223,27 @@ async def test_the_tree_expands_divisions_and_counts_per_item_leaves() -> None:
     assert "25 items" in drawn
     assert "hole 0.000,0.000" not in drawn
     assert "      coarse" in drawn
+
+
+@pytest.mark.asyncio
+async def test_a_question_blocks_the_worker_until_it_is_answered() -> None:
+    """``ask`` runs on the worker; the answer arrives from a keypress."""
+    app = InlineApp()
+    answers: list[str] = []
+
+    async with app.run_test() as pilot:
+        presentation = TerminalPresentation(app)
+        app.run_worker(
+            lambda: answers.append(
+                presentation.ask(Choice(prompt="which enclosure?", candidates=("1590B", "1590BB")))
+            ),
+            thread=True,
+        )
+        await pilot.pause()
+        assert answers == []          # still waiting: nobody has chosen
+
+        await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert answers == ["1590BB"]
