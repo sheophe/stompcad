@@ -1,16 +1,18 @@
 """``stompcad``'s command line: one composed run over both tools.
 
 Resolves the arguments a run needs, validates every requested target
-together, then drives ``Driver`` under ``track()`` with the plain writer as
-both presentation and sink -- decision 11's headless path, and the only one
-until plan B brings a terminal. The exit convention is the four codes both
-tools share, reduced from the worse of the two halves' findings, plus spec
-decision 9's fifth code, 130, for a run the user cancelled.
+together, then drives ``Driver`` under ``track()`` with a presentation that
+is also the sink -- the plain writer without a terminal, decision 11's
+headless path, or the inline app's on a worker thread with one. The exit
+convention is the four codes both tools share, reduced from the worse of the
+two halves' findings, plus spec decision 9's fifth code, 130, for a run the
+user cancelled.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -24,8 +26,9 @@ from stompmodel.protocols import check_target_set
 
 from .cancel import EXIT_CANCELLED, Cancelled
 from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
+from .inline import InlineApp, TerminalPresentation
 from .plan import DRILL_AND_DOCK
-from .present import NoTerminal, PlainWriter
+from .present import NoTerminal, PlainWriter, Presentation
 
 __all__ = [
     "UsageError",
@@ -34,6 +37,7 @@ __all__ = [
     "validate_targets",
     "resolve",
     "worst_severity",
+    "choose_presentation",
     "main",
 ]
 
@@ -179,18 +183,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
 
 
+def choose_presentation(out: TextIO) -> bool:
+    """Whether this stream can carry a drawn run rather than streamed lines.
+
+    Decision 11: a pipe, a dumb terminal or a CI runner gets the plain
+    writer -- the same step lines, without the drawing. ``TERM=dumb``
+    cannot address a cursor, so an inline app would corrupt what it wrote.
+    """
+    return out.isatty() and os.environ.get("TERM", "") not in ("", "dumb")
+
+
 def _run(args: argparse.Namespace, out: TextIO) -> int:
     """Drive one composed run, and return the exit code its findings earned.
 
-    The plain writer is both the presentation the driver reports steps to
-    and the sink ``track`` folds positions into; without a terminal there is
-    no bar for the second half to draw, and decision 2's step lines are the
-    whole record either way.
+    The presentation is also the sink ``track`` folds positions into, the
+    same double duty either writer does. With a terminal the run happens on
+    a worker and the app owns the main thread; without one it happens right
+    here, and decision 2's step lines are the whole record either way.
     """
     options = resolve(args)
-    writer = PlainWriter(out)
-    driver = Driver(DRILL_AND_DOCK, writer, options)
-    with track(writer) as scope:
+    if not choose_presentation(out):
+        return _compose(options, PlainWriter(out))
+    app = InlineApp()
+    app.drive(lambda: _compose(options, TerminalPresentation(app)))
+    return app.run(inline=True, inline_no_clear=True) or EXIT_CLEAN
+
+
+def _compose(options: RunOptions, presentation: Presentation) -> int:
+    """One run, against whichever presentation is drawing it."""
+    driver = Driver(DRILL_AND_DOCK, presentation, options)
+    with track(presentation) as scope:
         drill, dock = driver.run(scope)
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])

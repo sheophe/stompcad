@@ -9,6 +9,7 @@ command line writes from the same inputs.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
@@ -102,3 +103,30 @@ def test_a_board_without_a_case_model_is_a_usage_error(
 
     assert code == EXIT_USAGE
     assert "--case-model is required to dock a board" in capsys.readouterr().err
+
+
+def test_a_captured_stream_is_not_a_terminal() -> None:
+    """Decision 11: without a terminal the plain writer runs, and nothing prompts."""
+    assert cli.choose_presentation(io.StringIO()) is False
+
+
+def test_a_terminal_gets_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tty, and not a dumb one, is what the inline app needs."""
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setenv("TERM", "xterm")
+    assert cli.choose_presentation(_Tty()) is True
+
+
+def test_a_dumb_terminal_falls_back_to_the_plain_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TERM=dumb cannot address a cursor, so drawing would corrupt the output."""
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setenv("TERM", "dumb")
+    assert cli.choose_presentation(_Tty()) is False

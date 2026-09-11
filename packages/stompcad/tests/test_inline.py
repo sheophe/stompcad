@@ -71,3 +71,16 @@ async def test_every_call_crosses_back_to_the_app_thread() -> None:
         await pilot.pause()
 
     assert crossings == ["show", "advance", "settle", "record"]
+
+
+@pytest.mark.asyncio
+async def test_the_worker_runs_the_composed_run_and_its_code_comes_back() -> None:
+    """The run happens off the main thread; its exit code leaves through ``exit``."""
+    app = InlineApp()
+    app.drive(lambda: 7)
+    async with app.run_test() as pilot:
+        for _ in range(50):
+            await pilot.pause()
+            if app.return_value is not None:
+                break
+    assert app.return_value == 7

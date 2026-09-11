@@ -9,7 +9,7 @@ renders positions and strings a driver hands it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
@@ -43,10 +43,29 @@ class InlineApp(App[int]):
         super().__init__()
         self.plan: RunPlan | None = None
         self.settled: list[str] = []
+        self._run: Callable[[], int] | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(id="bar")
         yield Static(id="branch")
+
+    def drive(self, run: Callable[[], int]) -> None:
+        """Hold the run until there is a loop to start it on.
+
+        Decision 1's second reason for a framework: a kernel query holds its
+        thread for minutes, and the display must still answer a key while it
+        does. ``run_worker`` needs a running app, and the caller has one only
+        after ``run()``, so the start waits for ``on_mount``.
+        """
+        self._run = run
+
+    def on_mount(self) -> None:
+        run = self._run
+        if run is not None:
+            self.run_worker(lambda: self._finish(run()), thread=True)
+
+    def _finish(self, code: int) -> None:
+        self.call_from_thread(self.exit, code)
 
     def show(self, plan: RunPlan) -> None:
         """Record the plan, so a label can be padded to the widest it holds."""
