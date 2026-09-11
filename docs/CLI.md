@@ -173,9 +173,11 @@ On a terminal, the run is instead drawn inline above the prompt. `--progress`
 picks the starting level of detail -- `bar` draws one progress bar and the
 deepest live branch, `steps` draws the nine steps and their outcomes, `tree`
 expands each step into the divisions it reports. Pressing `v` cycles the
-level while the run continues, without restarting anything. `--progress` is
-ignored without a terminal; a piped or redirected run always gets the plain
-step-line log.
+level while the run continues, without restarting anything. Pressing `q`
+stops the run, which then exits `130`. While a question is on screen, `q`
+abandons it instead -- the picker binds its own `q` -- and abandoning a
+question likewise stops the run. `--progress` is ignored without a
+terminal; a piped or redirected run always gets the plain step-line log.
 
 | Option | Meaning | Default |
 | --- | --- | --- |
@@ -220,7 +222,8 @@ status. `130` is the shell's own convention for a process ended by `SIGINT`:
 `128` plus the signal number `2`, the same code a shell reports for any command
 stopped with Ctrl-C — so a script already checking for that convention needs no
 special case for `stompcad`. It is reserved for a run the user stopped; no
-other path produces it.
+other path produces it. On a terminal that status is now also reachable by
+pressing `q`, not only by the signal.
 
 ## Output files and failures
 

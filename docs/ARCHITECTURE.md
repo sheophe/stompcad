@@ -83,7 +83,10 @@ read the drill document through `stompmodel` without importing `stompdrill`.
 `stompcad` calls each phase of both tools directly, in the order their own
 command lines call them, and holds each result between the steps. It reports
 the run as nine named steps, writes through the same staged-write transaction
-both tools use, and produces artefacts byte-identical to theirs. See
+both tools use, and produces artefacts byte-identical to theirs. On a
+terminal, a Textual app draws that same report inline above the prompt while
+the run continues on a worker thread; without one, a run gets the plain
+step-line log a pipe reads as a log of what happened. See
 [ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 ## Shared data and output

@@ -126,6 +126,33 @@ The four exit codes both tools share are reduced from the worse of the two
 halves' findings, so the record and the status cannot disagree. `130` is the
 fifth, and no other path produces it.
 
+### The terminal presentation runs the composed run on a worker thread
+
+`InlineApp` owns the main thread and its event loop; the composed run happens
+on a Textual worker thread, so a blocking kernel call cannot freeze the
+display for as long as it holds that thread. Every `TerminalPresentation`
+method crosses back to the app through `call_from_thread`, and nothing on the
+worker touches a widget directly. `ask` blocks its own worker on an `Event`
+the modal's callback sets, because the answer is a keypress that arrives only
+after the crossing that pushed the modal has already returned. The detail
+level `v` cycles is kept on the app alone and is never persisted, matching
+decision 3.
+
+Three further points came out of building this, not out of the spec.
+`InlineApp.drive` only stores the callable it is given; the worker itself
+starts from `on_mount`, because `run_worker` needs a running app and `drive`
+is called before `run()` supplies one — starting it at `drive` time raises
+`RuntimeError` and every terminal run would crash. Any fault on the worker is
+caught as `BaseException`, kept as `app.failure`, and re-raised on the main
+thread once `app.run()` returns, so `main`'s one exception-to-exit-code
+mapping serves the terminal path as well as the headless one instead of
+drifting into two; `BaseException` rather than `Exception` is required
+because `Cancelled` derives from it. And `q` abandons a question the same way
+it stops a run, because the picker binds its own `q` — `OptionList` swallows
+the app's binding — and because `App.pop_screen` can discard a pending
+screen's result callback without ever invoking it, `ask`'s wait is bounded
+rather than open-ended, or an abandoned screen would park the worker forever.
+
 ## Rationale
 
 **A protocol rather than printing.** Two audiences read a run: a person watching
@@ -171,10 +198,13 @@ A phase added to either tool is a step added to `stompcad.plan`, a weight
 recounted with the command recorded there, and a step line in the presentation.
 The step list is data, so nothing else changes with it.
 
-A terminal implementation of `Presentation` and an interactive resolver are
-later work. `ask` and `retry` exist for them, and both are exercised only by
-tests until that work lands; the spec's decisions 3, 6, 8 and 10 remain
-undecided in code.
+`TerminalPresentation`, in `stompcad/inline.py`, is the terminal implementation
+of `Presentation`; decision 3's three levels of detail, `--progress` and the
+`v` key that cycles them are decided in code alongside it. `ask` is
+implemented there too, drawn as the modal decision 6 will pick from, but it
+still has no caller, so it remains exercised only by tests. An interactive
+resolver is still later work, and `retry` still has no caller either. The
+spec's decisions 6, 8 and 10 remain undecided in code.
 
 `stompcad`'s suite gates the tests that read the board fixture and the cached
 enclosure model behind `--boards` and `--hammond`, mirroring both tools rather

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from stompcad import cli
 from stompcad.cancel import Cancelled
 from stompcad.inline import InlineApp, TerminalPresentation
 from stompcad.plan import DRILL_AND_DOCK
-from stompcad.present import Choice, Presentation
+from stompcad.present import Choice, PlainWriter, Presentation
 from tests.conftest import TAR_AI
 
 __all__: list[str] = []
@@ -310,3 +311,34 @@ async def test_the_app_going_away_abandons_a_pending_question() -> None:
         await _await_result(results)
 
     assert results == [("cancelled", None)]
+
+
+@pytest.mark.asyncio
+async def test_the_settled_lines_are_the_lines_a_pipe_receives() -> None:
+    """Decision 2: one presentation serves a terminal and a pipe alike.
+
+    Both are driven with the same calls in the same order, so any divergence
+    is a formatting difference between the two writers rather than a
+    difference in what the run reported.
+    """
+    calls = [
+        (DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp"),
+        (DRILL_AND_DOCK.steps[1], "8 holes, 2 tools"),
+        (DRILL_AND_DOCK.steps[2], "7 holes"),
+    ]
+
+    piped = io.StringIO()
+    writer = PlainWriter(piped)
+    writer.begin(DRILL_AND_DOCK)
+    for step, outcome in calls:
+        writer.finish_step(step, outcome)
+
+    app = InlineApp(level="steps")
+    async with app.run_test() as pilot:
+        app.show(DRILL_AND_DOCK)
+        for step, outcome in calls:
+            app.settle(step, outcome)
+        await pilot.pause()
+        settled = list(app.settled)
+
+    assert settled == piped.getvalue().splitlines()
