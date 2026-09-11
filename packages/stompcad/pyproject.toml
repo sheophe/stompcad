@@ -52,7 +52,7 @@ stompcollider = { workspace = true }
 # `hypothesis` matches the other members' dev groups even though this
 # package's own tests are not yet generative.
 [dependency-groups]
-dev = ["pytest", "hypothesis", "mypy", "ruff"]
+dev = ["pytest", "pytest-asyncio", "hypothesis", "mypy", "ruff"]
 
 # `pythonpath` reaches the repo root: `tests/conftest.py` reads
 # `tools.fetch_case_model.cache_dir`, mirroring the reason every other
