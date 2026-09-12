@@ -108,7 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--promote-warnings",
         action="store_true",
-        help="treat every warning as an error, so a resolvable one can be asked about",
+        help="raise every warning to an error when looking for a gap to ask about; "
+        "the exit code, the withheld artefacts and the drill document are unchanged",
     )
     return parser
 

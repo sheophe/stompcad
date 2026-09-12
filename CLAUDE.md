@@ -167,7 +167,11 @@ depends only on the `Stage` protocol.
   leaves them written. [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md)
   records why that is a deliberate limit rather than a necessity.
 - Artwork uses published top-view/backplate dimensions. A footprint may identify
-  several parts; require `--case` when ambiguous and verify a declared part.
+  several parts; the part is then declared with `--case` or, failing that,
+  inferred from a supplied case model's filename. Verify either against the
+  measurement. A declared part that disagrees is an error, because the operator
+  said something untrue; an inferred one that disagrees is no evidence, so the
+  ambiguity stands and a picker may resolve it.
 - A hole outside the reference outline produces a warning. Use the matched
   catalogue footprint as that boundary when available, otherwise the drawn
   outline. A hole outside the drilled face produces an error; this check needs

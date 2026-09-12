@@ -52,11 +52,21 @@ standards or sizes are usage errors, reported before the artwork is opened.
 The margin must be positive. The face and margin are validated even when no
 model is supplied. The tool checks a declared part against the artwork; use
 published top-view or backplate dimensions for the outline. A footprint can
-match several parts, in which case `--case` is required to choose one.
+match several parts, and the part is then either declared with `--case` or, when
+nothing is declared, inferred from the `--case-model` filename.
+
+Inference takes the model's stem, removes delimiters, uppercases it and accepts
+the result only when it names one of the tied parts: `1590BB.stp` gives
+`1590BB`. It is checked against the measurement exactly as a declaration is,
+but a filename is a guess, so where a declared part that disagrees is an error,
+an inferred one that disagrees leaves the ambiguity standing.
 
 For example, the repository's `tar.ai` fixture matches both `1590B`/`1590B2`
 (112.40 × 60.50 mm) and `1590BS` (112.00 × 60.50 mm). Use `--case 1590B` for
-that fixture. Without it, the tool reports `ambiguous-enclosure`.
+that fixture, or supply `--case-model 1590B.stp` and let the filename settle it;
+the run then reports `inferred-enclosure`, naming the file it read the part
+from. With neither a declaration nor a model whose filename names a tied part,
+the tool reports `ambiguous-enclosure`.
 
 Get a published Hammond model with:
 
@@ -299,6 +309,11 @@ Processing errors include `unknown-diameter`, `ambiguous-enclosure`,
 
 Warnings include `grid-too-fine`, `grid-ambiguous`, `hole-outside-outline`,
 `nesting-truncated`, `case-orientation-unverifiable` and `off-size`.
+
+Informational findings include `inferred-enclosure`, which names the case model
+a tied part was taken from and asks for `--case` to state it instead. They
+describe what the tool decided rather than anything to fix, so they change
+neither the exit code nor what is written.
 
 A hole extending beyond the reference outline is a warning. A hole extending
 beyond the actual drilled face is an error and requires a supplied case model

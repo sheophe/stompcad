@@ -236,12 +236,18 @@ The step list is data, so nothing else changes with it.
 of `Presentation`; decision 3's three levels of detail, `--progress` and the
 `v` key that cycles them are decided in code alongside it. `ask` is implemented
 there as the modal decision 6 picks from, and `ChoiceScreen` is what it pushes.
-The interactive resolver has landed for both resolvable codes, so `retry` has a
-caller and the spec's decisions 6, 8 and 10 are decided in code. What is left
-undone is the one gap decision 6 gestured at and this design declines:
-`ambiguous-placement` records a count rather than candidates, and no stage
-applies an explicit placement, so a picker there would ask a question no answer
-could be honoured for. The spec states that limit in its own decision 6.
+The interactive resolver has landed for both resolvable codes, so the spec's
+decisions 6, 8 and 10 are decided in code. What the resolver drives is `_rerun`,
+which runs one step again and returns its outcome without reporting it, because
+a loop answering gap after gap must not credit the step in between. `retry` is
+the same work with the step credited, kept as the public way to run one step
+alone; it has no caller in production yet, and remains an entry point rather
+than a use.
+
+What is left undone is the one gap decision 6 gestured at and this design
+declines: `ambiguous-placement` records a count rather than candidates, and no
+stage applies an explicit placement, so a picker there would ask a question no
+answer could be honoured for. The spec states that limit in its own decision 6.
 
 `stompcad`'s suite gates the tests that read the board fixture and the cached
 enclosure model behind `--boards` and `--hammond`, mirroring both tools rather

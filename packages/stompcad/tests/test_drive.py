@@ -102,9 +102,13 @@ class _Recording(PlainWriter):
 
 
 class _Answering(PlainWriter):
-    """A writer that answers every question with one prepared candidate."""
+    """A writer that answers every question with one prepared candidate.
 
-    def __init__(self, asked: list[Choice], answer: str) -> None:
+    The answer defaults to nothing, so a subclass that picks from the
+    question itself passes no value its own ``ask`` would ignore.
+    """
+
+    def __init__(self, asked: list[Choice], answer: str = "") -> None:
         super().__init__(io.StringIO())
         self._asked = asked
         self._answer = answer
@@ -135,7 +139,7 @@ class _AnsweringEach(_Answering):
     """
 
     def __init__(self, lines: list[str], asked: list[Choice]) -> None:
-        super().__init__(asked, "")
+        super().__init__(asked)
         self._lines = lines
 
     def ask(self, question: Question) -> str:
@@ -144,6 +148,22 @@ class _AnsweringEach(_Answering):
 
     def finish_step(self, step: Step, outcome: str) -> None:
         self._lines.append(f"{step.key}: {outcome}")
+
+
+class _PositionLog:
+    """Every position a run reported, tagged with the questions asked by then.
+
+    A sink sees nothing of the resolution loop, so the count of questions
+    already asked is what puts each update on one side of an answer or the
+    other. ``NullSink`` discards the same calls.
+    """
+
+    def __init__(self, asked: list[Choice]) -> None:
+        self._asked = asked
+        self.updates: list[tuple[int, float, tuple[str, ...]]] = []
+
+    def update(self, position: float, path: tuple[str, ...]) -> None:
+        self.updates.append((len(self._asked), position, path))
 
 
 def test_run_options_survives_replace() -> None:
@@ -227,7 +247,7 @@ def test_retry_runs_one_step_again_over_the_intermediates_already_held(
 
 
 def test_retry_refuses_a_step_whose_input_the_driver_does_not_hold() -> None:
-    """``retry`` names only ``quantise`` and ``drill``; every other key is refused."""
+    """``retry`` names ``quantise``, ``drill`` and ``read-boards``; other keys are refused."""
     driver = Driver(DRILL_AND_DOCK, _RecordingPresentation(), _options())
 
     with pytest.raises(ValueError):
@@ -322,7 +342,7 @@ def test_the_filter_is_not_applied_before_it_is_held() -> None:
 @pytest.mark.boards
 @pytest.mark.hammond
 def test_the_read_step_runs_again_over_the_boards_already_scanned(
-    drill_and_dock_run: Driver, tmp_path: Path
+    drill_and_dock_run: Driver,
 ) -> None:
     """Decision 8: the filter runs again, the parse does not.
 
@@ -415,6 +435,32 @@ def test_a_step_that_stops_to_ask_credits_nothing_until_it_answers() -> None:
     quantise_lines = [line for line in lines if line.startswith("quantise")]
     assert len(quantise_lines) == 1, f"quantise reported {len(quantise_lines)} times"
     assert quantise_lines[0] == "quantise: 8 holes, 2 tools", quantise_lines[0]
+
+
+def test_a_gap_is_raised_before_its_step_credits_a_leaf() -> None:
+    """Decision 8: the step that stopped to ask has credited nothing when it does.
+
+    A retried step is given the same span a second time, so a leaf counted
+    before the question would have to be either counted twice or taken back.
+    Only the sink witnesses that: ``finish_step`` says a step ended, while a
+    position says work inside one was counted.
+    """
+    asked: list[Choice] = []
+    log = _PositionLog(asked)
+    driver = Driver(DRILL_AND_DOCK, _Answering(asked, "1590B"), _undeclared())
+
+    with track(log) as scope:
+        driver.run(scope)
+
+    assert len(asked) == 1, "the control: an undeclared tie must raise the gap"
+    positions = [position for _asked, position, _path in log.updates]
+    assert positions == sorted(positions), f"a reported position retreated: {positions}"
+    label = DRILL_AND_DOCK.steps[1].label
+    entered = next(
+        position for count, position, path in log.updates if count == 0 and path == (label,)
+    )
+    unanswered = [position for count, position, _path in log.updates if count == 0]
+    assert max(unanswered) == entered, "quantise credited a leaf before its gap was answered"
 
 
 def test_a_run_that_declares_its_case_asks_nothing() -> None:
