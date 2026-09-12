@@ -9,12 +9,17 @@ what carried it, and returns what to ask, never asking anything itself.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from stompmodel.diagnostics import Diagnostic, Severity
 
 from .present import Choice
 
-__all__ = ["RESOLVABLE", "question_for"]
+if TYPE_CHECKING:  # ``drive`` imports this module, so this cannot be a runtime import
+    from .drive import RunOptions
+
+__all__ = ["RESOLVABLE", "question_for", "revision_for"]
 
 #: Each resolvable code, and the step that runs again once it is answered.
 #: Decision 6: a code absent from here never becomes a question, which is
@@ -57,3 +62,18 @@ def _candidates(
         return tuple(part.strip() for part in str(data.get("candidates", "")).split(",") if part.strip())
     board = data.get("board")
     return designators.get(board, ()) if isinstance(board, int) else ()
+
+
+def revision_for(diagnostic: Diagnostic, options: RunOptions, answer: str) -> RunOptions:
+    """The options the step should run again under, given this answer.
+
+    Each code revises exactly the field its own step reads, so the driver
+    never refuses a revision a picker produced. A tie declares the part;
+    a board nothing was admitted of widens the expression rather than
+    replacing it, which would resolve one board by emptying the others.
+    """
+    if diagnostic.code == "ambiguous-enclosure":
+        return replace(options, case=answer)
+    if diagnostic.code == "empty-group":
+        return replace(options, panel_reference=f"{options.panel_reference},{answer}")
+    raise KeyError(diagnostic.code)

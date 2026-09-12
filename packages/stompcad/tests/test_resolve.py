@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
-from stompcad.resolve import RESOLVABLE, question_for
+from pathlib import Path
+
+import pytest
+
+from stompcad.drive import RunOptions
+from stompcad.resolve import RESOLVABLE, question_for, revision_for
 from stompmodel.diagnostics import Diagnostic
 
 __all__: list[str] = []
+
+
+def _options(tmp_path: Path) -> RunOptions:
+    """A run's options with the two fields a picker revises set to knowns."""
+    return RunOptions(
+        panel=tmp_path / "panel.ai",
+        boards=(),
+        case=None,
+        case_model=None,
+        panel_reference="RV*",
+        targets=(),
+    )
 
 
 def test_a_warning_is_never_a_question() -> None:
@@ -62,3 +79,45 @@ def test_every_resolvable_code_names_a_step_that_reads_its_revision() -> None:
 
     for code, key in RESOLVABLE.items():
         assert key in _STEP_INPUTS, f"{code} names {key}, which is no step"
+
+
+def test_a_declared_case_answers_a_tie(tmp_path: Path) -> None:
+    """The tie is resolved by declaring the part, which ``quantise`` reads."""
+    options = _options(tmp_path)
+    tie = Diagnostic.error("ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),))
+
+    revised = revision_for(tie, options, "1590B2")
+
+    assert revised.case == "1590B2"
+    assert revised.panel_reference == options.panel_reference
+
+
+def test_an_admitted_designator_widens_the_expression(tmp_path: Path) -> None:
+    """Widened, not replaced: the expression still admits every other board."""
+    options = _options(tmp_path)
+    empty = Diagnostic.error("empty-group", "board 2", data=(("board", 2),))
+
+    revised = revision_for(empty, options, "SW1")
+
+    assert revised.panel_reference == "RV*,SW1"
+    assert revised.case == options.case
+
+
+def test_the_widened_expression_still_parses(tmp_path: Path) -> None:
+    """An answer that produced an unparseable filter would fail at the retry."""
+    from stompcollider.designators import parse_filter
+
+    options = _options(tmp_path)
+    empty = Diagnostic.error("empty-group", "board 2", data=(("board", 2),))
+
+    revised = revision_for(empty, options, "SW1")
+
+    assert parse_filter(revised.panel_reference).admit(["SW1"]) == {"SW1"}
+
+
+def test_an_unresolvable_code_has_no_revision(tmp_path: Path) -> None:
+    """Nothing outside the table may quietly acquire a revision."""
+    with pytest.raises(KeyError):
+        revision_for(
+            Diagnostic.error("unknown-diameter", "no such drill"), _options(tmp_path), "x"
+        )
