@@ -88,6 +88,17 @@ class _RecordingPresentation:
         return None
 
 
+class _Recording(PlainWriter):
+    """A writer that keeps the step lines rather than printing them."""
+
+    def __init__(self, lines: list[str]) -> None:
+        super().__init__(io.StringIO())
+        self._lines = lines
+
+    def finish_step(self, step: Step, outcome: str) -> None:
+        self._lines.append(f"{step.key}: {outcome}")
+
+
 def test_run_options_survives_replace() -> None:
     """Plan C's stated mechanism for feeding an answer back: ``dataclasses.replace``."""
     original = _options()
@@ -259,3 +270,59 @@ def test_the_filter_is_not_applied_before_it_is_held() -> None:
     """``_docked`` is the boards as read, so a revised filter starts from them."""
     source = inspect.getsource(Driver._read_boards)
     assert "admit(" not in source, "the filter belongs after the parse, not inside it"
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_the_read_step_runs_again_over_the_boards_already_scanned(
+    drill_and_dock_run: Driver, tmp_path: Path
+) -> None:
+    """Decision 8: the filter runs again, the parse does not.
+
+    The temporary the boards were read from is long gone, so a retry that
+    reached for a file would fail rather than merely be slow.
+    """
+    driver = drill_and_dock_run
+    before = driver._scan
+
+    with track(NullSink()) as scope:
+        retried = driver.retry(
+            "read-boards", replace(driver._options, panel_reference="RV*,SW*,D1"), scope
+        )
+
+    assert driver._scan is before, "the boards were read again"
+    assert retried is driver._dock_data
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_retry_of_the_read_step_refuses_a_revised_board_list(
+    drill_and_dock_run: Driver, tmp_path: Path
+) -> None:
+    """Accepted and ignored is the one outcome a revision may not have."""
+    driver = drill_and_dock_run
+
+    with track(NullSink()) as scope, pytest.raises(ValueError, match="boards"):
+        driver.retry(
+            "read-boards", replace(driver._options, boards=(tmp_path / "other.stp",)), scope
+        )
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_retried_step_reports_once_and_a_rerun_reports_not_at_all(
+    drill_and_dock_run: Driver,
+) -> None:
+    """Decision 4: a step credits its span only when it succeeds."""
+    driver = drill_and_dock_run
+    lines: list[str] = []
+    driver._presentation = _Recording(lines)
+    revised = replace(driver._options, panel_reference="RV*,SW*,D1")
+
+    with track(NullSink()) as scope:
+        driver._rerun("read-boards", revised, scope)
+    assert lines == []
+
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", revised, scope)
+    assert len(lines) == 1

@@ -114,6 +114,17 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
     "write-assembly": frozenset({"targets"}),
 }
 
+#: What each step can honour when it runs *again*, which may be narrower
+#: than what it reads the first time: a retry spends the intermediates the
+#: driver holds rather than the inputs it re-read. ``read-boards`` re-runs
+#: its filter over boards already scanned -- decision 8's own words -- so a
+#: revised board list would need a parse this step no longer performs.
+_RETRY_INPUTS: dict[str, frozenset[str]] = {
+    "quantise": frozenset({"case"}),
+    "drill": frozenset(),
+    "read-boards": frozenset({"panel_reference"}),
+}
+
 #: What each step leaves on the driver. ``retry`` clears every attribute a
 #: step later than the retried one left, reading the order from the plan
 #: itself. The dock half holds the boards as read separately from the
@@ -177,12 +188,13 @@ class Driver:
     def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
         """Drill the panel, then dock its boards against it when any were asked for.
 
-        The drill document ``run_dock`` reads is the one the drill steps
-        just held in memory, never written for this handoff alone -- see
-        the task report for the one case that forces a temporary file.
-        An errored drill half stops the run there: CLAUDE.md's "any error
-        prevents every requested output" binds the run between the two
-        write steps as well as each of them.
+        ``run_dock`` reads the drill document the drill steps just held in
+        memory, never written for this handoff alone. The one case that
+        forces a temporary file is that ``BoardSource`` reads from a path,
+        so the drill document and drilled case go to a temporary directory
+        for it. An errored drill half stops the run there: CLAUDE.md's "any
+        error prevents every requested output" binds the run between the
+        two write steps as well as each of them.
         """
         docking = bool(self._options.boards)
         steps = self._plan.steps if docking else self._plan.steps[:_DOCK_FROM]
@@ -203,32 +215,45 @@ class Driver:
         """Read the boards, match, seat and report clashes against the drilled case."""
         return self._dock_steps(drill, self._open(self._plan.steps[_DOCK_FROM:], scope))
 
-    def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData:
-        """Run one step again under revised options, from the intermediates held.
+    def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData | DockData:
+        """Run one step again under revised options, and report it when it succeeds.
 
         Decision 4: the step that stopped to ask runs again when the answer
-        arrives, reading neither the artwork nor the case model a second time.
-        Only a step whose input this driver holds is retryable, only a revision
-        that step actually reads is honoured, and an accepted one discards every
-        intermediate a later step produced -- so nothing the new options
-        contradict survives. Every refusal leaves the driver as it was.
+        arrives, reading neither the artwork nor the case model a second
+        time. Only a step whose input this driver holds is retryable, only
+        a revision that step can honour is accepted, and an accepted one
+        discards every intermediate a later step produced.
+        """
+        retried, outcome = self._rerun(key, options, scope)
+        self._presentation.finish_step(self._step(key), outcome)
+        return retried
+
+    def _rerun(self, key: str, options: RunOptions, scope: Scope) -> tuple[DrillData | DockData, str]:
+        """The work of a retry, with its outcome returned rather than reported.
+
+        A resolution loop asks and runs again until there is nothing left
+        to ask, and must not credit the step in between -- so the caller
+        decides when the step has finished, not this.
         """
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
             self._accept(key, options)
             self._quantised = self._quantise(scope)
-            retried, outcome = self._quantised, _quantise_outcome(self._quantised)
-        elif key == "drill":
+            return self._quantised, _quantise_outcome(self._quantised)
+        if key == "drill":
             if self._quantised is None:
                 raise ValueError("drill cannot run again before quantisation")
             self._accept(key, options)
             self._drilled = self._drill(self._quantised, scope)
-            retried, outcome = self._drilled, _drill_outcome(self._drilled)
-        else:
-            raise ValueError(f"{key!r} is not a step this driver can run again")
-        self._presentation.finish_step(self._step(key), outcome)
-        return retried
+            return self._drilled, _drill_outcome(self._drilled)
+        if key == "read-boards":
+            if self._docked is None or self._scan is None:
+                raise ValueError("read boards cannot run again before the boards are read")
+            self._accept(key, options)
+            self._dock_data = self._admit()
+            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)"
+        raise ValueError(f"{key!r} is not a step this driver can run again")
 
     def _accept(self, key: str, options: RunOptions) -> None:
         """Take revised options for one step, once it is settled they can take effect."""
@@ -246,7 +271,7 @@ class Driver:
         for the revision to take effect. Every unhonourable field is named at
         once, as the target check names every bad format at once.
         """
-        read = _STEP_INPUTS.get(key, frozenset())
+        read = _RETRY_INPUTS.get(key, frozenset())
         unhonoured = [
             f"{field.name} ({self._reader(field.name)})"
             for field in fields(options)

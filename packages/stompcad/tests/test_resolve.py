@@ -81,6 +81,27 @@ def test_every_resolvable_code_names_a_step_that_reads_its_revision() -> None:
         assert key in _STEP_INPUTS, f"{code} names {key}, which is no step"
 
 
+def test_every_resolvable_code_survives_its_own_retry(tmp_path: Path) -> None:
+    """A retry consults ``_RETRY_INPUTS``, not ``_STEP_INPUTS``: a code whose
+    step cannot honour its own revision on a second run would ask a
+    question, then refuse the very answer it asked for.
+    """
+    from dataclasses import fields
+
+    from stompcad.drive import _RETRY_INPUTS
+
+    options = _options(tmp_path)
+    for code, key in RESOLVABLE.items():
+        assert key in _RETRY_INPUTS, f"{code} names {key}, which no retry can run again"
+        revised = revision_for(Diagnostic.error(code, "message"), options, "X")
+        changed = {
+            field.name
+            for field in fields(options)
+            if getattr(revised, field.name) != getattr(options, field.name)
+        }
+        assert changed <= _RETRY_INPUTS[key], f"{code} revises {changed}, which {key!r} refuses"
+
+
 def test_a_declared_case_answers_a_tie(tmp_path: Path) -> None:
     """The tie is resolved by declaring the part, which ``quantise`` reads."""
     options = _options(tmp_path)
