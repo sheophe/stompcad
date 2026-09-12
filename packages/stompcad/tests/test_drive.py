@@ -17,7 +17,7 @@ import pytest
 from stompcad import drive
 from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
-from stompcad.present import PlainWriter
+from stompcad.present import Choice, PlainWriter, Question
 from stompmodel.progress import NO_PROGRESS, track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
@@ -94,6 +94,51 @@ class _Recording(PlainWriter):
     def __init__(self, lines: list[str]) -> None:
         super().__init__(io.StringIO())
         self._lines = lines
+
+    def finish_step(self, step: Step, outcome: str) -> None:
+        self._lines.append(f"{step.key}: {outcome}")
+
+
+class _Answering(PlainWriter):
+    """A writer that answers every question with one prepared candidate."""
+
+    def __init__(self, asked: list[Choice], answer: str) -> None:
+        super().__init__(io.StringIO())
+        self._asked = asked
+        self._answer = answer
+
+    def ask(self, question: Question) -> str:
+        self._asked.append(Choice(prompt=question.prompt, candidates=question.candidates))
+        return self._answer
+
+
+class _AnsweringRecorder(_Answering):
+    """As above, and keeping the step lines so a double report would show."""
+
+    def __init__(self, lines: list[str], answer: str) -> None:
+        super().__init__([], answer)
+        self._lines = lines
+
+    def finish_step(self, step: Step, outcome: str) -> None:
+        self._lines.append(f"{step.key}: {outcome}")
+
+
+class _AnsweringEach(_Answering):
+    """Answers every question with one of the candidates that question offered.
+
+    ``empty-group`` is raised per board, so a run over a file holding two
+    of them asks twice and one prepared answer would leave the second gap
+    exactly as it was -- which is a stub that never terminates, not a
+    driver that failed to resolve anything.
+    """
+
+    def __init__(self, lines: list[str], asked: list[Choice]) -> None:
+        super().__init__(asked, "")
+        self._lines = lines
+
+    def ask(self, question: Question) -> str:
+        super().ask(question)
+        return question.candidates[0]
 
     def finish_step(self, step: Step, outcome: str) -> None:
         self._lines.append(f"{step.key}: {outcome}")
@@ -326,3 +371,118 @@ def test_a_retried_step_reports_once_and_a_rerun_reports_not_at_all(
     with track(NullSink()) as scope:
         driver.retry("read-boards", revised, scope)
     assert len(lines) == 1
+
+
+def _undeclared() -> RunOptions:
+    """Options the tar fixture ties three parts under: no case is declared."""
+    return RunOptions(
+        panel=TAR_AI,
+        boards=(),
+        case=None,
+        case_model=None,
+        panel_reference="RV*",
+        targets=(),
+    )
+
+
+def test_a_tie_is_asked_about_and_the_answer_runs_quantise_again() -> None:
+    """The tar fixture ties three parts when no case is declared.
+
+    Decision 6's first row: the candidates are the tied parts, and the
+    answer declares the case that ends the tie.
+    """
+    asked: list[Choice] = []
+    driver = Driver(DRILL_AND_DOCK, _Answering(asked, "1590B"), _undeclared())
+
+    with track(NullSink()) as scope:
+        drill, _ = driver.run(scope)
+
+    assert len(asked) == 1
+    assert "1590B" in asked[0].candidates
+    assert not [d for d in drill.diagnostics if d.code == "ambiguous-enclosure"]
+
+
+def test_a_step_that_stops_to_ask_credits_nothing_until_it_answers() -> None:
+    """Decision 4: one line per step, reported only once it has succeeded."""
+    lines: list[str] = []
+    driver = Driver(DRILL_AND_DOCK, _AnsweringRecorder(lines, "1590B"), _undeclared())
+
+    with track(NullSink()) as scope:
+        driver.run(scope)
+
+    quantise_lines = [line for line in lines if line.startswith("quantise")]
+    assert len(quantise_lines) == 1, f"quantise reported {len(quantise_lines)} times"
+
+
+def test_a_run_that_declares_its_case_asks_nothing() -> None:
+    """A control: no gap, no question, and the same lines as before."""
+    asked: list[Choice] = []
+    options = replace(_undeclared(), case="1590B")
+    driver = Driver(DRILL_AND_DOCK, _Answering(asked, "unused"), options)
+
+    with track(NullSink()) as scope:
+        driver.run(scope)
+
+    assert asked == []
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_board_admitting_nothing_is_asked_about_and_the_read_step_credits_once(
+    drill_and_dock_run: Driver,
+) -> None:
+    """Decision 6's second row, and decision 4 over the dock half's own gap.
+
+    ``empty-group`` offers the board its own designators, and the answer
+    widens the expression rather than replacing it -- so the filter runs
+    again over boards already scanned, and the step is credited once
+    however many gaps were answered in turn.
+    """
+    driver = drill_and_dock_run
+    lines: list[str] = []
+    asked: list[Choice] = []
+    driver._presentation = _AnsweringEach(lines, asked)
+    driver._options = replace(driver._options, panel_reference="ZZ*")
+    empty = driver._admit()
+    assert "empty-group" in [d.code for d in empty.diagnostics], "the control: no gap to resolve"
+    assert driver._docked is not None
+
+    with track(NullSink()) as scope:
+        settled = driver._settled("read-boards", empty, "the unresolved outcome", scope)
+
+    assert len(asked) == len(driver._docked.boards), "each board admitting nothing asks once"
+    assert lines == ["read-boards: 2 board(s)"], "the credited outcome is the successful run's"
+    assert not [d for d in settled.diagnostics if d.code == "empty-group"]
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once() -> None:
+    """The same gap, through the run rather than the loop it is raised in.
+
+    Decision 4 binds where the hook sits, so the dock half's own step must
+    reach it: a run that asks and answers still leaves the read step one
+    line, and no ``empty-group`` behind it.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    lines: list[str] = []
+    asked: list[Choice] = []
+    options = RunOptions(
+        panel=TAR_AI,
+        boards=(TAR_PCB,),
+        case="1590B",
+        case_model=model,
+        panel_reference="ZZ*",
+        targets=(),
+    )
+    driver = Driver(DRILL_AND_DOCK, _AnsweringEach(lines, asked), options)
+
+    with track(NullSink()) as scope:
+        _drill, dock = driver.run(scope)
+
+    assert asked != [], "the control: the expression must admit nothing to raise the gap"
+    assert [line for line in lines if line.startswith("read-boards")] == ["read-boards: 2 board(s)"]
+    assert dock is not None
+    assert not [d for d in dock.diagnostics if d.code == "empty-group"]

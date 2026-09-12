@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, cast
 
 from stompcollider import (
     AssemblyEmitter,
@@ -49,7 +49,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
-from stompmodel.diagnostics import Severity
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import Scope
 from stompmodel.protocols import (
@@ -65,7 +65,8 @@ from stompmodel.protocols import (
 from stompmodel.units import nm_from_mm
 
 from .plan import RunPlan, Step
-from .present import Presentation
+from .present import Choice, Presentation
+from .resolve import promoted, question_for, revision_for
 
 __all__ = ["DOCK_TARGET_NAMES", "RunOptions", "Driver"]
 
@@ -150,6 +151,9 @@ class _Written(Processable, Diagnosable, Protocol):
 
 _DataT = TypeVar("_DataT", bound=_Written)
 
+#: Either half's data, so one resolution loop serves both.
+_D = TypeVar("_D", DrillData, DockData)
+
 
 @dataclass(frozen=True, slots=True)
 class RunOptions:
@@ -171,10 +175,17 @@ class Driver:
     without recomputing it -- which is what ``retry`` spends.
     """
 
-    def __init__(self, plan: RunPlan, presentation: Presentation, options: RunOptions) -> None:
+    def __init__(
+        self,
+        plan: RunPlan,
+        presentation: Presentation,
+        options: RunOptions,
+        promote_warnings: bool = False,
+    ) -> None:
         self._plan = plan
         self._presentation = presentation
         self._options = options
+        self._promote_warnings = promote_warnings
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
@@ -254,6 +265,42 @@ class Driver:
             self._dock_data = self._admit()
             return self._dock_data, f"{len(self._scan.raw.boards)} board(s)"
         raise ValueError(f"{key!r} is not a step this driver can run again")
+
+    def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
+        """Resolve what this step can be asked about, then credit it.
+
+        Decision 4: a step that stops to ask has not completed, so nothing
+        is reported until either there was nothing to ask or the answer
+        has been applied. Repeated gaps are answered in turn and the step
+        is credited once, with the outcome the successful run earned.
+        """
+        while (gap := self._gap_in(data)) is not None:
+            question, diagnostic = gap
+            answer = self._presentation.ask(question)
+            revised = revision_for(diagnostic, self._options, answer)
+            # ``_rerun`` returns the union of both halves' data; ``key`` chose
+            # the branch, so the value is this step's own type.
+            reran, outcome = self._rerun(key, revised, scope)
+            data = cast(_D, reran)
+        self._presentation.finish_step(self._step(key), outcome)
+        return data
+
+    def _gap_in(self, data: Diagnosable) -> tuple[Choice, Diagnostic] | None:
+        """The first gap in this data that a picker could resolve, if any."""
+        diagnostics = data.diagnostics
+        if self._promote_warnings:
+            diagnostics = promoted(diagnostics)
+        for diagnostic in diagnostics:
+            question = question_for(diagnostic, self._board_designators())
+            if question is not None:
+                return question, diagnostic
+        return None
+
+    def _board_designators(self) -> dict[int, tuple[str, ...]]:
+        """Each board's own names, for a gap that carries only its board."""
+        if self._docked is None:
+            return {}
+        return {board.ordinal: board.designators for board in self._docked.boards}
 
     def _accept(self, key: str, options: RunOptions) -> None:
         """Take revised options for one step, once it is settled they can take effect."""
@@ -341,8 +388,10 @@ class Driver:
         quantise_step = self._plan.steps[1]
         quantise_slot = next(slots)
         quantise_slot.label(quantise_step.label)
-        self._quantised = self._quantise(quantise_slot)
-        self._presentation.finish_step(quantise_step, _quantise_outcome(self._quantised))
+        quantised = self._quantise(quantise_slot)
+        self._quantised = self._settled(
+            "quantise", quantised, _quantise_outcome(quantised), quantise_slot
+        )
 
         drill_step = self._plan.steps[2]
         drill_slot = next(slots)
@@ -364,9 +413,11 @@ class Driver:
         read_slot = next(slots)
         read_slot.label(read_step.label)
         self._read_boards(drill, read_slot)
-        self._dock_data = self._admit()
+        admitted = self._admit()
         assert self._scan is not None
-        self._presentation.finish_step(read_step, f"{len(self._scan.raw.boards)} board(s)")
+        self._dock_data = self._settled(
+            "read-boards", admitted, f"{len(self._scan.raw.boards)} board(s)", read_slot
+        )
 
         assert self._dock_pipeline is not None
         for step, stage in zip(self._plan.steps[5:8], self._dock_pipeline, strict=True):

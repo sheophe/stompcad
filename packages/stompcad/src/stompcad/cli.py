@@ -223,9 +223,16 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     """
     options = resolve(args)
     if not choose_presentation(out):
-        return _compose(options, PlainWriter(out))
+        return _compose(options, PlainWriter(out), promote_warnings=args.promote_warnings)
     app = InlineApp(level=args.progress)
-    app.drive(lambda: _compose(options, TerminalPresentation(app), stop=lambda: app.stopping))
+    app.drive(
+        lambda: _compose(
+            options,
+            TerminalPresentation(app),
+            stop=lambda: app.stopping,
+            promote_warnings=args.promote_warnings,
+        )
+    )
     code = app.run(inline=True, inline_no_clear=True)
     if app.failure is not None:
         # A fault carried out from the worker: raised here, unconditionally,
@@ -241,10 +248,18 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def _compose(
-    options: RunOptions, presentation: Presentation, stop: Callable[[], bool] | None = None
+    options: RunOptions,
+    presentation: Presentation,
+    stop: Callable[[], bool] | None = None,
+    promote_warnings: bool = False,
 ) -> int:
-    """One run, against whichever presentation is drawing it."""
-    driver = Driver(DRILL_AND_DOCK, presentation, options)
+    """One run, against whichever presentation is drawing it.
+
+    ``promote_warnings`` travels beside the options rather than within
+    them: decision 6 makes it a rule about which findings reach a picker,
+    not an input any step reads, so no revision could ever honour it.
+    """
+    driver = Driver(DRILL_AND_DOCK, presentation, options, promote_warnings)
     sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
     with track(sink) as scope:
         drill, dock = driver.run(scope)
