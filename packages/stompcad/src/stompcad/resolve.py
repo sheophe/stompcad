@@ -8,7 +8,7 @@ what carried it, and returns what to ask, never asking anything itself.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -19,7 +19,7 @@ from .present import Choice
 if TYPE_CHECKING:  # ``drive`` imports this module, so this cannot be a runtime import
     from .drive import RunOptions
 
-__all__ = ["RESOLVABLE", "question_for", "revision_for"]
+__all__ = ["RESOLVABLE", "promoted", "question_for", "revision_for"]
 
 #: Each resolvable code, and the step that runs again once it is answered.
 #: Decision 6: a code absent from here never becomes a question, which is
@@ -29,6 +29,22 @@ RESOLVABLE: dict[str, str] = {
     "ambiguous-enclosure": "quantise",
     "empty-group": "read-boards",
 }
+
+
+def promoted(diagnostics: Sequence[Diagnostic]) -> tuple[Diagnostic, ...]:
+    """Every warning raised to an error, leaving the rest as they are.
+
+    Decision 6: promotion happens before the resolvable check, so a
+    promoted warning is asked about on the same path an error is rather
+    than on a second one written beside it. A code with no picker is
+    unaffected either way -- being an error is necessary, not sufficient.
+    """
+    return tuple(
+        replace(diagnostic, severity=Severity.ERROR)
+        if diagnostic.severity is Severity.WARNING
+        else diagnostic
+        for diagnostic in diagnostics
+    )
 
 
 def question_for(

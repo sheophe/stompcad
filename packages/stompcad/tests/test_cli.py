@@ -56,6 +56,12 @@ def test_the_fixtures_are_where_the_tests_expect() -> None:
     assert TAR_PCB.is_file()
 
 
+def test_promote_warnings_is_off_by_default() -> None:
+    """Decision 6: promotion is not the default."""
+    assert cli.build_parser().parse_args([str(TAR_AI)]).promote_warnings is False
+    assert cli.build_parser().parse_args([str(TAR_AI), "--promote-warnings"]).promote_warnings
+
+
 def test_an_unknown_emit_format_is_a_usage_error() -> None:
     """CLAUDE.md: an unrecognised target is invalid input, not a silent no-op."""
     code = cli.main([str(TAR_AI), "--emit", "bogus=out.bin"])

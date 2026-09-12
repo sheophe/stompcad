@@ -105,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="how much of the run to draw; 'v' cycles it while a run works; "
         "ignored without a terminal",
     )
+    parser.add_argument(
+        "--promote-warnings",
+        action="store_true",
+        help="treat every warning as an error, so a resolvable one can be asked about",
+    )
     return parser
 
 

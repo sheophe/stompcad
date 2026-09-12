@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from stompcad.drive import RunOptions
-from stompcad.resolve import RESOLVABLE, question_for, revision_for
-from stompmodel.diagnostics import Diagnostic
+from stompcad.resolve import RESOLVABLE, promoted, question_for, revision_for
+from stompmodel.diagnostics import Diagnostic, Severity
 
 __all__: list[str] = []
 
@@ -121,3 +121,46 @@ def test_an_unresolvable_code_has_no_revision(tmp_path: Path) -> None:
         revision_for(
             Diagnostic.error("unknown-diameter", "no such drill"), _options(tmp_path), "x"
         )
+
+
+def test_promotion_raises_every_warning_not_only_resolvable_ones() -> None:
+    """Decision 6: promotion happens before the resolvable check, not after."""
+    diagnostics = (
+        Diagnostic.warning("ambiguous-placement", "board 1: 2 placements fit"),
+        Diagnostic.info("grid-tie", "two holes share a grid point"),
+        Diagnostic.error("unknown-diameter", "no such drill"),
+    )
+
+    raised = promoted(diagnostics)
+
+    assert [d.severity for d in raised] == [Severity.ERROR, Severity.INFO, Severity.ERROR]
+    assert [d.code for d in raised] == [d.code for d in diagnostics]
+
+
+def test_a_promoted_warning_becomes_a_question_when_its_code_is_resolvable() -> None:
+    """One resolution path: a promoted warning is asked about exactly as an error is."""
+    warning = Diagnostic.warning(
+        "ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),)
+    )
+    assert question_for(warning) is None
+
+    (raised,) = promoted((warning,))
+    question = question_for(raised)
+
+    assert question is not None
+    assert question.candidates == ("1590B", "1590B2")
+
+
+def test_a_promoted_placement_is_still_not_a_question() -> None:
+    """No stage applies a chosen placement, so no picker may offer one.
+
+    ``ambiguous-placement`` carries a count rather than candidates, and
+    ``--place`` is refused as unsupported; a picker here would ask what
+    nothing could honour.
+    """
+    (raised,) = promoted(
+        (Diagnostic.warning("ambiguous-placement", "board 1", data=(("placements", 2),)),)
+    )
+    assert raised.severity is Severity.ERROR
+    assert question_for(raised) is None
+    assert "ambiguous-placement" not in RESOLVABLE
