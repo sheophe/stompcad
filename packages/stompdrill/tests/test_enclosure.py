@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from stompdrill.enclosures import footprints
 from stompdrill.pipeline import IdentifyHammondFootprint, normalize_part_name
 from stompdrill.pipeline import enclosure as enclosure_stage
+from stompdrill.pipeline.enclosure import infer_part_name
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import RawOutline
 from stompmodel.units import Millimetre, Nanometre
@@ -51,6 +54,11 @@ def codes(diagnostics: tuple[Diagnostic, ...]) -> list[str]:
 def catalogue_footprints_nm() -> set[tuple[int, int]]:
     """Every catalogue footprint, in nanometres, in the catalogue's orientation."""
     return set(footprints())
+
+
+def _tied_outline() -> RawOutline:
+    """The fixture panel, which ties 1590BS, 1590B and 1590B2 undeclared."""
+    return FIXTURE
 
 
 class TestIdentifyHammondFootprint:
@@ -839,3 +847,60 @@ class TestTheEnclosureQuantiserEmitsNoMovementDiagnostic:
         assert moved_width_nm == 400_000
         assert moved_height_nm == 500_000
         assert diagnostics == ()
+
+
+class TestInferPartName:
+    def test_a_filename_names_a_catalogue_part(self) -> None:
+        """Decision 10: stem, delimiters removed, uppercased, and in the catalogue."""
+        assert infer_part_name(Path("1590BB.stp")) == "1590BB"
+        assert infer_part_name(Path("/cache/1590-bb.step")) == "1590BB"
+        assert infer_part_name(Path("1590_B2.stp")) == "1590B2"
+
+    def test_a_filename_that_names_nothing_is_no_guess(self) -> None:
+        """A stem outside the catalogue is simply no candidate, not a failure."""
+        assert infer_part_name(Path("enclosure.stp")) is None
+        assert infer_part_name(Path("1590ZZZ.stp")) is None
+
+
+class TestInferredEnclosure:
+    def test_an_inferred_part_ends_a_tie_it_agrees_with(self) -> None:
+        """The tie is resolved without asking, and the run says it was inferred."""
+        stage = IdentifyHammondFootprint(case_model=Path("1590B.stp"))
+
+        _, match, diagnostics = stage.quantise(_tied_outline(), ORIGIN)
+
+        assert match is not None
+        assert match.selected_part == "1590B"
+        assert codes(diagnostics) == ["inferred-enclosure"]
+        assert "1590B.stp" in diagnostics[0].message
+
+    def test_an_inferred_part_that_disagrees_falls_back_to_the_ambiguity(self) -> None:
+        """A guess that fails verification asks rather than refuses.
+
+        Where a declared part that disagrees is an error, an inferred one
+        leaves the tie standing so a picker can resolve it.
+        """
+        stage = IdentifyHammondFootprint(case_model=Path("1590A.stp"))
+
+        _, match, diagnostics = stage.quantise(_tied_outline(), ORIGIN)
+
+        assert match is None
+        assert codes(diagnostics) == ["ambiguous-enclosure"]
+
+    def test_a_declared_part_is_not_overridden_by_a_filename(self) -> None:
+        """Decision 10 infers only when no case is declared."""
+        stage = IdentifyHammondFootprint(expected_part="1590B2", case_model=Path("1590B.stp"))
+
+        _, match, _ = stage.quantise(_tied_outline(), ORIGIN)
+
+        assert match is not None
+        assert match.selected_part == "1590B2"
+
+    def test_a_run_with_no_model_is_unchanged(self) -> None:
+        """Decision 10: inference has a filename to read only when a model is supplied."""
+        stage = IdentifyHammondFootprint()
+
+        _, match, diagnostics = stage.quantise(_tied_outline(), ORIGIN)
+
+        assert match is None
+        assert codes(diagnostics) == ["ambiguous-enclosure"]

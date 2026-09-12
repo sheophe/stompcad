@@ -327,7 +327,8 @@ def build_quantisers(args: argparse.Namespace) -> Quantisers:
     """Build named quantisers, resolving all effective inputs before file access."""
     return Quantisers(
         enclosure=IdentifyHammondFootprint(
-            expected_part=None if args.case is None else parse_case(args.case)
+            expected_part=None if args.case is None else parse_case(args.case),
+            case_model=None if args.case_model is None else Path(args.case_model),
         ),
         diameters=SnapDiametersToDrillTable(build_drill_standard(args)),
         positions=_snap_positions(args),

@@ -509,7 +509,9 @@ class Driver:
         assert self._raw is not None  # _read_panel always runs first
         return quantise(
             self._raw,
-            enclosure=IdentifyHammondFootprint(expected_part=self._options.case),
+            enclosure=IdentifyHammondFootprint(
+                expected_part=self._options.case, case_model=self._options.case_model
+            ),
             diameters=SnapDiametersToDrillTable(DRILL_STANDARDS[DEFAULT_STANDARD]),
             positions=SnapPositions(nm_from_mm(_DEFAULT_GRID_MM)),
             scope=scope,
