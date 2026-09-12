@@ -75,6 +75,40 @@ retried; naming another is refused rather than quietly re-read, because a driver
 that silently re-parsed the artwork would spend exactly what holding the
 intermediates was for.
 
+### A gap is resolved between a step's work and its credit
+
+Resolution sits inside the step: it produces its data, `Driver._settled` asks
+about the first finding a picker can answer, the step runs again under that
+answer, and only then is it credited with the outcome the successful run
+earned. Decision 4 requires exactly that — a step that stops to ask credits
+nothing — so a resolution loop outside the step would have to either report the
+step twice or retract a line it had already written.
+
+Two codes reach a picker: `ambiguous-enclosure`, whose candidates are the tied
+parts and whose answer declares `case`, and `empty-group`, whose candidates are
+a board's own designators and whose answer widens `panel_reference` rather than
+replacing it. `stompcad.resolve.RESOLVABLE` is the whole list, and a code absent
+from it stays a refusal. A third is a row there, a branch in `_candidates` and
+`revision_for`, and a row in `_RETRY_INPUTS` — three small places rather than
+one clever one.
+
+What a step may honour on a *retry* is narrower than what it reads on a first
+run, and the two are separate tables. `_STEP_INPUTS` records what a step reads;
+`_RETRY_INPUTS` records what it can still honour when it runs again, because a
+retry spends the intermediates the driver holds rather than inputs it re-reads.
+A revision the named step cannot honour is refused, naming the step that would
+have to run again for it to take effect, rather than accepted and ignored.
+
+The dock half holds the boards as read separately from the boards as filtered,
+so a revised filter re-runs without the temporary the parse needed. That is
+also why a revised board list is refused: `read boards` re-runs its filter over
+boards already scanned, and the files they were staged from are gone by then.
+
+`promote_warnings` is not a `RunOptions` field. It travels beside the options,
+as an argument to `Driver` and to `cli._compose`, because decision 6 makes it a
+rule about which findings reach a picker and not an input any step reads — and
+a field no step reads is precisely what a refused revision is.
+
 ### The composition adds no second mechanism, and no second rule
 
 Both write steps render every target, then stage and commit the whole set
@@ -191,8 +225,8 @@ Neither tool's command-line contract changes. Both keep their flags, their
 reports and their exit codes, and both remain usable alone.
 
 [docs/CLI.md](../CLI.md) documents a third command: its arguments, the formats
-either half can render, the two facts docking has no default for, and the five
-exit codes.
+either half can render, the two facts docking has no default for, the five exit
+codes, and which gaps a run on a terminal offers to resolve.
 
 A phase added to either tool is a step added to `stompcad.plan`, a weight
 recounted with the command recorded there, and a step line in the presentation.
@@ -200,11 +234,20 @@ The step list is data, so nothing else changes with it.
 
 `TerminalPresentation`, in `stompcad/inline.py`, is the terminal implementation
 of `Presentation`; decision 3's three levels of detail, `--progress` and the
-`v` key that cycles them are decided in code alongside it. `ask` is
-implemented there too, drawn as the modal decision 6 will pick from, but it
-still has no caller, so it remains exercised only by tests. An interactive
-resolver is still later work, and `retry` still has no caller either. The
-spec's decisions 6, 8 and 10 remain undecided in code.
+`v` key that cycles them are decided in code alongside it. `ask` is implemented
+there as the modal decision 6 picks from, and `ChoiceScreen` is what it pushes.
+The interactive resolver has landed for both resolvable codes, so the spec's
+decisions 6, 8 and 10 are decided in code. What the resolver drives is `_rerun`,
+which runs one step again and returns its outcome without reporting it, because
+a loop answering gap after gap must not credit the step in between. `retry` is
+the same work with the step credited, kept as the public way to run one step
+alone; it has no caller in production yet, and remains an entry point rather
+than a use.
+
+What is left undone is the one gap decision 6 gestured at and this design
+declines: `ambiguous-placement` records a count rather than candidates, and no
+stage applies an explicit placement, so a picker there would ask a question no
+answer could be honoured for. The spec states that limit in its own decision 6.
 
 `stompcad`'s suite gates the tests that read the board fixture and the cached
 enclosure model behind `--boards` and `--hammond`, mirroring both tools rather

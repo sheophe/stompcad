@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, cast
 
 from stompcollider import (
     AssemblyEmitter,
@@ -49,7 +49,7 @@ from stompdrill.pipeline import (
 )
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
-from stompmodel.diagnostics import Severity
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import Scope
 from stompmodel.protocols import (
@@ -65,7 +65,8 @@ from stompmodel.protocols import (
 from stompmodel.units import nm_from_mm
 
 from .plan import RunPlan, Step
-from .present import Presentation
+from .present import Choice, Presentation
+from .resolve import promoted, question_for, revision_for
 
 __all__ = ["DOCK_TARGET_NAMES", "RunOptions", "Driver"]
 
@@ -114,14 +115,27 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
     "write-assembly": frozenset({"targets"}),
 }
 
-#: What each step leaves on the driver. Only the drill half holds anything:
-#: the dock half's intermediates live inside ``run_dock``, which is why its
-#: steps are not retryable. ``retry`` clears every attribute a step later
-#: than the retried one left, reading the order from the plan itself.
+#: What each step can honour when it runs *again*, which may be narrower
+#: than what it reads the first time: a retry spends the intermediates the
+#: driver holds rather than the inputs it re-read. ``read-boards`` re-runs
+#: its filter over boards already scanned -- decision 8's own words -- so a
+#: revised board list would need a parse this step no longer performs.
+_RETRY_INPUTS: dict[str, frozenset[str]] = {
+    "quantise": frozenset({"case"}),
+    "drill": frozenset(),
+    "read-boards": frozenset({"panel_reference"}),
+}
+
+#: What each step leaves on the driver. ``retry`` clears every attribute a
+#: step later than the retried one left, reading the order from the plan
+#: itself. The dock half holds the boards as read separately from the
+#: boards as filtered, because a revised filter re-runs over the first
+#: without needing the files the second was read from.
 _STEP_HOLDS: dict[str, tuple[str, ...]] = {
     "read-panel": ("_case_model", "_raw"),
     "quantise": ("_quantised",),
     "drill": ("_drilled",),
+    "read-boards": ("_scan", "_geometry", "_docked", "_dock_pipeline", "_dock_data"),
 }
 
 
@@ -136,6 +150,9 @@ class _Written(Processable, Diagnosable, Protocol):
 
 
 _DataT = TypeVar("_DataT", bound=_Written)
+
+#: Either half's data, so one resolution loop serves both.
+_D = TypeVar("_D", DrillData, DockData)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,24 +175,37 @@ class Driver:
     without recomputing it -- which is what ``retry`` spends.
     """
 
-    def __init__(self, plan: RunPlan, presentation: Presentation, options: RunOptions) -> None:
+    def __init__(
+        self,
+        plan: RunPlan,
+        presentation: Presentation,
+        options: RunOptions,
+        promote_warnings: bool = False,
+    ) -> None:
         self._plan = plan
         self._presentation = presentation
         self._options = options
+        self._promote_warnings = promote_warnings
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
         self._drilled: DrillData | None = None
+        self._scan: BoardScan | None = None
+        self._geometry: dict[int, BoardGeometry] | None = None
+        self._docked: DockData | None = None
+        self._dock_pipeline: Pipeline[DockData] | None = None
+        self._dock_data: DockData | None = None
 
     def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
         """Drill the panel, then dock its boards against it when any were asked for.
 
-        The drill document ``run_dock`` reads is the one the drill steps
-        just held in memory, never written for this handoff alone -- see
-        the task report for the one case that forces a temporary file.
-        An errored drill half stops the run there: CLAUDE.md's "any error
-        prevents every requested output" binds the run between the two
-        write steps as well as each of them.
+        ``run_dock`` reads the drill document the drill steps just held in
+        memory, never written for this handoff alone. The one case that
+        forces a temporary file is that ``BoardSource`` reads from a path,
+        so the drill document and drilled case go to a temporary directory
+        for it. An errored drill half stops the run there: CLAUDE.md's "any
+        error prevents every requested output" binds the run between the
+        two write steps as well as each of them.
         """
         docking = bool(self._options.boards)
         steps = self._plan.steps if docking else self._plan.steps[:_DOCK_FROM]
@@ -196,32 +226,81 @@ class Driver:
         """Read the boards, match, seat and report clashes against the drilled case."""
         return self._dock_steps(drill, self._open(self._plan.steps[_DOCK_FROM:], scope))
 
-    def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData:
-        """Run one step again under revised options, from the intermediates held.
+    def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData | DockData:
+        """Run one step again under revised options, and report it when it succeeds.
 
         Decision 4: the step that stopped to ask runs again when the answer
-        arrives, reading neither the artwork nor the case model a second time.
-        Only a step whose input this driver holds is retryable, only a revision
-        that step actually reads is honoured, and an accepted one discards every
-        intermediate a later step produced -- so nothing the new options
-        contradict survives. Every refusal leaves the driver as it was.
+        arrives, reading neither the artwork nor the case model a second
+        time. Only a step whose input this driver holds is retryable, only
+        a revision that step can honour is accepted, and an accepted one
+        discards every intermediate a later step produced.
+        """
+        retried, outcome = self._rerun(key, options, scope)
+        self._presentation.finish_step(self._step(key), outcome)
+        return retried
+
+    def _rerun(self, key: str, options: RunOptions, scope: Scope) -> tuple[DrillData | DockData, str]:
+        """The work of a retry, with its outcome returned rather than reported.
+
+        A resolution loop asks and runs again until there is nothing left
+        to ask, and must not credit the step in between -- so the caller
+        decides when the step has finished, not this.
         """
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
             self._accept(key, options)
             self._quantised = self._quantise(scope)
-            retried, outcome = self._quantised, _quantise_outcome(self._quantised)
-        elif key == "drill":
+            return self._quantised, _quantise_outcome(self._quantised)
+        if key == "drill":
             if self._quantised is None:
                 raise ValueError("drill cannot run again before quantisation")
             self._accept(key, options)
             self._drilled = self._drill(self._quantised, scope)
-            retried, outcome = self._drilled, _drill_outcome(self._drilled)
-        else:
-            raise ValueError(f"{key!r} is not a step this driver can run again")
+            return self._drilled, _drill_outcome(self._drilled)
+        if key == "read-boards":
+            if self._docked is None or self._scan is None:
+                raise ValueError("read boards cannot run again before the boards are read")
+            self._accept(key, options)
+            self._dock_data = self._admit()
+            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)"
+        raise ValueError(f"{key!r} is not a step this driver can run again")
+
+    def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
+        """Resolve what this step can be asked about, then credit it.
+
+        Decision 4: a step that stops to ask has not completed, so nothing
+        is reported until either there was nothing to ask or the answer
+        has been applied. Repeated gaps are answered in turn and the step
+        is credited once, with the outcome the successful run earned.
+        """
+        while (gap := self._gap_in(data)) is not None:
+            question, diagnostic = gap
+            answer = self._presentation.ask(question)
+            revised = revision_for(diagnostic, self._options, answer)
+            # ``_rerun`` returns the union of both halves' data; ``key`` chose
+            # the branch, so the value is this step's own type.
+            reran, outcome = self._rerun(key, revised, scope)
+            data = cast(_D, reran)
         self._presentation.finish_step(self._step(key), outcome)
-        return retried
+        return data
+
+    def _gap_in(self, data: Diagnosable) -> tuple[Choice, Diagnostic] | None:
+        """The first gap in this data that a picker could resolve, if any."""
+        diagnostics = data.diagnostics
+        if self._promote_warnings:
+            diagnostics = promoted(diagnostics)
+        for diagnostic in diagnostics:
+            question = question_for(diagnostic, self._board_designators())
+            if question is not None:
+                return question, diagnostic
+        return None
+
+    def _board_designators(self) -> dict[int, tuple[str, ...]]:
+        """Each board's own names, for a gap that carries only its board."""
+        if self._docked is None:
+            return {}
+        return {board.ordinal: board.designators for board in self._docked.boards}
 
     def _accept(self, key: str, options: RunOptions) -> None:
         """Take revised options for one step, once it is settled they can take effect."""
@@ -239,7 +318,7 @@ class Driver:
         for the revision to take effect. Every unhonourable field is named at
         once, as the target check names every bad format at once.
         """
-        read = _STEP_INPUTS.get(key, frozenset())
+        read = _RETRY_INPUTS.get(key, frozenset())
         unhonoured = [
             f"{field.name} ({self._reader(field.name)})"
             for field in fields(options)
@@ -309,8 +388,10 @@ class Driver:
         quantise_step = self._plan.steps[1]
         quantise_slot = next(slots)
         quantise_slot.label(quantise_step.label)
-        self._quantised = self._quantise(quantise_slot)
-        self._presentation.finish_step(quantise_step, _quantise_outcome(self._quantised))
+        quantised = self._quantise(quantise_slot)
+        self._quantised = self._settled(
+            "quantise", quantised, _quantise_outcome(quantised), quantise_slot
+        )
 
         drill_step = self._plan.steps[2]
         drill_slot = next(slots)
@@ -331,33 +412,39 @@ class Driver:
         read_step = self._plan.steps[4]
         read_slot = next(slots)
         read_slot.label(read_step.label)
-        scan, geometry, data, pipeline = self._read_boards(drill, read_slot)
-        self._presentation.finish_step(read_step, f"{len(scan.raw.boards)} board(s)")
+        self._read_boards(drill, read_slot)
+        admitted = self._admit()
+        assert self._scan is not None
+        self._dock_data = self._settled(
+            "read-boards", admitted, f"{len(self._scan.raw.boards)} board(s)", read_slot
+        )
 
-        for step, stage in zip(self._plan.steps[5:8], pipeline, strict=True):
+        assert self._dock_pipeline is not None
+        for step, stage in zip(self._plan.steps[5:8], self._dock_pipeline, strict=True):
             slot = next(slots)
             slot.label(step.label)
-            before, data = data, Pipeline([stage]).run(data, slot)
-            self._presentation.finish_step(step, _stage_outcome(before, data))
+            before = self._dock_data
+            self._dock_data = Pipeline([stage]).run(before, slot)
+            self._presentation.finish_step(step, _stage_outcome(before, self._dock_data))
 
         write_step = self._plan.steps[8]
         write_slot = next(slots)
         write_slot.label(write_step.label)
-        written = self._write_dock(data, scan, geometry, write_slot)
+        assert self._geometry is not None
+        written = self._write_dock(self._dock_data, self._scan, self._geometry, write_slot)
         self._presentation.finish_step(write_step, ", ".join(written) or "nothing written")
 
-        return data
+        return self._dock_data
 
-    def _read_boards(
-        self, drill: DrillData, scope: Scope
-    ) -> tuple[BoardScan, dict[int, BoardGeometry], DockData, Pipeline[DockData]]:
+    def _read_boards(self, drill: DrillData, scope: Scope) -> None:
         """Stage the drill document and the drilled case, then scan and compose.
 
         ``BoardSource`` reads both from real files, and neither is one
         this run already wrote: the drill document lives only in memory
         until a target asks for it, and the case is drilled only by the
         ``step`` emitter's own render. Both go to a private temporary
-        directory, gone before this method returns -- see the task report.
+        directory, gone before this method returns, which is why the
+        filter that needs no file is held separately in ``_admit``.
         """
         settings = OutputSettings(title=_DEFAULT_TITLE, case_model=self._case_model)
         with tempfile.TemporaryDirectory(prefix="stompcad-dock-") as tmp:
@@ -370,19 +457,29 @@ class Driver:
 
             source = BoardSource(drill_path, list(self._options.boards), case_path)
             scan = source.scan(scope)
-            panel_reference = parse_filter(self._options.panel_reference)
             tolerance_nm = derived_tolerance(scan.drill, drill_path)
             case = registration(scan, drill_path)
-            data = admit(docked(scan, case), panel_reference)
-            geometry = board_geometry(scan, case)
-            pipeline = build_pipeline(
+            self._scan = scan
+            self._geometry = board_geometry(scan, case)
+            self._docked = docked(scan, case)
+            self._dock_pipeline = build_pipeline(
                 tolerance_nm,
                 scan.case.solids,
-                {ordinal: board.solids for ordinal, board in geometry.items()},
+                {ordinal: board.solids for ordinal, board in self._geometry.items()},
                 nm_from_mm(_SEAT_PITCH_MAX_MM),
                 nm_from_mm(_SEAT_PITCH_MIN_MM),
             )
-            return scan, geometry, data, pipeline
+
+    def _admit(self) -> DockData:
+        """Filter the boards already scanned, which needs no file to repeat.
+
+        Decision 8: the gap this raises is found by a filter over boards
+        already read, so running it again re-runs the filter and not the
+        parse -- which is why the temporary the parse needed may be gone.
+        """
+        if self._docked is None:
+            raise ValueError("the boards must be read before the filter runs")
+        return admit(self._docked, parse_filter(self._options.panel_reference))
 
     def _read_panel(self, scope: Scope) -> None:
         """Load the artwork and, when named, the case model -- the read step's leaves."""
@@ -412,7 +509,9 @@ class Driver:
         assert self._raw is not None  # _read_panel always runs first
         return quantise(
             self._raw,
-            enclosure=IdentifyHammondFootprint(expected_part=self._options.case),
+            enclosure=IdentifyHammondFootprint(
+                expected_part=self._options.case, case_model=self._options.case_model
+            ),
             diameters=SnapDiametersToDrillTable(DRILL_STANDARDS[DEFAULT_STANDARD]),
             positions=SnapPositions(nm_from_mm(_DEFAULT_GRID_MM)),
             scope=scope,

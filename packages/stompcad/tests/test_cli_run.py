@@ -16,7 +16,7 @@ import pytest
 
 from stompcad import cli
 from stompdrill import cli as stompdrill_cli
-from stompmodel.diagnostics import EXIT_ERRORS, EXIT_USAGE, EXIT_WARNINGS
+from stompmodel.diagnostics import EXIT_USAGE, EXIT_WARNINGS
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB
 
 __all__: list[str] = []
@@ -50,14 +50,34 @@ def test_the_step_log_streams_as_each_step_completes(
     ]
 
 
-def test_an_errored_run_exits_2_and_writes_nothing(tmp_path: Path) -> None:
-    """The tar footprint matches three parts, so no declared case is an error."""
+def test_a_tie_a_pipe_cannot_answer_exits_3_and_writes_nothing(tmp_path: Path) -> None:
+    """The tar footprint ties three parts, and a pipe cannot answer the tie.
+
+    Decision 11: the tie is a question now rather than an error, so a run
+    with no terminal to ask on exits with a usage failure naming what was
+    missing -- and writes nothing either way.
+    """
     target = tmp_path / "out.drl"
 
     code = cli.main([str(TAR_AI), "--emit", f"excellon={target}"])
 
-    assert code == EXIT_ERRORS
+    assert code == EXIT_USAGE
     assert not target.exists()
+
+
+def test_a_gap_with_no_terminal_exits_three_and_names_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Decision 11: a pipe cannot answer, so the run says what it needed.
+
+    The tar fixture ties three parts when no case is declared, which is a
+    resolvable gap; piped, it must refuse rather than prompt.
+    """
+    code = cli.main([str(TAR_AI), "--emit", f"excellon={tmp_path / 'out.drl'}"])
+
+    assert code == EXIT_USAGE
+    message = capsys.readouterr().err
+    assert "1590B" in message, "the refusal does not name the parts it was tied between"
 
 
 def test_two_targets_naming_one_file_are_a_usage_error(tmp_path: Path) -> None:

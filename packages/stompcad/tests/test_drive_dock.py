@@ -182,17 +182,19 @@ def test_write_dock_withholds_every_target_on_an_error_severity(tmp_path: Path) 
 def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> None:
     """CLAUDE.md's "any error prevents every requested output" binds the run too.
 
-    A genuine ERROR rather than a constructed one: the tar fixture's
-    footprint matches three catalogue parts, so a run declaring no case
-    raises ``ambiguous-enclosure`` out of quantisation. Docking such a run
-    would read every board and seat it for output it may not write.
+    A genuine ERROR rather than a constructed one: the tar footprint is no
+    1590BB, so declaring one raises ``unmatched-enclosure`` out of
+    quantisation. Decision 6 gives that code no picker, so it stays an
+    error the run stops on rather than a gap it could ask about. Docking
+    such a run would read every board and seat it for output it may not
+    write.
     """
     presentation = _RecordingPresentation()
     target = tmp_path / "report.json"
     options = RunOptions(
         panel=TAR_AI,
         boards=(TAR_PCB,),
-        case=None,
+        case="1590BB",
         case_model=None,
         panel_reference=PANEL_REFERENCE,
         targets=(("report", target),),
@@ -203,7 +205,7 @@ def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> N
         drilled, dock = driver.run(scope)
 
     assert drilled.worst_severity is Severity.ERROR
-    assert [finding.code for finding in drilled.diagnostics] == ["ambiguous-enclosure"]
+    assert [finding.code for finding in drilled.diagnostics] == ["unmatched-enclosure"]
     assert dock is None
     assert [step.key for step, _outcome in presentation.finished] == [
         "read-panel", "quantise", "drill", "write-case",

@@ -52,11 +52,21 @@ standards or sizes are usage errors, reported before the artwork is opened.
 The margin must be positive. The face and margin are validated even when no
 model is supplied. The tool checks a declared part against the artwork; use
 published top-view or backplate dimensions for the outline. A footprint can
-match several parts, in which case `--case` is required to choose one.
+match several parts, and the part is then either declared with `--case` or, when
+nothing is declared, inferred from the `--case-model` filename.
+
+Inference takes the model's stem, removes delimiters, uppercases it and accepts
+the result only when it names one of the tied parts: `1590BB.stp` gives
+`1590BB`. It passes the same verification a declared part does, though only on
+the tie it was read to resolve, and a filename is a guess: where a declared
+part that disagrees is an error, an inferred one leaves the ambiguity standing.
 
 For example, the repository's `tar.ai` fixture matches both `1590B`/`1590B2`
 (112.40 × 60.50 mm) and `1590BS` (112.00 × 60.50 mm). Use `--case 1590B` for
-that fixture. Without it, the tool reports `ambiguous-enclosure`.
+that fixture, or supply `--case-model 1590B.stp` and let the filename settle it;
+the run then reports `inferred-enclosure`, naming the file it read the part
+from. With neither a declaration nor a model whose filename names a tied part,
+the tool reports `ambiguous-enclosure`.
 
 Get a published Hammond model with:
 
@@ -186,6 +196,7 @@ terminal; a piped or redirected run always gets the plain step-line log.
 | `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
 | `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
 | `--progress bar\|steps\|tree` | Starting detail level for the inline run; `v` cycles it | `bar` |
+| `--promote-warnings` | Raise every warning to an error, so a resolvable one can be asked about | Off |
 
 `--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
 `excellon`, `json` and `step` from the drill half, `report` and `assembly`
@@ -199,6 +210,14 @@ components chosen for this particular pedal, and `--case-model` supplies the
 enclosure the boards are seated in; naming a board without either is a usage
 error rather than a guess.
 
+When the footprint matches more than one part, no `--case` is declared and a
+`--case-model` is supplied, the part may be inferred from the model's filename:
+a model named `1590B.stp` settles a tie the artwork alone leaves open, provided
+that name is one of the tied parts. A run that inferred the part records an
+informational finding naming the model it took the name from, and asking for
+`--case` to state it instead, so an enclosure nobody declared is never
+chosen silently.
+
 An error anywhere stops the whole run. The drill half's errors withhold its
 artefacts and leave the boards unread, and the dock half's withhold the report
 and the assembly. Both halves name what they did not write.
@@ -206,6 +225,30 @@ and the assembly. Both halves name what they did not write.
 A run stopped before it finishes exits `130`, and nothing it was about to write
 survives. Every artefact is rendered before any target is touched, so at the
 moment a run can be stopped there is nothing half-written on disk to remove.
+
+### Pickers
+
+A gap the run can resolve asks instead of refusing. On a terminal, an error
+carrying a resolvable code puts a picker on screen: the prompt is the
+diagnostic's own message, the candidates are the finite set the tool itself
+computed, and the step that stopped runs again under the answer. That step is
+credited once it succeeds, so it leaves one line in the record rather than two.
+
+Two gaps ask. A tie between enclosure parts offers the tied parts, the same
+answer `--case` would have given. A board whose `--panel-reference` expression
+admits none of its designators offers that board's own designators, and the
+answer widens the expression rather than replacing it, so resolving one board
+cannot empty another. Every other error remains a refusal: a code with no
+picker is never turned into a question.
+
+`--promote-warnings` raises every warning to an error before that check runs,
+which is what would let a warning reach a picker at all. Being an error is
+necessary and not sufficient, and both resolvable codes are errors already, so
+the flag has nothing to promote into a question until a warning carries one.
+
+Without a terminal there is nobody to ask. Rather than prompting where no
+answer can arrive, the run exits `3` naming the question it needed answered --
+on a pipe, a redirect, a dumb terminal or a CI runner alike.
 
 ### Exit codes
 
@@ -266,6 +309,11 @@ Processing errors include `unknown-diameter`, `ambiguous-enclosure`,
 
 Warnings include `grid-too-fine`, `grid-ambiguous`, `hole-outside-outline`,
 `nesting-truncated`, `case-orientation-unverifiable` and `off-size`.
+
+Informational findings include `inferred-enclosure`, which names the case model
+a tied part was taken from and asks for `--case` to state it instead. They
+describe what the tool decided rather than anything to fix, so they change
+neither the exit code nor what is written.
 
 A hole extending beyond the reference outline is a warning. A hole extending
 beyond the actual drilled face is an error and requires a supplied case model

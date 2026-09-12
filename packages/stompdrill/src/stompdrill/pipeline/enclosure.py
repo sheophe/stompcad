@@ -7,7 +7,9 @@ misses warn and stay measured, while ties or failed declarations are errors.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+from pathlib import Path
 from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic, ParameterValue
@@ -26,6 +28,7 @@ __all__ = [
     "CATALOGUE",
     "DEFAULT_TOLERANCE_NM",
     "normalize_part_name",
+    "infer_part_name",
     "IdentifyHammondFootprint",
 ]
 
@@ -58,6 +61,22 @@ def normalize_part_name(name: str) -> str:
     return name.strip().upper()
 
 
+def infer_part_name(path: Path) -> str | None:
+    """The catalogue part a case model's filename names, if it names one.
+
+    Decision 10: the stem with its delimiters removed and uppercased,
+    accepted only when the catalogue has such a part. A filename is a
+    guess, so a stem naming nothing is no candidate rather than a fault.
+    """
+    stem = re.sub(r"[\s_\-]+", "", path.stem).upper()
+    return stem if stem in _catalogue_parts() else None
+
+
+def _catalogue_parts() -> frozenset[str]:
+    """Every base part the catalogue lists, for a filename to be checked against."""
+    return frozenset(part for parts in footprints().values() for part in parts)
+
+
 class IdentifyHammondFootprint:
     """Match an outline against catalogue footprints with per-axis slack.
 
@@ -71,6 +90,7 @@ class IdentifyHammondFootprint:
         self,
         expected_part: str | None = None,
         tolerance_nm: Nanometre = DEFAULT_TOLERANCE_NM,
+        case_model: Path | None = None,
     ) -> None:
         # Checked once, at construction, on the precedent every length in the
         # model sets and for its reason: a float tolerance is a length that
@@ -98,6 +118,8 @@ class IdentifyHammondFootprint:
         # must not become a part number that nothing can ever match.
         resolved = normalize_part_name(expected_part) if expected_part is not None else ""
         self.expected_part: str | None = resolved or None
+        # A guess to try only when a tie is undeclared; see ``_inferred``.
+        self.case_model: Path | None = case_model
 
     def describe(self) -> StageRun:
         """Record effective tolerance, catalogue and any normalised declaration."""
@@ -156,8 +178,25 @@ class IdentifyHammondFootprint:
 
         if not matches:
             return (measured, None, (self._unknown(measured),))
+
+        selected: str | None = self.expected_part
+        inference: tuple[Diagnostic, ...] = ()
         if len(matches) > 1:
-            return (measured, None, (self._ambiguous(measured, matches),))
+            inferred = infer_part_name(self.case_model) if self.case_model else None
+            agreed = (
+                [match for match in matches if inferred in footprints()[match[0]]]
+                if inferred is not None
+                else []
+            )
+            if len(agreed) != 1:
+                # A guess that fails verification leaves the tie standing, so
+                # a picker can resolve what the filename could not.
+                return (measured, None, (self._ambiguous(measured, matches),))
+            # ``agreed`` is non-empty only on the branch above, where
+            # ``inferred`` was checked ``is not None`` to build it.
+            assert inferred is not None
+            matches, selected = agreed, inferred
+            inference = (self._inferred(inferred),)
 
         (length_nm, width_nm), rotated = matches[0]
         candidates = footprints()[(length_nm, width_nm)]
@@ -170,7 +209,7 @@ class IdentifyHammondFootprint:
             # forgot to work rotation out would report every portrait panel as
             # landscape and nothing would say otherwise.
             rotated=rotated,
-            selected_part=self.expected_part,
+            selected_part=selected,
         )
         # ``resized``, never ``ReferenceOutline(...)``: see the module docstring.
         # The artwork's own orientation is kept — a rotated panel stays portrait
@@ -182,7 +221,7 @@ class IdentifyHammondFootprint:
 
         if self.expected_part is not None and self.expected_part not in candidates:
             return (snapped, match, (self._wrong(length_nm, width_nm, candidates),))
-        return (snapped, match, ())
+        return (snapped, match, inference)
 
     # -- matching --------------------------------------------------------
     def _matches(self, outline: RawOutline) -> list[_Match]:
@@ -239,6 +278,14 @@ class IdentifyHammondFootprint:
                 ("candidates", _candidate_list(tied)),
                 ("tolerance_nm", self.tolerance_nm),
             ),
+        )
+
+    def _inferred(self, part: str) -> Diagnostic:
+        """Say the case was inferred, and name the file it was inferred from."""
+        return Diagnostic.info(
+            "inferred-enclosure",
+            f"case {part} inferred from {self.case_model.name if self.case_model else '?'}; "
+            f"declare --case to state it instead",
         )
 
     def _unverifiable(self) -> Diagnostic:
