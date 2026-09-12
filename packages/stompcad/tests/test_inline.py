@@ -11,10 +11,11 @@ import pytest
 
 from stompcad import cli
 from stompcad.cancel import Cancelled
+from stompcad.drive import RunOptions
 from stompcad.inline import InlineApp, TerminalPresentation
 from stompcad.plan import DRILL_AND_DOCK
-from stompcad.present import Choice, PlainWriter, Presentation
-from stompmodel.diagnostics import EXIT_ERRORS
+from stompcad.present import Choice, PlainWriter, Presentation, Question
+from stompmodel.diagnostics import EXIT_ERRORS, EXIT_WARNINGS
 from tests.conftest import TAR_AI
 
 __all__: list[str] = []
@@ -416,3 +417,67 @@ async def test_a_settled_run_renders_its_full_record_at_bar_level() -> None:
     assert rendered == "\n".join(app.settled)
     assert "read panel" in rendered
     assert "pitch" in rendered
+
+
+class _RecordingTerminal(TerminalPresentation):
+    """``TerminalPresentation`` keeping the answers it handed back.
+
+    A picker's answer is otherwise invisible from outside the run: the line
+    a step settles into names holes and tools, never the part a tie was
+    resolved to. Everything else is the real boundary, on the real app.
+    """
+
+    def __init__(self, app: InlineApp) -> None:
+        super().__init__(app)
+        self.answers: list[str] = []
+
+    def ask(self, question: Question) -> str:
+        answer = super().ask(question)
+        self.answers.append(answer)
+        return answer
+
+
+@pytest.mark.asyncio
+async def test_a_tie_is_answered_in_the_terminal_and_the_run_carries_on(
+    tmp_path: Path,
+) -> None:
+    """Decision 6 end to end: the gap asks, the keypress answers, the run finishes.
+
+    The tar fixture ties three parts when no case is declared. The worker
+    blocks on the modal, a keypress chooses, and the step runs again under
+    the answer -- so the settled record shows one line for it, not two.
+    """
+    app = InlineApp(level="steps")
+    options = RunOptions(
+        panel=TAR_AI,
+        boards=(),
+        case=None,
+        case_model=None,
+        panel_reference="RV*",
+        targets=(("excellon", tmp_path / "out.drl"),),
+    )
+    presentation = _RecordingTerminal(app)
+    app.drive(lambda: cli._compose(options, presentation, promote_warnings=False))
+
+    async with app.run_test() as pilot:
+        for _ in range(200):
+            await pilot.pause()
+            if app.screen_stack and app.screen_stack[-1].__class__.__name__ == "ChoiceScreen":
+                break
+        assert app.screen_stack[-1].__class__.__name__ == "ChoiceScreen"
+        await pilot.press("enter")
+        for _ in range(400):
+            await pilot.pause()
+            if app.return_value is not None:
+                break
+
+    assert app.failure is None
+    # ``enter`` takes the option list's opening highlight, the first
+    # candidate the tie recorded; the stage's order is not this test's to pick.
+    assert presentation.answers == ["1590BS"]
+    # The fixture's two coincident holes warn whichever part resolves the
+    # tie, so a run that carried on under the answer earns exactly 1.
+    assert app.return_value == EXIT_WARNINGS
+    assert (tmp_path / "out.drl").exists()
+    quantise_lines = [line for line in app.settled if line.strip().startswith("quantise")]
+    assert len(quantise_lines) == 1, app.settled
