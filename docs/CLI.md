@@ -57,9 +57,9 @@ nothing is declared, inferred from the `--case-model` filename.
 
 Inference takes the model's stem, removes delimiters, uppercases it and accepts
 the result only when it names one of the tied parts: `1590BB.stp` gives
-`1590BB`. It is checked against the measurement exactly as a declaration is,
-but a filename is a guess, so where a declared part that disagrees is an error,
-an inferred one that disagrees leaves the ambiguity standing.
+`1590BB`. It passes the same verification a declared part does, though only on
+the tie it was read to resolve, and a filename is a guess: where a declared
+part that disagrees is an error, an inferred one leaves the ambiguity standing.
 
 For example, the repository's `tar.ai` fixture matches both `1590B`/`1590B2`
 (112.40 × 60.50 mm) and `1590BS` (112.00 × 60.50 mm). Use `--case 1590B` for
