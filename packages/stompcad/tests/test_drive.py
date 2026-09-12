@@ -7,6 +7,7 @@ from the byte-identity acceptance test in ``test_drive_drill.py``.
 
 from __future__ import annotations
 
+import inspect
 import io
 from dataclasses import replace
 from pathlib import Path
@@ -14,11 +15,11 @@ from pathlib import Path
 import pytest
 
 from stompcad import drive
-from stompcad.drive import Driver, RunOptions
+from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import PlainWriter
 from stompmodel.progress import NO_PROGRESS, track
-from tests.conftest import PANEL_REFERENCE, TAR_AI, NullSink
+from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
 __all__: list[str] = []
 
@@ -38,6 +39,30 @@ def _options() -> RunOptions:
         panel_reference=PANEL_REFERENCE,
         targets=(),
     )
+
+
+@pytest.fixture
+def drill_and_dock_run() -> Driver:
+    """A driver that has run both halves, so its intermediates are populated.
+
+    Gated behind the same flags the rest of the dock tests use, because it
+    reads the board fixture and the cached enclosure model.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    options = RunOptions(
+        panel=TAR_AI,
+        boards=(TAR_PCB,),
+        case="1590B",
+        case_model=model,
+        panel_reference="RV*,SW*",
+        targets=(),
+    )
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+    with track(NullSink()) as scope:
+        driver.run(scope)
+    return driver
 
 
 class _RecordingPresentation:
@@ -144,7 +169,7 @@ def test_retry_runs_one_step_again_over_the_intermediates_already_held(
 
 
 def test_retry_refuses_a_step_whose_input_the_driver_does_not_hold() -> None:
-    """The dock half's inputs live inside ``run_dock``, so its steps are not retryable."""
+    """``retry`` names only ``quantise`` and ``drill``; every other key is refused."""
     driver = Driver(DRILL_AND_DOCK, _RecordingPresentation(), _options())
 
     with pytest.raises(ValueError):
@@ -197,3 +222,40 @@ def test_retrying_a_step_discards_what_a_later_step_produced() -> None:
         driver.retry("quantise", replace(_options(), case="1590BB"), scope)
 
     assert driver._drilled is None, "the drilled data still describes the superseded options"
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_the_dock_half_holds_what_a_retry_would_need(drill_and_dock_run: Driver) -> None:
+    """Decision 8: the filter runs again over boards already scanned.
+
+    Everything that reads a file is gone with the temporary directory by
+    the time the read step finishes, so what is held must be enough to
+    re-run the filter without one.
+    """
+    driver = drill_and_dock_run
+
+    assert driver._docked is not None
+    assert driver._scan is not None
+    assert driver._dock_pipeline is not None
+    assert driver._dock_data is not None
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_every_dock_hold_is_cleared_by_a_retry_of_an_earlier_step(
+    drill_and_dock_run: Driver,
+) -> None:
+    """A value computed under superseded options must not outlive them."""
+    driver = drill_and_dock_run
+
+    driver._discard_after("quantise")
+
+    for attribute in _STEP_HOLDS["read-boards"]:
+        assert getattr(driver, attribute) is None, attribute
+
+
+def test_the_filter_is_not_applied_before_it_is_held() -> None:
+    """``_docked`` is the boards as read, so a revised filter starts from them."""
+    source = inspect.getsource(Driver._read_boards)
+    assert "admit(" not in source, "the filter belongs after the parse, not inside it"

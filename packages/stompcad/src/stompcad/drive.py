@@ -114,14 +114,16 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
     "write-assembly": frozenset({"targets"}),
 }
 
-#: What each step leaves on the driver. Only the drill half holds anything:
-#: the dock half's intermediates live inside ``run_dock``, which is why its
-#: steps are not retryable. ``retry`` clears every attribute a step later
-#: than the retried one left, reading the order from the plan itself.
+#: What each step leaves on the driver. ``retry`` clears every attribute a
+#: step later than the retried one left, reading the order from the plan
+#: itself. The dock half holds the boards as read separately from the
+#: boards as filtered, because a revised filter re-runs over the first
+#: without needing the files the second was read from.
 _STEP_HOLDS: dict[str, tuple[str, ...]] = {
     "read-panel": ("_case_model", "_raw"),
     "quantise": ("_quantised",),
     "drill": ("_drilled",),
+    "read-boards": ("_scan", "_geometry", "_docked", "_dock_pipeline", "_dock_data"),
 }
 
 
@@ -166,6 +168,11 @@ class Driver:
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
         self._drilled: DrillData | None = None
+        self._scan: BoardScan | None = None
+        self._geometry: dict[int, BoardGeometry] | None = None
+        self._docked: DockData | None = None
+        self._dock_pipeline: Pipeline[DockData] | None = None
+        self._dock_data: DockData | None = None
 
     def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
         """Drill the panel, then dock its boards against it when any were asked for.
@@ -331,33 +338,37 @@ class Driver:
         read_step = self._plan.steps[4]
         read_slot = next(slots)
         read_slot.label(read_step.label)
-        scan, geometry, data, pipeline = self._read_boards(drill, read_slot)
-        self._presentation.finish_step(read_step, f"{len(scan.raw.boards)} board(s)")
+        self._read_boards(drill, read_slot)
+        self._dock_data = self._admit()
+        assert self._scan is not None
+        self._presentation.finish_step(read_step, f"{len(self._scan.raw.boards)} board(s)")
 
-        for step, stage in zip(self._plan.steps[5:8], pipeline, strict=True):
+        assert self._dock_pipeline is not None
+        for step, stage in zip(self._plan.steps[5:8], self._dock_pipeline, strict=True):
             slot = next(slots)
             slot.label(step.label)
-            before, data = data, Pipeline([stage]).run(data, slot)
-            self._presentation.finish_step(step, _stage_outcome(before, data))
+            before = self._dock_data
+            self._dock_data = Pipeline([stage]).run(before, slot)
+            self._presentation.finish_step(step, _stage_outcome(before, self._dock_data))
 
         write_step = self._plan.steps[8]
         write_slot = next(slots)
         write_slot.label(write_step.label)
-        written = self._write_dock(data, scan, geometry, write_slot)
+        assert self._geometry is not None
+        written = self._write_dock(self._dock_data, self._scan, self._geometry, write_slot)
         self._presentation.finish_step(write_step, ", ".join(written) or "nothing written")
 
-        return data
+        return self._dock_data
 
-    def _read_boards(
-        self, drill: DrillData, scope: Scope
-    ) -> tuple[BoardScan, dict[int, BoardGeometry], DockData, Pipeline[DockData]]:
+    def _read_boards(self, drill: DrillData, scope: Scope) -> None:
         """Stage the drill document and the drilled case, then scan and compose.
 
         ``BoardSource`` reads both from real files, and neither is one
         this run already wrote: the drill document lives only in memory
         until a target asks for it, and the case is drilled only by the
         ``step`` emitter's own render. Both go to a private temporary
-        directory, gone before this method returns -- see the task report.
+        directory, gone before this method returns, which is why the
+        filter that needs no file is held separately in ``_admit``.
         """
         settings = OutputSettings(title=_DEFAULT_TITLE, case_model=self._case_model)
         with tempfile.TemporaryDirectory(prefix="stompcad-dock-") as tmp:
@@ -370,19 +381,29 @@ class Driver:
 
             source = BoardSource(drill_path, list(self._options.boards), case_path)
             scan = source.scan(scope)
-            panel_reference = parse_filter(self._options.panel_reference)
             tolerance_nm = derived_tolerance(scan.drill, drill_path)
             case = registration(scan, drill_path)
-            data = admit(docked(scan, case), panel_reference)
-            geometry = board_geometry(scan, case)
-            pipeline = build_pipeline(
+            self._scan = scan
+            self._geometry = board_geometry(scan, case)
+            self._docked = docked(scan, case)
+            self._dock_pipeline = build_pipeline(
                 tolerance_nm,
                 scan.case.solids,
-                {ordinal: board.solids for ordinal, board in geometry.items()},
+                {ordinal: board.solids for ordinal, board in self._geometry.items()},
                 nm_from_mm(_SEAT_PITCH_MAX_MM),
                 nm_from_mm(_SEAT_PITCH_MIN_MM),
             )
-            return scan, geometry, data, pipeline
+
+    def _admit(self) -> DockData:
+        """Filter the boards already scanned, which needs no file to repeat.
+
+        Decision 8: the gap this raises is found by a filter over boards
+        already read, so running it again re-runs the filter and not the
+        parse -- which is why the temporary the parse needed may be gone.
+        """
+        if self._docked is None:
+            raise ValueError("the boards must be read before the filter runs")
+        return admit(self._docked, parse_filter(self._options.panel_reference))
 
     def _read_panel(self, scope: Scope) -> None:
         """Load the artwork and, when named, the case model -- the read step's leaves."""
