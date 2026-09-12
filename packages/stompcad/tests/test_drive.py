@@ -18,6 +18,8 @@ from stompcad import drive
 from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
+from stompmodel.diagnostics import Diagnostic
+from stompmodel.model import DrillData
 from stompmodel.progress import NO_PROGRESS, track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
@@ -412,6 +414,7 @@ def test_a_step_that_stops_to_ask_credits_nothing_until_it_answers() -> None:
 
     quantise_lines = [line for line in lines if line.startswith("quantise")]
     assert len(quantise_lines) == 1, f"quantise reported {len(quantise_lines)} times"
+    assert quantise_lines[0] == "quantise: 8 holes, 2 tools", quantise_lines[0]
 
 
 def test_a_run_that_declares_its_case_asks_nothing() -> None:
@@ -424,6 +427,24 @@ def test_a_run_that_declares_its_case_asks_nothing() -> None:
         driver.run(scope)
 
     assert asked == []
+
+
+def test_promote_warnings_reaches_the_gap_finding_path() -> None:
+    """The flag travels from ``__init__`` to ``_gap_in``, not only into ``resolve``.
+
+    Both resolvable codes are raised at ERROR today, so promotion changes no
+    live run; this proves the wire the constructor argument is for, ahead of
+    a warning-level resolvable code ever existing.
+    """
+    tied = Diagnostic.warning(
+        "ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),)
+    )
+    data = DrillData(diagnostics=(tied,))
+    passed_over = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+    promoting = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options(), True)
+
+    assert passed_over._gap_in(data) is None
+    assert promoting._gap_in(data) is not None
 
 
 @pytest.mark.boards

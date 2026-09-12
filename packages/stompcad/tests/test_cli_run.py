@@ -65,6 +65,21 @@ def test_a_tie_a_pipe_cannot_answer_exits_3_and_writes_nothing(tmp_path: Path) -
     assert not target.exists()
 
 
+def test_a_gap_with_no_terminal_exits_three_and_names_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Decision 11: a pipe cannot answer, so the run says what it needed.
+
+    The tar fixture ties three parts when no case is declared, which is a
+    resolvable gap; piped, it must refuse rather than prompt.
+    """
+    code = cli.main([str(TAR_AI), "--emit", f"excellon={tmp_path / 'out.drl'}"])
+
+    assert code == EXIT_USAGE
+    message = capsys.readouterr().err
+    assert "1590B" in message, "the refusal does not name the parts it was tied between"
+
+
 def test_two_targets_naming_one_file_are_a_usage_error(tmp_path: Path) -> None:
     """``check_target_set``: each artefact needs its own path, as both tools require."""
     target = tmp_path / "out.drl"
