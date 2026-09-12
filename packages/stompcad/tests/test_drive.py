@@ -429,6 +429,29 @@ def test_a_run_that_declares_its_case_asks_nothing() -> None:
     assert asked == []
 
 
+@pytest.mark.hammond
+def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
+    """``_quantise`` must thread ``case_model`` through, not merely accept it.
+
+    The tar fixture ties three parts undeclared; the cached model's own
+    filename resolves it, and the run reports the part as inferred rather
+    than declared -- proof this path reaches ``IdentifyHammondFootprint``
+    rather than being silently dropped.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    options = replace(_undeclared(), case_model=model)
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+
+    with track(NullSink()) as scope:
+        drill = driver.run_drill(scope)
+
+    assert drill.enclosure is not None
+    assert drill.enclosure.selected_part == "1590B"
+    assert "inferred-enclosure" in [d.code for d in drill.diagnostics]
+
+
 def test_promote_warnings_reaches_the_gap_finding_path() -> None:
     """The flag travels from ``__init__`` to ``_gap_in``, not only into ``resolve``.
 
