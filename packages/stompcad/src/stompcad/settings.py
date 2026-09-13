@@ -9,11 +9,30 @@ knows what a step does with a value.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, replace
 from enum import Enum
+from pathlib import Path
 from typing import Generic, TypeVar
 
-__all__ = ["Origin", "Provenance", "Discovery", "Resolved", "pick"]
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
+from stompmodel.model import CaseFace
+
+__all__ = [
+    "Origin",
+    "Provenance",
+    "Discovery",
+    "Resolved",
+    "pick",
+    "Artwork",
+    "Enclosure",
+    "Drilling",
+    "BoardSettings",
+    "OutputSettings",
+    "Settings",
+    "DEFAULTS",
+]
 
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
@@ -104,3 +123,162 @@ def pick(
     if discovered is not None:
         return Resolved(discovered.value, Provenance(Origin.DISCOVERED, discovered.detail))
     return Resolved(default, Provenance(Origin.DEFAULT))
+
+
+@dataclass(frozen=True, slots=True)
+class Artwork:
+    """The `a` place: the file, the layers it names, and how deep to look."""
+
+    panel: Resolved[Path | None]
+    drill_layer: Resolved[str]
+    reference_layer: Resolved[str]
+    form_depth: Resolved[int]
+
+    def rows(self) -> Iterator[tuple[str, str]]:
+        yield "panel", self.panel.describe()
+        yield "drill layer", self.drill_layer.describe()
+        yield "reference layer", self.reference_layer.describe()
+        yield "form depth", self.form_depth.describe()
+
+
+@dataclass(frozen=True, slots=True)
+class Enclosure:
+    """The `e` place: which box, which model of it, and which face is drilled."""
+
+    case: Resolved[str | None]
+    case_model: Resolved[Path | None]
+    case_face: Resolved[CaseFace]
+    case_margin_mm: Resolved[float]
+
+    def rows(self) -> Iterator[tuple[str, str]]:
+        yield "case", self.case.describe()
+        yield "case model", self.case_model.describe()
+        yield "drilled face", self.case_face.describe()
+        yield "clearance margin", self.case_margin_mm.describe()
+
+
+@dataclass(frozen=True, slots=True)
+class Drilling:
+    """The `d` place: the grid, the drills that exist, and the drawing's title."""
+
+    grid_mm: Resolved[float]
+    grid_warn_mm: Resolved[float | None]
+    drill_standard: Resolved[str]
+    drill_sizes: Resolved[str | None]
+    no_drill_sizes: Resolved[str | None]
+    title: Resolved[str]
+
+    def rows(self) -> Iterator[tuple[str, str]]:
+        yield "grid", self.grid_mm.describe()
+        yield "warn over", self.grid_warn_mm.describe()
+        yield "drill standard", self.drill_standard.describe()
+        yield "stocked sizes", self.drill_sizes.describe()
+        yield "excluded sizes", self.no_drill_sizes.describe()
+        yield "drawing title", self.title.describe()
+
+
+@dataclass(frozen=True, slots=True)
+class BoardSettings:
+    """The `b` place: the boards, what holds them to the panel, and the search."""
+
+    boards: Resolved[tuple[Path, ...]]
+    panel_reference: Resolved[str]
+    match_tolerance_mm: Resolved[float | None]
+    seat_pitch_max_mm: Resolved[float]
+    seat_pitch_min_mm: Resolved[float]
+
+    def rows(self) -> Iterator[tuple[str, str]]:
+        yield "boards", self.boards.describe()
+        yield "panel references", self.panel_reference.describe()
+        yield "match tolerance", self.match_tolerance_mm.describe()
+        yield "seat step, coarse", self.seat_pitch_max_mm.describe()
+        yield "seat step, fine", self.seat_pitch_min_mm.describe()
+
+
+@dataclass(frozen=True, slots=True)
+class OutputSettings:
+    """The `o` place: what to make, and where each artefact goes."""
+
+    targets: Resolved[tuple[tuple[str, Path], ...]]
+
+    def rows(self) -> Iterator[tuple[str, str]]:
+        yield "artefacts", self.targets.describe()
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """Every resolved value, grouped by the place that owns it.
+
+    The workbench's view. ``drive.RunOptions`` is derived from this in one
+    direction only: the driver's tables key on flat field names, and a
+    nested record would break ``_refuse_unhonoured`` and ``revision_for``
+    at once.
+    """
+
+    artwork: Artwork
+    enclosure: Enclosure
+    drilling: Drilling
+    boards: BoardSettings
+    output: OutputSettings
+
+    def places(self) -> Iterator[tuple[str, Iterator[tuple[str, str]]]]:
+        """Each place's name and its rows, in the sidebar's own order."""
+        yield "artwork", self.artwork.rows()
+        yield "enclosure", self.enclosure.rows()
+        yield "drilling", self.drilling.rows()
+        yield "boards", self.boards.rows()
+        yield "output", self.output.rows()
+
+    @staticmethod
+    def of_defaults(panel: Path) -> Settings:
+        """Every value at rank four, for a panel nobody has said anything about."""
+        return replace(DEFAULTS, artwork=replace(DEFAULTS.artwork, panel=_at_default(panel)))
+
+
+def _at_default(value: _T) -> Resolved[_T]:
+    """A value nobody supplied, discovered or declared."""
+    return Resolved(value, Provenance(Origin.DEFAULT))
+
+
+# ``_at_default(None)`` below still type-checks as, say, ``Resolved[str |
+# None]``: mypy solves the call's type variable from the keyword's declared
+# field type, not from the literal ``None`` alone, so no ``cast`` or
+# ``type: ignore`` is needed for any optional row.
+
+
+#: Rank four, and the one statement of it. Each value is the default the tool
+#: that consumes it uses from its own command line; ``test_settings`` compares
+#: them against those parsers rather than against a copy, because a default
+#: that silently stops matching breaks byte identity and nothing else.
+DEFAULTS = Settings(
+    artwork=Artwork(
+        # ``None``, not ``Path()``: an empty path stringifies to "." and is
+        # therefore truthy, so a no-panel project would read as ready.
+        panel=Resolved[Path | None](None, Provenance(Origin.DEFAULT)),
+        drill_layer=_at_default("Drill"),
+        reference_layer=_at_default("Background"),
+        form_depth=_at_default(DEFAULT_FORM_DEPTH),
+    ),
+    enclosure=Enclosure(
+        case=_at_default(None),
+        case_model=_at_default(None),
+        case_face=_at_default(CaseFace.BOX),
+        case_margin_mm=_at_default(1.0),
+    ),
+    drilling=Drilling(
+        grid_mm=_at_default(0.25),
+        grid_warn_mm=_at_default(None),
+        drill_standard=_at_default(DEFAULT_STANDARD),
+        drill_sizes=_at_default(None),
+        no_drill_sizes=_at_default(None),
+        title=_at_default(""),
+    ),
+    boards=BoardSettings(
+        boards=_at_default(()),
+        panel_reference=_at_default(""),
+        match_tolerance_mm=_at_default(None),
+        seat_pitch_max_mm=_at_default(2.0),
+        seat_pitch_min_mm=_at_default(0.05),
+    ),
+    output=OutputSettings(targets=_at_default(())),
+)
