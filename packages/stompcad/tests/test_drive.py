@@ -442,17 +442,14 @@ def test_retry_inputs_never_exceed_step_inputs() -> None:
 
 
 def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> None:
-    """The deleted refusal test's other half: an unrun driver's own guards.
+    """An unrun driver refuses a retry, naming the work that has not happened.
 
-    That test exercised a freshly constructed, never-run ``Driver`` and
-    expected a raise; the behaviour it pinned there was the *refusal* on a
-    revision, which this task removes, but the five precondition raises in
-    ``_rerun`` are a different thing and are still live -- and, with every
-    surviving and new test built on the already-run ``drill_and_dock_run``
-    fixture, every one of those five preconditions was trivially satisfied
-    and none of them was exercised. Each message names the work that has
-    not happened -- "the panel is read", "quantisation" -- rather than the
-    attribute it would have set, so a person reading it knows what to do.
+    Each of ``_rerun``'s preconditions guards an intermediate a later step
+    reads, so a driver that has already run satisfies all five and cannot
+    exercise any of them; only a freshly constructed one can. Each message
+    names the missing work -- "the panel is read", "quantisation" -- rather
+    than the attribute it would have set, so a person reading it knows what
+    to do.
     """
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
 
