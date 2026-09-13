@@ -18,7 +18,9 @@ import pytest
 
 from stompcad.drive import Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
-from stompmodel.model import DrillData
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
+from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, NullSink
 
@@ -49,10 +51,24 @@ class _SilentPresentation:
 def _options(targets: tuple[tuple[str, Path], ...]) -> RunOptions:
     return RunOptions(
         panel=TAR_AI,
-        boards=(),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(),
         panel_reference=PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=targets,
     )
 

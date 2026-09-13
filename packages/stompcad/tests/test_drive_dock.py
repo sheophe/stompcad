@@ -23,6 +23,8 @@ from stompcollider import cli as stompcollider_cli
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill import cli as stompdrill_cli
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, DrillData
@@ -95,10 +97,24 @@ def test_the_dock_half_matches_stompcollider_byte_for_byte(tmp_path: Path) -> No
     mine = tmp_path / "mine.json"
     options = RunOptions(
         panel=TAR_AI,
-        boards=(TAR_PCB,),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=model,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(TAR_PCB,),
         panel_reference=_PAIRING_PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(("report", mine),),
     )
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
@@ -126,10 +142,24 @@ def _dummy_case_registration() -> CaseRegistration:
 def _options(name: str, target: Path) -> RunOptions:
     return RunOptions(
         panel=TAR_AI,
-        boards=(TAR_PCB,),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(TAR_PCB,),
         panel_reference=PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=((name, target),),
     )
 
@@ -193,10 +223,24 @@ def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> N
     target = tmp_path / "report.json"
     options = RunOptions(
         panel=TAR_AI,
-        boards=(TAR_PCB,),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590BB",
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(TAR_PCB,),
         panel_reference=PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(("report", target),),
     )
     driver = Driver(DRILL_AND_DOCK, presentation, options)

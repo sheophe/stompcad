@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TextIO
 
@@ -35,6 +36,7 @@ from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
 from .inline import InlineApp, TerminalPresentation
 from .plan import DRILL_AND_DOCK
 from .present import NoTerminal, PlainWriter, Presentation
+from .settings import Settings
 
 __all__ = [
     "UsageError",
@@ -168,8 +170,11 @@ def resolve(args: argparse.Namespace) -> RunOptions:
         )
     if boards and args.case_model is None:
         raise UsageError("--case-model is required to dock a board: a board is seated in the case")
-    return RunOptions(
-        panel=Path(args.panel),
+    # Every field this parser does not surface stays at Settings.DEFAULTS' own
+    # value -- the one statement of what either wrapped tool's CLI defaults
+    # to -- rather than a second copy of them here.
+    return replace(
+        RunOptions.of(Settings.of_defaults(Path(args.panel))),
         boards=boards,
         case=args.case,
         case_model=None if args.case_model is None else Path(args.case_model),

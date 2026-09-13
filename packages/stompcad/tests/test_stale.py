@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from stompcad import stale
 from stompcad.drive import _STEP_CONSUMES, _STEP_HOLDS, _STEP_INPUTS
 from stompcad.plan import DRILL_AND_DOCK
@@ -61,7 +59,6 @@ def test_a_step_with_no_inputs_is_never_the_earliest_stale_one() -> None:
                 assert ORDER.index(key) > min(ORDER.index(other) for other in invalidated)
 
 
-@pytest.mark.xfail(reason="RunOptions grows in Task 10", strict=True)
 def test_every_option_field_belongs_to_exactly_one_place() -> None:
     from dataclasses import fields
 

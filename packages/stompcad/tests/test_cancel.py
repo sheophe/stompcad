@@ -21,7 +21,10 @@ from stompcad.cancel import EXIT_CANCELLED, Cancelled, CancellingSink
 from stompcad.drive import Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK
 from stompcad.present import NoTerminal, PlainWriter
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import EXIT_USAGE
+from stompmodel.model import CaseFace
 from stompmodel.progress import track
 from stompmodel.protocols import Payload, stage_all
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
@@ -56,10 +59,24 @@ def test_a_cancelled_run_leaves_neither_artefact_nor_temporary(tmp_path: Path) -
     target = tmp_path / "out.drl"
     options = RunOptions(
         panel=TAR_AI,
-        boards=(TAR_PCB,),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=model,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(TAR_PCB,),
         panel_reference=PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(("excellon", target),),
     )
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
@@ -149,10 +166,24 @@ def test_a_cancelled_run_exits_130(tmp_path: Path) -> None:
     """
     options = RunOptions(
         panel=TAR_AI,
-        boards=(),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(),
         panel_reference="",
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(("excellon", tmp_path / "out.drl"),),
     )
     with pytest.raises(Cancelled):

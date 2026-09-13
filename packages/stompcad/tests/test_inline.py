@@ -15,7 +15,10 @@ from stompcad.drive import RunOptions
 from stompcad.inline import InlineApp, TerminalPresentation
 from stompcad.plan import DRILL_AND_DOCK
 from stompcad.present import Choice, PlainWriter, Presentation, Question
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import EXIT_ERRORS, EXIT_WARNINGS
+from stompmodel.model import CaseFace
 from tests.conftest import TAR_AI
 
 __all__: list[str] = []
@@ -450,10 +453,24 @@ async def test_a_tie_is_answered_in_the_terminal_and_the_run_carries_on(
     app = InlineApp(level="steps")
     options = RunOptions(
         panel=TAR_AI,
-        boards=(),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case=None,
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(),
         panel_reference="RV*",
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(("excellon", tmp_path / "out.drl"),),
     )
     presentation = _RecordingTerminal(app)

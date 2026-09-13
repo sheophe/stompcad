@@ -36,7 +36,6 @@ from stompdrill.cad import OcpCaseModel, load_case_model
 from stompdrill.emitters import available
 from stompdrill.emitters.build import OutputSettings, make_emitter
 from stompdrill.pipeline import (
-    DEFAULT_STANDARD,
     DRILL_STANDARDS,
     CheckCaseClearance,
     CheckOutlineContainment,
@@ -62,27 +61,14 @@ from stompmodel.protocols import (
     commit_all,
     stage_all,
 )
-from stompmodel.units import nm_from_mm
+from stompmodel.units import Nanometre, nm_from_mm
 
 from .plan import RunPlan, Step
 from .present import Choice, Presentation
 from .resolve import promoted, question_for, revision_for
+from .settings import Settings
 
 __all__ = ["DOCK_TARGET_NAMES", "RunOptions", "Driver"]
-
-#: Every stompdrill CLI default this driver stands in for, since RunOptions
-#: carries only what a run's caller resolves and stompdrill resolves the
-#: rest from its own flags. Matching them is what makes byte identity hold.
-_DEFAULT_GRID_MM = 0.25
-_DEFAULT_CASE_FACE = CaseFace.BOX
-_DEFAULT_CASE_MARGIN_MM = 1.0
-_DEFAULT_TITLE = ""
-
-#: stompcollider's own CLI defaults for the two flags RunOptions exposes no
-#: override for; matching them is what makes the dock half's byte identity
-#: hold the same way the drill half's does.
-_SEAT_PITCH_MAX_MM = 2.0
-_SEAT_PITCH_MIN_MM = 0.05
 
 #: ``RunOptions.targets`` is one set naming both halves' outputs; a write
 #: step renders only the names its own tool would recognise, so a caller
@@ -103,11 +89,19 @@ _DOCK_FROM = 4
 #: what a step can honour from what it already holds; a step added to a plan
 #: is a row added here, and a field named by no row is honoured by no step.
 _STEP_INPUTS: dict[str, frozenset[str]] = {
-    "read-panel": frozenset({"panel", "case", "case_model"}),
-    "quantise": frozenset({"case", "grid_mm"}),
+    "read-panel": frozenset({
+        "panel", "drill_layer", "reference_layer", "form_depth",
+        "case", "case_model", "case_face", "case_margin_mm",
+    }),
+    "quantise": frozenset({
+        "case", "grid_mm", "grid_warn_mm", "drill_standard", "drill_sizes", "no_drill_sizes",
+    }),
     "drill": frozenset(),
-    "write-case": frozenset({"targets"}),
-    "read-boards": frozenset({"boards", "panel_reference"}),
+    "write-case": frozenset({"targets", "title"}),
+    "read-boards": frozenset({
+        "boards", "panel_reference", "title",
+        "match_tolerance_mm", "seat_pitch_max_mm", "seat_pitch_min_mm",
+    }),
     "match": frozenset(),
     "seat": frozenset(),
     "clash": frozenset(),
@@ -183,14 +177,68 @@ _D = TypeVar("_D", DrillData, DockData)
 
 @dataclass(frozen=True, slots=True)
 class RunOptions:
-    """One run's resolved inputs, after arguments and before any file opens."""
+    """One run's resolved inputs, flat because the driver's tables key on names.
+
+    ``settings.Settings`` is the grouped, provenanced view a person reads;
+    this is what a step consults. The derivation runs one way only: a
+    nested record here would break ``_STEP_INPUTS``, ``_changed`` and
+    ``resolve.revision_for`` at once.
+    """
 
     panel: Path
-    boards: tuple[Path, ...]
+    drill_layer: str
+    reference_layer: str
+    form_depth: int
     case: str | None
     case_model: Path | None
+    case_face: CaseFace
+    case_margin_mm: float
+    grid_mm: float
+    grid_warn_mm: float | None
+    drill_standard: str
+    drill_sizes: str | None
+    no_drill_sizes: str | None
+    title: str
+    boards: tuple[Path, ...]
     panel_reference: str
+    match_tolerance_mm: float | None
+    seat_pitch_max_mm: float
+    seat_pitch_min_mm: float
     targets: tuple[tuple[str, Path], ...]
+
+    @staticmethod
+    def of(settings: Settings) -> RunOptions:
+        """Flatten the workbench's view into the driver's contract.
+
+        A panel is optional there and required here, because ``readiness``
+        refuses a run without one: representing "no panel" twice would let
+        the two disagree.
+        """
+        panel = settings.artwork.panel.value
+        if panel is None:
+            raise ValueError("a run needs a panel; readiness() refuses one without")
+        return RunOptions(
+            panel=panel,
+            drill_layer=settings.artwork.drill_layer.value,
+            reference_layer=settings.artwork.reference_layer.value,
+            form_depth=settings.artwork.form_depth.value,
+            case=settings.enclosure.case.value,
+            case_model=settings.enclosure.case_model.value,
+            case_face=settings.enclosure.case_face.value,
+            case_margin_mm=settings.enclosure.case_margin_mm.value,
+            grid_mm=settings.drilling.grid_mm.value,
+            grid_warn_mm=settings.drilling.grid_warn_mm.value,
+            drill_standard=settings.drilling.drill_standard.value,
+            drill_sizes=settings.drilling.drill_sizes.value,
+            no_drill_sizes=settings.drilling.no_drill_sizes.value,
+            title=settings.drilling.title.value,
+            boards=settings.boards.boards.value,
+            panel_reference=settings.boards.panel_reference.value,
+            match_tolerance_mm=settings.boards.match_tolerance_mm.value,
+            seat_pitch_max_mm=settings.boards.seat_pitch_max_mm.value,
+            seat_pitch_min_mm=settings.boards.seat_pitch_min_mm.value,
+            targets=settings.output.targets.value,
+        )
 
 
 class Driver:
@@ -502,7 +550,8 @@ class Driver:
         directory, gone before this method returns, which is why the
         filter that needs no file is held separately in ``_admit``.
         """
-        settings = OutputSettings(title=_DEFAULT_TITLE, case_model=self._case_model)
+        options = self._options
+        settings = OutputSettings(title=options.title, case_model=self._case_model)
         with tempfile.TemporaryDirectory(prefix="stompcad-dock-") as tmp:
             tmp_path = Path(tmp)
             drill_path = tmp_path / "drill.json"
@@ -511,9 +560,13 @@ class Driver:
             case_path = tmp_path / "case.stp"
             case_path.write_bytes(_as_bytes(make_emitter("step", settings).emit(drill)))
 
-            source = BoardSource(drill_path, list(self._options.boards), case_path)
+            source = BoardSource(drill_path, list(options.boards), case_path)
             scan = source.scan(scope)
-            tolerance_nm = derived_tolerance(scan.drill, drill_path)
+            tolerance_nm = (
+                derived_tolerance(scan.drill, drill_path)
+                if options.match_tolerance_mm is None
+                else nm_from_mm(options.match_tolerance_mm)
+            )
             case = registration(scan, drill_path)
             self._scan = scan
             self._geometry = board_geometry(scan, case)
@@ -522,8 +575,8 @@ class Driver:
                 tolerance_nm,
                 scan.case.solids,
                 {ordinal: board.solids for ordinal, board in self._geometry.items()},
-                nm_from_mm(_SEAT_PITCH_MAX_MM),
-                nm_from_mm(_SEAT_PITCH_MIN_MM),
+                nm_from_mm(options.seat_pitch_max_mm),
+                nm_from_mm(options.seat_pitch_min_mm),
             )
 
     def _admit(self) -> DockData:
@@ -539,19 +592,25 @@ class Driver:
 
     def _read_panel(self, scope: Scope) -> None:
         """Load the artwork and, when named, the case model -- the read step's leaves."""
-        read_leaves = scope.steps(2 if self._options.case_model is not None else 1)
-        if self._options.case_model is not None:
+        options = self._options
+        read_leaves = scope.steps(2 if options.case_model is not None else 1)
+        if options.case_model is not None:
             case_slot = next(read_leaves)
             case_slot.label("case model")
             self._case_model = load_case_model(
-                self._options.case_model,
-                face=_DEFAULT_CASE_FACE,
-                margin_nm=nm_from_mm(_DEFAULT_CASE_MARGIN_MM),
-                part=self._options.case,
+                options.case_model,
+                face=options.case_face,
+                margin_nm=nm_from_mm(options.case_margin_mm),
+                part=options.case,
             )
         artwork_slot = next(read_leaves)
         artwork_slot.label("artwork")
-        source = AiPdfSource(self._options.panel)
+        source = AiPdfSource(
+            options.panel,
+            drill_layer=options.drill_layer,
+            reference_layer=options.reference_layer,
+            form_depth=options.form_depth,
+        )
         self._raw = source.read()
         next(read_leaves, None)  # exhaust: this is what closes the artwork leaf
 
@@ -563,13 +622,20 @@ class Driver:
 
     def _quantise(self, scope: Scope) -> DrillData:
         assert self._raw is not None  # _read_panel always runs first
+        options = self._options
+        standard = DRILL_STANDARDS[options.drill_standard]
+        include = _selected_sizes(options.drill_sizes)
+        exclude = _selected_sizes(options.no_drill_sizes)
+        if include is not None or exclude is not None:
+            standard = standard.select(include=include, exclude=exclude)
+        warn_over_nm = None if options.grid_warn_mm is None else nm_from_mm(options.grid_warn_mm)
         return quantise(
             self._raw,
             enclosure=IdentifyHammondFootprint(
-                expected_part=self._options.case, case_model=self._options.case_model
+                expected_part=options.case, case_model=options.case_model
             ),
-            diameters=SnapDiametersToDrillTable(DRILL_STANDARDS[DEFAULT_STANDARD]),
-            positions=SnapPositions(nm_from_mm(_DEFAULT_GRID_MM)),
+            diameters=SnapDiametersToDrillTable(standard),
+            positions=SnapPositions(nm_from_mm(options.grid_mm), warn_over_nm),
             scope=scope,
         )
 
@@ -588,7 +654,7 @@ class Driver:
     def _write_case(self, data: DrillData, scope: Scope) -> list[str]:
         """Render, stage and commit the drill half's own targets."""
         targets = self._targets_for(frozenset(available()))
-        settings = OutputSettings(title=_DEFAULT_TITLE, case_model=self._case_model)
+        settings = OutputSettings(title=self._options.title, case_model=self._case_model)
         return self._write(
             data,
             targets,
@@ -691,6 +757,18 @@ def _undocked(targets: Sequence[tuple[str, Path]]) -> list[str]:
     return ["docked nothing: this run's drill half has errors, so no board was read:"] + [
         f"  {path}  ({name})" for name, path in targets
     ]
+
+
+def _selected_sizes(text: str | None) -> tuple[Nanometre, ...] | None:
+    """Comma-separated millimetre sizes as exact drill-table nanometres, or none named.
+
+    Mirrors ``stompdrill.cli.build_drill_standard``'s own narrowing of
+    ``--drill-sizes``/``--no-drill-sizes``, over a string a run's caller
+    already resolved rather than an unread command-line flag.
+    """
+    if text is None:
+        return None
+    return tuple(nm_from_mm(float(size)) for size in text.split(",") if size.strip())
 
 
 def _quantise_outcome(data: DrillData) -> str:

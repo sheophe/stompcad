@@ -10,7 +10,6 @@ from __future__ import annotations
 import inspect
 import io
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -18,8 +17,10 @@ from stompcad import drive
 from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import DrillData
+from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import NO_PROGRESS, track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
@@ -32,13 +33,27 @@ def _refuse_to_read(panel: object) -> object:
 
 
 def _options() -> RunOptions:
-    """A minimal, valid ``RunOptions``: no case model, no emitted targets."""
+    """A minimal, valid ``RunOptions``, at both tools' own CLI defaults throughout."""
     return RunOptions(
         panel=TAR_AI,
-        boards=(),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(),
         panel_reference=PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(),
     )
 
@@ -53,13 +68,8 @@ def drill_and_dock_run() -> Driver:
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")
-    options = RunOptions(
-        panel=TAR_AI,
-        boards=(TAR_PCB,),
-        case="1590B",
-        case_model=model,
-        panel_reference="RV*,SW*",
-        targets=(),
+    options = replace(
+        _options(), boards=(TAR_PCB,), case_model=model, panel_reference="RV*,SW*"
     )
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
     with track(NullSink()) as scope:
@@ -329,21 +339,18 @@ def test_the_read_step_runs_again_over_the_boards_already_scanned(
 def test_a_revision_a_step_cannot_honour_re_runs_it_instead(
     drill_and_dock_run: Driver,
 ) -> None:
-    """``targets`` is read by neither ``read-boards`` nor its own retry.
+    """``title`` is read by ``read-boards`` itself, but not by its own retry.
 
     So it cannot be honoured from the scan already held, and the right
-    answer is the parse -- not the refusal this replaces. (The brief names
-    ``title`` for this case; ``RunOptions`` does not carry that field until
-    Task 10 grows it, so this substitutes ``targets``, a field the same
-    table already excludes from what ``read-boards`` can honour.)
+    answer is the parse -- not the refusal this replaces.
     """
     driver = drill_and_dock_run
     before = driver._scan
-    revised = replace(driver._options, targets=(("report", Path("out.json")),))
+    revised = replace(driver._options, title="revised")
     with track(NullSink()) as scope:
         driver.retry("read-boards", revised, scope)
     assert driver._scan is not before, "the boards must have been scanned again"
-    assert driver._options.targets == revised.targets
+    assert driver._options.title == revised.title
 
 
 @pytest.mark.boards
@@ -413,16 +420,11 @@ def test_match_seat_and_clash_are_not_retry_targets(drill_and_dock_run: Driver) 
             driver.retry(key, driver._options, scope)
 
 
-@pytest.mark.xfail(reason="RunOptions grows in Task 10", strict=True)
 def test_no_option_field_is_read_by_no_step() -> None:
     """Replaces the refusal: a field nothing reads would change nothing.
 
-    ``_STEP_INPUTS['quantise']`` already names ``grid_mm`` ahead of
-    ``RunOptions`` carrying it (Task 8, in anticipation of Task 10), so this
-    equality does not hold yet -- the same forward reference
-    ``test_stale.test_every_option_field_belongs_to_exactly_one_place``
-    already marks ``xfail`` for. It stops failing, and this marker should
-    come off, once Task 10 lands.
+    A revision to a field no row names would invalidate no step, so a run
+    could go stale under it and still look settled.
     """
     from dataclasses import fields
 
@@ -556,14 +558,7 @@ def test_a_retried_step_reports_once_and_a_rerun_reports_not_at_all(
 
 def _undeclared() -> RunOptions:
     """Options the tar fixture ties three parts under: no case is declared."""
-    return RunOptions(
-        panel=TAR_AI,
-        boards=(),
-        case=None,
-        case_model=None,
-        panel_reference="RV*",
-        targets=(),
-    )
+    return replace(_options(), case=None, panel_reference="RV*")
 
 
 def test_a_tie_is_asked_about_and_the_answer_runs_quantise_again() -> None:
@@ -718,14 +713,7 @@ def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once
         pytest.skip("no cached 1590B model")
     lines: list[str] = []
     asked: list[Choice] = []
-    options = RunOptions(
-        panel=TAR_AI,
-        boards=(TAR_PCB,),
-        case="1590B",
-        case_model=model,
-        panel_reference="ZZ*",
-        targets=(),
-    )
+    options = replace(_options(), boards=(TAR_PCB,), case_model=model, panel_reference="ZZ*")
     driver = Driver(DRILL_AND_DOCK, _AnsweringEach(lines, asked), options)
 
     with track(NullSink()) as scope:
