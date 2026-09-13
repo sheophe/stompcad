@@ -10,6 +10,8 @@ rather than inside a three-minute dock test.
 from __future__ import annotations
 
 import ast
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -84,23 +86,43 @@ def test_a_bad_target_leaves_a_good_target_unwritten(tmp_path: Path) -> None:
 
     The control is the point: the same invocation without the bad name does
     write that artefact, so the assertion below is about validation rather
-    than about a command line that writes nothing whatever it is asked.
+    than about a command line that writes nothing whatever it is asked. A
+    declared empty ``boards`` confirms the pedal has none, on a private copy
+    of the fixture so the declaration cannot leak into another suite reading
+    the shared one.
     """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}}), encoding="utf-8"
+    )
     good, control = tmp_path / "good.drl", tmp_path / "control.drl"
-    assert cli.main([str(TAR_AI), "--case", "1590B", "--emit", f"excellon={control}"]) != EXIT_USAGE
+    assert cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={control}"]) != EXIT_USAGE
     assert control.is_file(), "the control wrote nothing; the assertion below proves nothing"
 
     code = cli.main([
-        str(TAR_AI), "--case", "1590B", "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
+        str(panel), "--case", "1590B", "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
     ])
 
     assert code == EXIT_USAGE
     assert not good.exists()
 
 
-def test_parse_emit_rejects_a_spec_with_no_separator() -> None:
+def test_parse_emit_accepts_a_bare_format() -> None:
+    """The optional path form: a known format takes its name from the panel."""
+    assert cli.parse_emit("excellon", TAR_AI) == (
+        "excellon", TAR_AI.with_name(f"{TAR_AI.stem}-case.drl"),
+    )
+
+
+def test_parse_emit_rejects_a_spec_with_no_format_name() -> None:
     with pytest.raises(cli.UsageError):
-        cli.parse_emit("no-equals-sign")
+        cli.parse_emit("=out.bin", TAR_AI)
+
+
+def test_parse_emit_rejects_a_spec_with_an_empty_path() -> None:
+    with pytest.raises(cli.UsageError):
+        cli.parse_emit("excellon=", TAR_AI)
 
 
 def test_a_keyboard_interrupt_exits_130(monkeypatch: pytest.MonkeyPatch) -> None:

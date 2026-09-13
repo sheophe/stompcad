@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -22,6 +24,20 @@ from stompmodel.model import CaseFace
 from tests.conftest import TAR_AI
 
 __all__: list[str] = []
+
+
+def _boardless_panel(tmp_path: Path) -> Path:
+    """A private copy of the tar fixture, declared to have no boards.
+
+    Copied rather than read in place: the shared fixture must not gain a
+    companion project file every other suite reading it would also see.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}}), encoding="utf-8"
+    )
+    return panel
 
 
 class _AlwaysATerminal:
@@ -161,7 +177,7 @@ def test_the_stop_flag_wired_by_run_cancels_the_composed_run(
     monkeypatch.setattr(InlineApp, "run", fake_run)
     monkeypatch.setenv("TERM", "xterm")
     args = cli.build_parser().parse_args(
-        [str(TAR_AI), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"]
+        [str(_boardless_panel(tmp_path)), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"]
     )
 
     with pytest.raises(Cancelled):
@@ -184,7 +200,7 @@ def test_an_app_that_fails_under_the_run_is_not_reported_as_a_stop(
     monkeypatch.setattr(InlineApp, "run", fake_run)
     monkeypatch.setenv("TERM", "xterm")
     args = cli.build_parser().parse_args(
-        [str(TAR_AI), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"]
+        [str(_boardless_panel(tmp_path)), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"]
     )
 
     assert cli._run(args, _AlwaysATerminal()) == EXIT_ERRORS  # type: ignore[arg-type]
