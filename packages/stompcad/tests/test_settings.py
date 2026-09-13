@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stompcad.settings import Discovery, Origin, Resolved, pick  # noqa: F401  (pick's return type)
+from stompcad.settings import Discovery, Origin, pick
 
 
 def test_an_argument_beats_every_other_rank() -> None:
