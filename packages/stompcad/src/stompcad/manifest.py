@@ -82,12 +82,15 @@ class ManifestError(StompError):
 class Manifest:
     """What a project declares, and what was passed over on the way in.
 
-    ``stored`` carries the same declarations as ``values``, but exactly as
-    the file wrote them -- a relative string, not the ``Path`` ``values``
-    resolves it to. ``payload_for`` carries a held declaration forward
-    through ``stored``: a value already on disk must reach the next file
-    byte-identical to what the project declared, never re-derived from the
-    resolved form ``values`` hands the rest of the tool.
+    ``values`` is what the run resolves from, so it holds only what this
+    build knows, with each path resolved against the project. ``stored`` is
+    the file: every section and key it declared, in the spelling it used --
+    a relative string, not the ``Path`` ``values`` resolves it to -- and
+    including the keys this build does not recognise. ``payload_for``
+    carries a held declaration forward through ``stored``, so a value
+    already on disk reaches the next file byte-identical to what the project
+    declared, and a key a later version wrote survives an older build
+    opening that file rather than being deleted by it.
     """
 
     values: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -104,9 +107,11 @@ def read(panel: Path) -> Manifest:
     """This project's declarations, or an empty one where there is no file.
 
     An unknown key is a note rather than a refusal, which is what lets a
-    file written by a later version still open. A file that is not an
-    object, or not JSON at all, is refused: a manifest that cannot be
-    understood must not be silently treated as absent.
+    file written by a later version still open; it is ignored by the run
+    and kept by the file, because refusing to resolve from a key is not a
+    reason to delete it. A file that is not an object, or not JSON at all,
+    is refused: a manifest that cannot be understood must not be silently
+    treated as absent.
     """
     path = manifest_path(panel)
     if not path.is_file():
@@ -130,21 +135,20 @@ def read(panel: Path) -> Manifest:
     for place, declared in loaded.items():
         if place not in PLACES:
             notes.append(f"{path.name}: ignoring unknown section {place!r}")
+            if isinstance(declared, dict):
+                stored[place] = dict(declared)
             continue
         if not isinstance(declared, dict):
             raise ManifestError(f"{path}: section {place!r} must be an object")
+        stored[place] = dict(declared)
         kept: dict[str, Any] = {}
-        kept_raw: dict[str, Any] = {}
         for key, value in declared.items():
             if key not in PLACES[place]:
                 notes.append(f"{path.name}: ignoring unknown key {place}.{key}")
                 continue
             kept[key] = _absolute(place, key, value, path.parent)
-            kept_raw[key] = value
         if kept:
             values[place] = kept
-        if kept_raw:
-            stored[place] = kept_raw
     return Manifest(values, notes, stored)
 
 

@@ -264,3 +264,36 @@ def test_merging_a_target_does_not_mutate_the_held_manifest(tmp_path: Path) -> N
     )
     payload_for(panel, settings, Half.DOCK, held)
     assert held.stored["output"]["targets"] == before, "the caller's held manifest must be untouched"
+
+
+def test_an_unknown_key_survives_being_read_and_written_back(tmp_path: Path) -> None:
+    """A key this build does not know is ignored on the way in, never deleted.
+
+    An additive version bump only works if an older build can open a newer
+    file, run, fill its own gaps and leave the file still readable by the
+    build that wrote it. Filtering the unknown key out of the payload as
+    well as out of the values would make every bump destructive.
+    """
+    from stompcad.manifest import Half, payload_for
+    from stompcad.settings import Settings
+
+    panel = _write(tmp_path, {"version": 1, "drilling": {"grid_mm": 0.5, "wobble": 3}})
+    held = manifest.read(panel)
+    assert held.values["drilling"] == {"grid_mm": 0.5}, "the run must not resolve from an unknown key"
+
+    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
+    assert written["drilling"]["wobble"] == 3
+    assert written["drilling"]["grid_mm"] == 0.5
+
+
+def test_an_unknown_section_survives_being_read_and_written_back(tmp_path: Path) -> None:
+    """A whole place a later version added is carried, for the same reason a key is."""
+    from stompcad.manifest import Half, payload_for
+    from stompcad.settings import Settings
+
+    panel = _write(tmp_path, {"version": 1, "sparkle": {"x": 1}})
+    held = manifest.read(panel)
+    assert "sparkle" not in held.values
+
+    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
+    assert written["sparkle"] == {"x": 1}
