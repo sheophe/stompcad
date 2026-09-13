@@ -10,7 +10,6 @@ from __future__ import annotations
 import inspect
 import io
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -18,8 +17,10 @@ from stompcad import drive
 from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import DrillData
+from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import NO_PROGRESS, track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
@@ -32,13 +33,27 @@ def _refuse_to_read(panel: object) -> object:
 
 
 def _options() -> RunOptions:
-    """A minimal, valid ``RunOptions``: no case model, no emitted targets."""
+    """A minimal, valid ``RunOptions``, at both tools' own CLI defaults throughout."""
     return RunOptions(
         panel=TAR_AI,
-        boards=(),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case="1590B",
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(),
         panel_reference=PANEL_REFERENCE,
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(),
     )
 
@@ -53,13 +68,8 @@ def drill_and_dock_run() -> Driver:
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")
-    options = RunOptions(
-        panel=TAR_AI,
-        boards=(TAR_PCB,),
-        case="1590B",
-        case_model=model,
-        panel_reference="RV*,SW*",
-        targets=(),
+    options = replace(
+        _options(), boards=(TAR_PCB,), case_model=model, panel_reference="RV*,SW*"
     )
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
     with track(NullSink()) as scope:
@@ -246,43 +256,6 @@ def test_retry_runs_one_step_again_over_the_intermediates_already_held(
     assert [finding.code for finding in again.diagnostics] == ["unmatched-enclosure"]
 
 
-def test_retry_refuses_a_step_whose_input_the_driver_does_not_hold() -> None:
-    """``retry`` names ``quantise``, ``drill`` and ``read-boards``; other keys are refused."""
-    driver = Driver(DRILL_AND_DOCK, _RecordingPresentation(), _options())
-
-    with pytest.raises(ValueError):
-        driver.retry("seat", _options(), NO_PROGRESS)
-
-    with pytest.raises(ValueError):
-        driver.retry("quantise", _options(), NO_PROGRESS)
-
-
-def test_retry_refuses_a_revised_field_the_named_step_cannot_honour() -> None:
-    """A revision the step cannot apply is a usage error, not a silent no-op.
-
-    ``retry`` takes a whole ``RunOptions`` but one step reads only part of
-    it: ``drill`` never looks at ``case_model``, so accepting a revised one
-    would leave plan C believing an answer took effect when nothing read it.
-    Refused the way ``stompcollider`` refuses ``--place`` -- parsed, judged,
-    rejected with the reason -- and the driver is left exactly as it was.
-    """
-    presentation = _RecordingPresentation()
-    driver = Driver(DRILL_AND_DOCK, presentation, _options())
-    with track(NullSink()) as scope:
-        driver.run_drill(scope)
-    held, drilled = driver._options, driver._drilled
-    presentation.finished.clear()
-
-    with pytest.raises(ValueError) as refusal:
-        driver.retry("drill", replace(_options(), case_model=Path("enclosure.stp")), NO_PROGRESS)
-
-    assert "case_model" in str(refusal.value)
-    assert "read-panel" in str(refusal.value), "the refusal must name the step that reads it"
-    assert driver._options is held, "the refused options replaced the ones the driver holds"
-    assert driver._drilled is drilled
-    assert presentation.finished == [], "a refused retry reported a step as finished"
-
-
 def test_retrying_a_step_discards_what_a_later_step_produced() -> None:
     """Re-running a step supersedes every intermediate computed after it.
 
@@ -363,16 +336,201 @@ def test_the_read_step_runs_again_over_the_boards_already_scanned(
 
 @pytest.mark.boards
 @pytest.mark.hammond
-def test_a_retry_of_the_read_step_refuses_a_revised_board_list(
-    drill_and_dock_run: Driver, tmp_path: Path
+def test_a_revision_a_step_cannot_honour_re_runs_it_instead(
+    drill_and_dock_run: Driver,
 ) -> None:
-    """Accepted and ignored is the one outcome a revision may not have."""
-    driver = drill_and_dock_run
+    """``title`` is read by ``read-boards`` itself, but not by its own retry.
 
-    with track(NullSink()) as scope, pytest.raises(ValueError, match="boards"):
-        driver.retry(
-            "read-boards", replace(driver._options, boards=(tmp_path / "other.stp",)), scope
-        )
+    So it cannot be honoured from the scan already held, and the right
+    answer is the parse -- not the refusal this replaces.
+    """
+    driver = drill_and_dock_run
+    before = driver._scan
+    revised = replace(driver._options, title="revised")
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", revised, scope)
+    assert driver._scan is not before, "the boards must have been scanned again"
+    assert driver._options.title == revised.title
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_revision_a_step_can_honour_keeps_what_it_read(
+    drill_and_dock_run: Driver,
+) -> None:
+    """A widened expression re-runs the filter, never the parse."""
+    driver = drill_and_dock_run
+    before = driver._scan
+    widened = replace(
+        driver._options, panel_reference=f"{driver._options.panel_reference},C1"
+    )
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", widened, scope)
+    assert driver._scan is before, "boards already scanned are not read twice"
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_revised_board_list_reparses_rather_than_filters_a_stale_scan(
+    drill_and_dock_run: Driver,
+) -> None:
+    """``boards`` is the field the comment above ``_RETRY_INPUTS`` names as
+    the reason ``read-boards`` needs a narrower row at all -- the one the
+    deleted refusal test covered, and the ``targets`` test above does not.
+
+    A stale-scan filter could never grow the board count on its own; only a
+    genuine second parse of the doubled list can, so that is what is proved
+    rather than merely asserted.
+    """
+    driver = drill_and_dock_run
+    before = driver._scan
+    assert before is not None, "the control: a fixture with nothing scanned proves nothing"
+    revised = replace(driver._options, boards=(TAR_PCB, TAR_PCB))
+
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", revised, scope)
+
+    assert driver._scan is not before, "the boards must have been scanned again"
+    assert driver._options.boards == revised.boards
+    assert driver._scan is not None
+    assert len(driver._scan.raw.boards) == 2 * len(before.raw.boards), (
+        "a filter over the stale scan could not have doubled the board count"
+    )
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_every_step_in_the_plan_can_be_retried(drill_and_dock_run: Driver) -> None:
+    """No step is refused any more; a revision it outgrew re-runs it."""
+    driver = drill_and_dock_run
+    for step in DRILL_AND_DOCK.steps:
+        if step.key in {"match", "seat", "clash"}:
+            continue
+        with track(NullSink()) as scope:
+            driver.retry(step.key, driver._options, scope)
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_match_seat_and_clash_are_not_retry_targets(drill_and_dock_run: Driver) -> None:
+    """They read no field, so no change ever makes one of them the earliest."""
+    driver = drill_and_dock_run
+    for key in ("match", "seat", "clash"):
+        with track(NullSink()) as scope, pytest.raises(ValueError, match=key):
+            driver.retry(key, driver._options, scope)
+
+
+def test_no_option_field_is_read_by_no_step() -> None:
+    """Replaces the refusal: a field nothing reads would change nothing.
+
+    A revision to a field no row names would invalidate no step, so a run
+    could go stale under it and still look settled.
+    """
+    from dataclasses import fields
+
+    from stompcad.drive import _STEP_INPUTS, RunOptions
+
+    read = {name for names in _STEP_INPUTS.values() for name in names}
+    assert {field.name for field in fields(RunOptions)} == read
+
+
+def test_retry_inputs_never_exceed_step_inputs() -> None:
+    from stompcad.drive import _RETRY_INPUTS, _STEP_INPUTS
+
+    for key, honourable in _RETRY_INPUTS.items():
+        assert honourable <= _STEP_INPUTS[key], key
+
+
+def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> None:
+    """An unrun driver refuses a retry, naming the work that has not happened.
+
+    Each of ``_rerun``'s preconditions guards an intermediate a later step
+    reads, so a driver that has already run satisfies all five and cannot
+    exercise any of them; only a freshly constructed one can. Each message
+    names the missing work -- "the panel is read", "quantisation" -- rather
+    than the attribute it would have set, so a person reading it knows what
+    to do.
+    """
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+
+    with pytest.raises(ValueError, match="panel is read"):
+        driver.retry("quantise", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="quantisation"):
+        driver.retry("drill", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="panel is drilled"):
+        driver.retry("write-case", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="panel is drilled"):
+        driver.retry("read-boards", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="boards are docked"):
+        driver.retry("write-assembly", _options(), NO_PROGRESS)
+
+
+def test_retrying_read_panel_also_credits_the_quantise_hold_it_refreshed() -> None:
+    """``_STEP_HOLDS`` says ``quantise`` owns ``_quantised``. A retry of
+    ``read-panel`` sets it too, because a read alone has nothing of
+    ``DrillData``'s own shape to report -- so the presentation must be told
+    ``quantise`` ran as well, or ``_STEP_HOLDS``'s claim about who assigns
+    what is silently false the one time it is not this call's own key.
+    """
+    lines: list[str] = []
+    driver = Driver(DRILL_AND_DOCK, _Recording(lines), _options())
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+    lines.clear()
+
+    with track(NullSink()) as scope:
+        driver.retry("read-panel", driver._options, scope)
+
+    keys = [line.split(":", 1)[0] for line in lines]
+    assert keys == ["read-panel", "quantise"], lines
+
+
+def _uniquely_owned_holds() -> dict[str, str]:
+    """Attributes ``_STEP_HOLDS`` assigns to exactly one step.
+
+    ``_dock_data`` is excluded on purpose: ``match``, ``seat``, ``clash`` and
+    ``read-boards`` (through ``_admit``) all legitimately rewrite it during a
+    normal run, so which of them is responsible cannot be told apart from
+    the attribute's identity alone -- unlike every other hold below, which
+    only one step ever assigns.
+    """
+    owners: dict[str, list[str]] = {}
+    for owner, attributes in _STEP_HOLDS.items():
+        for attribute in attributes:
+            owners.setdefault(attribute, []).append(owner)
+    return {attribute: found[0] for attribute, found in owners.items() if len(found) == 1}
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_retry_credits_every_step_whose_hold_it_refreshed(drill_and_dock_run: Driver) -> None:
+    """The general form of the ``read-panel``/``quantise`` guard above.
+
+    A future branch that writes to a hold ``_STEP_HOLDS`` assigns to some
+    *other* step, without also crediting that step, would leave the
+    presentation believing a step never ran when it did -- this is true
+    for any retryable step, not only ``read-panel``, so it is checked for
+    all of them rather than pinned once.
+    """
+    driver = drill_and_dock_run
+    unique_holds = _uniquely_owned_holds()
+
+    for step in DRILL_AND_DOCK.steps:
+        if step.key in {"match", "seat", "clash"}:
+            continue
+        before = {attribute: getattr(driver, attribute) for attribute in unique_holds}
+        lines: list[str] = []
+        driver._presentation = _Recording(lines)
+
+        with track(NullSink()) as scope:
+            driver.retry(step.key, driver._options, scope)
+
+        credited = {line.split(":", 1)[0] for line in lines}
+        for attribute, owner in unique_holds.items():
+            after = getattr(driver, attribute)
+            refreshed = after is not None and after is not before[attribute]
+            if refreshed:
+                assert owner in credited, f"{owner!r}'s hold changed but was not credited"
 
 
 @pytest.mark.boards
@@ -397,14 +555,7 @@ def test_a_retried_step_reports_once_and_a_rerun_reports_not_at_all(
 
 def _undeclared() -> RunOptions:
     """Options the tar fixture ties three parts under: no case is declared."""
-    return RunOptions(
-        panel=TAR_AI,
-        boards=(),
-        case=None,
-        case_model=None,
-        panel_reference="RV*",
-        targets=(),
-    )
+    return replace(_options(), case=None, panel_reference="RV*")
 
 
 def test_a_tie_is_asked_about_and_the_answer_runs_quantise_again() -> None:
@@ -559,14 +710,7 @@ def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once
         pytest.skip("no cached 1590B model")
     lines: list[str] = []
     asked: list[Choice] = []
-    options = RunOptions(
-        panel=TAR_AI,
-        boards=(TAR_PCB,),
-        case="1590B",
-        case_model=model,
-        panel_reference="ZZ*",
-        targets=(),
-    )
+    options = replace(_options(), boards=(TAR_PCB,), case_model=model, panel_reference="ZZ*")
     driver = Driver(DRILL_AND_DOCK, _AnsweringEach(lines, asked), options)
 
     with track(NullSink()) as scope:

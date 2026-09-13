@@ -175,9 +175,13 @@ stompcad PANEL.ai BOARD.stp --case 1590B --case-model 1590B.stp \
 
 `stompcad` runs `stompdrill` and `stompcollider` together as one invocation. It
 drills `PANEL.ai`, then seats each `BOARD.stp` inside the case it has just
-drilled and reports the clashes. Naming no board runs the drill half alone.
-Each of the run's steps prints one line as it completes, so a piped run reads
-as a log of what happened.
+drilled and reports the clashes. Naming no board and finding none beside the
+panel does not run the drill half alone: it leaves the run refusing to
+start, because a question nobody has answered is not the same as an answer
+of none. A drill-only run is declared, not merely omitted, by recording an
+empty board list in the project file described below. Each of the run's steps
+prints one line as it completes, so a piped run reads as a log of what
+happened.
 
 On a terminal, the run is instead drawn inline above the prompt. `--progress`
 picks the starting level of detail -- `bar` draws one progress bar and the
@@ -200,10 +204,10 @@ terminal; a piped or redirected run always gets the plain step-line log.
 
 `--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
 `excellon`, `json` and `step` from the drill half, `report` and `assembly`
-from the dock half. Every requested target is validated together, before
-anything is opened for writing: a name neither half can render is a usage
-error naming it, and two targets naming one file are refused exactly as both
-tools refuse them.
+from the dock half. Every requested target is validated together before
+anything is opened for writing, whether it was typed here or declared in the
+project file: a name neither half can render is a usage error naming it, and
+two targets naming one file are refused exactly as both tools refuse them.
 
 Neither fact docking needs has a default. `--panel-reference` names the
 components chosen for this particular pedal, and `--case-model` supplies the
@@ -225,6 +229,66 @@ and the assembly. Both halves name what they did not write.
 A run stopped before it finishes exits `130`, and nothing it was about to write
 survives. Every artefact is rendered before any target is touched, so at the
 moment a run can be stopped there is nothing half-written on disk to remove.
+
+### The project file
+
+A pedal is a project, and the values that describe it belong to the panel
+rather than to one invocation. `stompcad` reads them from a file beside the
+artwork, named from its stem: `tar.ai` is described by `tar.stompcad.json`.
+Moving the pair together moves the project; there is no other state, and
+nothing outside that directory is consulted.
+
+The file is a JSON object holding a schema `version` and one object per group
+of settings — `artwork`, `enclosure`, `drilling`, `boards` and `output` — each
+naming the same values the options above do:
+
+```json
+{
+  "version": 1,
+  "enclosure": { "case": "1590B", "case_model": "1590B.stp" },
+  "boards": { "boards": ["tar-pcb.stp"], "panel_reference": "RV*,SW*" },
+  "output": { "targets": { "excellon": "tar-case.drl" } }
+}
+```
+
+Paths are stored relative to the file, so a project that is copied or shared
+still works. A declared value beats a default and beats anything the run
+works out for itself; an option typed on the command line beats the file. A
+value the file already holds is used and left untouched — a one-off
+invocation cannot quietly redefine the project — and where the two disagree
+the run says so rather than choosing silently.
+
+The empty declaration matters as much as a full one. `"boards": {"boards": []}`
+states that this pedal has no board to dock, which is what a drill-only run
+needs: finding no board beside the panel is not the same answer as being told
+there is none, so a run given neither refuses to start rather than quietly
+drilling alone.
+
+A key this build does not recognise is reported and ignored, and left in the
+file, so a project written by a later version still opens here. A file that
+cannot be read at all — malformed JSON, or something that is not an object —
+is a usage error naming the file: a project whose declarations cannot be read
+must never be run under values that look like the builder's own.
+
+A key this build does recognise must hold the shape that key takes — a string,
+a number, a whole number, a list of paths, or the `targets` object of format
+name to path — and one that does not is the same usage error, naming the key
+and the shape it wants. It is reported before the artwork is opened, so a
+mistyped value never stops a run part-way through. A boolean is not a number
+here: `"form_depth": true` is refused rather than read as `1`, and `null` is
+refused where the key holds no null — omitting a key is how a project declares
+nothing about it.
+
+A value of the right shape must also be one the tool that consumes it accepts.
+The grid and its warning distance, the clearance margin, the match tolerance,
+the two seat steps and the designator filter are checked by the same code
+`stompdrill` and `stompcollider` run from their own command lines, so a
+project cannot start a run under a value either tool would refuse. These are
+reported before the artwork is opened too, naming the key that carried the
+value.
+
+This build does not yet write the file. Until it does, a project is
+hand-authored.
 
 ### Pickers
 

@@ -15,10 +15,20 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO, TypeVar
 
+from stompcollider.cli import parse_length as parse_dock_length
+from stompcollider.cli import parse_pitches
+from stompcollider.designators import parse_filter
+from stompcollider.errors import UsageError as DockUsageError
+from stompdrill.cli import build_case_model, parse_case, parse_face, parse_sizes
+from stompdrill.cli import parse_length as parse_drill_length
 from stompdrill.emitters import available
+from stompdrill.errors import UsageError as DrillUsageError
+from stompdrill.pipeline import DRILL_STANDARDS, SnapPositions
+from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import (
     EXIT_CLEAN,
     EXIT_ERRORS,
@@ -27,17 +37,36 @@ from stompmodel.diagnostics import (
     exit_for_severity,
 )
 from stompmodel.errors import StompError
+from stompmodel.model import CaseFace
 from stompmodel.progress import Sink, track
 from stompmodel.protocols import check_target_set
+from stompmodel.units import Nanometre, nm_from_mm
 
+from . import discover, manifest
 from .cancel import EXIT_CANCELLED, Cancelled, CancellingSink
 from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
 from .inline import InlineApp, TerminalPresentation
 from .plan import DRILL_AND_DOCK
 from .present import NoTerminal, PlainWriter, Presentation
+from .readiness import Readiness, readiness
+from .settings import (
+    DEFAULTS,
+    Artwork,
+    BoardSettings,
+    Discovery,
+    Drilling,
+    Enclosure,
+    Origin,
+    OutputSettings,
+    Provenance,
+    Resolved,
+    Settings,
+    pick,
+)
 
 __all__ = [
     "UsageError",
+    "Resolution",
     "build_parser",
     "parse_emit",
     "validate_targets",
@@ -46,6 +75,8 @@ __all__ = [
     "choose_presentation",
     "main",
 ]
+
+_T = TypeVar("_T")
 
 
 class UsageError(Exception):
@@ -64,12 +95,20 @@ def build_parser() -> argparse.ArgumentParser:
         prog="stompcad",
         description="Drill a panel and dock its boards inside the drilled case, in one run.",
     )
-    parser.add_argument("panel", metavar="PANEL.ai", help="Illustrator file to read")
+    parser.add_argument(
+        "panel",
+        metavar="PANEL.ai",
+        nargs="?",
+        default=None,
+        help="Illustrator file to read; with none given, the sole .ai file "
+        "in the working directory is used",
+    )
     parser.add_argument(
         "boards",
         metavar="BOARD.stp",
         nargs="*",
-        help="board models to seat in the drilled case; docking is skipped with none",
+        help="board models to seat in the drilled case; a drill-only run must say so "
+        "explicitly, with an empty list declared in the project file",
     )
     parser.add_argument(
         "--case",
@@ -114,12 +153,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_emit(spec: str) -> tuple[str, Path]:
-    """``"fmt=path"`` -> ``("fmt", Path("path"))``. The format is not checked here."""
+def parse_emit(spec: str, panel: Path) -> tuple[str, Path]:
+    """``"fmt"`` or ``"fmt=path"`` -> ``(fmt, path)``. The format is not checked here.
+
+    A bare format takes its file from ``discover.output_path``'s naming
+    scheme, beside ``panel``. A format that scheme does not know has no such
+    answer; it keeps ``panel`` itself as a placeholder, because
+    ``validate_targets`` rejects the name outright regardless of what path
+    travels beside it.
+    """
     name, separator, path = spec.partition("=")
-    if not separator or not name.strip() or not path.strip():
+    name = name.strip()
+    if not name:
+        raise UsageError(f"--emit expects FORMAT or FORMAT=PATH, got {spec!r}")
+    if not separator:
+        try:
+            return (name, discover.output_path(name, panel))
+        except KeyError:
+            return (name, panel)
+    if not path.strip():
         raise UsageError(f"--emit expects FORMAT=PATH, got {spec!r}")
-    return (name.strip(), Path(path.strip()))
+    return (name, Path(path.strip()))
 
 
 def _known_targets() -> frozenset[str]:
@@ -127,57 +181,508 @@ def _known_targets() -> frozenset[str]:
     return frozenset(available()) | DOCK_TARGET_NAMES
 
 
-def validate_targets(targets: Sequence[tuple[str, Path]]) -> None:
-    """Reject every unknown ``--emit`` format together, before any file opens.
+def validate_targets(targets: Sequence[tuple[str, Path]], where: str = "--emit") -> None:
+    """Reject every unknown target format together, before any file opens.
 
     CLAUDE.md: "Validate all requested targets together before rendering."
     ``_write_case`` and ``_write_dock`` each filter to the names their own
     half owns; those two sets are disjoint, so a name outside their union
     would otherwise be silently dropped rather than reported. Collecting
     every bad name here, rather than raising on the first, is what makes one
-    round trip enough for a caller who mistyped more than one flag.
+    round trip enough for a caller who mistyped more than one. ``where``
+    names the rank that asked, because a flag and a project key are edited
+    in different places.
     """
     known = _known_targets()
     bad = sorted({name for name, _path in targets if name not in known})
     if bad:
         raise UsageError(
-            f"--emit: unknown format(s) {', '.join(bad)}; available: {', '.join(sorted(known))}"
+            f"{where}: unknown format(s) {', '.join(bad)}; available: {', '.join(sorted(known))}"
         )
 
 
-def resolve(args: argparse.Namespace) -> RunOptions:
-    """One run's inputs, with everything a command line can get wrong settled first.
+def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]]) -> None:
+    """Both target checks, over the set this run will actually write.
 
-    Both tools resolve their arguments before opening an input, and both
-    refuse a target set two of whose members reach one file. Docking needs
-    two facts nothing can supply on a run's behalf: the case the boards go
-    into, and which designators are panel references. A run with no board
-    needs neither, so neither is required until one is named.
+    ``validate_targets`` rejects a format neither half owns, and
+    ``check_target_set`` two artefacts naming one file -- which ADR-0001's
+    rollback assumes never happens, and which would otherwise leave one file
+    on disk beside two claims of having written it.
     """
-    targets = [parse_emit(spec) for spec in args.emit]
-    validate_targets(targets)
+    where = "output.targets" if targets.provenance.origin is Origin.PROJECT else "--emit"
+    validate_targets(targets.value, where)
     try:
-        check_target_set([path for _name, path in targets])
+        check_target_set([path for _name, path in targets.value])
     except ValueError as failure:
         raise UsageError(str(failure)) from failure
-    boards = tuple(Path(board) for board in args.boards)
-    if boards and args.panel_reference is None:
+
+
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """What one invocation resolved, what it wants to say, and what blocks it.
+
+    Resolving and refusing are separate because they answer different
+    questions: the workbench opens on a resolution that is not ready and
+    shows why, while a headless run turns the same blockers into exit 3.
+    A ``resolve`` that raised could serve only the second.
+    """
+
+    settings: Settings
+    notes: tuple[str, ...]
+    blockers: Readiness
+
+    def require_ready(self) -> None:
+        """Raise a usage failure naming every blocker and the place that answers it."""
+        if self.blockers.ready:
+            return
         raise UsageError(
-            "--panel-reference is required to dock a board: it names the components "
-            "chosen for this pedal, which no default can know"
+            "this run is not ready:\n"
+            + "\n".join(
+                f"  {place}: {sentence}" for _blocker, place, sentence in self.blockers.blockers
+            )
         )
-    if boards and args.case_model is None:
-        raise UsageError("--case-model is required to dock a board: a board is seated in the case")
-    return RunOptions(
-        panel=Path(args.panel),
-        boards=boards,
-        case=args.case,
-        case_model=None if args.case_model is None else Path(args.case_model),
-        # Never parsed when no board is named: the dock half is the only
-        # reader, and a run without one does not reach it.
-        panel_reference=args.panel_reference or "",
-        targets=tuple(targets),
+
+
+def _project(project: manifest.Manifest, place: str, key: str) -> Any:
+    """One declared value, or ``None`` where the project says nothing about it.
+
+    Untyped by nature: ``manifest.read`` has checked each declaration's
+    JSON shape, not what it means, so the caller still owns turning a
+    string of the right shape into the face, part number or size list
+    ``Settings`` carries.
+    """
+    return project.values.get(place, {}).get(key)
+
+
+def _pick_noting(
+    argument: _T | None,
+    project: _T | None,
+    discovered: Discovery[_T] | None,
+    default: _T,
+    *,
+    panel: Path,
+    label: str,
+    notes: list[str],
+) -> Resolved[_T]:
+    """``pick``, plus the one note a declaration's own rank cannot raise itself.
+
+    Spec decision 6: a declaration stands even where discovery found
+    something else, so the disagreement becomes a note naming the file --
+    never a silent re-pick, and never a note when nothing above the project
+    overrode it, since that would just restate what discovery already
+    considered and lost to a stronger rank.
+    """
+    resolved = pick(argument, project, discovered, default)
+    if (
+        resolved.provenance.origin is Origin.PROJECT
+        and discovered is not None
+        and discovered.value != resolved.value
+    ):
+        notes.append(
+            f"{panel.name}: the project declares {label} {resolved.value!r}, "
+            f"but {discovered.detail} is {discovered.value!r}"
+        )
+    return resolved
+
+
+def _resolve_panel(args: argparse.Namespace, directory: Path) -> tuple[Path, Resolved[Path | None]]:
+    """The panel: the argument if given, else the directory's one artwork file.
+
+    None and several candidates are both usage failures naming what was
+    found, because a headless run has nobody to ask; the workbench opens
+    blocked on the same two states instead of pre-empting them here.
+    """
+    if args.panel is not None:
+        panel = Path(args.panel)
+        return panel, Resolved[Path | None](panel, Provenance(Origin.ARGUMENT))
+    found = discover.panels(directory)
+    if len(found) == 1:
+        panel = found[0]
+        return panel, Resolved[Path | None](panel, Provenance(Origin.DISCOVERED, "the artwork"))
+    if not found:
+        raise UsageError(f"no artwork (.ai) file found in {directory}; name one")
+    names = ", ".join(path.name for path in found)
+    raise UsageError(f"several artwork files found in {directory} ({names}); name one")
+
+
+def _layer_discovery(panel: Path, conventional: str) -> Discovery[str] | None:
+    """The conventional layer name, when the artwork carries it.
+
+    A file that cannot yet be read -- a placeholder ahead of a real panel,
+    or one the run will fail on regardless once it opens it for real --
+    offers no opinion here rather than raising ahead of that step.
+    """
+    try:
+        names = discover.layers(panel)
+    except StompError:
+        return None
+    return Discovery(conventional, "found in the artwork") if conventional in names else None
+
+
+def _case_face(raw: Any) -> CaseFace | None:
+    """A project's drilled-face string as the enum ``Settings`` carries.
+
+    ``stompdrill``'s own parser owns how the word is read -- which spellings
+    it strips and lowers as well as which two names exist -- so a second
+    reading here would accept what its flag refuses, or refuse what it
+    accepts. Its sentence names that flag, which this command line has not
+    got, so the prefix becomes the key the value was typed into.
+    """
+    if raw is None:
+        return None
+    try:
+        return parse_face(str(raw))
+    except DrillUsageError as failure:
+        raise UsageError(
+            str(failure).replace("--case-face", "enclosure.case_face", 1)
+        ) from failure
+
+
+def _validate_drilling(drilling: Drilling) -> None:
+    """Build the drill table this run would use, and refuse it here if it cannot.
+
+    The same three questions ``stompdrill``'s ``build_drill_standard``
+    asks -- does the standard exist, do the sizes parse, does the narrowed
+    table survive -- asked where a usage-error convention exists to answer
+    them. ``drive.py`` narrows the table again under the real run, but by
+    then the artwork is open and a bad value is a traceback rather than a
+    usage failure naming the project key that carried it.
+    """
+    standard = DRILL_STANDARDS.get(drilling.drill_standard.value)
+    if standard is None:
+        raise UsageError(
+            f"drilling.drill_standard {drilling.drill_standard.value!r} is not a drill "
+            f"standard; available: {', '.join(DRILL_STANDARDS)}"
+        )
+    include = _selected_sizes(drilling.drill_sizes, "drilling.drill_sizes")
+    exclude = _selected_sizes(drilling.no_drill_sizes, "drilling.no_drill_sizes")
+    if include is None and exclude is None:
+        return
+    try:
+        standard.select(include=include, exclude=exclude)
+    except ValueError as failure:
+        # The standard names itself and the sizes it holds; restating either
+        # here would be a second answer to the same question.
+        raise UsageError(str(failure)) from failure
+
+
+def _selected_sizes(sizes: Resolved[str | None], label: str) -> tuple[Nanometre, ...] | None:
+    """One declared size list in the exact nanometres a drill table is keyed by."""
+    if sizes.value is None:
+        return None
+    try:
+        return tuple(nm_from_mm(size) for size in parse_sizes(sizes.value, label))
+    except DrillUsageError as failure:
+        raise UsageError(str(failure)) from failure
+
+
+def _validate_form_depth(panel: Path, form_depth: Resolved[int]) -> None:
+    """A nesting depth the reader would reject, caught before it opens anything.
+
+    Constructing the source is the check: ``AiPdfSource`` states the rule
+    and applies it without touching the file, so the depth this run would
+    read at is tested by the object that would read it.
+    """
+    try:
+        AiPdfSource(panel, form_depth=form_depth.value)
+    except ValueError as failure:
+        raise UsageError(f"artwork.form_depth: {failure}") from failure
+
+
+def _declared_case(raw: Any, label: str) -> str | None:
+    """One rank's part number, as the catalogue spells it, or a usage failure.
+
+    ``stompdrill`` owns which designators exist and what each normalises
+    to, and its own command line hands the normalised form to the stage;
+    a second spelling reaching the same stage from here would be a second
+    answer. Its sentence names its own flag, so the project rank restates
+    the prefix as the key the value was actually typed into.
+    """
+    if raw is None:
+        return None
+    try:
+        return parse_case(str(raw))
+    except DrillUsageError as failure:
+        raise UsageError(str(failure).replace("--case", label, 1)) from failure
+
+
+def _validate_panel_reference(panel_reference: Resolved[str]) -> None:
+    """The dock half's own filter parser, asked of whichever rank answered.
+
+    ``stompcollider`` states what a term may be, and states it for a caller
+    that has opened nothing; left to the run it would first be asked over
+    boards already read, on the far side of the drill half's commit. An
+    unanswered filter is passed over rather than parsed: the empty default
+    is the state ``readiness`` reports as a blocker, not a bad expression.
+    """
+    if not panel_reference.value:
+        return
+    where = (
+        "--panel-reference"
+        if panel_reference.provenance.origin is Origin.ARGUMENT
+        else "boards.panel_reference"
     )
+    try:
+        parse_filter(panel_reference.value)
+    except DockUsageError as failure:
+        raise UsageError(f"{where}: {failure}") from failure
+
+
+# The four checks below name every value as the project spells it. No flag of
+# this command line carries any of these six numbers, so the project file is
+# the only rank that can state one and the only place a refusal can send
+# anybody; a flag added later brings its own name with it.
+
+
+def _declared_length(millimetres: float, label: str) -> Nanometre:
+    """One rank's millimetre value in the exact nanometres its tool works in.
+
+    ``stompdrill``'s own conversion, which is where a value JSON can hold
+    and no arithmetic can use -- an infinity -- stops being a length.
+    """
+    try:
+        return parse_drill_length(millimetres, label)
+    except DrillUsageError as failure:
+        raise UsageError(str(failure)) from failure
+
+
+def _validate_grid(drilling: Drilling) -> None:
+    """Build the position snapping this run would use, and refuse it here if it cannot.
+
+    ``stompdrill``'s command line resolves the same two values into a
+    ``SnapPositions`` before it opens the artwork, so a pitch no grid can be
+    spelled in, or a warning distance no hole can have moved less than, is a
+    usage failure there. The threshold is checked against the pitch it was
+    declared beside, because that is the pair the stage holds; building the
+    pitch on its own first is what tells the two declarations apart.
+    """
+    grid_nm = _declared_length(drilling.grid_mm.value, "drilling.grid_mm")
+    try:
+        SnapPositions(grid_nm)
+    except ValueError as failure:
+        raise UsageError(f"drilling.grid_mm: {failure}") from failure
+    warn_mm = drilling.grid_warn_mm.value
+    if warn_mm is None:
+        return
+    warn_nm = _declared_length(warn_mm, "drilling.grid_warn_mm")
+    try:
+        SnapPositions(grid_nm, warn_nm)
+    except ValueError as failure:
+        raise UsageError(f"drilling.grid_warn_mm: {failure}") from failure
+
+
+def _validate_case_margin(margin_mm: Resolved[float], face: CaseFace) -> None:
+    """``stompdrill``'s own clearance check, asked with the model withheld.
+
+    CLAUDE.md: the margin is refused whether or not a model was supplied,
+    and naming no model is what leaves this call the check alone -- nothing
+    is loaded and no geometry is touched. The face is the one this run
+    resolved, already checked above, so the call states the run's own values.
+    """
+    try:
+        build_case_model(
+            argparse.Namespace(
+                case_face=face.value,
+                case_margin=margin_mm.value,
+                case_model=None,
+                case=None,
+            )
+        )
+    except DrillUsageError as failure:
+        raise UsageError(
+            str(failure).replace("--case-margin", "enclosure.case_margin_mm", 1)
+        ) from failure
+
+
+def _validate_dock_lengths(
+    tolerance_mm: Resolved[float | None],
+    pitch_max_mm: Resolved[float],
+    pitch_min_mm: Resolved[float],
+) -> None:
+    """The dock half's three lengths, checked by ``stompcollider``'s own parsers.
+
+    Each is handed back as the text that command line would have carried,
+    because those parsers are the single statement of the rules they hold: a
+    recognition tolerance of nothing pairs no component with any hole, a scan
+    step of nothing describes no scan, and a coarse step finer than the fine
+    one describes no search. Their sentences name their own flags, so each
+    prefix is restated as the key the value was actually typed into.
+    """
+    if tolerance_mm.value is not None:
+        try:
+            parse_dock_length(str(tolerance_mm.value), "boards.match_tolerance_mm")
+        except DockUsageError as failure:
+            raise UsageError(str(failure)) from failure
+    try:
+        parse_pitches(
+            argparse.Namespace(
+                seat_pitch_max=str(pitch_max_mm.value),
+                seat_pitch_min=str(pitch_min_mm.value),
+            )
+        )
+    except DockUsageError as failure:
+        raise UsageError(
+            str(failure)
+            .replace("--seat-pitch-max", "boards.seat_pitch_max_mm")
+            .replace("--seat-pitch-min", "boards.seat_pitch_min_mm")
+        ) from failure
+
+
+def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
+    """The four ranks, assembled once, with every disagreement carried.
+
+    Three orderings are load-bearing. The panel comes first, because every
+    other rank is read relative to it. Every value a user can type is then
+    resolved and validated, before the first discovery opens the artwork:
+    CLAUDE.md's "validate options before opening the artwork" has nowhere
+    else to happen for a value carried only by a hand-edited project file.
+    That is why the dock half's three lengths and its designator filter
+    resolve up there, though the board list beside them cannot. Discovery
+    follows, needing the panel to read its layers and the case model to
+    exclude it from the board candidates; and the targets are checked once
+    resolved, because a project may supply them as readily as a flag may.
+    """
+    notes: list[str] = []
+    panel, panel_resolved = _resolve_panel(args, directory)
+
+    project = manifest.read(panel)
+    notes.extend(project.notes)
+
+    # Everything from here to the layer discovery below is typed text that
+    # needs checking and no file to check it against -- most of it carried
+    # by the project file alone, which is the only rank several of these
+    # fields have. Nothing in this block may read the artwork.
+    case_face_resolved = pick(
+        None, _case_face(_project(project, "enclosure", "case_face")), None,
+        DEFAULTS.enclosure.case_face.value,
+    )
+    drilling = Drilling(
+        grid_mm=pick(None, _project(project, "drilling", "grid_mm"), None, DEFAULTS.drilling.grid_mm.value),
+        grid_warn_mm=pick(
+            None, _project(project, "drilling", "grid_warn_mm"), None,
+            DEFAULTS.drilling.grid_warn_mm.value,
+        ),
+        drill_standard=pick(
+            None, _project(project, "drilling", "drill_standard"), None,
+            DEFAULTS.drilling.drill_standard.value,
+        ),
+        drill_sizes=pick(
+            None, _project(project, "drilling", "drill_sizes"), None, DEFAULTS.drilling.drill_sizes.value,
+        ),
+        no_drill_sizes=pick(
+            None, _project(project, "drilling", "no_drill_sizes"), None,
+            DEFAULTS.drilling.no_drill_sizes.value,
+        ),
+        title=pick(None, _project(project, "drilling", "title"), None, DEFAULTS.drilling.title.value),
+    )
+    _validate_drilling(drilling)
+    _validate_grid(drilling)
+    form_depth_resolved = pick(
+        None, _project(project, "artwork", "form_depth"), None, DEFAULTS.artwork.form_depth.value,
+    )
+    _validate_form_depth(panel, form_depth_resolved)
+
+    # ``case`` is a declaration and has no discovered rank. A supplied
+    # model's filename is a guess the drill stage tries against the
+    # measurement, and only where a tie is otherwise undeclared; promoting
+    # it here would hand that guess in as something the operator said, which
+    # is an error where it disagrees rather than an ambiguity a picker can
+    # still settle.
+    case_resolved = pick(
+        _declared_case(args.case, "--case"),
+        _declared_case(_project(project, "enclosure", "case"), "enclosure.case"),
+        None,
+        DEFAULTS.enclosure.case.value,
+    )
+    case_model_arg = None if args.case_model is None else Path(args.case_model)
+    case_model_project = _project(project, "enclosure", "case_model")
+    # Locating the enclosure cache is separate work this run does not take
+    # on (CLAUDE.md); a supplied model is the only rank that can be found
+    # without it, so no discovery narrows a model left unnamed.
+    case_model_resolved = _pick_noting(
+        case_model_arg, case_model_project, None, DEFAULTS.enclosure.case_model.value,
+        panel=panel, label="case model", notes=notes,
+    )
+    case_margin_resolved = pick(
+        None, _project(project, "enclosure", "case_margin_mm"), None,
+        DEFAULTS.enclosure.case_margin_mm.value,
+    )
+    _validate_case_margin(case_margin_resolved, case_face_resolved.value)
+    enclosure = Enclosure(
+        case=case_resolved, case_model=case_model_resolved,
+        case_face=case_face_resolved, case_margin_mm=case_margin_resolved,
+    )
+
+    match_tolerance_resolved = pick(
+        None, _project(project, "boards", "match_tolerance_mm"), None,
+        DEFAULTS.boards.match_tolerance_mm.value,
+    )
+    seat_pitch_max_resolved = pick(
+        None, _project(project, "boards", "seat_pitch_max_mm"), None,
+        DEFAULTS.boards.seat_pitch_max_mm.value,
+    )
+    seat_pitch_min_resolved = pick(
+        None, _project(project, "boards", "seat_pitch_min_mm"), None,
+        DEFAULTS.boards.seat_pitch_min_mm.value,
+    )
+    _validate_dock_lengths(
+        match_tolerance_resolved, seat_pitch_max_resolved, seat_pitch_min_resolved
+    )
+    panel_reference_resolved = pick(
+        args.panel_reference, _project(project, "boards", "panel_reference"), None,
+        DEFAULTS.boards.panel_reference.value,
+    )
+    _validate_panel_reference(panel_reference_resolved)
+
+    drill_layer_resolved = _pick_noting(
+        None, _project(project, "artwork", "drill_layer"),
+        _layer_discovery(panel, DEFAULTS.artwork.drill_layer.value),
+        DEFAULTS.artwork.drill_layer.value, panel=panel, label="drill layer", notes=notes,
+    )
+    reference_layer_resolved = _pick_noting(
+        None, _project(project, "artwork", "reference_layer"),
+        _layer_discovery(panel, DEFAULTS.artwork.reference_layer.value),
+        DEFAULTS.artwork.reference_layer.value, panel=panel, label="reference layer", notes=notes,
+    )
+    artwork = Artwork(
+        panel=panel_resolved, drill_layer=drill_layer_resolved,
+        reference_layer=reference_layer_resolved, form_depth=form_depth_resolved,
+    )
+
+    boards_arg = tuple(Path(board) for board in args.boards) if args.boards else None
+    boards_project_raw = _project(project, "boards", "boards")
+    boards_project = None if boards_project_raw is None else tuple(boards_project_raw)
+    boards_discovery = Discovery(
+        discover.board_candidates(panel.parent, panel, case_model_resolved.value), "found beside it",
+    )
+    boards_resolved = _pick_noting(
+        boards_arg, boards_project, boards_discovery, DEFAULTS.boards.boards.value,
+        panel=panel, label="boards", notes=notes,
+    )
+    boards_settings = BoardSettings(
+        boards=boards_resolved,
+        panel_reference=panel_reference_resolved,
+        match_tolerance_mm=match_tolerance_resolved,
+        seat_pitch_max_mm=seat_pitch_max_resolved,
+        seat_pitch_min_mm=seat_pitch_min_resolved,
+    )
+
+    targets_arg = tuple(parse_emit(spec, panel) for spec in args.emit) if args.emit else None
+    targets_project_raw = _project(project, "output", "targets")
+    targets_project = None if targets_project_raw is None else tuple(targets_project_raw)
+    output = OutputSettings(
+        targets=pick(targets_arg, targets_project, None, DEFAULTS.output.targets.value),
+    )
+    # Checked after resolution, not on ``--emit`` alone: the set that reaches
+    # the write steps is the resolved one, whichever rank supplied it, and a
+    # target set checked at a rank the run may not even use is no check at all.
+    _validate_output(output.targets)
+
+    settings = Settings(
+        artwork=artwork, enclosure=enclosure, drilling=drilling,
+        boards=boards_settings, output=output,
+    )
+    return Resolution(settings=settings, notes=tuple(notes), blockers=readiness(settings))
 
 
 def worst_severity(severities: Iterable[Severity | None]) -> Severity | None:
@@ -222,7 +727,9 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     a worker and the app owns the main thread; without one it happens right
     here, and decision 2's step lines are the whole record either way.
     """
-    options = resolve(args)
+    resolved = resolve(args, Path.cwd())
+    resolved.require_ready()
+    options = RunOptions.of(resolved.settings)
     if not choose_presentation(out):
         return _compose(options, PlainWriter(out), promote_warnings=args.promote_warnings)
     app = InlineApp(level=args.progress)

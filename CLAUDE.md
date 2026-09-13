@@ -137,6 +137,7 @@ are in [docs/adr/](docs/adr/):
 | [0011](docs/adr/0011-behaviour-lock-and-its-blind-spots.md) | Output-preservation checks and their limits |
 | [0012](docs/adr/0012-progress-protocol-and-optional-kernel-capability.md) | Progress reporting and optional kernel capabilities |
 | [0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md) | The orchestrator's presentation and composed run |
+| [0014](docs/adr/0014-the-workbench-and-its-resolution.md) | The workbench, resolution ranks and invalidation |
 
 Keep `stompcollider` independent of `stompdrill` and direct OCP imports. Read
 shared drill documents through `stompmodel` and use kernel operations through

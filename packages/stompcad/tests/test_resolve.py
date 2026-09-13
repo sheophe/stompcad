@@ -8,7 +8,10 @@ import pytest
 
 from stompcad.drive import RunOptions
 from stompcad.resolve import RESOLVABLE, promoted, question_for, revision_for
+from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.model import CaseFace
 
 __all__: list[str] = []
 
@@ -17,10 +20,24 @@ def _options(tmp_path: Path) -> RunOptions:
     """A run's options with the two fields a picker revises set to knowns."""
     return RunOptions(
         panel=tmp_path / "panel.ai",
-        boards=(),
+        drill_layer="Drill",
+        reference_layer="Background",
+        form_depth=DEFAULT_FORM_DEPTH,
         case=None,
         case_model=None,
+        case_face=CaseFace.BOX,
+        case_margin_mm=1.0,
+        grid_mm=0.25,
+        grid_warn_mm=None,
+        drill_standard=DEFAULT_STANDARD,
+        drill_sizes=None,
+        no_drill_sizes=None,
+        title="",
+        boards=(),
         panel_reference="RV*",
+        match_tolerance_mm=None,
+        seat_pitch_max_mm=2.0,
+        seat_pitch_min_mm=0.05,
         targets=(),
     )
 

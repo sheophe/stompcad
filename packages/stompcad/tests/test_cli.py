@@ -10,6 +10,8 @@ rather than inside a three-minute dock test.
 from __future__ import annotations
 
 import ast
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -84,23 +86,43 @@ def test_a_bad_target_leaves_a_good_target_unwritten(tmp_path: Path) -> None:
 
     The control is the point: the same invocation without the bad name does
     write that artefact, so the assertion below is about validation rather
-    than about a command line that writes nothing whatever it is asked.
+    than about a command line that writes nothing whatever it is asked. A
+    declared empty ``boards`` confirms the pedal has none, on a private copy
+    of the fixture so the declaration cannot leak into another suite reading
+    the shared one.
     """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}}), encoding="utf-8"
+    )
     good, control = tmp_path / "good.drl", tmp_path / "control.drl"
-    assert cli.main([str(TAR_AI), "--case", "1590B", "--emit", f"excellon={control}"]) != EXIT_USAGE
+    assert cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={control}"]) != EXIT_USAGE
     assert control.is_file(), "the control wrote nothing; the assertion below proves nothing"
 
     code = cli.main([
-        str(TAR_AI), "--case", "1590B", "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
+        str(panel), "--case", "1590B", "--emit", f"excellon={good}", "--emit", "bogus=bad.bin",
     ])
 
     assert code == EXIT_USAGE
     assert not good.exists()
 
 
-def test_parse_emit_rejects_a_spec_with_no_separator() -> None:
+def test_parse_emit_accepts_a_bare_format() -> None:
+    """The optional path form: a known format takes its name from the panel."""
+    assert cli.parse_emit("excellon", TAR_AI) == (
+        "excellon", TAR_AI.with_name(f"{TAR_AI.stem}-case.drl"),
+    )
+
+
+def test_parse_emit_rejects_a_spec_with_no_format_name() -> None:
     with pytest.raises(cli.UsageError):
-        cli.parse_emit("no-equals-sign")
+        cli.parse_emit("=out.bin", TAR_AI)
+
+
+def test_parse_emit_rejects_a_spec_with_an_empty_path() -> None:
+    with pytest.raises(cli.UsageError):
+        cli.parse_emit("excellon=", TAR_AI)
 
 
 def test_a_keyboard_interrupt_exits_130(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,3 +138,96 @@ def test_a_keyboard_interrupt_exits_130(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(cli, "_run", raises_interrupt)
     assert cli.main([str(TAR_AI)]) == EXIT_CANCELLED
+
+
+def test_a_project_target_set_is_checked_like_a_flag_one(tmp_path: Path) -> None:
+    """Two artefacts naming one file are refused wherever the pair came from.
+
+    ``--emit`` is not the only rank that supplies targets, and the rollback
+    both tools stage their writes through assumes each artefact owns its
+    own path. A run that is otherwise able to finish is the control: what
+    is under test is the refusal, not an invocation that fails anyway.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    target = tmp_path / "x.out"
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({
+            "version": 1,
+            "boards": {"boards": []},
+            "enclosure": {"case": "1590B"},
+            "output": {"targets": {"excellon": "x.out", "json": "x.out"}},
+        }),
+        encoding="utf-8",
+    )
+
+    code = cli.main([str(panel)])
+
+    assert code == EXIT_USAGE
+    assert not target.exists(), "one file on disk under two claims of having written it"
+
+
+def test_a_project_target_this_build_cannot_render_is_a_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unknown format is named, not dropped, whichever rank asked for it.
+
+    Each write step filters to the formats its own half owns, so a name
+    outside their union is written by neither -- silently, unless it is
+    rejected before the run starts.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({
+            "version": 1,
+            "boards": {"boards": []},
+            "enclosure": {"case": "1590B"},
+            "output": {"targets": {"bogus": "a.out", "excellon": "b.drl"}},
+        }),
+        encoding="utf-8",
+    )
+
+    code = cli.main([str(panel)])
+
+    assert code == EXIT_USAGE
+    error = capsys.readouterr().err
+    assert "bogus" in error
+    assert "output.targets" in error, "the refusal names a flag the builder did not type"
+    assert not (tmp_path / "b.drl").exists(), "a bad name must spoil the good one too"
+
+
+def test_a_malformed_project_value_is_refused_before_the_artwork_is_opened(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLAUDE.md: options are validated before the artwork is opened.
+
+    A grid the project spells as text is only a number when something tries
+    to scale it, which is several steps into a run that has already read the
+    panel. The control is the same invocation with a number, which writes
+    the artefact this one must not reach.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    project = tmp_path / "tar.stompcad.json"
+    good, refused = tmp_path / "good.drl", tmp_path / "refused.drl"
+
+    project.write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}, "drilling": {"grid_mm": 0.25}}),
+        encoding="utf-8",
+    )
+    assert cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={good}"]) != EXIT_USAGE
+    assert good.is_file(), "the control wrote nothing; the assertion below proves nothing"
+    capsys.readouterr()
+
+    project.write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}, "drilling": {"grid_mm": "abc"}}),
+        encoding="utf-8",
+    )
+    code = cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={refused}"])
+
+    printed = capsys.readouterr()
+    assert code == EXIT_USAGE
+    assert "drilling.grid_mm" in printed.err
+    assert "read panel" not in printed.out, "the artwork was opened before the value was checked"
+    assert not refused.exists()
