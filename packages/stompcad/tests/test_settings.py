@@ -96,6 +96,20 @@ def test_a_place_reports_each_row_with_its_provenance() -> None:
     assert rows["drill standard"] == "metric, default"
 
 
+def test_an_enum_valued_row_describes_the_flag_string_not_the_member_name() -> None:
+    """``CaseFace.BOX`` must read as stompdrill's own ``box``, not ``CaseFace.BOX``.
+
+    ``Resolved.describe()`` interpolates ``self.value`` directly; an ``Enum``
+    with no custom ``__str__`` would otherwise leak its member name into a row
+    that every sibling row states as the flag's own string.
+    """
+    from stompcad.settings import Settings
+
+    settings = Settings.of_defaults(Path("tar.ai"))
+    rows = dict(settings.enclosure.rows())
+    assert rows["drilled face"] == "box, default"
+
+
 def test_settings_name_every_place() -> None:
     from stompcad.settings import Settings
 
