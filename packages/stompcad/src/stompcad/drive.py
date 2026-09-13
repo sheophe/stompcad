@@ -105,7 +105,7 @@ _DOCK_FROM = 4
 #: a row added here; a field named by no row is honoured by no step.
 _STEP_INPUTS: dict[str, frozenset[str]] = {
     "read-panel": frozenset({"panel", "case", "case_model"}),
-    "quantise": frozenset({"case"}),
+    "quantise": frozenset({"case", "grid_mm"}),
     "drill": frozenset(),
     "write-case": frozenset({"targets"}),
     "read-boards": frozenset({"boards", "panel_reference"}),
@@ -126,16 +126,35 @@ _RETRY_INPUTS: dict[str, frozenset[str]] = {
     "read-boards": frozenset({"panel_reference"}),
 }
 
-#: What each step leaves on the driver. ``retry`` clears every attribute a
-#: step later than the retried one left, reading the order from the plan
-#: itself. The dock half holds the boards as read separately from the
-#: boards as filtered, because a revised filter re-runs over the first
-#: without needing the files the second was read from.
+#: What each step leaves on the driver. The dock stages each rewrite
+#: ``_dock_data``, so each declares it: a consumer is stale when an *earlier*
+#: producer of what it reads is stale, and a stage that produced nothing by
+#: this table could never make the stage after it stale.
 _STEP_HOLDS: dict[str, tuple[str, ...]] = {
     "read-panel": ("_case_model", "_raw"),
     "quantise": ("_quantised",),
     "drill": ("_drilled",),
     "read-boards": ("_scan", "_geometry", "_docked", "_dock_pipeline", "_dock_data"),
+    "match": ("_dock_data",),
+    "seat": ("_dock_data",),
+    "clash": ("_dock_data",),
+}
+
+#: What each step reads of what an earlier step left. With ``_STEP_HOLDS`` this
+#: is the whole dependency: invalidation follows these edges rather than the
+#: plan's order, because a write step produces nothing any later step reads and
+#: must therefore invalidate nothing. See spec decision 10 for the cost of
+#: getting this wrong.
+_STEP_CONSUMES: dict[str, tuple[str, ...]] = {
+    "read-panel": (),
+    "quantise": ("_raw",),
+    "drill": ("_quantised", "_case_model"),
+    "write-case": ("_drilled", "_case_model"),
+    "read-boards": ("_drilled", "_case_model"),
+    "match": ("_dock_data", "_dock_pipeline"),
+    "seat": ("_dock_data", "_dock_pipeline"),
+    "clash": ("_dock_data", "_dock_pipeline"),
+    "write-assembly": ("_dock_data", "_scan", "_geometry"),
 }
 
 
