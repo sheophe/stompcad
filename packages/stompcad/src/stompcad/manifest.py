@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from stompmodel.errors import StompError
+
+from .settings import Settings
 
 __all__ = [
     "MANIFEST_SUFFIX",
@@ -27,6 +30,8 @@ __all__ = [
     "Manifest",
     "manifest_path",
     "read",
+    "Half",
+    "payload_for",
 ]
 
 #: What the project file is called, given the artwork's stem.
@@ -145,3 +150,78 @@ def _absolute(place: str, key: str, value: Any, root: Path) -> Any:
     if isinstance(value, list):
         return [root / str(item) for item in value]
     return root / str(value)
+
+
+#: Which places each half of the run is entitled to declare. ``output`` is in
+#: both because a target set spans them: ``write case`` commits the drill
+#: formats and ``write assembly`` the dock ones, so each records what it
+#: actually committed rather than what the run intended.
+_HALF_PLACES: dict[str, tuple[str, ...]] = {
+    "drill": ("artwork", "enclosure", "drilling", "output"),
+    "dock": ("boards", "output"),
+}
+
+
+class Half(Enum):
+    """Which half of the run is recording what it declared."""
+
+    DRILL = "drill"
+    DOCK = "dock"
+
+
+def payload_for(panel: Path, settings: Settings, half: Half, held: Manifest) -> str | None:
+    """The project file this half would leave, or ``None`` when it adds nothing.
+
+    Spec decision 8: gaps only, never a replacement, and written with the
+    half's own commit rather than at the end of the run. Returning text
+    instead of writing it is what lets the caller stage this beside the
+    artefacts, so a committed artefact can never sit next to a project file
+    that fails to describe it.
+    """
+    merged = {place: dict(values) for place, values in held.values.items()}
+    added = False
+    for place in _HALF_PLACES[half.value]:
+        record = getattr(settings, place)
+        into = merged.setdefault(place, {})
+        for key in sorted(PLACES[place]):
+            if key in into:
+                continue
+            into[key] = _stored(place, key, getattr(record, key).value, panel.parent)
+            added = True
+        if not into:
+            merged.pop(place)
+    if not added:
+        return None
+    return json.dumps({"version": VERSION, **merged}, indent=2, sort_keys=True) + "\n"
+
+
+def _stored(place: str, key: str, value: Any, root: Path) -> Any:
+    """One value as the file holds it: relative paths, plain names, lists.
+
+    ``CaseFace`` is stored as its own ``value``, which is the same string
+    ``stompdrill``'s ``--case-face`` accepts -- one spelling, not two.
+    """
+    if isinstance(value, Enum):
+        return value.value
+    if key in _PATHS.get(place, frozenset()):
+        if isinstance(value, tuple):
+            return [_relative(item, root) for item in value]
+        return None if value is None else _relative(Path(value), root)
+    if key == "targets":
+        return {name: _relative(path, root) for name, path in value}
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
+
+def _relative(path: Path, root: Path) -> str:
+    """A path as the project stores it, falling back to absolute off-tree.
+
+    A file somewhere else entirely is stored as it is: a relative path
+    climbing out of the project directory is less legible than the absolute
+    one it came from, and no more portable.
+    """
+    try:
+        return str(Path(path).relative_to(root))
+    except ValueError:
+        return str(path)
