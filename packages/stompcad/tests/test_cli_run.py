@@ -286,3 +286,30 @@ def test_an_argument_beats_a_conflicting_discovery(tmp_path: Path) -> None:
     case = resolved.settings.enclosure.case
     assert case.value == "1590BB"
     assert case.provenance.origin is Origin.ARGUMENT
+
+
+def test_a_malformed_size_list_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLAUDE.md: options are validated before the artwork opens.
+
+    ``discover.layers`` is made to fail loudly if it is ever called; a
+    validation ordered after layer discovery would surface that failure
+    instead of the usage error under test.
+    """
+    from stompcad import discover
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    def _must_not_be_called(panel: Path) -> tuple[str, ...]:
+        raise AssertionError("the artwork must not be opened before options are validated")
+
+    monkeypatch.setattr(discover, "layers", _must_not_be_called)
+
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "drilling": {"drill_sizes": "nope"}}), encoding="utf-8"
+    )
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "drilling.drill_sizes" in str(failure.value)

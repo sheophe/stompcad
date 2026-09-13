@@ -99,7 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
         "boards",
         metavar="BOARD.stp",
         nargs="*",
-        help="board models to seat in the drilled case; docking is skipped with none",
+        help="board models to seat in the drilled case; a drill-only run must say so "
+        "explicitly, with an empty list declared in the project file",
     )
     parser.add_argument(
         "--case",
@@ -343,6 +344,36 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     project = manifest.read(panel)
     notes.extend(project.notes)
 
+    # Neither place below depends on the panel or the enclosure, and both
+    # can carry user-typed text only through the project file (neither is a
+    # flag on this parser); validating them here, before anything opens the
+    # artwork, is what CLAUDE.md's "validate before opening the artwork or
+    # board input" means for values that live nowhere but a hand-edited file.
+    case_face_resolved = pick(
+        None, _case_face(_project(project, "enclosure", "case_face")), None,
+        DEFAULTS.enclosure.case_face.value,
+    )
+    drilling = Drilling(
+        grid_mm=pick(None, _project(project, "drilling", "grid_mm"), None, DEFAULTS.drilling.grid_mm.value),
+        grid_warn_mm=pick(
+            None, _project(project, "drilling", "grid_warn_mm"), None,
+            DEFAULTS.drilling.grid_warn_mm.value,
+        ),
+        drill_standard=pick(
+            None, _project(project, "drilling", "drill_standard"), None,
+            DEFAULTS.drilling.drill_standard.value,
+        ),
+        drill_sizes=pick(
+            None, _project(project, "drilling", "drill_sizes"), None, DEFAULTS.drilling.drill_sizes.value,
+        ),
+        no_drill_sizes=pick(
+            None, _project(project, "drilling", "no_drill_sizes"), None,
+            DEFAULTS.drilling.no_drill_sizes.value,
+        ),
+        title=pick(None, _project(project, "drilling", "title"), None, DEFAULTS.drilling.title.value),
+    )
+    _validate_sizes(drilling)
+
     case_model_arg = None if args.case_model is None else Path(args.case_model)
     case_model_project = _project(project, "enclosure", "case_model")
     supplied_model = case_model_arg if case_model_arg is not None else case_model_project
@@ -363,10 +394,6 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     case_model_resolved = _pick_noting(
         case_model_arg, case_model_project, None, DEFAULTS.enclosure.case_model.value,
         panel=panel, label="case model", notes=notes,
-    )
-    case_face_resolved = pick(
-        None, _case_face(_project(project, "enclosure", "case_face")), None,
-        DEFAULTS.enclosure.case_face.value,
     )
     case_margin_resolved = pick(
         None, _project(project, "enclosure", "case_margin_mm"), None,
@@ -439,27 +466,6 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     output = OutputSettings(
         targets=pick(targets_arg, targets_project, None, DEFAULTS.output.targets.value),
     )
-
-    drilling = Drilling(
-        grid_mm=pick(None, _project(project, "drilling", "grid_mm"), None, DEFAULTS.drilling.grid_mm.value),
-        grid_warn_mm=pick(
-            None, _project(project, "drilling", "grid_warn_mm"), None,
-            DEFAULTS.drilling.grid_warn_mm.value,
-        ),
-        drill_standard=pick(
-            None, _project(project, "drilling", "drill_standard"), None,
-            DEFAULTS.drilling.drill_standard.value,
-        ),
-        drill_sizes=pick(
-            None, _project(project, "drilling", "drill_sizes"), None, DEFAULTS.drilling.drill_sizes.value,
-        ),
-        no_drill_sizes=pick(
-            None, _project(project, "drilling", "no_drill_sizes"), None,
-            DEFAULTS.drilling.no_drill_sizes.value,
-        ),
-        title=pick(None, _project(project, "drilling", "title"), None, DEFAULTS.drilling.title.value),
-    )
-    _validate_sizes(drilling)
 
     settings = Settings(
         artwork=artwork, enclosure=enclosure, drilling=drilling,
