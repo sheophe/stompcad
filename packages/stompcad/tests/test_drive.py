@@ -20,7 +20,7 @@ from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData
-from stompmodel.progress import NO_PROGRESS, track
+from stompmodel.progress import track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
 __all__: list[str] = []
@@ -246,43 +246,6 @@ def test_retry_runs_one_step_again_over_the_intermediates_already_held(
     assert [finding.code for finding in again.diagnostics] == ["unmatched-enclosure"]
 
 
-def test_retry_refuses_a_step_whose_input_the_driver_does_not_hold() -> None:
-    """``retry`` names ``quantise``, ``drill`` and ``read-boards``; other keys are refused."""
-    driver = Driver(DRILL_AND_DOCK, _RecordingPresentation(), _options())
-
-    with pytest.raises(ValueError):
-        driver.retry("seat", _options(), NO_PROGRESS)
-
-    with pytest.raises(ValueError):
-        driver.retry("quantise", _options(), NO_PROGRESS)
-
-
-def test_retry_refuses_a_revised_field_the_named_step_cannot_honour() -> None:
-    """A revision the step cannot apply is a usage error, not a silent no-op.
-
-    ``retry`` takes a whole ``RunOptions`` but one step reads only part of
-    it: ``drill`` never looks at ``case_model``, so accepting a revised one
-    would leave plan C believing an answer took effect when nothing read it.
-    Refused the way ``stompcollider`` refuses ``--place`` -- parsed, judged,
-    rejected with the reason -- and the driver is left exactly as it was.
-    """
-    presentation = _RecordingPresentation()
-    driver = Driver(DRILL_AND_DOCK, presentation, _options())
-    with track(NullSink()) as scope:
-        driver.run_drill(scope)
-    held, drilled = driver._options, driver._drilled
-    presentation.finished.clear()
-
-    with pytest.raises(ValueError) as refusal:
-        driver.retry("drill", replace(_options(), case_model=Path("enclosure.stp")), NO_PROGRESS)
-
-    assert "case_model" in str(refusal.value)
-    assert "read-panel" in str(refusal.value), "the refusal must name the step that reads it"
-    assert driver._options is held, "the refused options replaced the ones the driver holds"
-    assert driver._drilled is drilled
-    assert presentation.finished == [], "a refused retry reported a step as finished"
-
-
 def test_retrying_a_step_discards_what_a_later_step_produced() -> None:
     """Re-running a step supersedes every intermediate computed after it.
 
@@ -363,16 +326,88 @@ def test_the_read_step_runs_again_over_the_boards_already_scanned(
 
 @pytest.mark.boards
 @pytest.mark.hammond
-def test_a_retry_of_the_read_step_refuses_a_revised_board_list(
-    drill_and_dock_run: Driver, tmp_path: Path
+def test_a_revision_a_step_cannot_honour_re_runs_it_instead(
+    drill_and_dock_run: Driver,
 ) -> None:
-    """Accepted and ignored is the one outcome a revision may not have."""
-    driver = drill_and_dock_run
+    """``targets`` is read by neither ``read-boards`` nor its own retry.
 
-    with track(NullSink()) as scope, pytest.raises(ValueError, match="boards"):
-        driver.retry(
-            "read-boards", replace(driver._options, boards=(tmp_path / "other.stp",)), scope
-        )
+    So it cannot be honoured from the scan already held, and the right
+    answer is the parse -- not the refusal this replaces. (The brief names
+    ``title`` for this case; ``RunOptions`` does not carry that field until
+    Task 10 grows it, so this substitutes ``targets``, a field the same
+    table already excludes from what ``read-boards`` can honour.)
+    """
+    driver = drill_and_dock_run
+    before = driver._scan
+    revised = replace(driver._options, targets=(("report", Path("out.json")),))
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", revised, scope)
+    assert driver._scan is not before, "the boards must have been scanned again"
+    assert driver._options.targets == revised.targets
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_revision_a_step_can_honour_keeps_what_it_read(
+    drill_and_dock_run: Driver,
+) -> None:
+    """A widened expression re-runs the filter, never the parse."""
+    driver = drill_and_dock_run
+    before = driver._scan
+    widened = replace(
+        driver._options, panel_reference=f"{driver._options.panel_reference},C1"
+    )
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", widened, scope)
+    assert driver._scan is before, "boards already scanned are not read twice"
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_every_step_in_the_plan_can_be_retried(drill_and_dock_run: Driver) -> None:
+    """No step is refused any more; a revision it outgrew re-runs it."""
+    driver = drill_and_dock_run
+    for step in DRILL_AND_DOCK.steps:
+        if step.key in {"match", "seat", "clash"}:
+            continue
+        with track(NullSink()) as scope:
+            driver.retry(step.key, driver._options, scope)
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_match_seat_and_clash_are_not_retry_targets(drill_and_dock_run: Driver) -> None:
+    """They read no field, so no change ever makes one of them the earliest."""
+    driver = drill_and_dock_run
+    for key in ("match", "seat", "clash"):
+        with track(NullSink()) as scope, pytest.raises(ValueError, match=key):
+            driver.retry(key, driver._options, scope)
+
+
+@pytest.mark.xfail(reason="RunOptions grows in Task 10", strict=True)
+def test_no_option_field_is_read_by_no_step() -> None:
+    """Replaces the refusal: a field nothing reads would change nothing.
+
+    ``_STEP_INPUTS['quantise']`` already names ``grid_mm`` ahead of
+    ``RunOptions`` carrying it (Task 8, in anticipation of Task 10), so this
+    equality does not hold yet -- the same forward reference
+    ``test_stale.test_every_option_field_belongs_to_exactly_one_place``
+    already marks ``xfail`` for. It stops failing, and this marker should
+    come off, once Task 10 lands.
+    """
+    from dataclasses import fields
+
+    from stompcad.drive import _STEP_INPUTS, RunOptions
+
+    read = {name for names in _STEP_INPUTS.values() for name in names}
+    assert {field.name for field in fields(RunOptions)} == read
+
+
+def test_retry_inputs_never_exceed_step_inputs() -> None:
+    from stompcad.drive import _RETRY_INPUTS, _STEP_INPUTS
+
+    for key, honourable in _RETRY_INPUTS.items():
+        assert honourable <= _STEP_INPUTS[key], key
 
 
 @pytest.mark.boards

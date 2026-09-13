@@ -1,6 +1,12 @@
 # ADR-0013: The orchestrator's presentation and its composed run
 
-**Status:** Accepted
+**Status:** Accepted, partly amended by
+[ADR-0014](0014-the-workbench-and-its-resolution.md), which changes what
+`retry` does with a revision the named step cannot honour: refusing it was
+right while a resolver alone called it mid-run, and wrong once a builder in
+the workbench can call it after simply changing their mind, so `retry` now
+discards that step's own holds and runs it again rather than refusing. This
+ADR's other decisions stand.
 
 ## Context
 

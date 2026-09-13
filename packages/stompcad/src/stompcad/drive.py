@@ -99,10 +99,9 @@ DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
 #: run's span -- see ``Driver._open``.
 _DOCK_FROM = 4
 
-#: What each step reads from ``RunOptions``. ``retry`` consults it to refuse
-#: a revision the named step would never consult, and to name the step that
-#: would have to run again for it to take effect. A step added to a plan is
-#: a row added here; a field named by no row is honoured by no step.
+#: What each step reads from ``RunOptions``. ``_RETRY_INPUTS`` narrows this to
+#: what a step can honour from what it already holds; a step added to a plan
+#: is a row added here, and a field named by no row is honoured by no step.
 _STEP_INPUTS: dict[str, frozenset[str]] = {
     "read-panel": frozenset({"panel", "case", "case_model"}),
     "quantise": frozenset({"case", "grid_mm"}),
@@ -115,16 +114,24 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
     "write-assembly": frozenset({"targets"}),
 }
 
-#: What each step can honour when it runs *again*, which may be narrower
-#: than what it reads the first time: a retry spends the intermediates the
-#: driver holds rather than the inputs it re-read. ``read-boards`` re-runs
-#: its filter over boards already scanned -- decision 8's own words -- so a
-#: revised board list would need a parse this step no longer performs.
+#: What each step can honour *without discarding what it holds*. Narrower than
+#: ``_STEP_INPUTS`` only where a step's own intermediate would have to be
+#: rebuilt: ``read boards`` re-runs its filter over boards already scanned, so
+#: a revised board list needs the parse it no longer performs. Everything else
+#: reads its inputs as it runs, so honouring and re-running are one call.
 _RETRY_INPUTS: dict[str, frozenset[str]] = {
-    "quantise": frozenset({"case"}),
-    "drill": frozenset(),
+    "read-panel": frozenset(),
+    "quantise": _STEP_INPUTS["quantise"],
+    "drill": _STEP_INPUTS["drill"],
+    "write-case": _STEP_INPUTS["write-case"],
     "read-boards": frozenset({"panel_reference"}),
+    "write-assembly": _STEP_INPUTS["write-assembly"],
 }
+
+#: Steps that are never a retry target: they read no field, so no change makes
+#: one of them the earliest stale step, and each is re-run by the step before
+#: it. ``test_stale`` asserts the first half of that claim.
+_STAGE_STEPS = frozenset({"match", "seat", "clash"})
 
 #: What each step leaves on the driver. The dock stages each rewrite
 #: ``_dock_data``, so each declares it: a consumer is stale when an *earlier*
@@ -248,11 +255,12 @@ class Driver:
     def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData | DockData:
         """Run one step again under revised options, and report it when it succeeds.
 
-        Decision 4: the step that stopped to ask runs again when the answer
-        arrives, reading neither the artwork nor the case model a second
-        time. Only a step whose input this driver holds is retryable, only
-        a revision that step can honour is accepted, and an accepted one
-        discards every intermediate a later step produced.
+        Decision 4's own retry, generalised by decision 10's second half: a
+        revision this step can honour from what it holds runs cheaply, and
+        one it cannot discards that step's own holds and runs it as a first
+        run would -- never refused and left accepted-but-ignored. ``match``,
+        ``seat`` and ``clash`` read no field, so no revision ever names one
+        of them; a step added to the plan is a row added to ``_rerun``.
         """
         retried, outcome = self._rerun(key, options, scope)
         self._presentation.finish_step(self._step(key), outcome)
@@ -265,6 +273,15 @@ class Driver:
         to ask, and must not credit the step in between -- so the caller
         decides when the step has finished, not this.
         """
+        if key == "read-panel":
+            self._accept(key, options)
+            slots = scope.steps(2)
+            self._read_panel(next(slots))
+            outcome = self._read_outcome()
+            # A read has nothing of DrillData's own shape to report; quantise
+            # is what turns it into one, and it is cheap enough to pay again.
+            self._quantised = self._quantise(next(slots))
+            return self._quantised, outcome
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
@@ -277,12 +294,33 @@ class Driver:
             self._accept(key, options)
             self._drilled = self._drill(self._quantised, scope)
             return self._drilled, _drill_outcome(self._drilled)
-        if key == "read-boards":
-            if self._docked is None or self._scan is None:
-                raise ValueError("read boards cannot run again before the boards are read")
+        if key == "write-case":
+            if self._drilled is None:
+                raise ValueError("write case cannot run again before the panel is drilled")
             self._accept(key, options)
+            written = self._write_case(self._drilled, scope)
+            return self._drilled, ", ".join(written) or "nothing written"
+        if key == "read-boards":
+            if self._drilled is None:
+                raise ValueError("read boards cannot run again before the panel is drilled")
+            self._accept(key, options)
+            if self._docked is None:  # _accept discarded the scan: parse again
+                self._read_boards(self._drilled, scope)
             self._dock_data = self._admit()
+            assert self._scan is not None
             return self._dock_data, f"{len(self._scan.raw.boards)} board(s)"
+        if key == "write-assembly":
+            if self._dock_data is None or self._scan is None or self._geometry is None:
+                raise ValueError("write assembly cannot run again before the boards are docked")
+            self._accept(key, options)
+            written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
+            return self._dock_data, ", ".join(written) or "nothing written"
+        if key in _STAGE_STEPS:
+            keys = [step.key for step in self._plan.steps]
+            before = keys[keys.index(key) - 1]
+            raise ValueError(
+                f"{key!r} reads no field of its own -- retry {before!r} to run it again"
+            )
         raise ValueError(f"{key!r} is not a step this driver can run again")
 
     def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
@@ -321,41 +359,28 @@ class Driver:
             return {}
         return {board.ordinal: board.designators for board in self._docked.boards}
 
-    def _accept(self, key: str, options: RunOptions) -> None:
-        """Take revised options for one step, once it is settled they can take effect."""
-        self._refuse_unhonoured(key, options)
-        self._discard_after(key)
-        self._options = options
-
-    def _refuse_unhonoured(self, key: str, options: RunOptions) -> None:
-        """Refuse a revised field the named step does not read.
-
-        ``retry`` takes a whole ``RunOptions``; a step reads part of it, so a
-        field it never consults would be accepted and then ignored. Refused
-        the way ``stompcollider`` refuses ``--place``: parsed, judged and
-        rejected with the reason, naming the step that would have to run again
-        for the revision to take effect. Every unhonourable field is named at
-        once, as the target check names every bad format at once.
-        """
-        read = _RETRY_INPUTS.get(key, frozenset())
-        unhonoured = [
-            f"{field.name} ({self._reader(field.name)})"
+    def _changed(self, options: RunOptions) -> frozenset[str]:
+        """Which fields this revision alters, against the options now in force."""
+        return frozenset(
+            field.name
             for field in fields(options)
-            if field.name not in read
-            and getattr(options, field.name) != getattr(self._options, field.name)
-        ]
-        if unhonoured:
-            raise ValueError(
-                f"{key!r} does not read {', '.join(unhonoured)}: a revision this step "
-                "cannot honour is refused rather than accepted and ignored"
-            )
+            if getattr(options, field.name) != getattr(self._options, field.name)
+        )
 
-    def _reader(self, name: str) -> str:
-        """Which step of this run reads one option field, for a refusal to name."""
-        for step in self._plan.steps:
-            if name in _STEP_INPUTS.get(step.key, frozenset()):
-                return f"read by {step.key!r}"
-        return "read by no step in this run"
+    def _accept(self, key: str, options: RunOptions) -> None:
+        """Take revised options for one step, discarding what they supersede.
+
+        A value computed under the options being replaced would otherwise be
+        read by a later call as though it agreed with them. Where the revision
+        is one this step cannot honour from what it holds, its own
+        intermediates go too -- which is what makes the next call a first run
+        rather than a retry.
+        """
+        self._discard_after(key)
+        if not self._changed(options) <= _RETRY_INPUTS.get(key, frozenset()):
+            for attribute in _STEP_HOLDS.get(key, ()):
+                setattr(self, attribute, None)
+        self._options = options
 
     def _discard_after(self, key: str) -> None:
         """Drop every intermediate a step later than this one left behind.
