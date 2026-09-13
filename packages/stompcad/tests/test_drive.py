@@ -20,7 +20,7 @@ from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.model import DrillData
-from stompmodel.progress import track
+from stompmodel.progress import NO_PROGRESS, track
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
 __all__: list[str] = []
@@ -364,6 +364,35 @@ def test_a_revision_a_step_can_honour_keeps_what_it_read(
 
 @pytest.mark.boards
 @pytest.mark.hammond
+def test_a_revised_board_list_reparses_rather_than_filters_a_stale_scan(
+    drill_and_dock_run: Driver,
+) -> None:
+    """``boards`` is the field the comment above ``_RETRY_INPUTS`` names as
+    the reason ``read-boards`` needs a narrower row at all -- the one the
+    deleted refusal test covered, and the ``targets`` test above does not.
+
+    A stale-scan filter could never grow the board count on its own; only a
+    genuine second parse of the doubled list can, so that is what is proved
+    rather than merely asserted.
+    """
+    driver = drill_and_dock_run
+    before = driver._scan
+    assert before is not None, "the control: a fixture with nothing scanned proves nothing"
+    revised = replace(driver._options, boards=(TAR_PCB, TAR_PCB))
+
+    with track(NullSink()) as scope:
+        driver.retry("read-boards", revised, scope)
+
+    assert driver._scan is not before, "the boards must have been scanned again"
+    assert driver._options.boards == revised.boards
+    assert driver._scan is not None
+    assert len(driver._scan.raw.boards) == 2 * len(before.raw.boards), (
+        "a filter over the stale scan could not have doubled the board count"
+    )
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
 def test_every_step_in_the_plan_can_be_retried(drill_and_dock_run: Driver) -> None:
     """No step is refused any more; a revision it outgrew re-runs it."""
     driver = drill_and_dock_run
@@ -408,6 +437,101 @@ def test_retry_inputs_never_exceed_step_inputs() -> None:
 
     for key, honourable in _RETRY_INPUTS.items():
         assert honourable <= _STEP_INPUTS[key], key
+
+
+def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> None:
+    """The deleted refusal test's other half: an unrun driver's own guards.
+
+    That test exercised a freshly constructed, never-run ``Driver`` and
+    expected a raise; the behaviour it pinned there was the *refusal* on a
+    revision, which this task removes, but the five precondition raises in
+    ``_rerun`` are a different thing and are still live -- and, with every
+    surviving and new test built on the already-run ``drill_and_dock_run``
+    fixture, every one of those five preconditions was trivially satisfied
+    and none of them was exercised. Each message names the work that has
+    not happened -- "the panel is read", "quantisation" -- rather than the
+    attribute it would have set, so a person reading it knows what to do.
+    """
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+
+    with pytest.raises(ValueError, match="panel is read"):
+        driver.retry("quantise", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="quantisation"):
+        driver.retry("drill", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="panel is drilled"):
+        driver.retry("write-case", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="panel is drilled"):
+        driver.retry("read-boards", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="boards are docked"):
+        driver.retry("write-assembly", _options(), NO_PROGRESS)
+
+
+def test_retrying_read_panel_also_credits_the_quantise_hold_it_refreshed() -> None:
+    """``_STEP_HOLDS`` says ``quantise`` owns ``_quantised``. A retry of
+    ``read-panel`` sets it too, because a read alone has nothing of
+    ``DrillData``'s own shape to report -- so the presentation must be told
+    ``quantise`` ran as well, or ``_STEP_HOLDS``'s claim about who assigns
+    what is silently false the one time it is not this call's own key.
+    """
+    lines: list[str] = []
+    driver = Driver(DRILL_AND_DOCK, _Recording(lines), _options())
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+    lines.clear()
+
+    with track(NullSink()) as scope:
+        driver.retry("read-panel", driver._options, scope)
+
+    keys = [line.split(":", 1)[0] for line in lines]
+    assert keys == ["read-panel", "quantise"], lines
+
+
+def _uniquely_owned_holds() -> dict[str, str]:
+    """Attributes ``_STEP_HOLDS`` assigns to exactly one step.
+
+    ``_dock_data`` is excluded on purpose: ``match``, ``seat``, ``clash`` and
+    ``read-boards`` (through ``_admit``) all legitimately rewrite it during a
+    normal run, so which of them is responsible cannot be told apart from
+    the attribute's identity alone -- unlike every other hold below, which
+    only one step ever assigns.
+    """
+    owners: dict[str, list[str]] = {}
+    for owner, attributes in _STEP_HOLDS.items():
+        for attribute in attributes:
+            owners.setdefault(attribute, []).append(owner)
+    return {attribute: found[0] for attribute, found in owners.items() if len(found) == 1}
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+def test_a_retry_credits_every_step_whose_hold_it_refreshed(drill_and_dock_run: Driver) -> None:
+    """The general form of the ``read-panel``/``quantise`` guard above.
+
+    A future branch that writes to a hold ``_STEP_HOLDS`` assigns to some
+    *other* step, without also crediting that step, would leave the
+    presentation believing a step never ran when it did -- this is true
+    for any retryable step, not only ``read-panel``, so it is checked for
+    all of them rather than pinned once.
+    """
+    driver = drill_and_dock_run
+    unique_holds = _uniquely_owned_holds()
+
+    for step in DRILL_AND_DOCK.steps:
+        if step.key in {"match", "seat", "clash"}:
+            continue
+        before = {attribute: getattr(driver, attribute) for attribute in unique_holds}
+        lines: list[str] = []
+        driver._presentation = _Recording(lines)
+
+        with track(NullSink()) as scope:
+            driver.retry(step.key, driver._options, scope)
+
+        credited = {line.split(":", 1)[0] for line in lines}
+        for attribute, owner in unique_holds.items():
+            after = getattr(driver, attribute)
+            refreshed = after is not None and after is not before[attribute]
+            if refreshed:
+                assert owner in credited, f"{owner!r}'s hold changed but was not credited"
 
 
 @pytest.mark.boards

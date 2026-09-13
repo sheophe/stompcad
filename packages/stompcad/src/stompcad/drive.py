@@ -262,44 +262,55 @@ class Driver:
         ``seat`` and ``clash`` read no field, so no revision ever names one
         of them; a step added to the plan is a row added to ``_rerun``.
         """
-        retried, outcome = self._rerun(key, options, scope)
+        retried, outcome, refreshed = self._rerun(key, options, scope)
         self._presentation.finish_step(self._step(key), outcome)
+        for other_key, other_outcome in refreshed:
+            self._presentation.finish_step(self._step(other_key), other_outcome)
         return retried
 
-    def _rerun(self, key: str, options: RunOptions, scope: Scope) -> tuple[DrillData | DockData, str]:
-        """The work of a retry, with its outcome returned rather than reported.
+    def _rerun(
+        self, key: str, options: RunOptions, scope: Scope
+    ) -> tuple[DrillData | DockData, str, tuple[tuple[str, str], ...]]:
+        """The work of a retry, with its outcome(s) returned rather than reported.
 
         A resolution loop asks and runs again until there is nothing left
         to ask, and must not credit the step in between -- so the caller
-        decides when the step has finished, not this.
+        decides when the step has finished, not this: nothing here calls
+        ``finish_step``, including for the third element below.
+
+        That element names every *other* step this call also credited,
+        beyond ``key`` itself. Only ``read-panel`` returns one: it has
+        nothing of ``DrillData``'s own shape to report, so it pays for
+        ``quantise`` to produce one -- which sets ``_quantised``, the hold
+        ``_STEP_HOLDS`` declares belongs to ``quantise``. Leaving that
+        credit unpaid would make ``_STEP_HOLDS``'s claim about who assigns
+        what silently false the one time it is not this call's own key.
         """
         if key == "read-panel":
             self._accept(key, options)
             slots = scope.steps(2)
             self._read_panel(next(slots))
             outcome = self._read_outcome()
-            # A read has nothing of DrillData's own shape to report; quantise
-            # is what turns it into one, and it is cheap enough to pay again.
             self._quantised = self._quantise(next(slots))
-            return self._quantised, outcome
+            return self._quantised, outcome, (("quantise", _quantise_outcome(self._quantised)),)
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
             self._accept(key, options)
             self._quantised = self._quantise(scope)
-            return self._quantised, _quantise_outcome(self._quantised)
+            return self._quantised, _quantise_outcome(self._quantised), ()
         if key == "drill":
             if self._quantised is None:
                 raise ValueError("drill cannot run again before quantisation")
             self._accept(key, options)
             self._drilled = self._drill(self._quantised, scope)
-            return self._drilled, _drill_outcome(self._drilled)
+            return self._drilled, _drill_outcome(self._drilled), ()
         if key == "write-case":
             if self._drilled is None:
                 raise ValueError("write case cannot run again before the panel is drilled")
             self._accept(key, options)
             written = self._write_case(self._drilled, scope)
-            return self._drilled, ", ".join(written) or "nothing written"
+            return self._drilled, ", ".join(written) or "nothing written", ()
         if key == "read-boards":
             if self._drilled is None:
                 raise ValueError("read boards cannot run again before the panel is drilled")
@@ -308,13 +319,13 @@ class Driver:
                 self._read_boards(self._drilled, scope)
             self._dock_data = self._admit()
             assert self._scan is not None
-            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)"
+            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)", ()
         if key == "write-assembly":
             if self._dock_data is None or self._scan is None or self._geometry is None:
                 raise ValueError("write assembly cannot run again before the boards are docked")
             self._accept(key, options)
             written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
-            return self._dock_data, ", ".join(written) or "nothing written"
+            return self._dock_data, ", ".join(written) or "nothing written", ()
         if key in _STAGE_STEPS:
             keys = [step.key for step in self._plan.steps]
             before = keys[keys.index(key) - 1]
@@ -337,7 +348,8 @@ class Driver:
             revised = revision_for(diagnostic, self._options, answer)
             # ``_rerun`` returns the union of both halves' data; ``key`` chose
             # the branch, so the value is this step's own type.
-            reran, outcome = self._rerun(key, revised, scope)
+            reran, outcome, refreshed = self._rerun(key, revised, scope)
+            assert not refreshed, "a resolvable step must not refresh another step's hold"
             data = cast(_D, reran)
         self._presentation.finish_step(self._step(key), outcome)
         return data
