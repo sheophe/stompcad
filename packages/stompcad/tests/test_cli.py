@@ -195,3 +195,39 @@ def test_a_project_target_this_build_cannot_render_is_a_usage_error(
     assert "bogus" in error
     assert "output.targets" in error, "the refusal names a flag the builder did not type"
     assert not (tmp_path / "b.drl").exists(), "a bad name must spoil the good one too"
+
+
+def test_a_malformed_project_value_is_refused_before_the_artwork_is_opened(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLAUDE.md: options are validated before the artwork is opened.
+
+    A grid the project spells as text is only a number when something tries
+    to scale it, which is several steps into a run that has already read the
+    panel. The control is the same invocation with a number, which writes
+    the artefact this one must not reach.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    project = tmp_path / "tar.stompcad.json"
+    good, refused = tmp_path / "good.drl", tmp_path / "refused.drl"
+
+    project.write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}, "drilling": {"grid_mm": 0.25}}),
+        encoding="utf-8",
+    )
+    assert cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={good}"]) != EXIT_USAGE
+    assert good.is_file(), "the control wrote nothing; the assertion below proves nothing"
+    capsys.readouterr()
+
+    project.write_text(
+        json.dumps({"version": 1, "boards": {"boards": []}, "drilling": {"grid_mm": "abc"}}),
+        encoding="utf-8",
+    )
+    code = cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={refused}"])
+
+    printed = capsys.readouterr()
+    assert code == EXIT_USAGE
+    assert "drilling.grid_mm" in printed.err
+    assert "read panel" not in printed.out, "the artwork was opened before the value was checked"
+    assert not refused.exists()

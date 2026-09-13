@@ -297,3 +297,101 @@ def test_an_unknown_section_survives_being_read_and_written_back(tmp_path: Path)
 
     written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
     assert written["sparkle"] == {"x": 1}
+
+
+@pytest.mark.parametrize(
+    ("place", "key", "declared"),
+    [
+        ("output", "targets", "x.out"),
+        ("output", "targets", ["a", "b"]),
+        ("output", "targets", {"excellon": 3}),
+        ("boards", "boards", "tar-pcb.stp"),
+        ("boards", "boards", [1, 2]),
+        ("boards", "panel_reference", ["RV*"]),
+        ("drilling", "grid_mm", "abc"),
+        ("drilling", "grid_mm", None),
+        ("drilling", "title", 7),
+        ("drilling", "drill_sizes", 3.2),
+        ("artwork", "form_depth", "deep"),
+        ("artwork", "form_depth", 1.5),
+        ("artwork", "drill_layer", None),
+        ("enclosure", "case", ["1590B"]),
+        ("enclosure", "case_model", 3),
+        ("enclosure", "case_margin_mm", "1"),
+    ],
+)
+def test_a_known_key_of_the_wrong_shape_is_refused(
+    tmp_path: Path, place: str, key: str, declared: object,
+) -> None:
+    """A hand-authored value reaching the run as the wrong type is a usage failure.
+
+    The sentence has to serve someone editing JSON in a text editor, so it
+    names the file, the place, the key and the shape that key holds.
+    """
+    panel = _write(tmp_path, {"version": 1, place: {key: declared}})
+    with pytest.raises(manifest.ManifestError) as failure:
+        manifest.read(panel)
+    sentence = str(failure.value)
+    assert "tar.stompcad.json" in sentence
+    assert f"{place}.{key}" in sentence
+
+
+def test_a_true_is_refused_where_a_number_is_expected(tmp_path: Path) -> None:
+    """``bool`` subclasses ``int``; a project that says ``true`` did not say one."""
+    panel = _write(tmp_path, {"version": 1, "artwork": {"form_depth": True}})
+    with pytest.raises(manifest.ManifestError) as failure:
+        manifest.read(panel)
+    assert "artwork.form_depth" in str(failure.value)
+
+
+def test_a_nullable_key_still_accepts_null(tmp_path: Path) -> None:
+    """The fields a run leaves unset are written as ``null`` and must read back."""
+    panel = _write(tmp_path, {
+        "version": 1,
+        "enclosure": {"case": None, "case_model": None},
+        "drilling": {"grid_warn_mm": None, "drill_sizes": None, "no_drill_sizes": None},
+        "boards": {"match_tolerance_mm": None},
+    })
+    read = manifest.read(panel)
+    assert read.values["enclosure"]["case"] is None
+    assert read.values["drilling"]["grid_warn_mm"] is None
+
+
+def test_an_integer_is_a_number_where_a_number_is_wanted(tmp_path: Path) -> None:
+    """JSON writes ``1`` for a whole millimetre; that is a number, not a mistake."""
+    panel = _write(tmp_path, {"version": 1, "drilling": {"grid_mm": 1}})
+    assert manifest.read(panel).values["drilling"]["grid_mm"] == 1
+
+
+def test_an_unknown_key_of_any_shape_is_still_only_a_note(tmp_path: Path) -> None:
+    """The control: shape checking reaches known keys, and no others.
+
+    An unknown key has no declared shape to be wrong against, and refusing
+    one would make every version bump destructive.
+    """
+    panel = _write(tmp_path, {"version": 1, "drilling": {"wobble": ["anything", 3, None]}})
+    read = manifest.read(panel)
+    assert "drilling" not in read.values
+    assert read.stored["drilling"]["wobble"] == ["anything", 3, None]
+    assert any("wobble" in note for note in read.notes)
+
+
+def test_every_schema_key_declares_a_shape() -> None:
+    """A key in one table and not the other is a key nothing checks."""
+    from stompcad.manifest import _SHAPES
+
+    declared = {key for keys in manifest.PLACES.values() for key in keys}
+    assert set(_SHAPES) == declared, "the schema and the shape table must name the same keys"
+
+
+@pytest.mark.parametrize("half_name", ["DRILL", "DOCK"])
+def test_what_a_half_writes_is_what_the_reader_accepts(tmp_path: Path, half_name: str) -> None:
+    """The shapes are the file's own: a payload this tool wrote must read back."""
+    from stompcad.manifest import Half, payload_for
+    from stompcad.settings import Settings
+
+    panel = tmp_path / "tar.ai"
+    text = payload_for(panel, Settings.of_defaults(panel), Half[half_name], manifest.Manifest())
+    assert text is not None
+    (tmp_path / "tar.stompcad.json").write_text(text, encoding="utf-8")
+    manifest.read(panel)

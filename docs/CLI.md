@@ -270,6 +270,13 @@ cannot be read at all — malformed JSON, or something that is not an object —
 is a usage error naming the file: a project whose declarations cannot be read
 must never be run under values that look like the builder's own.
 
+A key this build does recognise must hold the shape that key takes — a string,
+a number, a whole number, a list of paths, or the `targets` object of format
+name to path — and one that does not is the same usage error, naming the key
+and the shape it wants. It is reported before the artwork is opened, so a
+mistyped value never stops a run part-way through. A boolean is not a number
+here: `"form_depth": true` is refused rather than read as `1`.
+
 This build does not yet write the file. Until it does, a project is
 hand-authored.
 

@@ -241,9 +241,10 @@ class Resolution:
 def _project(project: manifest.Manifest, place: str, key: str) -> Any:
     """One declared value, or ``None`` where the project says nothing about it.
 
-    Untyped by nature: a project file is JSON that ``manifest.read`` has
-    checked structurally, not against each field's own type, so the caller
-    still owns turning a raw declaration into the type ``Settings`` wants.
+    Untyped by nature: ``manifest.read`` has checked each declaration's
+    JSON shape, not what it means, so the caller still owns turning a
+    string of the right shape into the face, part number or size list
+    ``Settings`` carries.
     """
     return project.values.get(place, {}).get(key)
 
@@ -316,8 +317,8 @@ def _layer_discovery(panel: Path, conventional: str) -> Discovery[str] | None:
 def _case_face(raw: Any) -> CaseFace | None:
     """A project's drilled-face string as the enum ``Settings`` carries.
 
-    ``manifest.read`` checks the key exists, not that its value means
-    anything; a name outside the two the model knows is a usage error
+    ``manifest.read`` checks the value is a string, not that it names a
+    face; a name outside the two the model knows is a usage error
     naming the project key, not a bare ``ValueError`` from deep inside a run.
     """
     if raw is None:
