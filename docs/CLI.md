@@ -280,11 +280,12 @@ refused where the key holds no null — omitting a key is how a project declares
 nothing about it.
 
 A value of the right shape must also be one the tool that consumes it accepts.
-The grid and its warning distance, the clearance margin, the match tolerance
-and the two seat steps are checked by the same code `stompdrill` and
-`stompcollider` run from their own command lines, so a project cannot start a
-run under a number either tool would refuse. These are reported before the
-artwork is opened too, naming the key that carried the value.
+The grid and its warning distance, the clearance margin, the match tolerance,
+the two seat steps and the designator filter are checked by the same code
+`stompdrill` and `stompcollider` run from their own command lines, so a
+project cannot start a run under a value either tool would refuse. These are
+reported before the artwork is opened too, naming the key that carried the
+value.
 
 This build does not yet write the file. Until it does, a project is
 hand-authored.
