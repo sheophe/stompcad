@@ -263,3 +263,26 @@ def test_a_bare_emit_takes_its_path_from_the_naming_scheme(tmp_path: Path) -> No
     panel.write_bytes(b"")
     resolved = resolve(build_parser().parse_args([str(panel), "--emit", "excellon"]), tmp_path)
     assert resolved.settings.output.targets.value == (("excellon", tmp_path / "tar-case.drl"),)
+
+
+def test_an_argument_beats_a_conflicting_discovery(tmp_path: Path) -> None:
+    """The rank a bare flag reaches is stronger than a filename's own guess.
+
+    ``--case-model``'s stem names a real catalogue part, so ``case`` would
+    be discovered as ``1590B`` if nothing outranked it; ``--case`` still
+    wins over that discovery, the pair no other test here exercises.
+    """
+    from stompcad.cli import build_parser, resolve
+    from stompcad.settings import Origin
+
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    resolved = resolve(
+        build_parser().parse_args([
+            str(panel), "--case", "1590BB", "--case-model", str(tmp_path / "1590B.stp"),
+        ]),
+        tmp_path,
+    )
+    case = resolved.settings.enclosure.case
+    assert case.value == "1590BB"
+    assert case.provenance.origin is Origin.ARGUMENT
