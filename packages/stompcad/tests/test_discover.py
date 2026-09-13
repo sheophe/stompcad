@@ -63,6 +63,10 @@ def test_a_cached_model_is_found_by_part() -> None:
     assert found.detail == "cached for 1590B"
 
 
+def test_no_cached_model_is_none_not_a_fabricated_path(tmp_path: Path) -> None:
+    assert discover.cached_model("1590B", tmp_path) is None
+
+
 def test_every_format_has_a_file_name() -> None:
     from stompcad.drive import DOCK_TARGET_NAMES
     from stompdrill.emitters import available
@@ -76,4 +80,4 @@ def test_output_paths_follow_the_naming_scheme(tmp_path: Path) -> None:
     assert discover.output_path("drawing-pdf", panel) == tmp_path / "tar-case.pdf"
     assert discover.output_path("step", panel) == tmp_path / "tar-case.stp"
     assert discover.output_path("assembly", panel) == tmp_path / "tar-assembly.stp"
-    assert discover.output_path("report", panel) == tmp_path / "tar-assembly.txt"
+    assert discover.output_path("report", panel) == tmp_path / "tar-assembly.json"

@@ -38,7 +38,7 @@ ARTEFACT_NAMES: dict[str, str] = {
     "drawing-svg": "-case.svg",
     "step": "-case.stp",
     "json": "-case.json",
-    "report": "-assembly.txt",
+    "report": "-assembly.json",
     "assembly": "-assembly.stp",
 }
 
