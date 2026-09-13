@@ -106,7 +106,9 @@ def test_a_value_the_project_already_holds_is_left_alone(tmp_path: Path) -> None
     from stompcad.settings import Settings
 
     panel = tmp_path / "tar.ai"
-    held = manifest.Manifest({"drilling": {"grid_mm": 0.5}})
+    held = manifest.Manifest(
+        values={"drilling": {"grid_mm": 0.5}}, stored={"drilling": {"grid_mm": 0.5}}
+    )
     written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
     assert written["drilling"]["grid_mm"] == 0.5, "a declaration is never overwritten by a run"
 
@@ -179,3 +181,86 @@ def test_the_schema_covers_every_field_a_place_carries() -> None:
         carried = {field.name for field in fields(getattr(DEFAULTS, place))}
         assert allowed <= carried, f"{place}: schema names a field settings does not carry"
         assert carried - allowed <= {"panel"}, f"{place}: settings carries a field the schema forgets"
+
+
+def test_a_carried_over_path_reaches_the_next_half_as_the_string_it_was(tmp_path: Path) -> None:
+    """A held path is already in-memory as a ``Path``; the payload must not choke on it.
+
+    ``read()`` turns a declared path into a ``Path`` for the rest of the tool to
+    resolve against. That resolved form must never be fed back to ``json.dumps``
+    directly -- the file's own stored form has to be carried over unchanged.
+    """
+    from stompcad.manifest import Half, payload_for
+    from stompcad.settings import Settings
+
+    panel = tmp_path / "tar.ai"
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "boards": {"boards": ["tar-pcb.stp"]}}), encoding="utf-8"
+    )
+    held = manifest.read(panel)
+    settings = Settings.of_defaults(panel)
+    written = json.loads(payload_for(panel, settings, Half.DRILL, held) or "{}")
+    assert written["boards"]["boards"] == ["tar-pcb.stp"], "a carried-over path must not be re-derived"
+
+
+def test_targets_merge_by_format_across_halves(tmp_path: Path) -> None:
+    """``output.targets`` is the one key both halves declare into; each keeps its own format."""
+    from dataclasses import replace
+
+    from stompcad.manifest import Half, payload_for
+    from stompcad.settings import Origin, Provenance, Resolved, Settings
+
+    panel = tmp_path / "tar.ai"
+    manifest_file = tmp_path / "tar.stompcad.json"
+
+    drill_settings = Settings.of_defaults(panel)
+    drill_settings = replace(
+        drill_settings,
+        output=replace(
+            drill_settings.output,
+            targets=Resolved((("gerber", tmp_path / "tar.drl"),), Provenance(Origin.USER)),
+        ),
+    )
+    first = payload_for(panel, drill_settings, Half.DRILL, manifest.Manifest())
+    assert first is not None
+    manifest_file.write_text(first, encoding="utf-8")
+
+    dock_settings = Settings.of_defaults(panel)
+    dock_settings = replace(
+        dock_settings,
+        output=replace(
+            dock_settings.output,
+            targets=Resolved((("assembly", tmp_path / "tar.json"),), Provenance(Origin.USER)),
+        ),
+    )
+    second = payload_for(panel, dock_settings, Half.DOCK, manifest.read(panel))
+    assert second is not None
+    manifest_file.write_text(second, encoding="utf-8")
+
+    final = json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert final["output"]["targets"] == {"gerber": "tar.drl", "assembly": "tar.json"}, (
+        "both halves' target formats must survive"
+    )
+
+
+def test_merging_a_target_does_not_mutate_the_held_manifest(tmp_path: Path) -> None:
+    """``payload_for`` does not write -- and a held object is not the caller's to edit either."""
+    from dataclasses import replace
+
+    from stompcad.manifest import Half, Manifest, payload_for
+    from stompcad.settings import Origin, Provenance, Resolved, Settings
+
+    panel = tmp_path / "tar.ai"
+    held = Manifest(stored={"output": {"targets": {"gerber": "tar.drl"}}})
+    before = dict(held.stored["output"]["targets"])
+
+    settings = Settings.of_defaults(panel)
+    settings = replace(
+        settings,
+        output=replace(
+            settings.output,
+            targets=Resolved((("assembly", tmp_path / "tar.json"),), Provenance(Origin.USER)),
+        ),
+    )
+    payload_for(panel, settings, Half.DOCK, held)
+    assert held.stored["output"]["targets"] == before, "the caller's held manifest must be untouched"

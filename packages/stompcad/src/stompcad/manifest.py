@@ -80,10 +80,19 @@ class ManifestError(StompError):
 
 @dataclass(frozen=True, slots=True)
 class Manifest:
-    """What a project declares, and what was passed over on the way in."""
+    """What a project declares, and what was passed over on the way in.
+
+    ``stored`` carries the same declarations as ``values``, but exactly as
+    the file wrote them -- a relative string, not the ``Path`` ``values``
+    resolves it to. ``payload_for`` carries a held declaration forward
+    through ``stored``: a value already on disk must reach the next file
+    byte-identical to what the project declared, never re-derived from the
+    resolved form ``values`` hands the rest of the tool.
+    """
 
     values: dict[str, dict[str, Any]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    stored: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def manifest_path(panel: Path) -> Path:
@@ -117,6 +126,7 @@ def read(panel: Path) -> Manifest:
             f"{VERSION}, so any key it does not know is ignored"
         )
     values: dict[str, dict[str, Any]] = {}
+    stored: dict[str, dict[str, Any]] = {}
     for place, declared in loaded.items():
         if place not in PLACES:
             notes.append(f"{path.name}: ignoring unknown section {place!r}")
@@ -124,14 +134,18 @@ def read(panel: Path) -> Manifest:
         if not isinstance(declared, dict):
             raise ManifestError(f"{path}: section {place!r} must be an object")
         kept: dict[str, Any] = {}
+        kept_raw: dict[str, Any] = {}
         for key, value in declared.items():
             if key not in PLACES[place]:
                 notes.append(f"{path.name}: ignoring unknown key {place}.{key}")
                 continue
             kept[key] = _absolute(place, key, value, path.parent)
+            kept_raw[key] = value
         if kept:
             values[place] = kept
-    return Manifest(values, notes)
+        if kept_raw:
+            stored[place] = kept_raw
+    return Manifest(values, notes, stored)
 
 
 def _absolute(place: str, key: str, value: Any, root: Path) -> Any:
@@ -178,12 +192,26 @@ def payload_for(panel: Path, settings: Settings, half: Half, held: Manifest) -> 
     artefacts, so a committed artefact can never sit next to a project file
     that fails to describe it.
     """
-    merged = {place: dict(values) for place, values in held.values.items()}
+    merged = {place: dict(values) for place, values in held.stored.items()}
     added = False
     for place in _HALF_PLACES[half.value]:
         record = getattr(settings, place)
         into = merged.setdefault(place, {})
         for key in sorted(PLACES[place]):
+            if key == "targets":
+                # The one key both halves declare into: each format name is
+                # its own gap, because the drill half commits its formats
+                # and the dock half its own, and neither may erase the other.
+                # Copied rather than mutated in place -- ``held`` is the
+                # caller's, and ``payload_for`` promises not to write.
+                current = dict(into.get(key, {}))
+                for name, path in _stored(place, key, getattr(record, key).value, panel.parent).items():
+                    if name in current:
+                        continue
+                    current[name] = path
+                    added = True
+                into[key] = current
+                continue
             if key in into:
                 continue
             into[key] = _stored(place, key, getattr(record, key).value, panel.parent)
