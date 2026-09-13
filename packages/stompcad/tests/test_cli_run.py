@@ -1,10 +1,11 @@
-"""The command line drives the run: the plan's goal sentence, tested.
+"""The command line drives one composed run over both tools.
 
 ``stompcad PANEL.ai`` composes both tools in one invocation, streams its step
 log, writes the artefacts either tool would write and exits on the worst
-finding either half reported. The first test is the acceptance criterion --
-the artefact compared, byte for byte, against what ``stompdrill``'s own
-command line writes from the same inputs.
+finding either half reported. The two byte-for-byte comparisons are the
+acceptance criterion -- an artefact measured against what ``stompdrill``'s
+own command line writes from the same inputs, once where a flag declares the
+enclosure and once where nothing but the supplied model names it.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import pytest
 from stompcad import cli
 from stompdrill import cli as stompdrill_cli
 from stompmodel.diagnostics import EXIT_USAGE, EXIT_WARNINGS
-from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB
+from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, case_model
 
 __all__: list[str] = []
 
@@ -266,11 +267,35 @@ def test_a_bare_emit_takes_its_path_from_the_naming_scheme(tmp_path: Path) -> No
 
 
 def test_an_argument_beats_a_conflicting_discovery(tmp_path: Path) -> None:
-    """The rank a bare flag reaches is stronger than a filename's own guess.
+    """The rank a bare argument reaches is stronger than what was found beside it.
 
-    ``--case-model``'s stem names a real catalogue part, so ``case`` would
-    be discovered as ``1590B`` if nothing outranked it; ``--case`` still
-    wins over that discovery, the pair no other test here exercises.
+    Two board models sit in the directory, so discovery has an answer of
+    its own; naming one on the command line still wins, the pair no other
+    test here exercises.
+    """
+    from stompcad.cli import build_parser, resolve
+    from stompcad.settings import Origin
+
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    for name in ("tar-pcb.stp", "other.stp"):
+        (tmp_path / name).write_bytes(b"")
+    resolved = resolve(
+        build_parser().parse_args([str(panel), str(tmp_path / "other.stp")]), tmp_path
+    )
+    boards = resolved.settings.boards.boards
+    assert boards.value == (tmp_path / "other.stp",)
+    assert boards.provenance.origin is Origin.ARGUMENT
+
+
+def test_a_case_model_filename_never_becomes_a_declared_case(tmp_path: Path) -> None:
+    """A supplied model is a file to read, not a statement about the enclosure.
+
+    ``stompdrill`` treats a model's stem as a guess to try against the
+    measurement, and only where a tie is otherwise undeclared. Promoting
+    that stem to ``case`` here would hand the same guess in as a
+    declaration, which is an error where it disagrees rather than an
+    ambiguity a picker can still settle.
     """
     from stompcad.cli import build_parser, resolve
     from stompcad.settings import Origin
@@ -278,14 +303,39 @@ def test_an_argument_beats_a_conflicting_discovery(tmp_path: Path) -> None:
     panel = tmp_path / "tar.ai"
     panel.write_bytes(b"")
     resolved = resolve(
-        build_parser().parse_args([
-            str(panel), "--case", "1590BB", "--case-model", str(tmp_path / "1590B.stp"),
-        ]),
+        build_parser().parse_args([str(panel), "--case-model", str(tmp_path / "1590B.stp")]),
         tmp_path,
     )
     case = resolved.settings.enclosure.case
-    assert case.value == "1590BB"
-    assert case.provenance.origin is Origin.ARGUMENT
+    assert case.value is None, "a filename was promoted to a declaration"
+    assert case.provenance.origin is Origin.DEFAULT
+
+
+@pytest.mark.hammond
+def test_a_model_alone_writes_what_stompdrill_writes_byte_for_byte(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Byte identity on the path where the model, not a flag, names the part.
+
+    The drill document carries both the run's parameters and its
+    diagnostics, so it is the artefact that shows a part this half inferred
+    being handed to the next run as though it had been declared.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    panel = _boardless_panel(tmp_path)
+    here = tmp_path / "1590B.stp"
+    shutil.copy(model, here)
+    mine, theirs = tmp_path / "mine.json", tmp_path / "theirs.json"
+
+    reference = stompdrill_cli.main([
+        str(panel), "--case-model", str(here), "--emit", f"json={theirs}",
+    ])
+    mine_code = cli.main([str(panel), "--case-model", str(here), "--emit", f"json={mine}"])
+
+    assert mine_code == reference, capsys.readouterr().err
+    assert mine.read_bytes() == theirs.read_bytes()
 
 
 def test_a_malformed_size_list_is_reported_before_the_artwork_is_opened(
@@ -313,3 +363,85 @@ def test_a_malformed_size_list_is_reported_before_the_artwork_is_opened(
     with pytest.raises(UsageError) as failure:
         resolve(build_parser().parse_args([str(panel)]), tmp_path)
     assert "drilling.drill_sizes" in str(failure.value)
+
+
+def test_an_unstocked_drill_standard_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A standard nobody publishes is a usage error, not a ``KeyError`` mid-run."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"drilling": {"drill_standard": "nonsense"}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "drilling.drill_standard" in str(failure.value)
+
+
+def test_a_size_outside_the_standard_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A size that parses but the table does not hold is refused at the same boundary."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"drilling": {"drill_sizes": "3.77"}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "3.77" in str(failure.value)
+
+
+def test_a_form_depth_the_reader_rejects_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero levels of nesting is not a depth; the reader says so, this boundary raises it."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"artwork": {"form_depth": 0}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "artwork.form_depth" in str(failure.value)
+
+
+def test_a_case_the_catalogue_does_not_hold_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The project's part number is checked against the catalogue, as a flag's is."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"enclosure": {"case": "nonsense"}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "enclosure.case" in str(failure.value)
+
+
+def test_a_declared_case_reaches_the_run_as_the_catalogue_spells_it(tmp_path: Path) -> None:
+    """``stompdrill`` normalises what it is handed; a second spelling is a second answer."""
+    from stompcad.cli import build_parser, resolve
+
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    resolved = resolve(build_parser().parse_args([str(panel), "--case", "1590b"]), tmp_path)
+    assert resolved.settings.enclosure.case.value == "1590B"
+
+
+def _declaring(tmp_path: Path, declared: dict[str, object]) -> Path:
+    """A panel whose project file declares exactly what a test is about."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, **declared}), encoding="utf-8"
+    )
+    return panel
+
+
+def _never_opens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make layer discovery fail loudly, so a late validation cannot pass as an early one."""
+    from stompcad import discover
+
+    def _must_not_be_called(panel: Path) -> tuple[str, ...]:
+        raise AssertionError("the artwork must not be opened before options are validated")
+
+    monkeypatch.setattr(discover, "layers", _must_not_be_called)

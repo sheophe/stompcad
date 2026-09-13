@@ -95,9 +95,11 @@ def cached_model(part: str, cache: Path) -> Discovery[Path] | None:
 def part_from_model(path: Path) -> str | None:
     """The catalogue part a model's filename names, or ``None``.
 
-    ``stompdrill`` owns this rule, and owns verifying the answer against
-    the measurement. Restating either here would give one question two
-    answers.
+    Which model this is, never which part the panel is drawn for: the stem
+    is what keys the enclosure cache, and resolving it to ``case`` would
+    hand a guess to the drill stage as a declaration. ``stompdrill`` owns
+    that rule and owns verifying its answer against the measurement;
+    restating either here would give one question two answers.
     """
     return infer_part_name(path)
 

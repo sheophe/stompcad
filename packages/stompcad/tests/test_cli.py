@@ -138,3 +138,60 @@ def test_a_keyboard_interrupt_exits_130(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(cli, "_run", raises_interrupt)
     assert cli.main([str(TAR_AI)]) == EXIT_CANCELLED
+
+
+def test_a_project_target_set_is_checked_like_a_flag_one(tmp_path: Path) -> None:
+    """Two artefacts naming one file are refused wherever the pair came from.
+
+    ``--emit`` is not the only rank that supplies targets, and the rollback
+    both tools stage their writes through assumes each artefact owns its
+    own path. A run that is otherwise able to finish is the control: what
+    is under test is the refusal, not an invocation that fails anyway.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    target = tmp_path / "x.out"
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({
+            "version": 1,
+            "boards": {"boards": []},
+            "enclosure": {"case": "1590B"},
+            "output": {"targets": {"excellon": "x.out", "json": "x.out"}},
+        }),
+        encoding="utf-8",
+    )
+
+    code = cli.main([str(panel)])
+
+    assert code == EXIT_USAGE
+    assert not target.exists(), "one file on disk under two claims of having written it"
+
+
+def test_a_project_target_this_build_cannot_render_is_a_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unknown format is named, not dropped, whichever rank asked for it.
+
+    Each write step filters to the formats its own half owns, so a name
+    outside their union is written by neither -- silently, unless it is
+    rejected before the run starts.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({
+            "version": 1,
+            "boards": {"boards": []},
+            "enclosure": {"case": "1590B"},
+            "output": {"targets": {"bogus": "a.out", "excellon": "b.drl"}},
+        }),
+        encoding="utf-8",
+    )
+
+    code = cli.main([str(panel)])
+
+    assert code == EXIT_USAGE
+    error = capsys.readouterr().err
+    assert "bogus" in error
+    assert "output.targets" in error, "the refusal names a flag the builder did not type"
+    assert not (tmp_path / "b.drl").exists(), "a bad name must spoil the good one too"

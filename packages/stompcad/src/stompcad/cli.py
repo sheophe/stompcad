@@ -19,9 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, TypeVar
 
-from stompdrill.cli import parse_sizes
+from stompdrill.cli import parse_case, parse_sizes
 from stompdrill.emitters import available
 from stompdrill.errors import UsageError as DrillUsageError
+from stompdrill.pipeline import DRILL_STANDARDS
+from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import (
     EXIT_CLEAN,
     EXIT_ERRORS,
@@ -33,6 +35,7 @@ from stompmodel.errors import StompError
 from stompmodel.model import CaseFace
 from stompmodel.progress import Sink, track
 from stompmodel.protocols import check_target_set
+from stompmodel.units import Nanometre, nm_from_mm
 
 from . import discover, manifest
 from .cancel import EXIT_CANCELLED, Cancelled, CancellingSink
@@ -173,22 +176,40 @@ def _known_targets() -> frozenset[str]:
     return frozenset(available()) | DOCK_TARGET_NAMES
 
 
-def validate_targets(targets: Sequence[tuple[str, Path]]) -> None:
-    """Reject every unknown ``--emit`` format together, before any file opens.
+def validate_targets(targets: Sequence[tuple[str, Path]], where: str = "--emit") -> None:
+    """Reject every unknown target format together, before any file opens.
 
     CLAUDE.md: "Validate all requested targets together before rendering."
     ``_write_case`` and ``_write_dock`` each filter to the names their own
     half owns; those two sets are disjoint, so a name outside their union
     would otherwise be silently dropped rather than reported. Collecting
     every bad name here, rather than raising on the first, is what makes one
-    round trip enough for a caller who mistyped more than one flag.
+    round trip enough for a caller who mistyped more than one. ``where``
+    names the rank that asked, because a flag and a project key are edited
+    in different places.
     """
     known = _known_targets()
     bad = sorted({name for name, _path in targets if name not in known})
     if bad:
         raise UsageError(
-            f"--emit: unknown format(s) {', '.join(bad)}; available: {', '.join(sorted(known))}"
+            f"{where}: unknown format(s) {', '.join(bad)}; available: {', '.join(sorted(known))}"
         )
+
+
+def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]]) -> None:
+    """Both target checks, over the set this run will actually write.
+
+    ``validate_targets`` rejects a format neither half owns, and
+    ``check_target_set`` two artefacts naming one file -- which ADR-0001's
+    rollback assumes never happens, and which would otherwise leave one file
+    on disk beside two claims of having written it.
+    """
+    where = "output.targets" if targets.provenance.origin is Origin.PROJECT else "--emit"
+    validate_targets(targets.value, where)
+    try:
+        check_target_set([path for _name, path in targets.value])
+    except ValueError as failure:
+        raise UsageError(str(failure)) from failure
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,33 +331,86 @@ def _case_face(raw: Any) -> CaseFace | None:
         ) from None
 
 
-def _validate_sizes(drilling: Drilling) -> None:
-    """A malformed stocked-size list is a usage error, not a mid-run crash.
+def _validate_drilling(drilling: Drilling) -> None:
+    """Build the drill table this run would use, and refuse it here if it cannot.
 
-    Neither field is a flag on this parser, so the project file is the only
-    rank that can carry user-typed text into them; ``drive.py``'s own
-    narrowing mirrors ``stompdrill``'s parser but has no usage-error
-    convention to raise through, which is why this boundary -- the one that
-    has one, ahead of opening the artwork -- validates them instead.
+    The same three questions ``stompdrill``'s ``build_drill_standard``
+    asks -- does the standard exist, do the sizes parse, does the narrowed
+    table survive -- asked where a usage-error convention exists to answer
+    them. ``drive.py`` narrows the table again under the real run, but by
+    then the artwork is open and a bad value is a traceback rather than a
+    usage failure naming the project key that carried it.
     """
-    for label, resolved in (
-        ("drilling.drill_sizes", drilling.drill_sizes),
-        ("drilling.no_drill_sizes", drilling.no_drill_sizes),
-    ):
-        if resolved.value is None:
-            continue
-        try:
-            parse_sizes(resolved.value, label)
-        except DrillUsageError as failure:
-            raise UsageError(str(failure)) from failure
+    standard = DRILL_STANDARDS.get(drilling.drill_standard.value)
+    if standard is None:
+        raise UsageError(
+            f"drilling.drill_standard {drilling.drill_standard.value!r} is not a drill "
+            f"standard; available: {', '.join(DRILL_STANDARDS)}"
+        )
+    include = _selected_sizes(drilling.drill_sizes, "drilling.drill_sizes")
+    exclude = _selected_sizes(drilling.no_drill_sizes, "drilling.no_drill_sizes")
+    if include is None and exclude is None:
+        return
+    try:
+        standard.select(include=include, exclude=exclude)
+    except ValueError as failure:
+        # The standard names itself and the sizes it holds; restating either
+        # here would be a second answer to the same question.
+        raise UsageError(str(failure)) from failure
+
+
+def _selected_sizes(sizes: Resolved[str | None], label: str) -> tuple[Nanometre, ...] | None:
+    """One declared size list in the exact nanometres a drill table is keyed by."""
+    if sizes.value is None:
+        return None
+    try:
+        return tuple(nm_from_mm(size) for size in parse_sizes(sizes.value, label))
+    except DrillUsageError as failure:
+        raise UsageError(str(failure)) from failure
+
+
+def _validate_form_depth(panel: Path, form_depth: Resolved[int]) -> None:
+    """A nesting depth the reader would reject, caught before it opens anything.
+
+    Constructing the source is the check: ``AiPdfSource`` states the rule
+    and applies it without touching the file, so the depth this run would
+    read at is tested by the object that would read it.
+    """
+    try:
+        AiPdfSource(panel, form_depth=form_depth.value)
+    except ValueError as failure:
+        raise UsageError(f"artwork.form_depth: {failure}") from failure
+
+
+def _declared_case(raw: Any, label: str) -> str | None:
+    """One rank's part number, as the catalogue spells it, or a usage failure.
+
+    ``stompdrill`` owns which designators exist and what each normalises
+    to, and its own command line hands the normalised form to the stage;
+    a second spelling reaching the same stage from here would be a second
+    answer. Its sentence names its own flag, so the project rank restates
+    the prefix as the key the value was actually typed into.
+    """
+    if raw is None:
+        return None
+    try:
+        return parse_case(str(raw))
+    except DrillUsageError as failure:
+        raise UsageError(str(failure).replace("--case", label, 1)) from failure
 
 
 def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     """The four ranks, assembled once, with every disagreement carried.
 
-    Order matters only in that discovery needs the panel before it can read
-    the artwork's layers, and needs the case model before it can exclude it
-    from the board candidates. Everything else is independent.
+    Three orderings are load-bearing. The panel comes first, because every
+    other rank is read relative to it. Every value a user can type is then
+    resolved and validated, before the first discovery opens the artwork:
+    CLAUDE.md's "validate options before opening the artwork" has nowhere
+    else to happen for a value carried only by a hand-edited project file.
+    Discovery follows, needing the panel to read its layers and the case
+    model to exclude it from the board candidates; and the targets are
+    checked once resolved, because a project may supply them as readily as
+    a flag may.
     """
     notes: list[str] = []
     panel, panel_resolved = _resolve_panel(args, directory)
@@ -344,11 +418,10 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     project = manifest.read(panel)
     notes.extend(project.notes)
 
-    # Neither place below depends on the panel or the enclosure, and both
-    # can carry user-typed text only through the project file (neither is a
-    # flag on this parser); validating them here, before anything opens the
-    # artwork, is what CLAUDE.md's "validate before opening the artwork or
-    # board input" means for values that live nowhere but a hand-edited file.
+    # Everything from here to the layer discovery below is typed text that
+    # needs checking and no file to check it against -- most of it carried
+    # by the project file alone, which is the only rank several of these
+    # fields have. Nothing in this block may read the artwork.
     case_face_resolved = pick(
         None, _case_face(_project(project, "enclosure", "case_face")), None,
         DEFAULTS.enclosure.case_face.value,
@@ -372,22 +445,26 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         ),
         title=pick(None, _project(project, "drilling", "title"), None, DEFAULTS.drilling.title.value),
     )
-    _validate_sizes(drilling)
+    _validate_drilling(drilling)
+    form_depth_resolved = pick(
+        None, _project(project, "artwork", "form_depth"), None, DEFAULTS.artwork.form_depth.value,
+    )
+    _validate_form_depth(panel, form_depth_resolved)
 
+    # ``case`` is a declaration and has no discovered rank. A supplied
+    # model's filename is a guess the drill stage tries against the
+    # measurement, and only where a tie is otherwise undeclared; promoting
+    # it here would hand that guess in as something the operator said, which
+    # is an error where it disagrees rather than an ambiguity a picker can
+    # still settle.
+    case_resolved = pick(
+        _declared_case(args.case, "--case"),
+        _declared_case(_project(project, "enclosure", "case"), "enclosure.case"),
+        None,
+        DEFAULTS.enclosure.case.value,
+    )
     case_model_arg = None if args.case_model is None else Path(args.case_model)
     case_model_project = _project(project, "enclosure", "case_model")
-    supplied_model = case_model_arg if case_model_arg is not None else case_model_project
-
-    case_discovery: Discovery[str] | None = None
-    if supplied_model is not None:
-        inferred = discover.part_from_model(supplied_model)
-        if inferred is not None:
-            case_discovery = Discovery(inferred, f"inferred from {supplied_model.name}")
-
-    case_resolved = _pick_noting(
-        args.case, _project(project, "enclosure", "case"), case_discovery,
-        DEFAULTS.enclosure.case.value, panel=panel, label="case", notes=notes,
-    )
     # Locating the enclosure cache is separate work this run does not take
     # on (CLAUDE.md); a supplied model is the only rank that can be found
     # without it, so no discovery narrows a model left unnamed.
@@ -413,9 +490,6 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         None, _project(project, "artwork", "reference_layer"),
         _layer_discovery(panel, DEFAULTS.artwork.reference_layer.value),
         DEFAULTS.artwork.reference_layer.value, panel=panel, label="reference layer", notes=notes,
-    )
-    form_depth_resolved = pick(
-        None, _project(project, "artwork", "form_depth"), None, DEFAULTS.artwork.form_depth.value,
     )
     artwork = Artwork(
         panel=panel_resolved, drill_layer=drill_layer_resolved,
@@ -452,20 +526,16 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         ),
     )
 
-    targets_arg: tuple[tuple[str, Path], ...] | None = None
-    if args.emit:
-        parsed = [parse_emit(spec, panel) for spec in args.emit]
-        validate_targets(parsed)
-        try:
-            check_target_set([path for _name, path in parsed])
-        except ValueError as failure:
-            raise UsageError(str(failure)) from failure
-        targets_arg = tuple(parsed)
+    targets_arg = tuple(parse_emit(spec, panel) for spec in args.emit) if args.emit else None
     targets_project_raw = _project(project, "output", "targets")
     targets_project = None if targets_project_raw is None else tuple(targets_project_raw)
     output = OutputSettings(
         targets=pick(targets_arg, targets_project, None, DEFAULTS.output.targets.value),
     )
+    # Checked after resolution, not on ``--emit`` alone: the set that reaches
+    # the write steps is the resolved one, whichever rank supplied it, and a
+    # target set checked at a rank the run may not even use is no check at all.
+    _validate_output(output.targets)
 
     settings = Settings(
         artwork=artwork, enclosure=enclosure, drilling=drilling,

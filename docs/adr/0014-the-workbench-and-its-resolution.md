@@ -73,10 +73,20 @@ on its own command line. Discovery sits between the manifest and the default
 because it is stronger evidence than an assumption and weaker than a
 declaration typed on purpose — the panel found beside the working directory,
 the layers read from the artwork itself, the boards found in the project
-directory, the case model matched by footprint or filename, the
-panel-reference designators read from the boards, and the match tolerance
-derived from the drill grid are none of them guesses, but none of them is
-what the builder typed either.
+directory, the case model found in the enclosure cache or named by a `.stp`
+whose stem is a catalogue part, the panel-reference designators read from the
+boards, and the match tolerance derived from the drill grid are none of them
+guesses, but none of them is what the builder typed either.
+
+The enclosure part is not among them, and a model's filename is discovery of
+the model rather than of the part. `stompdrill` identifies the part from the
+measured footprint, and where that measurement ties it may try a supplied
+model's stem against the tie — a guess it reports as inferred and abandons
+where it disagrees, leaving the tie standing for a picker to settle.
+Resolving that same stem to `case` here would hand the guess to that stage as
+a declaration, and a declared part that disagrees is an error. So `case`
+resolves from the argument, the project or nothing at all; the model travels
+beside it, and the stage that measures owns what the filename is worth.
 
 A project value that discovery contradicts is a finding, not an override. If
 the manifest names a drill layer the artwork no longer has, the run reports
