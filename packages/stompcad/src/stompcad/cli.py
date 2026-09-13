@@ -21,8 +21,9 @@ from typing import Any, TextIO, TypeVar
 
 from stompcollider.cli import parse_length as parse_dock_length
 from stompcollider.cli import parse_pitches
+from stompcollider.designators import parse_filter
 from stompcollider.errors import UsageError as DockUsageError
-from stompdrill.cli import build_case_model, parse_case, parse_sizes
+from stompdrill.cli import build_case_model, parse_case, parse_face, parse_sizes
 from stompdrill.cli import parse_length as parse_drill_length
 from stompdrill.emitters import available
 from stompdrill.errors import UsageError as DrillUsageError
@@ -321,19 +322,20 @@ def _layer_discovery(panel: Path, conventional: str) -> Discovery[str] | None:
 def _case_face(raw: Any) -> CaseFace | None:
     """A project's drilled-face string as the enum ``Settings`` carries.
 
-    ``manifest.read`` checks the value is a string, not that it names a
-    face; a name outside the two the model knows is a usage error
-    naming the project key, not a bare ``ValueError`` from deep inside a run.
+    ``stompdrill``'s own parser owns how the word is read -- which spellings
+    it strips and lowers as well as which two names exist -- so a second
+    reading here would accept what its flag refuses, or refuse what it
+    accepts. Its sentence names that flag, which this command line has not
+    got, so the prefix becomes the key the value was typed into.
     """
     if raw is None:
         return None
     try:
-        return CaseFace(raw)
-    except ValueError:
+        return parse_face(str(raw))
+    except DrillUsageError as failure:
         raise UsageError(
-            f"enclosure.case_face {raw!r} is not a drilled face; use one of: "
-            + ", ".join(face.value for face in CaseFace)
-        ) from None
+            str(failure).replace("--case-face", "enclosure.case_face", 1)
+        ) from failure
 
 
 def _validate_drilling(drilling: Drilling) -> None:
@@ -402,6 +404,28 @@ def _declared_case(raw: Any, label: str) -> str | None:
         return parse_case(str(raw))
     except DrillUsageError as failure:
         raise UsageError(str(failure).replace("--case", label, 1)) from failure
+
+
+def _validate_panel_reference(panel_reference: Resolved[str]) -> None:
+    """The dock half's own filter parser, asked of whichever rank answered.
+
+    ``stompcollider`` states what a term may be, and states it for a caller
+    that has opened nothing; left to the run it would first be asked over
+    boards already read, on the far side of the drill half's commit. An
+    unanswered filter is passed over rather than parsed: the empty default
+    is the state ``readiness`` reports as a blocker, not a bad expression.
+    """
+    if not panel_reference.value:
+        return
+    where = (
+        "--panel-reference"
+        if panel_reference.provenance.origin is Origin.ARGUMENT
+        else "boards.panel_reference"
+    )
+    try:
+        parse_filter(panel_reference.value)
+    except DockUsageError as failure:
+        raise UsageError(f"{where}: {failure}") from failure
 
 
 # The four checks below name every value as the project spells it. No flag of
@@ -512,11 +536,11 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     resolved and validated, before the first discovery opens the artwork:
     CLAUDE.md's "validate options before opening the artwork" has nowhere
     else to happen for a value carried only by a hand-edited project file.
-    That is why the dock half's three lengths resolve up there, though the
-    board list beside them cannot. Discovery follows, needing the panel to
-    read its layers and the case model to exclude it from the board
-    candidates; and the targets are checked once resolved, because a project
-    may supply them as readily as a flag may.
+    That is why the dock half's three lengths and its designator filter
+    resolve up there, though the board list beside them cannot. Discovery
+    follows, needing the panel to read its layers and the case model to
+    exclude it from the board candidates; and the targets are checked once
+    resolved, because a project may supply them as readily as a flag may.
     """
     notes: list[str] = []
     panel, panel_resolved = _resolve_panel(args, directory)
@@ -604,6 +628,11 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     _validate_dock_lengths(
         match_tolerance_resolved, seat_pitch_max_resolved, seat_pitch_min_resolved
     )
+    panel_reference_resolved = pick(
+        args.panel_reference, _project(project, "boards", "panel_reference"), None,
+        DEFAULTS.boards.panel_reference.value,
+    )
+    _validate_panel_reference(panel_reference_resolved)
 
     drill_layer_resolved = _pick_noting(
         None, _project(project, "artwork", "drill_layer"),
@@ -632,10 +661,7 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     )
     boards_settings = BoardSettings(
         boards=boards_resolved,
-        panel_reference=pick(
-            args.panel_reference, _project(project, "boards", "panel_reference"), None,
-            DEFAULTS.boards.panel_reference.value,
-        ),
+        panel_reference=panel_reference_resolved,
         match_tolerance_mm=match_tolerance_resolved,
         seat_pitch_max_mm=seat_pitch_max_resolved,
         seat_pitch_min_mm=seat_pitch_min_resolved,

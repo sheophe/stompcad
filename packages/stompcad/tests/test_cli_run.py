@@ -531,6 +531,94 @@ def test_a_coarse_seat_step_finer_than_the_fine_one_is_reported_before_the_artwo
     assert "--seat-pitch" not in sentence, "the refusal names a flag the builder did not type"
 
 
+def test_a_malformed_panel_reference_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A designator filter is a typed value, so it is refused where typed values are.
+
+    ``parse_filter`` otherwise first runs over boards already read, which is
+    the far side of the drill half's own commit: a stray comma would cost
+    the whole run and leave its drill artefacts behind.
+    """
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"boards": {"panel_reference": "RV*,,SW*"}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    sentence = str(failure.value)
+    assert "boards.panel_reference" in sentence
+    assert "--panel-reference" not in sentence, "the refusal names a flag the builder did not type"
+
+
+def test_a_malformed_panel_reference_flag_is_refused_as_the_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This value has a flag as well as a key, so the refusal names the rank that asked.
+
+    The control is the same expression declared in the project above, which
+    names the key instead; a fixed prefix would misattribute one of the two.
+    """
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel), "--panel-reference", "RV*,,SW*"]), tmp_path)
+    sentence = str(failure.value)
+    assert "--panel-reference" in sentence
+    assert "boards.panel_reference" not in sentence, "the refusal names a key nobody edited"
+
+
+def test_an_unanswered_panel_reference_is_still_a_blocker(tmp_path: Path) -> None:
+    """The empty default is "not yet chosen", which readiness reports rather than refuses.
+
+    ``parse_filter("")`` raises, so a check asked about every value would
+    turn the workbench's unanswered state into a usage failure and leave the
+    readiness matrix nothing to show. The control is the malformed
+    expression above, which does refuse.
+    """
+    from stompcad.cli import build_parser, resolve
+    from stompcad.readiness import Blocker
+
+    (tmp_path / "board.stp").write_bytes(b"")
+    panel = _declaring(
+        tmp_path,
+        {"boards": {"boards": ["board.stp"]}, "enclosure": {"case_model": "1590B.stp"}},
+    )
+    resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
+
+    assert Blocker.NO_PANEL_REFERENCE in {
+        blocker for blocker, _place, _sentence in resolved.blockers.blockers
+    }
+
+
+def test_a_declared_face_is_normalised_as_stompdrill_normalises_it(tmp_path: Path) -> None:
+    """``stompdrill`` strips and lowers what its own flag is handed; so does this key.
+
+    A second reading of the same word would accept a spelling here that
+    ``--case-face`` refuses, or refuse one it accepts.
+    """
+    from stompcad.cli import build_parser, resolve
+    from stompmodel.model import CaseFace
+
+    panel = _declaring(tmp_path, {"enclosure": {"case_face": " Box"}})
+    resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert resolved.settings.enclosure.case_face.value is CaseFace.BOX
+
+
+def test_a_face_outside_the_two_names_the_project_key(tmp_path: Path) -> None:
+    """``parse_face`` names its own flag; this rank restates the key instead."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    panel = _declaring(tmp_path, {"enclosure": {"case_face": "side"}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    sentence = str(failure.value)
+    assert "enclosure.case_face" in sentence
+    assert "--case-face" not in sentence, "the refusal names a flag this command line has not got"
+
+
 def test_a_declared_case_reaches_the_run_as_the_catalogue_spells_it(tmp_path: Path) -> None:
     """``stompdrill`` normalises what it is handed; a second spelling is a second answer."""
     from stompcad.cli import build_parser, resolve
