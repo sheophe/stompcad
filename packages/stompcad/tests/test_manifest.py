@@ -377,11 +377,20 @@ def test_an_unknown_key_of_any_shape_is_still_only_a_note(tmp_path: Path) -> Non
 
 
 def test_every_schema_key_declares_a_shape() -> None:
-    """A key in one table and not the other is a key nothing checks."""
+    """A key in one table and not the other is a key nothing checks.
+
+    The count is the second half of the same invariant: one shape row per
+    declared key holds only while no two places spell a key name the same,
+    and comparing flattened sets alone cannot see the day that changes.
+    """
     from stompcad.manifest import _SHAPES
 
     declared = {key for keys in manifest.PLACES.values() for key in keys}
     assert set(_SHAPES) == declared, "the schema and the shape table must name the same keys"
+    assert sum(len(keys) for keys in manifest.PLACES.values()) == len(declared), (
+        "the shape table is keyed by name alone, so two places spelling one key "
+        "the same way would share a single row"
+    )
 
 
 @pytest.mark.parametrize("half_name", ["DRILL", "DOCK"])

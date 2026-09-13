@@ -19,10 +19,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO, TypeVar
 
-from stompdrill.cli import parse_case, parse_sizes
+from stompcollider.cli import parse_length as parse_dock_length
+from stompcollider.cli import parse_pitches
+from stompcollider.errors import UsageError as DockUsageError
+from stompdrill.cli import build_case_model, parse_case, parse_sizes
+from stompdrill.cli import parse_length as parse_drill_length
 from stompdrill.emitters import available
 from stompdrill.errors import UsageError as DrillUsageError
-from stompdrill.pipeline import DRILL_STANDARDS
+from stompdrill.pipeline import DRILL_STANDARDS, SnapPositions
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import (
     EXIT_CLEAN,
@@ -400,6 +404,106 @@ def _declared_case(raw: Any, label: str) -> str | None:
         raise UsageError(str(failure).replace("--case", label, 1)) from failure
 
 
+# The four checks below name every value as the project spells it. No flag of
+# this command line carries any of these six numbers, so the project file is
+# the only rank that can state one and the only place a refusal can send
+# anybody; a flag added later brings its own name with it.
+
+
+def _declared_length(millimetres: float, label: str) -> Nanometre:
+    """One rank's millimetre value in the exact nanometres its tool works in.
+
+    ``stompdrill``'s own conversion, which is where a value JSON can hold
+    and no arithmetic can use -- an infinity -- stops being a length.
+    """
+    try:
+        return parse_drill_length(millimetres, label)
+    except DrillUsageError as failure:
+        raise UsageError(str(failure)) from failure
+
+
+def _validate_grid(drilling: Drilling) -> None:
+    """Build the position snapping this run would use, and refuse it here if it cannot.
+
+    ``stompdrill``'s command line resolves the same two values into a
+    ``SnapPositions`` before it opens the artwork, so a pitch no grid can be
+    spelled in, or a warning distance no hole can have moved less than, is a
+    usage failure there. The threshold is checked against the pitch it was
+    declared beside, because that is the pair the stage holds; building the
+    pitch on its own first is what tells the two declarations apart.
+    """
+    grid_nm = _declared_length(drilling.grid_mm.value, "drilling.grid_mm")
+    try:
+        SnapPositions(grid_nm)
+    except ValueError as failure:
+        raise UsageError(f"drilling.grid_mm: {failure}") from failure
+    warn_mm = drilling.grid_warn_mm.value
+    if warn_mm is None:
+        return
+    warn_nm = _declared_length(warn_mm, "drilling.grid_warn_mm")
+    try:
+        SnapPositions(grid_nm, warn_nm)
+    except ValueError as failure:
+        raise UsageError(f"drilling.grid_warn_mm: {failure}") from failure
+
+
+def _validate_case_margin(margin_mm: Resolved[float], face: CaseFace) -> None:
+    """``stompdrill``'s own clearance check, asked with the model withheld.
+
+    CLAUDE.md: the margin is refused whether or not a model was supplied,
+    and naming no model is what leaves this call the check alone -- nothing
+    is loaded and no geometry is touched. The face is the one this run
+    resolved, already checked above, so the call states the run's own values.
+    """
+    try:
+        build_case_model(
+            argparse.Namespace(
+                case_face=face.value,
+                case_margin=margin_mm.value,
+                case_model=None,
+                case=None,
+            )
+        )
+    except DrillUsageError as failure:
+        raise UsageError(
+            str(failure).replace("--case-margin", "enclosure.case_margin_mm", 1)
+        ) from failure
+
+
+def _validate_dock_lengths(
+    tolerance_mm: Resolved[float | None],
+    pitch_max_mm: Resolved[float],
+    pitch_min_mm: Resolved[float],
+) -> None:
+    """The dock half's three lengths, checked by ``stompcollider``'s own parsers.
+
+    Each is handed back as the text that command line would have carried,
+    because those parsers are the single statement of the rules they hold: a
+    recognition tolerance of nothing pairs no component with any hole, a scan
+    step of nothing describes no scan, and a coarse step finer than the fine
+    one describes no search. Their sentences name their own flags, so each
+    prefix is restated as the key the value was actually typed into.
+    """
+    if tolerance_mm.value is not None:
+        try:
+            parse_dock_length(str(tolerance_mm.value), "boards.match_tolerance_mm")
+        except DockUsageError as failure:
+            raise UsageError(str(failure)) from failure
+    try:
+        parse_pitches(
+            argparse.Namespace(
+                seat_pitch_max=str(pitch_max_mm.value),
+                seat_pitch_min=str(pitch_min_mm.value),
+            )
+        )
+    except DockUsageError as failure:
+        raise UsageError(
+            str(failure)
+            .replace("--seat-pitch-max", "boards.seat_pitch_max_mm")
+            .replace("--seat-pitch-min", "boards.seat_pitch_min_mm")
+        ) from failure
+
+
 def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     """The four ranks, assembled once, with every disagreement carried.
 
@@ -408,10 +512,11 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     resolved and validated, before the first discovery opens the artwork:
     CLAUDE.md's "validate options before opening the artwork" has nowhere
     else to happen for a value carried only by a hand-edited project file.
-    Discovery follows, needing the panel to read its layers and the case
-    model to exclude it from the board candidates; and the targets are
-    checked once resolved, because a project may supply them as readily as
-    a flag may.
+    That is why the dock half's three lengths resolve up there, though the
+    board list beside them cannot. Discovery follows, needing the panel to
+    read its layers and the case model to exclude it from the board
+    candidates; and the targets are checked once resolved, because a project
+    may supply them as readily as a flag may.
     """
     notes: list[str] = []
     panel, panel_resolved = _resolve_panel(args, directory)
@@ -447,6 +552,7 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         title=pick(None, _project(project, "drilling", "title"), None, DEFAULTS.drilling.title.value),
     )
     _validate_drilling(drilling)
+    _validate_grid(drilling)
     form_depth_resolved = pick(
         None, _project(project, "artwork", "form_depth"), None, DEFAULTS.artwork.form_depth.value,
     )
@@ -477,9 +583,26 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         None, _project(project, "enclosure", "case_margin_mm"), None,
         DEFAULTS.enclosure.case_margin_mm.value,
     )
+    _validate_case_margin(case_margin_resolved, case_face_resolved.value)
     enclosure = Enclosure(
         case=case_resolved, case_model=case_model_resolved,
         case_face=case_face_resolved, case_margin_mm=case_margin_resolved,
+    )
+
+    match_tolerance_resolved = pick(
+        None, _project(project, "boards", "match_tolerance_mm"), None,
+        DEFAULTS.boards.match_tolerance_mm.value,
+    )
+    seat_pitch_max_resolved = pick(
+        None, _project(project, "boards", "seat_pitch_max_mm"), None,
+        DEFAULTS.boards.seat_pitch_max_mm.value,
+    )
+    seat_pitch_min_resolved = pick(
+        None, _project(project, "boards", "seat_pitch_min_mm"), None,
+        DEFAULTS.boards.seat_pitch_min_mm.value,
+    )
+    _validate_dock_lengths(
+        match_tolerance_resolved, seat_pitch_max_resolved, seat_pitch_min_resolved
     )
 
     drill_layer_resolved = _pick_noting(
@@ -513,18 +636,9 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
             args.panel_reference, _project(project, "boards", "panel_reference"), None,
             DEFAULTS.boards.panel_reference.value,
         ),
-        match_tolerance_mm=pick(
-            None, _project(project, "boards", "match_tolerance_mm"), None,
-            DEFAULTS.boards.match_tolerance_mm.value,
-        ),
-        seat_pitch_max_mm=pick(
-            None, _project(project, "boards", "seat_pitch_max_mm"), None,
-            DEFAULTS.boards.seat_pitch_max_mm.value,
-        ),
-        seat_pitch_min_mm=pick(
-            None, _project(project, "boards", "seat_pitch_min_mm"), None,
-            DEFAULTS.boards.seat_pitch_min_mm.value,
-        ),
+        match_tolerance_mm=match_tolerance_resolved,
+        seat_pitch_max_mm=seat_pitch_max_resolved,
+        seat_pitch_min_mm=seat_pitch_min_resolved,
     )
 
     targets_arg = tuple(parse_emit(spec, panel) for spec in args.emit) if args.emit else None

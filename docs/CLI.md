@@ -275,7 +275,16 @@ a number, a whole number, a list of paths, or the `targets` object of format
 name to path — and one that does not is the same usage error, naming the key
 and the shape it wants. It is reported before the artwork is opened, so a
 mistyped value never stops a run part-way through. A boolean is not a number
-here: `"form_depth": true` is refused rather than read as `1`.
+here: `"form_depth": true` is refused rather than read as `1`, and `null` is
+refused where the key holds no null — omitting a key is how a project declares
+nothing about it.
+
+A value of the right shape must also be one the tool that consumes it accepts.
+The grid and its warning distance, the clearance margin, the match tolerance
+and the two seat steps are checked by the same code `stompdrill` and
+`stompcollider` run from their own command lines, so a project cannot start a
+run under a number either tool would refuse. These are reported before the
+artwork is opened too, naming the key that carried the value.
 
 This build does not yet write the file. Until it does, a project is
 hand-authored.

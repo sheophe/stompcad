@@ -417,6 +417,120 @@ def test_a_case_the_catalogue_does_not_hold_is_reported_before_the_artwork_is_op
     assert "enclosure.case" in str(failure.value)
 
 
+def test_a_grid_no_pitch_can_be_spelled_in_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sub-micron fraction of a pitch is what ``SnapPositions`` itself refuses.
+
+    ``stompdrill``'s command line builds that stage before it opens the
+    artwork, so the same declaration must fail here rather than as a
+    ``ValueError`` from inside a run that has already read the panel.
+    """
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"drilling": {"grid_mm": 0.0015}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "drilling.grid_mm" in str(failure.value)
+
+
+def test_a_negative_grid_warning_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A distance no hole can have moved less than is not a threshold."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"drilling": {"grid_warn_mm": -0.5}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "drilling.grid_warn_mm" in str(failure.value)
+
+
+def test_a_clearance_margin_of_nothing_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLAUDE.md: the margin is refused whether or not a model was supplied."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"enclosure": {"case_margin_mm": 0}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "enclosure.case_margin_mm" in str(failure.value)
+
+
+def test_a_match_tolerance_of_nothing_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recognition tolerance of nothing pairs no component with any hole."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"boards": {"match_tolerance_mm": 0}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "boards.match_tolerance_mm" in str(failure.value)
+
+
+def test_a_coarse_seat_step_of_nothing_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scan pitch of nothing describes no scan; the search clamps it to a nanometre."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"boards": {"seat_pitch_max_mm": 0}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "boards.seat_pitch_max_mm" in str(failure.value)
+
+
+def test_a_negative_fine_seat_step_is_reported_before_the_artwork_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The finest step is a length like the coarsest, and refused on its own terms."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    _never_opens(monkeypatch)
+    panel = _declaring(tmp_path, {"boards": {"seat_pitch_min_mm": -1}})
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert "boards.seat_pitch_min_mm" in str(failure.value)
+
+
+def test_a_coarse_seat_step_finer_than_the_fine_one_is_reported_before_the_artwork(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pair is ordered, and each is valid alone: the control is the swap.
+
+    Declared the other way round the same two numbers are the defaults, and
+    resolve without complaint, so what this refuses is the ordering rather
+    than either value. The control runs before the artwork is barred,
+    because a resolution that gets as far as discovery must be allowed to.
+    """
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    control = tmp_path / "control"
+    control.mkdir()
+    ordered = _declaring(
+        control, {"boards": {"seat_pitch_max_mm": 2.0, "seat_pitch_min_mm": 0.05}}
+    )
+    resolve(build_parser().parse_args([str(ordered)]), control)
+
+    _never_opens(monkeypatch)
+    panel = _declaring(
+        tmp_path, {"boards": {"seat_pitch_max_mm": 0.05, "seat_pitch_min_mm": 2.0}}
+    )
+    with pytest.raises(UsageError) as failure:
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    sentence = str(failure.value)
+    assert "boards.seat_pitch_max_mm" in sentence
+    assert "boards.seat_pitch_min_mm" in sentence
+    assert "--seat-pitch" not in sentence, "the refusal names a flag the builder did not type"
+
+
 def test_a_declared_case_reaches_the_run_as_the_catalogue_spells_it(tmp_path: Path) -> None:
     """``stompdrill`` normalises what it is handed; a second spelling is a second answer."""
     from stompcad.cli import build_parser, resolve
