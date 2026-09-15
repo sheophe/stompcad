@@ -1,13 +1,8 @@
 """Every key the workbench answers, as data rather than as bindings.
 
-Spec decision 3 requires the eight place letters, the three global verbs and
-every ``Ctrl``+letter to be provably distinct. A binding list cannot be
-proved distinct without starting an application, so the table lives here and
-``app`` builds its bindings from it -- one statement, checked by one test.
-
-A ``Place``'s value is the lower-case name ``readiness`` and ``stale``
-already use for the five configuration places, so nothing has to translate
-between two spellings of one place.
+Spec decision 3: the table proves distinctness, without running the app.
+Each ``Place`` value is the name ``readiness`` and ``stale`` already use,
+so nothing translates between two spellings.
 """
 
 from __future__ import annotations
