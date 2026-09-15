@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import inspect
 import io
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar, cast
 
 import pytest
@@ -86,11 +88,12 @@ def drill_and_dock_run() -> Driver:
 
 
 class _RecordingPresentation:
-    """Records every ``finish_step`` call, in the order the driver made it."""
+    """Records every ``finish_step``/``report`` call, in the order the driver made them."""
 
     def __init__(self) -> None:
         self.began: RunPlan | None = None
         self.finished: list[tuple[Step, str]] = []
+        self.reported: list[Sequence[str]] = []
 
     def begin(self, plan: RunPlan) -> None:
         self.began = plan
@@ -104,8 +107,8 @@ class _RecordingPresentation:
     def ask(self, question: object) -> str:
         raise AssertionError("run_drill must not ask a question of its own")
 
-    def report(self, lines: object) -> None:
-        return None
+    def report(self, lines: Sequence[str]) -> None:
+        self.reported.append(lines)
 
 
 class _Recording(PlainWriter):
@@ -779,6 +782,17 @@ class _ClashStub(_MatchStub):
     name: ClassVar[str] = "clash"
 
 
+class _CountingStage(_MatchStub):
+    """Counts each ``apply`` call, so a resumed stage step is proven to have run."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
+        self.calls += 1
+        return data
+
+
 #: Three stand-in stages in ``_STAGE_ORDER``'s own order, so a resumed stage
 #: step has something to index into without running real board matching.
 _STAND_IN_PIPELINE: Pipeline[DockData] = Pipeline([_MatchStub(), _SeatStub(), _ClashStub()])
@@ -790,14 +804,18 @@ def _driver_and_presentation_with_held_intermediates(
     """A driver whose held intermediates are stand-ins, so a resume needs no kernel.
 
     ``_scan``/``_geometry`` are cast placeholders: no test built from this
-    helper requests a ``report`` or ``assembly`` target, so ``_write_dock``
-    always returns before either is read -- the same early exit
-    ``test_drive_dock.py``'s own withhold test uses to justify a cast in
-    place of a real, kernel-backed value. ``targets`` names an absolute path
-    under ``tmp_path`` so a write step that does run commits nowhere else.
+    helper requests a ``report``/``assembly`` target, so ``_write_dock``
+    returns before either is read, the early exit ``test_drive_dock.py``'s
+    own withhold test already justifies. ``boards`` is a never-opened path,
+    only truthy so a resume keeps the dock half. ``targets`` names an
+    absolute path under ``tmp_path`` so a write step commits nowhere else.
     """
     presentation = _RecordingPresentation()
-    options = replace(_options(), targets=(("json", tmp_path / "case.json"),))
+    options = replace(
+        _options(),
+        boards=(Path("stand-in-board.stp"),),
+        targets=(("json", tmp_path / "case.json"),),
+    )
     driver = Driver(DRILL_AND_DOCK, presentation, options)
     driver._raw = cast(RawDrillData, object())
     driver._quantised = DrillData()
@@ -833,12 +851,17 @@ def test_a_resume_of_the_write_steps_keeps_every_dock_intermediate(tmp_path: Pat
     the scan the second write needs.
     """
     driver = _driver_with_held_intermediates(tmp_path)
-    held = (driver._scan, driver._geometry, driver._dock_data)
+    held_scan, held_geometry, held_dock_data = driver._scan, driver._geometry, driver._dock_data
     revised = replace(driver._options, targets=(("json", tmp_path / "other.json"),))
 
     driver.resume(frozenset({"write-case", "write-assembly"}), revised, NO_PROGRESS)
 
-    assert (driver._scan, driver._geometry, driver._dock_data) == held
+    # Identity, not equality: a rebuilt-but-equal value would still mean the
+    # scan or the dock data was computed again, which is the cost decision 10
+    # exists to avoid -- see finding 1 of the fix round for the failure mode.
+    assert driver._scan is held_scan
+    assert driver._geometry is held_geometry
+    assert driver._dock_data is held_dock_data
 
 
 def test_a_resume_discards_only_what_the_changed_step_cannot_honour(tmp_path: Path) -> None:
@@ -891,10 +914,20 @@ def test_a_resumed_position_never_retreats(tmp_path: Path) -> None:
 def test_a_stage_step_is_runnable_by_a_resume_though_no_revision_names_it(
     tmp_path: Path,
 ) -> None:
-    """``match``, ``seat`` and ``clash`` read no field, so only consumption makes them stale."""
-    driver = _driver_with_held_intermediates(tmp_path)
+    """``match``, ``seat`` and ``clash`` read no field, so only consumption makes them stale.
+
+    ``_dock_data`` being non-``None`` alone would pass even if ``match``
+    were silently skipped, since the stand-in already sets it -- so this
+    checks the stage actually ran: once, and credited.
+    """
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    counting = _CountingStage()
+    driver._dock_pipeline = Pipeline([counting, _SeatStub(), _ClashStub()])
+
     driver.resume(frozenset({"match"}), driver._options, NO_PROGRESS)
-    assert driver._dock_data is not None
+
+    assert counting.calls == 1
+    assert [step.key for step, _outcome in presentation.finished] == ["match"]
 
 
 def test_a_retry_still_refuses_a_stage_step(tmp_path: Path) -> None:
@@ -909,3 +942,118 @@ def test_the_driver_names_every_artefact_it_committed(tmp_path: Path) -> None:
     driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
     assert driver.written
+
+
+# --------------------------------------------------------------------------
+# Fix round 1: five findings against the design above.
+# --------------------------------------------------------------------------
+
+
+def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 1: ``read-boards`` is stale only by consumption of a re-drilled panel.
+
+    A grid change invalidates the whole plan but names no field ``read
+    boards`` itself reads, so the old rule kept its scan. The assembly
+    would then disagree with the case this very resume just rewrote.
+    """
+    driver = _driver_with_held_intermediates(tmp_path)
+    calls = {"read_boards": 0}
+
+    def _stub_quantise(scope: Scope) -> DrillData:
+        return DrillData()
+
+    def _stub_drill(data: DrillData, scope: Scope) -> DrillData:
+        return DrillData()
+
+    def _stub_read_boards(drill: DrillData, scope: Scope) -> None:
+        calls["read_boards"] += 1
+        # ``_run_step`` reports ``len(self._scan.raw.boards)``, so the stand-in
+        # needs that one shape rather than an opaque, never-touched cast.
+        driver._scan = cast(BoardScan, SimpleNamespace(raw=SimpleNamespace(boards=())))
+        driver._geometry = {}
+        driver._docked = _stand_in_dock_data()
+        driver._dock_pipeline = _STAND_IN_PIPELINE
+
+    monkeypatch.setattr(driver, "_quantise", _stub_quantise)
+    monkeypatch.setattr(driver, "_drill", _stub_drill)
+    monkeypatch.setattr(driver, "_read_boards", _stub_read_boards)
+    revised = replace(driver._options, grid_mm=driver._options.grid_mm / 2)
+    stale = drive.invalidated(frozenset({"grid_mm"}))
+
+    driver.resume(stale, revised, NO_PROGRESS)
+
+    assert calls["read_boards"] == 1
+
+
+def test_a_resume_of_read_panel_and_quantise_credits_each_step_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding 2: a resume must not cascade ``read-panel`` into ``quantise``.
+
+    A retry pays for ``quantise`` from inside ``read-panel`` because it has
+    nothing of ``DrillData``'s own shape to report. A resume runs ``quantise``
+    as its own stale step instead, or it would be credited -- and, with an
+    unanswered gap, possibly credited before that gap was resolved.
+    """
+    presentation = _RecordingPresentation()
+    driver = Driver(DRILL_AND_DOCK, presentation, _options())
+    calls = {"quantise": 0}
+    real_quantise = Driver._quantise
+
+    def _counting_quantise(self: Driver, scope: Scope) -> DrillData:
+        calls["quantise"] += 1
+        return real_quantise(self, scope)
+
+    monkeypatch.setattr(Driver, "_quantise", _counting_quantise)
+
+    driver.resume(frozenset({"read-panel", "quantise"}), driver._options, NO_PROGRESS)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["read-panel", "quantise"]
+    assert calls["quantise"] == 1
+
+
+def test_a_resume_reports_undocked_and_skips_dock_steps_when_drilled_has_errors(
+    tmp_path: Path,
+) -> None:
+    """Finding 3: ``run`` never docks against an errored drill half, and neither must resume."""
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver._drilled = DrillData().with_diagnostics(
+        Diagnostic.error("synthetic-error", "forced for the undocked guard")
+    )
+
+    driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, NO_PROGRESS)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
+    assert any("docked nothing" in line for lines in presentation.reported for line in lines)
+
+
+def test_a_resume_drops_the_dock_half_when_there_are_no_boards(tmp_path: Path) -> None:
+    """Finding 4: ``run`` skips the dock half with no boards, and so must resume."""
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver._options = replace(driver._options, boards=())
+
+    driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, NO_PROGRESS)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
+
+
+def test_a_refused_retry_leaves_options_and_holds_untouched() -> None:
+    """Finding 5: a refusal must not run ``_accept`` before its own precondition is checked."""
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+    before = driver._options
+    revised = replace(before, case="1590BB")
+
+    with pytest.raises(ValueError, match="panel is read"):
+        driver.retry("quantise", revised, NO_PROGRESS)
+
+    assert driver._options is before
+
+
+def test_a_retry_of_an_unknown_key_names_it() -> None:
+    """Finding 5: an unknown key must not reach ``_discard_after``'s ``list.index`` instead."""
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+
+    with pytest.raises(ValueError, match="not a step this driver can run again"):
+        driver.retry("bogus", driver._options, NO_PROGRESS)

@@ -364,20 +364,43 @@ class Driver:
         """Run every stale step, in the plan's own order, against what is held.
 
         Decision 10: changing a value marks steps stale and ``Ctrl+R`` runs
-        that set. The span is divided among the steps this resume intends to
-        take and no others, the same way ``_open`` divides a whole run, so
-        the position is monotonic across the resume rather than across some
-        larger plan most of which will not run.
+        that set. A resume takes only the steps a run would take: the dock
+        half is dropped with no boards, and a dock step is never reached
+        once the held drill data has an error, exactly where ``run`` itself
+        stops. The span divides over what remains, so the position stays
+        monotonic across a resume that takes less than the whole set.
         """
         self._adopt(options, stale)
-        steps = tuple(step for step in self._plan.steps if step.key in stale)
+        dock_keys = frozenset(step.key for step in self._plan.steps[_DOCK_FROM:])
+        steps = tuple(
+            step
+            for step in self._plan.steps
+            if step.key in stale and (self._options.boards or step.key not in dock_keys)
+        )
         if not steps:
             return
         slots = self._open(steps, scope)
         for step in steps:
+            if (
+                step.key in dock_keys
+                and self._drilled is not None
+                and self._drilled.worst_severity is Severity.ERROR
+            ):
+                self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES)))
+                break
             slot = next(slots)
             slot.label(step.label)
+            if step.key == "read-panel":
+                # No cascade into ``quantise`` here: unlike a retry, a resume
+                # already has ``quantise`` as its own stale step when one is
+                # needed, so crediting it again from inside ``read-panel``
+                # would double-credit it and could do so before a gap of its
+                # own is resolved (ADR-0013's credit-only-once rule).
+                self._read_panel(slot)
+                self._presentation.finish_step(step, self._read_outcome())
+                continue
             data, outcome, refreshed = self._run_step(step.key, slot)
+            assert not refreshed, "read-panel's own cascade is bypassed above"
             if step.key in _RESOLVABLE_STEPS:
                 # ``_run_step`` returns the union of both halves' data; ``key``
                 # chose the branch, so the value is that resolvable step's own
@@ -389,8 +412,6 @@ class Driver:
                     self._settled(step.key, cast(DockData, data), outcome, slot)
             else:
                 self._presentation.finish_step(step, outcome)
-            for other_key, other_outcome in refreshed:
-                self._presentation.finish_step(self._step(other_key), other_outcome)
 
     def _rerun(
         self, key: str, options: RunOptions, scope: Scope
@@ -416,8 +437,32 @@ class Driver:
             raise ValueError(
                 f"{key!r} reads no field of its own -- retry {before!r} to run it again"
             )
+        if key not in {step.key for step in self._plan.steps}:
+            raise ValueError(f"{key!r} is not a step this driver can run again")
+        self._precondition(key)
         self._accept(key, options)
         return self._run_step(key, scope)
+
+    def _precondition(self, key: str) -> None:
+        """Raise the guard ``_run_step`` would, before ``_accept`` can run.
+
+        A refused retry must leave no trace: checked here, ahead of
+        ``_accept``, a refusal never discards a hold or replaces the
+        options in force. ``_run_step`` keeps its own copy of each guard,
+        because ``resume`` calls it directly and never reaches this one.
+        """
+        if key == "quantise" and self._raw is None:
+            raise ValueError("quantise cannot run again before the panel is read")
+        if key == "drill" and self._quantised is None:
+            raise ValueError("drill cannot run again before quantisation")
+        if key == "write-case" and self._drilled is None:
+            raise ValueError("write case cannot run again before the panel is drilled")
+        if key == "read-boards" and self._drilled is None:
+            raise ValueError("read boards cannot run again before the panel is drilled")
+        if key == "write-assembly" and (
+            self._dock_data is None or self._scan is None or self._geometry is None
+        ):
+            raise ValueError("write assembly cannot run again before the boards are docked")
 
     def _run_step(
         self, key: str, scope: Scope
@@ -535,18 +580,25 @@ class Driver:
     def _adopt(self, options: RunOptions, stale: frozenset[str]) -> None:
         """Take revised options for a step set already known to be stale.
 
-        Narrower than ``_accept``: a retry assumes everything after its one
-        step is superseded; a resume gets the whole ``_STEP_CONSUMES`` set
-        already computed, so nothing outside it is invalid -- keeping a
-        filename from costing the seating search. A step's holds clear only
-        where it cannot honour a changed field from them; one reading no
-        field is stale by consumption alone, and clearing it early would
-        strip ``_dock_data`` from the stage about to read it.
+        Narrower than ``_accept``, which assumes everything after its one
+        step is superseded: a resume gets the whole ``_STEP_CONSUMES`` set
+        already computed, so nothing outside it is invalid. A step's holds
+        clear where it cannot honour a changed field, or where an earlier
+        step also in ``stale`` produces what it consumes -- read boards is
+        stale by consumption alone when the panel is re-drilled, and its
+        scan must not outlive that.
         """
         changed = self._changed(options)
+        order = [step.key for step in self._plan.steps]
         for key in stale:
             relevant = changed & _STEP_INPUTS.get(key, frozenset())
-            if relevant and not relevant <= _RETRY_INPUTS.get(key, frozenset()):
+            cannot_honour = bool(relevant) and not relevant <= _RETRY_INPUTS.get(key, frozenset())
+            consumed = set(_STEP_CONSUMES.get(key, ()))
+            superseded = any(
+                earlier in stale and consumed.intersection(_STEP_HOLDS.get(earlier, ()))
+                for earlier in order[: order.index(key)]
+            )
+            if cannot_honour or superseded:
                 for attribute in _STEP_HOLDS.get(key, ()):
                     setattr(self, attribute, None)
         self._options = options
