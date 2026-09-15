@@ -64,6 +64,65 @@ exits `3` naming what was missing. `CI` present in the environment, or
 that allocates a pty gets the plain writer rather than a full-screen
 application it cannot answer and would otherwise hang against.
 
+### The key model is semi-modal: bare letters are global, Ctrl is local
+
+Each of the eight places owns one unique bare letter — `p` `a` `e` `d` `b` `o`
+`r` `f` — and three letters no place claims are global verbs: `w` opens the
+window on the current subject, `q` quits, `?` shows the keys. Arrows move
+between neighbouring elements, `enter` enters or commits, `esc` cancels or
+closes, everywhere. `tab` and `Ctrl`+letter belong to the place. The sidebar is
+never focused: it is a map, not a control, and one pane holds focus so there is
+no pane model to learn. A sidebar row is clickable and `[`/`]` step between
+neighbouring places, so the design never depends on memory it has not yet
+taught; both resolve to the same place change a letter makes, so neither is a
+second navigation model. Starting a run takes two keys — `r` then `Ctrl+R`, or
+`enter` on the `Project` place's run row — because a single bare letter that
+commits the machine to minutes of kernel work is a hazard, not a convenience.
+The model has one hazard, not knowing whether a letter will jump or type, and
+it is closed twice: the footer always states the mode, and the only mode in
+which letters type is an open text field. Every bare letter, every
+`Ctrl`+letter and every place letter must be provably distinct, and an open
+text field must provably suppress all of them.
+
+### The sidebar carries three independent states per row
+
+Where the user is, how far the project has got, and whether this place needs
+the user are three channels and never one: the selected row's background, a
+marker on the left, a marker on the right. Only the five configuration places
+carry the left marker. The right-hand marker marks the exception rather than
+the accomplishment — eight ticks carry no information — so a fully resolved
+project shows a clean sidebar and the one positive statement lives on
+`Project`. `Findings` carries a count covering errors and warnings only; a
+"worth knowing" entry is listed but never counted and never marks anything,
+because a run that inferred an enclosure and bounded a search succeeded. The
+left marker and the stale set are derived from one structure: the marker is
+computed from which steps the last run credited less which steps a change has
+since invalidated, so the roadmap has no way to disagree with the engine.
+
+### Before a run everything is open; during one nothing is editable
+
+Until a run begins the user changes whatever they like in any order; the
+roadmap reports where configuration has reached and does not gate it. While a
+run is active no parameter accepts an edit, every place stays readable and
+every bare letter still works. Read-only, never hidden: a run whose settings
+cannot be inspected is a run the user has to take on trust.
+
+### A gap pauses the run and takes the user to the place that answers it
+
+A finding that is both an error and carries a resolvable code stops the run and
+navigates to the place that can answer it. Only that place accepts edits while
+the run is paused. A picker's `enter` is labelled "Use this and continue":
+committing the answer **is** the continuation, so there is no second action to
+find, and a place answering by a free edit instead carries a focused "Continue
+run" row. A second gap replaces the first rather than queueing behind it,
+because the second may not exist once the first is answered. `esc` is a ladder,
+innermost first: it closes an open editor or picker, and only then stops the
+paused run. Moving to another place with a bare letter closes an open picker
+without committing it. Severity decides whether a run pauses, not whether a
+remedy exists: an error pauses and asks, a warning does not pause but stays
+actionable in `Findings` once the run completes. That retires
+`--promote-warnings`, whose intent becomes the default behaviour.
+
 ### Resolution has four ranks: argument, project, discovered, default
 
 A value resolves from the strongest rank that supplies it: an argument on the

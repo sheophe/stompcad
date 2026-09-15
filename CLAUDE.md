@@ -20,10 +20,21 @@ clashes.
 `stompcad` is the orchestrator over both. It composes them as libraries into
 one run: nine named steps, one position, one status, and artefacts that match
 what either tool writes from its own command line, byte for byte. It computes no
-geometry and imports neither the kernel nor `stompgeom`. Its presentation and
-composed run are [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md);
-[docs/specs/stompcad-tui.md](docs/specs/stompcad-tui.md) is the binding
-specification, and its decisions 3, 6, 8 and 10 are later plans.
+geometry and imports neither the kernel nor `stompgeom`. On a terminal it opens
+a full-screen workbench and the user stays inside it; a run is an event the
+workbench drives, not the program's exit. A pipe, a dumb terminal or a CI
+runner gets the plain writer instead: the same step lines, streamed, no
+drawing. The command line carries only what identifies the work — the panel
+and its boards positionally, `--case`, `--case-model`, `--panel-reference` and
+`--emit` — and everything else is reached through the project file, never a
+flag added for a value the workbench already exposes. `stompcad` reaches for a
+viewer, never for a kernel. Its presentation and composed run are
+[ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md),
+amended by
+[ADR-0014](docs/adr/0014-the-workbench-and-its-resolution.md), which decides
+the workbench and how its inputs resolve;
+[docs/specs/stompcad-workbench.md](docs/specs/stompcad-workbench.md) is the
+binding specification.
 
 Enclosure geometry comes from a supplied model. `stompdrill` uses it to verify
 clearance and cut the selected holes. Model acquisition is handled separately
