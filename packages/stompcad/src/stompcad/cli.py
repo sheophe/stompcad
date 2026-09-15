@@ -201,16 +201,20 @@ def validate_targets(targets: Sequence[tuple[str, Path]], where: str = "--emit")
         )
 
 
-def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]]) -> None:
-    """Both target checks, over the set this run will actually write.
+def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]], panel: Path) -> None:
+    """Every target check, over the set this run will actually write.
 
     ``validate_targets`` rejects a format neither half owns, and
-    ``check_target_set`` two artefacts naming one file -- which ADR-0001's
-    rollback assumes never happens, and which would otherwise leave one file
-    on disk beside two claims of having written it.
+    ``check_target_set`` two artefacts naming one file. The project file
+    joins that set because a half commits it in the same transaction as its
+    artefacts: an artefact aimed at it would be a second writer for one
+    path, which is exactly what ADR-0001's rollback assumes never happens.
     """
     where = "output.targets" if targets.provenance.origin is Origin.PROJECT else "--emit"
     validate_targets(targets.value, where)
+    project = manifest.manifest_path(panel)
+    if any(path == project for _name, path in targets.value):
+        raise UsageError(f"{where}: {project.name} is this panel's project file, not an artefact")
     try:
         check_target_set([path for _name, path in targets.value])
     except ValueError as failure:
@@ -679,7 +683,7 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     # Checked after resolution, not on ``--emit`` alone: the set that reaches
     # the write steps is the resolved one, whichever rank supplied it, and a
     # target set checked at a rank the run may not even use is no check at all.
-    _validate_output(output.targets)
+    _validate_output(output.targets, panel)
 
     settings = Settings(
         artwork=artwork, enclosure=enclosure, drilling=drilling,

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Protocol, TypeVar, cast
 
@@ -63,6 +63,7 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, nm_from_mm
 
+from .manifest import Half, Manifest, manifest_path, payload_for, read
 from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
 from .resolve import RESOLVABLE, promoted, question_for, revision_for
@@ -70,7 +71,8 @@ from .settings import Settings
 from .stale import PLACE_OF_FIELD, stale_steps
 
 __all__ = [
-    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "invalidated", "steps_of_place", "readers_of",
+    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project",
+    "invalidated", "steps_of_place", "readers_of",
 ]
 
 #: ``RunOptions.targets`` is one set naming both halves' outputs; a write
@@ -284,6 +286,20 @@ class RunOptions:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Project:
+    """Where a half's declarations go, and what they say.
+
+    ``held`` is what the file already declares, re-read after each commit so
+    a second commit in one session leaves what the first recorded. Decision
+    8: a value the manifest already holds is used and left untouched.
+    """
+
+    panel: Path
+    settings: Settings
+    held: Manifest
+
+
 class Driver:
     """Runs one plan's steps over one set of options, one at a time.
 
@@ -298,11 +314,13 @@ class Driver:
         presentation: Presentation,
         options: RunOptions,
         promote_warnings: bool = False,
+        project: Project | None = None,
     ) -> None:
         self._plan = plan
         self._presentation = presentation
         self._options = options
         self._promote_warnings = promote_warnings
+        self._project = project
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
@@ -811,15 +829,30 @@ class Driver:
         """This run's targets whose format one half owns, in the order requested."""
         return [(name, path) for name, path in self._options.targets if name in names]
 
+    def _declaration(self, half: Half) -> tuple[Path, Payload] | None:
+        """This half's project file, or ``None`` where it adds nothing new."""
+        if self._project is None:
+            return None
+        payload = payload_for(
+            self._project.panel, self._project.settings, half, self._project.held
+        )
+        if payload is None:
+            return None
+        return manifest_path(self._project.panel), payload
+
     def _write_case(self, data: DrillData, scope: Scope) -> list[str]:
         """Render, stage and commit the drill half's own targets."""
         targets = self._targets_for(frozenset(available()))
         settings = OutputSettings(title=self._options.title, case_model=self._case_model)
+        # Spec decision 17: with no boards, the dock half never runs, so this
+        # is the only commit that can record the confirmed empty board list.
+        half = Half.DRILL_ONLY if not self._options.boards else Half.DRILL
         return self._write(
             data,
             targets,
             lambda: [(make_emitter(name, settings), path) for name, path in targets],
             scope,
+            half,
         )
 
     def _write_dock(
@@ -831,7 +864,9 @@ class Driver:
     ) -> list[str]:
         """Render, stage and commit the dock half's own targets."""
         targets = self._targets_for(DOCK_TARGET_NAMES)
-        return self._write(data, targets, lambda: _dock_emitters(targets, scan, geometry), scope)
+        return self._write(
+            data, targets, lambda: _dock_emitters(targets, scan, geometry), scope, Half.DOCK
+        )
 
     def _write(
         self,
@@ -839,37 +874,49 @@ class Driver:
         targets: Sequence[tuple[str, Path]],
         emitters: Callable[[], Sequence[tuple[Emitter[_DataT], Path]]],
         scope: Scope,
+        half: Half,
     ) -> list[str]:
-        """Render every target of one half, then stage and commit the whole set.
+        """Render this half's targets, then stage and commit them with its declaration.
 
-        Withholds every target on an error severity, before ``emitters`` is
-        even called: CLAUDE.md states "any error prevents every requested
-        output", and an emitter may legitimately refuse data this broken, so
-        nothing is rendered rather than rendered and discarded. Staging and
-        the whole-set transaction are ``stompmodel``'s (ADR-0001, ADR-0005);
-        both halves reach them here, so no second write mechanism exists to
-        lose the rollback ``commit_all`` provides.
+        Withholds every target on an error severity, before ``emitters`` runs:
+        CLAUDE.md's "any error prevents every requested output" holds, and an
+        emitter may refuse data this broken, so nothing is rendered rather than
+        rendered and discarded. Decision 8: the declaration joins the same
+        transaction as the artefacts, so a committed file never sits beside a
+        project file that fails to describe it. Staging and the commit stay
+        ``stompmodel``'s (ADR-0001, ADR-0005); no second write path exists.
         """
-        if not targets:
+        declaration = self._declaration(half)
+        if not targets and declaration is None:
             return []
         if data.worst_severity is Severity.ERROR:
-            self._presentation.report(_withheld(targets))
+            if targets:
+                self._presentation.report(_withheld(targets))
             return []
         rendered: list[tuple[Emitter[_DataT], Path, Payload]] = []
-        built = emitters()
+        built = emitters() if targets else []
         for (emitter, path), slot in zip(built, scope.steps(len(built)), strict=True):
             slot.label(emitter.name)
             rendered.append((emitter, path, emitter.emit(data)))
-        staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
+        entries: list[tuple[Path, Payload]] = [(path, payload) for _e, path, payload in rendered]
+        if declaration is not None:
+            entries.append(declaration)
+        staged = stage_all(entries)
         sizes = commit_all(staged)
-        self._written.extend(written.path for written in staged)
+        if declaration is not None and self._project is not None:
+            # Re-read rather than merge in memory: the file on disk is what
+            # the next commit must leave untouched, and it is the only thing
+            # that knows what this commit actually added.
+            self._project = replace(self._project, held=read(self._project.panel))
+        artefacts = staged[: len(rendered)]
+        self._written.extend(written.path for written in artefacts)
         self._presentation.report([
             f"wrote {written.path}  ({emitter.name}, {size} bytes)"
             for (emitter, _path, _payload), written, size in zip(
-                rendered, staged, sizes, strict=True
+                rendered, artefacts, sizes[: len(rendered)], strict=True
             )
         ])
-        return [str(written.path) for written in staged]
+        return [str(written.path) for written in artefacts]
 
     @property
     def written(self) -> tuple[Path, ...]:

@@ -287,6 +287,7 @@ def _absolute(place: str, key: str, value: Any, root: Path) -> Any:
 _HALF_PLACES: dict[str, tuple[str, ...]] = {
     "drill": ("artwork", "enclosure", "drilling", "output"),
     "dock": ("boards", "output"),
+    "drill-only": ("artwork", "enclosure", "drilling", "output", "boards"),
 }
 
 
@@ -295,6 +296,11 @@ class Half(Enum):
 
     DRILL = "drill"
     DOCK = "dock"
+    #: A run with no boards never reaches the dock half, so the drill half's
+    #: commit is the only commit it has -- and the empty board list is the
+    #: declaration that decided there would be no dock half. Decision 17
+    #: requires it remembered, or the question is asked on every open.
+    DRILL_ONLY = "drill-only"
 
 
 def payload_for(panel: Path, settings: Settings, half: Half, held: Manifest) -> str | None:

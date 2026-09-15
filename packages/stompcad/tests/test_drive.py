@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import io
+import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -17,16 +18,17 @@ from typing import ClassVar, cast
 
 import pytest
 
-from stompcad import drive
-from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
+from stompcad import cli, drive, manifest
+from stompcad.drive import _STEP_HOLDS, Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
+from stompcad.settings import Origin, Provenance, Resolved, Settings
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.quantise import RawDrillData
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
-from stompmodel.diagnostics import Diagnostic
+from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
 from stompmodel.progress import NO_PROGRESS, Scope, track
@@ -833,6 +835,33 @@ def _driver_with_held_intermediates(tmp_path: Path) -> Driver:
     return driver
 
 
+def _errored_dock_data() -> DockData:
+    """A dock result carrying an error, for the write step's own withhold guard."""
+    return _stand_in_dock_data().with_diagnostics(Diagnostic.error("stand-in-error", "stand-in"))
+
+
+def _driver_writing_into(
+    tmp_path: Path,
+    *,
+    worst: Severity | None = None,
+    targets: tuple[tuple[str, Path], ...] | None = None,
+) -> tuple[Driver, Path]:
+    """A driver over ``tmp_path`` with a real ``Project``, so a write step declares.
+
+    Built on ``_driver_and_presentation_with_held_intermediates`` rather than
+    a second set of fakes: the same stand-in intermediates and options, plus
+    the ``Project`` this task's declarations are staged and re-read through.
+    """
+    panel = tmp_path / "tar.ai"
+    driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    if targets is not None:
+        driver._options = replace(driver._options, targets=targets)
+    if worst is not None:
+        driver._drilled = DrillData().with_diagnostics(Diagnostic(worst, "stand-in", "stand-in"))
+    driver._project = Project(panel=panel, settings=Settings.of_defaults(panel), held=manifest.Manifest())
+    return driver, panel
+
+
 class _Recorder:
     """A sink appending each reported position to the list it was given."""
 
@@ -1071,3 +1100,69 @@ def test_a_resume_of_a_step_whose_precondition_fails_names_the_missing_work() ->
 
     with pytest.raises(ValueError, match="panel is read"):
         driver.resume(frozenset({"quantise"}), driver._options, NO_PROGRESS)
+
+
+# --------------------------------------------------------------------------
+# Task 5: the manifest inside each half's own transaction.
+# --------------------------------------------------------------------------
+
+
+def test_a_half_commits_its_declarations_with_its_own_artefacts(tmp_path: Path) -> None:
+    """Decision 8: an artefact never sits beside a project file that misses it."""
+    driver, panel = _driver_writing_into(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["drilling"]["grid_mm"] == driver._options.grid_mm
+
+
+def test_a_withheld_half_records_nothing(tmp_path: Path) -> None:
+    """The control: a half that wrote no artefact declares nothing about them."""
+    driver, panel = _driver_writing_into(tmp_path, worst=Severity.ERROR)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert not manifest.manifest_path(panel).exists()
+
+
+def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> None:
+    """Decision 8: a value the manifest holds is used and left untouched."""
+    driver, panel = _driver_writing_into(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    first = manifest.manifest_path(panel).read_text(encoding="utf-8")
+
+    driver._options = replace(driver._options, grid_mm=0.5)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+
+    assert manifest.manifest_path(panel).read_text(encoding="utf-8") == first
+
+
+def test_a_failed_dock_half_leaves_the_drill_declarations_and_not_its_own(tmp_path: Path) -> None:
+    """Decision 8: gap-filling follows each half's commit, not the whole run.
+
+    The drill half commits real case files before docking begins, so
+    recording the declarations only on a whole-run success would leave those
+    files beside defaults that did not make them.
+    """
+    driver, panel = _driver_writing_into(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    driver._dock_data = _errored_dock_data()
+    driver.resume(frozenset({"write-assembly"}), driver._options, NO_PROGRESS)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert "drilling" in recorded
+    assert "boards" not in recorded
+
+
+def test_a_run_that_writes_nothing_still_records_what_it_ran_under(tmp_path: Path) -> None:
+    """A check-only run is a run; decision 17 permits one and decision 8 remembers it."""
+    driver, panel = _driver_writing_into(tmp_path, targets=())
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert manifest.manifest_path(panel).exists()
+
+
+def test_the_manifest_is_never_one_of_the_artefacts(tmp_path: Path) -> None:
+    """Two writers for one path is what `check_target_set` exists to refuse."""
+    panel = tmp_path / "tar.ai"
+    targets = Resolved[tuple[tuple[str, Path], ...]](
+        (("excellon", manifest.manifest_path(panel)),), Provenance(Origin.PROJECT)
+    )
+    with pytest.raises(cli.UsageError, match="project file"):
+        cli._validate_output(targets, panel)
