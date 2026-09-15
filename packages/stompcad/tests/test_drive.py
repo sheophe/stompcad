@@ -1057,3 +1057,17 @@ def test_a_retry_of_an_unknown_key_names_it() -> None:
 
     with pytest.raises(ValueError, match="not a step this driver can run again"):
         driver.retry("bogus", driver._options, NO_PROGRESS)
+
+
+def test_a_resume_of_a_step_whose_precondition_fails_names_the_missing_work() -> None:
+    """Fix round 2: ``_run_step``'s one guard path must be reachable from resume too.
+
+    A retry reaches this guard through ``_rerun``'s own call, ahead of
+    ``_accept``; a resume never goes through ``_rerun`` at all, so this is
+    the only test that proves ``_run_step``'s internal call to
+    ``_precondition`` fires on that path.
+    """
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+
+    with pytest.raises(ValueError, match="panel is read"):
+        driver.resume(frozenset({"quantise"}), driver._options, NO_PROGRESS)

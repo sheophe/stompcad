@@ -444,12 +444,13 @@ class Driver:
         return self._run_step(key, scope)
 
     def _precondition(self, key: str) -> None:
-        """Raise the guard ``_run_step`` would, before ``_accept`` can run.
+        """Raise the one guard a step of this key must pass before it can run again.
 
-        A refused retry must leave no trace: checked here, ahead of
-        ``_accept``, a refusal never discards a hold or replaces the
-        options in force. ``_run_step`` keeps its own copy of each guard,
-        because ``resume`` calls it directly and never reaches this one.
+        The only copy of each message: ``_rerun`` calls this ahead of
+        ``_accept``, so a refused retry leaves no trace, and ``_run_step``
+        calls it too, so a resume meets the same guard a first run would.
+        Two copies once drifted -- a guard tightened in only one of them
+        would let a retry's refusal arrive a call too late.
         """
         if key == "quantise" and self._raw is None:
             raise ValueError("quantise cannot run again before the panel is read")
@@ -480,29 +481,6 @@ class Driver:
             outcome = self._read_outcome()
             self._quantised = self._quantise(next(slots))
             return self._quantised, outcome, (("quantise", _quantise_outcome(self._quantised)),)
-        if key == "quantise":
-            if self._raw is None:
-                raise ValueError("quantise cannot run again before the panel is read")
-            self._quantised = self._quantise(scope)
-            return self._quantised, _quantise_outcome(self._quantised), ()
-        if key == "drill":
-            if self._quantised is None:
-                raise ValueError("drill cannot run again before quantisation")
-            self._drilled = self._drill(self._quantised, scope)
-            return self._drilled, _drill_outcome(self._drilled), ()
-        if key == "write-case":
-            if self._drilled is None:
-                raise ValueError("write case cannot run again before the panel is drilled")
-            written = self._write_case(self._drilled, scope)
-            return self._drilled, ", ".join(written) or "nothing written", ()
-        if key == "read-boards":
-            if self._drilled is None:
-                raise ValueError("read boards cannot run again before the panel is drilled")
-            if self._docked is None:  # the scan was discarded: parse again
-                self._read_boards(self._drilled, scope)
-            self._dock_data = self._admit()
-            assert self._scan is not None
-            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)", ()
         if key in _STAGE_ORDER:
             if self._dock_data is None or self._dock_pipeline is None:
                 raise ValueError(f"{key!r} cannot run before the boards are read")
@@ -510,9 +488,30 @@ class Driver:
             stage = self._dock_pipeline[_STAGE_ORDER.index(key)]
             self._dock_data = Pipeline([stage]).run(before, scope)
             return self._dock_data, _stage_outcome(before, self._dock_data), ()
+        self._precondition(key)
+        if key == "quantise":
+            assert self._raw is not None
+            self._quantised = self._quantise(scope)
+            return self._quantised, _quantise_outcome(self._quantised), ()
+        if key == "drill":
+            assert self._quantised is not None
+            self._drilled = self._drill(self._quantised, scope)
+            return self._drilled, _drill_outcome(self._drilled), ()
+        if key == "write-case":
+            assert self._drilled is not None
+            written = self._write_case(self._drilled, scope)
+            return self._drilled, ", ".join(written) or "nothing written", ()
+        if key == "read-boards":
+            assert self._drilled is not None
+            if self._docked is None:  # the scan was discarded: parse again
+                self._read_boards(self._drilled, scope)
+            self._dock_data = self._admit()
+            assert self._scan is not None
+            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)", ()
         if key == "write-assembly":
-            if self._dock_data is None or self._scan is None or self._geometry is None:
-                raise ValueError("write assembly cannot run again before the boards are docked")
+            assert self._dock_data is not None
+            assert self._scan is not None
+            assert self._geometry is not None
             written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
             return self._dock_data, ", ".join(written) or "nothing written", ()
         raise ValueError(f"{key!r} is not a step this driver can run again")
