@@ -1,0 +1,239 @@
+"""Every rule the workbench holds, driven without an application."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from stompcad import manifest
+from stompcad.cli import Resolution
+from stompcad.present import Choice
+from stompcad.readiness import Blocker, Readiness, readiness
+from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
+from stompcad.workbench.keys import Place
+from stompcad.workbench.session import Locked, PendingGap, Phase, Session
+from stompmodel.diagnostics import Diagnostic, Severity
+
+__all__: list[str] = []
+
+_PANEL = Path("/project/tar.ai")
+_PLAN = frozenset({
+    "read-panel", "quantise", "drill", "write-case",
+    "read-boards", "match", "seat", "clash", "write-assembly",
+})
+
+
+def _settings(**places: object) -> Settings:
+    """A complete, runnable project, with whatever this test overrides."""
+    base = replace(
+        Settings.of_defaults(_PANEL),
+        enclosure=replace(
+            DEFAULTS.enclosure,
+            case_model=Resolved(Path("/project/1590B.stp"), Provenance(Origin.PROJECT)),
+        ),
+        boards=replace(
+            DEFAULTS.boards,
+            boards=Resolved((Path("/project/tar-pcb.stp"),), Provenance(Origin.PROJECT)),
+            panel_reference=Resolved("RV*,SW*", Provenance(Origin.PROJECT)),
+        ),
+        output=replace(
+            DEFAULTS.output,
+            targets=Resolved((("excellon", Path("/project/tar-case.drl")),), Provenance(Origin.PROJECT)),
+        ),
+    )
+    return replace(base, **places)  # type: ignore[arg-type]
+
+
+def _session(settings: Settings | None = None, project: manifest.Manifest | None = None) -> Session:
+    resolved = settings if settings is not None else _settings()
+    held = project if project is not None else manifest.Manifest()
+    return Session(
+        Resolution(
+            settings=resolved,
+            notes=(),
+            blockers=readiness(resolved),
+            project=held,
+        )
+    )
+
+
+def test_a_complete_project_may_run_and_says_so() -> None:
+    """Decision 4: the one positive statement belongs on Project."""
+    session = _session()
+    assert session.may_run()
+    assert session.statement() == "Everything needed is here. Press Enter to run."
+
+
+def test_an_unresolved_board_list_blocks_the_run_and_marks_its_place() -> None:
+    """Decision 17: not discovered and not declared is unresolved, not drill only."""
+    session = _session(_settings(boards=DEFAULTS.boards))
+    assert not session.may_run()
+    assert session.attention(Place.BOARDS)
+    assert not session.attention(Place.DRILLING)
+
+
+def test_a_clean_project_shows_a_clean_sidebar() -> None:
+    """Decision 4: the marker marks the exception, never the accomplishment."""
+    session = _session()
+    assert not any(row.attention for row in session.rows())
+
+
+def test_findings_carries_a_count_rather_than_a_mark() -> None:
+    session = _session()
+    session.record_findings([
+        Diagnostic(Severity.ERROR, "cannot-enter", "board 1 never enters"),
+        Diagnostic(Severity.INFO, "inferred-enclosure", "from tar-case.stp"),
+    ])
+    row = next(row for row in session.rows() if row.place is Place.FINDINGS)
+    assert row.count == 1
+    assert not row.attention
+
+
+def test_an_edit_records_its_origin_and_the_project_it_overrode() -> None:
+    """Decision 7: where two ranks disagree, the row shows both."""
+    session = _session(project=manifest.Manifest(values={"drilling": {"grid_mm": 0.25}}))
+    session.set(Place.DRILLING, "grid_mm", 0.5)
+    row = session.settings.drilling.grid_mm
+    assert row.provenance.origin is Origin.USER
+    assert row.describe() == "0.5, you set this — the project says 0.25"
+
+
+def test_an_edit_agreeing_with_the_project_shows_no_disagreement() -> None:
+    """The control: a row that always showed a disagreement would show nothing."""
+    session = _session(project=manifest.Manifest(values={"drilling": {"grid_mm": 0.25}}))
+    session.set(Place.DRILLING, "grid_mm", 0.25)
+    assert session.settings.drilling.grid_mm.describe() == "0.25, you set this"
+
+
+def test_an_output_change_makes_only_the_write_steps_stale() -> None:
+    """Decision 10: propagation follows data, and a filename costs no kernel work."""
+    session = _session()
+    session.set(Place.OUTPUT, "targets", (("excellon", Path("/project/other.drl")),))
+    assert session.stale() == {"write-case", "write-assembly"}
+    assert session.roadmap() is Place.OUTPUT
+
+
+def test_the_roadmap_falls_back_to_the_earliest_place_a_change_touched() -> None:
+    session = _session()
+    session.set(Place.OUTPUT, "targets", ())
+    session.set(Place.DRILLING, "grid_mm", 0.5)
+    assert session.roadmap() is Place.DRILLING
+
+
+def test_the_left_marker_is_derived_from_the_stale_set() -> None:
+    """Decision 4: the roadmap has no way to disagree with the engine."""
+    session = _session()
+    session.begin_run(_PLAN)
+    for step in sorted(_PLAN):
+        session.credit(step)
+    session.finish_run(0)
+    assert all(session.reached(place) for place in (Place.DRILLING, Place.OUTPUT))
+
+    session.set(Place.DRILLING, "grid_mm", 0.5)
+    assert not session.reached(Place.DRILLING)
+    assert not session.reached(Place.OUTPUT)
+    assert session.reached(Place.ARTWORK)
+
+
+def test_a_credited_step_clears_a_change_only_once_every_reader_has_run() -> None:
+    """`targets` is read twice; clearing it at the first would un-stale the second."""
+    session = _session()
+    session.set(Place.OUTPUT, "targets", ())
+    session.begin_run(_PLAN)
+    session.credit("write-case")
+    assert "write-assembly" in session.stale()
+    session.credit("write-assembly")
+    assert session.stale() == frozenset()
+
+
+def test_nothing_is_editable_while_a_run_is_active() -> None:
+    """Decision 5: read-only, never hidden."""
+    session = _session()
+    session.begin_run(_PLAN)
+    for place in Place:
+        assert not session.may_edit(place)
+    with pytest.raises(Locked):
+        session.set(Place.DRILLING, "grid_mm", 0.5)
+
+
+def test_every_place_is_still_reachable_while_a_run_is_active() -> None:
+    """The other half of decision 5: readable everywhere, editable nowhere."""
+    session = _session()
+    session.begin_run(_PLAN)
+    session.go(Place.DRILLING)
+    assert session.place is Place.DRILLING
+    assert session.settings.drilling.grid_mm.value == 0.25
+
+
+def test_only_the_paused_place_accepts_an_edit() -> None:
+    """Decision 12: the app navigates to the place that can answer."""
+    session = _session()
+    session.begin_run(_PLAN)
+    session.pause(PendingGap(
+        code="ambiguous-enclosure",
+        step="quantise",
+        place=Place.ENCLOSURE,
+        choice=Choice("which part?", ("1590B", "1590B2")),
+    ))
+    assert session.place is Place.ENCLOSURE
+    assert session.may_edit(Place.ENCLOSURE)
+    assert not session.may_edit(Place.DRILLING)
+
+
+def test_a_second_gap_replaces_the_first_rather_than_queueing() -> None:
+    """Decision 12: the second may not exist once the first is answered."""
+    session = _session()
+    session.begin_run(_PLAN)
+    session.pause(PendingGap("ambiguous-enclosure", "quantise", Place.ENCLOSURE, None))
+    session.pause(PendingGap("empty-group", "read-boards", Place.BOARDS, None))
+    assert session.gap is not None
+    assert session.gap.code == "empty-group"
+    assert session.place is Place.BOARDS
+
+
+def test_answering_returns_the_run_to_running_with_no_second_action() -> None:
+    session = _session()
+    session.begin_run(_PLAN)
+    session.pause(PendingGap("empty-group", "read-boards", Place.BOARDS, None))
+    session.resumed()
+    assert session.phase is Phase.RUNNING
+    assert session.gap is None
+
+
+def test_a_finished_run_leaves_the_code_it_earned() -> None:
+    """Decision 14: the exit code is the last completed run's."""
+    session = _session()
+    assert session.exit_code == 0
+    session.begin_run(_PLAN)
+    session.finish_run(1)
+    assert session.phase is Phase.DONE
+    assert session.exit_code == 1
+
+
+def test_an_unreadable_project_blocks_the_run_and_says_why() -> None:
+    """Decision 9: a project whose declarations cannot be read is never run under defaults."""
+    resolved = _settings()
+    session = Session(Resolution(
+        settings=resolved,
+        notes=(),
+        blockers=Readiness((
+            (Blocker.UNREADABLE_PROJECT, "project", "tar.stompcad.json: expecting ',' at line 3"),
+        )),
+        obstacle="tar.stompcad.json: expecting ',' at line 3",
+    ))
+    assert not session.may_run()
+    assert "line 3" in session.statement()
+    assert session.attention(Place.PROJECT)
+
+
+def test_a_file_already_on_disk_is_labelled_found_rather_than_current() -> None:
+    """Decision 2: the manifest holds no hashes, so the app must not imply one."""
+    session = _session()
+    path = Path("/project/tar-case.drl")
+    assert session.label_for(path, exists=True) == (
+        "already on disk; this session has not made or verified it"
+    )
+    session.record_written([path])
+    assert session.label_for(path, exists=True) == "made by this run"

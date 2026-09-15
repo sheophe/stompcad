@@ -25,6 +25,8 @@ __all__ = [
     "Discovery",
     "Resolved",
     "pick",
+    "as_flag_string",
+    "disagreement",
     "Artwork",
     "Enclosure",
     "Drilling",
@@ -75,7 +77,7 @@ class Discovery(Generic[_T_co]):
     detail: str
 
 
-def _as_flag_string(value: object) -> object:
+def as_flag_string(value: object) -> object:
     """An ``Enum``'s own ``.value`` -- the string a flag uses -- not its member name.
 
     ``str(CaseFace.BOX)`` is ``"CaseFace.BOX"`` with no custom ``__str__``
@@ -83,6 +85,22 @@ def _as_flag_string(value: object) -> object:
     the one place that has to know an enum from any other value.
     """
     return value.value if isinstance(value, Enum) else value
+
+
+def disagreement(declared: object | None, value: object) -> object | None:
+    """The project's value where it differs from this one, else ``None``.
+
+    Compared through ``as_flag_string`` and through a sequence's own items,
+    because the manifest holds a face as the string its flag accepts and a
+    board list as a list where ``Settings`` carries a tuple. Comparing the
+    two forms directly would report a disagreement between one value and
+    its own spelling.
+    """
+    if declared is None:
+        return None
+    if isinstance(declared, (list, tuple)) and isinstance(value, (list, tuple)):
+        return None if tuple(declared) == tuple(value) else declared
+    return None if as_flag_string(declared) == as_flag_string(value) else declared
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +118,10 @@ class Resolved(Generic[_T]):
 
     def describe(self) -> str:
         """``0.5, you set this — the project says 0.25``, or the first half alone."""
-        stated = f"{_as_flag_string(self.value)}, {self.provenance.describe()}"
+        stated = f"{as_flag_string(self.value)}, {self.provenance.describe()}"
         if self.project is None:
             return stated
-        return f"{stated} — the project says {_as_flag_string(self.project)}"
+        return f"{stated} — the project says {as_flag_string(self.project)}"
 
 
 def pick(

@@ -30,6 +30,9 @@ class Blocker(Enum):
     NO_PANEL_REFERENCE = "which components mount to the panel is a pedal-specific fact"
     NO_BOARD_FOR_ASSEMBLY = "an assembly needs at least one board to seat"
     NO_TARGETS = "nothing has been chosen to make"
+    # Never raised by readiness(): the manifest is read before a Settings
+    # exists, so resolve() appends this blocker itself.
+    UNREADABLE_PROJECT = "this project file cannot be read"
 
 
 @dataclass(frozen=True, slots=True)

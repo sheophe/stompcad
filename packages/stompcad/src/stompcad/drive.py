@@ -63,12 +63,15 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, nm_from_mm
 
-from .plan import RunPlan, Step
+from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
 from .resolve import promoted, question_for, revision_for
 from .settings import Settings
+from .stale import PLACE_OF_FIELD, stale_steps
 
-__all__ = ["DOCK_TARGET_NAMES", "RunOptions", "Driver"]
+__all__ = [
+    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "invalidated", "steps_of_place", "readers_of",
+]
 
 #: ``RunOptions.targets`` is one set naming both halves' outputs; a write
 #: step renders only the names its own tool would recognise, so a caller
@@ -157,6 +160,36 @@ _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
     "clash": ("_dock_data", "_dock_pipeline"),
     "write-assembly": ("_dock_data", "_scan", "_geometry"),
 }
+
+
+def invalidated(changed: frozenset[str], plan: RunPlan = DRILL_AND_DOCK) -> frozenset[str]:
+    """Every step a change to these fields invalidated, by data rather than position.
+
+    The one public entry to this module's three tables. The workbench derives
+    both its stale set and its roadmap from this call, so the sidebar cannot
+    disagree with what a resume will actually run.
+    """
+    order = tuple(step.key for step in plan.steps)
+    return stale_steps(order, changed, _STEP_INPUTS, _STEP_HOLDS, _STEP_CONSUMES)
+
+
+def steps_of_place(place: str) -> frozenset[str]:
+    """Every step reading a field this place owns.
+
+    A step reading two places' fields belongs to both -- ``write case`` reads
+    ``targets`` and ``title`` -- because the left marker asks whether this
+    place's work has been done, not which place owns the step.
+    """
+    return frozenset(
+        key
+        for key, fields in _STEP_INPUTS.items()
+        if any(PLACE_OF_FIELD.get(field) == place for field in fields)
+    )
+
+
+def readers_of(field: str) -> frozenset[str]:
+    """Every step that reads this field, so a change can be cleared once all have run."""
+    return frozenset(key for key, fields in _STEP_INPUTS.items() if field in fields)
 
 
 class _Written(Processable, Diagnosable, Protocol):

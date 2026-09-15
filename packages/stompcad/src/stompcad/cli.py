@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO, TypeVar
 
@@ -230,6 +230,9 @@ class Resolution:
     settings: Settings
     notes: tuple[str, ...]
     blockers: Readiness
+    project: manifest.Manifest = field(default_factory=manifest.Manifest)
+    obstacle: str | None = None
+    panel_candidates: tuple[Path, ...] = ()
 
     def require_ready(self) -> None:
         """Raise a usage failure naming every blocker and the place that answers it."""
@@ -682,7 +685,9 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         artwork=artwork, enclosure=enclosure, drilling=drilling,
         boards=boards_settings, output=output,
     )
-    return Resolution(settings=settings, notes=tuple(notes), blockers=readiness(settings))
+    return Resolution(
+        settings=settings, notes=tuple(notes), blockers=readiness(settings), project=project
+    )
 
 
 def worst_severity(severities: Iterable[Severity | None]) -> Severity | None:
