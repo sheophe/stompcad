@@ -9,7 +9,8 @@ import Textual draw that state and feed keys back into it.
 
 from __future__ import annotations
 
+from .app import Workbench
 from .keys import Place
 from .session import Session
 
-__all__ = ["Place", "Session"]
+__all__ = ["Place", "Session", "Workbench"]
