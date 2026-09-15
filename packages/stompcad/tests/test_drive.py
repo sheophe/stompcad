@@ -10,6 +10,8 @@ from __future__ import annotations
 import inspect
 import io
 from dataclasses import replace
+from pathlib import Path
+from typing import ClassVar, cast
 
 import pytest
 
@@ -17,11 +19,17 @@ from stompcad import drive
 from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import Choice, PlainWriter, Question
+from stompcollider.model import DockData
+from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.quantise import RawDrillData
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import CaseFace, DrillData
-from stompmodel.progress import NO_PROGRESS, track
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope, track
+from stompmodel.protocols import Pipeline
+from stompmodel.units import Nanometre
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
 __all__: list[str] = []
@@ -720,3 +728,184 @@ def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once
     assert [line for line in lines if line.startswith("read-boards")] == ["read-boards: 2 board(s)"]
     assert dock is not None
     assert not [d for d in dock.diagnostics if d.code == "empty-group"]
+
+
+# --------------------------------------------------------------------------
+# Decision 10: resume runs a whole stale set without discarding what it did
+# not touch. These stand-ins name the driver's own tables rather than real
+# geometry, so a resume can be driven with no kernel and no board fixture.
+# --------------------------------------------------------------------------
+
+
+def _identity_frame() -> FaceFrame:
+    """A registration frame with no measured or kernel-backed geometry behind it."""
+    return FaceFrame(
+        CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+
+
+def _stand_in_dock_data() -> DockData:
+    """An otherwise empty ``DockData``, valid enough to be held without a real dock read."""
+    return DockData(case=CaseRegistration("1590B", CaseFace.BOX, "case.stp", _identity_frame()))
+
+
+class _MatchStub:
+    """A dock stage whose ``apply`` returns its input, standing in for ``Match``."""
+
+    name: ClassVar[str] = "match"
+    weight: ClassVar[float] = 1.0
+
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
+        return data
+
+    def describe(self) -> StageRun:
+        return StageRun(self.name)
+
+
+class _SeatStub(_MatchStub):
+    """Stands in for ``Seat``, beside ``_MatchStub``."""
+
+    name: ClassVar[str] = "seat"
+
+
+class _ClashStub(_MatchStub):
+    """Stands in for ``Clash``, beside ``_MatchStub``."""
+
+    name: ClassVar[str] = "clash"
+
+
+#: Three stand-in stages in ``_STAGE_ORDER``'s own order, so a resumed stage
+#: step has something to index into without running real board matching.
+_STAND_IN_PIPELINE: Pipeline[DockData] = Pipeline([_MatchStub(), _SeatStub(), _ClashStub()])
+
+
+def _driver_and_presentation_with_held_intermediates(
+    tmp_path: Path,
+) -> tuple[Driver, _RecordingPresentation]:
+    """A driver whose held intermediates are stand-ins, so a resume needs no kernel.
+
+    ``_scan``/``_geometry`` are cast placeholders: no test built from this
+    helper requests a ``report`` or ``assembly`` target, so ``_write_dock``
+    always returns before either is read -- the same early exit
+    ``test_drive_dock.py``'s own withhold test uses to justify a cast in
+    place of a real, kernel-backed value. ``targets`` names an absolute path
+    under ``tmp_path`` so a write step that does run commits nowhere else.
+    """
+    presentation = _RecordingPresentation()
+    options = replace(_options(), targets=(("json", tmp_path / "case.json"),))
+    driver = Driver(DRILL_AND_DOCK, presentation, options)
+    driver._raw = cast(RawDrillData, object())
+    driver._quantised = DrillData()
+    driver._drilled = DrillData()
+    driver._scan = cast(BoardScan, object())
+    driver._geometry = cast(dict[int, BoardGeometry], {})
+    driver._docked = _stand_in_dock_data()
+    driver._dock_pipeline = _STAND_IN_PIPELINE
+    driver._dock_data = _stand_in_dock_data()
+    return driver, presentation
+
+
+def _driver_with_held_intermediates(tmp_path: Path) -> Driver:
+    driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    return driver
+
+
+class _Recorder:
+    """A sink appending each reported position to the list it was given."""
+
+    def __init__(self, seen: list[float]) -> None:
+        self._seen = seen
+
+    def update(self, position: float, path: tuple[str, ...]) -> None:
+        self._seen.append(position)
+
+
+def test_a_resume_of_the_write_steps_keeps_every_dock_intermediate(tmp_path: Path) -> None:
+    """Decision 10: a filename must not cost the seating search again.
+
+    The finding that forced the design. ``retry`` discards everything after
+    the step it runs, so driving a two-write stale set through it would drop
+    the scan the second write needs.
+    """
+    driver = _driver_with_held_intermediates(tmp_path)
+    held = (driver._scan, driver._geometry, driver._dock_data)
+    revised = replace(driver._options, targets=(("json", tmp_path / "other.json"),))
+
+    driver.resume(frozenset({"write-case", "write-assembly"}), revised, NO_PROGRESS)
+
+    assert (driver._scan, driver._geometry, driver._dock_data) == held
+
+
+def test_a_resume_discards_only_what_the_changed_step_cannot_honour(tmp_path: Path) -> None:
+    """A revised board list needs the parse ``read boards`` no longer performs."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    revised = replace(driver._options, boards=(Path("other-pcb.stp"),))
+
+    driver._adopt(revised, frozenset({"read-boards"}))
+
+    assert driver._docked is None
+    assert driver._drilled is not None  # an earlier step's hold is untouched
+
+
+def test_a_resume_honours_a_revision_the_step_can_take_from_what_it_holds(
+    tmp_path: Path,
+) -> None:
+    """The control: a revised filter re-runs the filter, never the parse."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    revised = replace(driver._options, panel_reference="RV*")
+
+    driver._adopt(revised, frozenset({"read-boards"}))
+
+    assert driver._docked is not None
+
+
+def test_a_resume_runs_the_stale_steps_in_the_plan_s_own_order(tmp_path: Path) -> None:
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"write-assembly", "write-case"}), driver._options, NO_PROGRESS)
+    assert [step.key for step, _outcome in presentation.finished] == [
+        "write-case", "write-assembly"
+    ]
+
+
+def test_a_resume_reports_no_step_it_was_not_given(tmp_path: Path) -> None:
+    """The stale set is the whole instruction; a fresh step is not run for free."""
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
+
+
+def test_a_resumed_position_never_retreats(tmp_path: Path) -> None:
+    """Decision 8 of ADR-0013 continues to bind across a resume."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    seen: list[float] = []
+    with track(_Recorder(seen)) as scope:
+        driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, scope)
+    assert seen == sorted(seen)
+
+
+def test_a_stage_step_is_runnable_by_a_resume_though_no_revision_names_it(
+    tmp_path: Path,
+) -> None:
+    """``match``, ``seat`` and ``clash`` read no field, so only consumption makes them stale."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"match"}), driver._options, NO_PROGRESS)
+    assert driver._dock_data is not None
+
+
+def test_a_retry_still_refuses_a_stage_step(tmp_path: Path) -> None:
+    """The control: a retry is driven by a revision, and no revision names these."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    with pytest.raises(ValueError, match="reads no field"):
+        driver.retry("seat", driver._options, NO_PROGRESS)
+
+
+def test_the_driver_names_every_artefact_it_committed(tmp_path: Path) -> None:
+    """The `Output` place labels a file it wrote differently from one it found."""
+    driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert driver.written

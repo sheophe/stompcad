@@ -65,7 +65,7 @@ from stompmodel.units import Nanometre, nm_from_mm
 
 from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
-from .resolve import promoted, question_for, revision_for
+from .resolve import RESOLVABLE, promoted, question_for, revision_for
 from .settings import Settings
 from .stale import PLACE_OF_FIELD, stale_steps
 
@@ -129,6 +129,16 @@ _RETRY_INPUTS: dict[str, frozenset[str]] = {
 #: one of them the earliest stale step, and each is re-run by the step before
 #: it. ``test_stale`` asserts the first half of that claim.
 _STAGE_STEPS = frozenset({"match", "seat", "clash"})
+
+#: The three stage steps in the order the dock pipeline holds them. A resume
+#: can run one because ``_STEP_CONSUMES`` can make it stale; a retry cannot,
+#: because a retry is driven by a revision and none of these reads a field.
+_STAGE_ORDER: tuple[str, ...] = ("match", "seat", "clash")
+
+#: The two steps whose findings a picker can answer. A resumed step must be
+#: able to raise the same gap a first run does, so ``resume`` routes these
+#: through ``_settled`` exactly as ``run`` and ``retry`` already do.
+_RESOLVABLE_STEPS: frozenset[str] = frozenset(RESOLVABLE.values())
 
 #: What each step leaves on the driver. The dock stages each rewrite
 #: ``_dock_data``, so each declares it: a consumer is stale when an *earlier*
@@ -302,6 +312,7 @@ class Driver:
         self._docked: DockData | None = None
         self._dock_pipeline: Pipeline[DockData] | None = None
         self._dock_data: DockData | None = None
+        self._written: list[Path] = []
 
     def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
         """Drill the panel, then dock its boards against it when any were asked for.
@@ -349,6 +360,38 @@ class Driver:
             self._presentation.finish_step(self._step(other_key), other_outcome)
         return retried
 
+    def resume(self, stale: frozenset[str], options: RunOptions, scope: Scope) -> None:
+        """Run every stale step, in the plan's own order, against what is held.
+
+        Decision 10: changing a value marks steps stale and ``Ctrl+R`` runs
+        that set. The span is divided among the steps this resume intends to
+        take and no others, the same way ``_open`` divides a whole run, so
+        the position is monotonic across the resume rather than across some
+        larger plan most of which will not run.
+        """
+        self._adopt(options, stale)
+        steps = tuple(step for step in self._plan.steps if step.key in stale)
+        if not steps:
+            return
+        slots = self._open(steps, scope)
+        for step in steps:
+            slot = next(slots)
+            slot.label(step.label)
+            data, outcome, refreshed = self._run_step(step.key, slot)
+            if step.key in _RESOLVABLE_STEPS:
+                # ``_run_step`` returns the union of both halves' data; ``key``
+                # chose the branch, so the value is that resolvable step's own
+                # type -- the same erasure ``_settled`` performs on its own
+                # loop below, over ``_rerun``'s identical union return.
+                if step.key == "quantise":
+                    self._settled(step.key, cast(DrillData, data), outcome, slot)
+                else:
+                    self._settled(step.key, cast(DockData, data), outcome, slot)
+            else:
+                self._presentation.finish_step(step, outcome)
+            for other_key, other_outcome in refreshed:
+                self._presentation.finish_step(self._step(other_key), other_outcome)
+
     def _rerun(
         self, key: str, options: RunOptions, scope: Scope
     ) -> tuple[DrillData | DockData, str, tuple[tuple[str, str], ...]]:
@@ -367,8 +410,26 @@ class Driver:
         credit unpaid would make ``_STEP_HOLDS``'s claim about who assigns
         what silently false the one time it is not this call's own key.
         """
+        if key in _STAGE_STEPS:
+            keys = [step.key for step in self._plan.steps]
+            before = keys[keys.index(key) - 1]
+            raise ValueError(
+                f"{key!r} reads no field of its own -- retry {before!r} to run it again"
+            )
+        self._accept(key, options)
+        return self._run_step(key, scope)
+
+    def _run_step(
+        self, key: str, scope: Scope
+    ) -> tuple[DrillData | DockData, str, tuple[tuple[str, str], ...]]:
+        """One step's work, under the options already in force.
+
+        Split from ``_rerun`` because a retry and a resume disagree about
+        what to discard and agree about everything else. Nothing here
+        credits a step: the caller decides when a step has finished, which
+        is what lets a resolution loop ask and run again in between.
+        """
         if key == "read-panel":
-            self._accept(key, options)
             slots = scope.steps(2)
             self._read_panel(next(slots))
             outcome = self._read_outcome()
@@ -377,42 +438,38 @@ class Driver:
         if key == "quantise":
             if self._raw is None:
                 raise ValueError("quantise cannot run again before the panel is read")
-            self._accept(key, options)
             self._quantised = self._quantise(scope)
             return self._quantised, _quantise_outcome(self._quantised), ()
         if key == "drill":
             if self._quantised is None:
                 raise ValueError("drill cannot run again before quantisation")
-            self._accept(key, options)
             self._drilled = self._drill(self._quantised, scope)
             return self._drilled, _drill_outcome(self._drilled), ()
         if key == "write-case":
             if self._drilled is None:
                 raise ValueError("write case cannot run again before the panel is drilled")
-            self._accept(key, options)
             written = self._write_case(self._drilled, scope)
             return self._drilled, ", ".join(written) or "nothing written", ()
         if key == "read-boards":
             if self._drilled is None:
                 raise ValueError("read boards cannot run again before the panel is drilled")
-            self._accept(key, options)
-            if self._docked is None:  # _accept discarded the scan: parse again
+            if self._docked is None:  # the scan was discarded: parse again
                 self._read_boards(self._drilled, scope)
             self._dock_data = self._admit()
             assert self._scan is not None
             return self._dock_data, f"{len(self._scan.raw.boards)} board(s)", ()
+        if key in _STAGE_ORDER:
+            if self._dock_data is None or self._dock_pipeline is None:
+                raise ValueError(f"{key!r} cannot run before the boards are read")
+            before = self._dock_data
+            stage = self._dock_pipeline[_STAGE_ORDER.index(key)]
+            self._dock_data = Pipeline([stage]).run(before, scope)
+            return self._dock_data, _stage_outcome(before, self._dock_data), ()
         if key == "write-assembly":
             if self._dock_data is None or self._scan is None or self._geometry is None:
                 raise ValueError("write assembly cannot run again before the boards are docked")
-            self._accept(key, options)
             written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
             return self._dock_data, ", ".join(written) or "nothing written", ()
-        if key in _STAGE_STEPS:
-            keys = [step.key for step in self._plan.steps]
-            before = keys[keys.index(key) - 1]
-            raise ValueError(
-                f"{key!r} reads no field of its own -- retry {before!r} to run it again"
-            )
         raise ValueError(f"{key!r} is not a step this driver can run again")
 
     def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
@@ -473,6 +530,25 @@ class Driver:
         if not self._changed(options) <= _RETRY_INPUTS.get(key, frozenset()):
             for attribute in _STEP_HOLDS.get(key, ()):
                 setattr(self, attribute, None)
+        self._options = options
+
+    def _adopt(self, options: RunOptions, stale: frozenset[str]) -> None:
+        """Take revised options for a step set already known to be stale.
+
+        Narrower than ``_accept``: a retry assumes everything after its one
+        step is superseded; a resume gets the whole ``_STEP_CONSUMES`` set
+        already computed, so nothing outside it is invalid -- keeping a
+        filename from costing the seating search. A step's holds clear only
+        where it cannot honour a changed field from them; one reading no
+        field is stale by consumption alone, and clearing it early would
+        strip ``_dock_data`` from the stage about to read it.
+        """
+        changed = self._changed(options)
+        for key in stale:
+            relevant = changed & _STEP_INPUTS.get(key, frozenset())
+            if relevant and not relevant <= _RETRY_INPUTS.get(key, frozenset()):
+                for attribute in _STEP_HOLDS.get(key, ()):
+                    setattr(self, attribute, None)
         self._options = options
 
     def _discard_after(self, key: str) -> None:
@@ -735,6 +811,7 @@ class Driver:
             rendered.append((emitter, path, emitter.emit(data)))
         staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
         sizes = commit_all(staged)
+        self._written.extend(written.path for written in staged)
         self._presentation.report([
             f"wrote {written.path}  ({emitter.name}, {size} bytes)"
             for (emitter, _path, _payload), written, size in zip(
@@ -742,6 +819,16 @@ class Driver:
             )
         ])
         return [str(written.path) for written in staged]
+
+    @property
+    def written(self) -> tuple[Path, ...]:
+        """Every artefact this driver committed, in the order it committed them.
+
+        The `Output` place labels a file it made differently from one it
+        merely found (decision 2), and nothing else in the process knows
+        which is which.
+        """
+        return tuple(self._written)
 
 
 def _dock_emitters(
