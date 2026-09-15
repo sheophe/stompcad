@@ -26,6 +26,7 @@ __all__ = [
     "MANIFEST_SUFFIX",
     "VERSION",
     "PLACES",
+    "DOCK_TARGET_NAMES",
     "ManifestError",
     "Manifest",
     "manifest_path",
@@ -280,6 +281,12 @@ def _absolute(place: str, key: str, value: Any, root: Path) -> Any:
     return root / str(value)
 
 
+#: The dock half's own emitted formats. Defined here rather than in
+#: ``drive`` -- which imports this module -- because ``payload_for`` is
+#: where a target's owning half is decided; ``drive`` re-exports it so
+#: ``cli`` still reads one name for the union of both halves' formats.
+DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
+
 #: Which places each half of the run is entitled to declare. ``output`` is in
 #: both because a target set spans them: ``write case`` commits the drill
 #: formats and ``write assembly`` the dock ones, so each records what it
@@ -322,11 +329,16 @@ def payload_for(panel: Path, settings: Settings, half: Half, held: Manifest) -> 
                 # The one key both halves declare into: each format name is
                 # its own gap, because the drill half commits its formats
                 # and the dock half its own, and neither may erase the other.
+                # A format this half did not render is skipped outright --
+                # not merely left alone -- because ``write case`` runs before
+                # ``write assembly``, and declaring a dock format there would
+                # name a file that commit has not reached yet (decision 8).
                 # Copied rather than mutated in place -- ``held`` is the
                 # caller's, and ``payload_for`` promises not to write.
                 current = dict(into.get(key, {}))
                 for name, path in _stored(place, key, getattr(record, key).value, panel.parent).items():
-                    if name in current:
+                    owned = (name in DOCK_TARGET_NAMES) == (half is Half.DOCK)
+                    if not owned or name in current:
                         continue
                     current[name] = path
                     added = True

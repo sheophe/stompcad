@@ -39,7 +39,7 @@ from stompmodel.diagnostics import (
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace
 from stompmodel.progress import Sink, track
-from stompmodel.protocols import check_target_set
+from stompmodel.protocols import check_target_set, target_key
 from stompmodel.units import Nanometre, nm_from_mm
 
 from . import discover, manifest
@@ -206,14 +206,16 @@ def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]], panel: Pat
 
     ``validate_targets`` rejects a format neither half owns, and
     ``check_target_set`` two artefacts naming one file. The project file
-    joins that set because a half commits it in the same transaction as its
-    artefacts: an artefact aimed at it would be a second writer for one
-    path, which is exactly what ADR-0001's rollback assumes never happens.
+    joins that set, compared by ``target_key`` rather than ``==`` because a
+    ``..`` segment or a case variant still names it: a half commits it in
+    the same transaction as its artefacts, so a second writer for that one
+    path is exactly what ADR-0001's rollback assumes never happens.
     """
     where = "output.targets" if targets.provenance.origin is Origin.PROJECT else "--emit"
     validate_targets(targets.value, where)
     project = manifest.manifest_path(panel)
-    if any(path == project for _name, path in targets.value):
+    project_key = target_key(project)
+    if any(target_key(path) == project_key for _name, path in targets.value):
         raise UsageError(f"{where}: {project.name} is this panel's project file, not an artefact")
     try:
         check_target_set([path for _name, path in targets.value])

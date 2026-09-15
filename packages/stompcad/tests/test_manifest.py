@@ -451,3 +451,38 @@ def test_every_half_names_places_that_exist() -> None:
     assert set(_HALF_PLACES) == {half.value for half in Half}
     for places in _HALF_PLACES.values():
         assert set(places) <= set(PLACES)
+
+
+def _settings_with_targets(panel: Path, *names: str) -> Settings:
+    """Defaults, with one made-up path per requested format, as a user typed them."""
+    settings = Settings.of_defaults(panel)
+    return replace(
+        settings,
+        output=replace(
+            settings.output,
+            targets=Resolved(
+                tuple((name, panel.parent / f"tar.{name}") for name in names),
+                Provenance(Origin.USER),
+            ),
+        ),
+    )
+
+
+def test_a_drill_half_declares_only_its_own_target_formats(tmp_path: Path) -> None:
+    """Decision 8: ``write case`` must not name a file only ``write assembly`` commits."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "tar.ai"
+    settings = _settings_with_targets(panel, "json", "report", "assembly")
+    written = json.loads(payload_for(panel, settings, Half.DRILL, manifest.Manifest()) or "{}")
+    assert set(written["output"]["targets"]) == {"json"}
+
+
+def test_a_dock_half_declares_only_its_own_target_formats(tmp_path: Path) -> None:
+    """The control: the dock half's own two formats, never a format the drill half rendered."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "tar.ai"
+    settings = _settings_with_targets(panel, "json", "report", "assembly")
+    written = json.loads(payload_for(panel, settings, Half.DOCK, manifest.Manifest()) or "{}")
+    assert set(written["output"]["targets"]) == {"report", "assembly"}

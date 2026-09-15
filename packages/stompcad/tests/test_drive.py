@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import io
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -845,12 +845,16 @@ def _driver_writing_into(
     *,
     worst: Severity | None = None,
     targets: tuple[tuple[str, Path], ...] | None = None,
+    boards: tuple[Path, ...] | None = None,
 ) -> tuple[Driver, Path]:
     """A driver over ``tmp_path`` with a real ``Project``, so a write step declares.
 
     Built on ``_driver_and_presentation_with_held_intermediates`` rather than
     a second set of fakes: the same stand-in intermediates and options, plus
     the ``Project`` this task's declarations are staged and re-read through.
+    ``boards``, when given, overrides both the options and the settings the
+    project declares from, so ``Half.DRILL_ONLY`` is reachable with an empty
+    list read back as the confirmed answer it is, not an unresolved default.
     """
     panel = tmp_path / "tar.ai"
     driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
@@ -858,7 +862,14 @@ def _driver_writing_into(
         driver._options = replace(driver._options, targets=targets)
     if worst is not None:
         driver._drilled = DrillData().with_diagnostics(Diagnostic(worst, "stand-in", "stand-in"))
-    driver._project = Project(panel=panel, settings=Settings.of_defaults(panel), held=manifest.Manifest())
+    settings = Settings.of_defaults(panel)
+    if boards is not None:
+        driver._options = replace(driver._options, boards=boards)
+        settings = replace(
+            settings,
+            boards=replace(settings.boards, boards=Resolved(boards, Provenance(Origin.PROJECT))),
+        )
+    driver._project = Project(panel=panel, settings=settings, held=manifest.Manifest())
     return driver, panel
 
 
@@ -1113,6 +1124,15 @@ def test_a_half_commits_its_declarations_with_its_own_artefacts(tmp_path: Path) 
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
     recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
     assert recorded["drilling"]["grid_mm"] == driver._options.grid_mm
+    assert "boards" not in recorded, "the control: boards is the dock half's place with any boards"
+
+
+def test_a_drill_only_half_declares_the_confirmed_empty_board_list(tmp_path: Path) -> None:
+    """Spec decision 17, through the driver: no boards selects ``Half.DRILL_ONLY``."""
+    driver, panel = _driver_writing_into(tmp_path, boards=())
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["boards"]["boards"] == []
 
 
 def test_a_withheld_half_records_nothing(tmp_path: Path) -> None:
@@ -1123,12 +1143,27 @@ def test_a_withheld_half_records_nothing(tmp_path: Path) -> None:
 
 
 def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> None:
-    """Decision 8: a value the manifest holds is used and left untouched."""
+    """Decision 8: a value the manifest holds is used and left untouched.
+
+    Changed on ``_project.settings``, not ``driver._options``: the payload
+    is derived from the former, so only a revised held manifest -- read back
+    after the first commit -- can be what stops the second payload differing.
+    """
     driver, panel = _driver_writing_into(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
     first = manifest.manifest_path(panel).read_text(encoding="utf-8")
 
-    driver._options = replace(driver._options, grid_mm=0.5)
+    assert driver._project is not None
+    driver._project = replace(
+        driver._project,
+        settings=replace(
+            driver._project.settings,
+            drilling=replace(
+                driver._project.settings.drilling,
+                grid_mm=Resolved(0.5, Provenance(Origin.USER)),
+            ),
+        ),
+    )
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
 
     assert manifest.manifest_path(panel).read_text(encoding="utf-8") == first
@@ -1151,6 +1186,38 @@ def test_a_failed_dock_half_leaves_the_drill_declarations_and_not_its_own(tmp_pa
     assert "boards" not in recorded
 
 
+def test_a_drill_half_never_declares_a_target_only_the_dock_half_could_commit(
+    tmp_path: Path,
+) -> None:
+    """Decision 8, through the driver: ``write case`` must not pre-declare a dock format.
+
+    A dock format in the resolved targets is real ahead of the dock half --
+    a run may ask for both in one go -- so the guard has to be the half a
+    format belongs to, not merely whether the run intends to render it.
+    """
+    driver, panel = _driver_writing_into(tmp_path)
+    assert driver._project is not None
+    driver._project = replace(
+        driver._project,
+        settings=replace(
+            driver._project.settings,
+            output=replace(
+                driver._project.settings.output,
+                targets=Resolved(
+                    (("json", tmp_path / "tar.json"), ("assembly", tmp_path / "tar-assembly.step")),
+                    Provenance(Origin.USER),
+                ),
+            ),
+        ),
+    )
+
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert "assembly" not in recorded["output"]["targets"]
+    assert "json" in recorded["output"]["targets"]
+
+
 def test_a_run_that_writes_nothing_still_records_what_it_ran_under(tmp_path: Path) -> None:
     """A check-only run is a run; decision 17 permits one and decision 8 remembers it."""
     driver, panel = _driver_writing_into(tmp_path, targets=())
@@ -1158,11 +1225,52 @@ def test_a_run_that_writes_nothing_still_records_what_it_ran_under(tmp_path: Pat
     assert manifest.manifest_path(panel).exists()
 
 
-def test_the_manifest_is_never_one_of_the_artefacts(tmp_path: Path) -> None:
-    """Two writers for one path is what `check_target_set` exists to refuse."""
+@pytest.mark.parametrize(
+    "spell",
+    [
+        lambda project: project,
+        lambda project: project.parent / "sub" / ".." / project.name,
+        lambda project: project.parent / project.name.upper(),
+    ],
+    ids=["exact", "dotdot", "case"],
+)
+def test_the_manifest_is_never_one_of_the_artefacts(
+    tmp_path: Path, spell: Callable[[Path], Path]
+) -> None:
+    """Two writers for one path is what `check_target_set` exists to refuse.
+
+    Compared through ``target_key`` rather than ``==``: a ``..`` segment and
+    a case variant both name the same file on the filesystems this runs on,
+    and a mismatch there would let the declaration silently overwrite an
+    artefact spelled differently from the manifest's own path.
+    """
     panel = tmp_path / "tar.ai"
+    project = manifest.manifest_path(panel)
     targets = Resolved[tuple[tuple[str, Path], ...]](
-        (("excellon", manifest.manifest_path(panel)),), Provenance(Origin.PROJECT)
+        (("excellon", spell(project)),), Provenance(Origin.PROJECT)
     )
     with pytest.raises(cli.UsageError, match="project file"):
         cli._validate_output(targets, panel)
+
+
+def test_the_manifest_is_refused_under_a_relative_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control's own control: ``parse_emit`` hands a bare ``FORMAT=name`` through unresolved."""
+    panel = tmp_path / "tar.ai"
+    project = manifest.manifest_path(panel)
+    monkeypatch.chdir(tmp_path)
+    targets = Resolved[tuple[tuple[str, Path], ...]](
+        (("excellon", Path(project.name)),), Provenance(Origin.PROJECT)
+    )
+    with pytest.raises(cli.UsageError, match="project file"):
+        cli._validate_output(targets, panel)
+
+
+def test_an_ordinary_artefact_path_is_accepted(tmp_path: Path) -> None:
+    """The control: a target that is not the project file, under any spelling, passes."""
+    panel = tmp_path / "tar.ai"
+    targets = Resolved[tuple[tuple[str, Path], ...]](
+        (("excellon", tmp_path / "tar.drl"),), Provenance(Origin.PROJECT)
+    )
+    cli._validate_output(targets, panel)

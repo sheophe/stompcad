@@ -63,7 +63,7 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, nm_from_mm
 
-from .manifest import Half, Manifest, manifest_path, payload_for, read
+from .manifest import DOCK_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
 from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
 from .resolve import RESOLVABLE, promoted, question_for, revision_for
@@ -74,16 +74,6 @@ __all__ = [
     "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project",
     "invalidated", "steps_of_place", "readers_of",
 ]
-
-#: ``RunOptions.targets`` is one set naming both halves' outputs; a write
-#: step renders only the names its own tool would recognise, so a caller
-#: can ask for a drill format and a dock format in the one run without
-#: either half choking on the other's name. Matches
-#: ``stompcollider.cli``'s own fixed ``_REPORT``/``_ASSEMBLY`` pair.
-#: Published rather than private: ``cli`` validates every requested target
-#: against the union of both halves' names, and a name another module needs
-#: is part of this one's surface.
-DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
 
 #: Where the dock half's steps begin in the nine-step plan. One number,
 #: because the two halves are drawn from one plan and one division of the
