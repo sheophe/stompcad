@@ -26,8 +26,15 @@ from .sidebar import Sidebar
 __all__ = ["Workbench", "KeysScreen"]
 
 
-class Workbench(App[int]):
-    """The project open, full screen. ``run`` hands back the exit code it earned."""
+class Workbench(App[int], inherit_bindings=False):
+    """The project open, full screen. ``run`` hands back the exit code it earned.
+
+    Textual's own chords are not inherited: its priority ``ctrl+q`` would quit
+    without the session's exit code, and the palette's ``ctrl+p`` would answer
+    in every place. Neither is in the table decision 3 proves distinct.
+    """
+
+    ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     #body { width: 1fr; padding: 0 1; }
@@ -173,7 +180,7 @@ def _key_list() -> str:
     lines += [
         f"  {key.replace('question_mark', '?')}   {verb}" for key, verb in GLOBAL_VERBS.items()
     ]
-    lines += [f"  {STEP_KEYS[0]} {STEP_KEYS[1]}  previous and next place"]
+    lines += [f"  {STEP_KEYS[0]}   previous place", f"  {STEP_KEYS[1]}   next place"]
     lines += ["", "In a place"]
     lines += [
         f"  {key}   {detail} ({owner.value.capitalize()})"

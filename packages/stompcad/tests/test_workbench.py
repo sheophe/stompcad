@@ -6,6 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from textual.binding import Binding, BindingsMap
+from textual.command import CommandPalette
 from textual.widgets import Static
 
 from stompcad import manifest
@@ -13,7 +15,7 @@ from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench.app import Workbench
-from stompcad.workbench.keys import GLOBAL_VERBS, PLACE_KEYS, Place
+from stompcad.workbench.keys import GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, STEP_KEYS, Place
 from stompcad.workbench.session import Session
 
 __all__: list[str] = []
@@ -131,9 +133,55 @@ async def test_the_keys_screen_lists_every_key_the_table_holds() -> None:
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("question_mark")
-        shown = str(app.screen.query_one("#key-list", Static).content)
-        for key in (*PLACE_KEYS, *GLOBAL_VERBS):
-            assert key.replace("question_mark", "?") in shown
+        lines = [
+            line.strip() for line in str(app.screen.query_one("#key-list", Static).content).splitlines()
+        ]
+        for key in (*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS):
+            shown = key.replace("question_mark", "?")
+            assert any(line.startswith(f"{shown} ") for line in lines), shown
+
+
+#: Keys the running application answers that no table holds, each with its reason.
+#: ``ctrl+c`` is the one chord exempted, because Task 8 binds it. The other three
+#: are Textual's ``Screen`` defaults: ``super+c`` shares ``ctrl+c``'s copy binding,
+#: and ``tab`` belongs to the place under decision 3, which moves focus within it.
+_EXEMPT = {
+    "ctrl+c": "Task 8 binds it",
+    "super+c": "the other half of the screen's one `ctrl+c,super+c` copy binding",
+    "tab": "decision 3: tab belongs to the place",
+    "shift+tab": "tab's reverse",
+}
+
+
+def _spelled(*keys: str) -> set[str]:
+    """Each key as Textual spells it once bound: ``[`` is ``left_square_bracket``."""
+    return set(BindingsMap(Binding(key, "noop") for key in keys).key_to_bindings)
+
+
+@pytest.mark.asyncio
+async def test_the_app_answers_only_the_keys_its_table_holds() -> None:
+    """Decision 3: the table proved distinct is every key a press reaches.
+
+    The app's and the default screen's maps answer whatever is focused; a
+    focused widget's own keys, such as a scroll pane's arrows, are local.
+    """
+    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS)
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        bound = set(app._bindings.key_to_bindings) | set(app.screen._bindings.key_to_bindings)
+        assert tabled <= bound
+        assert bound - tabled - set(_EXEMPT) == set()
+
+
+@pytest.mark.asyncio
+async def test_ctrl_p_opens_no_command_palette() -> None:
+    """Textual's palette chord is in no table, so no place answers it."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d", "ctrl+p")
+        assert app.session.place is Place.DRILLING
+        assert not isinstance(app.screen, CommandPalette)
 
 
 @pytest.mark.asyncio
