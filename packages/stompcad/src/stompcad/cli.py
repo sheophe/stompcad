@@ -1,12 +1,12 @@
-"""``stompcad``'s command line: one composed run over both tools.
+"""``stompcad``'s command line: what identifies the work, and nothing else.
 
-Resolves the arguments a run needs, validates every requested target
-together, then drives ``Driver`` under ``track()`` with a presentation that
-is also the sink -- the plain writer without a terminal, decision 11's
-headless path, or the inline app's on a worker thread with one. The exit
-convention is the four codes both tools share, reduced from the worse of the
-two halves' findings, plus spec decision 9's fifth code, 130, for a run the
-user cancelled.
+Resolves the four ranks a run needs and validates every requested target
+together, then opens the workbench on a terminal or drives the run through
+the plain writer where there is none. Workbench decision 15: that second
+path is the only one without an application, so the flags here are exactly
+the facts that identify one piece of work. The exit convention is the four
+codes both tools share, reduced from the worse of the two halves' findings,
+plus the fifth, 130, for a run the user stopped.
 """
 
 from __future__ import annotations
@@ -29,13 +29,7 @@ from stompdrill.emitters import available
 from stompdrill.errors import UsageError as DrillUsageError
 from stompdrill.pipeline import DRILL_STANDARDS, SnapPositions
 from stompdrill.sources import AiPdfSource
-from stompmodel.diagnostics import (
-    EXIT_CLEAN,
-    EXIT_ERRORS,
-    EXIT_USAGE,
-    Severity,
-    exit_for_severity,
-)
+from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, Severity, exit_for_severity
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace
 from stompmodel.protocols import check_target_set, target_key
@@ -43,11 +37,10 @@ from stompmodel.units import Nanometre, nm_from_mm
 
 from . import discover, manifest
 from .cancel import EXIT_CANCELLED, Cancelled
-from .drive import DOCK_TARGET_NAMES, RunOptions, compose
-from .inline import InlineApp, TerminalPresentation
+from .drive import DOCK_TARGET_NAMES, Project, RunOptions, compose
 from .plan import DRILL_AND_DOCK
 from .present import NoTerminal, PlainWriter, Presentation
-from .readiness import Readiness, readiness
+from .readiness import Blocker, Readiness, readiness
 from .settings import (
     DEFAULTS,
     Artwork,
@@ -62,6 +55,9 @@ from .settings import (
     Settings,
     pick,
 )
+from .workbench.app import Workbench
+from .workbench.run import Launch
+from .workbench.session import Session
 
 __all__ = [
     "UsageError",
@@ -71,8 +67,10 @@ __all__ = [
     "validate_targets",
     "validate_place",
     "resolve",
+    "blocked",
+    "started_by_argument",
     "worst_severity",
-    "choose_presentation",
+    "has_terminal",
     "main",
 ]
 
@@ -136,13 +134,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="write an artifact; repeatable. FORMAT is one of: " + ", ".join(sorted(_known_targets())),
-    )
-    parser.add_argument(
-        "--progress",
-        choices=("bar", "steps", "tree"),
-        default="bar",
-        help="how much of the run to draw; 'v' cycles it while a run works; "
-        "ignored without a terminal",
     )
     return parser
 
@@ -235,7 +226,15 @@ class Resolution:
     panel_candidates: tuple[Path, ...] = ()
 
     def require_ready(self) -> None:
-        """Raise a usage failure naming every blocker and the place that answers it."""
+        """Raise a usage failure naming every blocker and the place that answers it.
+
+        The obstacle comes first because it is the one blocker that stops
+        the rest from meaning anything: with no panel or no readable
+        project, every other place is reporting on a project that does not
+        exist yet.
+        """
+        if self.obstacle is not None:
+            raise UsageError(self.obstacle)
         if self.blockers.ready:
             return
         raise UsageError(
@@ -288,24 +287,42 @@ def _pick_noting(
     return resolved
 
 
-def _resolve_panel(args: argparse.Namespace, directory: Path) -> tuple[Path, Resolved[Path | None]]:
-    """The panel: the argument if given, else the directory's one artwork file.
+def _resolve_panel(
+    args: argparse.Namespace, directory: Path
+) -> tuple[Path | None, Resolved[Path | None], str | None, tuple[Path, ...]]:
+    """The panel, how it was found, why there is none, and what else there was.
 
-    None and several candidates are both usage failures naming what was
-    found, because a headless run has nobody to ask; the workbench opens
-    blocked on the same two states instead of pre-empting them here.
+    Decision 6: none and several are states rather than failures. The
+    workbench opens on `Artwork` stating what it found, and a path typed
+    there starts the project; without a terminal the same two states become
+    the usage code they always were, named by ``require_ready``.
     """
     if args.panel is not None:
         panel = Path(args.panel)
-        return panel, Resolved[Path | None](panel, Provenance(Origin.ARGUMENT))
+        return panel, Resolved[Path | None](panel, Provenance(Origin.ARGUMENT)), None, ()
     found = discover.panels(directory)
     if len(found) == 1:
         panel = found[0]
-        return panel, Resolved[Path | None](panel, Provenance(Origin.DISCOVERED, "the artwork"))
+        return (
+            panel,
+            Resolved[Path | None](panel, Provenance(Origin.DISCOVERED, "the artwork")),
+            None,
+            (),
+        )
     if not found:
-        raise UsageError(f"no artwork (.ai) file found in {directory}; name one")
+        return (
+            None,
+            DEFAULTS.artwork.panel,
+            f"no artwork (.ai) file in {directory}; choose one in Artwork",
+            (),
+        )
     names = ", ".join(path.name for path in found)
-    raise UsageError(f"several artwork files found in {directory} ({names}); name one")
+    return (
+        None,
+        DEFAULTS.artwork.panel,
+        f"several artwork files here ({names}); choose one in Artwork",
+        found,
+    )
 
 
 def _layer_discovery(panel: Path, conventional: str) -> Discovery[str] | None:
@@ -573,9 +590,30 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     resolved, because a project may supply them as readily as a flag may.
     """
     notes: list[str] = []
-    panel, panel_resolved = _resolve_panel(args, directory)
+    panel, panel_resolved, missing, candidates = _resolve_panel(args, directory)
+    if panel is None:
+        assert missing is not None  # the only two branches with no panel both say why
+        return Resolution(
+            settings=DEFAULTS,
+            notes=(),
+            blockers=Readiness(((Blocker.NO_PANEL, "artwork", missing),)),
+            obstacle=missing,
+            panel_candidates=candidates,
+        )
 
-    project = manifest.read(panel)
+    try:
+        project = manifest.read(panel)
+    except manifest.ManifestError as failure:
+        # Decision 9: a project whose declarations cannot be read is never
+        # run under values that look like the user's own. Rank four for this
+        # panel is not those values -- it is what every place states while
+        # the file is unreadable, so the workbench stays readable throughout.
+        return Resolution(
+            settings=Settings.of_defaults(panel),
+            notes=(),
+            blockers=Readiness(((Blocker.UNREADABLE_PROJECT, "project", str(failure)),)),
+            obstacle=str(failure),
+        )
     notes.extend(project.notes)
 
     # Everything from here to the layer discovery below is typed text that
@@ -717,6 +755,40 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     )
 
 
+def blocked(args: argparse.Namespace, directory: Path) -> Resolution:
+    """``resolve``, with a refusal turned into something the workbench can show.
+
+    Inside the application there is nowhere to exit to, so a value the
+    consuming tool refuses becomes the obstacle on the `Project` place
+    rather than a message on a terminal about to be redrawn. The headless
+    path still calls ``resolve`` and still exits ``3``: the difference is
+    where a refusal can be read, not what counts as one.
+    """
+    try:
+        return resolve(args, directory)
+    except (UsageError, StompError) as failure:
+        panel = None if args.panel is None else Path(args.panel)
+        settings = DEFAULTS if panel is None else Settings.of_defaults(panel)
+        return Resolution(
+            settings=settings,
+            notes=(),
+            blockers=Readiness(((Blocker.UNREADABLE_PROJECT, "project", str(failure)),)),
+            obstacle=str(failure),
+        )
+
+
+def started_by_argument(args: argparse.Namespace) -> bool:
+    """Whether this invocation said "do not ask me". Decision 1.
+
+    An argument is an act of intent in this invocation; a manifest value is
+    a standing declaration. Bare ``stompcad tar.ai`` against a complete
+    project therefore opens resolved and ready and starts nothing, so that
+    opening last week's project to look at its artefacts costs no kernel
+    work.
+    """
+    return bool(args.boards or args.emit or args.case or args.case_model or args.panel_reference)
+
+
 def worst_severity(severities: Iterable[Severity | None]) -> Severity | None:
     """The worse finding of the halves that ran -- one run reports one status."""
     found = [severity for severity in severities if severity is not None]
@@ -741,51 +813,83 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
 
 
-def choose_presentation(out: TextIO) -> bool:
-    """Whether this stream can carry a drawn run rather than streamed lines.
+def has_terminal(out: TextIO) -> bool:
+    """Whether this stream can carry a workbench rather than streamed lines.
 
-    Decision 11: a pipe, a dumb terminal or a CI runner gets the plain
-    writer -- the same step lines, without the drawing. ``TERM=dumb``
-    cannot address a cursor, so an inline app would corrupt what it wrote.
+    Decision 15: a pipe, a dumb terminal or a CI runner gets the plain
+    writer. ``CI`` present in the environment counts as no terminal **even
+    with a tty attached**, because a runner that allocates a pty would
+    otherwise be given a full-screen application and hang until it timed
+    out -- and no flag should be required to avoid that. Presence rather
+    than truth: a runner declaring ``CI=false`` is still a runner, and the
+    variable's existence is the signal every runner agrees on.
     """
+    if "CI" in os.environ:
+        return False
     return out.isatty() and os.environ.get("TERM", "") not in ("", "dumb")
 
 
-def _run(args: argparse.Namespace, out: TextIO) -> int:
-    """Drive one composed run, and return the exit code its findings earned.
+def _workbench_for(args: argparse.Namespace, directory: Path) -> Workbench:
+    """The application this invocation opens, over whatever it resolved.
 
-    The presentation is also the sink ``track`` folds positions into, the
-    same double duty either writer does. With a terminal the run happens on
-    a worker and the app owns the main thread; without one it happens right
-    here, and decision 2's step lines are the whole record either way.
+    The session reaches back here for both rules it cannot hold itself: a
+    panel typed into `Artwork` resolves exactly as one named on the command
+    line does, and an edit is refused by the tool that will consume it.
     """
-    resolved = resolve(args, Path.cwd())
-    resolved.require_ready()
-    options = RunOptions.of(resolved.settings)
-    if not choose_presentation(out):
-        return _compose(options, PlainWriter(out))
-    app = InlineApp(level=args.progress)
-    app.drive(
-        lambda: _compose(options, TerminalPresentation(app), stop=lambda: app.stopping)
+    resolved = blocked(args, directory)
+    session = Session(
+        resolved,
+        resolver=lambda path: blocked(
+            argparse.Namespace(**{**vars(args), "panel": str(path)}), directory
+        ),
+        validator=lambda settings, place: validate_place(
+            settings, place, settings.artwork.panel.value or Path()
+        ),
     )
-    code = app.run(inline=True, inline_no_clear=True)
+    panel = resolved.settings.artwork.panel.value
+    return Workbench(
+        session,
+        launch=None if panel is None else Launch(panel=panel),
+        autostart=started_by_argument(args),
+    )
+
+
+def _run(args: argparse.Namespace, out: TextIO) -> int:
+    """Drive one project, in the workbench or through the plain writer.
+
+    With a terminal the app owns the main thread for as long as the user
+    wants it, and a run is an event inside it; the exit code is the last
+    run's. Without one the run happens right here, and decision 15's step
+    lines are the whole record -- which the workbench writes as it exits,
+    so a run leaves its record behind either way.
+    """
+    directory = Path.cwd()
+    if not has_terminal(out):
+        resolved = resolve(args, directory)
+        resolved.require_ready()
+        panel = resolved.settings.artwork.panel.value
+        assert panel is not None  # ``require_ready`` raises on a project with none
+        return _compose(
+            RunOptions.of(resolved.settings),
+            PlainWriter(out),
+            project=Project(panel, resolved.settings, resolved.project),
+        )
+    app = _workbench_for(args, directory)
+    app.run()
     if app.failure is not None:
-        # A fault carried out from the worker: raised here, unconditionally,
-        # regardless of what ``code`` holds.
+        # A fault carried into the app from the worker: raised here, where
+        # ``main`` can map it, once the application has finished with it.
         raise app.failure
-    if code is None:
-        # The app exited without the run's own exit code. A stop the user
-        # asked for earns 130; the app failing under the run is a processing
-        # error, because decision 9 reserves 130 for the stop alone.
-        return EXIT_CANCELLED if app.stopping else EXIT_ERRORS
-    # A code the run itself earned.
-    return code
+    for line in app.settled:
+        out.write(f"{line}\n")
+    return app.session.exit_code
 
 
 def _compose(
     options: RunOptions,
     presentation: Presentation,
     stop: Callable[[], bool] | None = None,
+    project: Project | None = None,
 ) -> int:
     """One run, against whichever presentation is drawing it, reduced to a code.
 
@@ -793,7 +897,7 @@ def _compose(
     a run through the same call; what is left here is what a process does
     with one.
     """
-    _driver, drill, dock = compose(DRILL_AND_DOCK, presentation, options, stop=stop)
+    _driver, drill, dock = compose(DRILL_AND_DOCK, presentation, options, project, stop=stop)
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])
     )

@@ -25,6 +25,13 @@ from tests.conftest import TAR_AI, TAR_PCB
 __all__: list[str] = []
 
 
+class _AlwaysATerminal:
+    """Stands in for ``out`` so ``has_terminal`` sees a tty without one."""
+
+    def isatty(self) -> bool:
+        return True
+
+
 def _imported_roots(source: Path) -> set[str]:
     """Every top-level package name imported anywhere under ``source``.
 
@@ -258,3 +265,105 @@ def test_every_place_accepts_its_defaults(place: str) -> None:
     from stompcad.settings import Settings
 
     cli.validate_place(Settings.of_defaults(TAR_AI), place, TAR_AI)
+
+
+def test_ci_counts_as_no_terminal_even_with_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decision 15: a runner that allocates a pty must not get a full-screen app."""
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("TERM", "xterm")
+    assert not cli.has_terminal(_AlwaysATerminal())  # type: ignore[arg-type]
+
+
+def test_a_dumb_terminal_counts_as_no_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("TERM", "dumb")
+    assert not cli.has_terminal(_AlwaysATerminal())  # type: ignore[arg-type]
+
+
+def test_a_real_terminal_gets_the_workbench(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The control: a rule that said no to everything would never open the app."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert cli.has_terminal(_AlwaysATerminal())  # type: ignore[arg-type]
+
+
+def test_the_parser_carries_only_what_identifies_the_work() -> None:
+    """Decision 6: no flag is added for any value the workbench exposes."""
+    parser = cli.build_parser()
+    flags = {action.dest for action in parser._actions} - {"help"}
+    assert flags == {"panel", "boards", "case", "case_model", "panel_reference", "emit"}
+
+
+def test_the_retired_flags_are_gone() -> None:
+    """Decision 16: `--progress` had no remaining job, and `--promote-warnings` none at all."""
+    parser = cli.build_parser()
+    for flag in ("--progress", "--promote-warnings"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["tar.ai", flag])
+
+
+def test_no_panel_blocks_rather_than_refusing(tmp_path: Path) -> None:
+    """Decision 6: the workbench opens on the Artwork place, stating that none is selected."""
+    resolved = cli.blocked(cli.build_parser().parse_args([]), tmp_path)
+    assert resolved.settings.artwork.panel.value is None
+    assert not resolved.blockers.ready
+    assert resolved.obstacle is not None
+    assert "artwork" in resolved.obstacle.lower()
+
+
+def test_several_panels_offer_a_pick(tmp_path: Path) -> None:
+    for name in ("tar.ai", "fuzz.ai"):
+        (tmp_path / name).write_bytes(b"%PDF-1.4\n")
+    resolved = cli.blocked(cli.build_parser().parse_args([]), tmp_path)
+    assert {path.name for path in resolved.panel_candidates} == {"tar.ai", "fuzz.ai"}
+
+
+def test_a_malformed_project_blocks_the_run_and_names_the_file(tmp_path: Path) -> None:
+    """Decision 9: never silent defaults, and never a run under values that look like the user's."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "tar.stompcad.json").write_text("{not json", encoding="utf-8")
+    resolved = cli.blocked(cli.build_parser().parse_args([str(panel)]), tmp_path)
+    assert not resolved.blockers.ready
+    assert resolved.obstacle is not None
+    assert "tar.stompcad.json" in resolved.obstacle
+    assert resolved.settings.drilling.grid_mm.value == 0.25, "every place must stay readable"
+
+
+def test_each_blocked_state_still_exits_three_without_a_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Decision 6: without a terminal the same three cases keep the usage code.
+
+    All three, because each reaches the code by its own route: two of them
+    through the panel nobody named, and the third through a project file
+    that cannot be read. ``CI`` is what makes this the headless path with a
+    terminal attached or without one.
+    """
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main([]) == EXIT_USAGE
+    assert "artwork" in capsys.readouterr().err.lower()
+
+    for name in ("tar.ai", "fuzz.ai"):
+        (tmp_path / name).write_bytes(b"%PDF-1.4\n")
+    assert cli.main([]) == EXIT_USAGE
+    several = capsys.readouterr().err
+    assert "tar.ai" in several and "fuzz.ai" in several
+
+    (tmp_path / "tar.stompcad.json").write_text("{not json", encoding="utf-8")
+    assert cli.main(["tar.ai"]) == EXIT_USAGE
+    assert "tar.stompcad.json" in capsys.readouterr().err
+
+
+def test_an_argument_beyond_the_panel_starts_the_run() -> None:
+    """Decision 1: an argument is an act of intent in this invocation."""
+    parser = cli.build_parser()
+    assert cli.started_by_argument(parser.parse_args(["tar.ai", "--case", "1590B"]))
+    assert cli.started_by_argument(parser.parse_args(["tar.ai", "tar-pcb.stp"]))
+
+
+def test_a_bare_panel_against_a_complete_project_starts_nothing() -> None:
+    """A manifest value is a standing declaration, not an act of intent."""
+    assert not cli.started_by_argument(cli.build_parser().parse_args(["tar.ai"]))

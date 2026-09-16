@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
@@ -801,3 +802,138 @@ async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
         await pilot.press("ctrl+r")
         await _settle(pilot, app)
     assert _recorded(app).declared[-1].drilling.title.value == "Tar"
+
+
+# -- an invocation that said "do not ask me" -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_argument_beyond_the_panel_opens_with_the_run_already_moving() -> None:
+    """Decision 1: there is no batch flag, because there is nothing to batch."""
+    app = Workbench(_session(), launch=_fake_launch(), autostart=True)
+    async with app.run_test() as pilot:
+        await _settle(pilot, app)
+        assert app.session.phase is Phase.DONE
+
+
+@pytest.mark.asyncio
+async def test_a_project_opened_to_be_looked_at_starts_nothing() -> None:
+    """The control: a manifest value is a standing declaration, not an act of intent."""
+    app = Workbench(_session(), launch=_fake_launch())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+        assert app.session.phase is Phase.IDLE
+
+
+# -- the boundary the worker reports through -------------------------------
+
+
+def _accepts_presentation(presentation: Presentation) -> None:
+    """Structural conformance, enforced by mypy rather than at runtime."""
+
+
+def test_the_workbench_presentation_satisfies_the_boundary() -> None:
+    """ADR-0013 pinned ``Presentation``; this is the terminal's implementation of it."""
+    _accepts_presentation(WorkbenchPresentation(Workbench(_session())))
+
+
+@pytest.mark.asyncio
+async def test_every_call_crosses_back_to_the_app_thread() -> None:
+    """Textual forbids touching the UI from a worker; nothing here may.
+
+    The double records what it was asked to run rather than running it, so a
+    method that reached a widget directly would leave this list short. The
+    fault is in the sequence because it crosses through ``_tell`` rather
+    than through the presentation, and it is no less a worker's call.
+    """
+    app = Workbench(_session(), launch=_fake_launch())
+    crossings: list[str] = []
+
+    def crossed(callback, *args, **kwargs):  # type: ignore[no-untyped-def]
+        crossings.append(callback.__name__)
+        return callback(*args, **kwargs)
+
+    async with app.run_test() as pilot:
+        app.call_from_thread = crossed  # type: ignore[method-assign]
+        presentation = WorkbenchPresentation(app)
+        presentation.begin(DRILL_AND_DOCK)
+        presentation.update(0.5, ("seat",))
+        presentation.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai")
+        presentation.report(["read 8 holes"])
+        run._tell(app, app.fault, OSError("disk full"))
+        await pilot.pause()
+
+    assert crossings == ["show", "advance", "settle", "record", "fault"]
+
+
+@pytest.mark.asyncio
+async def test_a_fault_on_the_worker_reaches_the_main_thread() -> None:
+    """A failing run must not come back as a success.
+
+    The fault happens where nothing can print it, so it travels to the app,
+    which outlives the run and can show it. The run ends; the app does not.
+    """
+
+    def explode(*_args: object, **_kwargs: object) -> NoReturn:
+        raise OSError("disk full")
+
+    app = Workbench(_session(), launch=Launch(panel=_PANEL, compose=explode))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        assert isinstance(app.failure, OSError)
+        assert app.session.phase is Phase.DONE
+
+
+def _asking(presentation: WorkbenchPresentation, results: list[str]) -> Callable[[], None]:
+    """A worker body recording how ``ask`` ended: answered, or abandoned."""
+
+    def body() -> None:
+        try:
+            results.append(
+                presentation.ask(
+                    Choice(
+                        prompt="reference outline is within tolerance of more than one footprint",
+                        candidates=("1590B", "1590B2"),
+                        code="ambiguous-enclosure",
+                    )
+                )
+            )
+        except Cancelled:
+            results.append("cancelled")
+
+    return body
+
+
+async def _await_result(results: list[str], timeout: float = 5.0) -> None:
+    """Poll for the worker's recorded outcome, bounded so a stall fails fast."""
+
+    async def poll() -> None:
+        while not results:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout=timeout)
+
+
+@pytest.mark.asyncio
+async def test_the_app_going_away_abandons_a_pending_question() -> None:
+    """A screen the shutdown popped never calls back; the wait must still end.
+
+    Nothing else ends it: the answer is a keypress, and there is no longer
+    anybody to press one, so a worker left waiting would hold a thread for
+    as long as the process lived.
+    """
+    app = Workbench(_session(), launch=_fake_launch())
+    results: list[str] = []
+
+    async with app.run_test() as pilot:
+        presentation = WorkbenchPresentation(app)
+        app.run_worker(_asking(presentation, results), thread=True)
+        await _paused(pilot, app)
+        assert results == []
+
+        app.exit()
+        await _await_result(results)
+
+    assert results == ["cancelled"]

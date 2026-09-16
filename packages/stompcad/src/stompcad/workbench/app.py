@@ -76,10 +76,17 @@ class Workbench(App[int], inherit_bindings=False):
 
     message: reactive[str] = reactive("")
 
-    def __init__(self, session: Session, launch: Launch | None = None) -> None:
+    def __init__(
+        self, session: Session, launch: Launch | None = None, autostart: bool = False
+    ) -> None:
         super().__init__()
         self.session = session
         self.launch = launch
+        # Decision 1: an invocation carrying something beyond the panel means
+        # "do not ask me", so the app opens with the run already moving. A
+        # manifest value is a standing declaration and starts nothing, or
+        # opening last week's project to look at it would cost kernel work.
+        self.autostart = autostart
         self._base: Screen[Any] | None = None
         # What the run leaves behind, in the form a pipe would have received
         # it (decision 15), plus where the run stands while it is working.
@@ -108,6 +115,8 @@ class Workbench(App[int], inherit_bindings=False):
     async def on_mount(self) -> None:
         self._base = self.screen
         await self.redraw()
+        if self.autostart and self.session.may_run():
+            self.action_start_run()
 
     # -- drawing -----------------------------------------------------------
 

@@ -10,16 +10,21 @@ enclosure and once where nothing but the supplied model names it.
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import io
 import json
 import shutil
 from pathlib import Path
 
 import pytest
+from textual.pilot import Pilot
 
 from stompcad import cli
+from stompcad.workbench.app import Workbench
+from stompcad.workbench.session import Phase
 from stompdrill import cli as stompdrill_cli
-from stompmodel.diagnostics import EXIT_USAGE, EXIT_WARNINGS
+from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, EXIT_WARNINGS
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, case_model
 
 __all__: list[str] = []
@@ -157,19 +162,20 @@ def test_a_board_without_a_case_model_is_a_usage_error(
 
 
 def test_a_captured_stream_is_not_a_terminal() -> None:
-    """Decision 11: without a terminal the plain writer runs, and nothing prompts."""
-    assert cli.choose_presentation(io.StringIO()) is False
+    """Decision 15: without a terminal the plain writer runs, and nothing prompts."""
+    assert cli.has_terminal(io.StringIO()) is False
 
 
 def test_a_terminal_gets_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A tty, and not a dumb one, is what the inline app needs."""
+    """A tty, and not a dumb one, is what the workbench needs."""
 
     class _Tty(io.StringIO):
         def isatty(self) -> bool:
             return True
 
+    monkeypatch.delenv("CI", raising=False)
     monkeypatch.setenv("TERM", "xterm")
-    assert cli.choose_presentation(_Tty()) is True
+    assert cli.has_terminal(_Tty()) is True
 
 
 def test_a_dumb_terminal_falls_back_to_the_plain_writer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,8 +185,9 @@ def test_a_dumb_terminal_falls_back_to_the_plain_writer(monkeypatch: pytest.Monk
         def isatty(self) -> bool:
             return True
 
+    monkeypatch.delenv("CI", raising=False)
     monkeypatch.setenv("TERM", "dumb")
-    assert cli.choose_presentation(_Tty()) is False
+    assert cli.has_terminal(_Tty()) is False
 
 
 def test_a_lone_panel_is_discovered(tmp_path: Path) -> None:
@@ -193,21 +200,37 @@ def test_a_lone_panel_is_discovered(tmp_path: Path) -> None:
     assert resolved.settings.artwork.panel.provenance.origin is Origin.DISCOVERED
 
 
-def test_several_panels_without_an_argument_is_a_usage_failure(tmp_path: Path) -> None:
-    from stompcad.cli import UsageError, build_parser, resolve
+def test_several_panels_without_an_argument_is_an_obstacle_and_still_exits_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Decision 6: a state the workbench can show, and the usage code without one."""
+    from stompcad.cli import blocked, build_parser, main
 
     for name in ("a.ai", "b.ai"):
         (tmp_path / name).write_bytes(b"")
-    with pytest.raises(UsageError) as failure:
-        resolve(build_parser().parse_args([]), tmp_path)
-    assert "a.ai" in str(failure.value) and "b.ai" in str(failure.value)
+    obstacle = blocked(build_parser().parse_args([]), tmp_path).obstacle
+    assert obstacle is not None and "a.ai" in obstacle and "b.ai" in obstacle
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.chdir(tmp_path)
+    assert main([]) == EXIT_USAGE
+    named = capsys.readouterr().err
+    assert "a.ai" in named and "b.ai" in named
 
 
-def test_no_panel_at_all_is_a_usage_failure(tmp_path: Path) -> None:
-    from stompcad.cli import UsageError, build_parser, resolve
+def test_no_panel_at_all_is_an_obstacle_and_still_exits_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from stompcad.cli import blocked, build_parser, main
 
-    with pytest.raises(UsageError):
-        resolve(build_parser().parse_args([]), tmp_path)
+    resolved = blocked(build_parser().parse_args([]), tmp_path)
+    assert resolved.obstacle is not None
+    assert not resolved.blockers.ready
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.chdir(tmp_path)
+    assert main([]) == EXIT_USAGE
+    assert "artwork" in capsys.readouterr().err.lower()
 
 
 def test_an_argument_beats_the_project_and_says_so(tmp_path: Path) -> None:
@@ -647,3 +670,75 @@ def _never_opens(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("the artwork must not be opened before options are validated")
 
     monkeypatch.setattr(discover, "layers", _must_not_be_called)
+
+
+def _tar_project(tmp_path: Path, model: Path) -> Path:
+    """A private copy of the whole fixture: the panel, its board, the case model.
+
+    Copied rather than read in place, because both runs below fill the gaps
+    in a project file beside the artwork, and the shared fixture must not
+    gain one that every other suite reading it would also see.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    shutil.copy(TAR_PCB, tmp_path / "tar-pcb.stp")
+    shutil.copy(model, tmp_path / "1590B.stp")
+    return panel
+
+
+def _args(panel: Path) -> argparse.Namespace:
+    """One invocation naming everything a drilled and docked run needs."""
+    return cli.build_parser().parse_args([
+        str(panel),
+        str(panel.with_name("tar-pcb.stp")),
+        "--case", "1590B",
+        "--case-model", str(panel.with_name("1590B.stp")),
+        "--panel-reference", PANEL_REFERENCE,
+        "--emit", f"excellon={panel.with_name('out.drl')}",
+        "--emit", f"report={panel.with_name('report.json')}",
+    ])
+
+
+def _workbench_over(panel: Path) -> Workbench:
+    """The application that same invocation opens, over that same project."""
+    return cli._workbench_for(_args(panel), panel.parent)
+
+
+async def _settled(pilot: Pilot[int], app: Workbench) -> None:
+    """Wait for the run to end, however long the kernel holds its worker.
+
+    Bounded by the caller's own alarm rather than by a count chosen here: a
+    real drill and dock is minutes of work, and a number measured against
+    one machine's clock is a guess about every other machine's.
+    """
+    while app.session.phase is Phase.RUNNING:
+        await pilot.pause()
+        await asyncio.sleep(0.05)
+
+
+@pytest.mark.boards
+@pytest.mark.hammond
+@pytest.mark.asyncio
+async def test_the_workbench_s_exit_lines_are_the_pipe_s_bytes(tmp_path: Path) -> None:
+    """Decision 15: a run leaves its record behind either way.
+
+    The same invocation, run twice over one project: once through the plain
+    writer, once through the workbench, whose settled lines are written out
+    as it exits. The comparison is the bytes, because "the same lines" is
+    only a claim until the padding and the order are compared too.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    piped = io.StringIO()
+    project = _tar_project(tmp_path, model)
+    assert cli._run(_args(project), piped) in (EXIT_CLEAN, EXIT_WARNINGS)
+
+    app = _workbench_over(project)
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settled(pilot, app)
+
+    assert app.failure is None
+    assert app.session.phase is Phase.DONE
+    assert "\n".join(app.settled) + "\n" == piped.getvalue()
