@@ -348,6 +348,30 @@ async def test_confirming_a_quit_during_a_run_earns_the_stop_code() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_run_finishing_while_the_dialog_is_open_keeps_its_own_code() -> None:
+    """The answer decides, not the moment the question was asked.
+
+    A run can complete between the two, and a completed run earned its own
+    code: a stop may end a run, never change what a completed one produced.
+    """
+    finding = Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.01 mm")
+    composed = _Compose(hold=True, finding=finding)
+    app = Workbench(_session(), launch=Launch(panel=_PANEL, compose=composed))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        await pilot.press("q")
+        await pilot.pause()
+        assert app.screen.query("#confirm"), "no dialog, so nothing raced it"
+        composed.released.set()  # the run finishes with the dialog still open
+        await _settle(pilot, app)
+        assert app.session.phase is Phase.DONE
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.return_value == EXIT_WARNINGS
+
+
+@pytest.mark.asyncio
 async def test_quitting_after_a_completed_run_keeps_the_code_it_earned() -> None:
     """The control: a stop may end a run, never change what a completed one produced."""
     finding = Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.01 mm")

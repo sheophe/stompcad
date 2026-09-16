@@ -120,9 +120,13 @@ class Workbench(App[int], inherit_bindings=False):
         if not self.is_running:
             return
         base = self._base if self._base is not None else self.screen
+        body = next(iter(base.query("#body").results(Vertical)), None)
+        if body is None or not body.is_mounted:
+            return
         base.query_one(Sidebar).show(self.session.rows())
-        body = base.query_one("#body", Vertical)
         await body.remove_children()
+        if not body.is_mounted:
+            return  # the app went during the await; there is nothing to mount into
         await body.mount(pane_for(self.session, self.session.place, self._run_view()))
         rows = list(body.query(FocusRow))
         target = next((row for row in rows if row.field == field), rows[0] if rows else None)
@@ -416,15 +420,20 @@ class Workbench(App[int], inherit_bindings=False):
         self.exit(self.session.exit_code)
 
     def _quit_confirmed(self, leave: bool | None) -> None:
-        """Decision 14: a run the user stopped exits 130, whatever it had reached.
+        """Decision 14: the answer decides, not the moment the question was asked.
 
-        This branch alone. Quitting with no run still exits 0, and quitting
-        after a run keeps the code that run earned, so a stop may end a run
-        without changing what a completed one produced.
+        A run can finish while the dialog is open, and one that finished
+        earned its own code -- a stop may end a run but never change what a
+        completed run produced. Only a run still in flight exits 130; with
+        no run at all ``exit_code`` has never moved from 0.
         """
-        if leave:
+        if not leave:
+            return
+        if self.session.phase in (Phase.RUNNING, Phase.PAUSED):
             self.action_stop_run()
             self.exit(EXIT_CANCELLED)
+            return
+        self.exit(self.session.exit_code)
 
     def action_window(self) -> None:
         """Open the viewer on the current subject.
