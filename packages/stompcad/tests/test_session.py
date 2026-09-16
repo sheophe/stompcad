@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -370,6 +371,43 @@ def test_a_refused_value_is_asked_again_once_its_place_answers(tmp_path: Path) -
     assert "bogus" not in session.statement().lower()
     assert session.statement() == "Everything needed is here. Press Enter to run."
     assert not any(row.attention for row in session.rows())
+
+
+def test_a_duplicate_target_marks_the_place_that_owns_it(tmp_path: Path) -> None:
+    """Decision 4: a marker on a place holding no values is no marker at all.
+
+    Two artefacts naming one file is ``stompmodel``'s own sentence and names
+    no flag of ours, so the refusal has to be labelled on the way past. Filed
+    under `Project` it marks a place with no row to change, and no edit
+    anywhere can then discharge it.
+    """
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    session = _blocked(panel, "--emit", "excellon=out", "--emit", "json=out")
+    assert [place for _blocker, place, _sentence in session.ready().blockers] == ["output"]
+    assert session.attention(Place.OUTPUT)
+    assert not session.attention(Place.PROJECT)
+
+    session.set(Place.OUTPUT, "targets", (("excellon", tmp_path / "tar-case.drl"),))
+    session.set(Place.BOARDS, "boards", ())
+
+    assert session.may_run()
+    assert session.statement() == "Everything needed is here. Press Enter to run."
+
+
+def test_a_duplicate_target_the_project_declares_marks_output_too(tmp_path: Path) -> None:
+    """The same sentence from the other rank, answered in the same place."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps(
+            {"version": 1, "output": {"targets": {"excellon": "x.out", "json": "x.out"}}}
+        ),
+        encoding="utf-8",
+    )
+    session = _blocked(panel)
+    assert [place for _blocker, place, _sentence in session.ready().blockers] == ["output"]
+    assert "x.out" in session.statement()
 
 
 def test_an_unreadable_project_survives_an_edit_to_something_else(tmp_path: Path) -> None:

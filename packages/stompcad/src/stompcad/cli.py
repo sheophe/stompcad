@@ -206,7 +206,11 @@ def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]], panel: Pat
     try:
         check_target_set([path for _name, path in targets.value])
     except ValueError as failure:
-        raise UsageError(str(failure)) from failure
+        # Labelled on the way past, because the sentence is ``stompmodel``'s
+        # and names paths rather than any flag or key of ours. Unlabelled,
+        # ``_refused_place`` can only file it under the project -- a place
+        # holding no values, so nothing a builder edits could discharge it.
+        raise UsageError(f"{where}: {failure}") from failure
 
 
 @dataclass(frozen=True, slots=True)
