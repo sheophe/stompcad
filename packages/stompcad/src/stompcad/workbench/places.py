@@ -307,7 +307,7 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
 
 
 class Rows(VerticalScroll):
-    """A place's rows. Arrows move between neighbours, as they do everywhere.
+    """A place's rows. `↑`/`↓` move between neighbours; `←` leaves for the list.
 
     Not itself focusable: one row holds focus, so there is no pane to tab
     into before reaching a value.

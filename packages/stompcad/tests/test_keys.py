@@ -49,3 +49,11 @@ def test_a_local_key_names_the_place_that_owns_it() -> None:
     assert keys.LOCAL_KEYS["ctrl+r"][0] is keys.Place.RUN
     assert keys.LOCAL_KEYS["ctrl+l"][0] is keys.Place.ARTWORK
     assert keys.LOCAL_KEYS["ctrl+f"][0] is keys.Place.ENCLOSURE
+
+
+def test_the_sidebar_s_keys_take_part_in_the_distinctness_check(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The arrows are only proved distinct if ``conflicts`` reads their tables."""
+    monkeypatch.setitem(keys.SIDEBAR_KEYS, "p", ("go('project')", "planted"))
+    assert "p" in keys.conflicts()
+    monkeypatch.setitem(keys.TO_SIDEBAR, "b", "planted")
+    assert "b" in keys.conflicts()

@@ -35,7 +35,16 @@ from ..cancel import EXIT_CANCELLED
 from ..drive import Driver
 from ..plan import RunPlan, Step
 from ..present import step_line
-from .keys import GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, RUN_KEYS, STEP_KEYS, Place
+from .keys import (
+    GLOBAL_VERBS,
+    LOCAL_KEYS,
+    PLACE_KEYS,
+    RUN_KEYS,
+    SIDEBAR_KEYS,
+    STEP_KEYS,
+    TO_SIDEBAR,
+    Place,
+)
 from .places import (
     Editor,
     Field,
@@ -74,7 +83,10 @@ class Workbench(App[int], inherit_bindings=False):
     #mode { dock: bottom; height: 1; background: $panel; }
     """
 
-    BINDINGS = table_bindings()
+    BINDINGS = [
+        *table_bindings(),
+        *(Binding(key, "focus_sidebar", detail, show=False) for key, detail in TO_SIDEBAR.items()),
+    ]
 
     message: reactive[str] = reactive("")
 
@@ -144,7 +156,8 @@ class Workbench(App[int], inherit_bindings=False):
         place is unchanged. A run reports through ``call_later``, so one can
         arrive after the app has begun tearing its widgets down; there is
         nothing left to draw on. Focus lands on ``field``'s row, else a
-        pending gap's, else the first.
+        pending gap's, else the first -- unless the sidebar holds focus, where
+        a step through the places leaves it.
         """
         if not self.is_running:
             return
@@ -153,18 +166,19 @@ class Workbench(App[int], inherit_bindings=False):
         if body is None or not _mounted(body):
             return
         base.query_one(Sidebar).show(self.session.rows())
+        # Read before the old pane goes: removing a focused row hands focus to
+        # the next focusable widget, which is the sidebar.
+        in_sidebar = isinstance(self.focused, Sidebar)
         await body.remove_children()
         if not _mounted(body):
             return  # the app went during the await; there is nothing to mount into
         await body.mount(pane_for(self.session, self.session.place, self._run_view()))
-        rows = list(body.query(FocusRow))
-        target = next((row for row in rows if row.field == field), None)
-        if target is None:
-            target = next(
-                (row for row in rows if isinstance(row, GapRow)), rows[0] if rows else None
-            )
-        if target is not None:
-            target.focus()
+        target = _entry_row(body, field)
+        if not in_sidebar:
+            if target is not None:
+                target.focus()
+            else:
+                base.set_focus(None)  # a place with nothing to select holds no focus
         self._show_mode()
 
     def _run_view(self) -> RunView:
@@ -205,7 +219,7 @@ class Workbench(App[int], inherit_bindings=False):
     def _mode_line(self) -> str:
         if self.mode() == "typing":
             return "  typing — letters type here; esc leaves the field" + self._tail()
-        return "  moving — letters jump to a place; ? for the keys" + self._tail()
+        return "  moving — arrows or letters move you; ? for the keys" + self._tail()
 
     def _tail(self) -> str:
         return f"    {self.message}" if self.message else ""
@@ -256,8 +270,22 @@ class Workbench(App[int], inherit_bindings=False):
         if isinstance(self.screen, (PickerScreen, KeysScreen)):
             self.pop_screen()
 
+    def action_focus_sidebar(self) -> None:
+        """`←`: leave the place for the list, keeping the place where it is."""
+        base = self._base if self._base is not None else self.screen
+        base.query_one(Sidebar).focus()
+
+    def action_enter_place(self) -> None:
+        """`→` or `enter` in the list: into the place, onto the row a letter lands on."""
+        base = self._base if self._base is not None else self.screen
+        target = _entry_row(base.query_one("#body", Vertical), None)
+        if target is not None:
+            target.focus()
+
     async def on_sidebar_chosen(self, event: Sidebar.Chosen) -> None:
+        """A click goes to the place and into it, as a letter does."""
         await self.action_go(event.place.value)
+        self.action_enter_place()
 
     # -- changing ----------------------------------------------------------
 
@@ -819,6 +847,21 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+#: How the keys screen spells an arrow; every other key is shown as it is named.
+_GLYPHS: dict[str, str] = {"left": "←", "right": "→", "up": "↑", "down": "↓"}
+
+
+def _entry_row(body: Vertical, field: str | None) -> FocusRow | None:
+    """The row focus lands on entering a place: ``field``'s, a gap's, else the first."""
+    rows = list(body.query(FocusRow))
+    target = next((row for row in rows if row.field == field), None) if field else None
+    if target is None:
+        target = next(
+            (row for row in rows if isinstance(row, GapRow)), rows[0] if rows else None
+        )
+    return target
+
+
 def _key_list() -> str:
     """Every key and what it does, read from the tables rather than restated."""
     lines = ["Places"]
@@ -829,6 +872,11 @@ def _key_list() -> str:
     ]
     lines += [f"  {key}   {detail}" for key, (_action, detail) in RUN_KEYS.items()]
     lines += [f"  {STEP_KEYS[0]}   previous place", f"  {STEP_KEYS[1]}   next place"]
+    lines += ["", "Moving between the list and the place"]
+    lines += [f"  {_GLYPHS.get(key, key)}   {detail}" for key, detail in TO_SIDEBAR.items()]
+    lines += [
+        f"  {_GLYPHS.get(key, key)}   {detail}" for key, (_action, detail) in SIDEBAR_KEYS.items()
+    ]
     lines += ["", "In a place"]
     lines += [
         f"  {key}   {detail} ({owner.value.capitalize()})"

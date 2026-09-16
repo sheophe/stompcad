@@ -235,6 +235,11 @@ the keys. `[` and `]` step to the previous and next place. Three
 `Ctrl+F` looks in the cache for an enclosure model, `Ctrl+R` starts or
 resumes the run.
 
+The arrows reach everything the letters do, for anyone who has not learnt
+them yet. The workbench has two panes: `←` from a place moves to the list of
+places, `↑`/`↓` there step between places, and `→` or `enter` goes back in.
+Inside a place, `↑`/`↓` move between its rows.
+
 Starting a run takes two keys — `r` then `Ctrl+R`, or `enter` on the
 `Project` place's run row — because a single bare letter that commits the
 machine to minutes of kernel work is a hazard rather than a convenience.

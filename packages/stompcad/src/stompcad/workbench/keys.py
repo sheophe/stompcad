@@ -19,6 +19,8 @@ __all__ = [
     "RUN_KEYS",
     "PRIORITY_KEYS",
     "STEP_KEYS",
+    "TO_SIDEBAR",
+    "SIDEBAR_KEYS",
     "neighbour",
     "conflicts",
 ]
@@ -109,6 +111,20 @@ PRIORITY_KEYS: frozenset[str] = frozenset({"ctrl+c"})
 #: learning the letters.
 STEP_KEYS: tuple[str, str] = ("[", "]")
 
+#: The key that leaves a place for the sidebar. Answered by the application
+#: rather than by a row, so it works from a place with nothing to select.
+TO_SIDEBAR: dict[str, str] = {"left": "to the list of places"}
+
+#: The sidebar's own keys, meaningful only while it holds focus. Arrows are
+#: the route a newcomer tries first; stepping changes the place as a letter
+#: does, so the two routes never disagree about where the user is.
+SIDEBAR_KEYS: dict[str, tuple[str, str]] = {
+    "up": ("step_place(False)", "previous place, in the list"),
+    "down": ("step_place(True)", "next place, in the list"),
+    "right": ("enter_place", "into the place"),
+    "enter": ("enter_place", "into the place"),
+}
+
 
 def neighbour(place: Place, forward: bool) -> Place:
     """The next or previous place, wrapping at both ends of the sidebar."""
@@ -125,7 +141,11 @@ def conflicts() -> tuple[str, ...]:
     that names the keys it already knows about.
     """
     seen: dict[str, int] = {}
-    for table in (PLACE_KEYS, GLOBAL_VERBS, LOCAL_KEYS, RUN_KEYS, dict.fromkeys(STEP_KEYS)):
+    tables = (
+        PLACE_KEYS, GLOBAL_VERBS, LOCAL_KEYS, RUN_KEYS,
+        dict.fromkeys(STEP_KEYS), TO_SIDEBAR, SIDEBAR_KEYS,
+    )
+    for table in tables:
         for key in table:
             seen[key] = seen.get(key, 0) + 1
     return tuple(sorted(key for key, count in seen.items() if count > 1))

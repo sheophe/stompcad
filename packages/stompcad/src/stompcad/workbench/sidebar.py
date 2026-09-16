@@ -5,18 +5,22 @@ this place needs the user are three channels: a background, a marker on the
 left, a marker on the right. The characters are this implementation's
 choice -- the specification leaves them open -- but the separation is not.
 
-The sidebar is never focused. It is a map of where the project stands, and
-a click on a row resolves to the same place change a bare letter makes.
+The sidebar is one of two panes. `←` from a place focuses it, `↑`/`↓` step
+between places, and `→` or `enter` goes back in. A step, a click and a
+bare letter all resolve to one place change, so no route disagrees.
 """
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.message import Message
 from textual.widgets import Rule, Static
 
-from .keys import CONFIGURATION, SIDEBAR_ORDER, Place
+from .keys import CONFIGURATION, SIDEBAR_KEYS, SIDEBAR_ORDER, Place
 from .session import Row
 
 __all__ = ["Sidebar", "SidebarRow"]
@@ -52,7 +56,15 @@ class Sidebar(Vertical):
     DEFAULT_CSS = """
     Sidebar { width: 18; border-right: solid $panel; }
     Sidebar SidebarRow.-selected { background: $accent 20%; }
+    Sidebar:focus SidebarRow.-selected { background: $accent 60%; }
     """
+
+    can_focus = True
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding(key, f"app.{action}", detail, show=False)
+        for key, (action, detail) in SIDEBAR_KEYS.items()
+    ]
 
     class Chosen(Message):
         """A row was clicked. The app decides what that means."""

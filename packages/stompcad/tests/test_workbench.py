@@ -25,11 +25,14 @@ from stompcad.workbench.keys import (
     LOCAL_KEYS,
     PLACE_KEYS,
     RUN_KEYS,
+    SIDEBAR_KEYS,
     STEP_KEYS,
+    TO_SIDEBAR,
     Place,
 )
 from stompcad.workbench.places import FIELDS, PickerScreen, ValueRow
 from stompcad.workbench.session import Session
+from stompcad.workbench.sidebar import Sidebar
 from stompmodel.diagnostics import Diagnostic, Severity
 from tests.conftest import TAR_AI
 
@@ -144,13 +147,95 @@ async def test_a_place_that_needs_the_user_is_marked_and_the_others_are_not() ->
         assert "!" not in "".join(line for name, line in lines.items() if "Drilling" in line)
 
 
+def test_the_sidebar_binds_exactly_its_own_table() -> None:
+    """Its arrows are proved distinct only if the table is what it binds."""
+    own = {binding.key for binding in Sidebar.BINDINGS if isinstance(binding, Binding)}
+    assert own == set(SIDEBAR_KEYS)
+
+
 @pytest.mark.asyncio
-async def test_the_sidebar_is_never_focused() -> None:
-    """Decision 3: the sidebar is a map, not a control to tab into."""
+async def test_the_workbench_opens_inside_a_place_not_the_list() -> None:
+    """The list is focusable now, but the app still starts where the work is."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
-        await pilot.press("tab", "tab", "tab")
-        assert app.focused is None or "Sidebar" not in type(app.focused).__name__
+        await pilot.pause()
+        assert not isinstance(app.focused, Sidebar)
+        assert app.focused is not None
+
+
+@pytest.mark.asyncio
+async def test_left_moves_focus_from_a_place_to_the_sidebar() -> None:
+    """Decision 3: `←` leaves the place for the list, and the place stays put."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d", "left")
+        assert isinstance(app.focused, Sidebar)
+        assert app.session.place is Place.DRILLING
+
+
+@pytest.mark.asyncio
+async def test_left_reaches_the_sidebar_from_a_place_with_nothing_to_select() -> None:
+    """Findings holds no row to focus, so `←` must not depend on one being focused."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("f", "left")
+        assert isinstance(app.focused, Sidebar)
+
+
+@pytest.mark.asyncio
+async def test_up_and_down_in_the_sidebar_step_places_and_keep_focus_there() -> None:
+    """Stepping in the list is the change a letter makes; focus stays in the list."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d", "left", "down")
+        assert _place(app) is Place.BOARDS
+        assert isinstance(app.focused, Sidebar)
+        assert app.query("#pane-boards")
+        await pilot.press("up", "up")
+        assert _place(app) is Place.ENCLOSURE
+        assert isinstance(app.focused, Sidebar)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["right", "enter"])
+async def test_right_or_enter_goes_into_the_place(key: str) -> None:
+    """The way back in: focus lands on the place's first row, as a letter leaves it."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d", "left", "down", key)
+        assert isinstance(app.focused, ValueRow)
+        assert app.focused.place is Place.BOARDS
+
+
+@pytest.mark.asyncio
+async def test_right_on_a_place_with_nothing_to_select_stays_in_the_sidebar() -> None:
+    """Going in where there is nothing to hold focus must not strand it nowhere."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("f", "left", "right")
+        assert isinstance(app.focused, Sidebar)
+
+
+@pytest.mark.asyncio
+async def test_a_letter_still_jumps_from_the_sidebar() -> None:
+    """The fast route works from either pane."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d", "left", "o")
+        assert _place(app) is Place.OUTPUT
+
+
+@pytest.mark.asyncio
+async def test_left_in_an_open_field_moves_the_cursor_not_the_focus() -> None:
+    """The control: typing keeps its own arrows, as it keeps its letters."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter", "T", "a", "r", "left")
+        editor = app.query_one("#editor", Input)
+        assert app.focused is editor
+        assert editor.cursor_position == 2
 
 
 @pytest.mark.asyncio
@@ -181,8 +266,11 @@ async def test_the_keys_screen_lists_every_key_the_table_holds() -> None:
         lines = [
             line.strip() for line in str(app.screen.query_one("#key-list", Static).content).splitlines()
         ]
-        for key in (*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS):
-            shown = key.replace("question_mark", "?")
+        glyphs = {"left": "←", "right": "→", "up": "↑", "down": "↓", "question_mark": "?"}
+        for key in (
+            *PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS, *TO_SIDEBAR, *SIDEBAR_KEYS
+        ):
+            shown = glyphs.get(key, key)
             assert any(line.startswith(f"{shown} ") for line in lines), shown
 
 
@@ -235,7 +323,7 @@ async def test_the_app_answers_only_the_keys_its_table_holds() -> None:
     The app's and the default screen's maps answer whatever is focused; a
     focused widget's own keys, such as a scroll pane's arrows, are local.
     """
-    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS)
+    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS, *TO_SIDEBAR)
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()
