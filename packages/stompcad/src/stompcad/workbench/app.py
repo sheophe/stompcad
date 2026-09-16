@@ -412,12 +412,18 @@ class Workbench(App[int], inherit_bindings=False):
     def _answered(self, answer: object | None) -> None:
         """Committing the answer *is* the continuation -- no second action.
 
-        ``None`` is a picker abandoned rather than an empty answer, which
-        leaves the run paused and the gap's own row to reopen it.
+        ``None`` is a picker abandoned, and so is a multiple one committed
+        with nothing ticked: decision 11 forbids substituting an answer the
+        tool did not compute, and an empty one revises a field into
+        something no step can read. Both leave the run paused, with the
+        gap's own row to reopen the picker.
         """
         if answer is None or self._answer is None:
             return
-        self._resume(",".join(_many(answer)) if isinstance(answer, tuple) else str(answer))
+        ticked = _many(answer) if isinstance(answer, tuple) else (str(answer),)
+        if not ticked:
+            return
+        self._resume(",".join(ticked))
 
     def action_answer_gap(self) -> None:
         """`enter` on the paused place's own row: its picker, or the continuation."""

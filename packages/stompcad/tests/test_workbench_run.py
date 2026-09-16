@@ -10,7 +10,7 @@ from typing import NoReturn
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Input, Static
+from textual.widgets import Input, SelectionList, Static
 
 from stompcad import cli, manifest
 from stompcad.cancel import EXIT_CANCELLED, Cancelled
@@ -637,3 +637,50 @@ async def test_a_place_answering_by_a_free_edit_carries_a_continue_row() -> None
         await app.redraw()
         await pilot.pause()
         assert app.query("#continue-run")
+
+
+@pytest.mark.asyncio
+async def test_a_gap_picker_committed_with_nothing_ticked_abandons_it() -> None:
+    """Decision 11: an empty tick list is abandonment, never an answer.
+
+    ``empty-group``'s answer widens a designator expression, so committing
+    nothing would widen it with an empty term -- a filter the next step
+    refuses, taking the paused run down with it one keypress from where the
+    app itself sent the builder.
+    """
+    app = Workbench(_session(), launch=_launch_raising("empty-group", ("RV1", "RV2")))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        assert app.screen.query_one("#picker", SelectionList).selected == []
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.session.phase is Phase.PAUSED
+        assert app.session.gap is not None and app.session.gap.code == "empty-group"
+        assert app.failure is None
+        assert _answers(app) == [], "the run was answered with the empty commit"
+        row = app.query_one("#gap-row", FocusRow)
+        row.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.screen.query("#picker"), "the abandoned picker cannot be reopened"
+
+
+@pytest.mark.asyncio
+async def test_a_ticked_designator_still_answers_and_continues() -> None:
+    """The control: what is abandoned is the empty commit, not every commit."""
+    app = Workbench(_session(), launch=_launch_raising("empty-group", ("RV1", "RV2")))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        app.screen.query_one("#picker", SelectionList).select("RV1")
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await _settle(pilot, app)
+
+        assert app.session.phase is Phase.DONE
+        assert _answers(app) == ["RV1"]
