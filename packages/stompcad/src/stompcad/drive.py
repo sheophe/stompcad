@@ -50,7 +50,7 @@ from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import CaseFace, DrillData
-from stompmodel.progress import Scope
+from stompmodel.progress import Scope, Sink, track
 from stompmodel.protocols import (
     Diagnosable,
     Emitter,
@@ -63,6 +63,7 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, nm_from_mm
 
+from .cancel import CancellingSink
 from .manifest import DOCK_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
 from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
@@ -71,7 +72,7 @@ from .settings import Settings
 from .stale import PLACE_OF_FIELD, stale_steps
 
 __all__ = [
-    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project",
+    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project", "compose",
     "invalidated", "steps_of_place", "readers_of",
 ]
 
@@ -917,6 +918,37 @@ class Driver:
         which is which.
         """
         return tuple(self._written)
+
+    @property
+    def designators(self) -> dict[int, tuple[str, ...]]:
+        """Each board's own names, once the boards have been read.
+
+        Empty before ``read boards``, which is why ``panel_reference`` is
+        typed until a run has read a board and ticked afterwards.
+        """
+        return self._board_designators()
+
+
+def compose(
+    plan: RunPlan,
+    presentation: Presentation,
+    options: RunOptions,
+    project: Project | None = None,
+    stop: Callable[[], bool] | None = None,
+    promote_warnings: bool = False,
+) -> tuple[Driver, DrillData, DockData | None]:
+    """One composed run: the driver, and what each half produced.
+
+    Both presentations reach a run through here. What differs between the
+    workbench and the plain writer is what happens around a run -- one
+    returns to an application and the other to a process -- never what a run
+    is, and a second composition is how the two would drift apart.
+    """
+    driver = Driver(plan, presentation, options, promote_warnings, project)
+    sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
+    with track(sink) as scope:
+        drill, dock = driver.run(scope)
+    return driver, drill, dock
 
 
 def _dock_emitters(

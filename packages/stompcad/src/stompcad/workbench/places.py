@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
@@ -27,7 +28,16 @@ from stompmodel.model import CaseFace
 from .. import discover
 from ..drive import DOCK_TARGET_NAMES
 from ..settings import as_flag_string
-from .keys import CONFIGURATION, GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, STEP_KEYS, Place
+from .keys import (
+    CONFIGURATION,
+    GLOBAL_VERBS,
+    LOCAL_KEYS,
+    PLACE_KEYS,
+    PRIORITY_KEYS,
+    RUN_KEYS,
+    STEP_KEYS,
+    Place,
+)
 from .session import Session
 
 __all__ = [
@@ -38,9 +48,14 @@ __all__ = [
     "choices_for",
     "chosen_for",
     "table_bindings",
+    "RunView",
+    "NO_RUN",
+    "position_line",
     "pane_for",
     "Rows",
+    "FocusRow",
     "ValueRow",
+    "RunRow",
     "Editor",
     "Ticks",
     "PickerScreen",
@@ -144,10 +159,11 @@ def chosen_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
 def table_bindings(namespace: str = "") -> list[BindingType]:
     """Every key the tables hold, bound to the application's own actions.
 
-    One builder serves the application and the picker, so a list open over
-    a place answers exactly the letters the place does, and no key is added
-    to one alone. None of them is a priority binding: an open text field
-    consumes a printable key, and nothing here asks to be heard over it.
+    One builder serves the application, the picker and the keys screen, so a
+    list open over a place answers exactly the letters the place does, and no
+    key is added to one alone. Only ``PRIORITY_KEYS`` is heard over what is
+    focused: a bare letter must lose to an open text field, and a stop must
+    not lose to a modal.
     """
     return [
         *(
@@ -164,15 +180,54 @@ def table_bindings(namespace: str = "") -> list[BindingType]:
             Binding(key, f"{namespace}local('{key}')", detail, show=False)
             for key, (_owner, detail) in LOCAL_KEYS.items()
         ),
+        *(
+            Binding(
+                key,
+                f"{namespace}{action}",
+                detail,
+                show=False,
+                priority=key in PRIORITY_KEYS,
+            )
+            for key, (action, detail) in RUN_KEYS.items()
+        ),
     ]
 
 
-def pane_for(session: Session, place: Place) -> Widget:
+@dataclass(frozen=True, slots=True)
+class RunView:
+    """What the `Run` place draws: the record so far, and where the run stands.
+
+    Passed in rather than read off a session, because none of it is a rule:
+    the lines are what a pipe would have received and the position is the
+    one the progress tree folded.
+    """
+
+    lines: tuple[str, ...] = ()
+    position: float = 0.0
+    branch: str = ""
+
+
+#: No run has reported anything yet. One instance, because it holds nothing.
+NO_RUN = RunView()
+
+
+def position_line(position: float, branch: str) -> str:
+    """The one live line: how far the run has got, and what it is inside."""
+    return f"  {position:.0%}  {branch}"
+
+
+def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
     """The widget this place draws into the body."""
     pane = Rows(id=f"pane-{place.value}")
     pane.border_title = place.value.capitalize()
     if place is Place.PROJECT:
-        pane.compose_add_child(Static(session.statement()))
+        pane.compose_add_child(Static(session.statement(), markup=False))
+        pane.compose_add_child(RunRow())
+    elif place is Place.RUN:
+        pane.compose_add_child(
+            Static(position_line(run.position, run.branch), id="run-position", markup=False)
+        )
+        pane.compose_add_child(Static("\n".join(run.lines), id="run-lines", markup=False))
     elif place in CONFIGURATION:
         record = getattr(session.settings, place.value)
         for field, label, stated in record.rows():
@@ -197,14 +252,25 @@ class Rows(VerticalScroll):
     ]
 
 
-class ValueRow(Static):
-    """One value: its name, what it states, and `enter` to change it."""
+class FocusRow(Static):
+    """One line a place can put focus on, whether it carries a value or a verb.
+
+    Arrows move between these and nothing else, so a pane's focusable lines
+    are one set rather than one set per kind of row.
+    """
 
     can_focus = True
 
+    #: Which value this row carries, or empty where it carries none.
+    field: str = ""
+
     DEFAULT_CSS = """
-    ValueRow:focus { background: $accent 30%; }
+    FocusRow:focus { background: $accent 30%; }
     """
+
+
+class ValueRow(FocusRow):
+    """One value: its name, what it states, and `enter` to change it."""
 
     BINDINGS = [Binding("enter", "edit", "change", show=False)]
 
@@ -226,6 +292,19 @@ class ValueRow(Static):
         self.post_message(ValueRow.Edit(self))
 
 
+class RunRow(FocusRow):
+    """`Project`'s own way into a run: decision 3's second route, and no letter.
+
+    Two keys start a run, and this is the other pair. `enter` here means
+    what `enter` means on every other row -- commit what this line is for.
+    """
+
+    BINDINGS = [Binding("enter", "app.start_run", "run", show=False)]
+
+    def __init__(self) -> None:
+        super().__init__("Run this project", id="run-row", markup=False)
+
+
 class Editor(Input):
     """The one open text field: while it has focus, letters type rather than jump."""
 
@@ -235,10 +314,28 @@ class Editor(Input):
         super().__init__(id="editor")
         self.row = row
 
+    async def on_key(self, event: events.Key) -> None:
+        """Decision 3: an open field suppresses a place's chords, not just its letters.
+
+        Textual consumes a printable key here already, so a bare letter
+        never reaches a binding; a ``Ctrl``+letter would, and ``Ctrl+R``
+        mid-edit commits minutes of kernel work nobody asked for. The stop
+        is bound with priority and is answered before this, which is what
+        decision 14 means by stopping from anywhere.
+        """
+        if _is_chord(event.key):
+            event.stop()
+            event.prevent_default()
+
     def action_close(self) -> None:
         """Abandon the text, and hand focus back to the row that opened it."""
         self.row.focus()
         self.remove()
+
+
+def _is_chord(key: str) -> bool:
+    """Whether this key is a plain ``Ctrl``+letter, the form a place's keys take."""
+    return len(key) == len("ctrl+x") and key.startswith("ctrl+") and key[-1].isalpha()
 
 
 class Ticks(SelectionList[str]):

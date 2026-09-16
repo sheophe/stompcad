@@ -16,6 +16,8 @@ __all__ = [
     "PLACE_KEYS",
     "GLOBAL_VERBS",
     "LOCAL_KEYS",
+    "RUN_KEYS",
+    "PRIORITY_KEYS",
     "STEP_KEYS",
     "neighbour",
     "conflicts",
@@ -88,6 +90,20 @@ LOCAL_KEYS: dict[str, tuple[Place, str]] = {
     "ctrl+r": (Place.RUN, "start or resume the run"),
 }
 
+#: Decision 14's two keys, each bound to its own action rather than to a verb.
+#: Neither is a bare letter, which is why they are not global verbs: `esc` is a
+#: ladder that closes the innermost thing open, and `ctrl+c` stops a run from
+#: anywhere. Quitting and stopping are different acts, so they are different keys.
+RUN_KEYS: dict[str, tuple[str, str]] = {
+    "escape": ("escape", "close, or stop the run"),
+    "ctrl+c": ("stop_run", "stop the run"),
+}
+
+#: The one key bound with priority. A modal screen hides the application's
+#: bindings, and a stop must stay reachable while one holds the screen; nothing
+#: else in the table asks to be heard over what is focused.
+PRIORITY_KEYS: frozenset[str] = frozenset({"ctrl+c"})
+
 #: Previous and next place. Not a second navigation model: both resolve to the
 #: same place change a letter makes, and exist so nobody is stuck while
 #: learning the letters.
@@ -109,7 +125,7 @@ def conflicts() -> tuple[str, ...]:
     that names the keys it already knows about.
     """
     seen: dict[str, int] = {}
-    for table in (PLACE_KEYS, GLOBAL_VERBS, LOCAL_KEYS, dict.fromkeys(STEP_KEYS)):
+    for table in (PLACE_KEYS, GLOBAL_VERBS, LOCAL_KEYS, RUN_KEYS, dict.fromkeys(STEP_KEYS)):
         for key in table:
             seen[key] = seen.get(key, 0) + 1
     return tuple(sorted(key for key, count in seen.items() if count > 1))

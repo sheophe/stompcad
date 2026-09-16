@@ -16,7 +16,14 @@ from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench.app import Workbench
-from stompcad.workbench.keys import GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, STEP_KEYS, Place
+from stompcad.workbench.keys import (
+    GLOBAL_VERBS,
+    LOCAL_KEYS,
+    PLACE_KEYS,
+    RUN_KEYS,
+    STEP_KEYS,
+    Place,
+)
 from stompcad.workbench.places import FIELDS, ValueRow
 from stompcad.workbench.session import Session
 
@@ -147,17 +154,17 @@ async def test_the_keys_screen_lists_every_key_the_table_holds() -> None:
         lines = [
             line.strip() for line in str(app.screen.query_one("#key-list", Static).content).splitlines()
         ]
-        for key in (*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS):
+        for key in (*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS):
             shown = key.replace("question_mark", "?")
             assert any(line.startswith(f"{shown} ") for line in lines), shown
 
 
 #: Keys the running application answers that no table holds, each with its reason.
-#: ``ctrl+c`` is the one chord exempted, because Task 8 binds it. The other three
-#: are Textual's ``Screen`` defaults: ``super+c`` shares ``ctrl+c``'s copy binding,
-#: and ``tab`` belongs to the place under decision 3, which moves focus within it.
+#: All three are Textual's ``Screen`` defaults: ``super+c`` is the other half of
+#: its one ``ctrl+c,super+c`` copy binding, whose ``ctrl+c`` the run's own stop
+#: now outranks, and ``tab`` belongs to the place under decision 3, as does its
+#: reverse.
 _EXEMPT = {
-    "ctrl+c": "Task 8 binds it",
     "super+c": "the other half of the screen's one `ctrl+c,super+c` copy binding",
     "tab": "decision 3: tab belongs to the place",
     "shift+tab": "tab's reverse",
@@ -176,13 +183,36 @@ async def test_the_app_answers_only_the_keys_its_table_holds() -> None:
     The app's and the default screen's maps answer whatever is focused; a
     focused widget's own keys, such as a scroll pane's arrows, are local.
     """
-    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS)
+    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS)
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()
         bound = set(app._bindings.key_to_bindings) | set(app.screen._bindings.key_to_bindings)
         assert tabled <= bound
         assert bound - tabled - set(_EXEMPT) == set()
+
+
+@pytest.mark.asyncio
+async def test_the_keys_screen_answers_only_the_keys_its_table_holds() -> None:
+    """A modal hides the app's bindings, so `?` must carry the table too."""
+    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS)
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("question_mark")
+        assert app.screen.query("#key-list")
+        bound = set(app.screen._bindings.key_to_bindings)
+        assert tabled <= bound
+        assert bound - tabled - set(_EXEMPT) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_place_letter_leaves_the_keys_screen_for_that_place() -> None:
+    """The control: a table that never reached the help would strand the letters."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("question_mark", "b")
+        assert not app.screen.query("#key-list")
+        assert app.session.place is Place.BOARDS
 
 
 @pytest.mark.asyncio
@@ -317,8 +347,8 @@ async def test_a_step_key_and_a_verb_still_reach_the_app_through_a_picker() -> N
 
 @pytest.mark.asyncio
 async def test_an_open_picker_answers_only_the_keys_its_table_holds() -> None:
-    """The picker's own map is the app's table plus `escape`, and nothing else."""
-    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS)
+    """The picker's own map is the app's whole table, and nothing besides it."""
+    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS, *RUN_KEYS)
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d")
@@ -327,7 +357,7 @@ async def test_an_open_picker_answers_only_the_keys_its_table_holds() -> None:
         assert app.screen.query("#picker")
         bound = set(app.screen._bindings.key_to_bindings)
         assert tabled <= bound
-        assert bound - tabled - set(_EXEMPT) == {"escape"}
+        assert bound - tabled - set(_EXEMPT) == set()
 
 
 @pytest.mark.asyncio

@@ -38,13 +38,12 @@ from stompmodel.diagnostics import (
 )
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace
-from stompmodel.progress import Sink, track
 from stompmodel.protocols import check_target_set, target_key
 from stompmodel.units import Nanometre, nm_from_mm
 
 from . import discover, manifest
-from .cancel import EXIT_CANCELLED, Cancelled, CancellingSink
-from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
+from .cancel import EXIT_CANCELLED, Cancelled
+from .drive import DOCK_TARGET_NAMES, RunOptions, compose
 from .inline import InlineApp, TerminalPresentation
 from .plan import DRILL_AND_DOCK
 from .present import NoTerminal, PlainWriter, Presentation
@@ -800,16 +799,17 @@ def _compose(
     stop: Callable[[], bool] | None = None,
     promote_warnings: bool = False,
 ) -> int:
-    """One run, against whichever presentation is drawing it.
+    """One run, against whichever presentation is drawing it, reduced to a code.
 
-    ``promote_warnings`` travels beside the options rather than within
-    them: decision 6 makes it a rule about which findings reach a picker,
-    not an input any step reads, so no revision could ever honour it.
+    Composing the run is ``drive.compose``'s, because the workbench reaches
+    a run through the same call; what is left here is what a process does
+    with one. ``promote_warnings`` travels beside the options rather than
+    within them: decision 6 makes it a rule about which findings reach a
+    picker, not an input any step reads.
     """
-    driver = Driver(DRILL_AND_DOCK, presentation, options, promote_warnings)
-    sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
-    with track(sink) as scope:
-        drill, dock = driver.run(scope)
+    _driver, drill, dock = compose(
+        DRILL_AND_DOCK, presentation, options, stop=stop, promote_warnings=promote_warnings
+    )
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])
     )
