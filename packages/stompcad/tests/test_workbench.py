@@ -514,6 +514,26 @@ async def test_several_artworks_offer_the_artwork_row_a_pick(tmp_path: Path) -> 
         assert app.launch is not None and app.launch.panel == tmp_path / "fuzz.ai"
 
 
+@pytest.mark.asyncio
+async def test_a_refused_flag_marks_the_place_that_can_answer_it(tmp_path: Path) -> None:
+    """Decision 4: the marker marks the place holding a gap, so it must be that place.
+
+    The sidebar is what a blocked start is read through, and a mark on
+    `Project` would send a builder to the one place with nothing to change.
+    """
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    app = cli._workbench_for(
+        cli.build_parser().parse_args([str(panel), "--case", "bogus"]), tmp_path
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        marked = [line for line in app.sidebar_text().splitlines() if "!" in line]
+        assert len(marked) == 1, app.sidebar_text()
+        assert "Enclosure" in marked[0]
+
+
 def test_every_row_a_place_states_is_a_row_a_user_can_edit() -> None:
     """The two tables are one statement; a field in either alone is a defect."""
     settings = Settings.of_defaults(_PANEL)

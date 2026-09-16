@@ -55,6 +55,7 @@ from .settings import (
     Settings,
     pick,
 )
+from .stale import PLACE_OF_FIELD
 from .workbench.app import Workbench
 from .workbench.run import Launch
 from .workbench.session import Session
@@ -755,24 +756,65 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     )
 
 
+#: The one flag whose own name and the field it carries disagree: ``--emit``
+#: writes ``output.targets``. Every other flag's ``dest`` is already the
+#: field's name, which is what lets the table below be built rather than kept.
+_FLAG_FIELDS: dict[str, str] = {"emit": "targets"}
+
+
+def _refusal_labels() -> dict[str, str]:
+    """Every label a refusal can name, and the place that owns that value.
+
+    Built from the field table and the parser itself, so a key renamed or a
+    flag added brings its own row. A copy written out here would send a
+    builder to the wrong place exactly when it fell behind one of them.
+    """
+    labels = {f"{place}.{field}": place for field, place in PLACE_OF_FIELD.items()}
+    for action in build_parser()._actions:
+        place = PLACE_OF_FIELD.get(_FLAG_FIELDS.get(action.dest, action.dest))
+        if place is not None:
+            labels.update({flag: place for flag in action.option_strings})
+    return labels
+
+
+def _refused_place(sentence: str) -> str:
+    """Which place owns the value a refusal names. Decision 6.
+
+    Every validator prefixes its sentence with the label the value was typed
+    into -- a project key, or the flag that carries it -- so the place is
+    read from the refusal rather than guessed at. A sentence naming no label
+    is the project's own, which is where a reader with nothing else to go on
+    should start.
+    """
+    labels = _refusal_labels()
+    for word in sentence.replace(",", " ").split():
+        place = labels.get(word.strip(":;'\"()"))
+        if place is not None:
+            return place
+    return "project"
+
+
 def blocked(args: argparse.Namespace, directory: Path) -> Resolution:
     """``resolve``, with a refusal turned into something the workbench can show.
 
-    Inside the application there is nowhere to exit to, so a value the
-    consuming tool refuses becomes the obstacle on the `Project` place
-    rather than a message on a terminal about to be redrawn. The headless
-    path still calls ``resolve`` and still exits ``3``: the difference is
-    where a refusal can be read, not what counts as one.
+    Inside the application there is nowhere to exit to, so a refused value
+    becomes an obstacle on the place that owns it rather than a message on a
+    terminal about to be redrawn -- and the sidebar's marker is derived from
+    that place, so naming the wrong one sends a builder somewhere with
+    nothing to change. An unreadable project is decision 9's own case and
+    keeps its own blocker, raised by ``resolve`` before this sees it.
     """
     try:
         return resolve(args, directory)
-    except (UsageError, StompError) as failure:
+    except (UsageError, StompError, OSError) as failure:
         panel = None if args.panel is None else Path(args.panel)
         settings = DEFAULTS if panel is None else Settings.of_defaults(panel)
         return Resolution(
             settings=settings,
             notes=(),
-            blockers=Readiness(((Blocker.UNREADABLE_PROJECT, "project", str(failure)),)),
+            blockers=Readiness(
+                ((Blocker.REFUSED_VALUE, _refused_place(str(failure)), str(failure)),)
+            ),
             obstacle=str(failure),
         )
 

@@ -33,6 +33,10 @@ class Blocker(Enum):
     # Never raised by readiness(): the manifest is read before a Settings
     # exists, so resolve() appends this blocker itself.
     UNREADABLE_PROJECT = "this project file cannot be read"
+    # Nor this one, and for the same reason: a value the consuming tool
+    # refuses is caught by cli.blocked, which files it against the place the
+    # value was typed into -- the only place that can answer it.
+    REFUSED_VALUE = "this value is not one the tool that reads it accepts"
 
 
 @dataclass(frozen=True, slots=True)

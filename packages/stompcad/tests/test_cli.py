@@ -11,15 +11,18 @@ from __future__ import annotations
 
 import ast
 import inspect
+import io
 import json
 import shutil
 from pathlib import Path
 
 import pytest
 
-from stompcad import cli
+from stompcad import cli, discover
 from stompcad.cancel import EXIT_CANCELLED
-from stompmodel.diagnostics import EXIT_USAGE
+from stompcad.readiness import Blocker
+from stompcad.workbench.app import Workbench
+from stompmodel.diagnostics import EXIT_ERRORS, EXIT_USAGE, EXIT_WARNINGS
 from tests.conftest import TAR_AI, TAR_PCB
 
 __all__: list[str] = []
@@ -27,6 +30,13 @@ __all__: list[str] = []
 
 class _AlwaysATerminal:
     """Stands in for ``out`` so ``has_terminal`` sees a tty without one."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+class _CapturingTerminal(io.StringIO):
+    """A terminal that keeps what was written to it, as scrollback does."""
 
     def isatty(self) -> bool:
         return True
@@ -328,6 +338,10 @@ def test_a_malformed_project_blocks_the_run_and_names_the_file(tmp_path: Path) -
     assert resolved.obstacle is not None
     assert "tar.stompcad.json" in resolved.obstacle
     assert resolved.settings.drilling.grid_mm.value == 0.25, "every place must stay readable"
+    # Decision 9's own case keeps its own blocker: the file, not a value in it.
+    assert [(blocker, place) for blocker, place, _s in resolved.blockers.blockers] == [
+        (Blocker.UNREADABLE_PROJECT, "project")
+    ]
 
 
 def test_each_blocked_state_still_exits_three_without_a_terminal(
@@ -367,3 +381,127 @@ def test_an_argument_beyond_the_panel_starts_the_run() -> None:
 def test_a_bare_panel_against_a_complete_project_starts_nothing() -> None:
     """A manifest value is a standing declaration, not an act of intent."""
     assert not cli.started_by_argument(cli.build_parser().parse_args(["tar.ai"]))
+
+
+def _stand_in(
+    settled: list[str], code: int, failure: BaseException | None = None
+) -> object:
+    """A ``Workbench.run`` that leaves behind what a real one leaves behind.
+
+    The application is driven by its own suite; what this exercises is the
+    handful of lines after ``run()`` returns, which nothing else reaches --
+    the record written out, the code handed back and a fault re-raised.
+    """
+
+    def run(app: Workbench) -> int | None:
+        app.settled = list(settled)
+        app.failure = failure
+        app.session.finish_run(code)
+        return code
+
+    return run
+
+
+def _a_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """A panel to open, and an environment ``has_terminal`` says yes to."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("TERM", "xterm")
+    return panel
+
+
+def test_the_workbench_s_lines_and_code_leave_through_the_command_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Decision 15: the app writes its record as it exits, and 14: the code is the run's.
+
+    The workbench keeps both on itself, so the process only has them if this
+    branch takes them off it: a byte comparison against ``settled`` inside
+    the app would pass with nothing written to the terminal at all.
+    """
+    panel = _a_terminal(monkeypatch, tmp_path)
+    settled = ["  read panel      tar.ai", "  quantise        8 holes, 2 tools"]
+    monkeypatch.setattr(Workbench, "run", _stand_in(settled, EXIT_WARNINGS))
+    out = _CapturingTerminal()
+
+    code = cli._run(cli.build_parser().parse_args([str(panel)]), out)
+
+    assert out.getvalue() == "\n".join(settled) + "\n"
+    assert code == EXIT_WARNINGS
+
+
+def test_a_fault_the_app_kept_is_raised_where_main_can_map_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The app outlives the run, so a fault leaves with the app rather than under it.
+
+    ``main`` maps it to an exit code and prints it; swallowed here, a run
+    that broke would report whatever code the session happened to hold.
+    """
+    panel = _a_terminal(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        Workbench, "run", _stand_in(["  read panel      tar.ai"], EXIT_ERRORS, OSError("disk full"))
+    )
+    out = _CapturingTerminal()
+
+    with pytest.raises(OSError, match="disk full"):
+        cli._run(cli.build_parser().parse_args([str(panel)]), out)
+
+    assert out.getvalue() == "", "the record was written past a fault that stops the run"
+
+
+def test_a_refused_flag_blocks_the_place_that_owns_the_value(tmp_path: Path) -> None:
+    """Decision 6: a blocker names the place that can answer it, not the landing.
+
+    ``Project`` cannot answer a part number the catalogue does not hold, and
+    a marker there sends the builder somewhere with nothing to change.
+    """
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    resolved = cli.blocked(
+        cli.build_parser().parse_args([str(panel), "--case", "bogus"]), tmp_path
+    )
+    assert [(blocker, place) for blocker, place, _s in resolved.blockers.blockers] == [
+        (Blocker.REFUSED_VALUE, "enclosure")
+    ]
+    assert resolved.obstacle is not None and "--case" in resolved.obstacle
+
+
+def test_a_refused_project_key_blocks_the_place_that_owns_the_value(tmp_path: Path) -> None:
+    """The other half of the label table: a key the file was typed into."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "drilling": {"grid_mm": 0.0015}}), encoding="utf-8"
+    )
+    resolved = cli.blocked(cli.build_parser().parse_args([str(panel)]), tmp_path)
+    assert [place for _b, place, _s in resolved.blockers.blockers] == ["drilling"]
+
+
+def test_a_refusal_naming_no_label_falls_back_to_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: a sentence naming nothing must still open somewhere readable."""
+
+    def refuses(args: object, directory: object) -> cli.Resolution:
+        raise cli.UsageError("two artefacts write to one file")
+
+    monkeypatch.setattr(cli, "resolve", refuses)
+    resolved = cli.blocked(cli.build_parser().parse_args([]), tmp_path)
+    assert [place for _b, place, _s in resolved.blockers.blockers] == ["project"]
+    assert resolved.obstacle == "two artefacts write to one file"
+
+
+def test_a_directory_that_cannot_be_read_becomes_an_obstacle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside the app there is nowhere to exit to, a refused read included."""
+
+    def refuses(directory: Path) -> tuple[Path, ...]:
+        raise PermissionError(13, "Permission denied", str(directory))
+
+    monkeypatch.setattr(discover, "panels", refuses)
+    resolved = cli.blocked(cli.build_parser().parse_args([]), tmp_path)
+    assert resolved.obstacle is not None and "Permission denied" in resolved.obstacle
+    assert not resolved.blockers.ready
