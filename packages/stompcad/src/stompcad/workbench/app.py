@@ -744,6 +744,16 @@ class KeysScreen(ModalScreen[None]):
     the same table as well as its own two closes: decision 3 needs every
     bare letter to work while the help is open, exactly as it does over a
     picker. Its own `escape` and `?` are listed first, so both close it.
+    Drawn as a window over the place, like the picker, so the help never
+    hides what it is helping with.
+    """
+
+    DEFAULT_CSS = """
+    KeysScreen { align: center middle; }
+    KeysScreen > Vertical {
+        width: auto; height: auto; max-height: 90%;
+        border: round $accent; background: $surface; padding: 0 1;
+    }
     """
 
     BINDINGS = [
@@ -753,7 +763,9 @@ class KeysScreen(ModalScreen[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        yield Static(_key_list(), id="key-list")
+        with Vertical(id="keys") as window:
+            window.border_title = "Keys"
+            yield Static(_key_list(), id="key-list", markup=False)
 
 
 class ConfirmScreen(ModalScreen[bool]):

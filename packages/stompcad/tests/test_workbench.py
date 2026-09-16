@@ -185,6 +185,24 @@ async def test_the_keys_screen_lists_every_key_the_table_holds() -> None:
             assert any(line.startswith(f"{shown} ") for line in lines), shown
 
 
+@pytest.mark.asyncio
+async def test_the_keys_screen_is_a_window_over_the_workbench() -> None:
+    """`?` opens a centred box, as the picker and the quit question do.
+
+    The control is the terminal's own size: a list filling the screen would
+    match it on both axes, so being smaller on both is the claim.
+    """
+    app = Workbench(_session())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        box = app.screen.query_one("#keys").region
+        assert box.width < app.size.width and box.height < app.size.height
+        left, right = box.x, app.size.width - box.right
+        top, bottom = box.y, app.size.height - box.bottom
+        assert abs(left - right) <= 1 and abs(top - bottom) <= 1
+
+
 #: Keys the running application answers that no table holds, each with its reason.
 #: All three are Textual's ``Screen`` defaults: ``super+c`` is the other half of
 #: its one ``ctrl+c,super+c`` copy binding, whose ``ctrl+c`` the run's own stop
