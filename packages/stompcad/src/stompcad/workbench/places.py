@@ -27,7 +27,7 @@ from stompmodel.model import CaseFace
 
 from .. import discover
 from ..drive import DOCK_TARGET_NAMES
-from ..settings import as_flag_string
+from ..settings import Origin, as_flag_string
 from .keys import (
     CONFIGURATION,
     GLOBAL_VERBS,
@@ -51,6 +51,8 @@ __all__ = [
     "RunView",
     "NO_RUN",
     "position_line",
+    "finding_lines",
+    "output_lines",
     "pane_for",
     "Rows",
     "FocusRow",
@@ -225,6 +227,45 @@ def position_line(position: float, branch: str) -> str:
     return f"  {position:.0%}  {branch}"
 
 
+def finding_lines(session: Session) -> tuple[str, ...]:
+    """What the `Findings` place lists, in the order the run raised them.
+
+    Plan 3 replaces this body with the six families, their shared prose and
+    the jump to the row that addresses each finding. It is a function rather
+    than a widget so that replacement changes what is said and not where it
+    is said.
+    """
+    if not session.findings:
+        return ("Nothing to report.",)
+    return tuple(
+        f"{finding.diagnostic.severity.value:<8}{finding.diagnostic.code:<28}"
+        f"{finding.diagnostic.message}"
+        for finding in session.findings
+    )
+
+
+def output_lines(session: Session) -> tuple[str, ...]:
+    """Each artefact, where it goes, and what is honestly known about it.
+
+    Decision 2: a file found on disk is labelled as found, never as current.
+    The manifest holds no hashes, so this is the strongest true statement
+    available -- and it is the session's, never persisted.
+    """
+    targets = session.settings.output.targets
+    if not targets.value:
+        # Decision 17: an empty set somebody answered is a run permitted to
+        # write nothing, which is a legitimate thing to want and so must be
+        # said -- a run that quietly writes nothing is indistinguishable
+        # from one that failed to. At rank four it is an unanswered
+        # question instead, which the editable row above already states.
+        answered = targets.provenance.origin is not Origin.DEFAULT
+        return ("check only — writes nothing",) if answered else ()
+    return tuple(
+        f"{name:<14}{path}  — {session.label_for(path, exists=path.is_file())}"
+        for name, path in targets.value
+    )
+
+
 def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
     """The widget this place draws into the body."""
     pane = Rows(id=f"pane-{place.value}")
@@ -243,11 +284,15 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
         record = getattr(session.settings, place.value)
         for field, label, stated in record.rows():
             pane.compose_add_child(ValueRow(place, field, f"{label:<18}{stated}"))
+        if place is Place.OUTPUT:
+            # Beside the row that chooses them, never in place of it: what an
+            # artefact is called is editable, what is known about it is not.
+            pane.compose_add_child(Static("\n".join(output_lines(session)), markup=False))
         gap = session.gap
         if gap is not None and gap.place is place:
             pane.compose_add_child(GapRow(gap))
     else:
-        pane.compose_add_child(Static(""))
+        pane.compose_add_child(Static("\n".join(finding_lines(session)), markup=False))
     return pane
 
 

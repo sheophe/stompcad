@@ -23,7 +23,7 @@ from .. import drive, stale
 from ..plan import RunPlan
 from ..present import Choice
 from ..readiness import Readiness, readiness
-from ..settings import Origin, Provenance, Resolved, Settings, disagreement
+from ..settings import Discovery, Origin, Provenance, Resolved, Settings, disagreement
 from .findings import Finding, classify, counted
 from .keys import CONFIGURATION, SIDEBAR_ORDER, Place, neighbour
 
@@ -207,18 +207,40 @@ class Session:
         """Record one value the user set, and what the project said instead.
 
         ``Origin.USER`` is this method's own rank: above the project and
-        above an argument, because it is the most recent thing anybody said.
+        above an argument, because it is the most recent thing anybody said,
+        which is also why this is the rank that records a disagreement.
+        """
+        declared = self._project.values.get(place.value, {}).get(field)
+        self._replace_value(
+            place,
+            field,
+            Resolved(value, Provenance(Origin.USER), disagreement(declared, value)),
+        )
+
+    def adopt(self, place: Place, field: str, found: Discovery[Any]) -> None:
+        """Take a value the tool found, recording that it was found rather than set.
+
+        Decision 7: the origin a row states must be the rank that supplied
+        it, and a cached model is discovered however it was asked for.
+        Discovery sits below the project, so it records no disagreement.
+        """
+        self._replace_value(
+            place, field, Resolved(found.value, Provenance(Origin.DISCOVERED, found.detail))
+        )
+
+    def _replace_value(self, place: Place, field: str, resolved: Resolved[Any]) -> None:
+        """One value, at whatever rank supplied it, put in force.
+
         The field is added to the change set, which is what makes the steps
-        reading it stale. The consuming tool's check runs before either is
-        touched, so a refused edit invalidates nothing.
+        reading it stale, and readiness is asked again. The consuming tool's
+        check runs before either is touched, so a refused value invalidates
+        nothing -- which is why every rank arrives through here.
         """
         if place not in CONFIGURATION:
             raise ValueError(f"{place.value} holds no values to set")
         if not self.may_edit(place):
             raise Locked(f"{place.value} does not accept an edit while a run is active")
         record = getattr(self._settings, place.value)
-        declared = self._project.values.get(place.value, {}).get(field)
-        resolved = Resolved(value, Provenance(Origin.USER), disagreement(declared, value))
         previous = self._settings
         self._settings = replace(
             self._settings, **{place.value: replace(record, **{field: resolved})}
@@ -239,6 +261,16 @@ class Session:
         self._adopt(self._resolver(path))
 
     # -- what a change invalidated ----------------------------------------
+
+    def invalidate(self, *fields: str) -> None:
+        """Mark fields changed without changing their values. Decision 10.
+
+        `Ctrl+L` says the artwork on disk is not the artwork the last run
+        read. Nothing the project declares has changed, so nothing is set --
+        but every step reading the panel is stale, and that is the same
+        statement an edit makes.
+        """
+        self._changed = self._changed | frozenset(fields)
 
     def stale(self) -> frozenset[str]:
         """The steps a resume would run, derived from the driver's own tables."""

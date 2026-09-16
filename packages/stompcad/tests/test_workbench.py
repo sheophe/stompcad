@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from stompcad.workbench.keys import (
 )
 from stompcad.workbench.places import FIELDS, PickerScreen, ValueRow
 from stompcad.workbench.session import Session
+from stompmodel.diagnostics import Diagnostic, Severity
 
 __all__: list[str] = []
 
@@ -68,6 +70,27 @@ def _runnable() -> Settings:
                 (("excellon", Path("/project/tar-case.drl")),), Provenance(Origin.PROJECT)
             ),
         ),
+    )
+
+
+def _targets(paths: dict[str, Path]) -> Settings:
+    """A runnable project whose artefacts are these, declared by the project."""
+    base = _runnable()
+    return replace(
+        base,
+        output=replace(
+            base.output,
+            targets=Resolved(tuple(sorted(paths.items())), Provenance(Origin.PROJECT)),
+        ),
+    )
+
+
+def _declared_case(part: str) -> Settings:
+    """A project that names its enclosure part and holds no model for it yet."""
+    base = Settings.of_defaults(_PANEL)
+    return replace(
+        base,
+        enclosure=replace(base.enclosure, case=Resolved(part, Provenance(Origin.PROJECT))),
     )
 
 
@@ -554,3 +577,101 @@ def test_every_value_the_workbench_exposes_is_reachable_through_the_manifest() -
     for place, fields in FIELDS.items():
         declarable = PLACES[place.value] | ({"panel"} if place is Place.ARTWORK else set())
         assert {field.name for field in fields} <= declarable, place
+
+
+@pytest.mark.asyncio
+async def test_the_findings_place_lists_what_the_run_found() -> None:
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([
+            Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.06 mm"),
+            Diagnostic(Severity.INFO, "inferred-enclosure", "the part came from tar-case.stp"),
+        ])
+        await pilot.press("f")
+        shown = app.pane_text()
+        assert "off-grid" in shown
+        assert "inferred-enclosure" in shown
+
+
+@pytest.mark.asyncio
+async def test_information_is_listed_but_not_counted() -> None:
+    """Decision 4: a run that inferred an enclosure succeeded, and owes nothing."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([
+            Diagnostic(Severity.INFO, "seating-search-bounded", "bounded at 20 mm"),
+        ])
+        await app.redraw()
+        await pilot.pause()
+        row = next(row for row in app.session.rows() if row.place is Place.FINDINGS)
+        assert row.count == 0
+        assert not row.attention
+
+
+@pytest.mark.asyncio
+async def test_an_artefact_already_on_disk_is_never_called_current(tmp_path: Path) -> None:
+    """Decision 2: the workbench cannot know it matches, and must not imply it."""
+    artefact = tmp_path / "tar-case.drl"
+    artefact.write_text("M30\n", encoding="utf-8")
+    app = Workbench(_session(_targets({"excellon": artefact})))
+    async with app.run_test() as pilot:
+        await pilot.press("o")
+        shown = app.pane_text()
+        assert "already on disk" in shown
+        assert "made by this run" not in shown
+
+
+@pytest.mark.asyncio
+async def test_an_artefact_this_session_wrote_says_so(tmp_path: Path) -> None:
+    artefact = tmp_path / "tar-case.drl"
+    artefact.write_text("M30\n", encoding="utf-8")
+    app = Workbench(_session(_targets({"excellon": artefact})))
+    async with app.run_test() as pilot:
+        app.session.record_written([artefact])
+        await pilot.press("o")
+        assert "made by this run" in app.pane_text()
+
+
+@pytest.mark.asyncio
+async def test_ctrl_l_re_reads_the_artwork_s_own_layer_list() -> None:
+    """A re-export from Illustrator is the reason this key exists."""
+    app = Workbench(_session(), launch=None)
+    async with app.run_test() as pilot:
+        await pilot.press("a", "ctrl+l")
+        assert "read-panel" in app.session.stale()
+
+
+@pytest.mark.asyncio
+async def test_ctrl_f_adopts_a_model_the_cache_already_holds(tmp_path: Path) -> None:
+    """CLAUDE.md: acquiring a model is separate work, so this only looks."""
+    cache = tmp_path / "cases"
+    cache.mkdir()
+    (cache / "1590B.stp").write_text("ISO-10303-21;\n", encoding="utf-8")
+    app = Workbench(_session(_declared_case("1590B")), cache=cache)
+    async with app.run_test() as pilot:
+        await pilot.press("e", "ctrl+f")
+        assert app.session.settings.enclosure.case_model.value == cache / "1590B.stp"
+        assert app.session.settings.enclosure.case_model.provenance.origin is Origin.DISCOVERED
+
+
+@pytest.mark.asyncio
+async def test_ctrl_f_downloads_nothing_and_says_where_to_get_one(tmp_path: Path) -> None:
+    """The control: a key that fetched would make the workbench acquire models."""
+    app = Workbench(_session(_declared_case("1590B")), cache=tmp_path / "empty")
+    async with app.run_test() as pilot:
+        await pilot.press("e", "ctrl+f")
+        assert "fetch_case_model" in app.message
+        assert app.session.settings.enclosure.case_model.value is None
+
+
+@pytest.mark.asyncio
+async def test_ctrl_f_without_the_acquiring_tool_says_no_location_is_known(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback: `tools` is a repository script, so an app cannot count on it."""
+    monkeypatch.setitem(sys.modules, "tools.fetch_case_model", None)
+    app = Workbench(_session(_declared_case("1590B")))
+    async with app.run_test() as pilot:
+        await pilot.press("e", "ctrl+f")
+        assert "no cache location is known" in app.message
+        assert "tools/fetch_case_model.py" in app.message
