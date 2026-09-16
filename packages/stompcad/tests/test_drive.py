@@ -694,6 +694,33 @@ def test_a_run_with_no_gap_records_the_case_it_ran_under(tmp_path: Path) -> None
     assert recorded["enclosure"]["case"] == "1590B"
 
 
+def test_a_resume_under_a_revised_value_keeps_the_gap_the_run_answered(tmp_path: Path) -> None:
+    """Decision 8: both the revision and the answer reach the file that describes them.
+
+    ``declare`` is handed the workbench's own settings, where an answered
+    tie was never recorded -- the answer went to the worker. Taking those
+    settings whole would drop it, and the question would be asked on every
+    open: exactly what recording it on ``Project.settings`` prevents.
+    """
+    panel = tmp_path / "tar.ai"
+    driver = _declaring(panel, _Answering([], "1590B2"), case=None)
+    with track(NullSink()) as scope:
+        driver.resume(frozenset({"read-panel", "quantise"}), driver._options, scope)
+
+    defaults = Settings.of_defaults(panel)
+    edited = replace(
+        defaults,
+        drilling=replace(defaults.drilling, title=Resolved("Tar", Provenance(Origin.USER))),
+    )
+    driver.declare(edited)
+    with track(NullSink()) as scope:
+        driver.resume(frozenset({"drill", "write-case"}), driver._options, scope)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["enclosure"]["case"] == "1590B2"
+    assert recorded["drilling"]["title"] == "Tar", "the resume's own revision was not declared"
+
+
 @pytest.mark.hammond
 def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
     """``_quantise`` must thread ``case_model`` through, not merely accept it.

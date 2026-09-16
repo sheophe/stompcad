@@ -148,6 +148,55 @@ def test_a_credited_step_clears_a_change_only_once_every_reader_has_run() -> Non
     assert session.stale() == frozenset()
 
 
+def test_a_resume_adds_to_what_the_project_has_reached() -> None:
+    """A resume runs a subset; it does not un-run everything it skipped."""
+    session = _session()
+    session.begin_run(_PLAN)
+    for step in sorted(_PLAN):
+        session.credit(step)
+    session.finish_run(0)
+
+    session.set(Place.OUTPUT, "targets", ())
+    session.begin_run(session.stale(), fresh=False)
+    session.credit("write-case")
+    session.credit("write-assembly")
+    session.finish_run(0)
+
+    assert session.reached(Place.ARTWORK)
+    assert session.reached(Place.OUTPUT)
+
+
+def test_a_fresh_run_forgets_what_an_earlier_one_reached() -> None:
+    """The control: a run of a different plan must not inherit the old one's credit."""
+    session = _session()
+    session.begin_run(_PLAN)
+    for step in sorted(_PLAN):
+        session.credit(step)
+    session.begin_run(frozenset({"read-panel"}))
+    assert not session.reached(Place.OUTPUT)
+
+
+def test_an_interrupted_resume_leaves_the_steps_it_never_reached_stale() -> None:
+    """Decision 4: a change clears when every step it invalidated has run, not its readers.
+
+    ``grid_mm`` is read by ``quantise`` alone but invalidates the drill and
+    write steps too, so a resume stopped after quantisation must still
+    report drilling as unreached.
+    """
+    session = _session()
+    session.begin_run(_PLAN)
+    for step in sorted(_PLAN):
+        session.credit(step)
+    session.finish_run(0)
+
+    session.set(Place.DRILLING, "grid_mm", 0.5)
+    session.begin_run(session.stale(), fresh=False)
+    session.credit("quantise")
+
+    assert session.stale() != frozenset()
+    assert not session.reached(Place.DRILLING)
+
+
 def test_nothing_is_editable_while_a_run_is_active() -> None:
     """Decision 5: read-only, never hidden."""
     session = _session()

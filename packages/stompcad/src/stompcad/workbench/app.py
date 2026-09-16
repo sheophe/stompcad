@@ -30,6 +30,7 @@ from stompmodel.model import CaseFace
 
 from .. import discover
 from ..cancel import EXIT_CANCELLED
+from ..drive import Driver
 from ..plan import RunPlan, Step
 from ..present import step_line
 from .keys import GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, RUN_KEYS, STEP_KEYS, Place
@@ -49,7 +50,7 @@ from .places import (
     position_line,
     table_bindings,
 )
-from .run import Launch, start
+from .run import Launch, may_resume, start
 from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
 
@@ -90,6 +91,10 @@ class Workbench(App[int], inherit_bindings=False):
         self.branch = ""
         self.stopping = False
         self.failure: BaseException | None = None
+        # What outlives one run: the driver, because its held intermediates
+        # are what the next `Ctrl+R` spends, and whether this run is that.
+        self.driver: Driver | None = None
+        self.resuming = False
         # What a paused run is waiting on: the one callback that lets the
         # worker go again, held only while a gap is unanswered.
         self._answer: Callable[[str], None] | None = None
@@ -293,10 +298,16 @@ class Workbench(App[int], inherit_bindings=False):
 
     # -- the run -----------------------------------------------------------
 
+    def keep(self, driver: Driver) -> None:
+        """Hold the run's driver: its intermediates are what a resume spends."""
+        self.driver = driver
+
     def show(self, plan: RunPlan) -> None:
         """The plan the run intends to take, which may be less than the whole."""
         self.plan = plan
-        self.session.begin_run(frozenset(step.key for step in plan.steps))
+        self.session.begin_run(
+            frozenset(step.key for step in plan.steps), fresh=not self.resuming
+        )
         self._refresh()
 
     def advance(self, position: float, path: tuple[str, ...]) -> None:
@@ -366,6 +377,7 @@ class Workbench(App[int], inherit_bindings=False):
         if self.launch is None:
             self.message = "no project is open"
             return
+        self.resuming = may_resume(self)
         self.plan = self.launch.plan
         self.settled = []
         self.reports = []
@@ -377,7 +389,12 @@ class Workbench(App[int], inherit_bindings=False):
         # Decision 5 binds from the keypress, not from the worker's first
         # crossing: a window in which a place still accepts an edit is a
         # window in which a value can change under work already under way.
-        self.session.begin_run(frozenset(step.key for step in self.launch.plan.steps))
+        planned = (
+            self.session.stale()
+            if self.resuming
+            else frozenset(step.key for step in self.launch.plan.steps)
+        )
+        self.session.begin_run(planned, fresh=not self.resuming)
         start(self)
         self._refresh()
 

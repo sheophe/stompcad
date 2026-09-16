@@ -28,6 +28,7 @@ from stompcad.workbench.places import FocusRow, ValueRow
 from stompcad.workbench.run import Launch, WorkbenchPresentation
 from stompcad.workbench.session import PendingGap, Phase, Session
 from stompmodel.diagnostics import EXIT_WARNINGS, Diagnostic, Severity
+from stompmodel.progress import Scope
 
 __all__: list[str] = []
 
@@ -141,6 +142,65 @@ def _answers(app: Workbench) -> list[str]:
     launch = app.launch
     assert launch is not None and isinstance(launch.compose, _Asking)
     return launch.compose.answers
+
+
+class _RecordingDriver(Driver):
+    """A driver that records what a resume asked of it, and runs no step.
+
+    Subclassed rather than duck-typed because the workbench keeps whatever
+    ``compose`` hands back and spends it on the next `Ctrl+R`: a double
+    that is not a ``Driver`` would prove nothing about that.
+    """
+
+    def __init__(self, plan: RunPlan, presentation: Presentation, options: RunOptions) -> None:
+        super().__init__(plan, presentation, options)
+        self.resumed: list[frozenset[str]] = []
+        self.declared: list[Settings] = []
+
+    def declare(self, settings: Settings) -> None:
+        self.declared.append(settings)
+
+    def resume(self, stale: frozenset[str], options: RunOptions, scope: Scope) -> None:
+        self.resumed.append(stale)
+        steps = tuple(step for step in self._plan.steps if step.key in stale)
+        self._presentation.begin(RunPlan(steps))
+        for step in steps:
+            self._presentation.finish_step(step, f"{step.key} done")
+
+
+class _Recording:
+    """A composed run that hands back a driver the app can resume against."""
+
+    def __init__(self) -> None:
+        self.driver: _RecordingDriver | None = None
+
+    def __call__(
+        self,
+        plan: RunPlan,
+        presentation: Presentation,
+        options: RunOptions,
+        project: Project | None = None,
+        stop: object = None,
+    ) -> tuple[Driver, _Data, _Data | None]:
+        presentation.begin(plan)
+        for step in plan.steps:
+            presentation.finish_step(step, f"{step.key} done")
+        self.driver = _RecordingDriver(plan, presentation, options)
+        return self.driver, _Data(), None
+
+
+def _recording_launch() -> Launch:
+    """A launch whose driver outlives its run, as a real one's does."""
+    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Recording())
+
+
+def _recorded(app: Workbench) -> _RecordingDriver:
+    """The driver the faked run handed back, from the fake that made it."""
+    launch = app.launch
+    assert launch is not None and isinstance(launch.compose, _Recording)
+    driver = launch.compose.driver
+    assert driver is not None, "nothing was composed, so nothing could be kept"
+    return driver
 
 
 async def _paused(pilot: Pilot[int], app: Workbench) -> None:
@@ -684,3 +744,60 @@ async def test_a_ticked_designator_still_answers_and_continues() -> None:
 
         assert app.session.phase is Phase.DONE
         assert _answers(app) == ["RV1"]
+
+
+# -- resuming what a change invalidated -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_second_ctrl_r_after_a_change_resumes_rather_than_starting_over() -> None:
+    """Decision 10: the stale set is what runs, against what the driver holds."""
+    app = Workbench(_session(), launch=_recording_launch())
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        app.session.set(Place.OUTPUT, "targets", ())
+        await pilot.press("ctrl+r")
+        await _settle(pilot, app)
+    assert _recorded(app).resumed == [frozenset({"write-case", "write-assembly"})]
+
+
+@pytest.mark.asyncio
+async def test_a_resume_is_never_automatic() -> None:
+    """Decision 10: kernel work takes minutes, and a run that starts on a keystroke is hostile."""
+    app = Workbench(_session(), launch=_recording_launch())
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        app.session.set(Place.DRILLING, "grid_mm", 0.5)
+        await app.redraw()
+        await pilot.pause()
+    assert _recorded(app).resumed == []
+
+
+@pytest.mark.asyncio
+async def test_the_roadmap_retreats_to_the_place_a_change_touched() -> None:
+    """Decision 4: the marker is the earliest place owning a stale step."""
+    app = Workbench(_session(), launch=_recording_launch())
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        app.session.set(Place.DRILLING, "grid_mm", 0.5)
+        await app.redraw()
+        await pilot.pause()
+        assert app.session.roadmap() is Place.DRILLING
+        assert not app.session.reached(Place.DRILLING)
+        assert app.session.reached(Place.ARTWORK)
+
+
+@pytest.mark.asyncio
+async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
+    """Decision 8: the manifest records what made the outputs."""
+    app = Workbench(_session(), launch=_recording_launch())
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        app.session.set(Place.DRILLING, "title", "Tar")
+        await pilot.press("ctrl+r")
+        await _settle(pilot, app)
+    assert _recorded(app).declared[-1].drilling.title.value == "Tar"

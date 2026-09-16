@@ -16,11 +16,12 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 
-from stompmodel.diagnostics import Diagnostic, exit_for_severity
+from stompmodel.diagnostics import Diagnostic, Severity, exit_for_severity
+from stompmodel.progress import Sink, track
 from stompmodel.protocols import Diagnosable
 
 from .. import manifest
-from ..cancel import EXIT_CANCELLED, Cancelled
+from ..cancel import EXIT_CANCELLED, Cancelled, CancellingSink
 from ..drive import Driver, Project, RunOptions, compose
 from ..plan import DRILL_AND_DOCK, RunPlan, Step
 from ..present import Choice, Question
@@ -31,7 +32,7 @@ from .session import PendingGap
 if TYPE_CHECKING:
     from .app import Workbench
 
-__all__ = ["Launch", "WorkbenchPresentation", "start"]
+__all__ = ["Launch", "WorkbenchPresentation", "may_resume", "start"]
 
 #: What a composed run hands back: the driver that held it, and each half's
 #: data. Typed by what the outcome reads rather than by either tool's own
@@ -110,9 +111,20 @@ def _gap_for(question: Question) -> PendingGap:
     return PendingGap(question.code, row.step, Place(row.place), question)
 
 
+def may_resume(app: Workbench) -> bool:
+    """Whether `Ctrl+R` resumes: a driver to spend, and something stale to spend it on.
+
+    Asked twice -- once to bind the phase on the keypress, once to choose
+    the worker's path -- so the two ask one question rather than two that
+    happen to agree.
+    """
+    return app.driver is not None and bool(app.session.stale())
+
+
 def start(app: Workbench) -> None:
-    """Begin a run on a worker, and hand its outcome back to the app."""
+    """Begin a run, or resume what a change invalidated. Decision 10."""
     app.stopping = False
+    app.resuming = may_resume(app)
     app.run_worker(lambda: _attempt(app), thread=True)
 
 
@@ -124,24 +136,31 @@ def _attempt(app: Workbench) -> None:
     ``Cancelled`` is caught here because it is a stop the user asked for,
     and decision 14 reserves its own code for exactly that.
     """
-    launch = app.launch
-    assert launch is not None  # ``action_start_run`` refuses a run without one
     try:
-        options = RunOptions.of(app.session.settings)
-        project = Project(launch.panel, app.session.settings, manifest.read(launch.panel))
-        driver, drill, dock = launch.compose(
-            launch.plan,
-            WorkbenchPresentation(app),
-            options,
-            project,
-            lambda: app.stopping,
-        )
+        if app.resuming:
+            _resume(app)
+        else:
+            _first(app)
     except Cancelled:
         _finish(app, EXIT_CANCELLED, None, (), {})
-        return
     except BaseException as failure:  # noqa: BLE001 - shown in the app, not raised
         _tell(app, app.fault, failure)
-        return
+
+
+def _first(app: Workbench) -> None:
+    """Compose the whole plan, and keep the driver a later `Ctrl+R` spends."""
+    launch = app.launch
+    assert launch is not None  # ``action_start_run`` refuses a run without one
+    options = RunOptions.of(app.session.settings)
+    project = Project(launch.panel, app.session.settings, manifest.read(launch.panel))
+    driver, drill, dock = launch.compose(
+        launch.plan,
+        WorkbenchPresentation(app),
+        options,
+        project,
+        lambda: app.stopping,
+    )
+    _tell(app, app.keep, driver)
     severities = [drill.worst_severity] + ([] if dock is None else [dock.worst_severity])
     found = [severity for severity in severities if severity is not None]
     diagnostics = list(drill.diagnostics) + ([] if dock is None else list(dock.diagnostics))
@@ -152,6 +171,33 @@ def _attempt(app: Workbench) -> None:
         driver.written,
         driver.designators,
     )
+
+
+def _resume(app: Workbench) -> None:
+    """Run the stale set against the intermediates the driver still holds.
+
+    The driver is the one the first run left rather than a fresh one: its
+    project is where an answered gap was recorded, and its intermediates
+    are the whole reason a resume costs less than starting over.
+    """
+    driver = app.driver
+    assert driver is not None  # ``may_resume`` is what chose this path
+    driver.declare(app.session.settings)
+    sink: Sink = CancellingSink(WorkbenchPresentation(app), lambda: app.stopping)
+    with track(sink) as scope:
+        driver.resume(app.session.stale(), RunOptions.of(app.session.settings), scope)
+    _finish(
+        app,
+        exit_for_severity(_worst(driver.findings)),
+        list(driver.findings),
+        driver.written,
+        driver.designators,
+    )
+
+
+def _worst(diagnostics: Sequence[Diagnostic]) -> Severity | None:
+    """The worst severity among these findings, or ``None`` where there is none."""
+    return max((found.severity for found in diagnostics), default=None)
 
 
 def _finish(

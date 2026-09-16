@@ -69,7 +69,7 @@ from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
 from .resolve import RESOLVABLE, question_for, revision_for
 from .settings import Origin, Provenance, Resolved, Settings
-from .stale import PLACE_OF_FIELD, stale_steps
+from .stale import PLACE_OF_FIELD, PLACE_ORDER, stale_steps
 
 __all__ = [
     "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project", "compose",
@@ -191,7 +191,12 @@ def steps_of_place(place: str) -> frozenset[str]:
 
 
 def readers_of(field: str) -> frozenset[str]:
-    """Every step that reads this field, so a change can be cleared once all have run."""
+    """Every step reading this field, which is the narrow half of ``invalidated``.
+
+    Published beside it because the two answer different questions: what
+    reads a value, and what a change to it invalidated. Only the second
+    decides whether work already done still stands.
+    """
     return frozenset(key for key, fields in _STEP_INPUTS.items() if field in fields)
 
 
@@ -563,6 +568,20 @@ class Driver:
             answered = Resolved(getattr(options, name), Provenance(Origin.USER))
             settings = replace(settings, **{place: replace(record, **{name: answered})})
         self._project = replace(project, settings=settings)
+
+    def declare(self, settings: Settings) -> None:
+        """The values a further commit records, keeping what a gap already answered.
+
+        Decision 8: a half's declarations are the values that produced its
+        artefacts, so a resume under revised values records the revised
+        ones. An answered gap is such a value and is recorded nowhere else,
+        so it survives here unless the user has since set that field
+        themselves -- and ``held`` still protects everything already written.
+        """
+        project = self._project
+        if project is None:
+            return
+        self._project = replace(project, settings=_kept(project.settings, settings))
 
     def _gap_in(self, data: Diagnosable) -> tuple[Choice, Diagnostic] | None:
         """The first gap in this data that a picker could resolve, if any."""
@@ -936,6 +955,21 @@ class Driver:
         return tuple(self._written)
 
     @property
+    def findings(self) -> tuple[Diagnostic, ...]:
+        """Both halves' diagnostics, as the run stands now.
+
+        Read after a resume, which hands back no half's value: the
+        `Findings` place must show what this run found rather than what the
+        run before it did.
+        """
+        found: list[Diagnostic] = []
+        if self._drilled is not None:
+            found.extend(self._drilled.diagnostics)
+        if self._dock_data is not None:
+            found.extend(self._dock_data.diagnostics)
+        return tuple(found)
+
+    @property
     def designators(self) -> dict[int, tuple[str, ...]]:
         """Each board's own names, once the boards have been read.
 
@@ -964,6 +998,28 @@ def compose(
     with track(sink) as scope:
         drill, dock = driver.run(scope)
     return driver, drill, dock
+
+
+def _kept(held: Settings, fresh: Settings) -> Settings:
+    """``fresh``, less any field the answered-gap rank already holds.
+
+    A user who has since set that field themselves said the more recent
+    thing, and the run is about to read theirs, so theirs is what the
+    manifest must record.
+    """
+    settings = fresh
+    for place in PLACE_ORDER:
+        before = getattr(held, place)
+        after = getattr(fresh, place)
+        answered = {
+            row.name: getattr(before, row.name)
+            for row in fields(before)
+            if getattr(before, row.name).provenance.origin is Origin.USER
+            and getattr(after, row.name).provenance.origin is not Origin.USER
+        }
+        if answered:
+            settings = replace(settings, **{place: replace(after, **answered)})
+    return settings
 
 
 def _dock_emitters(

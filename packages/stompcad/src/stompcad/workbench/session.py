@@ -319,24 +319,37 @@ class Session:
 
     # -- the run as an event ----------------------------------------------
 
-    def begin_run(self, planned: frozenset[str]) -> None:
-        """A run has started over these steps; nothing is editable until it ends."""
+    def begin_run(self, planned: frozenset[str], fresh: bool = True) -> None:
+        """A run has started over these steps; nothing is editable until it ends.
+
+        A resume passes ``fresh=False``: the steps it skipped keep their
+        credit, because that is why they were skipped, while the steps it is
+        about to run lose theirs -- or the run before would answer for work
+        this one has not done. A fresh run forgets everything, because a
+        different plan's credit is not this plan's.
+        """
         self._phase = Phase.RUNNING
         self._gap = None
-        self._planned = planned
+        if fresh:
+            self._planned = planned
+            self._completed = frozenset()
+        else:
+            self._planned = self._planned | planned
+            self._completed = self._completed - planned
 
     def credit(self, step: str) -> None:
         """One step completed under the values now in force.
 
-        A change clears only once every step this run planned to read it has
-        run. ``targets`` is read by both write steps, so clearing it at the
-        first would report the second as fresh while it still holds work.
+        A change clears once every step it *invalidated* has run, not every
+        step that reads it: ``grid_mm`` is read by ``quantise`` alone, so
+        clearing it there would report the drill and write steps it also
+        invalidated as fresh while they still hold that work.
         """
         self._completed = self._completed | {step}
         self._changed = frozenset(
             field
             for field in self._changed
-            if not (drive.readers_of(field) & self._planned) <= self._completed
+            if not (drive.invalidated(frozenset({field})) & self._planned) <= self._completed
         )
 
     def pause(self, gap: PendingGap) -> None:
