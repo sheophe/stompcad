@@ -259,9 +259,10 @@ A phase added to either tool is a step added to `stompcad.plan`, a weight
 recounted with the command recorded there, and a step line in the presentation.
 The step list is data, so nothing else changes with it.
 
-`TerminalPresentation`, in `stompcad/inline.py`, is the terminal implementation
-of `Presentation`. `ask` is implemented there as the modal decision 6 picks
-from, and `ChoiceScreen` is what it pushes.
+`WorkbenchPresentation`, in `stompcad/workbench/run.py`, is the terminal
+implementation of `Presentation`, having replaced `TerminalPresentation` in
+the deleted `stompcad/inline.py`. `ask` pushes `PickerScreen`, the
+workbench's own modal, where the inline app pushed `ChoiceScreen`.
 The interactive resolver has landed for both resolvable codes, so the spec's
 decisions 6, 8 and 10 are decided in code. What the resolver drives is `_rerun`,
 which runs one step again and returns its outcome without reporting it, because

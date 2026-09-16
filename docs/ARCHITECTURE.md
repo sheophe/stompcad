@@ -83,11 +83,18 @@ read the drill document through `stompmodel` without importing `stompdrill`.
 `stompcad` calls each phase of both tools directly, in the order their own
 command lines call them, and holds each result between the steps. It reports
 the run as nine named steps, writes through the same staged-write transaction
-both tools use, and produces artefacts byte-identical to theirs. On a
-terminal, a Textual app draws that same report inline above the prompt while
-the run continues on a worker thread; without one, a run gets the plain
-step-line log a pipe reads as a log of what happened. See
+both tools use, and produces artefacts byte-identical to theirs. See
 [ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
+
+The orchestrator's presentation is the workbench on a terminal and the plain
+writer everywhere else. The workbench is a full-screen Textual application
+that runs the composed run on a worker thread while the user stays inside
+it; the plain writer streams the same step lines a pipe, a dumb terminal or
+a CI runner reads as a log of what happened. The workbench renders strings,
+positions and paths, and reaches for a viewer rather than a kernel:
+`stompcad.workbench.session` holds the rules a project resolves and stales
+by, and the Textual modules under `stompcad.workbench` draw them. See
+[docs/specs/stompcad-workbench.md](specs/stompcad-workbench.md).
 
 ## Shared data and output
 

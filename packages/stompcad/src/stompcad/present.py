@@ -2,11 +2,11 @@
 
 Spec decision 2 requires one shared line format between a terminal's
 settled scrollback and a pipe's streamed output, so ``PlainWriter`` keeps
-that format in one place rather than duplicating it per output mode.
-Decision 11 requires a genuine gap with no terminal to exit ``3`` naming
-what was missing, which is why ``ask`` raises rather than prompts. Plan B
-implements ``Presentation`` with a live terminal; plan C is ``ask``'s only
-caller.
+that format in one place rather than duplicating it per output mode. The
+presentation specification's decision 11 requires a genuine gap with no
+terminal to exit ``3`` naming what was missing, which is why ``ask`` raises
+rather than prompts. Plan B implements ``Presentation`` with a live
+terminal; plan C is ``ask``'s only caller.
 """
 
 from __future__ import annotations
@@ -75,9 +75,9 @@ class Presentation(Protocol):
 class NoTerminal(StompError):
     """Raised when a run must ask, but has no terminal to ask on.
 
-    Spec decision 11: a pipe or a dumb terminal exits with a usage error
-    naming the missing question, rather than prompting where no one can
-    answer.
+    The presentation specification's decision 11: a pipe or a dumb terminal
+    exits with a usage error naming the missing question, rather than
+    prompting where no one can answer.
     """
 
 

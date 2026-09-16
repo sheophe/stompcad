@@ -485,10 +485,10 @@ class Workbench(App[int], inherit_bindings=False):
         """Committing the answer *is* the continuation -- no second action.
 
         ``None`` is a picker abandoned, and so is a multiple one committed
-        with nothing ticked: decision 11 forbids substituting an answer the
-        tool did not compute, and an empty one revises a field into
-        something no step can read. Both leave the run paused, with the
-        gap's own row to reopen the picker.
+        with nothing ticked: the workbench specification's decision 11
+        forbids substituting an answer the tool did not compute, and an
+        empty one revises a field into something no step can read. Both
+        leave the run paused, with the gap's own row to reopen the picker.
         """
         if answer is None or self._answer is None:
             return
