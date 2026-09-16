@@ -73,7 +73,7 @@ from .stale import PLACE_OF_FIELD, PLACE_ORDER, stale_steps
 
 __all__ = [
     "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project", "compose",
-    "invalidated", "steps_of_place", "readers_of",
+    "plan_for", "invalidated", "steps_of_place", "readers_of",
 ]
 
 #: Where the dock half's steps begin in the nine-step plan. One number,
@@ -163,6 +163,17 @@ _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
     "clash": ("_dock_data", "_dock_pipeline"),
     "write-assembly": ("_dock_data", "_scan", "_geometry"),
 }
+
+
+def plan_for(boards: Sequence[Path], plan: RunPlan = DRILL_AND_DOCK) -> RunPlan:
+    """The steps a run over these options would actually take. Decision 17.
+
+    The one statement of where the two halves divide and of what decides
+    it, so the roadmap plans the steps the driver will run rather than the
+    nine a plan lists. ``_DOCK_FROM`` stays private: a caller outside has
+    no business knowing where the division falls, only what it yields.
+    """
+    return plan if boards else RunPlan(plan.steps[:_DOCK_FROM])
 
 
 def invalidated(changed: frozenset[str], plan: RunPlan = DRILL_AND_DOCK) -> frozenset[str]:
@@ -338,7 +349,7 @@ class Driver:
         two write steps as well as each of them.
         """
         docking = bool(self._options.boards)
-        steps = self._plan.steps if docking else self._plan.steps[:_DOCK_FROM]
+        steps = plan_for(self._options.boards, self._plan).steps
         slots = self._open(steps, scope)
         drilled = self._drill_steps(slots)
         if not docking:
@@ -386,8 +397,8 @@ class Driver:
         dock_keys = frozenset(step.key for step in self._plan.steps[_DOCK_FROM:])
         steps = tuple(
             step
-            for step in self._plan.steps
-            if step.key in stale and (self._options.boards or step.key not in dock_keys)
+            for step in plan_for(self._options.boards, self._plan).steps
+            if step.key in stale
         )
         if not steps:
             return

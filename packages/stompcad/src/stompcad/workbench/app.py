@@ -389,12 +389,7 @@ class Workbench(App[int], inherit_bindings=False):
         # Decision 5 binds from the keypress, not from the worker's first
         # crossing: a window in which a place still accepts an edit is a
         # window in which a value can change under work already under way.
-        planned = (
-            self.session.stale()
-            if self.resuming
-            else frozenset(step.key for step in self.launch.plan.steps)
-        )
-        self.session.begin_run(planned, fresh=not self.resuming)
+        self.session.start_run(self.resuming)
         start(self)
         self._refresh()
 

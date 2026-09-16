@@ -39,6 +39,19 @@ from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_mode
 __all__: list[str] = []
 
 
+def test_a_run_without_boards_takes_only_the_drill_half() -> None:
+    """Decision 17's division, stated once for the driver and the roadmap alike.
+
+    The workbench derives its stale set from the plan a run would take, so
+    a second statement of where the halves divide is how the sidebar comes
+    to wait on a step this project has no reason to run.
+    """
+    assert [step.key for step in drive.plan_for(()).steps] == [
+        "read-panel", "quantise", "drill", "write-case",
+    ]
+    assert drive.plan_for((TAR_PCB,)) is DRILL_AND_DOCK
+
+
 def _refuse_to_read(panel: object) -> object:
     """Stands in for the artwork reader, where reading again would be the defect."""
     raise AssertionError(f"the artwork was read again: {panel}")

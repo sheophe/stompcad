@@ -23,6 +23,8 @@ _PLAN = frozenset({
     "read-panel", "quantise", "drill", "write-case",
     "read-boards", "match", "seat", "clash", "write-assembly",
 })
+#: What a project with no boards runs: decision 17's drill-only row.
+_DRILL_ONLY = frozenset({"read-panel", "quantise", "drill", "write-case"})
 
 
 def _settings(**places: object) -> Settings:
@@ -195,6 +197,67 @@ def test_an_interrupted_resume_leaves_the_steps_it_never_reached_stale() -> None
 
     assert session.stale() != frozenset()
     assert not session.reached(Place.DRILLING)
+
+
+def _boardless() -> Settings:
+    """A project that has declared it has no boards, and is ready to run anyway."""
+    base = _settings()
+    return replace(
+        base, boards=replace(base.boards, boards=Resolved((), Provenance(Origin.PROJECT)))
+    )
+
+
+def test_a_first_run_plans_the_steps_this_project_s_own_plan_holds() -> None:
+    """Decision 17: no boards means no dock half, so no dock step is planned."""
+    session = _session(_boardless())
+    session.start_run(resuming=False)
+    for step in sorted(_DRILL_ONLY):
+        session.credit(step)
+    assert session.phase is Phase.RUNNING
+    assert session.reached(Place.OUTPUT)
+
+
+def test_a_boardless_resume_returns_the_project_to_reached() -> None:
+    """Decision 4: the roadmap cannot claim a step stale that this project never runs.
+
+    With no boards the driver drops the dock half, so planning ``write
+    assembly`` would wait on a step no run will credit: ``targets`` would
+    stay stale for ever and `Output` would never read as reached again.
+    """
+    session = _session(_boardless())
+    session.begin_run(_DRILL_ONLY)
+    for step in sorted(_DRILL_ONLY):
+        session.credit(step)
+    session.finish_run(0)
+    assert session.reached(Place.OUTPUT)
+
+    session.set(Place.OUTPUT, "targets", ())
+    assert session.stale() == frozenset({"write-case"})
+    session.start_run(resuming=True)
+    session.credit("write-case")
+    session.finish_run(0)
+
+    assert session.stale() == frozenset()
+    assert session.reached(Place.OUTPUT)
+
+
+def test_a_project_with_a_board_still_plans_its_dock_half() -> None:
+    """The control: dropping the dock half is the boards' answer, never a default."""
+    session = _session()
+    session.begin_run(_PLAN)
+    for step in sorted(_PLAN):
+        session.credit(step)
+    session.finish_run(0)
+
+    session.set(Place.OUTPUT, "targets", ())
+    assert session.stale() == frozenset({"write-case", "write-assembly"})
+    session.start_run(resuming=True)
+    session.credit("write-case")
+    assert not session.reached(Place.OUTPUT), "the dock half's write step has not run"
+
+    session.credit("write-assembly")
+    assert session.stale() == frozenset()
+    assert session.reached(Place.OUTPUT)
 
 
 def test_nothing_is_editable_while_a_run_is_active() -> None:

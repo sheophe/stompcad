@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from stompmodel.diagnostics import Diagnostic
 
 from .. import drive, stale
+from ..plan import RunPlan
 from ..present import Choice
 from ..readiness import Readiness, readiness
 from ..settings import Origin, Provenance, Resolved, Settings, disagreement
@@ -241,7 +242,17 @@ class Session:
 
     def stale(self) -> frozenset[str]:
         """The steps a resume would run, derived from the driver's own tables."""
-        return drive.invalidated(self._changed)
+        return drive.invalidated(self._changed, self._plan())
+
+    def _plan(self) -> RunPlan:
+        """The steps a run of this project would take, which its boards decide.
+
+        Decision 4 derives the marker and the resume from one structure, so
+        both ask the driver what a run over these values covers. A project
+        with no boards has no dock half, and a roadmap waiting on a step it
+        will never run reports it stale for ever.
+        """
+        return drive.plan_for(self._settings.boards.boards.value)
 
     def roadmap(self) -> Place | None:
         """The earliest place owning a change, or ``None`` when nothing changed."""
@@ -318,6 +329,19 @@ class Session:
         )
 
     # -- the run as an event ----------------------------------------------
+
+    def start_run(self, resuming: bool) -> None:
+        """Bind the run to the steps it will take. Decisions 5, 10 and 17.
+
+        A resume runs the stale set and keeps the credit of what it skips; a
+        first run takes every step this project's own plan holds. Which of
+        the two it is depends on there being a driver to spend, which the
+        application knows and this does not.
+        """
+        planned = (
+            self.stale() if resuming else frozenset(step.key for step in self._plan().steps)
+        )
+        self.begin_run(planned, fresh=not resuming)
 
     def begin_run(self, planned: frozenset[str], fresh: bool = True) -> None:
         """A run has started over these steps; nothing is editable until it ends.
