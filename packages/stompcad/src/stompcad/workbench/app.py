@@ -725,14 +725,16 @@ def _is_text(widget: object) -> bool:
 
 
 def _mounted(widget: Widget) -> bool:
-    """Whether this widget is still in the tree, asked afresh each time.
+    """Whether this widget can still be mounted into, asked afresh each time.
 
-    A call rather than the attribute: what was true before an ``await`` is
-    not what the next line is asking about, and a reader that keeps the
-    first answer -- mypy's ``warn_unreachable`` does -- calls the second
-    check dead code.
+    ``Widget.mount`` refuses a node that is not attached to the app through
+    the DOM, and an app on its way out detaches every node it has, so that
+    is the question this must ask. A call rather than the attribute: what
+    was true before an ``await`` is not what the next line is asking about,
+    and a reader that keeps the first answer -- mypy's ``warn_unreachable``
+    does -- calls the second check dead code.
     """
-    return widget.is_mounted
+    return widget.is_attached
 
 
 class KeysScreen(ModalScreen[None]):

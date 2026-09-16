@@ -142,9 +142,21 @@ def _attempt(app: Workbench) -> None:
         else:
             _first(app)
     except Cancelled:
-        _finish(app, EXIT_CANCELLED, None, (), {})
+        _finish(app, EXIT_CANCELLED, None, _committed(app), {})
     except BaseException as failure:  # noqa: BLE001 - shown in the app, not raised
         _tell(app, app.fault, failure)
+
+
+def _committed(app: Workbench) -> tuple[Path, ...]:
+    """What a stopped run had already written, where a driver holds the answer.
+
+    A stop is heard at the next reported leaf, so a write may have committed
+    before it: decision 2 keeps "already on disk" for a file this session did
+    not make, and denying one it did make is that same claim backwards. A
+    first run hands its driver back as it returns, so a stop before then has
+    nobody to ask.
+    """
+    return () if app.driver is None else app.driver.written
 
 
 def _first(app: Workbench) -> None:

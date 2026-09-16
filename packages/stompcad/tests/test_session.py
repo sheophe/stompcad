@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from stompcad import manifest
+from stompcad import cli, manifest
 from stompcad.cli import Resolution
 from stompcad.present import Choice
 from stompcad.readiness import Blocker, Readiness, readiness
@@ -337,6 +337,58 @@ def test_an_unreadable_project_blocks_the_run_and_says_why() -> None:
     ))
     assert not session.may_run()
     assert "line 3" in session.statement()
+    assert session.attention(Place.PROJECT)
+
+
+def _blocked(panel: Path, *flags: str) -> Session:
+    """A session opened on whatever ``cli.blocked`` made of this command line."""
+    args = cli.build_parser().parse_args([str(panel), *flags])
+    return Session(
+        cli.blocked(args, panel.parent),
+        validator=lambda settings, place: cli.validate_place(settings, place, panel),
+    )
+
+
+def test_a_refused_value_is_asked_again_once_its_place_answers(tmp_path: Path) -> None:
+    """Decision 4: the roadmap has no way to disagree with the engine.
+
+    The marker sends a builder to the place that owns the refused value, so
+    answering it there must lift the refusal. A run still refused over a
+    value nobody holds teaches a builder that the marker means nothing.
+    """
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    session = _blocked(panel, "--case", "bogus")
+    assert not session.may_run()
+    assert session.attention(Place.ENCLOSURE)
+
+    session.set(Place.ENCLOSURE, "case", "1590B")
+    session.set(Place.BOARDS, "boards", ())
+    session.set(Place.OUTPUT, "targets", (("excellon", tmp_path / "tar-case.drl"),))
+
+    assert session.may_run()
+    assert "bogus" not in session.statement().lower()
+    assert session.statement() == "Everything needed is here. Press Enter to run."
+    assert not any(row.attention for row in session.rows())
+
+
+def test_an_unreadable_project_survives_an_edit_to_something_else(tmp_path: Path) -> None:
+    """Decision 9: the file is still unreadable, whatever else has been said.
+
+    The control for the refusal above: an obstacle any edit at all lifted
+    would lift this one too, and the project would then run under values
+    that look like the user's own.
+    """
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text("{not json", encoding="utf-8")
+    session = _blocked(panel)
+    assert not session.may_run()
+
+    session.set(Place.DRILLING, "grid_mm", 0.5)
+
+    assert not session.may_run()
+    assert "tar.stompcad.json" in session.statement()
     assert session.attention(Place.PROJECT)
 
 

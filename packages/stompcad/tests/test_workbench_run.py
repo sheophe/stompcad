@@ -169,10 +169,28 @@ class _RecordingDriver(Driver):
             self._presentation.finish_step(step, f"{step.key} done")
 
 
+#: What the stopped run below committed before the stop was heard.
+_ARTEFACT = Path("/project/tar-case.drl")
+
+
+class _StoppingDriver(_RecordingDriver):
+    """A resume that commits one artefact and is then stopped at the next leaf.
+
+    The order a real run has: ``write case`` commits, and the stop is heard
+    at the leaf after it -- which is why a stopped run has something to say
+    about what is on disk.
+    """
+
+    def resume(self, stale: frozenset[str], options: RunOptions, scope: Scope) -> None:
+        self._written.append(_ARTEFACT)
+        raise Cancelled("stopped after the artefact was committed")
+
+
 class _Recording:
     """A composed run that hands back a driver the app can resume against."""
 
-    def __init__(self) -> None:
+    def __init__(self, driver: type[_RecordingDriver] = _RecordingDriver) -> None:
+        self.driver_type = driver
         self.driver: _RecordingDriver | None = None
 
     def __call__(
@@ -186,13 +204,13 @@ class _Recording:
         presentation.begin(plan)
         for step in plan.steps:
             presentation.finish_step(step, f"{step.key} done")
-        self.driver = _RecordingDriver(plan, presentation, options)
+        self.driver = self.driver_type(plan, presentation, options)
         return self.driver, _Data(), None
 
 
-def _recording_launch() -> Launch:
+def _recording_launch(driver: type[_RecordingDriver] = _RecordingDriver) -> Launch:
     """A launch whose driver outlives its run, as a real one's does."""
-    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Recording())
+    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Recording(driver))
 
 
 def _recorded(app: Workbench) -> _RecordingDriver:
@@ -524,6 +542,25 @@ async def test_a_cancelled_run_earns_the_shell_s_own_stop_code() -> None:
         await pilot.press("q")
         await pilot.pause()
     assert app.return_value == EXIT_CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_run_still_owns_what_it_committed() -> None:
+    """Decision 2: "already on disk" is for a file this session did not make.
+
+    A stop is noticed at the next leaf, so a write may have committed
+    before it was heard. Labelling that file as merely found would deny
+    work this very session did.
+    """
+    app = Workbench(_session(), launch=_recording_launch(_StoppingDriver))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        app.session.set(Place.OUTPUT, "targets", ())
+        await pilot.press("ctrl+r")
+        await _settle(pilot, app)
+        assert app.session.exit_code == EXIT_CANCELLED
+        assert app.session.label_for(_ARTEFACT, exists=True) == "made by this run"
 
 
 # -- what the run leaves behind -------------------------------------------

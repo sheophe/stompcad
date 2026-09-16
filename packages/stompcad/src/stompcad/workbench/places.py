@@ -3,8 +3,10 @@
 Spec decision 2 names the places for subjects, and decision 7 has every row
 state its value and origin; both come straight from ``Settings.<place>.rows()``,
 so a pane composes strings rather than deciding anything. Decision 3 makes
-every list a picker rather than a field, which confines text entry to
-numbers, paths and the designator expression.
+every list a picker rather than a field, so a row is typed only where the
+tool that owns it offers nothing to choose from: the numbers, the paths, the
+drawing title and the two size lists -- and the designators, which are a tick
+list once a run has read a board and an expression until then.
 """
 
 from __future__ import annotations
@@ -272,6 +274,14 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
     pane.border_title = place.value.capitalize()
     if place is Place.PROJECT:
         pane.compose_add_child(Static(session.statement(), markup=False))
+        if session.notes:
+            # Decisions 6 and 9: a declaration discovery contradicts is news,
+            # and so is a key this build does not know. Neither re-picks
+            # anything, so saying them where the project is read is the whole
+            # of what "reported" can mean inside an application.
+            pane.compose_add_child(
+                Static("\n".join(session.notes), id="project-notes", markup=False)
+            )
         pane.compose_add_child(RunRow())
     elif place is Place.RUN:
         pane.compose_add_child(

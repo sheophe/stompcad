@@ -22,7 +22,7 @@ from stompmodel.diagnostics import Diagnostic
 from .. import drive, stale
 from ..plan import RunPlan
 from ..present import Choice
-from ..readiness import Readiness, readiness
+from ..readiness import Blocker, Readiness, readiness
 from ..settings import Discovery, Origin, Provenance, Resolved, Settings, disagreement
 from .findings import Finding, classify, counted
 from .keys import CONFIGURATION, SIDEBAR_ORDER, Place, neighbour
@@ -37,6 +37,11 @@ __all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session"]
 #: from the declarations now on screen -- and must not imply it.
 FOUND = "already on disk; this session has not made or verified it"
 MADE = "made by this run"
+
+#: The two blockers ``readiness`` cannot raise: both are found before a
+#: ``Settings`` exists, so an edit carries them forward rather than deriving
+#: them. Recomputing readiness alone would leave a refused run marked nowhere.
+_STANDING = (Blocker.REFUSED_VALUE, Blocker.UNREADABLE_PROJECT)
 
 
 class Locked(Exception):
@@ -133,6 +138,9 @@ class Session:
         self._obstacle = resolution.obstacle
         self._panel_candidates = resolution.panel_candidates
         self._blockers = resolution.blockers
+        self._standing = tuple(
+            blocker for blocker in resolution.blockers.blockers if blocker[0] in _STANDING
+        )
         self._planned = frozenset()
         self._completed = frozenset()
         self._changed = frozenset()
@@ -252,7 +260,27 @@ class Session:
                 self._settings = previous
                 raise Refused(str(failure)) from failure
         self._changed = self._changed | {field}
-        self._blockers = readiness(self._settings)
+        self._restate(place)
+
+    def _restate(self, place: Place) -> None:
+        """Ask a standing refusal again, now the place that owns it has answered.
+
+        That place's own checks are what refused, and ``_replace_value`` has
+        just run them over the value now in force and seen them pass, so the
+        refusal is spent. An unreadable project is not: editing a value does
+        not make the file readable, and only adopting the project again can.
+        Decision 4 needs the marker, the statement and ``may_run`` to move
+        together, which is why all three read this one set.
+        """
+        kept = tuple(
+            blocker for blocker in self._standing
+            if not (blocker[0] is Blocker.REFUSED_VALUE and blocker[1] == place.value)
+        )
+        spent = tuple(blocker for blocker in self._standing if blocker not in kept)
+        self._standing = kept
+        if any(self._obstacle == blocker[2] for blocker in spent):
+            self._obstacle = None
+        self._blockers = Readiness(kept + readiness(self._settings).blockers)
 
     def adopt_panel(self, path: Path) -> None:
         """Start the project a typed path names. Decision 6's blocked start."""

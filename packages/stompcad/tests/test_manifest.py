@@ -486,3 +486,16 @@ def test_a_dock_half_declares_only_its_own_target_formats(tmp_path: Path) -> Non
     settings = _settings_with_targets(panel, "json", "report", "assembly")
     written = json.loads(payload_for(panel, settings, Half.DOCK, manifest.Manifest()) or "{}")
     assert set(written["output"]["targets"]) == {"report", "assembly"}
+
+
+def test_no_format_name_belongs_to_both_halves() -> None:
+    """The premise the two tests above rest on: a name identifies one half.
+
+    ``payload_for`` attributes a target by asking whether the dock half
+    names it, which is only an attribution while the two sets are disjoint.
+    An overlap would let the drill half declare a file ``write assembly``
+    has not committed yet, which is the one thing decision 8 forbids.
+    """
+    from stompdrill.emitters import available
+
+    assert not frozenset(available()) & manifest.DOCK_TARGET_NAMES

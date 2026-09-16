@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -28,6 +30,7 @@ from stompcad.workbench.keys import (
 from stompcad.workbench.places import FIELDS, PickerScreen, ValueRow
 from stompcad.workbench.session import Session
 from stompmodel.diagnostics import Diagnostic, Severity
+from tests.conftest import TAR_AI
 
 __all__: list[str] = []
 
@@ -555,6 +558,63 @@ async def test_a_refused_flag_marks_the_place_that_can_answer_it(tmp_path: Path)
         marked = [line for line in app.sidebar_text().splitlines() if "!" in line]
         assert len(marked) == 1, app.sidebar_text()
         assert "Enclosure" in marked[0]
+
+
+@pytest.mark.asyncio
+async def test_a_declaration_the_artwork_contradicts_is_drawn(tmp_path: Path) -> None:
+    """Decision 6: a contradicted declaration is news, so somebody has to read it.
+
+    The declaration stands, which is the dangerous half and is already
+    right; what this asks is that the run says so where a builder is
+    looking.
+    """
+    panel = tmp_path / "tar.ai"
+    shutil.copy(TAR_AI, panel)
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "artwork": {"drill_layer": "Sparkle"}}), encoding="utf-8"
+    )
+    app = cli._workbench_for(cli.build_parser().parse_args([str(panel)]), tmp_path)
+    assert app.session.notes, "nothing was resolved into a note, so nothing below is about one"
+
+    async with app.run_test() as pilot:
+        await pilot.press("p")
+        await pilot.pause()
+        assert "Sparkle" in app.pane_text()
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_manifest_key_is_drawn_where_it_is_read(tmp_path: Path) -> None:
+    """Decision 9: reported and ignored -- and a report nobody draws is neither."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "drilling": {"grid_mm": 0.5, "wobble": 3}}), encoding="utf-8"
+    )
+    app = cli._workbench_for(cli.build_parser().parse_args([str(panel)]), tmp_path)
+
+    async with app.run_test() as pilot:
+        await pilot.press("p")
+        await pilot.pause()
+        assert "wobble" in app.pane_text()
+
+
+@pytest.mark.asyncio
+async def test_a_project_with_nothing_to_report_draws_no_note(tmp_path: Path) -> None:
+    """The control: a pane that always drew a line would prove nothing above."""
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    (tmp_path / "tar.stompcad.json").write_text(
+        json.dumps({"version": 1, "drilling": {"grid_mm": 0.5}}), encoding="utf-8"
+    )
+    app = cli._workbench_for(cli.build_parser().parse_args([str(panel)]), tmp_path)
+    assert not app.session.notes
+
+    async with app.run_test() as pilot:
+        await pilot.press("p")
+        await pilot.pause()
+        assert app.pane_text().strip() == "\n".join(
+            (app.session.statement(), "Run this project")
+        )
 
 
 def test_every_row_a_place_states_is_a_row_a_user_can_edit() -> None:
