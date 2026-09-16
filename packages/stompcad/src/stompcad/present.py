@@ -39,14 +39,27 @@ class Question(Protocol):
     def prompt(self) -> str: ...
     @property
     def candidates(self) -> tuple[str, ...]: ...
+    @property
+    def multiple(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
 class Choice:
-    """One finite choice: what is asked, and the answers the tool computed."""
+    """One finite choice: what is asked, and the answers the tool computed.
+
+    ``multiple`` is per code rather than per question. A panel is drawn for
+    exactly one part; a board is usually held to the panel by several
+    components, and offering one would satisfy the filter and then earn
+    ``under-constrained-board`` from the next step -- a picker resolving one
+    error into another. ``code`` is the diagnostic's own, so whoever draws
+    the question finds the place that answers it without re-deriving it
+    from a prompt a tool wrote for a person.
+    """
 
     prompt: str
     candidates: tuple[str, ...]
+    multiple: bool = False
+    code: str = ""
 
 
 class Presentation(Protocol):

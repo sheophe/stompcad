@@ -67,8 +67,8 @@ from .cancel import CancellingSink
 from .manifest import DOCK_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
 from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
-from .resolve import RESOLVABLE, promoted, question_for, revision_for
-from .settings import Settings
+from .resolve import RESOLVABLE, question_for, revision_for
+from .settings import Origin, Provenance, Resolved, Settings
 from .stale import PLACE_OF_FIELD, stale_steps
 
 __all__ = [
@@ -131,7 +131,7 @@ _STAGE_ORDER: tuple[str, ...] = ("match", "seat", "clash")
 #: The two steps whose findings a picker can answer. A resumed step must be
 #: able to raise the same gap a first run does, so ``resume`` routes these
 #: through ``_settled`` exactly as ``run`` and ``retry`` already do.
-_RESOLVABLE_STEPS: frozenset[str] = frozenset(RESOLVABLE.values())
+_RESOLVABLE_STEPS: frozenset[str] = frozenset(gap.step for gap in RESOLVABLE.values())
 
 #: What each step leaves on the driver. The dock stages each rewrite
 #: ``_dock_data``, so each declares it: a consumer is stale when an *earlier*
@@ -304,13 +304,11 @@ class Driver:
         plan: RunPlan,
         presentation: Presentation,
         options: RunOptions,
-        promote_warnings: bool = False,
         project: Project | None = None,
     ) -> None:
         self._plan = plan
         self._presentation = presentation
         self._options = options
-        self._promote_warnings = promote_warnings
         self._project = project
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
@@ -537,6 +535,7 @@ class Driver:
             question, diagnostic = gap
             answer = self._presentation.ask(question)
             revised = revision_for(diagnostic, self._options, answer)
+            self._declare(revised)
             # ``_rerun`` returns the union of both halves' data; ``key`` chose
             # the branch, so the value is this step's own type.
             reran, outcome, refreshed = self._rerun(key, revised, scope)
@@ -545,12 +544,29 @@ class Driver:
         self._presentation.finish_step(self._step(key), outcome)
         return data
 
+    def _declare(self, options: RunOptions) -> None:
+        """Record an answered gap where the manifest reads its declarations.
+
+        Decision 8 records the values that produced the artefacts, and the
+        payload is derived from ``Project.settings`` rather than from the
+        options a revision changed. Recording the answer only in the options
+        would leave the field declared as the gap it started as -- and, being
+        held, never corrected: the question would return on every open.
+        """
+        project = self._project
+        if project is None:
+            return
+        settings = project.settings
+        for name in sorted(self._changed(options)):
+            place = PLACE_OF_FIELD[name]
+            record = getattr(settings, place)
+            answered = Resolved(getattr(options, name), Provenance(Origin.USER))
+            settings = replace(settings, **{place: replace(record, **{name: answered})})
+        self._project = replace(project, settings=settings)
+
     def _gap_in(self, data: Diagnosable) -> tuple[Choice, Diagnostic] | None:
         """The first gap in this data that a picker could resolve, if any."""
-        diagnostics = data.diagnostics
-        if self._promote_warnings:
-            diagnostics = promoted(diagnostics)
-        for diagnostic in diagnostics:
+        for diagnostic in data.diagnostics:
             question = question_for(diagnostic, self._board_designators())
             if question is not None:
                 return question, diagnostic
@@ -935,7 +951,6 @@ def compose(
     options: RunOptions,
     project: Project | None = None,
     stop: Callable[[], bool] | None = None,
-    promote_warnings: bool = False,
 ) -> tuple[Driver, DrillData, DockData | None]:
     """One composed run: the driver, and what each half produced.
 
@@ -944,7 +959,7 @@ def compose(
     returns to an application and the other to a process -- never what a run
     is, and a second composition is how the two would drift apart.
     """
-    driver = Driver(plan, presentation, options, promote_warnings, project)
+    driver = Driver(plan, presentation, options, project)
     sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
     with track(sink) as scope:
         drill, dock = driver.run(scope)

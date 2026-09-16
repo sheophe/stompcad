@@ -144,12 +144,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="how much of the run to draw; 'v' cycles it while a run works; "
         "ignored without a terminal",
     )
-    parser.add_argument(
-        "--promote-warnings",
-        action="store_true",
-        help="raise every warning to an error when looking for a gap to ask about; "
-        "the exit code, the withheld artefacts and the drill document are unchanged",
-    )
     return parser
 
 
@@ -769,15 +763,10 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     resolved.require_ready()
     options = RunOptions.of(resolved.settings)
     if not choose_presentation(out):
-        return _compose(options, PlainWriter(out), promote_warnings=args.promote_warnings)
+        return _compose(options, PlainWriter(out))
     app = InlineApp(level=args.progress)
     app.drive(
-        lambda: _compose(
-            options,
-            TerminalPresentation(app),
-            stop=lambda: app.stopping,
-            promote_warnings=args.promote_warnings,
-        )
+        lambda: _compose(options, TerminalPresentation(app), stop=lambda: app.stopping)
     )
     code = app.run(inline=True, inline_no_clear=True)
     if app.failure is not None:
@@ -797,19 +786,14 @@ def _compose(
     options: RunOptions,
     presentation: Presentation,
     stop: Callable[[], bool] | None = None,
-    promote_warnings: bool = False,
 ) -> int:
     """One run, against whichever presentation is drawing it, reduced to a code.
 
     Composing the run is ``drive.compose``'s, because the workbench reaches
     a run through the same call; what is left here is what a process does
-    with one. ``promote_warnings`` travels beside the options rather than
-    within them: decision 6 makes it a rule about which findings reach a
-    picker, not an input any step reads.
+    with one.
     """
-    _driver, drill, dock = compose(
-        DRILL_AND_DOCK, presentation, options, stop=stop, promote_warnings=promote_warnings
-    )
+    _driver, drill, dock = compose(DRILL_AND_DOCK, presentation, options, stop=stop)
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])
     )

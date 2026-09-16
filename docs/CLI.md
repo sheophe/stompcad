@@ -200,7 +200,6 @@ terminal; a piped or redirected run always gets the plain step-line log.
 | `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
 | `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
 | `--progress bar\|steps\|tree` | Starting detail level for the inline run; `v` cycles it | `bar` |
-| `--promote-warnings` | Raise every warning to an error, so a resolvable one can be asked about | Off |
 
 `--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
 `excellon`, `json` and `step` from the drill half, `report` and `assembly`
@@ -305,10 +304,8 @@ answer widens the expression rather than replacing it, so resolving one board
 cannot empty another. Every other error remains a refusal: a code with no
 picker is never turned into a question.
 
-`--promote-warnings` raises every warning to an error before that check runs,
-which is what would let a warning reach a picker at all. Being an error is
-necessary and not sufficient, and both resolvable codes are errors already, so
-the flag has nothing to promote into a question until a warning carries one.
+Severity decides whether a run stops to ask, not whether a remedy exists: an
+error asks, and a warning is reported and left actionable.
 
 Without a terminal there is nobody to ask. Rather than prompting where no
 answer can arrive, the run exits `3` naming the question it needed answered --

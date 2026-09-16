@@ -21,7 +21,7 @@ import pytest
 from stompcad import cli, drive, manifest
 from stompcad.drive import _STEP_HOLDS, Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
-from stompcad.present import Choice, PlainWriter, Question
+from stompcad.present import Choice, PlainWriter, Presentation, Question
 from stompcad.settings import Origin, Provenance, Resolved, Settings
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
@@ -137,7 +137,10 @@ class _Answering(PlainWriter):
         self._answer = answer
 
     def ask(self, question: Question) -> str:
-        self._asked.append(Choice(prompt=question.prompt, candidates=question.candidates))
+        # Kept whole rather than rebuilt: a copy made field by field drops
+        # whatever column the question gained since this line was written.
+        assert isinstance(question, Choice), "the driver asks with ``resolve``'s own Choice"
+        self._asked.append(question)
         return self._answer
 
 
@@ -639,6 +642,58 @@ def test_a_run_that_declares_its_case_asks_nothing() -> None:
     assert asked == []
 
 
+def _declaring(panel: Path, presentation: Presentation, case: str | None) -> Driver:
+    """A driver over the tied fixture whose drill half commits a project file.
+
+    ``case`` is what the project already declares, and also what the run is
+    given: the tar fixture ties three parts only where neither says anything.
+    """
+    options = _undeclared() if case is None else replace(_undeclared(), case=case)
+    settings = Settings.of_defaults(panel)
+    if case is not None:
+        settings = replace(
+            settings,
+            enclosure=replace(
+                settings.enclosure, case=Resolved(case, Provenance(Origin.PROJECT))
+            ),
+        )
+    driver = Driver(DRILL_AND_DOCK, presentation, options)
+    driver._project = Project(panel=panel, settings=settings, held=manifest.Manifest())
+    return driver
+
+
+def test_an_answered_tie_is_declared_where_the_manifest_reads_it(tmp_path: Path) -> None:
+    """Decision 8: the manifest records the values that produced the artefacts.
+
+    The declarations are read from ``Project.settings``, so an answer that
+    revised the options alone would be recorded as the ``null`` it started
+    as -- and, being held, never corrected afterwards: the same question
+    would be asked on every open.
+    """
+    panel = tmp_path / "tar.ai"
+    driver = _declaring(panel, _Answering([], "1590B2"), case=None)
+
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["enclosure"]["case"] == "1590B2"
+
+
+def test_a_run_with_no_gap_records_the_case_it_ran_under(tmp_path: Path) -> None:
+    """The control: a revision changes a declaration, a run happening does not."""
+    panel = tmp_path / "tar.ai"
+    asked: list[Choice] = []
+    driver = _declaring(panel, _Answering(asked, "never asked"), case="1590B")
+
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+
+    assert asked == [], "the control: a declared case ties nothing"
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["enclosure"]["case"] == "1590B"
+
+
 @pytest.mark.hammond
 def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
     """``_quantise`` must thread ``case_model`` through, not merely accept it.
@@ -660,24 +715,6 @@ def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
     assert drill.enclosure is not None
     assert drill.enclosure.selected_part == "1590B"
     assert "inferred-enclosure" in [d.code for d in drill.diagnostics]
-
-
-def test_promote_warnings_reaches_the_gap_finding_path() -> None:
-    """The flag travels from ``__init__`` to ``_gap_in``, not only into ``resolve``.
-
-    Both resolvable codes are raised at ERROR today, so promotion changes no
-    live run; this proves the wire the constructor argument is for, ahead of
-    a warning-level resolvable code ever existing.
-    """
-    tied = Diagnostic.warning(
-        "ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),)
-    )
-    data = DrillData(diagnostics=(tied,))
-    passed_over = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
-    promoting = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options(), True)
-
-    assert passed_over._gap_in(data) is None
-    assert promoting._gap_in(data) is not None
 
 
 @pytest.mark.boards

@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING
 
 from stompmodel.diagnostics import Diagnostic, exit_for_severity
@@ -22,7 +23,10 @@ from .. import manifest
 from ..cancel import EXIT_CANCELLED, Cancelled
 from ..drive import Driver, Project, RunOptions, compose
 from ..plan import DRILL_AND_DOCK, RunPlan, Step
-from ..present import Question
+from ..present import Choice, Question
+from ..resolve import RESOLVABLE
+from .keys import Place
+from .session import PendingGap
 
 if TYPE_CHECKING:
     from .app import Workbench
@@ -67,11 +71,43 @@ class WorkbenchPresentation:
         self._app.call_from_thread(self._app.settle, step, outcome)
 
     def ask(self, question: Question) -> str:
-        """Pause for a gap. Task 9 is the whole of this method."""
-        raise NotImplementedError
+        """Pause the run on this gap, and block until somebody answers it.
+
+        The wait happens after the crossing, never during it: the app thread
+        must not be blocked on the thread that is waiting for it. A picker
+        abandoned without an answer leaves the run paused and the picker
+        reopenable rather than parking this worker forever -- the loop
+        notices a stop, which is the only thing that ends a wait unanswered.
+        """
+        answered = Event()
+        box: list[str] = []
+
+        def chosen(answer: str) -> None:
+            box.append(answer)
+            answered.set()
+
+        self._app.call_from_thread(self._app.enquire, _gap_for(question), chosen)
+        while not answered.wait(0.05):
+            if self._app.stopping or not self._app.is_running:
+                raise Cancelled("the gap was left unanswered")
+        return box[0]
 
     def report(self, lines: Sequence[str]) -> None:
         self._app.call_from_thread(self._app.record, list(lines))
+
+
+def _gap_for(question: Question) -> PendingGap:
+    """Which place answers this question, from the code's own row.
+
+    Read from the question rather than re-derived from its prompt, which is
+    a sentence a tool wrote for a person. A question carrying no code names
+    no place, so this narrows to the ``Choice`` ``resolve`` builds instead
+    of guessing at one.
+    """
+    if not isinstance(question, Choice):
+        raise KeyError("a question with no code names no place that can answer it")
+    row = RESOLVABLE[question.code]
+    return PendingGap(question.code, row.step, Place(row.place), question)
 
 
 def start(app: Workbench) -> None:

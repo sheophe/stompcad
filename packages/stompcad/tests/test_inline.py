@@ -490,7 +490,7 @@ async def test_a_tie_is_answered_in_the_terminal_and_the_run_carries_on(
         targets=(("excellon", tmp_path / "out.drl"),),
     )
     presentation = _RecordingTerminal(app)
-    app.drive(lambda: cli._compose(options, presentation, promote_warnings=False))
+    app.drive(lambda: cli._compose(options, presentation))
 
     async with app.run_test() as pilot:
         for _ in range(200):

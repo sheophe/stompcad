@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from stompcad.drive import RunOptions
-from stompcad.resolve import RESOLVABLE, promoted, question_for, revision_for
+from stompcad.resolve import RESOLVABLE, question_for, revision_for
 from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -94,8 +94,8 @@ def test_every_resolvable_code_names_a_step_that_reads_its_revision() -> None:
     """A code whose step cannot honour the answer would ask and then ignore it."""
     from stompcad.drive import _STEP_INPUTS
 
-    for code, key in RESOLVABLE.items():
-        assert key in _STEP_INPUTS, f"{code} names {key}, which is no step"
+    for code, gap in RESOLVABLE.items():
+        assert gap.step in _STEP_INPUTS, f"{code} names {gap.step}, which is no step"
 
 
 def test_every_resolvable_code_survives_its_own_retry(tmp_path: Path) -> None:
@@ -108,15 +108,17 @@ def test_every_resolvable_code_survives_its_own_retry(tmp_path: Path) -> None:
     from stompcad.drive import _RETRY_INPUTS
 
     options = _options(tmp_path)
-    for code, key in RESOLVABLE.items():
-        assert key in _RETRY_INPUTS, f"{code} names {key}, which no retry can run again"
+    for code, gap in RESOLVABLE.items():
+        assert gap.step in _RETRY_INPUTS, f"{code} names {gap.step}, which no retry can run again"
         revised = revision_for(Diagnostic.error(code, "message"), options, "X")
         changed = {
             field.name
             for field in fields(options)
             if getattr(revised, field.name) != getattr(options, field.name)
         }
-        assert changed <= _RETRY_INPUTS[key], f"{code} revises {changed}, which {key!r} refuses"
+        assert changed <= _RETRY_INPUTS[gap.step], (
+            f"{code} revises {changed}, which {gap.step!r} refuses"
+        )
 
 
 def test_a_declared_case_answers_a_tie(tmp_path: Path) -> None:
@@ -161,44 +163,52 @@ def test_an_unresolvable_code_has_no_revision(tmp_path: Path) -> None:
         )
 
 
-def test_promotion_raises_every_warning_not_only_resolvable_ones() -> None:
-    """Decision 6: promotion happens before the resolvable check, not after."""
-    diagnostics = (
-        Diagnostic.warning("ambiguous-placement", "board 1: 2 placements fit"),
-        Diagnostic.info("grid-tie", "two holes share a grid point"),
-        Diagnostic.error("unknown-diameter", "no such drill"),
-    )
-
-    raised = promoted(diagnostics)
-
-    assert [d.severity for d in raised] == [Severity.ERROR, Severity.INFO, Severity.ERROR]
-    assert [d.code for d in raised] == [d.code for d in diagnostics]
-
-
-def test_a_promoted_warning_becomes_a_question_when_its_code_is_resolvable() -> None:
-    """One resolution path: a promoted warning is asked about exactly as an error is."""
-    warning = Diagnostic.warning(
-        "ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),)
-    )
-    assert question_for(warning) is None
-
-    (raised,) = promoted((warning,))
-    question = question_for(raised)
-
-    assert question is not None
-    assert question.candidates == ("1590B", "1590B2")
-
-
-def test_a_promoted_placement_is_still_not_a_question() -> None:
+def test_a_placement_is_not_a_question_however_severe_it_is() -> None:
     """No stage applies a chosen placement, so no picker may offer one.
 
     ``ambiguous-placement`` carries a count rather than candidates, and
     ``--place`` is refused as unsupported; a picker here would ask what
     nothing could honour.
     """
-    (raised,) = promoted(
-        (Diagnostic.warning("ambiguous-placement", "board 1", data=(("placements", 2),)),)
-    )
+    raised = Diagnostic.error("ambiguous-placement", "board 1", data=(("placements", 2),))
     assert raised.severity is Severity.ERROR
     assert question_for(raised) is None
     assert "ambiguous-placement" not in RESOLVABLE
+
+
+def test_a_tie_is_a_single_choice_and_an_empty_group_a_multiple_one() -> None:
+    """Decision 12: a panel is drawn for one part; a board is held by several."""
+    assert not RESOLVABLE["ambiguous-enclosure"].multiple
+    assert RESOLVABLE["empty-group"].multiple
+
+
+def test_each_resolvable_code_names_the_place_that_answers_it() -> None:
+    from stompcad.stale import PLACE_ORDER
+
+    for code, gap in RESOLVABLE.items():
+        assert gap.place in PLACE_ORDER, code
+
+
+def test_a_question_carries_the_arity_its_code_declares() -> None:
+    diagnostic = Diagnostic(
+        Severity.ERROR, "empty-group", "board 1 admitted nothing",
+        data=(("board", 1),),
+    )
+    question = question_for(diagnostic, {1: ("RV1", "RV2")})
+    assert question is not None and question.multiple
+
+
+def test_offering_one_designator_would_resolve_one_error_into_another() -> None:
+    """The control this arity exists for: a single pick earns `under-constrained-board`."""
+    diagnostic = Diagnostic(
+        Severity.ERROR, "empty-group", "board 1 admitted nothing", data=(("board", 1),),
+    )
+    question = question_for(diagnostic, {1: ("RV1", "RV2", "RV3")})
+    assert question is not None and len(question.candidates) > 1
+
+
+def test_no_refusal_code_can_become_a_question() -> None:
+    """A picker chooses between answers the tool computed; nothing here invents one."""
+    for code in ("unknown-diameter", "off-size", "hole-outside-outline"):
+        diagnostic = Diagnostic(Severity.ERROR, code, "refused")
+        assert question_for(diagnostic) is None

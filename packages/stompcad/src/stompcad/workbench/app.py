@@ -11,7 +11,7 @@ key before any binding is checked. The stop is, because it must outrank a modal.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,7 @@ from .places import (
     Editor,
     Field,
     FocusRow,
+    GapRow,
     Kind,
     PickerScreen,
     RunView,
@@ -49,7 +50,7 @@ from .places import (
     table_bindings,
 )
 from .run import Launch, start
-from .session import Locked, Phase, Refused, Session
+from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
 
 __all__ = ["Workbench", "KeysScreen", "ConfirmScreen"]
@@ -89,6 +90,9 @@ class Workbench(App[int], inherit_bindings=False):
         self.branch = ""
         self.stopping = False
         self.failure: BaseException | None = None
+        # What a paused run is waiting on: the one callback that lets the
+        # worker go again, held only while a gap is unanswered.
+        self._answer: Callable[[str], None] | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -113,9 +117,10 @@ class Workbench(App[int], inherit_bindings=False):
 
         Drawn on the base screen, which a picker may still be covering. The
         old pane's removal is awaited first, since both carry one id when the
-        place is unchanged. Focus lands on ``field``'s row, else the first.
-        A run reports through ``call_later``, so one can arrive after the app
-        has begun tearing its widgets down; there is nothing left to draw on.
+        place is unchanged. A run reports through ``call_later``, so one can
+        arrive after the app has begun tearing its widgets down; there is
+        nothing left to draw on. Focus lands on ``field``'s row, else a
+        pending gap's, else the first.
         """
         if not self.is_running:
             return
@@ -129,7 +134,11 @@ class Workbench(App[int], inherit_bindings=False):
             return  # the app went during the await; there is nothing to mount into
         await body.mount(pane_for(self.session, self.session.place, self._run_view()))
         rows = list(body.query(FocusRow))
-        target = next((row for row in rows if row.field == field), rows[0] if rows else None)
+        target = next((row for row in rows if row.field == field), None)
+        if target is None:
+            target = next(
+                (row for row in rows if isinstance(row, GapRow)), rows[0] if rows else None
+            )
         if target is not None:
             target.focus()
         self._show_mode()
@@ -378,13 +387,73 @@ class Workbench(App[int], inherit_bindings=False):
             self.stopping = True
             self.message = "stopping…"
 
+    def enquire(self, gap: PendingGap, chosen: Callable[[str], None]) -> None:
+        """Stop for this gap and go to the place that answers it. Decision 12."""
+        self.session.pause(gap)
+        self._answer = chosen
+        self._refresh()
+        self._open_gap_picker()
+
+    def _open_gap_picker(self) -> None:
+        """Offer the gap's own candidates, named as the continuation they are."""
+        gap = self.session.gap
+        if gap is None or gap.choice is None:
+            return
+        self.push_screen(
+            PickerScreen(
+                None,
+                gap.choice.candidates,
+                multiple=gap.choice.multiple,
+                label="Use this and continue",
+            ),
+            self._answered,
+        )
+
+    def _answered(self, answer: object | None) -> None:
+        """Committing the answer *is* the continuation -- no second action.
+
+        ``None`` is a picker abandoned rather than an empty answer, which
+        leaves the run paused and the gap's own row to reopen it.
+        """
+        if answer is None or self._answer is None:
+            return
+        self._resume(",".join(_many(answer)) if isinstance(answer, tuple) else str(answer))
+
+    def action_answer_gap(self) -> None:
+        """`enter` on the paused place's own row: its picker, or the continuation."""
+        gap = self.session.gap
+        if gap is None:
+            return
+        if gap.choice is None:
+            self.action_continue_run()
+            return
+        self._open_gap_picker()
+
+    def action_continue_run(self) -> None:
+        """The focused row a place answering by a free edit gains."""
+        if self.session.gap is None or self._answer is None:
+            return
+        self._resume("")
+
+    def _resume(self, answer: str) -> None:
+        """Let the waiting run go again, once the session says it is running."""
+        chosen = self._answer
+        assert chosen is not None  # every caller checks; this is the narrowing
+        self._answer = None
+        self.session.resumed()
+        self._refresh()
+        chosen(answer)
+
     def action_escape(self) -> None:
-        """The ladder, innermost first. Task 9 adds the paused rung."""
+        """The ladder, innermost first: a modal, an editor, then the run itself."""
         if isinstance(self.screen, (PickerScreen, KeysScreen)):
             self.pop_screen()
             return
         if self._editors():
             self._close_editor()
+            return
+        if self.session.phase is Phase.PAUSED and self.session.gap is not None:
+            self.action_stop_run()
             return
         if self.session.place is Place.RUN:
             self.action_stop_run()

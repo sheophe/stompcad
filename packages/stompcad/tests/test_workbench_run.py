@@ -17,15 +17,16 @@ from stompcad.cancel import EXIT_CANCELLED, Cancelled
 from stompcad.cli import Resolution
 from stompcad.drive import Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan
-from stompcad.present import Presentation
+from stompcad.present import Choice, Presentation
 from stompcad.readiness import readiness
+from stompcad.resolve import RESOLVABLE
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench import run
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.keys import Place
-from stompcad.workbench.places import ValueRow
+from stompcad.workbench.places import FocusRow, ValueRow
 from stompcad.workbench.run import Launch, WorkbenchPresentation
-from stompcad.workbench.session import Phase, Session
+from stompcad.workbench.session import PendingGap, Phase, Session
 from stompmodel.diagnostics import EXIT_WARNINGS, Diagnostic, Severity
 
 __all__: list[str] = []
@@ -74,7 +75,6 @@ class _Compose:
         options: RunOptions,
         project: Project | None = None,
         stop: object = None,
-        promote_warnings: bool = False,
     ) -> tuple[Driver, _Data, _Data | None]:
         assert isinstance(presentation, WorkbenchPresentation)
         app = presentation._app
@@ -94,6 +94,64 @@ class _Compose:
 def _fake_launch(hold: bool = False, finding: Diagnostic | None = None) -> Launch:
     """A launch whose composed run costs nothing; Task 11 runs the real one."""
     return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Compose(hold, finding))
+
+
+class _Asking:
+    """A composed run that raises one gap, and keeps whatever answered it.
+
+    The candidates are a tool's own answers for the code named, so the
+    picker the app opens is the picker a real run would have raised.
+    """
+
+    def __init__(self, code: str, candidates: tuple[str, ...]) -> None:
+        self.code = code
+        self.candidates = candidates
+        self.answers: list[str] = []
+
+    def __call__(
+        self,
+        plan: RunPlan,
+        presentation: Presentation,
+        options: RunOptions,
+        project: Project | None = None,
+        stop: object = None,
+    ) -> tuple[Driver, _Data, _Data | None]:
+        presentation.begin(plan)
+        gap = RESOLVABLE[self.code]
+        self.answers.append(
+            presentation.ask(
+                Choice(
+                    prompt="reference outline is within tolerance of more than one footprint",
+                    candidates=self.candidates,
+                    multiple=gap.multiple,
+                    code=self.code,
+                )
+            )
+        )
+        return Driver(plan, presentation, options), _Data(), None
+
+
+def _launch_raising(code: str, candidates: tuple[str, ...] = ("1590B", "1590B2")) -> Launch:
+    """A launch whose run stops once on this code and waits to be answered."""
+    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Asking(code, candidates))
+
+
+def _answers(app: Workbench) -> list[str]:
+    """Every answer the faked run received, from the fake that received them."""
+    launch = app.launch
+    assert launch is not None and isinstance(launch.compose, _Asking)
+    return launch.compose.answers
+
+
+async def _paused(pilot: Pilot[int], app: Workbench) -> None:
+    """Pause until the run has stopped for its gap and the picker is drawn."""
+    for _ in range(400):
+        if app.session.phase is Phase.PAUSED:
+            await pilot.pause()
+            return
+        await pilot.pause()
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"the run never paused; the phase is {app.session.phase}")
 
 
 async def _open_editor(pilot: Pilot[int], app: Workbench, field: str) -> None:
@@ -469,3 +527,113 @@ async def test_the_settled_lines_are_padded_to_the_plan_the_run_declared() -> No
         await _settle(pilot, app)
         width = max(len(step.label) for step in DRILL_AND_DOCK.steps)
         assert step_line("quantise", "quantise done", width) in app.settled
+
+
+# -- the pause that navigates ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_gap_pauses_the_run_and_takes_the_user_to_its_place() -> None:
+    """Decision 12: the app navigates, rather than marking and leaving them to hunt."""
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        assert app.session.place is Place.ENCLOSURE
+        assert app.session.phase is Phase.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_only_the_paused_place_accepts_an_edit() -> None:
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        await pilot.press("d")
+        await _edit_first_row(pilot, app)
+        assert "nothing is editable" in app.message
+
+
+@pytest.mark.asyncio
+async def test_committing_the_answer_is_the_continuation() -> None:
+    """Decision 12: no second action to find."""
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        await pilot.press("enter")
+        await _settle(pilot, app)
+        assert app.session.phase is Phase.DONE
+        assert _answers(app) == ["1590B"]
+
+
+@pytest.mark.asyncio
+async def test_the_picker_says_that_choosing_continues_the_run() -> None:
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        label = str(app.screen.query_one("#picker-label", Static).content)
+        assert "continue" in label.lower()
+
+
+@pytest.mark.asyncio
+async def test_leaving_the_place_abandons_the_picker_without_stopping_the_run() -> None:
+    """A picker is a transient widget; the run stays paused and reopenable."""
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        await pilot.press("d")
+        assert not app.screen.query("#picker")
+        assert app.session.phase is Phase.PAUSED
+        assert not app.stopping
+
+
+@pytest.mark.asyncio
+async def test_the_gap_s_own_row_reopens_the_picker_that_was_abandoned() -> None:
+    """Decision 12: abandoning a picker is recoverable, not the end of the run."""
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        await pilot.press("escape")
+        assert not app.screen.query("#picker")
+        await pilot.press("e")
+        row = app.query_one("#gap-row", FocusRow)
+        row.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.screen.query("#picker")
+
+
+@pytest.mark.asyncio
+async def test_esc_closes_the_picker_before_it_stops_the_run() -> None:
+    """Decision 12: `esc` is a ladder, innermost first."""
+    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _paused(pilot, app)
+        await pilot.press("escape")
+        assert not app.stopping
+        await pilot.press("escape")
+        assert app.stopping
+
+
+@pytest.mark.asyncio
+async def test_a_place_answering_by_a_free_edit_carries_a_continue_row() -> None:
+    """The only control a place otherwise closed to editing gains.
+
+    No code reaches this today: both resolvable codes are pickers, and
+    ``question_for`` raises nothing without candidates. The mechanism is
+    built and tested here rather than left for the first code that needs it.
+    """
+    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        app.session.pause(PendingGap("off-grid", "quantise", Place.DRILLING, None))
+        await app.redraw()
+        await pilot.pause()
+        assert app.query("#continue-run")

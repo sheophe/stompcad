@@ -38,7 +38,7 @@ from .keys import (
     STEP_KEYS,
     Place,
 )
-from .session import Session
+from .session import PendingGap, Session
 
 __all__ = [
     "Kind",
@@ -56,6 +56,7 @@ __all__ = [
     "FocusRow",
     "ValueRow",
     "RunRow",
+    "GapRow",
     "Editor",
     "Ticks",
     "PickerScreen",
@@ -236,6 +237,9 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
         record = getattr(session.settings, place.value)
         for field, label, stated in record.rows():
             pane.compose_add_child(ValueRow(place, field, f"{label:<18}{stated}"))
+        gap = session.gap
+        if gap is not None and gap.place is place:
+            pane.compose_add_child(GapRow(gap))
     else:
         pane.compose_add_child(Static(""))
     return pane
@@ -307,6 +311,23 @@ class RunRow(FocusRow):
 
     def __init__(self) -> None:
         super().__init__("Run this project", id="run-row", markup=False)
+
+
+class GapRow(FocusRow):
+    """What the paused run waits for, and `enter` to answer it. Decision 12.
+
+    A picker is transient, so abandoning one must be recoverable rather than
+    the end of the run; and a gap answered by a free edit has no picker at
+    all. One row serves both: the way back into the list, and the named
+    continuation that edit would otherwise lack.
+    """
+
+    BINDINGS = [Binding("enter", "app.answer_gap", "answer", show=False)]
+
+    def __init__(self, gap: PendingGap) -> None:
+        choice = gap.choice
+        label = "Continue run" if choice is None else f"Answer and continue: {choice.prompt}"
+        super().__init__(label, id="continue-run" if choice is None else "gap-row", markup=False)
 
 
 class Editor(Input):
@@ -399,8 +420,14 @@ class PickerScreen(ModalScreen[object]):
                 yield OptionList(*self.choices, id="picker")
 
     def on_mount(self) -> None:
-        if not self.multiple and self.chosen and self.chosen[0] in self.choices:
-            self.query_one("#picker", OptionList).highlighted = self.choices.index(self.chosen[0])
+        """Highlight the current answer, or the first, so `enter` always commits one."""
+        if self.multiple:
+            return
+        picker = self.query_one("#picker", OptionList)
+        if self.chosen and self.chosen[0] in self.choices:
+            picker.highlighted = self.choices.index(self.chosen[0])
+        elif self.choices:
+            picker.highlighted = 0
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if not self.multiple:
