@@ -262,14 +262,17 @@ class Session:
 
     # -- what a change invalidated ----------------------------------------
 
-    def invalidate(self, *fields: str) -> None:
-        """Mark fields changed without changing their values. Decision 10.
+    def invalidate(self, place: Place, *fields: str) -> None:
+        """Mark this place's fields changed without changing them. Decision 10.
 
         `Ctrl+L` says the artwork on disk is not the artwork the last run
         read. Nothing the project declares has changed, so nothing is set --
         but every step reading the panel is stale, and that is the same
-        statement an edit makes.
+        statement an edit makes. Which is why a run refuses it too: this is
+        the bookkeeping ``credit`` and a resume reason about.
         """
+        if not self.may_edit(place):
+            raise Locked(f"{place.value} does not accept an edit while a run is active")
         self._changed = self._changed | frozenset(fields)
 
     def stale(self) -> frozenset[str]:

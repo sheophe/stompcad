@@ -618,7 +618,11 @@ class Workbench(App[int], inherit_bindings=False):
         if panel is None:
             self.message = "no artwork is selected"
             return
-        self.session.invalidate("panel")
+        try:
+            self.session.invalidate(Place.ARTWORK, "panel")
+        except Locked as failure:
+            self.message = str(failure)
+            return
         self.message = f"{panel.name} will be read again on the next run"
         self._refresh()
 
@@ -642,7 +646,13 @@ class Workbench(App[int], inherit_bindings=False):
         if found is None:
             self.message = f"no cached model for {part}; tools/fetch_case_model.py acquires one"
             return
-        self.session.adopt(Place.ENCLOSURE, "case_model", found)
+        try:
+            self.session.adopt(Place.ENCLOSURE, "case_model", found)
+        except (Refused, Locked) as failure:
+            # The same two a row's own edit shows rather than takes: a run
+            # holds the place, or the tool that consumes the model says no.
+            self.message = str(failure)
+            return
         self.message = f"using {found.value.name}, {found.detail}"
         self._refresh()
 

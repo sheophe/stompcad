@@ -665,6 +665,44 @@ async def test_ctrl_f_downloads_nothing_and_says_where_to_get_one(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_ctrl_f_refuses_while_a_run_holds_the_place(tmp_path: Path) -> None:
+    """Decision 5: a key that adopts a value is a mutation, and a run holds the place.
+
+    The control is the test above: with no run the same press over the same
+    cache adopts the model, so this refusal is the run's and not the cache's.
+    """
+    cache = tmp_path / "cases"
+    cache.mkdir()
+    (cache / "1590B.stp").write_text("ISO-10303-21;\n", encoding="utf-8")
+    app = Workbench(_session(_declared_case("1590B")), cache=cache)
+    async with app.run_test() as pilot:
+        app.session.begin_run(frozenset({"read-panel", "quantise"}))
+        await pilot.press("e", "ctrl+f")
+        assert app.session.settings.enclosure.case_model.value is None
+        assert "enclosure" in app.message and "run" in app.message
+        await pilot.press("d")
+        assert app.session.place is Place.DRILLING, "the refusal never left the action"
+
+
+@pytest.mark.asyncio
+async def test_ctrl_l_refuses_while_a_run_holds_the_place() -> None:
+    """Decision 5: invalidating is the statement an edit makes, so a run refuses it.
+
+    The control is ``test_ctrl_l_re_reads_the_artwork_s_own_layer_list``:
+    with no run the same press does make ``read-panel`` stale.
+    """
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.begin_run(frozenset({"read-panel", "quantise"}))
+        before = app.session.stale()
+        await pilot.press("a", "ctrl+l")
+        assert app.session.stale() == before
+        assert "artwork" in app.message and "run" in app.message
+        await pilot.press("d")
+        assert app.session.place is Place.DRILLING, "the refusal never left the action"
+
+
+@pytest.mark.asyncio
 async def test_ctrl_f_without_the_acquiring_tool_says_no_location_is_known(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
