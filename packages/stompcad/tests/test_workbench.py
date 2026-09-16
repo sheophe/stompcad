@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from rich.cells import cell_len
 from textual.binding import Binding, BindingsMap
 from textual.command import CommandPalette
 from textual.pilot import Pilot
@@ -18,7 +19,7 @@ from stompcad import cli, manifest
 from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
-from stompcad.workbench.app import Workbench
+from stompcad.workbench.app import Workbench, _key_list
 from stompcad.workbench.keys import (
     GLOBAL_VERBS,
     LOCAL_KEYS,
@@ -186,17 +187,24 @@ async def test_the_keys_screen_lists_every_key_the_table_holds() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_keys_screen_is_a_window_over_the_workbench() -> None:
-    """`?` opens a centred box, as the picker and the quit question do.
+async def test_the_keys_screen_is_a_window_sized_to_its_text() -> None:
+    """`?` opens a centred box that fits the whole key list, with a margin.
 
-    The control is the terminal's own size: a list filling the screen would
-    match it on both axes, so being smaller on both is the claim.
+    Measured against the text itself, not the terminal: a box collapsed to
+    nothing is also smaller than the screen, so that alone proves nothing.
     """
+    lines = _key_list().splitlines()
+    width, height = max(cell_len(line) for line in lines), len(lines)
     app = Workbench(_session())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.press("question_mark")
         await pilot.pause()
+        text = app.screen.query_one("#key-list").region
         box = app.screen.query_one("#keys").region
+        assert (text.width, text.height) == (width, height)
+        # A border plus at least one blank row and two blank columns each side.
+        assert text.x - box.x >= 3 and box.right - text.right >= 3
+        assert text.y - box.y >= 2 and box.bottom - text.bottom >= 2
         assert box.width < app.size.width and box.height < app.size.height
         left, right = box.x, app.size.width - box.right
         top, bottom = box.y, app.size.height - box.bottom

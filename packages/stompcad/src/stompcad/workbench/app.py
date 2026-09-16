@@ -16,6 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from rich.cells import cell_len
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -737,6 +738,10 @@ def _mounted(widget: Widget) -> bool:
     return widget.is_attached
 
 
+#: The blank rows and columns between the keys window's border and its text.
+_KEYS_MARGIN: tuple[int, int] = (1, 2)
+
+
 class KeysScreen(ModalScreen[None]):
     """What `?` shows: the same table the bindings were built from.
 
@@ -751,8 +756,8 @@ class KeysScreen(ModalScreen[None]):
     DEFAULT_CSS = """
     KeysScreen { align: center middle; }
     KeysScreen > Vertical {
-        width: auto; height: auto; max-height: 90%;
-        border: round $accent; background: $surface; padding: 0 1;
+        max-width: 100%; max-height: 100%; overflow: auto auto;
+        border: round $accent; background: $surface;
     }
     """
 
@@ -763,9 +768,22 @@ class KeysScreen(ModalScreen[None]):
     ]
 
     def compose(self) -> ComposeResult:
+        text = _key_list()
+        lines = text.splitlines()
+        width = max(cell_len(line) for line in lines)
+        height = len(lines)
+        rows, columns = _KEYS_MARGIN
         with Vertical(id="keys") as window:
             window.border_title = "Keys"
-            yield Static(_key_list(), id="key-list", markup=False)
+            window.styles.padding = (rows, columns)
+            # Sized from the text rather than left to `auto`: an auto-sized
+            # container around an auto-sized text collapses to its border.
+            window.styles.width = width + 2 * (columns + 1)
+            window.styles.height = height + 2 * (rows + 1)
+            key_list = Static(text, id="key-list", markup=False)
+            key_list.styles.width = width
+            key_list.styles.height = height
+            yield key_list
 
 
 class ConfirmScreen(ModalScreen[bool]):
