@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from stompdrill.enclosures import footprints
 from stompdrill.pipeline.enclosure import infer_part_name
 from stompdrill.sources import AiPdfSource
 
@@ -24,6 +25,7 @@ __all__ = [
     "board_candidates",
     "cached_model",
     "part_from_model",
+    "catalogue_parts",
     "output_path",
 ]
 
@@ -102,6 +104,16 @@ def part_from_model(path: Path) -> str | None:
     restating either here would give one question two answers.
     """
     return infer_part_name(path)
+
+
+def catalogue_parts() -> tuple[str, ...]:
+    """Every base part the enclosure catalogue lists, for a picker to offer.
+
+    ``stompdrill`` owns the catalogue and owns checking a declaration
+    against the measurement; this only asks it what exists, so the picker
+    offers answers the tool already recognises rather than inventing a list.
+    """
+    return tuple(sorted({part for parts in footprints().values() for part in parts}))
 
 
 def output_path(format_name: str, panel: Path) -> Path:

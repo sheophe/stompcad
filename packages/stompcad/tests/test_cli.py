@@ -10,6 +10,7 @@ rather than inside a three-minute dock test.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import shutil
 from pathlib import Path
@@ -231,3 +232,35 @@ def test_a_malformed_project_value_is_refused_before_the_artwork_is_opened(
     assert "drilling.grid_mm" in printed.err
     assert "read panel" not in printed.out, "the artwork was opened before the value was checked"
     assert not refused.exists()
+
+
+def test_every_configuration_place_is_checked_after_an_edit() -> None:
+    """A place with no branch would accept anything an edit put into it."""
+    from stompcad.stale import PLACE_ORDER
+
+    source = inspect.getsource(cli.validate_place)
+    for place in PLACE_ORDER:
+        assert f'"{place}"' in source
+
+
+def test_an_edited_place_is_refused_by_the_tool_that_reads_it() -> None:
+    """The refusal is ``stompdrill``'s own, naming the key the value was typed into."""
+    from dataclasses import replace
+
+    from stompcad.settings import Origin, Provenance, Resolved, Settings
+
+    settings = Settings.of_defaults(TAR_AI)
+    zero = replace(
+        settings,
+        drilling=replace(settings.drilling, grid_mm=Resolved(0.0015, Provenance(Origin.USER))),
+    )
+    with pytest.raises(cli.UsageError, match="drilling.grid_mm"):
+        cli.validate_place(zero, "drilling", TAR_AI)
+
+
+@pytest.mark.parametrize("place", ["artwork", "enclosure", "drilling", "boards", "output"])
+def test_every_place_accepts_its_defaults(place: str) -> None:
+    """The control: a check that refused everything would pass the test above."""
+    from stompcad.settings import Settings
+
+    cli.validate_place(Settings.of_defaults(TAR_AI), place, TAR_AI)

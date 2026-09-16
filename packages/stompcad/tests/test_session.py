@@ -13,7 +13,7 @@ from stompcad.present import Choice
 from stompcad.readiness import Blocker, Readiness, readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench.keys import Place
-from stompcad.workbench.session import Locked, PendingGap, Phase, Session
+from stompcad.workbench.session import Locked, PendingGap, Phase, Refused, Session
 from stompmodel.diagnostics import Diagnostic, Severity
 
 __all__: list[str] = []
@@ -237,3 +237,47 @@ def test_a_file_already_on_disk_is_labelled_found_rather_than_current() -> None:
     )
     session.record_written([path])
     assert session.label_for(path, exists=True) == "made by this run"
+
+
+def test_an_edit_the_consuming_tool_refuses_is_reverted_and_reported() -> None:
+    """The rule belongs to the tool that reads the value, never to the workbench."""
+    def refuse(settings: Settings, place: str) -> None:
+        raise ValueError("drilling.grid_mm: a grid pitch of 0 describes no grid")
+
+    session = Session(
+        Resolution(settings=_settings(), notes=(), blockers=readiness(_settings()),
+                   project=manifest.Manifest()),
+        validator=refuse,
+    )
+    before = session.settings.drilling.grid_mm
+    with pytest.raises(Refused, match="describes no grid"):
+        session.set(Place.DRILLING, "grid_mm", 0.0)
+    assert session.settings.drilling.grid_mm == before
+    assert session.stale() == frozenset()
+
+
+def test_an_edit_the_tool_accepts_stands() -> None:
+    """The control: a validator that refused everything would prove nothing."""
+    session = Session(
+        Resolution(settings=_settings(), notes=(), blockers=readiness(_settings()),
+                   project=manifest.Manifest()),
+        validator=lambda settings, place: None,
+    )
+    session.set(Place.DRILLING, "grid_mm", 0.5)
+    assert session.settings.drilling.grid_mm.value == 0.5
+
+
+@pytest.mark.parametrize("place", [Place.PROJECT, Place.RUN, Place.FINDINGS])
+def test_a_place_holding_no_values_refuses_an_edit_by_name(place: Place) -> None:
+    """Only the five configuration places carry values; the others must say so."""
+    session = _session()
+    with pytest.raises(ValueError, match=place.value):
+        session.set(place, "grid_mm", 0.5)
+
+
+def test_designators_are_every_board_s_names_once_in_name_order() -> None:
+    """Absent before a run, then the union a multiple picker offers."""
+    session = _session()
+    assert not session.designators
+    session.record_designators({1: ("SW1", "RV1"), 2: ("RV1", "RV2")})
+    assert session.designators == ("RV1", "RV2", "SW1")

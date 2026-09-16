@@ -11,7 +11,7 @@ pilot.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -29,7 +29,7 @@ from .keys import CONFIGURATION, SIDEBAR_ORDER, Place, neighbour
 if TYPE_CHECKING:  # ``cli`` imports the application, which imports this module
     from ..cli import Resolution
 
-__all__ = ["Locked", "Phase", "PendingGap", "Row", "Session"]
+__all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session"]
 
 #: Decision 2's two labels, and the reason neither is persisted: the manifest
 #: holds no hashes, so the workbench cannot know an existing artefact was made
@@ -44,6 +44,15 @@ class Locked(Exception):
     Raised rather than ignored: a refusal nobody can observe is
     indistinguishable from an edit that silently did nothing, and the guard
     is only worth having if a test can see it work.
+    """
+
+
+class Refused(Exception):
+    """A value the tool that consumes it will not accept. Not a workbench rule.
+
+    The message is that tool's own sentence, reaching the row that carried
+    the value. Restating the rule here would give one question two answers,
+    which is how byte identity drifts.
     """
 
 
@@ -95,8 +104,10 @@ class Session:
         self,
         resolution: Resolution,
         resolver: Callable[[Path], Resolution] | None = None,
+        validator: Callable[[Settings, str], None] | None = None,
     ) -> None:
         self._resolver = resolver
+        self._validator = validator
         self._place = Place.PROJECT
         self._phase = Phase.IDLE
         self._gap: PendingGap | None = None
@@ -126,6 +137,7 @@ class Session:
         self._changed = frozenset()
         self._findings = ()
         self._written = frozenset()
+        self._designators: dict[int, tuple[str, ...]] = {}
 
     # -- what there is to look at -----------------------------------------
 
@@ -165,6 +177,11 @@ class Session:
     def exit_code(self) -> int:
         return self._exit_code
 
+    @property
+    def designators(self) -> tuple[str, ...]:
+        """Every designator any board carries, in name order, without repeats."""
+        return tuple(sorted({name for names in self._designators.values() for name in names}))
+
     # -- moving ------------------------------------------------------------
 
     def go(self, place: Place) -> None:
@@ -191,16 +208,26 @@ class Session:
         ``Origin.USER`` is this method's own rank: above the project and
         above an argument, because it is the most recent thing anybody said.
         The field is added to the change set, which is what makes the steps
-        reading it stale.
+        reading it stale. The consuming tool's check runs before either is
+        touched, so a refused edit invalidates nothing.
         """
+        if place not in CONFIGURATION:
+            raise ValueError(f"{place.value} holds no values to set")
         if not self.may_edit(place):
             raise Locked(f"{place.value} does not accept an edit while a run is active")
         record = getattr(self._settings, place.value)
         declared = self._project.values.get(place.value, {}).get(field)
         resolved = Resolved(value, Provenance(Origin.USER), disagreement(declared, value))
+        previous = self._settings
         self._settings = replace(
             self._settings, **{place.value: replace(record, **{field: resolved})}
         )
+        if self._validator is not None:
+            try:
+                self._validator(self._settings, place.value)
+            except Exception as failure:  # the consuming tool's own refusal
+                self._settings = previous
+                raise Refused(str(failure)) from failure
         self._changed = self._changed | {field}
         self._blockers = readiness(self._settings)
 
@@ -332,6 +359,16 @@ class Session:
     def record_findings(self, diagnostics: Sequence[Diagnostic]) -> None:
         """What the run found, classified by whatever ``classify`` knows today."""
         self._findings = classify(diagnostics)
+
+    def record_designators(self, designators: Mapping[int, tuple[str, ...]]) -> None:
+        """Each board's own names, so `panel_reference` becomes a list to tick.
+
+        Absent before a run, because they arrive with ``read boards``. That
+        is why the expression is typed until a run has read a board and
+        ticked afterwards -- and why the saved result is the expression
+        rather than the ticks.
+        """
+        self._designators = dict(designators)
 
     def record_written(self, paths: Sequence[Path]) -> None:
         """Every artefact this session actually wrote. Never persisted -- decision 2."""

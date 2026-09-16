@@ -70,6 +70,7 @@ __all__ = [
     "build_parser",
     "parse_emit",
     "validate_targets",
+    "validate_place",
     "resolve",
     "worst_severity",
     "choose_presentation",
@@ -535,6 +536,33 @@ def _validate_dock_lengths(
             .replace("--seat-pitch-max", "boards.seat_pitch_max_mm")
             .replace("--seat-pitch-min", "boards.seat_pitch_min_mm")
         ) from failure
+
+
+def validate_place(settings: Settings, place: str, panel: Path) -> None:
+    """Every check the values of one place must pass, asked after an edit.
+
+    The same helpers ``resolve`` runs before a headless run, dispatched by
+    the place that owns the values. An edit is a new rank, and a rank
+    reaching a step unchecked is what plan 1's validation block exists to
+    prevent -- so nothing here states a rule; it asks the tool that owns one.
+    """
+    if place == "artwork":
+        _validate_form_depth(panel, settings.artwork.form_depth)
+    elif place == "enclosure":
+        _declared_case(settings.enclosure.case.value, "enclosure.case")
+        _validate_case_margin(settings.enclosure.case_margin_mm, settings.enclosure.case_face.value)
+    elif place == "drilling":
+        _validate_drilling(settings.drilling)
+        _validate_grid(settings.drilling)
+    elif place == "boards":
+        _validate_panel_reference(settings.boards.panel_reference)
+        _validate_dock_lengths(
+            settings.boards.match_tolerance_mm,
+            settings.boards.seat_pitch_max_mm,
+            settings.boards.seat_pitch_min_mm,
+        )
+    elif place == "output":
+        _validate_output(settings.output.targets, panel)
 
 
 def resolve(args: argparse.Namespace, directory: Path) -> Resolution:

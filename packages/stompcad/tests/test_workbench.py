@@ -8,14 +8,16 @@ from pathlib import Path
 import pytest
 from textual.binding import Binding, BindingsMap
 from textual.command import CommandPalette
-from textual.widgets import Static
+from textual.pilot import Pilot
+from textual.widgets import Input, SelectionList, Static
 
-from stompcad import manifest
+from stompcad import cli, manifest
 from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.keys import GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, STEP_KEYS, Place
+from stompcad.workbench.places import FIELDS, ValueRow
 from stompcad.workbench.session import Session
 
 __all__: list[str] = []
@@ -23,11 +25,20 @@ __all__: list[str] = []
 _PANEL = Path("/project/tar.ai")
 
 
-def _session(settings: Settings | None = None) -> Session:
+def _session(
+    settings: Settings | None = None, project: manifest.Manifest | None = None
+) -> Session:
+    """A session whose edits are checked by the real consuming tool, as a run's are."""
     resolved = settings if settings is not None else _runnable()
-    return Session(Resolution(
-        settings=resolved, notes=(), blockers=readiness(resolved), project=manifest.Manifest(),
-    ))
+    return Session(
+        Resolution(
+            settings=resolved,
+            notes=(),
+            blockers=readiness(resolved),
+            project=project if project is not None else manifest.Manifest(),
+        ),
+        validator=lambda settings, place: cli.validate_place(settings, place, _PANEL),
+    )
 
 
 def _runnable() -> Settings:
@@ -200,3 +211,245 @@ async def test_the_window_verb_reports_that_no_viewer_is_installed() -> None:
     async with app.run_test() as pilot:
         await pilot.press("w")
         assert "viewer" in app.message.lower()
+
+
+async def _focus_row(pilot: Pilot[int], app: Workbench, field: str) -> None:
+    """Focus one row by name: the subject is editing, not how many arrows reach it."""
+    row = next(row for row in app.query(ValueRow) if row.field == field)
+    row.focus()
+    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_an_open_text_field_suppresses_every_bare_letter() -> None:
+    """Decision 3's one hazard, closed. The guard this whole model rests on."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter")
+        await pilot.press("b", "o", "a", "r", "d")
+        assert app.session.place is Place.DRILLING
+        assert app.query_one("#editor", Input).value == "board"
+        assert app.mode() == "typing"
+        assert "typing" in str(app.query_one("#mode", Static).content).lower()
+
+
+@pytest.mark.asyncio
+async def test_closing_the_field_gives_the_letters_back() -> None:
+    """The control: a suppression that never lifted would be a trap, not a mode."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter", "escape")
+        assert "moving" in str(app.query_one("#mode", Static).content).lower()
+        await pilot.press("b")
+        assert app.session.place is Place.BOARDS
+
+
+@pytest.mark.asyncio
+async def test_committing_a_text_row_records_the_value_and_who_set_it() -> None:
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter")
+        for character in "Tar":
+            await pilot.press(character)
+        await pilot.press("enter")
+        assert app.session.settings.drilling.title.value == "Tar"
+        assert app.session.settings.drilling.title.provenance.origin is Origin.USER
+
+
+@pytest.mark.asyncio
+async def test_a_choice_row_opens_a_picker_rather_than_a_field() -> None:
+    """Decision 3: a list keeps the letters working, which is why most rows are lists."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "drill_standard")
+        await pilot.press("enter")
+        assert app.screen.query("#picker")
+        assert app.mode() == "moving"
+
+
+@pytest.mark.asyncio
+async def test_committing_a_picker_records_the_answer_it_chose() -> None:
+    """The picker's `enter` is the commit: no second action to find."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "drill_standard")
+        await pilot.press("enter", "home", "enter")
+        assert not app.screen.query("#picker")
+        standard = app.session.settings.drilling.drill_standard
+        assert standard.value == "fractional"
+        assert standard.provenance.origin is Origin.USER
+
+
+@pytest.mark.asyncio
+async def test_leaving_a_place_abandons_an_open_picker() -> None:
+    """Decision 12: a picker is a transient widget, so leaving abandons it."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "drill_standard")
+        await pilot.press("enter", "b")
+        assert not app.screen.query("#picker")
+        assert app.session.place is Place.BOARDS
+        assert app.session.settings.drilling.drill_standard.provenance.origin is Origin.DEFAULT
+
+
+@pytest.mark.asyncio
+async def test_a_step_key_and_a_verb_still_reach_the_app_through_a_picker() -> None:
+    """Decision 3: every bare letter works everywhere, an open list included."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "drill_standard")
+        await pilot.press("enter", "w")
+        assert "viewer" in app.message.lower()
+        await pilot.press("]")
+        assert not app.screen.query("#picker")
+        assert app.session.place is Place.BOARDS
+
+
+@pytest.mark.asyncio
+async def test_an_open_picker_answers_only_the_keys_its_table_holds() -> None:
+    """The picker's own map is the app's table plus `escape`, and nothing else."""
+    tabled = _spelled(*PLACE_KEYS, *GLOBAL_VERBS, *STEP_KEYS, *LOCAL_KEYS)
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "drill_standard")
+        await pilot.press("enter")
+        assert app.screen.query("#picker")
+        bound = set(app.screen._bindings.key_to_bindings)
+        assert tabled <= bound
+        assert bound - tabled - set(_EXEMPT) == {"escape"}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_value_is_shown_rather_than_taken() -> None:
+    """The consuming tool's own sentence reaches the row that carried the value."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "grid_mm")
+        await pilot.press("enter")
+        for character in "0.0015":  # 1500 nm: no whole-micron grid; 0 would be clamped
+            await pilot.press(character)
+        await pilot.press("enter")
+        assert app.session.settings.drilling.grid_mm.value == 0.25
+        assert "grid" in app.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_arrows_move_between_neighbouring_rows() -> None:
+    """Decision 3: navigation is identical everywhere."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d", "down", "down")
+        assert app.focused is not None
+        assert getattr(app.focused, "field", None) == "drill_standard"
+
+
+@pytest.mark.asyncio
+async def test_a_clicked_place_is_entered_at_its_first_row() -> None:
+    """Every route into a place lands in the same spot, the mouse included."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.click(f"#row-{Place.ENCLOSURE.value}")
+        assert getattr(app.focused, "field", None) == "case"
+
+
+@pytest.mark.asyncio
+async def test_targets_commit_in_the_manifest_s_own_order() -> None:
+    """A ticked set is saved as the project spells it, so it never disagrees with itself."""
+    declared = (
+        ("drawing-pdf", Path("/project/tar-case.pdf")),
+        ("excellon", Path("/project/tar-case.drl")),
+    )
+    project = manifest.Manifest(values={"output": {"targets": declared}})
+    app = Workbench(_session(project=project))
+    async with app.run_test() as pilot:
+        await pilot.press("o")
+        await _focus_row(pilot, app, "targets")
+        await pilot.press("enter")
+        app.screen.query_one("#picker", SelectionList).select("drawing-pdf")
+        await pilot.press("enter")
+        targets = app.session.settings.output.targets
+        assert targets.value == declared
+        assert targets.project is None
+
+
+@pytest.mark.asyncio
+async def test_an_empty_ticked_board_list_is_the_declaration_of_none() -> None:
+    """Decision 17: nothing ticked is an answer, recorded at your rank."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("b")
+        await _focus_row(pilot, app, "boards")
+        await pilot.press("enter")
+        picker = app.screen.query_one("#picker", SelectionList)
+        picker.deselect_all()
+        await pilot.press("enter")
+        boards = app.session.settings.boards.boards
+        assert boards.value == ()
+        assert boards.provenance.origin is Origin.USER
+
+
+@pytest.mark.asyncio
+async def test_panel_references_are_typed_until_a_run_has_read_designators() -> None:
+    """Decision 6: the designators arrive with the boards, so the list comes later."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("b")
+        await _focus_row(pilot, app, "panel_reference")
+        await pilot.press("enter")
+        assert app.query("#editor")
+        assert not app.screen.query("#picker")
+        await pilot.press("escape")
+
+        app.session.record_designators({1: ("SW1", "RV1")})
+        await _focus_row(pilot, app, "panel_reference")
+        await pilot.press("enter")
+        picker = app.screen.query_one("#picker", SelectionList)
+        picker.select_all()
+        await pilot.press("enter")
+        assert app.session.settings.boards.panel_reference.value == "RV1,SW1"
+
+
+@pytest.mark.asyncio
+async def test_a_picker_whose_answers_cannot_be_read_says_so() -> None:
+    """A missing artwork is reported on the footer, never raised out of the app."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await _focus_row(pilot, app, "drill_layer")
+        await pilot.press("enter")
+        assert not app.screen.query("#picker")
+        assert "cannot read" in app.message
+
+
+def test_every_row_a_place_states_is_a_row_a_user_can_edit() -> None:
+    """The two tables are one statement; a field in either alone is a defect."""
+    settings = Settings.of_defaults(_PANEL)
+    for place, fields in FIELDS.items():
+        stated = {field for field, _label, _value in getattr(settings, place.value).rows()}
+        assert {field.name for field in fields} == stated
+
+
+def test_every_value_the_workbench_exposes_is_reachable_through_the_manifest() -> None:
+    """Decision 6: the command line identifies the work, the project how it is done.
+
+    A row the project cannot declare would be re-entered on every open.
+    ``panel`` is the one exception, and names itself: the manifest is named
+    after the panel, so recording it would answer a settled question twice.
+    """
+    from stompcad.manifest import PLACES
+
+    for place, fields in FIELDS.items():
+        declarable = PLACES[place.value] | ({"panel"} if place is Place.ARTWORK else set())
+        assert {field.name for field in fields} <= declarable, place

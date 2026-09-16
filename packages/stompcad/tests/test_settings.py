@@ -91,7 +91,7 @@ def test_a_place_reports_each_row_with_its_provenance() -> None:
     from stompcad.settings import Settings
 
     settings = Settings.of_defaults(Path("tar.ai"))
-    rows = dict(settings.drilling.rows())
+    rows = {label: stated for _field, label, stated in settings.drilling.rows()}
     assert rows["grid"] == "0.25, default"
     assert rows["drill standard"] == "metric, default"
 
@@ -106,7 +106,7 @@ def test_an_enum_valued_row_describes_the_flag_string_not_the_member_name() -> N
     from stompcad.settings import Settings
 
     settings = Settings.of_defaults(Path("tar.ai"))
-    rows = dict(settings.enclosure.rows())
+    rows = {label: stated for _field, label, stated in settings.enclosure.rows()}
     assert rows["drilled face"] == "box, default"
 
 
@@ -121,3 +121,15 @@ def test_settings_name_every_place() -> None:
         "boards",
         "output",
     ]
+
+
+def test_every_row_names_the_field_it_states() -> None:
+    """The workbench joins its own field table to these rows by name, not by position."""
+    from stompcad.settings import Settings
+
+    settings = Settings.of_defaults(Path("tar.ai"))
+    names = {field for field, _label, _stated in settings.drilling.rows()}
+    assert names == {
+        "grid_mm", "grid_warn_mm", "drill_standard",
+        "drill_sizes", "no_drill_sizes", "title",
+    }
