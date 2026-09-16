@@ -195,14 +195,16 @@ def table_bindings(namespace: str = "") -> list[BindingType]:
 
 @dataclass(frozen=True, slots=True)
 class RunView:
-    """What the `Run` place draws: the record so far, and where the run stands.
+    """What the `Run` place draws: the whole step list, the reports, the position.
 
-    Passed in rather than read off a session, because none of it is a rule:
-    the lines are what a pipe would have received and the position is the
-    one the progress tree folded.
+    ``steps`` is every step of the plan, finished or not, so the place holds
+    the list live rather than only what is done (decision 2). ``reports`` is
+    what a write step said, kept apart because the step lines are built from
+    the plan and would otherwise be drawn twice.
     """
 
-    lines: tuple[str, ...] = ()
+    steps: tuple[str, ...] = ()
+    reports: tuple[str, ...] = ()
     position: float = 0.0
     branch: str = ""
 
@@ -227,7 +229,9 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
         pane.compose_add_child(
             Static(position_line(run.position, run.branch), id="run-position", markup=False)
         )
-        pane.compose_add_child(Static("\n".join(run.lines), id="run-lines", markup=False))
+        pane.compose_add_child(
+            Static("\n".join((*run.steps, *run.reports)), id="run-lines", markup=False)
+        )
     elif place in CONFIGURATION:
         record = getattr(session.settings, place.value)
         for field, label, stated in record.rows():
@@ -319,11 +323,9 @@ class Editor(Input):
 
         Textual consumes a printable key here already, so a bare letter
         never reaches a binding; a ``Ctrl``+letter would, and ``Ctrl+R``
-        mid-edit commits minutes of kernel work nobody asked for. The stop
-        is bound with priority and is answered before this, which is what
-        decision 14 means by stopping from anywhere.
+        mid-edit commits minutes of kernel work nobody asked for.
         """
-        if _is_chord(event.key):
+        if _claimed(event.key):
             event.stop()
             event.prevent_default()
 
@@ -333,9 +335,15 @@ class Editor(Input):
         self.remove()
 
 
-def _is_chord(key: str) -> bool:
-    """Whether this key is a plain ``Ctrl``+letter, the form a place's keys take."""
-    return len(key) == len("ctrl+x") and key.startswith("ctrl+") and key[-1].isalpha()
+def _claimed(key: str) -> bool:
+    """Whether a place owns this chord, which is what a field must not leak.
+
+    By the table rather than by spelling: suppressing every ``Ctrl``+letter
+    took Textual's own editing chords from the one field this application
+    has. ``ctrl+c`` is absent because it is a priority binding, answered
+    before the focused widget ever sees it.
+    """
+    return key in LOCAL_KEYS
 
 
 class Ticks(SelectionList[str]):

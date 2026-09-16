@@ -104,7 +104,7 @@ def _attempt(app: Workbench) -> None:
         _finish(app, EXIT_CANCELLED, None, (), {})
         return
     except BaseException as failure:  # noqa: BLE001 - shown in the app, not raised
-        app.call_from_thread(app.fault, failure)
+        _tell(app, app.fault, failure)
         return
     severities = [drill.worst_severity] + ([] if dock is None else [dock.worst_severity])
     found = [severity for severity in severities if severity is not None]
@@ -126,7 +126,17 @@ def _finish(
     designators: dict[int, tuple[str, ...]],
 ) -> None:
     """Cross to the app thread with everything the places need to draw."""
+    _tell(app, app.completed, code, diagnostics, written, designators)
+
+
+def _tell(app: Workbench, report: Callable[..., None], *carried: object) -> None:
+    """Cross to the app thread, or give up because the crossing cannot be made.
+
+    ``call_from_thread`` raises once the app has gone, which a confirmed
+    quit during a run makes reachable on either crossing -- and a raise on
+    the worker ends nowhere at all.
+    """
     try:
-        app.call_from_thread(app.completed, code, diagnostics, written, designators)
+        app.call_from_thread(report, *carried)
     except RuntimeError:
-        pass  # the app went away first; there is nothing left to tell
+        pass

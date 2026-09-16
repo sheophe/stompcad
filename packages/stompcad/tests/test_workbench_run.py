@@ -6,9 +6,11 @@ import asyncio
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
+from typing import NoReturn
 
 import pytest
 from textual.pilot import Pilot
+from textual.widgets import Input, Static
 
 from stompcad import cli, manifest
 from stompcad.cancel import EXIT_CANCELLED, Cancelled
@@ -18,12 +20,13 @@ from stompcad.plan import DRILL_AND_DOCK, RunPlan
 from stompcad.present import Presentation
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
+from stompcad.workbench import run
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.keys import Place
 from stompcad.workbench.places import ValueRow
 from stompcad.workbench.run import Launch, WorkbenchPresentation
 from stompcad.workbench.session import Phase, Session
-from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.diagnostics import EXIT_WARNINGS, Diagnostic, Severity
 
 __all__: list[str] = []
 
@@ -59,8 +62,9 @@ class _Compose:
     is a hung suite rather than a failing test.
     """
 
-    def __init__(self, hold: bool) -> None:
+    def __init__(self, hold: bool, finding: Diagnostic | None = None) -> None:
         self.hold = hold
+        self.finding = finding
         self.released = Event()
 
     def __call__(
@@ -83,12 +87,22 @@ class _Compose:
                 raise Cancelled("cancelled at 22%")
             if not app.is_running:
                 raise Cancelled("the app went away")
-        return Driver(plan, presentation, options), _Data(), None
+        found = () if self.finding is None else (self.finding,)
+        return Driver(plan, presentation, options), _Data(found), None
 
 
-def _fake_launch(hold: bool = False) -> Launch:
+def _fake_launch(hold: bool = False, finding: Diagnostic | None = None) -> Launch:
     """A launch whose composed run costs nothing; Task 11 runs the real one."""
-    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Compose(hold))
+    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Compose(hold, finding))
+
+
+async def _open_editor(pilot: Pilot[int], app: Workbench, field: str) -> None:
+    """Open the one text field, on a row that carries one."""
+    row = next(row for row in app.query(ValueRow) if row.field == field)
+    row.focus()
+    await pilot.pause()
+    await pilot.press("enter")
+    assert app.query("#editor"), "no field opened, so nothing below is about one"
 
 
 # -- the project ----------------------------------------------------------
@@ -215,26 +229,48 @@ async def test_every_bare_letter_still_moves_while_the_run_works() -> None:
 
 @pytest.mark.asyncio
 async def test_an_open_editor_suppresses_the_chord_that_starts_a_run() -> None:
-    """Decision 3: an open text field suppresses every key a place owns, chords too."""
+    """Decision 3: an open text field suppresses every key a place owns, chords too.
+
+    The message is the discriminator, not the phase: an unsuppressed
+    ``ctrl+r`` here reaches the application and is refused for belonging to
+    another place, which leaves the phase alone and would prove nothing.
+    """
     app = Workbench(_session(), launch=_fake_launch())
     async with app.run_test() as pilot:
         await pilot.press("d")
-        row = next(row for row in app.query(ValueRow) if row.field == "title")
-        row.focus()
+        await _open_editor(pilot, app, "title")
+        await pilot.press("ctrl+r")
         await pilot.pause()
-        await pilot.press("enter", "ctrl+r")
-        await pilot.pause()
+        assert app.message == ""
         assert app.session.phase is Phase.IDLE
 
 
 @pytest.mark.asyncio
-async def test_the_same_chord_on_the_run_place_does_start_one() -> None:
-    """The control: a suppression that never lifted would refuse every run."""
+async def test_the_same_chord_with_no_field_open_reaches_the_application() -> None:
+    """The control: a suppression that never lifted would silence the refusal too."""
     app = Workbench(_session(), launch=_fake_launch())
     async with app.run_test() as pilot:
-        await pilot.press("r", "ctrl+r")
+        await pilot.press("d", "ctrl+r")
         await pilot.pause()
-        assert app.session.phase in (Phase.RUNNING, Phase.DONE)
+        assert "belongs to Run" in app.message
+
+
+@pytest.mark.asyncio
+async def test_an_open_field_keeps_the_chords_no_place_claims() -> None:
+    """The other control: only what a table claims is suppressed, not every chord.
+
+    ``ctrl+k`` is Textual's own "delete to the end of the line". Suppressing
+    chords by their spelling took it, and every other editing chord, away
+    from the one field this application has.
+    """
+    app = Workbench(_session(), launch=_fake_launch())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _open_editor(pilot, app, "title")
+        for character in "Tar":
+            await pilot.press(character)
+        await pilot.press("left", "ctrl+k")
+        assert app.query_one("#editor", Input).value == "Ta"
 
 
 # -- stopping and quitting ------------------------------------------------
@@ -284,6 +320,47 @@ async def test_q_confirms_while_a_run_is_in_flight() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_stop_is_heard_over_a_modal_holding_the_screen() -> None:
+    """Why the stop is the one priority binding: a modal hides the app's table."""
+    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        await pilot.press("q")
+        await pilot.pause()
+        assert app.screen.query("#confirm")
+        await pilot.press("ctrl+c")
+        assert app.stopping
+
+
+@pytest.mark.asyncio
+async def test_confirming_a_quit_during_a_run_earns_the_stop_code() -> None:
+    """Decision 14: a run the user stopped exits 130, whatever it had reached."""
+    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        await pilot.press("q")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.return_value == EXIT_CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_quitting_after_a_completed_run_keeps_the_code_it_earned() -> None:
+    """The control: a stop may end a run, never change what a completed one produced."""
+    finding = Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.01 mm")
+    app = Workbench(_session(), launch=_fake_launch(finding=finding))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await _settle(pilot, app)
+        await pilot.press("q")
+        await pilot.pause()
+    assert app.return_value == EXIT_WARNINGS
+
+
+@pytest.mark.asyncio
 async def test_the_app_opening_with_no_run_exits_clean() -> None:
     """Decision 14: `0` if the app opened and no run happened."""
     app = Workbench(_session(), launch=_fake_launch())
@@ -327,6 +404,34 @@ async def test_the_run_place_keeps_the_line_a_pipe_would_have_received() -> None
         await pilot.press("r", "ctrl+r")
         await _settle(pilot, app)
         assert any("quantise" in line for line in app.settled)
+
+
+@pytest.mark.asyncio
+async def test_the_run_place_lists_a_step_that_has_not_finished() -> None:
+    """Decision 2: the `Run` place holds the step list live, not only what is done."""
+    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        await pilot.pause()
+        listed = str(app.screen.query_one("#run-lines", Static).content)
+        assert "read panel" in listed, "a finished step is missing from the list"
+        assert "read-panel done" in listed
+        assert "write assembly" in listed, "a step still to come is missing from the list"
+        assert "write-assembly done" not in listed
+
+
+@pytest.mark.asyncio
+async def test_a_fault_after_the_app_has_gone_is_not_raised_on_the_worker() -> None:
+    """A confirmed quit outruns the worker, and a raise there ends nowhere."""
+
+    def explode(*_args: object, **_kwargs: object) -> NoReturn:
+        raise ValueError("the kernel gave up")
+
+    app = Workbench(_session(), launch=Launch(panel=_PANEL, compose=explode))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+    run._attempt(app)  # the crossing cannot be made; the fault has nowhere to go
 
 
 @pytest.mark.asyncio

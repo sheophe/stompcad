@@ -29,6 +29,7 @@ from stompmodel.errors import StompError
 from stompmodel.model import CaseFace
 
 from .. import discover
+from ..cancel import EXIT_CANCELLED
 from ..plan import RunPlan, Step
 from ..present import step_line
 from .keys import GLOBAL_VERBS, LOCAL_KEYS, PLACE_KEYS, RUN_KEYS, STEP_KEYS, Place
@@ -82,6 +83,7 @@ class Workbench(App[int], inherit_bindings=False):
         # it (decision 15), plus where the run stands while it is working.
         self.plan: RunPlan | None = None
         self.settled: list[str] = []
+        self.reports: list[str] = []
         self.outcomes: dict[str, str] = {}
         self.position = 0.0
         self.branch = ""
@@ -129,8 +131,18 @@ class Workbench(App[int], inherit_bindings=False):
         self._show_mode()
 
     def _run_view(self) -> RunView:
-        """What the `Run` place draws, gathered from what the run has reported."""
-        return RunView(tuple(self.settled), self.position, self.branch)
+        """The whole step list, live, and what the run reported besides it.
+
+        Built from the plan rather than from ``settled``, so a step still to
+        come is listed beside the ones already done; ``settled`` stays the
+        record in the order a pipe receives it, which decision 15 compares.
+        """
+        width = self._label_width()
+        steps = () if self.plan is None else tuple(
+            step_line(step.label, self.outcomes.get(step.key, ""), width).rstrip()
+            for step in self.plan.steps
+        )
+        return RunView(steps, tuple(self.reports), self.position, self.branch)
 
     def _refresh(self) -> None:
         """Schedule a redraw from a method the worker crossed into.
@@ -287,8 +299,14 @@ class Workbench(App[int], inherit_bindings=False):
         self._refresh()
 
     def record(self, lines: list[str]) -> None:
-        """The provenance report, which follows the last step unchanged."""
+        """What a write step said, kept in two places on purpose.
+
+        ``settled`` is the record in the order a pipe receives it, step
+        lines and reports interleaved; ``reports`` is the part the `Run`
+        place draws beneath a step list it builds from the plan.
+        """
         self.settled.extend(lines)
+        self.reports.extend(lines)
         self._refresh()
 
     def completed(
@@ -337,6 +355,7 @@ class Workbench(App[int], inherit_bindings=False):
             return
         self.plan = self.launch.plan
         self.settled = []
+        self.reports = []
         self.outcomes = {}
         self.position = 0.0
         self.branch = ""
@@ -397,9 +416,15 @@ class Workbench(App[int], inherit_bindings=False):
         self.exit(self.session.exit_code)
 
     def _quit_confirmed(self, leave: bool | None) -> None:
+        """Decision 14: a run the user stopped exits 130, whatever it had reached.
+
+        This branch alone. Quitting with no run still exits 0, and quitting
+        after a run keeps the code that run earned, so a stop may end a run
+        without changing what a completed one produced.
+        """
         if leave:
             self.action_stop_run()
-            self.exit(self.session.exit_code)
+            self.exit(EXIT_CANCELLED)
 
     def action_window(self) -> None:
         """Open the viewer on the current subject.
