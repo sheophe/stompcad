@@ -1,6 +1,7 @@
 # ADR-0014: The workbench and its resolution
 
-**Status:** Accepted
+**Status:** Accepted, amended: the sidebar now takes focus, and the arrows
+move between it and the place (see *The key model is semi-modal*).
 
 ## Context
 
@@ -70,9 +71,15 @@ Each of the eight places owns one unique bare letter — `p` `a` `e` `d` `b` `o`
 `r` `f` — and three letters no place claims are global verbs: `w` opens the
 window on the current subject, `q` quits, `?` shows the keys. Arrows move
 between neighbouring elements, `enter` enters or commits, `esc` cancels or
-closes, everywhere. `tab` and `Ctrl`+letter belong to the place. The sidebar is
-never focused: it is a map, not a control, and one pane holds focus so there is
-no pane model to learn. A sidebar row is clickable and `[`/`]` step between
+closes, everywhere. `tab` and `Ctrl`+letter belong to the place. The workbench
+has two panes, the sidebar and the place, and the arrows move between them:
+`←` from a place focuses the sidebar, `↑`/`↓` there step between places, and
+`→` or `enter` goes into the place. Arrows are what a builder unfamiliar with
+terminal applications tries first, so they are the route that needs no
+teaching, while the letters stay the fast route for someone who has learnt
+them; both must exist. Stepping in the sidebar changes the place as it moves,
+exactly as a letter does, so the two routes never disagree about where the
+user is. A sidebar row is clickable and `[`/`]` step between
 neighbouring places, so the design never depends on memory it has not yet
 taught; both resolve to the same place change a letter makes, so neither is a
 second navigation model. Starting a run takes two keys — `r` then `Ctrl+R`, or
