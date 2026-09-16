@@ -24,7 +24,7 @@ from stompcad.workbench.keys import (
     STEP_KEYS,
     Place,
 )
-from stompcad.workbench.places import FIELDS, ValueRow
+from stompcad.workbench.places import FIELDS, PickerScreen, ValueRow
 from stompcad.workbench.session import Session
 
 __all__: list[str] = []
@@ -461,6 +461,57 @@ async def test_a_picker_whose_answers_cannot_be_read_says_so() -> None:
         await pilot.press("enter")
         assert not app.screen.query("#picker")
         assert "cannot read" in app.message
+
+
+@pytest.mark.asyncio
+async def test_a_path_typed_into_artwork_starts_the_project(tmp_path: Path) -> None:
+    """Decision 6: a blocked start is usable, and a typed path is what starts it.
+
+    Exiting at a builder who ran the tool in the wrong directory is the
+    command line's reflex, so the row that states there is no artwork is
+    also the row that answers it -- and the run that follows is over what
+    was typed there.
+    """
+    panel = tmp_path / "artwork" / "tar.ai"
+    panel.parent.mkdir()
+    panel.write_bytes(b"")
+    elsewhere = tmp_path / "empty"
+    elsewhere.mkdir()
+    app = cli._workbench_for(cli.build_parser().parse_args([]), elsewhere)
+    assert app.launch is None, "nothing was named, so there is no project to run yet"
+
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await _focus_row(pilot, app, "panel")
+        await pilot.press("enter")
+        app.query_one("#editor", Input).value = str(panel)
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.session.settings.artwork.panel.value == panel
+        assert app.session.obstacle is None
+        assert app.launch is not None and app.launch.panel == panel
+
+
+@pytest.mark.asyncio
+async def test_several_artworks_offer_the_artwork_row_a_pick(tmp_path: Path) -> None:
+    """Decision 6: several `.ai` files offer a pick, on the row that holds the answer."""
+    for name in ("fuzz.ai", "tar.ai"):
+        (tmp_path / name).write_bytes(b"")
+    app = cli._workbench_for(cli.build_parser().parse_args([]), tmp_path)
+
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await _focus_row(pilot, app, "panel")
+        await pilot.press("enter")
+        picker = app.screen
+        assert isinstance(picker, PickerScreen)
+        assert {Path(choice).name for choice in picker.choices} == {"fuzz.ai", "tar.ai"}
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session.settings.artwork.panel.value == tmp_path / "fuzz.ai"
+        assert app.launch is not None and app.launch.panel == tmp_path / "fuzz.ai"
 
 
 def test_every_row_a_place_states_is_a_row_a_user_can_edit() -> None:

@@ -124,6 +124,12 @@ def field_of(place: Place, name: str) -> Field:
 def choices_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
     """The answers this row's picker offers, from whoever owns the question."""
     panel = session.settings.artwork.panel.value
+    if field == "panel":
+        # Decision 6: several artwork files offer a pick rather than a
+        # refusal, and the row that states which one is open is the row that
+        # offers them. With none found there is nothing to offer and the
+        # path is typed instead.
+        return tuple(str(path) for path in session.panel_candidates)
     if field in ("drill_layer", "reference_layer"):
         return () if panel is None else discover.layers(panel)
     if field == "case":

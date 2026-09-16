@@ -21,10 +21,11 @@ import pytest
 from textual.pilot import Pilot
 
 from stompcad import cli
+from stompcad.cancel import EXIT_CANCELLED
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.session import Phase
 from stompdrill import cli as stompdrill_cli
-from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, EXIT_WARNINGS
+from stompmodel.diagnostics import EXIT_USAGE, EXIT_WARNINGS
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, case_model
 
 __all__: list[str] = []
@@ -732,7 +733,12 @@ async def test_the_workbench_s_exit_lines_are_the_pipe_s_bytes(tmp_path: Path) -
         pytest.skip("no cached 1590B model")
     piped = io.StringIO()
     project = _tar_project(tmp_path, model)
-    assert cli._run(_args(project), piped) in (EXIT_CLEAN, EXIT_WARNINGS)
+    code = cli._run(_args(project), piped)
+    # The tar boards interfere, and a clash is stompcollider's deliverable
+    # rather than a broken run: what this needs is a run that happened, so
+    # the code is held to the two that mean it did not.
+    assert code not in (EXIT_USAGE, EXIT_CANCELLED), piped.getvalue()
+    assert (tmp_path / "out.drl").is_file()
 
     app = _workbench_over(project)
     async with app.run_test() as pilot:
@@ -742,3 +748,4 @@ async def test_the_workbench_s_exit_lines_are_the_pipe_s_bytes(tmp_path: Path) -
     assert app.failure is None
     assert app.session.phase is Phase.DONE
     assert "\n".join(app.settled) + "\n" == piped.getvalue()
+    assert app.session.exit_code == code, "one run, two presentations, two statuses"

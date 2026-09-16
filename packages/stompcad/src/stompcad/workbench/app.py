@@ -12,6 +12,7 @@ key before any binding is checked. The stop is, because it must outrank a modal.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -140,11 +141,11 @@ class Workbench(App[int], inherit_bindings=False):
             return
         base = self._base if self._base is not None else self.screen
         body = next(iter(base.query("#body").results(Vertical)), None)
-        if body is None or not body.is_mounted:
+        if body is None or not _mounted(body):
             return
         base.query_one(Sidebar).show(self.session.rows())
         await body.remove_children()
-        if not body.is_mounted:
+        if not _mounted(body):
             return  # the app went during the await; there is nothing to mount into
         await body.mount(pane_for(self.session, self.session.place, self._run_view()))
         rows = list(body.query(FocusRow))
@@ -251,8 +252,7 @@ class Workbench(App[int], inherit_bindings=False):
             self.message = "nothing is editable while a run is working"
             return
         field = field_of(event.place, event.field)
-        typed = field.name == "panel_reference" and not self.session.designators
-        if field.kind in (Kind.CHOICE, Kind.MANY) and not typed:
+        if self._picks(field):
             self._open_picker(event.place, field)
             return
         base = self._base if self._base is not None else self.screen
@@ -263,6 +263,20 @@ class Workbench(App[int], inherit_bindings=False):
         assert isinstance(pane, Widget)
         await pane.mount(editor, after=event.row)
         editor.focus()
+
+    def _picks(self, field: Field) -> bool:
+        """Whether `enter` here opens a list rather than a field. Decision 3.
+
+        Two rows carry answers only sometimes, so neither is decided by its
+        kind: the panel is a typed path until the directory offers
+        candidates, and a board's designators arrive with the run that reads
+        it. Everything else is a list wherever the tool that owns it has one.
+        """
+        if field.name == "panel":
+            return bool(self.session.panel_candidates)
+        if field.name == "panel_reference":
+            return bool(self.session.designators)
+        return field.kind in (Kind.CHOICE, Kind.MANY)
 
     def _open_picker(self, place: Place, field: Field) -> None:
         """Offer the owning tool's answers, or say why there are none to offer."""
@@ -297,13 +311,36 @@ class Workbench(App[int], inherit_bindings=False):
         await self.redraw(editor.row.field)
 
     def _commit(self, place: Place, field: str, answer: object) -> None:
-        """Convert, then hand the value over; a refusal is shown, never taken."""
+        """Convert, then hand the value over; a refusal is shown, never taken.
+
+        A panel is not one value of a project: it *is* the project, so that
+        row starts one rather than setting a field. Decision 6's blocked
+        start is only usable because of this.
+        """
         try:
-            self.session.set(place, field, _as_value(self.session, place, field, answer))
-        except (Refused, Locked, ValueError) as failure:
+            value = _as_value(self.session, place, field, answer)
+            if place is Place.ARTWORK and field == "panel":
+                self._adopt_panel(value)
+            else:
+                self.session.set(place, field, value)
+        except (Refused, Locked, ValueError, StompError, OSError) as failure:
             self.message = str(failure)
             return
         self.message = ""
+
+    def _adopt_panel(self, value: object) -> None:
+        """Resolve the project this path names, and aim the run at it.
+
+        The launch follows the panel because a workbench opened without one
+        has no project to run: leaving it behind would resolve a project the
+        run row still could not start.
+        """
+        if not isinstance(value, Path):
+            raise ValueError("artwork.panel: name the artwork file to read")
+        self.session.adopt_panel(value)
+        self.launch = (
+            Launch(panel=value) if self.launch is None else replace(self.launch, panel=value)
+        )
 
     # -- the run -----------------------------------------------------------
 
@@ -605,6 +642,17 @@ def _many(answer: object) -> tuple[str, ...]:
 def _is_text(widget: object) -> bool:
     """Whether this widget is an open text field, which is what suppresses letters."""
     return isinstance(widget, (Input, TextArea))
+
+
+def _mounted(widget: Widget) -> bool:
+    """Whether this widget is still in the tree, asked afresh each time.
+
+    A call rather than the attribute: what was true before an ``await`` is
+    not what the next line is asking about, and a reader that keeps the
+    first answer -- mypy's ``warn_unreachable`` does -- calls the second
+    check dead code.
+    """
+    return widget.is_mounted
 
 
 class KeysScreen(ModalScreen[None]):
