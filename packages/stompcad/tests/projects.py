@@ -28,15 +28,22 @@ PANEL = Path("/project/tar.ai")
 
 
 def session(
-    ready: bool = True, validator: Callable[[Settings, str], None] | None = None
+    ready: bool = True,
+    validator: Callable[[Settings, str], None] | None = None,
+    settings: Settings | None = None,
 ) -> Session:
-    """A session whose edits are checked by the real consuming tool, as a run's are."""
-    resolved = runnable() if ready else replace(runnable(), boards=DEFAULTS.boards)
+    """A session whose edits are checked by the real consuming tool, as a run's are.
+
+    ``settings`` replaces the whole project where a test needs one of its
+    own -- real files for the viewer, say -- rather than a patched copy.
+    """
+    if settings is None:
+        settings = runnable() if ready else replace(runnable(), boards=DEFAULTS.boards)
     return Session(
         Resolution(
-            settings=resolved,
+            settings=settings,
             notes=(),
-            blockers=readiness(resolved),
+            blockers=readiness(settings),
             project=manifest.Manifest(),
         ),
         validator=validator,

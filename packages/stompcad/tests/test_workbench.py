@@ -32,7 +32,14 @@ from stompcad.workbench.keys import (
     TO_SIDEBAR,
     Place,
 )
-from stompcad.workbench.places import FIELDS, FocusRow, PickerScreen, ValueRow
+from stompcad.workbench.places import (
+    FIELDS,
+    FindingRow,
+    FocusRow,
+    PickerScreen,
+    ValueRow,
+    finding_lines,
+)
 from stompcad.workbench.session import Session
 from stompcad.workbench.sidebar import Sidebar, SidebarRow
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -509,8 +516,8 @@ async def test_a_local_key_pressed_in_another_place_is_refused_and_says_so() -> 
 
 
 @pytest.mark.asyncio
-async def test_the_window_verb_reports_that_no_viewer_is_installed() -> None:
-    """Decision 13: `available()` false means `w` explains, never fails. Plan 4 fills it."""
+async def test_the_window_verb_away_from_an_artefact_says_where_the_viewer_opens() -> None:
+    """Decision 13 as decided: `w` never picks a file for the builder."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("w")
@@ -952,6 +959,63 @@ async def test_information_is_listed_but_not_counted() -> None:
         assert not row.attention
 
 
+def test_findings_are_grouped_under_their_family_with_its_prose() -> None:
+    session = _session()
+    session.record_findings([
+        Diagnostic.warning("off-grid", "hole 7 moved onto the grid"),
+        Diagnostic.error("wrong-enclosure", "1590B does not match the outline"),
+    ])
+    lines = "\n".join(finding_lines(session))
+    assert "Change the artwork" in lines and "Change a setting" in lines
+    assert "needs attention" in lines, "the family's prose is missing"
+    assert "hole 7 moved onto the grid" in lines
+
+
+def test_a_family_with_no_findings_is_not_drawn() -> None:
+    session = _session()
+    session.record_findings([Diagnostic.warning("off-grid", "…")])
+    assert "Fix or re-export a board" not in "\n".join(finding_lines(session))
+
+
+def test_a_fit_finding_is_stated_in_its_register() -> None:
+    """The gravest register reached by a WARNING: the case a severity rule gets wrong."""
+    session = _session()
+    session.record_findings([
+        Diagnostic.warning("enclosure-too-shallow", "the lid will not close"),
+        Diagnostic.info("zero-clearance", "RV1 touches the wall"),
+    ])
+    lines = "\n".join(finding_lines(session))
+    assert "do not build this yet" in lines
+    assert "result available for inspection" in lines
+
+
+def test_a_second_route_is_offered_where_there_is_one() -> None:
+    session = _session()
+    session.record_findings([Diagnostic.warning("off-grid", "…")])
+    assert "set the grid" in "\n".join(finding_lines(session))
+
+
+def test_nothing_to_report_is_still_said() -> None:
+    assert finding_lines(_session()) == ("Nothing to report.",)
+
+
+@pytest.mark.asyncio
+async def test_the_findings_place_mounts_the_prose_and_the_rows_a_finding_answers() -> None:
+    """What is drawn, not only what the function returns: prose on screen, and
+    a row for the finding a row answers but not for the one no row does."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([
+            Diagnostic.error("wrong-case-model", "the model is a 1590A"),
+            Diagnostic.warning("multiple-boards", "three boards in one file"),
+        ])
+        await pilot.press("f")
+        shown = app.pane_text()
+        assert "Change a setting" in shown and "Worth knowing" in shown
+        assert "three boards in one file" in shown
+        assert len(list(app.query(FindingRow))) == 1
+
+
 @pytest.mark.asyncio
 async def test_an_artefact_already_on_disk_is_never_called_current(tmp_path: Path) -> None:
     """Decision 2: the workbench cannot know it matches, and must not imply it."""
@@ -1057,3 +1121,50 @@ async def test_ctrl_f_without_the_acquiring_tool_says_no_location_is_known(
         await pilot.press("e", "ctrl+f")
         assert "no cache location is known" in app.message
         assert "tools/fetch_case_model.py" in app.message
+
+
+_NEAR_MISS = Diagnostic.warning(
+    "unmatched-part",
+    "RV1 lands 0.412 mm from hole 7, its nearest",
+    data=(("designator", "RV1"), ("nearest_hole", 7), ("offset_nm", 412000)),
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("found", "place", "field"),
+    [
+        (Diagnostic.warning("nesting-truncated", "a form nests past the depth read"),
+         Place.ARTWORK, "form_depth"),
+        (Diagnostic.error("wrong-case-model", "the model is a 1590A"),
+         Place.ENCLOSURE, "case_model"),
+        (_NEAR_MISS, Place.BOARDS, "match_tolerance_mm"),
+    ],
+)
+async def test_enter_on_a_finding_jumps_to_the_field_that_answers_it(
+    found: Diagnostic, place: Place, field: str
+) -> None:
+    """The row, not only the place. None of these fields is its place's first
+    row, which is where a jump carrying only the place would land."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([found])
+        await pilot.press("f")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session.place is place
+        assert isinstance(app.focused, ValueRow)
+        assert app.focused.field == field
+
+
+@pytest.mark.asyncio
+async def test_a_jump_needs_a_row_to_land_on() -> None:
+    """The control: a finding no row answers is text, so enter moves nowhere."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([Diagnostic.warning("multiple-boards", "three boards")])
+        await pilot.press("f")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session.place is Place.FINDINGS
+        assert not list(app.query(FindingRow))

@@ -1,9 +1,12 @@
 # ADR-0014: The workbench and its resolution
 
-**Status:** Accepted, amended twice: the sidebar now takes focus and the
-arrows move between it and the place (see *The key model is semi-modal*);
+**Status:** Accepted, amended three times: the sidebar now takes focus and
+the arrows move between it and the place (see *The key model is semi-modal*);
 the boards lost their discovered rank and the enclosure part gained one in
-the workbench alone (see *Resolution has four ranks*).
+the workbench alone (see *Resolution has four ranks*); the window opens only
+when asked, and `enter` gained two subject-specific meanings — on a finding
+it goes to the place that answers it, on an artefact in `Output` it opens the
+viewer (see *The window shows what a run wrote, and opens only when asked*).
 
 ## Context
 
@@ -70,10 +73,12 @@ application it cannot answer and would otherwise hang against.
 ### The key model is semi-modal: bare letters are global, Ctrl is local
 
 Each of the eight places owns one unique bare letter — `p` `a` `e` `d` `b` `o`
-`r` `f` — and three letters no place claims are global verbs: `w` opens the
-window on the current subject, `q` quits, `?` shows the keys. Arrows move
-between neighbouring elements, `enter` enters or commits, `esc` cancels or
-closes, everywhere. `tab` and `Ctrl`+letter belong to the place. The workbench
+`r` `f` — and three letters no place claims are global verbs: `w` views the
+focused artefact, `q` quits, `?` shows the keys. Arrows move
+between neighbouring elements, `enter` enters or commits — on a finding a row
+answers, it goes to that row; on an artefact in `Output`, it opens the
+viewer; both commit what the line is for — `esc` cancels or closes,
+everywhere. `tab` and `Ctrl`+letter belong to the place. The workbench
 has two panes, the sidebar and the place, and the arrows move between them:
 `←` from a place focuses the sidebar, `↑`/`↓` there step between places, and
 `→` or `enter` goes into the place. Arrows are what a builder unfamiliar with
@@ -92,6 +97,30 @@ it is closed twice: the footer always states the mode, and the only mode in
 which letters type is an open text field. Every bare letter, every
 `Ctrl`+letter and every place letter must be provably distinct, and an open
 text field must provably suppress all of them.
+
+### The window shows what a run wrote, and opens only when asked
+
+The viewer is handed a path to a file on disk and a mode; nothing else
+crosses the boundary — no geometry, no document, nothing tessellated on this
+side. `highlight` carries opaque identifiers that the viewer interprets: a
+hole's number, a board's ordinal, a designator, whatever a finding names.
+
+It shows what a run wrote, and opens only when asked. In `Output`, each
+artefact is a row, and `enter` on one opens the viewer on that file. `w` does
+the same on a focused artefact and otherwise says where to go; it never picks
+a file for the builder. Nothing opens by itself.
+
+The run's report is listed in `Output` but is not a row, so the viewer is
+never asked to draw it. Nothing claims its contents are shown elsewhere.
+
+Nothing returns a value and nothing waits. The window is non-interactive,
+which is what stops it becoming something a run depends on. `available()`
+false is explained rather than raised; the default implementation is the
+null one.
+
+Showing a panel before anything is written is not offered: the drill
+document lives in the run's process since ADR-0013's amendment, and nothing
+carries it back. That was decided, not overlooked.
 
 ### The sidebar carries three independent states per row
 

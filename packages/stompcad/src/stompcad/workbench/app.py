@@ -50,9 +50,11 @@ from .keys import (
 from .places import (
     Editor,
     Field,
+    FindingRow,
     FocusRow,
     GapRow,
     Kind,
+    OutputRow,
     PickerScreen,
     RunView,
     ValueRow,
@@ -69,6 +71,7 @@ from .runner import ProcessRunner, Runner
 from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
 from .theme import shades
+from .window import NullWindow, ViewRequest, Window
 
 __all__ = ["Workbench", "KeysScreen", "ConfirmScreen"]
 
@@ -130,6 +133,7 @@ class Workbench(App[int], inherit_bindings=False):
         autostart: bool = False,
         cache: Path | None = None,
         runner: Runner | None = None,
+        window: Window | None = None,
     ) -> None:
         super().__init__()
         self.session = session
@@ -139,6 +143,7 @@ class Workbench(App[int], inherit_bindings=False):
         # repository script and an app installed elsewhere has no such tool.
         self.cache = cache
         self.runner: Runner = runner or ProcessRunner()
+        self.window: Window = window or NullWindow()
         _prime_multiprocessing()
         # Decision 1: an invocation carrying something beyond the panel means
         # "do not ask me", so the app opens with the run already moving. A
@@ -186,7 +191,10 @@ class Workbench(App[int], inherit_bindings=False):
 
     def on_unmount(self) -> None:
         """The run's process is asked to go, and waited for if it is writing."""
-        self.runner.close()
+        try:
+            self.runner.close()
+        finally:
+            self.window.close_all()
 
     # -- drawing -----------------------------------------------------------
 
@@ -287,6 +295,44 @@ class Workbench(App[int], inherit_bindings=False):
         )
 
     # -- moving ------------------------------------------------------------
+
+    async def action_address_finding(self) -> None:
+        """Go to the row that answers the focused finding. Decision 11.
+
+        The place and the field travel together, because a place alone lands
+        on its first row -- an input file, for most places -- and not on the
+        value the finding is about. The move is ``action_go``'s own, so a
+        jump leaves a picker and a message exactly as a bare letter does.
+        """
+        row = self.focused
+        if not isinstance(row, FindingRow):
+            return
+        self._leave_modal()
+        self.session.go(row.remedy.place)
+        self.message = ""
+        await self.redraw(row.remedy.field)
+
+    def action_view_output(self) -> None:
+        """Open the viewer on the focused artefact, and only when asked. Decision 13.
+
+        Every way it cannot open is said rather than raised: a viewer that
+        failed loudly would make itself a dependency of the workbench, which
+        is the one thing this boundary exists to prevent. The contract says
+        ``open`` never raises, so a raise here is the viewer breaking its
+        own promise, caught rather than trusted.
+        """
+        row = self.focused
+        if not isinstance(row, OutputRow):
+            self.message = "the viewer opens on an artefact: choose one in Output, then press enter"
+        elif not row.path.is_file():
+            self.message = f"{row.path.name} has not been written yet"
+        elif not self.window.available():
+            self.message = f"no viewer is available; the file is at {row.path}"
+        else:
+            try:
+                self.window.open(ViewRequest(row.path, row.mode, row.path.name))
+            except Exception as error:
+                self.message = f"the viewer could not open {row.path.name}: {error}"
 
     async def action_go(self, place: str) -> None:
         self._leave_modal()
@@ -664,14 +710,13 @@ class Workbench(App[int], inherit_bindings=False):
         self.exit(self.session.exit_code)
 
     def action_window(self) -> None:
-        """Open the viewer on the current subject.
+        """`w`: view the focused artefact. Decision 13 names no other target.
 
-        Decision 13: ``available()`` false means ``w`` explains why rather
-        than failing, and the default implementation is the null one -- so
-        the whole workbench ships, runs and passes its suite with no window
-        in existence. Plan 4 replaces this body with ``Window.open``.
+        `w` never picks a file for the builder -- it acts only on a row
+        already focused in `Output`, so this is exactly what `enter` does
+        there, reached by a second key.
         """
-        self.message = "no viewer is installed, so there is nothing to open"
+        self.action_view_output()
 
     def action_keys(self) -> None:
         self.push_screen(KeysScreen())

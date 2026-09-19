@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from textual import events
 from textual.app import ComposeResult
@@ -32,6 +33,8 @@ from .. import discover
 from ..drive import DOCK_TARGET_NAMES
 from ..settings import Origin, as_flag_string
 from .dialog import Dialog
+from .families import FAMILIES, Family, Remedy
+from .findings import Finding
 from .keys import (
     CONFIGURATION,
     GLOBAL_VERBS,
@@ -43,6 +46,7 @@ from .keys import (
     Place,
 )
 from .session import PendingGap, Session
+from .window import ViewMode, view_mode_for
 
 __all__ = [
     "Kind",
@@ -56,12 +60,18 @@ __all__ = [
     "RunView",
     "NO_RUN",
     "position_line",
+    "FamilyBlock",
+    "family_blocks",
+    "finding_line",
     "finding_lines",
     "output_lines",
+    "output_entries",
     "pane_for",
     "Rows",
     "FocusRow",
     "ValueRow",
+    "FindingRow",
+    "OutputRow",
     "RunRow",
     "GapRow",
     "Editor",
@@ -245,20 +255,68 @@ def position_line(position: float, branch: str) -> str:
     return f"  {position:.0%}  {branch}"
 
 
-def finding_lines(session: Session) -> tuple[str, ...]:
-    """What the `Findings` place lists, in the order the run raised them.
+@dataclass(frozen=True, slots=True)
+class FamilyBlock:
+    """One family and the findings under it, in the run's own order."""
 
-    Plan 4 replaces this body with the six families, their shared prose and
-    the jump to the row that addresses each finding. It is a function rather
-    than a widget so that replacement changes what is said and not where it
-    is said.
+    family: Family
+    findings: tuple[Finding, ...]
+
+
+def family_blocks(session: Session) -> tuple[FamilyBlock, ...]:
+    """The findings grouped by remedy, only for families that hold something.
+
+    Seven headings over one finding is a form rather than a report. Within
+    a family the run's order survives, because the record must agree with
+    the step lines a piped run printed.
     """
-    if not session.findings:
+    held: dict[Family, list[Finding]] = {}
+    for finding in session.findings:
+        held.setdefault(finding.family, []).append(finding)
+    return tuple(FamilyBlock(family, tuple(held[family])) for family in Family if family in held)
+
+
+def finding_line(finding: Finding) -> str:
+    """One finding: its register where its family has them, then what was raised."""
+    register = f"{finding.register.value:<32}" if finding.register is not None else ""
+    raised = finding.diagnostic
+    return f"  {register}{raised.severity.value:<8}{raised.code:<28}{raised.message}"
+
+
+def _block_lines(block: FamilyBlock) -> Iterator[tuple[str, Finding | None]]:
+    """Each line of one family's block, and the finding a line stands for."""
+    prose = FAMILIES[block.family]
+    yield block.family.value, None
+    yield f"  {prose.means}", None
+    yield f"  {prose.routes}", None
+    for finding in block.findings:
+        yield finding_line(finding), finding
+        if finding.secondary:
+            yield f"      {finding.secondary}", None
+
+
+def finding_lines(session: Session) -> tuple[str, ...]:
+    """What the `Findings` place says: the families, their prose, the findings.
+
+    Decision 11 groups by remedy, so the first thing read is what to do
+    rather than who objected.
+    """
+    blocks = family_blocks(session)
+    if not blocks:
         return ("Nothing to report.",)
+    lines: list[str] = []
+    for block in blocks:
+        if lines:
+            lines.append("")
+        lines.extend(line for line, _finding in _block_lines(block))
+    return tuple(lines)
+
+
+def output_entries(session: Session) -> tuple[tuple[str, Path, str], ...]:
+    """Each artefact's kind, its path, and the line stating what is known of it."""
     return tuple(
-        f"{finding.diagnostic.severity.value:<8}{finding.diagnostic.code:<28}"
-        f"{finding.diagnostic.message}"
-        for finding in session.findings
+        (name, path, f"{name:<14}{path}  — {session.label_for(path, exists=path.is_file())}")
+        for name, path in session.settings.output.targets.value
     )
 
 
@@ -278,10 +336,7 @@ def output_lines(session: Session) -> tuple[str, ...]:
         # question instead, which the editable row above already states.
         answered = targets.provenance.origin is not Origin.DEFAULT
         return ("check only — writes nothing",) if answered else ()
-    return tuple(
-        f"{name:<14}{path}  — {session.label_for(path, exists=path.is_file())}"
-        for name, path in targets.value
-    )
+    return tuple(line for _name, _path, line in output_entries(session))
 
 
 def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
@@ -313,13 +368,43 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
         if place is Place.OUTPUT:
             # Beside the row that chooses them, never in place of it: what an
             # artefact is called is editable, what is known about it is not.
-            pane.compose_add_child(Static("\n".join(output_lines(session)), markup=False))
+            _compose_outputs(pane, session)
         gap = session.gap
         if gap is not None and gap.place is place:
             pane.compose_add_child(GapRow(gap))
     else:
-        pane.compose_add_child(Static("\n".join(finding_lines(session)), markup=False))
+        _compose_findings(pane, session)
     return pane
+
+
+def _compose_findings(pane: Rows, session: Session) -> None:
+    """The families as text, with each finding a row answers made focusable.
+
+    The lines are ``finding_lines``'s own, so what is read and what can be
+    focused cannot disagree. Only a finding with a remedy becomes a row: a
+    row that goes nowhere on `enter` teaches the key to be distrusted.
+    """
+    blocks = family_blocks(session)
+    if not blocks:
+        pane.compose_add_child(Static("Nothing to report.", markup=False))
+        return
+    text: list[str] = []
+
+    def flush() -> None:
+        if text:
+            pane.compose_add_child(Static("\n".join(text), markup=False))
+            text.clear()
+
+    for index, block in enumerate(blocks):
+        if index:
+            text.append("")
+        for line, finding in _block_lines(block):
+            if finding is not None and finding.remedy is not None:
+                flush()
+                pane.compose_add_child(FindingRow(finding.remedy, line))
+            else:
+                text.append(line)
+    flush()
 
 
 class Rows(VerticalScroll):
@@ -367,6 +452,67 @@ class FocusRow(Static):
         """
         rows = list(self.screen.query(FocusRow))
         rows[(rows.index(self) + (1 if forward else -1)) % len(rows)].focus()
+
+
+class FindingRow(FocusRow):
+    """A finding a row answers, and `enter` to go there. Decision 11.
+
+    ``field`` stays the empty string it inherits: that attribute names the
+    value a row carries, and this row carries none -- it carries where one
+    lives, which is ``remedy``.
+    """
+
+    BINDINGS = [Binding("enter", "app.address_finding", "go there", show=False)]
+
+    def __init__(self, remedy: Remedy, text: str) -> None:
+        super().__init__(text, markup=False)
+        self.remedy = remedy
+
+
+class OutputRow(FocusRow):
+    """One artefact the viewer can show, and `enter` to look at it.
+
+    Nothing opens by itself: the window appears only when somebody asks for
+    this row's file. Viewing is not editing, so this row answers under a run
+    too -- writes are staged and committed together, so what is on disk is a
+    committed file. An artefact the viewer does not draw is listed, not a row.
+    """
+
+    BINDINGS = [Binding("enter", "app.view_output", "view", show=False)]
+
+    def __init__(self, kind: str, path: Path, mode: ViewMode, text: str) -> None:
+        super().__init__(text, markup=False)
+        self.kind = kind
+        self.path = path
+        self.mode = mode
+
+
+def _compose_outputs(pane: Rows, session: Session) -> None:
+    """Each artefact the viewer can show as a row, the others listed as text.
+
+    Kept in the order the targets are declared, so rows and listed lines read
+    as one list. An artefact with no view -- the run's report -- is never a
+    row, so `enter` cannot land on it.
+    """
+    entries = output_entries(session)
+    if not entries:
+        pane.compose_add_child(Static("\n".join(output_lines(session)), markup=False))
+        return
+    text: list[str] = []
+
+    def flush() -> None:
+        if text:
+            pane.compose_add_child(Static("\n".join(text), markup=False))
+            text.clear()
+
+    for kind, path, line in entries:
+        mode = view_mode_for(kind)
+        if mode is None:
+            text.append(line)
+        else:
+            flush()
+            pane.compose_add_child(OutputRow(kind, path, mode, line))
+    flush()
 
 
 class ValueRow(FocusRow):
