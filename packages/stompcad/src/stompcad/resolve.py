@@ -8,8 +8,8 @@ what carried it, and returns what to ask, never asking anything itself.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -19,32 +19,32 @@ from .present import Choice
 if TYPE_CHECKING:  # ``drive`` imports this module, so this cannot be a runtime import
     from .drive import RunOptions
 
-__all__ = ["RESOLVABLE", "promoted", "question_for", "revision_for"]
-
-#: Each resolvable code, and the step that runs again once it is answered.
-#: Decision 6: a code absent from here never becomes a question, which is
-#: how a refusal stays a refusal. Each step must read the field its answer
-#: revises, which ``test_resolve`` checks against ``_STEP_INPUTS``.
-RESOLVABLE: dict[str, str] = {
-    "ambiguous-enclosure": "quantise",
-    "empty-group": "read-boards",
-}
+__all__ = ["Gap", "RESOLVABLE", "question_for", "revision_for"]
 
 
-def promoted(diagnostics: Sequence[Diagnostic]) -> tuple[Diagnostic, ...]:
-    """Every warning raised to an error, leaving the rest as they are.
+@dataclass(frozen=True, slots=True)
+class Gap:
+    """What answering one code costs: which step runs again, and where to answer.
 
-    Decision 6: promotion happens before the resolvable check, so a
-    promoted warning is asked about on the same path an error is rather
-    than on a second one written beside it. A code with no picker is
-    unaffected either way -- being an error is necessary, not sufficient.
+    Decision 12: the run stops and the app navigates, so the place travels
+    with the code rather than being looked up by whoever happens to be
+    drawing. ``place`` is spelled as ``stale.PLACE_ORDER`` spells it.
     """
-    return tuple(
-        replace(diagnostic, severity=Severity.ERROR)
-        if diagnostic.severity is Severity.WARNING
-        else diagnostic
-        for diagnostic in diagnostics
-    )
+
+    step: str
+    place: str
+    multiple: bool
+
+
+#: Each resolvable code, the step that runs again once it is answered, the
+#: place that answers it and the arity of that answer. Decision 6: a code
+#: absent from here never becomes a question, which is how a refusal stays a
+#: refusal. Each step must read the field its answer revises, which
+#: ``test_resolve`` checks against ``_STEP_INPUTS``.
+RESOLVABLE: dict[str, Gap] = {
+    "ambiguous-enclosure": Gap("quantise", "enclosure", multiple=False),
+    "empty-group": Gap("read-boards", "boards", multiple=True),
+}
 
 
 def question_for(
@@ -62,7 +62,12 @@ def question_for(
     candidates = _candidates(diagnostic, designators or {})
     if not candidates:
         return None
-    return Choice(prompt=diagnostic.message, candidates=candidates)
+    return Choice(
+        prompt=diagnostic.message,
+        candidates=candidates,
+        multiple=RESOLVABLE[diagnostic.code].multiple,
+        code=diagnostic.code,
+    )
 
 
 def _candidates(

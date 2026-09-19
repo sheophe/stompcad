@@ -2,11 +2,11 @@
 
 Spec decision 2 requires one shared line format between a terminal's
 settled scrollback and a pipe's streamed output, so ``PlainWriter`` keeps
-that format in one place rather than duplicating it per output mode.
-Decision 11 requires a genuine gap with no terminal to exit ``3`` naming
-what was missing, which is why ``ask`` raises rather than prompts. Plan B
-implements ``Presentation`` with a live terminal; plan C is ``ask``'s only
-caller.
+that format in one place rather than duplicating it per output mode. The
+presentation specification's decision 11 requires a genuine gap with no
+terminal to exit ``3`` naming what was missing, which is why ``ask`` raises
+rather than prompts. Plan B implements ``Presentation`` with a live
+terminal; plan C is ``ask``'s only caller.
 """
 
 from __future__ import annotations
@@ -39,14 +39,27 @@ class Question(Protocol):
     def prompt(self) -> str: ...
     @property
     def candidates(self) -> tuple[str, ...]: ...
+    @property
+    def multiple(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
 class Choice:
-    """One finite choice: what is asked, and the answers the tool computed."""
+    """One finite choice: what is asked, and the answers the tool computed.
+
+    ``multiple`` is per code rather than per question. A panel is drawn for
+    exactly one part; a board is usually held to the panel by several
+    components, and offering one would satisfy the filter and then earn
+    ``under-constrained-board`` from the next step -- a picker resolving one
+    error into another. ``code`` is the diagnostic's own, so whoever draws
+    the question finds the place that answers it without re-deriving it
+    from a prompt a tool wrote for a person.
+    """
 
     prompt: str
     candidates: tuple[str, ...]
+    multiple: bool = False
+    code: str = ""
 
 
 class Presentation(Protocol):
@@ -62,9 +75,9 @@ class Presentation(Protocol):
 class NoTerminal(StompError):
     """Raised when a run must ask, but has no terminal to ask on.
 
-    Spec decision 11: a pipe or a dumb terminal exits with a usage error
-    naming the missing question, rather than prompting where no one can
-    answer.
+    The presentation specification's decision 11: a pipe or a dumb terminal
+    exits with a usage error naming the missing question, rather than
+    prompting where no one can answer.
     """
 
 

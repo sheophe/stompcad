@@ -83,11 +83,29 @@ read the drill document through `stompmodel` without importing `stompdrill`.
 `stompcad` calls each phase of both tools directly, in the order their own
 command lines call them, and holds each result between the steps. It reports
 the run as nine named steps, writes through the same staged-write transaction
-both tools use, and produces artefacts byte-identical to theirs. On a
-terminal, a Textual app draws that same report inline above the prompt while
-the run continues on a worker thread; without one, a run gets the plain
-step-line log a pipe reads as a log of what happened. See
+both tools use, and produces artefacts byte-identical to theirs. See
 [ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
+
+The orchestrator's presentation is the workbench on a terminal and the plain
+writer everywhere else. The workbench is a full-screen Textual application;
+the composed run itself happens in a process of its own, spawned once and
+kept for the workbench's life, so the interface keeps answering while the
+run's own Python holds its interpreter between kernel calls. The boundary
+between them is closed: what crosses is step lines, positions, diagnostics,
+the questions a pause asks, the answers it takes, a stop, and the paths
+written — nothing the kernel builds travels. The plain writer streams the
+same step lines a pipe, a dumb terminal or a CI runner reads as a log of
+what happened. The workbench renders strings, positions and paths, and
+reaches for a viewer rather than a kernel: `stompcad.workbench.session`
+holds the rules a project resolves and stales by, and the Textual modules
+under `stompcad.workbench` draw them. See
+[docs/specs/stompcad-workbench.md](specs/stompcad-workbench.md).
+
+Because a first `spawn` synchronisation primitive starts multiprocessing's
+resource tracker, which reads `sys.stderr.fileno()`, the workbench primes it
+in `Workbench.__init__` before Textual takes the terminal: Textual's
+redirect would otherwise answer that read with a descriptor the tracker
+cannot use, for as long as the app is running.
 
 ## Shared data and output
 

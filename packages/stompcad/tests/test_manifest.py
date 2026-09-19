@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from stompcad import manifest
+from stompcad.settings import Origin, Provenance, Resolved, Settings
 
 
 def _write(tmp_path: Path, payload: dict[str, object]) -> Path:
     panel = tmp_path / "tar.ai"
     (tmp_path / "tar.stompcad.json").write_text(json.dumps(payload), encoding="utf-8")
     return panel
+
+
+def _settings_with_no_boards(panel: Path) -> Settings:
+    """Defaults with the empty board list recorded as an answer, not a default."""
+    settings = Settings.of_defaults(panel)
+    return replace(
+        settings,
+        boards=replace(settings.boards, boards=Resolved((), Provenance(Origin.PROJECT))),
+    )
 
 
 def test_the_manifest_sits_beside_the_panel_and_is_named_from_it(tmp_path: Path) -> None:
@@ -404,3 +415,87 @@ def test_what_a_half_writes_is_what_the_reader_accepts(tmp_path: Path, half_name
     assert text is not None
     (tmp_path / "tar.stompcad.json").write_text(text, encoding="utf-8")
     manifest.read(panel)
+
+
+def test_a_run_with_no_boards_records_the_empty_list_that_decided_it(tmp_path: Path) -> None:
+    """Decision 17: the confirmed empty list is declared intent and must be remembered.
+
+    A drill-only run has no dock half, so the drill half's commit is the
+    only commit it has. Recording nothing would ask the question again
+    every time the project opened.
+    """
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "tar.ai"
+    settings = _settings_with_no_boards(panel)
+    written = json.loads(payload_for(panel, settings, Half.DRILL_ONLY, manifest.Manifest()) or "{}")
+    assert written["boards"]["boards"] == []
+    assert "artwork" in written and "enclosure" in written
+
+
+def test_the_drill_half_of_a_docking_run_still_declares_no_board(tmp_path: Path) -> None:
+    """The control: the dock half owns `boards` whenever there is a dock half."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "tar.ai"
+    written = json.loads(
+        payload_for(panel, Settings.of_defaults(panel), Half.DRILL, manifest.Manifest()) or "{}"
+    )
+    assert "boards" not in written
+
+
+def test_every_half_names_places_that_exist() -> None:
+    """The structural guard: a half added without a row declares nothing."""
+    from stompcad.manifest import _HALF_PLACES, PLACES, Half
+
+    assert set(_HALF_PLACES) == {half.value for half in Half}
+    for places in _HALF_PLACES.values():
+        assert set(places) <= set(PLACES)
+
+
+def _settings_with_targets(panel: Path, *names: str) -> Settings:
+    """Defaults, with one made-up path per requested format, as a user typed them."""
+    settings = Settings.of_defaults(panel)
+    return replace(
+        settings,
+        output=replace(
+            settings.output,
+            targets=Resolved(
+                tuple((name, panel.parent / f"tar.{name}") for name in names),
+                Provenance(Origin.USER),
+            ),
+        ),
+    )
+
+
+def test_a_drill_half_declares_only_its_own_target_formats(tmp_path: Path) -> None:
+    """Decision 8: ``write case`` must not name a file only ``write assembly`` commits."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "tar.ai"
+    settings = _settings_with_targets(panel, "json", "report", "assembly")
+    written = json.loads(payload_for(panel, settings, Half.DRILL, manifest.Manifest()) or "{}")
+    assert set(written["output"]["targets"]) == {"json"}
+
+
+def test_a_dock_half_declares_only_its_own_target_formats(tmp_path: Path) -> None:
+    """The control: the dock half's own two formats, never a format the drill half rendered."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "tar.ai"
+    settings = _settings_with_targets(panel, "json", "report", "assembly")
+    written = json.loads(payload_for(panel, settings, Half.DOCK, manifest.Manifest()) or "{}")
+    assert set(written["output"]["targets"]) == {"report", "assembly"}
+
+
+def test_no_format_name_belongs_to_both_halves() -> None:
+    """The premise the two tests above rest on: a name identifies one half.
+
+    ``payload_for`` attributes a target by asking whether the dock half
+    names it, which is only an attribution while the two sets are disjoint.
+    An overlap would let the drill half declare a file ``write assembly``
+    has not committed yet, which is the one thing decision 8 forbids.
+    """
+    from stompdrill.emitters import available
+
+    assert not frozenset(available()) & manifest.DOCK_TARGET_NAMES

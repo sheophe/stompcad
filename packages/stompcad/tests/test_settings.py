@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from stompcad.settings import Discovery, Origin, pick
 
 
@@ -40,6 +42,33 @@ def test_a_disagreement_is_carried_not_discarded() -> None:
 
 def test_agreement_says_only_where_the_value_came_from() -> None:
     assert pick(None, None, None, 0.25).describe() == "0.25, default"
+
+
+def test_a_list_states_its_own_items_rather_than_Python_s_spelling_of_them() -> None:
+    """Decision 7: a row is read by a builder, and ``PosixPath`` is not a path."""
+    boards = (Path("/project/tar-pcb.stp"), Path("/project/jack.stp"))
+    resolved = pick(boards, None, None, ())
+    assert resolved.describe() == (
+        "/project/tar-pcb.stp, /project/jack.stp, from the command line"
+    )
+
+
+def test_an_artefact_states_both_the_format_and_where_it_goes() -> None:
+    """The pair is one row's whole answer, so neither half may be dropped."""
+    targets = (("excellon", Path("/project/tar-case.drl")),)
+    assert pick(targets, None, None, ()).describe() == (
+        "excellon: /project/tar-case.drl, from the command line"
+    )
+
+
+@pytest.mark.parametrize("empty", [(), None, ""])
+def test_nothing_reads_as_an_answer_rather_than_as_its_own_spelling(empty: object) -> None:
+    """``()``, ``None`` and a blank are one state on screen, so they read alike.
+
+    A row states an answer a builder can act on. Three spellings of the
+    absent answer -- one of them invisible -- are three things to learn.
+    """
+    assert pick(None, None, None, empty).describe() == "none, default"
 
 
 def test_the_project_agreeing_with_itself_carries_no_disagreement() -> None:
@@ -91,7 +120,7 @@ def test_a_place_reports_each_row_with_its_provenance() -> None:
     from stompcad.settings import Settings
 
     settings = Settings.of_defaults(Path("tar.ai"))
-    rows = dict(settings.drilling.rows())
+    rows = {label: stated for _field, label, stated in settings.drilling.rows()}
     assert rows["grid"] == "0.25, default"
     assert rows["drill standard"] == "metric, default"
 
@@ -106,7 +135,7 @@ def test_an_enum_valued_row_describes_the_flag_string_not_the_member_name() -> N
     from stompcad.settings import Settings
 
     settings = Settings.of_defaults(Path("tar.ai"))
-    rows = dict(settings.enclosure.rows())
+    rows = {label: stated for _field, label, stated in settings.enclosure.rows()}
     assert rows["drilled face"] == "box, default"
 
 
@@ -121,3 +150,15 @@ def test_settings_name_every_place() -> None:
         "boards",
         "output",
     ]
+
+
+def test_every_row_names_the_field_it_states() -> None:
+    """The workbench joins its own field table to these rows by name, not by position."""
+    from stompcad.settings import Settings
+
+    settings = Settings.of_defaults(Path("tar.ai"))
+    names = {field for field, _label, _stated in settings.drilling.rows()}
+    assert names == {
+        "grid_mm", "grid_warn_mm", "drill_standard",
+        "drill_sizes", "no_drill_sizes", "title",
+    }

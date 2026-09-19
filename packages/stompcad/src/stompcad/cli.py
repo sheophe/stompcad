@@ -1,12 +1,12 @@
-"""``stompcad``'s command line: one composed run over both tools.
+"""``stompcad``'s command line: what identifies the work, and nothing else.
 
-Resolves the arguments a run needs, validates every requested target
-together, then drives ``Driver`` under ``track()`` with a presentation that
-is also the sink -- the plain writer without a terminal, decision 11's
-headless path, or the inline app's on a worker thread with one. The exit
-convention is the four codes both tools share, reduced from the worse of the
-two halves' findings, plus spec decision 9's fifth code, 130, for a run the
-user cancelled.
+Resolves the four ranks a run needs and validates every requested target
+together, then opens the workbench on a terminal or drives the run through
+the plain writer where there is none. Workbench decision 15: that second
+path is the only one without an application, so the flags here are exactly
+the facts that identify one piece of work. The exit convention is the four
+codes both tools share, reduced from the worse of the two halves' findings,
+plus the fifth, 130, for a run the user stopped.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO, TypeVar
 
@@ -29,26 +29,18 @@ from stompdrill.emitters import available
 from stompdrill.errors import UsageError as DrillUsageError
 from stompdrill.pipeline import DRILL_STANDARDS, SnapPositions
 from stompdrill.sources import AiPdfSource
-from stompmodel.diagnostics import (
-    EXIT_CLEAN,
-    EXIT_ERRORS,
-    EXIT_USAGE,
-    Severity,
-    exit_for_severity,
-)
+from stompmodel.diagnostics import EXIT_CLEAN, EXIT_USAGE, Severity, exit_for_severity
 from stompmodel.errors import StompError
 from stompmodel.model import CaseFace
-from stompmodel.progress import Sink, track
-from stompmodel.protocols import check_target_set
+from stompmodel.protocols import check_target_set, target_key
 from stompmodel.units import Nanometre, nm_from_mm
 
 from . import discover, manifest
-from .cancel import EXIT_CANCELLED, Cancelled, CancellingSink
-from .drive import DOCK_TARGET_NAMES, Driver, RunOptions
-from .inline import InlineApp, TerminalPresentation
+from .cancel import EXIT_CANCELLED, Cancelled
+from .drive import DOCK_TARGET_NAMES, Project, RunOptions, compose
 from .plan import DRILL_AND_DOCK
 from .present import NoTerminal, PlainWriter, Presentation
-from .readiness import Readiness, readiness
+from .readiness import Blocker, Readiness, readiness
 from .settings import (
     DEFAULTS,
     Artwork,
@@ -63,6 +55,10 @@ from .settings import (
     Settings,
     pick,
 )
+from .stale import PLACE_OF_FIELD
+from .workbench.app import Workbench
+from .workbench.run import Launch
+from .workbench.session import Session
 
 __all__ = [
     "UsageError",
@@ -70,9 +66,12 @@ __all__ = [
     "build_parser",
     "parse_emit",
     "validate_targets",
+    "validate_place",
     "resolve",
+    "blocked",
+    "started_by_argument",
     "worst_severity",
-    "choose_presentation",
+    "has_terminal",
     "main",
 ]
 
@@ -137,19 +136,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="write an artifact; repeatable. FORMAT is one of: " + ", ".join(sorted(_known_targets())),
     )
-    parser.add_argument(
-        "--progress",
-        choices=("bar", "steps", "tree"),
-        default="bar",
-        help="how much of the run to draw; 'v' cycles it while a run works; "
-        "ignored without a terminal",
-    )
-    parser.add_argument(
-        "--promote-warnings",
-        action="store_true",
-        help="raise every warning to an error when looking for a gap to ask about; "
-        "the exit code, the withheld artefacts and the drill document are unchanged",
-    )
     return parser
 
 
@@ -201,20 +187,30 @@ def validate_targets(targets: Sequence[tuple[str, Path]], where: str = "--emit")
         )
 
 
-def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]]) -> None:
-    """Both target checks, over the set this run will actually write.
+def _validate_output(targets: Resolved[tuple[tuple[str, Path], ...]], panel: Path) -> None:
+    """Every target check, over the set this run will actually write.
 
     ``validate_targets`` rejects a format neither half owns, and
-    ``check_target_set`` two artefacts naming one file -- which ADR-0001's
-    rollback assumes never happens, and which would otherwise leave one file
-    on disk beside two claims of having written it.
+    ``check_target_set`` two artefacts naming one file. The project file
+    joins that set, compared by ``target_key`` rather than ``==`` because a
+    ``..`` segment or a case variant still names it: a half commits it in
+    the same transaction as its artefacts, so a second writer for that one
+    path is exactly what ADR-0001's rollback assumes never happens.
     """
     where = "output.targets" if targets.provenance.origin is Origin.PROJECT else "--emit"
     validate_targets(targets.value, where)
+    project = manifest.manifest_path(panel)
+    project_key = target_key(project)
+    if any(target_key(path) == project_key for _name, path in targets.value):
+        raise UsageError(f"{where}: {project.name} is this panel's project file, not an artefact")
     try:
         check_target_set([path for _name, path in targets.value])
     except ValueError as failure:
-        raise UsageError(str(failure)) from failure
+        # Labelled on the way past, because the sentence is ``stompmodel``'s
+        # and names paths rather than any flag or key of ours. Unlabelled,
+        # ``_refused_place`` can only file it under the project -- a place
+        # holding no values, so nothing a builder edits could discharge it.
+        raise UsageError(f"{where}: {failure}") from failure
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,9 +226,20 @@ class Resolution:
     settings: Settings
     notes: tuple[str, ...]
     blockers: Readiness
+    project: manifest.Manifest = field(default_factory=manifest.Manifest)
+    obstacle: str | None = None
+    panel_candidates: tuple[Path, ...] = ()
 
     def require_ready(self) -> None:
-        """Raise a usage failure naming every blocker and the place that answers it."""
+        """Raise a usage failure naming every blocker and the place that answers it.
+
+        The obstacle comes first because it is the one blocker that stops
+        the rest from meaning anything: with no panel or no readable
+        project, every other place is reporting on a project that does not
+        exist yet.
+        """
+        if self.obstacle is not None:
+            raise UsageError(self.obstacle)
         if self.blockers.ready:
             return
         raise UsageError(
@@ -285,24 +292,42 @@ def _pick_noting(
     return resolved
 
 
-def _resolve_panel(args: argparse.Namespace, directory: Path) -> tuple[Path, Resolved[Path | None]]:
-    """The panel: the argument if given, else the directory's one artwork file.
+def _resolve_panel(
+    args: argparse.Namespace, directory: Path
+) -> tuple[Path | None, Resolved[Path | None], str | None, tuple[Path, ...]]:
+    """The panel, how it was found, why there is none, and what else there was.
 
-    None and several candidates are both usage failures naming what was
-    found, because a headless run has nobody to ask; the workbench opens
-    blocked on the same two states instead of pre-empting them here.
+    Decision 6: none and several are states rather than failures. The
+    workbench opens on `Artwork` stating what it found, and a path typed
+    there starts the project; without a terminal the same two states become
+    the usage code they always were, named by ``require_ready``.
     """
     if args.panel is not None:
         panel = Path(args.panel)
-        return panel, Resolved[Path | None](panel, Provenance(Origin.ARGUMENT))
+        return panel, Resolved[Path | None](panel, Provenance(Origin.ARGUMENT)), None, ()
     found = discover.panels(directory)
     if len(found) == 1:
         panel = found[0]
-        return panel, Resolved[Path | None](panel, Provenance(Origin.DISCOVERED, "the artwork"))
+        return (
+            panel,
+            Resolved[Path | None](panel, Provenance(Origin.DISCOVERED, "the artwork")),
+            None,
+            (),
+        )
     if not found:
-        raise UsageError(f"no artwork (.ai) file found in {directory}; name one")
+        return (
+            None,
+            DEFAULTS.artwork.panel,
+            f"no artwork (.ai) file in {directory}; choose one in Artwork",
+            (),
+        )
     names = ", ".join(path.name for path in found)
-    raise UsageError(f"several artwork files found in {directory} ({names}); name one")
+    return (
+        None,
+        DEFAULTS.artwork.panel,
+        f"several artwork files here ({names}); choose one in Artwork",
+        found,
+    )
 
 
 def _layer_discovery(panel: Path, conventional: str) -> Discovery[str] | None:
@@ -528,24 +553,69 @@ def _validate_dock_lengths(
         ) from failure
 
 
+def validate_place(settings: Settings, place: str, panel: Path) -> None:
+    """Every check the values of one place must pass, asked after an edit.
+
+    The same helpers ``resolve`` runs before a headless run, dispatched by
+    the place that owns the values. An edit is a new rank, and a rank
+    reaching a step unchecked is what plan 1's validation block exists to
+    prevent -- so nothing here states a rule; it asks the tool that owns one.
+    """
+    if place == "artwork":
+        _validate_form_depth(panel, settings.artwork.form_depth)
+    elif place == "enclosure":
+        _declared_case(settings.enclosure.case.value, "enclosure.case")
+        _validate_case_margin(settings.enclosure.case_margin_mm, settings.enclosure.case_face.value)
+    elif place == "drilling":
+        _validate_drilling(settings.drilling)
+        _validate_grid(settings.drilling)
+    elif place == "boards":
+        _validate_panel_reference(settings.boards.panel_reference)
+        _validate_dock_lengths(
+            settings.boards.match_tolerance_mm,
+            settings.boards.seat_pitch_max_mm,
+            settings.boards.seat_pitch_min_mm,
+        )
+    elif place == "output":
+        _validate_output(settings.output.targets, panel)
+
+
 def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     """The four ranks, assembled once, with every disagreement carried.
 
     Three orderings are load-bearing. The panel comes first, because every
-    other rank is read relative to it. Every value a user can type is then
-    resolved and validated, before the first discovery opens the artwork:
-    CLAUDE.md's "validate options before opening the artwork" has nowhere
-    else to happen for a value carried only by a hand-edited project file.
-    That is why the dock half's three lengths and its designator filter
-    resolve up there, though the board list beside them cannot. Discovery
-    follows, needing the panel to read its layers and the case model to
-    exclude it from the board candidates; and the targets are checked once
-    resolved, because a project may supply them as readily as a flag may.
+    other rank is read relative to it. Every value a user can type is
+    resolved and validated before the first discovery opens the artwork,
+    because CLAUDE.md's "validate options before opening the artwork" has
+    nowhere else to happen for a hand-edited project file -- which is why
+    the dock half's lengths and its designator filter resolve up there.
+    The targets are checked last, once resolution has supplied them.
     """
     notes: list[str] = []
-    panel, panel_resolved = _resolve_panel(args, directory)
+    panel, panel_resolved, missing, candidates = _resolve_panel(args, directory)
+    if panel is None:
+        assert missing is not None  # the only two branches with no panel both say why
+        return Resolution(
+            settings=DEFAULTS,
+            notes=(),
+            blockers=Readiness(((Blocker.NO_PANEL, "artwork", missing),)),
+            obstacle=missing,
+            panel_candidates=candidates,
+        )
 
-    project = manifest.read(panel)
+    try:
+        project = manifest.read(panel)
+    except manifest.ManifestError as failure:
+        # Decision 9: a project whose declarations cannot be read is never
+        # run under values that look like the user's own. Rank four for this
+        # panel is not those values -- it is what every place states while
+        # the file is unreadable, so the workbench stays readable throughout.
+        return Resolution(
+            settings=Settings.of_defaults(panel),
+            notes=(),
+            blockers=Readiness(((Blocker.UNREADABLE_PROJECT, "project", str(failure)),)),
+            obstacle=str(failure),
+        )
     notes.extend(project.notes)
 
     # Everything from here to the layer discovery below is typed text that
@@ -652,11 +722,14 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     boards_arg = tuple(Path(board) for board in args.boards) if args.boards else None
     boards_project_raw = _project(project, "boards", "boards")
     boards_project = None if boards_project_raw is None else tuple(boards_project_raw)
-    boards_discovery = Discovery(
-        discover.board_candidates(panel.parent, panel, case_model_resolved.value), "found beside it",
-    )
+    # The boards have no discovered rank. A filename says nothing about what
+    # a model holds -- a board, the enclosure, or an assembly exported under
+    # a name of its own -- so a directory scan would dock whatever was in it.
+    # ``discover.board_candidates`` still offers them to the picker, where
+    # the builder is the one who says which are boards, and an unresolved
+    # list is what ``readiness`` asks about.
     boards_resolved = _pick_noting(
-        boards_arg, boards_project, boards_discovery, DEFAULTS.boards.boards.value,
+        boards_arg, boards_project, None, DEFAULTS.boards.boards.value,
         panel=panel, label="boards", notes=notes,
     )
     boards_settings = BoardSettings(
@@ -676,13 +749,90 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     # Checked after resolution, not on ``--emit`` alone: the set that reaches
     # the write steps is the resolved one, whichever rank supplied it, and a
     # target set checked at a rank the run may not even use is no check at all.
-    _validate_output(output.targets)
+    _validate_output(output.targets, panel)
 
     settings = Settings(
         artwork=artwork, enclosure=enclosure, drilling=drilling,
         boards=boards_settings, output=output,
     )
-    return Resolution(settings=settings, notes=tuple(notes), blockers=readiness(settings))
+    return Resolution(
+        settings=settings, notes=tuple(notes), blockers=readiness(settings), project=project
+    )
+
+
+#: The one flag whose own name and the field it carries disagree: ``--emit``
+#: writes ``output.targets``. Every other flag's ``dest`` is already the
+#: field's name, which is what lets the table below be built rather than kept.
+_FLAG_FIELDS: dict[str, str] = {"emit": "targets"}
+
+
+def _refusal_labels() -> dict[str, str]:
+    """Every label a refusal can name, and the place that owns that value.
+
+    Built from the field table and the parser itself, so a key renamed or a
+    flag added brings its own row. A copy written out here would send a
+    builder to the wrong place exactly when it fell behind one of them.
+    """
+    labels = {f"{place}.{field}": place for field, place in PLACE_OF_FIELD.items()}
+    for action in build_parser()._actions:
+        place = PLACE_OF_FIELD.get(_FLAG_FIELDS.get(action.dest, action.dest))
+        if place is not None:
+            labels.update({flag: place for flag in action.option_strings})
+    return labels
+
+
+def _refused_place(sentence: str) -> str:
+    """Which place owns the value a refusal names. Decision 6.
+
+    Every validator prefixes its sentence with the label the value was typed
+    into -- a project key, or the flag that carries it -- so the place is
+    read from the refusal rather than guessed at. A sentence naming no label
+    is the project's own, which is where a reader with nothing else to go on
+    should start.
+    """
+    labels = _refusal_labels()
+    for word in sentence.replace(",", " ").split():
+        place = labels.get(word.strip(":;'\"()"))
+        if place is not None:
+            return place
+    return "project"
+
+
+def blocked(args: argparse.Namespace, directory: Path) -> Resolution:
+    """``resolve``, with a refusal turned into something the workbench can show.
+
+    Inside the application there is nowhere to exit to, so a refused value
+    becomes an obstacle on the place that owns it rather than a message on a
+    terminal about to be redrawn -- and the sidebar's marker is derived from
+    that place, so naming the wrong one sends a builder somewhere with
+    nothing to change. An unreadable project is decision 9's own case and
+    keeps its own blocker, raised by ``resolve`` before this sees it.
+    """
+    try:
+        return resolve(args, directory)
+    except (UsageError, StompError, OSError) as failure:
+        panel = None if args.panel is None else Path(args.panel)
+        settings = DEFAULTS if panel is None else Settings.of_defaults(panel)
+        return Resolution(
+            settings=settings,
+            notes=(),
+            blockers=Readiness(
+                ((Blocker.REFUSED_VALUE, _refused_place(str(failure)), str(failure)),)
+            ),
+            obstacle=str(failure),
+        )
+
+
+def started_by_argument(args: argparse.Namespace) -> bool:
+    """Whether this invocation said "do not ask me". Decision 1.
+
+    An argument is an act of intent in this invocation; a manifest value is
+    a standing declaration. Bare ``stompcad tar.ai`` against a complete
+    project therefore opens resolved and ready and starts nothing, so that
+    opening last week's project to look at its artefacts costs no kernel
+    work.
+    """
+    return bool(args.boards or args.emit or args.case or args.case_model or args.panel_reference)
 
 
 def worst_severity(severities: Iterable[Severity | None]) -> Severity | None:
@@ -709,68 +859,91 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
 
 
-def choose_presentation(out: TextIO) -> bool:
-    """Whether this stream can carry a drawn run rather than streamed lines.
+def has_terminal(out: TextIO) -> bool:
+    """Whether this stream can carry a workbench rather than streamed lines.
 
-    Decision 11: a pipe, a dumb terminal or a CI runner gets the plain
-    writer -- the same step lines, without the drawing. ``TERM=dumb``
-    cannot address a cursor, so an inline app would corrupt what it wrote.
+    Decision 15: a pipe, a dumb terminal or a CI runner gets the plain
+    writer. ``CI`` present in the environment counts as no terminal **even
+    with a tty attached**, because a runner that allocates a pty would
+    otherwise be given a full-screen application and hang until it timed
+    out -- and no flag should be required to avoid that. Presence rather
+    than truth: a runner declaring ``CI=false`` is still a runner, and the
+    variable's existence is the signal every runner agrees on.
     """
+    if "CI" in os.environ:
+        return False
     return out.isatty() and os.environ.get("TERM", "") not in ("", "dumb")
 
 
-def _run(args: argparse.Namespace, out: TextIO) -> int:
-    """Drive one composed run, and return the exit code its findings earned.
+def _workbench_for(args: argparse.Namespace, directory: Path) -> Workbench:
+    """The application this invocation opens, over whatever it resolved.
 
-    The presentation is also the sink ``track`` folds positions into, the
-    same double duty either writer does. With a terminal the run happens on
-    a worker and the app owns the main thread; without one it happens right
-    here, and decision 2's step lines are the whole record either way.
+    The session reaches back here for both rules it cannot hold itself: a
+    panel typed into `Artwork` resolves exactly as one named on the command
+    line does, and an edit is refused by the tool that will consume it.
     """
-    resolved = resolve(args, Path.cwd())
-    resolved.require_ready()
-    options = RunOptions.of(resolved.settings)
-    if not choose_presentation(out):
-        return _compose(options, PlainWriter(out), promote_warnings=args.promote_warnings)
-    app = InlineApp(level=args.progress)
-    app.drive(
-        lambda: _compose(
-            options,
-            TerminalPresentation(app),
-            stop=lambda: app.stopping,
-            promote_warnings=args.promote_warnings,
-        )
+    resolved = blocked(args, directory)
+    session = Session(
+        resolved,
+        resolver=lambda path: blocked(
+            argparse.Namespace(**{**vars(args), "panel": str(path)}), directory
+        ),
+        validator=lambda settings, place: validate_place(
+            settings, place, settings.artwork.panel.value or Path()
+        ),
     )
-    code = app.run(inline=True, inline_no_clear=True)
+    panel = resolved.settings.artwork.panel.value
+    return Workbench(
+        session,
+        launch=None if panel is None else Launch(panel=panel),
+        autostart=started_by_argument(args),
+    )
+
+
+def _run(args: argparse.Namespace, out: TextIO) -> int:
+    """Drive one project, in the workbench or through the plain writer.
+
+    With a terminal the app owns the main thread for as long as the user
+    wants it, and a run is an event inside it; the exit code is the last
+    run's. Without one the run happens right here, and decision 15's step
+    lines are the whole record -- which the workbench writes as it exits,
+    so a run leaves its record behind either way.
+    """
+    directory = Path.cwd()
+    if not has_terminal(out):
+        resolved = resolve(args, directory)
+        resolved.require_ready()
+        panel = resolved.settings.artwork.panel.value
+        assert panel is not None  # ``require_ready`` raises on a project with none
+        return _compose(
+            RunOptions.of(resolved.settings),
+            PlainWriter(out),
+            project=Project(panel, resolved.settings, resolved.project),
+        )
+    app = _workbench_for(args, directory)
+    app.run()
     if app.failure is not None:
-        # A fault carried out from the worker: raised here, unconditionally,
-        # regardless of what ``code`` holds.
+        # A fault carried into the app from the worker: raised here, where
+        # ``main`` can map it, once the application has finished with it.
         raise app.failure
-    if code is None:
-        # The app exited without the run's own exit code. A stop the user
-        # asked for earns 130; the app failing under the run is a processing
-        # error, because decision 9 reserves 130 for the stop alone.
-        return EXIT_CANCELLED if app.stopping else EXIT_ERRORS
-    # A code the run itself earned.
-    return code
+    for line in app.settled:
+        out.write(f"{line}\n")
+    return app.session.exit_code
 
 
 def _compose(
     options: RunOptions,
     presentation: Presentation,
     stop: Callable[[], bool] | None = None,
-    promote_warnings: bool = False,
+    project: Project | None = None,
 ) -> int:
-    """One run, against whichever presentation is drawing it.
+    """One run, against whichever presentation is drawing it, reduced to a code.
 
-    ``promote_warnings`` travels beside the options rather than within
-    them: decision 6 makes it a rule about which findings reach a picker,
-    not an input any step reads, so no revision could ever honour it.
+    Composing the run is ``drive.compose``'s, because the workbench reaches
+    a run through the same call; what is left here is what a process does
+    with one.
     """
-    driver = Driver(DRILL_AND_DOCK, presentation, options, promote_warnings)
-    sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
-    with track(sink) as scope:
-        drill, dock = driver.run(scope)
+    _driver, drill, dock = compose(DRILL_AND_DOCK, presentation, options, project, stop=stop)
     return exit_for_severity(
         worst_severity([drill.worst_severity, None if dock is None else dock.worst_severity])
     )

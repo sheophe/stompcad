@@ -175,23 +175,23 @@ stompcad PANEL.ai BOARD.stp --case 1590B --case-model 1590B.stp \
 
 `stompcad` runs `stompdrill` and `stompcollider` together as one invocation. It
 drills `PANEL.ai`, then seats each `BOARD.stp` inside the case it has just
-drilled and reports the clashes. Naming no board and finding none beside the
-panel does not run the drill half alone: it leaves the run refusing to
-start, because a question nobody has answered is not the same as an answer
-of none. A drill-only run is declared, not merely omitted, by recording an
+drilled and reports the clashes. Naming no board does not run the drill half
+alone: it leaves the run refusing to start, because a question nobody has
+answered is not the same as an answer of none. Models sitting beside the
+panel are never taken for boards — nothing outside a `.stp` says whether it
+holds a board, an enclosure or a finished assembly. A drill-only run is declared, not merely omitted, by recording an
 empty board list in the project file described below. Each of the run's steps
 prints one line as it completes, so a piped run reads as a log of what
 happened.
 
-On a terminal, the run is instead drawn inline above the prompt. `--progress`
-picks the starting level of detail -- `bar` draws one progress bar and the
-deepest live branch, `steps` draws the nine steps and their outcomes, `tree`
-expands each step into the divisions it reports. Pressing `v` cycles the
-level while the run continues, without restarting anything. Pressing `q`
-stops the run, which then exits `130`. While a question is on screen, `q`
-abandons it instead -- the picker binds its own `q` -- and abandoning a
-question likewise stops the run. `--progress` is ignored without a
-terminal; a piped or redirected run always gets the plain step-line log.
+On a terminal, `stompcad` opens a full-screen workbench and the run happens
+inside it, in a process of its own, so the workbench keeps answering while
+the run works; `esc` stops it as soon as the run next reports where it has
+got to. Without one — a pipe, a dumb terminal, or a CI runner, where `CI`
+present in the environment or `TERM=dumb` counts as no terminal even with a
+tty attached — the run gets the streamed step lines instead. The workbench
+writes those same lines to the terminal as it exits, so a run leaves its
+record behind either way.
 
 | Option | Meaning | Default |
 | --- | --- | --- |
@@ -199,8 +199,6 @@ terminal; a piped or redirected run always gets the plain step-line log.
 | `--case-model PATH` | STEP model of the enclosure; required to dock a board | None |
 | `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
 | `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
-| `--progress bar\|steps\|tree` | Starting detail level for the inline run; `v` cycles it | `bar` |
-| `--promote-warnings` | Raise every warning to an error, so a resolvable one can be asked about | Off |
 
 `--emit` accepts either half's formats: `drawing-pdf`, `drawing-svg`,
 `excellon`, `json` and `step` from the drill half, `report` and `assembly`
@@ -229,6 +227,30 @@ and the assembly. Both halves name what they did not write.
 A run stopped before it finishes exits `130`, and nothing it was about to write
 survives. Every artefact is rendered before any target is touched, so at the
 moment a run can be stopped there is nothing half-written on disk to remove.
+
+### Keys
+
+Each place has one bare letter: `p` Project, `a` Artwork, `e` Enclosure,
+`d` Drilling, `b` Boards, `o` Output, `r` Run, `f` Findings. Three bare
+letters are global verbs: `w` opens the viewer window, `q` quits, `?` shows
+the keys. `[` and `]` step to the previous and next place. Three
+`Ctrl`+letters belong to one place each: `Ctrl+L` re-reads the artwork,
+`Ctrl+F` looks in the cache for an enclosure model, `Ctrl+R` starts or
+resumes the run.
+
+The arrows reach everything the letters do, for anyone who has not learnt
+them yet. The workbench has two panes: `←` from a place moves to the list of
+places, `↑`/`↓` there step between places, and `→` or `enter` goes back in.
+Inside a place, `↑`/`↓` move between its rows.
+
+An open text field keeps the editing keys the platform already has, so
+`Option`+`Backspace` removes the word behind the cursor.
+
+Starting a run takes two keys — `r` then `Ctrl+R`, or `enter` on the
+`Project` place's run row — because a single bare letter that commits the
+machine to minutes of kernel work is a hazard rather than a convenience.
+Press `?` inside the app for the full key table and why each key is where
+it is.
 
 ### The project file
 
@@ -287,8 +309,13 @@ project cannot start a run under a value either tool would refuse. These are
 reported before the artwork is opened too, naming the key that carried the
 value.
 
-This build does not yet write the file. Until it does, a project is
-hand-authored.
+A completed run fills the gaps the file left, recording the values that
+actually produced its artefacts rather than anything typed and abandoned. It
+never replaces a value the file already holds. Filling follows each half's
+own commit rather than the whole run: the drill half's declarations are
+written when its artefacts commit, and the dock half's when its own commit —
+so a run whose dock half fails leaves the drill half's declarations recorded
+and the dock half's not, matching exactly what reached disk.
 
 ### Pickers
 
@@ -305,10 +332,8 @@ answer widens the expression rather than replacing it, so resolving one board
 cannot empty another. Every other error remains a refusal: a code with no
 picker is never turned into a question.
 
-`--promote-warnings` raises every warning to an error before that check runs,
-which is what would let a warning reach a picker at all. Being an error is
-necessary and not sufficient, and both resolvable codes are errors already, so
-the flag has nothing to promote into a question until a warning carries one.
+Severity decides whether a run stops to ask, not whether a remedy exists: an
+error asks, and a warning is reported and left actionable.
 
 Without a terminal there is nobody to ask. Rather than prompting where no
 answer can arrive, the run exits `3` naming the question it needed answered --
@@ -325,12 +350,14 @@ on a pipe, a redirect, a dumb terminal or a CI runner alike.
 | `130` | The run was cancelled |
 
 The code is the worse of the two halves' findings, so one run reports one
-status. `130` is the shell's own convention for a process ended by `SIGINT`:
-`128` plus the signal number `2`, the same code a shell reports for any command
-stopped with Ctrl-C — so a script already checking for that convention needs no
-special case for `stompcad`. It is reserved for a run the user stopped; no
-other path produces it. On a terminal that status is now also reachable by
-pressing `q`, not only by the signal.
+status. These five codes are the machine interface; they are no longer
+anyone's report — the workbench and the plain writer are. `130` is the
+shell's own convention for a process ended by `SIGINT`: `128` plus the signal
+number `2`, the same code a shell reports for any command stopped with
+Ctrl-C — so a script already checking for that convention needs no special
+case for `stompcad`. It is reserved for a run the user stopped; no other path
+produces it. On a terminal that status is also reachable by `esc` on the
+`Run` place or `Ctrl+C` from anywhere, not only by the signal.
 
 ## Output files and failures
 

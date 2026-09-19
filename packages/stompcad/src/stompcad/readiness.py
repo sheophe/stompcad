@@ -30,6 +30,13 @@ class Blocker(Enum):
     NO_PANEL_REFERENCE = "which components mount to the panel is a pedal-specific fact"
     NO_BOARD_FOR_ASSEMBLY = "an assembly needs at least one board to seat"
     NO_TARGETS = "nothing has been chosen to make"
+    # Never raised by readiness(): the manifest is read before a Settings
+    # exists, so resolve() appends this blocker itself.
+    UNREADABLE_PROJECT = "this project file cannot be read"
+    # Nor this one, and for the same reason: a value the consuming tool
+    # refuses is caught by cli.blocked, which files it against the place the
+    # value was typed into -- the only place that can answer it.
+    REFUSED_VALUE = "this value is not one the tool that reads it accepts"
 
 
 @dataclass(frozen=True, slots=True)

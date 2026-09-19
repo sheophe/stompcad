@@ -81,3 +81,12 @@ def test_output_paths_follow_the_naming_scheme(tmp_path: Path) -> None:
     assert discover.output_path("step", panel) == tmp_path / "tar-case.stp"
     assert discover.output_path("assembly", panel) == tmp_path / "tar-assembly.stp"
     assert discover.output_path("report", panel) == tmp_path / "tar-assembly.json"
+
+
+def test_the_catalogue_parts_are_the_tool_s_own_once_each_in_order() -> None:
+    """A picker offers what ``stompdrill`` recognises, never a list kept here."""
+    from stompdrill.enclosures import footprints
+
+    parts = discover.catalogue_parts()
+    assert set(parts) == {part for names in footprints().values() for part in names}
+    assert list(parts) == sorted(set(parts))

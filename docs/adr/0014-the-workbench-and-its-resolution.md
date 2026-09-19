@@ -1,6 +1,9 @@
 # ADR-0014: The workbench and its resolution
 
-**Status:** Accepted
+**Status:** Accepted, amended twice: the sidebar now takes focus and the
+arrows move between it and the place (see *The key model is semi-modal*);
+the boards lost their discovered rank and the enclosure part gained one in
+the workbench alone (see *Resolution has four ranks*).
 
 ## Context
 
@@ -64,6 +67,71 @@ exits `3` naming what was missing. `CI` present in the environment, or
 that allocates a pty gets the plain writer rather than a full-screen
 application it cannot answer and would otherwise hang against.
 
+### The key model is semi-modal: bare letters are global, Ctrl is local
+
+Each of the eight places owns one unique bare letter — `p` `a` `e` `d` `b` `o`
+`r` `f` — and three letters no place claims are global verbs: `w` opens the
+window on the current subject, `q` quits, `?` shows the keys. Arrows move
+between neighbouring elements, `enter` enters or commits, `esc` cancels or
+closes, everywhere. `tab` and `Ctrl`+letter belong to the place. The workbench
+has two panes, the sidebar and the place, and the arrows move between them:
+`←` from a place focuses the sidebar, `↑`/`↓` there step between places, and
+`→` or `enter` goes into the place. Arrows are what a builder unfamiliar with
+terminal applications tries first, so they are the route that needs no
+teaching, while the letters stay the fast route for someone who has learnt
+them; both must exist. Stepping in the sidebar changes the place as it moves,
+exactly as a letter does, so the two routes never disagree about where the
+user is. A sidebar row is clickable and `[`/`]` step between
+neighbouring places, so the design never depends on memory it has not yet
+taught; both resolve to the same place change a letter makes, so neither is a
+second navigation model. Starting a run takes two keys — `r` then `Ctrl+R`, or
+`enter` on the `Project` place's run row — because a single bare letter that
+commits the machine to minutes of kernel work is a hazard, not a convenience.
+The model has one hazard, not knowing whether a letter will jump or type, and
+it is closed twice: the footer always states the mode, and the only mode in
+which letters type is an open text field. Every bare letter, every
+`Ctrl`+letter and every place letter must be provably distinct, and an open
+text field must provably suppress all of them.
+
+### The sidebar carries three independent states per row
+
+Where the user is, how far the project has got, and whether this place needs
+the user are three channels and never one: the selected row's background, a
+marker on the left, a marker on the right. Only the five configuration places
+carry the left marker. The right-hand marker marks the exception rather than
+the accomplishment — eight ticks carry no information — so a fully resolved
+project shows a clean sidebar and the one positive statement lives on
+`Project`. `Findings` carries a count covering errors and warnings only; a
+"worth knowing" entry is listed but never counted and never marks anything,
+because a run that inferred an enclosure and bounded a search succeeded. The
+left marker and the stale set are derived from one structure: the marker is
+computed from which steps the last run credited less which steps a change has
+since invalidated, so the roadmap has no way to disagree with the engine.
+
+### Before a run everything is open; during one nothing is editable
+
+Until a run begins the user changes whatever they like in any order; the
+roadmap reports where configuration has reached and does not gate it. While a
+run is active no parameter accepts an edit, every place stays readable and
+every bare letter still works. Read-only, never hidden: a run whose settings
+cannot be inspected is a run the user has to take on trust.
+
+### A gap pauses the run and takes the user to the place that answers it
+
+A finding that is both an error and carries a resolvable code stops the run and
+navigates to the place that can answer it. Only that place accepts edits while
+the run is paused. A picker's `enter` is labelled "Use this and continue":
+committing the answer **is** the continuation, so there is no second action to
+find, and a place answering by a free edit instead carries a focused "Continue
+run" row. A second gap replaces the first rather than queueing behind it,
+because the second may not exist once the first is answered. `esc` is a ladder,
+innermost first: it closes an open editor or picker, and only then stops the
+paused run. Moving to another place with a bare letter closes an open picker
+without committing it. Severity decides whether a run pauses, not whether a
+remedy exists: an error pauses and asks, a warning does not pause but stays
+actionable in `Findings` once the run completes. That retires
+`--promote-warnings`, whose intent becomes the default behaviour.
+
 ### Resolution has four ranks: argument, project, discovered, default
 
 A value resolves from the strongest rank that supplies it: an argument on the
@@ -72,21 +140,38 @@ about its own inputs, then a default matching what each tool already assumes
 on its own command line. Discovery sits between the manifest and the default
 because it is stronger evidence than an assumption and weaker than a
 declaration typed on purpose — the panel found beside the working directory,
-the layers read from the artwork itself, the boards found in the project
-directory, the case model found in the enclosure cache or named by a `.stp`
-whose stem is a catalogue part, the panel-reference designators read from the
-boards, and the match tolerance derived from the drill grid are none of them
-guesses, but none of them is what the builder typed either.
+the layers read from the artwork itself, the case model found in the
+enclosure cache, the panel-reference designators read from the boards, and
+the match tolerance derived from the drill grid are none of them guesses,
+but none of them is what the builder typed either.
 
-The enclosure part is not among them, and a model's filename is discovery of
-the model rather than of the part. `stompdrill` identifies the part from the
-measured footprint, and where that measurement ties it may try a supplied
-model's stem against the tie — a guess it reports as inferred and abandons
-where it disagrees, leaving the tie standing for a picker to settle.
-Resolving that same stem to `case` here would hand the guess to that stage as
-a declaration, and a declared part that disagrees is an error. So `case`
-resolves from the argument, the project or nothing at all; the model travels
-beside it, and the stage that measures owns what the filename is worth.
+The boards are not among them. A `.stp` beside the artwork may be a board,
+the enclosure, or an assembly somebody exported under a name of their own,
+and nothing outside the file tells the three apart, so a directory scan does
+not resolve the question — it docks whatever happened to be in the
+directory. Those files are offered as the list a builder ticks, which is
+discovery of the candidates and not of the answer. Until that tick the board
+list is unresolved, and an unresolved list stops the run and asks.
+
+The enclosure part is not among them either, and a model's filename is
+discovery of the model rather than of the part. `stompdrill` identifies the
+part from the measured footprint, and where that measurement ties it may try
+a supplied model's stem against the tie — a guess it reports as inferred and
+abandons where it disagrees, leaving the tie standing for a picker to
+settle. Resolving that same stem to `case` in a headless run would hand the
+guess to that stage as a declaration, and a declared part that disagrees is
+an error rather than the ambiguity it really is. So the command line
+resolves `case` from an argument, the project or nothing at all.
+
+**Amended.** In the workbench that stem does answer an unanswered part,
+because there the guess is made in the open: the row states the part, says
+which filename it was inferred from, and is changed in one keystroke before
+any run. A guess a builder has seen and left standing is a declaration, and
+the run treats it as one — which is exactly what a guess nobody ever saw is
+not. It is withdrawn with the file that made it, so naming a different model
+re-answers the part or leaves it unanswered rather than keeping an inference
+the named model no longer supports. Anything the project or the builder said
+outranks it, so naming a model never overrules a person.
 
 A project value that discovery contradicts is a finding, not an override. If
 the manifest names a drill layer the artwork no longer has, the run reports
@@ -172,8 +257,8 @@ report a position behind the one already announced.
 ### A run starts only when the readiness matrix allows it
 
 Whether a run may start is a stated matrix, not an inference from whichever
-values happen to be present. No panel blocks a start. Boards neither
-discovered nor declared block it too — an unresolved question about the
+values happen to be present. No panel blocks a start. Boards nobody has
+named block it too — an unresolved question about the
 pedal's boards is not the same as a decision that this pedal has none, and
 the driver's own "skip docking" behaviour cannot tell those two apart, so the
 workbench must. An explicitly confirmed empty board list is itself declared

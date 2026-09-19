@@ -25,6 +25,8 @@ __all__ = [
     "Discovery",
     "Resolved",
     "pick",
+    "as_flag_string",
+    "disagreement",
     "Artwork",
     "Enclosure",
     "Drilling",
@@ -75,7 +77,7 @@ class Discovery(Generic[_T_co]):
     detail: str
 
 
-def _as_flag_string(value: object) -> object:
+def as_flag_string(value: object) -> object:
     """An ``Enum``'s own ``.value`` -- the string a flag uses -- not its member name.
 
     ``str(CaseFace.BOX)`` is ``"CaseFace.BOX"`` with no custom ``__str__``
@@ -83,6 +85,46 @@ def _as_flag_string(value: object) -> object:
     the one place that has to know an enum from any other value.
     """
     return value.value if isinstance(value, Enum) else value
+
+
+def _stated(value: object) -> str:
+    """One value as a row states it, in the spelling its own tool uses.
+
+    A list reaches a row as a tuple, and interpolating one states Python's
+    spelling of the value -- ``(PosixPath('/x.stp'),)`` -- where the row
+    has to state the value. An artefact is a pair, so it states both
+    halves: a format with no destination names no file. Absence is one
+    state whichever type carries it, and a blank row states nothing at all.
+    """
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_item(item) for item in value) if value else "none"
+    if value is None or value == "":
+        return "none"
+    return str(as_flag_string(value))
+
+
+def _item(item: object) -> str:
+    """One item of a list, and the one shape that is a pair rather than a value."""
+    if isinstance(item, tuple) and len(item) == 2:
+        name, destination = item
+        return f"{name}: {destination}"
+    return str(as_flag_string(item))
+
+
+def disagreement(declared: object | None, value: object) -> object | None:
+    """The project's value where it differs from this one, else ``None``.
+
+    Compared through ``as_flag_string`` and through a sequence's own items,
+    because the manifest holds a face as the string its flag accepts and a
+    board list as a list where ``Settings`` carries a tuple. Comparing the
+    two forms directly would report a disagreement between one value and
+    its own spelling.
+    """
+    if declared is None:
+        return None
+    if isinstance(declared, (list, tuple)) and isinstance(value, (list, tuple)):
+        return None if tuple(declared) == tuple(value) else declared
+    return None if as_flag_string(declared) == as_flag_string(value) else declared
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +142,10 @@ class Resolved(Generic[_T]):
 
     def describe(self) -> str:
         """``0.5, you set this — the project says 0.25``, or the first half alone."""
-        stated = f"{_as_flag_string(self.value)}, {self.provenance.describe()}"
+        stated = f"{_stated(self.value)}, {self.provenance.describe()}"
         if self.project is None:
             return stated
-        return f"{stated} — the project says {_as_flag_string(self.project)}"
+        return f"{stated} — the project says {_stated(self.project)}"
 
 
 def pick(
@@ -144,11 +186,17 @@ class Artwork:
     reference_layer: Resolved[str]
     form_depth: Resolved[int]
 
-    def rows(self) -> Iterator[tuple[str, str]]:
-        yield "panel", self.panel.describe()
-        yield "drill layer", self.drill_layer.describe()
-        yield "reference layer", self.reference_layer.describe()
-        yield "form depth", self.form_depth.describe()
+    def rows(self) -> Iterator[tuple[str, str, str]]:
+        """Each field, the name a row shows for it, and what that row states.
+
+        The field name travels with the row so a caller can join its own
+        table to these by name. Joining by position would make a field added
+        here silently shift every row's meaning in the workbench.
+        """
+        yield "panel", "panel", self.panel.describe()
+        yield "drill_layer", "drill layer", self.drill_layer.describe()
+        yield "reference_layer", "reference layer", self.reference_layer.describe()
+        yield "form_depth", "form depth", self.form_depth.describe()
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,11 +208,12 @@ class Enclosure:
     case_face: Resolved[CaseFace]
     case_margin_mm: Resolved[float]
 
-    def rows(self) -> Iterator[tuple[str, str]]:
-        yield "case", self.case.describe()
-        yield "case model", self.case_model.describe()
-        yield "drilled face", self.case_face.describe()
-        yield "clearance margin", self.case_margin_mm.describe()
+    def rows(self) -> Iterator[tuple[str, str, str]]:
+        """Each field, its row's name and what it states, as ``Artwork.rows``."""
+        yield "case", "case", self.case.describe()
+        yield "case_model", "case model", self.case_model.describe()
+        yield "case_face", "drilled face", self.case_face.describe()
+        yield "case_margin_mm", "clearance margin", self.case_margin_mm.describe()
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,13 +227,14 @@ class Drilling:
     no_drill_sizes: Resolved[str | None]
     title: Resolved[str]
 
-    def rows(self) -> Iterator[tuple[str, str]]:
-        yield "grid", self.grid_mm.describe()
-        yield "warn over", self.grid_warn_mm.describe()
-        yield "drill standard", self.drill_standard.describe()
-        yield "stocked sizes", self.drill_sizes.describe()
-        yield "excluded sizes", self.no_drill_sizes.describe()
-        yield "drawing title", self.title.describe()
+    def rows(self) -> Iterator[tuple[str, str, str]]:
+        """Each field, its row's name and what it states, as ``Artwork.rows``."""
+        yield "grid_mm", "grid", self.grid_mm.describe()
+        yield "grid_warn_mm", "warn over", self.grid_warn_mm.describe()
+        yield "drill_standard", "drill standard", self.drill_standard.describe()
+        yield "drill_sizes", "stocked sizes", self.drill_sizes.describe()
+        yield "no_drill_sizes", "excluded sizes", self.no_drill_sizes.describe()
+        yield "title", "drawing title", self.title.describe()
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,12 +247,13 @@ class BoardSettings:
     seat_pitch_max_mm: Resolved[float]
     seat_pitch_min_mm: Resolved[float]
 
-    def rows(self) -> Iterator[tuple[str, str]]:
-        yield "boards", self.boards.describe()
-        yield "panel references", self.panel_reference.describe()
-        yield "match tolerance", self.match_tolerance_mm.describe()
-        yield "seat step, coarse", self.seat_pitch_max_mm.describe()
-        yield "seat step, fine", self.seat_pitch_min_mm.describe()
+    def rows(self) -> Iterator[tuple[str, str, str]]:
+        """Each field, its row's name and what it states, as ``Artwork.rows``."""
+        yield "boards", "boards", self.boards.describe()
+        yield "panel_reference", "panel references", self.panel_reference.describe()
+        yield "match_tolerance_mm", "match tolerance", self.match_tolerance_mm.describe()
+        yield "seat_pitch_max_mm", "seat step, coarse", self.seat_pitch_max_mm.describe()
+        yield "seat_pitch_min_mm", "seat step, fine", self.seat_pitch_min_mm.describe()
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,8 +262,9 @@ class OutputSettings:
 
     targets: Resolved[tuple[tuple[str, Path], ...]]
 
-    def rows(self) -> Iterator[tuple[str, str]]:
-        yield "artefacts", self.targets.describe()
+    def rows(self) -> Iterator[tuple[str, str, str]]:
+        """Each field, its row's name and what it states, as ``Artwork.rows``."""
+        yield "targets", "artefacts", self.targets.describe()
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,8 +283,12 @@ class Settings:
     boards: BoardSettings
     output: OutputSettings
 
-    def places(self) -> Iterator[tuple[str, Iterator[tuple[str, str]]]]:
-        """Each place's name and its rows, in the sidebar's own order."""
+    def places(self) -> Iterator[tuple[str, Iterator[tuple[str, str, str]]]]:
+        """Each place's name and its rows, in the sidebar's own order.
+
+        A row is its field, the name it shows and what it states, so the
+        workbench joins its editors to rows by field rather than by position.
+        """
         yield "artwork", self.artwork.rows()
         yield "enclosure", self.enclosure.rows()
         yield "drilling", self.drilling.rows()

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Protocol, TypeVar, cast
 
@@ -50,7 +50,7 @@ from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import CaseFace, DrillData
-from stompmodel.progress import Scope
+from stompmodel.progress import Scope, Sink, track
 from stompmodel.protocols import (
     Diagnosable,
     Emitter,
@@ -63,22 +63,18 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, nm_from_mm
 
-from .plan import RunPlan, Step
+from .cancel import CancellingSink
+from .manifest import DOCK_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
+from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
-from .resolve import promoted, question_for, revision_for
-from .settings import Settings
+from .resolve import RESOLVABLE, question_for, revision_for
+from .settings import Origin, Provenance, Resolved, Settings
+from .stale import PLACE_OF_FIELD, PLACE_ORDER, stale_steps
 
-__all__ = ["DOCK_TARGET_NAMES", "RunOptions", "Driver"]
-
-#: ``RunOptions.targets`` is one set naming both halves' outputs; a write
-#: step renders only the names its own tool would recognise, so a caller
-#: can ask for a drill format and a dock format in the one run without
-#: either half choking on the other's name. Matches
-#: ``stompcollider.cli``'s own fixed ``_REPORT``/``_ASSEMBLY`` pair.
-#: Published rather than private: ``cli`` validates every requested target
-#: against the union of both halves' names, and a name another module needs
-#: is part of this one's surface.
-DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
+__all__ = [
+    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project", "compose",
+    "plan_for", "invalidated", "steps_of_place", "readers_of",
+]
 
 #: Where the dock half's steps begin in the nine-step plan. One number,
 #: because the two halves are drawn from one plan and one division of the
@@ -127,6 +123,16 @@ _RETRY_INPUTS: dict[str, frozenset[str]] = {
 #: it. ``test_stale`` asserts the first half of that claim.
 _STAGE_STEPS = frozenset({"match", "seat", "clash"})
 
+#: The three stage steps in the order the dock pipeline holds them. A resume
+#: can run one because ``_STEP_CONSUMES`` can make it stale; a retry cannot,
+#: because a retry is driven by a revision and none of these reads a field.
+_STAGE_ORDER: tuple[str, ...] = ("match", "seat", "clash")
+
+#: The two steps whose findings a picker can answer. A resumed step must be
+#: able to raise the same gap a first run does, so ``resume`` routes these
+#: through ``_settled`` exactly as ``run`` and ``retry`` already do.
+_RESOLVABLE_STEPS: frozenset[str] = frozenset(gap.step for gap in RESOLVABLE.values())
+
 #: What each step leaves on the driver. The dock stages each rewrite
 #: ``_dock_data``, so each declares it: a consumer is stale when an *earlier*
 #: producer of what it reads is stale, and a stage that produced nothing by
@@ -157,6 +163,52 @@ _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
     "clash": ("_dock_data", "_dock_pipeline"),
     "write-assembly": ("_dock_data", "_scan", "_geometry"),
 }
+
+
+def plan_for(boards: Sequence[Path], plan: RunPlan = DRILL_AND_DOCK) -> RunPlan:
+    """The steps a run over these options would actually take. Decision 17.
+
+    The one statement of where the two halves divide and of what decides
+    it, so the roadmap plans the steps the driver will run rather than the
+    nine a plan lists. ``_DOCK_FROM`` stays private: a caller outside has
+    no business knowing where the division falls, only what it yields.
+    """
+    return plan if boards else RunPlan(plan.steps[:_DOCK_FROM])
+
+
+def invalidated(changed: frozenset[str], plan: RunPlan = DRILL_AND_DOCK) -> frozenset[str]:
+    """Every step a change to these fields invalidated, by data rather than position.
+
+    The one public entry to this module's three tables. The workbench derives
+    both its stale set and its roadmap from this call, so the sidebar cannot
+    disagree with what a resume will actually run.
+    """
+    order = tuple(step.key for step in plan.steps)
+    return stale_steps(order, changed, _STEP_INPUTS, _STEP_HOLDS, _STEP_CONSUMES)
+
+
+def steps_of_place(place: str) -> frozenset[str]:
+    """Every step reading a field this place owns.
+
+    A step reading two places' fields belongs to both -- ``write case`` reads
+    ``targets`` and ``title`` -- because the left marker asks whether this
+    place's work has been done, not which place owns the step.
+    """
+    return frozenset(
+        key
+        for key, fields in _STEP_INPUTS.items()
+        if any(PLACE_OF_FIELD.get(field) == place for field in fields)
+    )
+
+
+def readers_of(field: str) -> frozenset[str]:
+    """Every step reading this field, which is the narrow half of ``invalidated``.
+
+    Published beside it because the two answer different questions: what
+    reads a value, and what a change to it invalidated. Only the second
+    decides whether work already done still stands.
+    """
+    return frozenset(key for key, fields in _STEP_INPUTS.items() if field in fields)
 
 
 class _Written(Processable, Diagnosable, Protocol):
@@ -241,6 +293,20 @@ class RunOptions:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Project:
+    """Where a half's declarations go, and what they say.
+
+    ``held`` is what the file already declares, re-read after each commit so
+    a second commit in one session leaves what the first recorded. Decision
+    8: a value the manifest already holds is used and left untouched.
+    """
+
+    panel: Path
+    settings: Settings
+    held: Manifest
+
+
 class Driver:
     """Runs one plan's steps over one set of options, one at a time.
 
@@ -254,12 +320,12 @@ class Driver:
         plan: RunPlan,
         presentation: Presentation,
         options: RunOptions,
-        promote_warnings: bool = False,
+        project: Project | None = None,
     ) -> None:
         self._plan = plan
         self._presentation = presentation
         self._options = options
-        self._promote_warnings = promote_warnings
+        self._project = project
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
@@ -269,6 +335,7 @@ class Driver:
         self._docked: DockData | None = None
         self._dock_pipeline: Pipeline[DockData] | None = None
         self._dock_data: DockData | None = None
+        self._written: list[Path] = []
 
     def run(self, scope: Scope) -> tuple[DrillData, DockData | None]:
         """Drill the panel, then dock its boards against it when any were asked for.
@@ -282,7 +349,7 @@ class Driver:
         two write steps as well as each of them.
         """
         docking = bool(self._options.boards)
-        steps = self._plan.steps if docking else self._plan.steps[:_DOCK_FROM]
+        steps = plan_for(self._options.boards, self._plan).steps
         slots = self._open(steps, scope)
         drilled = self._drill_steps(slots)
         if not docking:
@@ -316,6 +383,59 @@ class Driver:
             self._presentation.finish_step(self._step(other_key), other_outcome)
         return retried
 
+    def resume(self, stale: frozenset[str], options: RunOptions, scope: Scope) -> None:
+        """Run every stale step, in the plan's own order, against what is held.
+
+        Decision 10: changing a value marks steps stale and ``Ctrl+R`` runs
+        that set. A resume takes only the steps a run would take: the dock
+        half is dropped with no boards, and a dock step is never reached
+        once the held drill data has an error, exactly where ``run`` itself
+        stops. The span divides over what remains, so the position stays
+        monotonic across a resume that takes less than the whole set.
+        """
+        self._adopt(options, stale)
+        dock_keys = frozenset(step.key for step in self._plan.steps[_DOCK_FROM:])
+        steps = tuple(
+            step
+            for step in plan_for(self._options.boards, self._plan).steps
+            if step.key in stale
+        )
+        if not steps:
+            return
+        slots = self._open(steps, scope)
+        for step in steps:
+            if (
+                step.key in dock_keys
+                and self._drilled is not None
+                and self._drilled.worst_severity is Severity.ERROR
+            ):
+                self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES)))
+                break
+            slot = next(slots)
+            slot.label(step.label)
+            if step.key == "read-panel":
+                # No cascade into ``quantise`` here: unlike a retry, a resume
+                # already has ``quantise`` as its own stale step when one is
+                # needed, so crediting it again from inside ``read-panel``
+                # would double-credit it and could do so before a gap of its
+                # own is resolved (ADR-0013's credit-only-once rule).
+                self._read_panel(slot)
+                self._presentation.finish_step(step, self._read_outcome())
+                continue
+            data, outcome, refreshed = self._run_step(step.key, slot)
+            assert not refreshed, "read-panel's own cascade is bypassed above"
+            if step.key in _RESOLVABLE_STEPS:
+                # ``_run_step`` returns the union of both halves' data; ``key``
+                # chose the branch, so the value is that resolvable step's own
+                # type -- the same erasure ``_settled`` performs on its own
+                # loop below, over ``_rerun``'s identical union return.
+                if step.key == "quantise":
+                    self._settled(step.key, cast(DrillData, data), outcome, slot)
+                else:
+                    self._settled(step.key, cast(DockData, data), outcome, slot)
+            else:
+                self._presentation.finish_step(step, outcome)
+
     def _rerun(
         self, key: str, options: RunOptions, scope: Scope
     ) -> tuple[DrillData | DockData, str, tuple[tuple[str, str], ...]]:
@@ -334,52 +454,89 @@ class Driver:
         credit unpaid would make ``_STEP_HOLDS``'s claim about who assigns
         what silently false the one time it is not this call's own key.
         """
-        if key == "read-panel":
-            self._accept(key, options)
-            slots = scope.steps(2)
-            self._read_panel(next(slots))
-            outcome = self._read_outcome()
-            self._quantised = self._quantise(next(slots))
-            return self._quantised, outcome, (("quantise", _quantise_outcome(self._quantised)),)
-        if key == "quantise":
-            if self._raw is None:
-                raise ValueError("quantise cannot run again before the panel is read")
-            self._accept(key, options)
-            self._quantised = self._quantise(scope)
-            return self._quantised, _quantise_outcome(self._quantised), ()
-        if key == "drill":
-            if self._quantised is None:
-                raise ValueError("drill cannot run again before quantisation")
-            self._accept(key, options)
-            self._drilled = self._drill(self._quantised, scope)
-            return self._drilled, _drill_outcome(self._drilled), ()
-        if key == "write-case":
-            if self._drilled is None:
-                raise ValueError("write case cannot run again before the panel is drilled")
-            self._accept(key, options)
-            written = self._write_case(self._drilled, scope)
-            return self._drilled, ", ".join(written) or "nothing written", ()
-        if key == "read-boards":
-            if self._drilled is None:
-                raise ValueError("read boards cannot run again before the panel is drilled")
-            self._accept(key, options)
-            if self._docked is None:  # _accept discarded the scan: parse again
-                self._read_boards(self._drilled, scope)
-            self._dock_data = self._admit()
-            assert self._scan is not None
-            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)", ()
-        if key == "write-assembly":
-            if self._dock_data is None or self._scan is None or self._geometry is None:
-                raise ValueError("write assembly cannot run again before the boards are docked")
-            self._accept(key, options)
-            written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
-            return self._dock_data, ", ".join(written) or "nothing written", ()
         if key in _STAGE_STEPS:
             keys = [step.key for step in self._plan.steps]
             before = keys[keys.index(key) - 1]
             raise ValueError(
                 f"{key!r} reads no field of its own -- retry {before!r} to run it again"
             )
+        if key not in {step.key for step in self._plan.steps}:
+            raise ValueError(f"{key!r} is not a step this driver can run again")
+        self._precondition(key)
+        self._accept(key, options)
+        return self._run_step(key, scope)
+
+    def _precondition(self, key: str) -> None:
+        """Raise the one guard a step of this key must pass before it can run again.
+
+        The only copy of each message: ``_rerun`` calls this ahead of
+        ``_accept``, so a refused retry leaves no trace, and ``_run_step``
+        calls it too, so a resume meets the same guard a first run would.
+        Two copies once drifted -- a guard tightened in only one of them
+        would let a retry's refusal arrive a call too late.
+        """
+        if key == "quantise" and self._raw is None:
+            raise ValueError("quantise cannot run again before the panel is read")
+        if key == "drill" and self._quantised is None:
+            raise ValueError("drill cannot run again before quantisation")
+        if key == "write-case" and self._drilled is None:
+            raise ValueError("write case cannot run again before the panel is drilled")
+        if key == "read-boards" and self._drilled is None:
+            raise ValueError("read boards cannot run again before the panel is drilled")
+        if key == "write-assembly" and (
+            self._dock_data is None or self._scan is None or self._geometry is None
+        ):
+            raise ValueError("write assembly cannot run again before the boards are docked")
+
+    def _run_step(
+        self, key: str, scope: Scope
+    ) -> tuple[DrillData | DockData, str, tuple[tuple[str, str], ...]]:
+        """One step's work, under the options already in force.
+
+        Split from ``_rerun`` because a retry and a resume disagree about
+        what to discard and agree about everything else. Nothing here
+        credits a step: the caller decides when a step has finished, which
+        is what lets a resolution loop ask and run again in between.
+        """
+        if key == "read-panel":
+            slots = scope.steps(2)
+            self._read_panel(next(slots))
+            outcome = self._read_outcome()
+            self._quantised = self._quantise(next(slots))
+            return self._quantised, outcome, (("quantise", _quantise_outcome(self._quantised)),)
+        if key in _STAGE_ORDER:
+            if self._dock_data is None or self._dock_pipeline is None:
+                raise ValueError(f"{key!r} cannot run before the boards are read")
+            before = self._dock_data
+            stage = self._dock_pipeline[_STAGE_ORDER.index(key)]
+            self._dock_data = Pipeline([stage]).run(before, scope)
+            return self._dock_data, _stage_outcome(before, self._dock_data), ()
+        self._precondition(key)
+        if key == "quantise":
+            assert self._raw is not None
+            self._quantised = self._quantise(scope)
+            return self._quantised, _quantise_outcome(self._quantised), ()
+        if key == "drill":
+            assert self._quantised is not None
+            self._drilled = self._drill(self._quantised, scope)
+            return self._drilled, _drill_outcome(self._drilled), ()
+        if key == "write-case":
+            assert self._drilled is not None
+            written = self._write_case(self._drilled, scope)
+            return self._drilled, ", ".join(written) or "nothing written", ()
+        if key == "read-boards":
+            assert self._drilled is not None
+            if self._docked is None:  # the scan was discarded: parse again
+                self._read_boards(self._drilled, scope)
+            self._dock_data = self._admit()
+            assert self._scan is not None
+            return self._dock_data, f"{len(self._scan.raw.boards)} board(s)", ()
+        if key == "write-assembly":
+            assert self._dock_data is not None
+            assert self._scan is not None
+            assert self._geometry is not None
+            written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
+            return self._dock_data, ", ".join(written) or "nothing written", ()
         raise ValueError(f"{key!r} is not a step this driver can run again")
 
     def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
@@ -394,6 +551,7 @@ class Driver:
             question, diagnostic = gap
             answer = self._presentation.ask(question)
             revised = revision_for(diagnostic, self._options, answer)
+            self._declare(revised)
             # ``_rerun`` returns the union of both halves' data; ``key`` chose
             # the branch, so the value is this step's own type.
             reran, outcome, refreshed = self._rerun(key, revised, scope)
@@ -402,12 +560,43 @@ class Driver:
         self._presentation.finish_step(self._step(key), outcome)
         return data
 
+    def _declare(self, options: RunOptions) -> None:
+        """Record an answered gap where the manifest reads its declarations.
+
+        Decision 8 records the values that produced the artefacts, and the
+        payload is derived from ``Project.settings`` rather than from the
+        options a revision changed. Recording the answer only in the options
+        would leave the field declared as the gap it started as -- and, being
+        held, never corrected: the question would return on every open.
+        """
+        project = self._project
+        if project is None:
+            return
+        settings = project.settings
+        for name in sorted(self._changed(options)):
+            place = PLACE_OF_FIELD[name]
+            record = getattr(settings, place)
+            answered = Resolved(getattr(options, name), Provenance(Origin.USER))
+            settings = replace(settings, **{place: replace(record, **{name: answered})})
+        self._project = replace(project, settings=settings)
+
+    def declare(self, settings: Settings) -> None:
+        """The values a further commit records, keeping what a gap already answered.
+
+        Decision 8: a half's declarations are the values that produced its
+        artefacts, so a resume under revised values records the revised
+        ones. An answered gap is such a value and is recorded nowhere else,
+        so it survives here unless the user has since set that field
+        themselves -- and ``held`` still protects everything already written.
+        """
+        project = self._project
+        if project is None:
+            return
+        self._project = replace(project, settings=_kept(project.settings, settings))
+
     def _gap_in(self, data: Diagnosable) -> tuple[Choice, Diagnostic] | None:
         """The first gap in this data that a picker could resolve, if any."""
-        diagnostics = data.diagnostics
-        if self._promote_warnings:
-            diagnostics = promoted(diagnostics)
-        for diagnostic in diagnostics:
+        for diagnostic in data.diagnostics:
             question = question_for(diagnostic, self._board_designators())
             if question is not None:
                 return question, diagnostic
@@ -440,6 +629,32 @@ class Driver:
         if not self._changed(options) <= _RETRY_INPUTS.get(key, frozenset()):
             for attribute in _STEP_HOLDS.get(key, ()):
                 setattr(self, attribute, None)
+        self._options = options
+
+    def _adopt(self, options: RunOptions, stale: frozenset[str]) -> None:
+        """Take revised options for a step set already known to be stale.
+
+        Narrower than ``_accept``, which assumes everything after its one
+        step is superseded: a resume gets the whole ``_STEP_CONSUMES`` set
+        already computed, so nothing outside it is invalid. A step's holds
+        clear where it cannot honour a changed field, or where an earlier
+        step also in ``stale`` produces what it consumes -- read boards is
+        stale by consumption alone when the panel is re-drilled, and its
+        scan must not outlive that.
+        """
+        changed = self._changed(options)
+        order = [step.key for step in self._plan.steps]
+        for key in stale:
+            relevant = changed & _STEP_INPUTS.get(key, frozenset())
+            cannot_honour = bool(relevant) and not relevant <= _RETRY_INPUTS.get(key, frozenset())
+            consumed = set(_STEP_CONSUMES.get(key, ()))
+            superseded = any(
+                earlier in stale and consumed.intersection(_STEP_HOLDS.get(earlier, ()))
+                for earlier in order[: order.index(key)]
+            )
+            if cannot_honour or superseded:
+                for attribute in _STEP_HOLDS.get(key, ()):
+                    setattr(self, attribute, None)
         self._options = options
 
     def _discard_after(self, key: str) -> None:
@@ -651,15 +866,30 @@ class Driver:
         """This run's targets whose format one half owns, in the order requested."""
         return [(name, path) for name, path in self._options.targets if name in names]
 
+    def _declaration(self, half: Half) -> tuple[Path, Payload] | None:
+        """This half's project file, or ``None`` where it adds nothing new."""
+        if self._project is None:
+            return None
+        payload = payload_for(
+            self._project.panel, self._project.settings, half, self._project.held
+        )
+        if payload is None:
+            return None
+        return manifest_path(self._project.panel), payload
+
     def _write_case(self, data: DrillData, scope: Scope) -> list[str]:
         """Render, stage and commit the drill half's own targets."""
         targets = self._targets_for(frozenset(available()))
         settings = OutputSettings(title=self._options.title, case_model=self._case_model)
+        # Spec decision 17: with no boards, the dock half never runs, so this
+        # is the only commit that can record the confirmed empty board list.
+        half = Half.DRILL_ONLY if not self._options.boards else Half.DRILL
         return self._write(
             data,
             targets,
             lambda: [(make_emitter(name, settings), path) for name, path in targets],
             scope,
+            half,
         )
 
     def _write_dock(
@@ -671,7 +901,9 @@ class Driver:
     ) -> list[str]:
         """Render, stage and commit the dock half's own targets."""
         targets = self._targets_for(DOCK_TARGET_NAMES)
-        return self._write(data, targets, lambda: _dock_emitters(targets, scan, geometry), scope)
+        return self._write(
+            data, targets, lambda: _dock_emitters(targets, scan, geometry), scope, Half.DOCK
+        )
 
     def _write(
         self,
@@ -679,36 +911,126 @@ class Driver:
         targets: Sequence[tuple[str, Path]],
         emitters: Callable[[], Sequence[tuple[Emitter[_DataT], Path]]],
         scope: Scope,
+        half: Half,
     ) -> list[str]:
-        """Render every target of one half, then stage and commit the whole set.
+        """Render this half's targets, then stage and commit them with its declaration.
 
-        Withholds every target on an error severity, before ``emitters`` is
-        even called: CLAUDE.md states "any error prevents every requested
-        output", and an emitter may legitimately refuse data this broken, so
-        nothing is rendered rather than rendered and discarded. Staging and
-        the whole-set transaction are ``stompmodel``'s (ADR-0001, ADR-0005);
-        both halves reach them here, so no second write mechanism exists to
-        lose the rollback ``commit_all`` provides.
+        Withholds every target on an error severity, before ``emitters`` runs:
+        CLAUDE.md's "any error prevents every requested output" holds, and an
+        emitter may refuse data this broken, so nothing is rendered rather than
+        rendered and discarded. Decision 8: the declaration joins the same
+        transaction as the artefacts, so a committed file never sits beside a
+        project file that fails to describe it. Staging and the commit stay
+        ``stompmodel``'s (ADR-0001, ADR-0005); no second write path exists.
         """
-        if not targets:
+        declaration = self._declaration(half)
+        if not targets and declaration is None:
             return []
         if data.worst_severity is Severity.ERROR:
-            self._presentation.report(_withheld(targets))
+            if targets:
+                self._presentation.report(_withheld(targets))
             return []
         rendered: list[tuple[Emitter[_DataT], Path, Payload]] = []
-        built = emitters()
+        built = emitters() if targets else []
         for (emitter, path), slot in zip(built, scope.steps(len(built)), strict=True):
             slot.label(emitter.name)
             rendered.append((emitter, path, emitter.emit(data)))
-        staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
+        entries: list[tuple[Path, Payload]] = [(path, payload) for _e, path, payload in rendered]
+        if declaration is not None:
+            entries.append(declaration)
+        staged = stage_all(entries)
         sizes = commit_all(staged)
+        if declaration is not None and self._project is not None:
+            # Re-read rather than merge in memory: the file on disk is what
+            # the next commit must leave untouched, and it is the only thing
+            # that knows what this commit actually added.
+            self._project = replace(self._project, held=read(self._project.panel))
+        artefacts = staged[: len(rendered)]
+        self._written.extend(written.path for written in artefacts)
         self._presentation.report([
             f"wrote {written.path}  ({emitter.name}, {size} bytes)"
             for (emitter, _path, _payload), written, size in zip(
-                rendered, staged, sizes, strict=True
+                rendered, artefacts, sizes[: len(rendered)], strict=True
             )
         ])
-        return [str(written.path) for written in staged]
+        return [str(written.path) for written in artefacts]
+
+    @property
+    def written(self) -> tuple[Path, ...]:
+        """Every artefact this driver committed, in the order it committed them.
+
+        The `Output` place labels a file it made differently from one it
+        merely found (decision 2), and nothing else in the process knows
+        which is which.
+        """
+        return tuple(self._written)
+
+    @property
+    def findings(self) -> tuple[Diagnostic, ...]:
+        """Both halves' diagnostics, as the run stands now.
+
+        Read after a resume, which hands back no half's value: the
+        `Findings` place must show what this run found rather than what the
+        run before it did.
+        """
+        found: list[Diagnostic] = []
+        if self._drilled is not None:
+            found.extend(self._drilled.diagnostics)
+        if self._dock_data is not None:
+            found.extend(self._dock_data.diagnostics)
+        return tuple(found)
+
+    @property
+    def designators(self) -> dict[int, tuple[str, ...]]:
+        """Each board's own names, once the boards have been read.
+
+        Empty before ``read boards``, which is why ``panel_reference`` is
+        typed until a run has read a board and ticked afterwards.
+        """
+        return self._board_designators()
+
+
+def compose(
+    plan: RunPlan,
+    presentation: Presentation,
+    options: RunOptions,
+    project: Project | None = None,
+    stop: Callable[[], bool] | None = None,
+) -> tuple[Driver, DrillData, DockData | None]:
+    """One composed run: the driver, and what each half produced.
+
+    Both presentations reach a run through here. What differs between the
+    workbench and the plain writer is what happens around a run -- one
+    returns to an application and the other to a process -- never what a run
+    is, and a second composition is how the two would drift apart.
+    """
+    driver = Driver(plan, presentation, options, project)
+    sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
+    with track(sink) as scope:
+        drill, dock = driver.run(scope)
+    return driver, drill, dock
+
+
+def _kept(held: Settings, fresh: Settings) -> Settings:
+    """``fresh``, less any field the answered-gap rank already holds.
+
+    A user who has since set that field themselves said the more recent
+    thing, and the run is about to read theirs, so theirs is what the
+    manifest must record.
+    """
+    settings = fresh
+    for place in PLACE_ORDER:
+        before = getattr(held, place)
+        after = getattr(fresh, place)
+        answered = {
+            row.name: getattr(before, row.name)
+            for row in fields(before)
+            if getattr(before, row.name).provenance.origin is Origin.USER
+            and getattr(after, row.name).provenance.origin is not Origin.USER
+        }
+        if answered:
+            settings = replace(settings, **{place: replace(after, **answered)})
+    return settings
 
 
 def _dock_emitters(

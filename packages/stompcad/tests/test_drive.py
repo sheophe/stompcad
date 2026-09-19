@@ -9,22 +9,47 @@ from __future__ import annotations
 
 import inspect
 import io
+import json
+from collections.abc import Callable, Sequence
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from typing import ClassVar, cast
 
 import pytest
 
-from stompcad import drive
-from stompcad.drive import _STEP_HOLDS, Driver, RunOptions
+from stompcad import cli, drive, manifest
+from stompcad.drive import _STEP_HOLDS, Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
-from stompcad.present import Choice, PlainWriter, Question
+from stompcad.present import Choice, PlainWriter, Presentation, Question
+from stompcad.settings import Origin, Provenance, Resolved, Settings
+from stompcollider.model import DockData
+from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill.pipeline import DEFAULT_STANDARD
+from stompdrill.quantise import RawDrillData
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
-from stompmodel.diagnostics import Diagnostic
-from stompmodel.model import CaseFace, DrillData
-from stompmodel.progress import NO_PROGRESS, track
+from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+from stompmodel.progress import NO_PROGRESS, Scope, track
+from stompmodel.protocols import Pipeline
+from stompmodel.units import Nanometre
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
 __all__: list[str] = []
+
+
+def test_a_run_without_boards_takes_only_the_drill_half() -> None:
+    """Decision 17's division, stated once for the driver and the roadmap alike.
+
+    The workbench derives its stale set from the plan a run would take, so
+    a second statement of where the halves divide is how the sidebar comes
+    to wait on a step this project has no reason to run.
+    """
+    assert [step.key for step in drive.plan_for(()).steps] == [
+        "read-panel", "quantise", "drill", "write-case",
+    ]
+    assert drive.plan_for((TAR_PCB,)) is DRILL_AND_DOCK
 
 
 def _refuse_to_read(panel: object) -> object:
@@ -78,11 +103,12 @@ def drill_and_dock_run() -> Driver:
 
 
 class _RecordingPresentation:
-    """Records every ``finish_step`` call, in the order the driver made it."""
+    """Records every ``finish_step``/``report`` call, in the order the driver made them."""
 
     def __init__(self) -> None:
         self.began: RunPlan | None = None
         self.finished: list[tuple[Step, str]] = []
+        self.reported: list[Sequence[str]] = []
 
     def begin(self, plan: RunPlan) -> None:
         self.began = plan
@@ -96,8 +122,8 @@ class _RecordingPresentation:
     def ask(self, question: object) -> str:
         raise AssertionError("run_drill must not ask a question of its own")
 
-    def report(self, lines: object) -> None:
-        return None
+    def report(self, lines: Sequence[str]) -> None:
+        self.reported.append(lines)
 
 
 class _Recording(PlainWriter):
@@ -124,7 +150,10 @@ class _Answering(PlainWriter):
         self._answer = answer
 
     def ask(self, question: Question) -> str:
-        self._asked.append(Choice(prompt=question.prompt, candidates=question.candidates))
+        # Kept whole rather than rebuilt: a copy made field by field drops
+        # whatever column the question gained since this line was written.
+        assert isinstance(question, Choice), "the driver asks with ``resolve``'s own Choice"
+        self._asked.append(question)
         return self._answer
 
 
@@ -626,6 +655,85 @@ def test_a_run_that_declares_its_case_asks_nothing() -> None:
     assert asked == []
 
 
+def _declaring(panel: Path, presentation: Presentation, case: str | None) -> Driver:
+    """A driver over the tied fixture whose drill half commits a project file.
+
+    ``case`` is what the project already declares, and also what the run is
+    given: the tar fixture ties three parts only where neither says anything.
+    """
+    options = _undeclared() if case is None else replace(_undeclared(), case=case)
+    settings = Settings.of_defaults(panel)
+    if case is not None:
+        settings = replace(
+            settings,
+            enclosure=replace(
+                settings.enclosure, case=Resolved(case, Provenance(Origin.PROJECT))
+            ),
+        )
+    driver = Driver(DRILL_AND_DOCK, presentation, options)
+    driver._project = Project(panel=panel, settings=settings, held=manifest.Manifest())
+    return driver
+
+
+def test_an_answered_tie_is_declared_where_the_manifest_reads_it(tmp_path: Path) -> None:
+    """Decision 8: the manifest records the values that produced the artefacts.
+
+    The declarations are read from ``Project.settings``, so an answer that
+    revised the options alone would be recorded as the ``null`` it started
+    as -- and, being held, never corrected afterwards: the same question
+    would be asked on every open.
+    """
+    panel = tmp_path / "tar.ai"
+    driver = _declaring(panel, _Answering([], "1590B2"), case=None)
+
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["enclosure"]["case"] == "1590B2"
+
+
+def test_a_run_with_no_gap_records_the_case_it_ran_under(tmp_path: Path) -> None:
+    """The control: a revision changes a declaration, a run happening does not."""
+    panel = tmp_path / "tar.ai"
+    asked: list[Choice] = []
+    driver = _declaring(panel, _Answering(asked, "never asked"), case="1590B")
+
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+
+    assert asked == [], "the control: a declared case ties nothing"
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["enclosure"]["case"] == "1590B"
+
+
+def test_a_resume_under_a_revised_value_keeps_the_gap_the_run_answered(tmp_path: Path) -> None:
+    """Decision 8: both the revision and the answer reach the file that describes them.
+
+    ``declare`` is handed the workbench's own settings, where an answered
+    tie was never recorded -- the answer went to the worker. Taking those
+    settings whole would drop it, and the question would be asked on every
+    open: exactly what recording it on ``Project.settings`` prevents.
+    """
+    panel = tmp_path / "tar.ai"
+    driver = _declaring(panel, _Answering([], "1590B2"), case=None)
+    with track(NullSink()) as scope:
+        driver.resume(frozenset({"read-panel", "quantise"}), driver._options, scope)
+
+    defaults = Settings.of_defaults(panel)
+    edited = replace(
+        defaults,
+        drilling=replace(defaults.drilling, title=Resolved("Tar", Provenance(Origin.USER))),
+    )
+    driver.declare(edited)
+    with track(NullSink()) as scope:
+        driver.resume(frozenset({"drill", "write-case"}), driver._options, scope)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["enclosure"]["case"] == "1590B2"
+    assert recorded["drilling"]["title"] == "Tar", "the resume's own revision was not declared"
+
+
 @pytest.mark.hammond
 def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
     """``_quantise`` must thread ``case_model`` through, not merely accept it.
@@ -647,24 +755,6 @@ def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
     assert drill.enclosure is not None
     assert drill.enclosure.selected_part == "1590B"
     assert "inferred-enclosure" in [d.code for d in drill.diagnostics]
-
-
-def test_promote_warnings_reaches_the_gap_finding_path() -> None:
-    """The flag travels from ``__init__`` to ``_gap_in``, not only into ``resolve``.
-
-    Both resolvable codes are raised at ERROR today, so promotion changes no
-    live run; this proves the wire the constructor argument is for, ahead of
-    a warning-level resolvable code ever existing.
-    """
-    tied = Diagnostic.warning(
-        "ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),)
-    )
-    data = DrillData(diagnostics=(tied,))
-    passed_over = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
-    promoting = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options(), True)
-
-    assert passed_over._gap_in(data) is None
-    assert promoting._gap_in(data) is not None
 
 
 @pytest.mark.boards
@@ -720,3 +810,544 @@ def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once
     assert [line for line in lines if line.startswith("read-boards")] == ["read-boards: 2 board(s)"]
     assert dock is not None
     assert not [d for d in dock.diagnostics if d.code == "empty-group"]
+
+
+# --------------------------------------------------------------------------
+# Decision 10: resume runs a whole stale set without discarding what it did
+# not touch. These stand-ins name the driver's own tables rather than real
+# geometry, so a resume can be driven with no kernel and no board fixture.
+# --------------------------------------------------------------------------
+
+
+def _identity_frame() -> FaceFrame:
+    """A registration frame with no measured or kernel-backed geometry behind it."""
+    return FaceFrame(
+        CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+
+
+def _stand_in_dock_data() -> DockData:
+    """An otherwise empty ``DockData``, valid enough to be held without a real dock read."""
+    return DockData(case=CaseRegistration("1590B", CaseFace.BOX, "case.stp", _identity_frame()))
+
+
+class _MatchStub:
+    """A dock stage whose ``apply`` returns its input, standing in for ``Match``."""
+
+    name: ClassVar[str] = "match"
+    weight: ClassVar[float] = 1.0
+
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
+        return data
+
+    def describe(self) -> StageRun:
+        return StageRun(self.name)
+
+
+class _SeatStub(_MatchStub):
+    """Stands in for ``Seat``, beside ``_MatchStub``."""
+
+    name: ClassVar[str] = "seat"
+
+
+class _ClashStub(_MatchStub):
+    """Stands in for ``Clash``, beside ``_MatchStub``."""
+
+    name: ClassVar[str] = "clash"
+
+
+class _CountingStage(_MatchStub):
+    """Counts each ``apply`` call, so a resumed stage step is proven to have run."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def apply(self, data: DockData, scope: Scope = NO_PROGRESS) -> DockData:
+        self.calls += 1
+        return data
+
+
+#: Three stand-in stages in ``_STAGE_ORDER``'s own order, so a resumed stage
+#: step has something to index into without running real board matching.
+_STAND_IN_PIPELINE: Pipeline[DockData] = Pipeline([_MatchStub(), _SeatStub(), _ClashStub()])
+
+
+def _driver_and_presentation_with_held_intermediates(
+    tmp_path: Path,
+) -> tuple[Driver, _RecordingPresentation]:
+    """A driver whose held intermediates are stand-ins, so a resume needs no kernel.
+
+    ``_scan``/``_geometry`` are cast placeholders: no test built from this
+    helper requests a ``report``/``assembly`` target, so ``_write_dock``
+    returns before either is read, the early exit ``test_drive_dock.py``'s
+    own withhold test already justifies. ``boards`` is a never-opened path,
+    only truthy so a resume keeps the dock half. ``targets`` names an
+    absolute path under ``tmp_path`` so a write step commits nowhere else.
+    """
+    presentation = _RecordingPresentation()
+    options = replace(
+        _options(),
+        boards=(Path("stand-in-board.stp"),),
+        targets=(("json", tmp_path / "case.json"),),
+    )
+    driver = Driver(DRILL_AND_DOCK, presentation, options)
+    driver._raw = cast(RawDrillData, object())
+    driver._quantised = DrillData()
+    driver._drilled = DrillData()
+    driver._scan = cast(BoardScan, object())
+    driver._geometry = cast(dict[int, BoardGeometry], {})
+    driver._docked = _stand_in_dock_data()
+    driver._dock_pipeline = _STAND_IN_PIPELINE
+    driver._dock_data = _stand_in_dock_data()
+    return driver, presentation
+
+
+def _driver_with_held_intermediates(tmp_path: Path) -> Driver:
+    driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    return driver
+
+
+def _errored_dock_data() -> DockData:
+    """A dock result carrying an error, for the write step's own withhold guard."""
+    return _stand_in_dock_data().with_diagnostics(Diagnostic.error("stand-in-error", "stand-in"))
+
+
+def _driver_writing_into(
+    tmp_path: Path,
+    *,
+    worst: Severity | None = None,
+    targets: tuple[tuple[str, Path], ...] | None = None,
+    boards: tuple[Path, ...] | None = None,
+) -> tuple[Driver, Path]:
+    """A driver over ``tmp_path`` with a real ``Project``, so a write step declares.
+
+    Built on ``_driver_and_presentation_with_held_intermediates`` rather than
+    a second set of fakes: the same stand-in intermediates and options, plus
+    the ``Project`` this task's declarations are staged and re-read through.
+    ``boards``, when given, overrides both the options and the settings the
+    project declares from, so ``Half.DRILL_ONLY`` is reachable with an empty
+    list read back as the confirmed answer it is, not an unresolved default.
+    """
+    panel = tmp_path / "tar.ai"
+    driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    if targets is not None:
+        driver._options = replace(driver._options, targets=targets)
+    if worst is not None:
+        driver._drilled = DrillData().with_diagnostics(Diagnostic(worst, "stand-in", "stand-in"))
+    settings = Settings.of_defaults(panel)
+    if boards is not None:
+        driver._options = replace(driver._options, boards=boards)
+        settings = replace(
+            settings,
+            boards=replace(settings.boards, boards=Resolved(boards, Provenance(Origin.PROJECT))),
+        )
+    driver._project = Project(panel=panel, settings=settings, held=manifest.Manifest())
+    return driver, panel
+
+
+class _Recorder:
+    """A sink appending each reported position to the list it was given."""
+
+    def __init__(self, seen: list[float]) -> None:
+        self._seen = seen
+
+    def update(self, position: float, path: tuple[str, ...]) -> None:
+        self._seen.append(position)
+
+
+def test_a_resume_of_the_write_steps_keeps_every_dock_intermediate(tmp_path: Path) -> None:
+    """Decision 10: a filename must not cost the seating search again.
+
+    The finding that forced the design. ``retry`` discards everything after
+    the step it runs, so driving a two-write stale set through it would drop
+    the scan the second write needs.
+    """
+    driver = _driver_with_held_intermediates(tmp_path)
+    held_scan, held_geometry, held_dock_data = driver._scan, driver._geometry, driver._dock_data
+    revised = replace(driver._options, targets=(("json", tmp_path / "other.json"),))
+
+    driver.resume(frozenset({"write-case", "write-assembly"}), revised, NO_PROGRESS)
+
+    # Identity, not equality: a rebuilt-but-equal value would still mean the
+    # scan or the dock data was computed again, which is the cost decision 10
+    # exists to avoid -- see finding 1 of the fix round for the failure mode.
+    assert driver._scan is held_scan
+    assert driver._geometry is held_geometry
+    assert driver._dock_data is held_dock_data
+
+
+def test_a_resume_discards_only_what_the_changed_step_cannot_honour(tmp_path: Path) -> None:
+    """A revised board list needs the parse ``read boards`` no longer performs."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    revised = replace(driver._options, boards=(Path("other-pcb.stp"),))
+
+    driver._adopt(revised, frozenset({"read-boards"}))
+
+    assert driver._docked is None
+    assert driver._drilled is not None  # an earlier step's hold is untouched
+
+
+def test_a_resume_honours_a_revision_the_step_can_take_from_what_it_holds(
+    tmp_path: Path,
+) -> None:
+    """The control: a revised filter re-runs the filter, never the parse."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    revised = replace(driver._options, panel_reference="RV*")
+
+    driver._adopt(revised, frozenset({"read-boards"}))
+
+    assert driver._docked is not None
+
+
+def test_a_resume_runs_the_stale_steps_in_the_plan_s_own_order(tmp_path: Path) -> None:
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"write-assembly", "write-case"}), driver._options, NO_PROGRESS)
+    assert [step.key for step, _outcome in presentation.finished] == [
+        "write-case", "write-assembly"
+    ]
+
+
+def test_a_resume_reports_no_step_it_was_not_given(tmp_path: Path) -> None:
+    """The stale set is the whole instruction; a fresh step is not run for free."""
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
+
+
+def test_a_resumed_position_never_retreats(tmp_path: Path) -> None:
+    """Decision 8 of ADR-0013 continues to bind across a resume."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    seen: list[float] = []
+    with track(_Recorder(seen)) as scope:
+        driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, scope)
+    assert seen == sorted(seen)
+
+
+def test_a_stage_step_is_runnable_by_a_resume_though_no_revision_names_it(
+    tmp_path: Path,
+) -> None:
+    """``match``, ``seat`` and ``clash`` read no field, so only consumption makes them stale.
+
+    ``_dock_data`` being non-``None`` alone would pass even if ``match``
+    were silently skipped, since the stand-in already sets it -- so this
+    checks the stage actually ran: once, and credited.
+    """
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    counting = _CountingStage()
+    driver._dock_pipeline = Pipeline([counting, _SeatStub(), _ClashStub()])
+
+    driver.resume(frozenset({"match"}), driver._options, NO_PROGRESS)
+
+    assert counting.calls == 1
+    assert [step.key for step, _outcome in presentation.finished] == ["match"]
+
+
+def test_a_retry_still_refuses_a_stage_step(tmp_path: Path) -> None:
+    """The control: a retry is driven by a revision, and no revision names these."""
+    driver = _driver_with_held_intermediates(tmp_path)
+    with pytest.raises(ValueError, match="reads no field"):
+        driver.retry("seat", driver._options, NO_PROGRESS)
+
+
+def test_the_driver_names_every_artefact_it_committed(tmp_path: Path) -> None:
+    """The `Output` place labels a file it wrote differently from one it found."""
+    driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert driver.written
+
+
+# --------------------------------------------------------------------------
+# Fix round 1: five findings against the design above.
+# --------------------------------------------------------------------------
+
+
+def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 1: ``read-boards`` is stale only by consumption of a re-drilled panel.
+
+    A grid change invalidates the whole plan but names no field ``read
+    boards`` itself reads, so the old rule kept its scan. The assembly
+    would then disagree with the case this very resume just rewrote.
+    """
+    driver = _driver_with_held_intermediates(tmp_path)
+    calls = {"read_boards": 0}
+
+    def _stub_quantise(scope: Scope) -> DrillData:
+        return DrillData()
+
+    def _stub_drill(data: DrillData, scope: Scope) -> DrillData:
+        return DrillData()
+
+    def _stub_read_boards(drill: DrillData, scope: Scope) -> None:
+        calls["read_boards"] += 1
+        # ``_run_step`` reports ``len(self._scan.raw.boards)``, so the stand-in
+        # needs that one shape rather than an opaque, never-touched cast.
+        driver._scan = cast(BoardScan, SimpleNamespace(raw=SimpleNamespace(boards=())))
+        driver._geometry = {}
+        driver._docked = _stand_in_dock_data()
+        driver._dock_pipeline = _STAND_IN_PIPELINE
+
+    monkeypatch.setattr(driver, "_quantise", _stub_quantise)
+    monkeypatch.setattr(driver, "_drill", _stub_drill)
+    monkeypatch.setattr(driver, "_read_boards", _stub_read_boards)
+    revised = replace(driver._options, grid_mm=driver._options.grid_mm / 2)
+    stale = drive.invalidated(frozenset({"grid_mm"}))
+
+    driver.resume(stale, revised, NO_PROGRESS)
+
+    assert calls["read_boards"] == 1
+
+
+def test_a_resume_of_read_panel_and_quantise_credits_each_step_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding 2: a resume must not cascade ``read-panel`` into ``quantise``.
+
+    A retry pays for ``quantise`` from inside ``read-panel`` because it has
+    nothing of ``DrillData``'s own shape to report. A resume runs ``quantise``
+    as its own stale step instead, or it would be credited -- and, with an
+    unanswered gap, possibly credited before that gap was resolved.
+    """
+    presentation = _RecordingPresentation()
+    driver = Driver(DRILL_AND_DOCK, presentation, _options())
+    calls = {"quantise": 0}
+    real_quantise = Driver._quantise
+
+    def _counting_quantise(self: Driver, scope: Scope) -> DrillData:
+        calls["quantise"] += 1
+        return real_quantise(self, scope)
+
+    monkeypatch.setattr(Driver, "_quantise", _counting_quantise)
+
+    driver.resume(frozenset({"read-panel", "quantise"}), driver._options, NO_PROGRESS)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["read-panel", "quantise"]
+    assert calls["quantise"] == 1
+
+
+def test_a_resume_reports_undocked_and_skips_dock_steps_when_drilled_has_errors(
+    tmp_path: Path,
+) -> None:
+    """Finding 3: ``run`` never docks against an errored drill half, and neither must resume."""
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver._drilled = DrillData().with_diagnostics(
+        Diagnostic.error("synthetic-error", "forced for the undocked guard")
+    )
+
+    driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, NO_PROGRESS)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
+    assert any("docked nothing" in line for lines in presentation.reported for line in lines)
+
+
+def test_a_resume_drops_the_dock_half_when_there_are_no_boards(tmp_path: Path) -> None:
+    """Finding 4: ``run`` skips the dock half with no boards, and so must resume."""
+    driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
+    driver._options = replace(driver._options, boards=())
+
+    driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, NO_PROGRESS)
+
+    assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
+
+
+def test_a_refused_retry_leaves_options_and_holds_untouched() -> None:
+    """Finding 5: a refusal must not run ``_accept`` before its own precondition is checked."""
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+    before = driver._options
+    revised = replace(before, case="1590BB")
+
+    with pytest.raises(ValueError, match="panel is read"):
+        driver.retry("quantise", revised, NO_PROGRESS)
+
+    assert driver._options is before
+
+
+def test_a_retry_of_an_unknown_key_names_it() -> None:
+    """Finding 5: an unknown key must not reach ``_discard_after``'s ``list.index`` instead."""
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+
+    with pytest.raises(ValueError, match="not a step this driver can run again"):
+        driver.retry("bogus", driver._options, NO_PROGRESS)
+
+
+def test_a_resume_of_a_step_whose_precondition_fails_names_the_missing_work() -> None:
+    """Fix round 2: ``_run_step``'s one guard path must be reachable from resume too.
+
+    A retry reaches this guard through ``_rerun``'s own call, ahead of
+    ``_accept``; a resume never goes through ``_rerun`` at all, so this is
+    the only test that proves ``_run_step``'s internal call to
+    ``_precondition`` fires on that path.
+    """
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
+
+    with pytest.raises(ValueError, match="panel is read"):
+        driver.resume(frozenset({"quantise"}), driver._options, NO_PROGRESS)
+
+
+# --------------------------------------------------------------------------
+# Task 5: the manifest inside each half's own transaction.
+# --------------------------------------------------------------------------
+
+
+def test_a_half_commits_its_declarations_with_its_own_artefacts(tmp_path: Path) -> None:
+    """Decision 8: an artefact never sits beside a project file that misses it."""
+    driver, panel = _driver_writing_into(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["drilling"]["grid_mm"] == driver._options.grid_mm
+    assert "boards" not in recorded, "the control: boards is the dock half's place with any boards"
+
+
+def test_a_drill_only_half_declares_the_confirmed_empty_board_list(tmp_path: Path) -> None:
+    """Spec decision 17, through the driver: no boards selects ``Half.DRILL_ONLY``."""
+    driver, panel = _driver_writing_into(tmp_path, boards=())
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert recorded["boards"]["boards"] == []
+
+
+def test_a_withheld_half_records_nothing(tmp_path: Path) -> None:
+    """The control: a half that wrote no artefact declares nothing about them."""
+    driver, panel = _driver_writing_into(tmp_path, worst=Severity.ERROR)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert not manifest.manifest_path(panel).exists()
+
+
+def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> None:
+    """Decision 8: a value the manifest holds is used and left untouched.
+
+    Changed on ``_project.settings``, not ``driver._options``: the payload
+    is derived from the former, so only a revised held manifest -- read back
+    after the first commit -- can be what stops the second payload differing.
+    """
+    driver, panel = _driver_writing_into(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    first = manifest.manifest_path(panel).read_text(encoding="utf-8")
+
+    assert driver._project is not None
+    driver._project = replace(
+        driver._project,
+        settings=replace(
+            driver._project.settings,
+            drilling=replace(
+                driver._project.settings.drilling,
+                grid_mm=Resolved(0.5, Provenance(Origin.USER)),
+            ),
+        ),
+    )
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+
+    assert manifest.manifest_path(panel).read_text(encoding="utf-8") == first
+
+
+def test_a_failed_dock_half_leaves_the_drill_declarations_and_not_its_own(tmp_path: Path) -> None:
+    """Decision 8: gap-filling follows each half's commit, not the whole run.
+
+    The drill half commits real case files before docking begins, so
+    recording the declarations only on a whole-run success would leave those
+    files beside defaults that did not make them.
+    """
+    driver, panel = _driver_writing_into(tmp_path)
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    driver._dock_data = _errored_dock_data()
+    driver.resume(frozenset({"write-assembly"}), driver._options, NO_PROGRESS)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert "drilling" in recorded
+    assert "boards" not in recorded
+
+
+def test_a_drill_half_never_declares_a_target_only_the_dock_half_could_commit(
+    tmp_path: Path,
+) -> None:
+    """Decision 8, through the driver: ``write case`` must not pre-declare a dock format.
+
+    A dock format in the resolved targets is real ahead of the dock half --
+    a run may ask for both in one go -- so the guard has to be the half a
+    format belongs to, not merely whether the run intends to render it.
+    """
+    driver, panel = _driver_writing_into(tmp_path)
+    assert driver._project is not None
+    driver._project = replace(
+        driver._project,
+        settings=replace(
+            driver._project.settings,
+            output=replace(
+                driver._project.settings.output,
+                targets=Resolved(
+                    (("json", tmp_path / "tar.json"), ("assembly", tmp_path / "tar-assembly.step")),
+                    Provenance(Origin.USER),
+                ),
+            ),
+        ),
+    )
+
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+
+    recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
+    assert "assembly" not in recorded["output"]["targets"]
+    assert "json" in recorded["output"]["targets"]
+
+
+def test_a_run_that_writes_nothing_still_records_what_it_ran_under(tmp_path: Path) -> None:
+    """A check-only run is a run; decision 17 permits one and decision 8 remembers it."""
+    driver, panel = _driver_writing_into(tmp_path, targets=())
+    driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    assert manifest.manifest_path(panel).exists()
+
+
+@pytest.mark.parametrize(
+    "spell",
+    [
+        lambda project: project,
+        lambda project: project.parent / "sub" / ".." / project.name,
+        lambda project: project.parent / project.name.upper(),
+    ],
+    ids=["exact", "dotdot", "case"],
+)
+def test_the_manifest_is_never_one_of_the_artefacts(
+    tmp_path: Path, spell: Callable[[Path], Path]
+) -> None:
+    """Two writers for one path is what `check_target_set` exists to refuse.
+
+    Compared through ``target_key`` rather than ``==``: a ``..`` segment and
+    a case variant both name the same file on the filesystems this runs on,
+    and a mismatch there would let the declaration silently overwrite an
+    artefact spelled differently from the manifest's own path.
+    """
+    panel = tmp_path / "tar.ai"
+    project = manifest.manifest_path(panel)
+    targets = Resolved[tuple[tuple[str, Path], ...]](
+        (("excellon", spell(project)),), Provenance(Origin.PROJECT)
+    )
+    with pytest.raises(cli.UsageError, match="project file"):
+        cli._validate_output(targets, panel)
+
+
+def test_the_manifest_is_refused_under_a_relative_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control's own control: ``parse_emit`` hands a bare ``FORMAT=name`` through unresolved."""
+    panel = tmp_path / "tar.ai"
+    project = manifest.manifest_path(panel)
+    monkeypatch.chdir(tmp_path)
+    targets = Resolved[tuple[tuple[str, Path], ...]](
+        (("excellon", Path(project.name)),), Provenance(Origin.PROJECT)
+    )
+    with pytest.raises(cli.UsageError, match="project file"):
+        cli._validate_output(targets, panel)
+
+
+def test_an_ordinary_artefact_path_is_accepted(tmp_path: Path) -> None:
+    """The control: a target that is not the project file, under any spelling, passes."""
+    panel = tmp_path / "tar.ai"
+    targets = Resolved[tuple[tuple[str, Path], ...]](
+        (("excellon", tmp_path / "tar.drl"),), Provenance(Origin.PROJECT)
+    )
+    cli._validate_output(targets, panel)

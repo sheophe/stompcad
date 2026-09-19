@@ -1,12 +1,28 @@
 # ADR-0013: The orchestrator's presentation and its composed run
 
-**Status:** Accepted, partly amended by
-[ADR-0014](0014-the-workbench-and-its-resolution.md), which changes what
-`retry` does with a revision the named step cannot honour: refusing it was
-right while a resolver alone called it mid-run, and wrong once a builder in
-the workbench can call it after simply changing their mind, so `retry` now
-discards that step's own holds and runs it again rather than refusing. This
-ADR's other decisions stand.
+**Status:** Accepted, amended by
+[ADR-0014](0014-the-workbench-and-its-resolution.md) in five places, beside the
+change to `retry` already recorded here and, with plan 3, its worker-thread
+decision amended to a process, for decision 18's reason: the terminal
+presentation's worker-thread mechanism now serves the workbench rather than
+`InlineApp`, its inline screen and the detail level `v` cycled; a terminal's
+settled step lines are now written as the workbench exits, so the byte
+comparison against the same run piped is against those exit lines; an error
+pauses a run and asks, a warning does not pause, and `promoted()` is deleted
+rather than left unreachable, which retires `--promote-warnings`; `CI` present
+in the environment, or `TERM=dumb`, now counts as no terminal even with a tty
+attached; and `q` quits while `esc` stops a run, rather than `q` meaning stop
+because the app exited with the run. `retry` still honours a revision where the
+held intermediates allow it, and otherwise discards that step's own holds and
+runs it again rather than refusing, because refusing was right while a resolver
+alone called it mid-run and wrong once a builder in the workbench can call it
+after simply changing their mind. Its worker-thread decision is amended to a
+process, for decision 18's reason: only `call_from_thread` is unchanged; a
+worker still crosses to the app, but now pumps events across a process boundary
+instead of doing the run's own work; `ask` blocks in that process on its own
+command pipe rather than a worker's `Event`; and a fault crosses as a value
+re-raised on the far side rather than as the exception object carried to the
+main thread. This ADR's other decisions stand.
 
 ## Context
 
@@ -42,7 +58,8 @@ A run is nine named steps — `read panel`, `quantise`, `drill`, `write case`,
 terminal, streaming each step's line as that step completes and drawing no bar.
 A terminal implementation renders the same step list live and settles into the
 same lines, which is what lets a terminal's scrollback be compared with a piped
-run's output directly.
+run's output directly. The workbench writes its settled step lines to the
+terminal as it exits, so that byte comparison is against those exit lines.
 
 `ask` raises `NoTerminal` rather than prompting. A genuine gap with no terminal
 to answer on is a usage failure naming what was missing, not a prompt nobody
@@ -110,10 +127,10 @@ so a revised filter re-runs without the temporary the parse needed. That is
 also why a revised board list is refused: `read boards` re-runs its filter over
 boards already scanned, and the files they were staged from are gone by then.
 
-`promote_warnings` is not a `RunOptions` field. It travels beside the options,
-as an argument to `Driver` and to `cli._compose`, because decision 6 makes it a
-rule about which findings reach a picker and not an input any step reads — and
-a field no step reads is precisely what a refused revision is.
+An error pauses the run and asks; a warning does not pause but stays
+actionable once the run completes. `promoted()` is deleted rather than left
+unreachable, because nothing has to stop for a warning once `Findings` is
+the place a builder returns to.
 
 ### The composition adds no second mechanism, and no second rule
 
@@ -166,32 +183,88 @@ The four exit codes both tools share are reduced from the worse of the two
 halves' findings, so the record and the status cannot disagree. `130` is the
 fifth, and no other path produces it.
 
-### The terminal presentation runs the composed run on a worker thread
+### The composed run happens in a process of its own
 
-`InlineApp` owns the main thread and its event loop; the composed run happens
-on a Textual worker thread, so a blocking kernel call cannot freeze the
-display for as long as it holds that thread. Every `TerminalPresentation`
-method crosses back to the app through `call_from_thread`, and nothing on the
-worker touches a widget directly. `ask` blocks its own worker on an `Event`
-the modal's callback sets, because the answer is a keypress that arrives only
-after the crossing that pushed the modal has already returned. The detail
-level `v` cycles is kept on the app alone and is never persisted, matching
-decision 3.
+The worker thread was chosen so a blocking kernel call could not freeze the
+display, and that reason was right; it still holds for the pump that now
+carries events across the wider boundary. It was not sufficient. A thread
+and the interface share one interpreter, and the run's own Python between
+kernel calls holds the interpreter lock as surely as a blocking kernel call
+does; the display does not freeze, but it answers late, late enough to read
+as a fault in the application.
 
-Three further points came out of building this, not out of the spec.
-`InlineApp.drive` only stores the callable it is given; the worker itself
-starts from `on_mount`, because `run_worker` needs a running app and `drive`
-is called before `run()` supplies one — starting it at `drive` time raises
-`RuntimeError` and every terminal run would crash. Any fault on the worker is
-caught as `BaseException`, kept as `app.failure`, and re-raised on the main
+So the run happens in a process started with `spawn`. Never `fork`: a
+forked child inherits the interface's memory, a live Textual application
+included, at whatever moment the fork landed. The process outlives one run,
+because the spec's resume, decision 10, spends intermediates the driver
+still holds, and a process started per run would throw away the thing a
+resume exists to reuse.
+
+A quit never signals a run in flight. `_write` stages and then commits with
+no cancellation point between, and both roll back by unwinding; a signal
+does not unwind, so signalling there is how a half-written set of artefacts
+is made. A quit asks the run to stop the way `esc` already does, and waits.
+What may be ended outright is a process sitting in its command loop, where
+nothing is in flight and there is nothing to roll back. A process that ends
+without reporting is itself reported: every way a run can finish reaches the
+session, because a session left believing a run is working holds every
+place read-only with no way back.
+
+That promise covers the interpreter's own exit as well as the quit, because
+`multiprocessing` ends every daemon child from an exit handler of its own
+and a run cut short there is cut short between the staging and the commit
+as surely as one cut short by `q`. The residual risk is accepted rather than
+removed: a run that never hears its stop delays the window's close for as
+long as it takes, which is the deliberate trade against a half-written set
+of artefacts.
+
+What crosses is what a pipe already receives: step lines, positions,
+diagnostics, the questions a pause asks, the answers it takes, a stop, and
+the paths written. Nothing the kernel builds travels. `ask` no longer blocks
+a worker on an `Event` and polls the app; it blocks in the run's own process
+on its command pipe, where waiting costs the interface nothing.
+
+A fault is no longer carried out as the exception object. An exception is an
+object and the pipe carries values, so what crosses is its sentence and
+whether `main` has a branch for its kind. A fault `main` would have mapped
+is re-raised as a `StompError` with the same sentence, so the printed line
+and the exit code are unchanged; anything else is re-raised as `RunFailed`,
+which `main` does not catch, so a defect still leaves a traceback. Which of
+the two it is, is decided in the run's own process, where the exception
+still is. The class is named for a reader and never rebuilt from that name:
+the interface would be importing whatever a pipe told it to — the kernel's
+own module, for a fault the kernel raised, into the one interpreter kept
+free of it — and a class that builds its message from its arguments would
+build a second one around the first, so the instruction a tool wrote for a
+builder would reach them wrapped around itself. The remote traceback
+travels with a defect, because the traceback the interface could produce
+names the line that re-raised. The
+presentation boundary itself does not move: `Presentation` is the same
+protocol with the same five methods, and what changed is that one
+implementation of it now writes into a pipe.
+
+`CI` present in the environment, or `TERM=dumb`, counts as no terminal even
+with a tty attached, so a runner that allocates a pty gets the plain writer
+rather than a full-screen application it cannot answer and would otherwise
+hang against.
+
+`q` quits, stopping any run first and confirming while one is in flight;
+`esc` stops a run in flight instead. That replaces the earlier decision that
+`q` meant stop because the app exited with the run: quitting and stopping
+are different acts once the app stays open across runs, and need different
+keys.
+
+One further point came out of building this, not out of the spec. The
+pump itself starts with the first run rather than from `on_mount`, because
+`events()` reaches `_serving()`, which spawns the process: a worker started
+at mount would spawn one merely to listen, and decision 1 forbids opening a
+project from costing kernel work. The run's own process catches its fault
+as `BaseException` — `Exception` would miss `Cancelled`, which derives from
+it — and reports it across the pipe as a value; the pump hands that value
+to the app, which keeps it as `app.failure` and re-raises it on the main
 thread once `app.run()` returns, so `main`'s one exception-to-exit-code
-mapping serves the terminal path as well as the headless one instead of
-drifting into two; `BaseException` rather than `Exception` is required
-because `Cancelled` derives from it. And `q` abandons a question the same way
-it stops a run, because the picker binds its own `q` — `OptionList` swallows
-the app's binding — and because `App.pop_screen` can discard a pending
-screen's result callback without ever invoking it, `ask`'s wait is bounded
-rather than open-ended, or an abandoned screen would park the worker forever.
+mapping still serves the terminal path as well as the headless one instead
+of drifting into two.
 
 ## Rationale
 
@@ -238,10 +311,11 @@ A phase added to either tool is a step added to `stompcad.plan`, a weight
 recounted with the command recorded there, and a step line in the presentation.
 The step list is data, so nothing else changes with it.
 
-`TerminalPresentation`, in `stompcad/inline.py`, is the terminal implementation
-of `Presentation`; decision 3's three levels of detail, `--progress` and the
-`v` key that cycles them are decided in code alongside it. `ask` is implemented
-there as the modal decision 6 picks from, and `ChoiceScreen` is what it pushes.
+`serve._Down`, in `stompcad/workbench/serve.py`, is the implementation of
+`Presentation`, written into a pipe instead of onto a screen, having
+replaced `WorkbenchPresentation` once the run moved to its own process.
+`ask` pushes `PickerScreen`, the workbench's own modal, where the inline
+app once pushed `ChoiceScreen`.
 The interactive resolver has landed for both resolvable codes, so the spec's
 decisions 6, 8 and 10 are decided in code. What the resolver drives is `_rerun`,
 which runs one step again and returns its outcome without reporting it, because
