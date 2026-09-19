@@ -235,7 +235,8 @@ def _enum_values(modules: dict[str, _Module]) -> frozenset[str]:
     """The member values of every code enum, which must each be defined once.
 
     Matched by name, so two classes sharing one would pool their values; that
-    is refused rather than guessed at, and the tool must be taught which.
+    is refused rather than guessed at, and the tool must be taught which. An
+    annotated member (``NAME: str = 'x'``) counts the same as a plain one.
     """
     found: set[str] = set()
     defined: set[str] = set()
@@ -247,7 +248,7 @@ def _enum_values(modules: dict[str, _Module]) -> frozenset[str]:
                 raise ValueError(f"{node.name} is defined more than once in the scanned roots")
             defined.add(node.name)
             for statement in node.body:
-                if isinstance(statement, ast.Assign) and isinstance(
+                if isinstance(statement, (ast.Assign, ast.AnnAssign)) and isinstance(
                     statement.value, ast.Constant
                 ) and isinstance(statement.value.value, str):
                     found.add(statement.value.value)
@@ -263,18 +264,42 @@ def _diagnostic_names(tree: ast.Module) -> frozenset[str]:
     return frozenset(names)
 
 
-def _code_argument(node: ast.Call, names: frozenset[str]) -> tuple[bool, ast.expr | None]:
-    """Whether this call raises or builds a ``Diagnostic``, and the code it passes.
+def _refers_to_diagnostic(expr: ast.expr, names: frozenset[str]) -> bool:
+    """Whether this expression names the ``Diagnostic`` class, however qualified.
 
-    ``Diagnostic.warning(code, ...)`` passes it first and ``Diagnostic(severity,
-    code, ...)`` second; either may name it ``code=``.
+    ``pkg.Diagnostic`` reads the same as a bare or aliased import; dropping
+    the qualified form would let a module-qualified raise pass unseen.
+    """
+    return (isinstance(expr, ast.Name) and expr.id in names) or (
+        isinstance(expr, ast.Attribute) and expr.attr == "Diagnostic"
+    )
+
+
+def _is_replace_with_code(node: ast.Call) -> bool:
+    """Whether this is a ``replace(...)`` call carrying a ``code=`` keyword.
+
+    Covers ``dataclasses.replace`` and a bare import alike: either can set a
+    diagnostic's code without going through a recognised raiser.
     """
     func = node.func
-    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-        if func.value.id not in names or func.attr not in _RAISERS:
-            return False, None
+    named = (isinstance(func, ast.Name) and func.id == "replace") or (
+        isinstance(func, ast.Attribute) and func.attr == "replace"
+    )
+    return named and any(keyword.arg == "code" for keyword in node.keywords)
+
+
+def _code_argument(node: ast.Call, names: frozenset[str]) -> tuple[bool, ast.expr | None]:
+    """Whether this call raises or builds a ``Diagnostic``, and the code it
+    passes. ``Diagnostic.warning(code, ...)`` passes it first and
+    ``Diagnostic(severity, code, ...)`` second; either may name it ``code=``
+    or reach ``Diagnostic`` through a qualified name such as ``sd.Diagnostic``.
+    """
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr in _RAISERS and _refers_to_diagnostic(
+        func.value, names
+    ):
         position = 0
-    elif isinstance(func, ast.Name) and func.id in names:
+    elif _refers_to_diagnostic(func, names):
         position = 1
     else:
         return False, None
@@ -326,30 +351,40 @@ def _scan(
         if module.name.split(".")[0] not in tools:
             continue
         names = _diagnostic_names(module.tree)
+        consumed: set[int] = set()
         for node in ast.walk(module.tree):
-            if not isinstance(node, ast.Call):
-                continue
-            raises, first = _code_argument(node, names)
-            if not raises:
-                continue
-            codes: frozenset[str]
-            if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                codes = frozenset({first.value})
+            if isinstance(node, ast.Call):
+                raises, first = _code_argument(node, names)
+                if raises:
+                    if isinstance(node.func, ast.Attribute):
+                        consumed.add(id(node.func))
+                    codes: frozenset[str]
+                    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                        codes = frozenset({first.value})
+                    elif (
+                        isinstance(first, ast.Attribute)
+                        and first.attr == "value"
+                        and isinstance(first.value, ast.Name)
+                        and _annotated_as_code(module.tree, node.lineno, first.value.id)
+                        and values
+                    ):
+                        codes = values
+                    else:
+                        shown = ast.unparse(first) if first is not None else "no positional code"
+                        unreadable.append(Unreadable(module.path, node.lineno, shown))
+                        continue
+                    unit = (module.name, _unit_at(module.tree, node.lineno))
+                    for code in codes:
+                        sites.setdefault(code, set()).add(Site(module.path, unit))
+                elif _is_replace_with_code(node):
+                    unreadable.append(Unreadable(module.path, node.lineno, ast.unparse(node)))
             elif (
-                isinstance(first, ast.Attribute)
-                and first.attr == "value"
-                and isinstance(first.value, ast.Name)
-                and _annotated_as_code(module.tree, node.lineno, first.value.id)
-                and values
+                isinstance(node, ast.Attribute)
+                and node.attr in _RAISERS
+                and _refers_to_diagnostic(node.value, names)
+                and id(node) not in consumed
             ):
-                codes = values
-            else:
-                shown = ast.unparse(first) if first is not None else "no positional code"
-                unreadable.append(Unreadable(module.path, node.lineno, shown))
-                continue
-            unit = (module.name, _unit_at(module.tree, node.lineno))
-            for code in codes:
-                sites.setdefault(code, set()).add(Site(module.path, unit))
+                unreadable.append(Unreadable(module.path, node.lineno, ast.unparse(node)))
     return sites, unreadable
 
 

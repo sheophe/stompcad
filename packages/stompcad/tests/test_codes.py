@@ -195,16 +195,101 @@ def test_a_code_enum_defined_twice_is_refused(tmp_path: Path) -> None:
 
 
 def test_an_unrelated_enum_is_not_a_code(tmp_path: Path) -> None:
+    """A fixture with a real raise site: pooling ``FrameStyle`` into the code
+    enums would widen the values a typed parameter resolves to, so this can
+    actually fail rather than passing regardless of ``_CODE_ENUMS``."""
     src = _tree(tmp_path, {
         "tool/__init__.py": "",
-        "tool/style.py": "from enum import Enum\nclass FrameStyle(Enum):\n    THIN = 'thin'\n",
+        "tool/base.py": (
+            _ENUM + "class FrameStyle(Enum):\n    THIN = 'thin'\n"
+        ),
+        "tool/check.py": (
+            "from .base import Rejection\n"
+            "def reject(rejection: Rejection):\n"
+            "    return Diagnostic.error(rejection.value, 'x')\n"
+        ),
     })
-    assert codes_in([src], ("tool",)) == {}
+    assert set(codes_in([src], ("tool",))) == {"hole-gone"}
 
 
 def test_a_missing_root_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         codes_in([tmp_path / "nowhere"], ("tool",))
+
+
+def test_a_module_qualified_raiser_is_read(tmp_path: Path) -> None:
+    """``pkg.Diagnostic.error(...)`` reads the same as an imported name."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/a.py": "def f():\n    return diagnostics.Diagnostic.error('qualified-code', 'x')\n",
+    })
+    assert set(codes_in([src], ("tool",))) == {"qualified-code"}
+
+
+def test_a_module_qualified_constructor_is_read(tmp_path: Path) -> None:
+    """``pkg.Diagnostic(severity, code, ...)`` is the built form, qualified."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/a.py": (
+            "def f():\n"
+            "    return sd.Diagnostic(Severity.ERROR, 'qualified-built-code', 'x')\n"
+        ),
+    })
+    assert set(codes_in([src], ("tool",))) == {"qualified-built-code"}
+
+
+def test_a_replace_call_with_a_code_keyword_is_reported(tmp_path: Path) -> None:
+    """``dataclasses.replace`` can set a code without any recognised raiser."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/a.py": "def f(d):\n    return dataclasses.replace(d, code='x')\n",
+    })
+    assert codes_in([src], ("tool",)) == {}
+    assert len(unreadable_in([src], ("tool",))) == 1
+
+
+def test_a_bare_replace_call_with_a_code_keyword_is_reported(tmp_path: Path) -> None:
+    """A bare imported ``replace`` is the same call, unqualified."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/a.py": "def f(d):\n    return replace(d, code='x')\n",
+    })
+    assert codes_in([src], ("tool",)) == {}
+    assert len(unreadable_in([src], ("tool",))) == 1
+
+
+def test_a_raiser_passed_as_a_value_is_reported(tmp_path: Path) -> None:
+    """``Diagnostic.error`` handed to ``partial`` is never a call's ``.func``."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/a.py": "def f():\n    return functools.partial(Diagnostic.error, 'x')\n",
+    })
+    assert codes_in([src], ("tool",)) == {}
+    assert len(unreadable_in([src], ("tool",))) == 1
+
+
+def test_a_raiser_bound_to_a_name_is_reported(tmp_path: Path) -> None:
+    """Aliasing a raiser and calling the alias hides the code from the scan."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/a.py": "make = Diagnostic.warning\ndef f():\n    return make('x', 'y')\n",
+    })
+    assert codes_in([src], ("tool",)) == {}
+    assert len(unreadable_in([src], ("tool",))) == 1
+
+
+def test_an_annotated_enum_member_is_read(tmp_path: Path) -> None:
+    """A member's value counts whether or not it carries a type annotation."""
+    src = _tree(tmp_path, {
+        "tool/__init__.py": "",
+        "tool/base.py": "from enum import Enum\nclass Rejection(Enum):\n    GONE: str = 'hole-gone'\n",
+        "tool/check.py": (
+            "from .base import Rejection\n"
+            "def reject(rejection: Rejection):\n"
+            "    return Diagnostic.error(rejection.value, 'x')\n"
+        ),
+    })
+    assert set(codes_in([src], ("tool",))) == {"hole-gone"}
 
 
 # -- what the graph reaches ---------------------------------------------------------
