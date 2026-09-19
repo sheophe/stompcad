@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import statistics
 import time
-from multiprocessing import get_context
 
 import pytest
 
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.run import Launch
 from stompcad.workbench.runner import ProcessRunner, Runner
+from stompcad.workbench.session import Phase
 
 from .projects import PANEL, session, settle
 
@@ -24,9 +24,12 @@ _INTERVAL = 0.01
 #: orders of magnitude, and a test that fails on a busy machine teaches
 #: people to delete it.
 _RATIO = 20.0
-#: The floor the ratio is taken against, so an idle machine measuring
-#: near zero cannot make any working figure look like a regression.
-_FLOOR_MS = 5.0
+#: The floor the ratio is taken against, so a genuinely near-zero idle
+#: reading cannot make any working figure look like a regression. Well
+#: under an ordinary idle p95 (low single-digit milliseconds), so the
+#: ratio term is what actually gates; this only catches a reading close
+#: to zero, not merely a good one.
+_FLOOR_MS = 0.5
 
 
 class _Tick:
@@ -53,16 +56,21 @@ def _app(runner: Runner) -> Workbench:
     return Workbench(session(), launch=Launch(panel=PANEL), runner=runner)
 
 
-def _prime_multiprocessing() -> None:
-    """Start the resource tracker before the app owns ``stderr``.
+@pytest.mark.asyncio
+async def test_a_process_runner_completes_a_run_inside_a_live_workbench() -> None:
+    """Priming multiprocessing is the product's job, not a caller's.
 
-    A first ``spawn`` synchronisation primitive launches that tracker,
-    which reads ``sys.stderr.fileno()``; Textual's own redirect answers
-    that call with an invalid descriptor for as long as the app is
-    running, which fails the launch. Any process that used
-    multiprocessing before opening a workbench already avoids this.
+    No priming call here. ``Workbench.__init__`` does it, because it is the
+    object that owns a ``Runner`` and runs before ``run_async`` ever wraps
+    ``stderr``. Removing that call turns this red rather than a copy of the
+    fix living beside the test that measures speed.
     """
-    get_context("spawn").Lock()
+    app = _app(ProcessRunner(entry="tests.composers:steady"))
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await settle(pilot, app)
+    assert app.failure is None
+    assert app.session.phase is Phase.DONE
 
 
 @pytest.mark.asyncio
@@ -74,7 +82,6 @@ async def test_the_interface_answers_while_a_run_works() -> None:
     machines. The idle sample is taken first because taking it after
     would measure an interpreter still settling from the run.
     """
-    _prime_multiprocessing()
     app = _app(ProcessRunner(entry="tests.composers:burning"))
     async with app.run_test() as pilot:
         idle = _Tick()

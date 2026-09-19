@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,25 @@ from .theme import shades
 
 __all__ = ["Workbench", "KeysScreen", "ConfirmScreen"]
 
+_multiprocessing_primed = False
+
+
+def _prime_multiprocessing() -> None:
+    """Start multiprocessing's resource tracker before Textual owns stderr.
+
+    A first ``spawn`` synchronisation primitive starts that tracker, which
+    reads ``sys.stderr.fileno()`` to launch itself. Textual's redirect
+    answers that call with an invalid descriptor for as long as an app is
+    running, so priming here, before the app takes the terminal, keeps a
+    run's first spawn from failing. Cheap to call again, so every
+    workbench may call it.
+    """
+    global _multiprocessing_primed
+    if _multiprocessing_primed:
+        return
+    get_context("spawn").Lock()
+    _multiprocessing_primed = True
+
 
 class Workbench(App[int], inherit_bindings=False):
     """The project open, full screen. ``run`` hands back the exit code it earned.
@@ -119,6 +139,7 @@ class Workbench(App[int], inherit_bindings=False):
         # repository script and an app installed elsewhere has no such tool.
         self.cache = cache
         self.runner: Runner = runner or ProcessRunner()
+        _prime_multiprocessing()
         # Decision 1: an invocation carrying something beyond the panel means
         # "do not ask me", so the app opens with the run already moving. A
         # manifest value is a standing declaration and starts nothing, or
