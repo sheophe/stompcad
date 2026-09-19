@@ -238,15 +238,16 @@ are different acts once the app stays open across runs, and need different
 keys.
 
 One further point came out of building this, not out of the spec. The
-worker itself starts from `on_mount`, because `run_worker` needs a running
-app and `drive` is called before `run()` supplies one — starting it at
-`drive` time raises `RuntimeError` and every terminal run would crash. The
-run's own process catches its fault as `BaseException` — `Exception` would
-miss `Cancelled`, which derives from it — and reports it across the pipe as
-a value; the pump hands that value to the app, which keeps it as
-`app.failure` and re-raises it on the main thread once `app.run()` returns,
-so `main`'s one exception-to-exit-code mapping still serves the terminal
-path as well as the headless one instead of drifting into two.
+pump itself starts with the first run rather than from `on_mount`, because
+`events()` reaches `_serving()`, which spawns the process: a worker started
+at mount would spawn one merely to listen, and decision 1 forbids opening a
+project from costing kernel work. The run's own process catches its fault
+as `BaseException` — `Exception` would miss `Cancelled`, which derives from
+it — and reports it across the pipe as a value; the pump hands that value
+to the app, which keeps it as `app.failure` and re-raises it on the main
+thread once `app.run()` returns, so `main`'s one exception-to-exit-code
+mapping still serves the terminal path as well as the headless one instead
+of drifting into two.
 
 ## Rationale
 
@@ -293,10 +294,11 @@ A phase added to either tool is a step added to `stompcad.plan`, a weight
 recounted with the command recorded there, and a step line in the presentation.
 The step list is data, so nothing else changes with it.
 
-`WorkbenchPresentation`, in `stompcad/workbench/run.py`, is the terminal
-implementation of `Presentation`, having replaced `TerminalPresentation` in
-the deleted `stompcad/inline.py`. `ask` pushes `PickerScreen`, the
-workbench's own modal, where the inline app pushed `ChoiceScreen`.
+`serve._Down`, in `stompcad/workbench/serve.py`, is the implementation of
+`Presentation`, written into a pipe instead of onto a screen, having
+replaced `WorkbenchPresentation` once the run moved to its own process.
+`ask` pushes `PickerScreen`, the workbench's own modal, where the inline
+app once pushed `ChoiceScreen`.
 The interactive resolver has landed for both resolvable codes, so the spec's
 decisions 6, 8 and 10 are decided in code. What the resolver drives is `_rerun`,
 which runs one step again and returns its outcome without reporting it, because

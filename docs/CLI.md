@@ -185,7 +185,9 @@ prints one line as it completes, so a piped run reads as a log of what
 happened.
 
 On a terminal, `stompcad` opens a full-screen workbench and the run happens
-inside it. Without one — a pipe, a dumb terminal, or a CI runner, where `CI`
+inside it, in a process of its own, so the workbench keeps answering while
+the run works; `esc` stops it as soon as the run next reports where it has
+got to. Without one — a pipe, a dumb terminal, or a CI runner, where `CI`
 present in the environment or `TERM=dumb` counts as no terminal even with a
 tty attached — the run gets the streamed step lines instead. The workbench
 writes those same lines to the terminal as it exits, so a run leaves its
