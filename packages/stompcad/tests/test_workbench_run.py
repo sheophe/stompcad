@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event
-from typing import NoReturn
+from threading import Event, get_ident
 
 import pytest
 from textual.pilot import Pilot
@@ -20,17 +19,19 @@ from stompcad.plan import DRILL_AND_DOCK, RunPlan
 from stompcad.present import Choice, Presentation
 from stompcad.resolve import RESOLVABLE
 from stompcad.settings import Settings
-from stompcad.workbench import run
+from stompcad.workbench import run, wire
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.dialog import Dialog
 from stompcad.workbench.keys import Place
 from stompcad.workbench.places import FocusRow, ValueRow
-from stompcad.workbench.run import Launch, WorkbenchPresentation
+from stompcad.workbench.run import Launch
 from stompcad.workbench.session import PendingGap, Phase, Session
 from stompmodel.diagnostics import EXIT_WARNINGS, Diagnostic, Severity
 from stompmodel.progress import Scope
 
+from . import composers
 from .projects import PANEL, session, settle
+from .runners import ThreadRunner
 
 __all__: list[str] = []
 
@@ -59,9 +60,9 @@ class _Compose:
     """A stand-in for ``drive.compose``: a plan, its steps, and no kernel work.
 
     ``hold`` keeps the run in flight so the rules that only apply while one
-    works have something to work against. It releases as soon as the app
-    asks it to stop or stops running, because a fake that outlives its app
-    is a hung suite rather than a failing test.
+    works have something to work against. It releases as soon as the runner
+    asks it to stop, because a fake that outlives its runner is a hung
+    suite rather than a failing test -- ``close()`` is what asks now.
     """
 
     def __init__(self, hold: bool, finding: Diagnostic | None = None) -> None:
@@ -77,8 +78,6 @@ class _Compose:
         project: Project | None = None,
         stop: object = None,
     ) -> tuple[Driver, _Data, _Data | None]:
-        assert isinstance(presentation, WorkbenchPresentation)
-        app = presentation._app
         presentation.begin(plan)
         steps = plan.steps[:2] if self.hold else plan.steps
         for step in steps:
@@ -86,15 +85,13 @@ class _Compose:
         while self.hold and not self.released.wait(0.02):
             if callable(stop) and stop():
                 raise Cancelled("cancelled at 22%")
-            if not app.is_running:
-                raise Cancelled("the app went away")
         found = () if self.finding is None else (self.finding,)
         return Driver(plan, presentation, options), _Data(found), None
 
 
-def _fake_launch(hold: bool = False, finding: Diagnostic | None = None) -> Launch:
-    """A launch whose composed run costs nothing; Task 11 runs the real one."""
-    return Launch(panel=PANEL, plan=DRILL_AND_DOCK, compose=_Compose(hold, finding))
+def _runner(hold: bool = False, finding: Diagnostic | None = None) -> ThreadRunner:
+    """A runner whose composed run costs nothing; ``test_runner.py`` runs the real one."""
+    return ThreadRunner(_Compose(hold, finding))
 
 
 class _Asking:
@@ -132,16 +129,17 @@ class _Asking:
         return Driver(plan, presentation, options), _Data(), None
 
 
-def _launch_raising(code: str, candidates: tuple[str, ...] = ("1590B", "1590B2")) -> Launch:
-    """A launch whose run stops once on this code and waits to be answered."""
-    return Launch(panel=PANEL, plan=DRILL_AND_DOCK, compose=_Asking(code, candidates))
+def _asking_runner(
+    code: str, candidates: tuple[str, ...] = ("1590B", "1590B2")
+) -> tuple[ThreadRunner, _Asking]:
+    """A runner whose run stops once on this code and waits to be answered."""
+    composer = _Asking(code, candidates)
+    return ThreadRunner(composer), composer
 
 
-def _answers(app: Workbench) -> list[str]:
+def _answers(asking: _Asking) -> list[str]:
     """Every answer the faked run received, from the fake that received them."""
-    launch = app.launch
-    assert launch is not None and isinstance(launch.compose, _Asking)
-    return launch.compose.answers
+    return asking.answers
 
 
 class _RecordingDriver(Driver):
@@ -207,16 +205,17 @@ class _Recording:
         return self.driver, _Data(), None
 
 
-def _recording_launch(driver: type[_RecordingDriver] = _RecordingDriver) -> Launch:
-    """A launch whose driver outlives its run, as a real one's does."""
-    return Launch(panel=PANEL, plan=DRILL_AND_DOCK, compose=_Recording(driver))
+def _recording_runner(
+    driver: type[_RecordingDriver] = _RecordingDriver,
+) -> tuple[ThreadRunner, _Recording]:
+    """A runner whose driver outlives its run, as a real one's does."""
+    composer = _Recording(driver)
+    return ThreadRunner(composer), composer
 
 
-def _recorded(app: Workbench) -> _RecordingDriver:
+def _recorded(recording: _Recording) -> _RecordingDriver:
     """The driver the faked run handed back, from the fake that made it."""
-    launch = app.launch
-    assert launch is not None and isinstance(launch.compose, _Recording)
-    driver = launch.compose.driver
+    driver = recording.driver
     assert driver is not None, "nothing was composed, so nothing could be kept"
     return driver
 
@@ -266,7 +265,7 @@ async def _edit_first_row(pilot: Pilot[int], app: Workbench) -> None:
 @pytest.mark.asyncio
 async def test_a_run_takes_two_keys_to_start() -> None:
     """Decision 3: one bare letter committing minutes of kernel work is a hazard."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r")
         assert app.session.phase is Phase.IDLE
@@ -277,7 +276,7 @@ async def test_a_run_takes_two_keys_to_start() -> None:
 
 @pytest.mark.asyncio
 async def test_enter_on_the_project_run_row_is_the_other_way_in() -> None:
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("p", "enter")
         await pilot.pause()
@@ -287,7 +286,7 @@ async def test_enter_on_the_project_run_row_is_the_other_way_in() -> None:
 @pytest.mark.asyncio
 async def test_a_run_is_refused_while_the_project_is_not_ready() -> None:
     """Decision 17: readiness gates the run, and says which place answers."""
-    app = Workbench(_session(ready=False), launch=_fake_launch())
+    app = Workbench(_session(ready=False), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -301,7 +300,7 @@ async def test_a_run_is_refused_while_the_project_is_not_ready() -> None:
 @pytest.mark.asyncio
 async def test_no_place_accepts_an_edit_while_the_run_works() -> None:
     """Decision 5. The guard: driven into every place, not just one."""
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -315,7 +314,7 @@ async def test_no_place_accepts_an_edit_while_the_run_works() -> None:
 @pytest.mark.asyncio
 async def test_every_bare_letter_still_moves_while_the_run_works() -> None:
     """The other half of decision 5: read-only, never hidden."""
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -331,7 +330,7 @@ async def test_an_open_editor_suppresses_the_chord_that_starts_a_run() -> None:
     ``ctrl+r`` here reaches the application and is refused for belonging to
     another place, which leaves the phase alone and would prove nothing.
     """
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("d")
         await _open_editor(pilot, app, "title")
@@ -344,7 +343,7 @@ async def test_an_open_editor_suppresses_the_chord_that_starts_a_run() -> None:
 @pytest.mark.asyncio
 async def test_the_same_chord_with_no_field_open_reaches_the_application() -> None:
     """The control: a suppression that never lifted would silence the refusal too."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("d", "ctrl+r")
         await pilot.pause()
@@ -359,7 +358,7 @@ async def test_an_open_field_keeps_the_chords_no_place_claims() -> None:
     chords by their spelling took it, and every other editing chord, away
     from the one field this application has.
     """
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("d")
         await _open_editor(pilot, app, "title")
@@ -375,7 +374,7 @@ async def test_an_open_field_keeps_the_chords_no_place_claims() -> None:
 @pytest.mark.asyncio
 async def test_esc_on_the_run_place_stops_the_run() -> None:
     """Decision 14: `esc` is the cancel of the thing that place owns."""
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -385,7 +384,7 @@ async def test_esc_on_the_run_place_stops_the_run() -> None:
 
 @pytest.mark.asyncio
 async def test_ctrl_c_stops_a_run_from_anywhere() -> None:
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -396,7 +395,7 @@ async def test_ctrl_c_stops_a_run_from_anywhere() -> None:
 @pytest.mark.asyncio
 async def test_q_quits_rather_than_stopping() -> None:
     """Decision 14 splits ADR-0013's `q`: quitting and stopping are different acts."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("q")
         await pilot.pause()
@@ -405,7 +404,7 @@ async def test_q_quits_rather_than_stopping() -> None:
 
 @pytest.mark.asyncio
 async def test_q_confirms_while_a_run_is_in_flight() -> None:
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -418,7 +417,7 @@ async def test_q_confirms_while_a_run_is_in_flight() -> None:
 @pytest.mark.asyncio
 async def test_the_stop_is_heard_over_a_modal_holding_the_screen() -> None:
     """Why the stop is the one priority binding: a modal hides the app's table."""
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -432,7 +431,7 @@ async def test_the_stop_is_heard_over_a_modal_holding_the_screen() -> None:
 @pytest.mark.asyncio
 async def test_confirming_a_quit_during_a_run_earns_the_stop_code() -> None:
     """Decision 14: a run the user stopped exits 130, whatever it had reached."""
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -452,7 +451,7 @@ async def test_a_run_finishing_while_the_dialog_is_open_keeps_its_own_code() -> 
     """
     finding = Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.01 mm")
     composed = _Compose(hold=True, finding=finding)
-    app = Workbench(_session(), launch=Launch(panel=PANEL, compose=composed))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=ThreadRunner(composed))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -471,7 +470,7 @@ async def test_a_run_finishing_while_the_dialog_is_open_keeps_its_own_code() -> 
 async def test_quitting_after_a_completed_run_keeps_the_code_it_earned() -> None:
     """The control: a stop may end a run, never change what a completed one produced."""
     finding = Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.01 mm")
-    app = Workbench(_session(), launch=_fake_launch(finding=finding))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(finding=finding))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -483,7 +482,7 @@ async def test_quitting_after_a_completed_run_keeps_the_code_it_earned() -> None
 @pytest.mark.asyncio
 async def test_the_app_opening_with_no_run_exits_clean() -> None:
     """Decision 14: `0` if the app opened and no run happened."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("q")
         await pilot.pause()
@@ -492,7 +491,7 @@ async def test_the_app_opening_with_no_run_exits_clean() -> None:
 
 @pytest.mark.asyncio
 async def test_a_cancelled_run_earns_the_shell_s_own_stop_code() -> None:
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -511,7 +510,8 @@ async def test_a_stopped_run_still_owns_what_it_committed() -> None:
     before it was heard. Labelling that file as merely found would deny
     work this very session did.
     """
-    app = Workbench(_session(), launch=_recording_launch(_StoppingDriver))
+    runner, _recording = _recording_runner(_StoppingDriver)
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -528,7 +528,7 @@ async def test_a_stopped_run_still_owns_what_it_committed() -> None:
 @pytest.mark.asyncio
 async def test_each_step_is_credited_as_it_completes() -> None:
     """The sidebar's left marker is derived from exactly this."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -538,7 +538,7 @@ async def test_each_step_is_credited_as_it_completes() -> None:
 @pytest.mark.asyncio
 async def test_the_run_place_keeps_the_line_a_pipe_would_have_received() -> None:
     """Decision 15: a run leaves its record behind either way."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -548,7 +548,7 @@ async def test_the_run_place_keeps_the_line_a_pipe_would_have_received() -> None
 @pytest.mark.asyncio
 async def test_the_run_place_lists_a_step_that_has_not_finished() -> None:
     """Decision 2: the `Run` place holds the step list live, not only what is done."""
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -560,17 +560,40 @@ async def test_the_run_place_lists_a_step_that_has_not_finished() -> None:
         assert "write-assembly done" not in listed
 
 
+class _OneShot:
+    """A runner that reports exactly one event, then falls silent."""
+
+    def __init__(self, event: wire.Event) -> None:
+        self._event = event
+
+    def start(self, panel: Path, plan: RunPlan, settings: Settings) -> None:
+        return None
+
+    def resume(self, stale: frozenset[str], settings: Settings) -> None:
+        return None
+
+    def answer(self, asked: int, text: str) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def events(self) -> Iterator[wire.Event]:
+        yield self._event
+
+    def close(self) -> None:
+        return None
+
+
 @pytest.mark.asyncio
 async def test_a_fault_after_the_app_has_gone_is_not_raised_on_the_worker() -> None:
-    """A confirmed quit outruns the worker, and a raise there ends nowhere."""
-
-    def explode(*_args: object, **_kwargs: object) -> NoReturn:
-        raise ValueError("the kernel gave up")
-
-    app = Workbench(_session(), launch=Launch(panel=PANEL, compose=explode))
+    """A confirmed quit outruns the pump, and a crossing that cannot be made ends nowhere."""
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.pause()
-    run._attempt(app)  # the crossing cannot be made; the fault has nowhere to go
+    faulted = wire.Faulted("builtins:ValueError", "the kernel gave up", "")
+    app.runner = _OneShot(faulted)
+    run._pump(app)  # the crossing cannot be made; the fault has nowhere to go
 
 
 @pytest.mark.asyncio
@@ -578,7 +601,7 @@ async def test_the_settled_lines_are_padded_to_the_plan_the_run_declared() -> No
     """Decision 15: the workbench's exit lines are byte-compared against the pipe."""
     from stompcad.present import step_line
 
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -592,7 +615,8 @@ async def test_the_settled_lines_are_padded_to_the_plan_the_run_declared() -> No
 @pytest.mark.asyncio
 async def test_a_gap_pauses_the_run_and_takes_the_user_to_its_place() -> None:
     """Decision 12: the app navigates, rather than marking and leaving them to hunt."""
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, _asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -602,7 +626,8 @@ async def test_a_gap_pauses_the_run_and_takes_the_user_to_its_place() -> None:
 
 @pytest.mark.asyncio
 async def test_only_the_paused_place_accepts_an_edit() -> None:
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, _asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -614,19 +639,21 @@ async def test_only_the_paused_place_accepts_an_edit() -> None:
 @pytest.mark.asyncio
 async def test_committing_the_answer_is_the_continuation() -> None:
     """Decision 12: no second action to find."""
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
         await pilot.press("enter")
         await settle(pilot, app)
         assert app.session.phase is Phase.DONE
-        assert _answers(app) == ["1590B"]
+        assert _answers(asking) == ["1590B"]
 
 
 @pytest.mark.asyncio
 async def test_the_picker_says_that_choosing_continues_the_run() -> None:
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, _asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -637,7 +664,8 @@ async def test_the_picker_says_that_choosing_continues_the_run() -> None:
 @pytest.mark.asyncio
 async def test_leaving_the_place_abandons_the_picker_without_stopping_the_run() -> None:
     """A picker is a transient widget; the run stays paused and reopenable."""
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, _asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -650,7 +678,8 @@ async def test_leaving_the_place_abandons_the_picker_without_stopping_the_run() 
 @pytest.mark.asyncio
 async def test_the_gap_s_own_row_reopens_the_picker_that_was_abandoned() -> None:
     """Decision 12: abandoning a picker is recoverable, not the end of the run."""
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, _asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -668,7 +697,8 @@ async def test_the_gap_s_own_row_reopens_the_picker_that_was_abandoned() -> None
 @pytest.mark.asyncio
 async def test_esc_closes_the_picker_before_it_stops_the_run() -> None:
     """Decision 12: `esc` is a ladder, innermost first."""
-    app = Workbench(_session(), launch=_launch_raising("ambiguous-enclosure"))
+    runner, _asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -686,7 +716,7 @@ async def test_a_place_answering_by_a_free_edit_carries_a_continue_row() -> None
     ``question_for`` raises nothing without candidates. The mechanism is
     built and tested here rather than left for the first code that needs it.
     """
-    app = Workbench(_session(), launch=_fake_launch(hold=True))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -694,6 +724,57 @@ async def test_a_place_answering_by_a_free_edit_carries_a_continue_row() -> None
         await app.redraw()
         await pilot.pause()
         assert app.query("#continue-run")
+
+
+class _AnsweringRunner:
+    """A runner that records what it is told, and reports nothing of its own."""
+
+    def __init__(self) -> None:
+        self.answers: list[tuple[int, str]] = []
+
+    def start(self, panel: Path, plan: RunPlan, settings: Settings) -> None:
+        return None
+
+    def resume(self, stale: frozenset[str], settings: Settings) -> None:
+        return None
+
+    def answer(self, asked: int, text: str) -> None:
+        self.answers.append((asked, text))
+
+    def stop(self) -> None:
+        return None
+
+    def events(self) -> Iterator[wire.Event]:
+        return iter(())
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pressing_continue_answers_and_returns_to_running() -> None:
+    """The standing test above only asserts the row is drawn; this presses it.
+
+    A place answering by a free edit gains one control, and pressing it
+    must both tell the runner and let the session go read-write again --
+    the second half is what a builder actually waits on.
+    """
+    runner = _AnsweringRunner()
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        app.session.pause(PendingGap("off-grid", "quantise", Place.DRILLING, None))
+        app._asked = 3
+        await app.redraw()
+        await pilot.pause()
+        row = app.query_one("#continue-run", FocusRow)
+        row.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session.phase is Phase.RUNNING
+        assert runner.answers == [(3, "")]
 
 
 @pytest.mark.asyncio
@@ -705,7 +786,8 @@ async def test_a_gap_picker_committed_with_nothing_ticked_abandons_it() -> None:
     refuses, taking the paused run down with it one keypress from where the
     app itself sent the builder.
     """
-    app = Workbench(_session(), launch=_launch_raising("empty-group", ("RV1", "RV2")))
+    runner, asking = _asking_runner("empty-group", ("RV1", "RV2"))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -717,7 +799,7 @@ async def test_a_gap_picker_committed_with_nothing_ticked_abandons_it() -> None:
         assert app.session.phase is Phase.PAUSED
         assert app.session.gap is not None and app.session.gap.code == "empty-group"
         assert app.failure is None
-        assert _answers(app) == [], "the run was answered with the empty commit"
+        assert _answers(asking) == [], "the run was answered with the empty commit"
         row = app.query_one("#gap-row", FocusRow)
         row.focus()
         await pilot.pause()
@@ -729,7 +811,8 @@ async def test_a_gap_picker_committed_with_nothing_ticked_abandons_it() -> None:
 @pytest.mark.asyncio
 async def test_a_ticked_designator_still_answers_and_continues() -> None:
     """The control: what is abandoned is the empty commit, not every commit."""
-    app = Workbench(_session(), launch=_launch_raising("empty-group", ("RV1", "RV2")))
+    runner, asking = _asking_runner("empty-group", ("RV1", "RV2"))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
@@ -740,7 +823,7 @@ async def test_a_ticked_designator_still_answers_and_continues() -> None:
         await settle(pilot, app)
 
         assert app.session.phase is Phase.DONE
-        assert _answers(app) == ["RV1"]
+        assert _answers(asking) == ["RV1"]
 
 
 # -- resuming what a change invalidated -----------------------------------
@@ -749,33 +832,36 @@ async def test_a_ticked_designator_still_answers_and_continues() -> None:
 @pytest.mark.asyncio
 async def test_a_second_ctrl_r_after_a_change_resumes_rather_than_starting_over() -> None:
     """Decision 10: the stale set is what runs, against what the driver holds."""
-    app = Workbench(_session(), launch=_recording_launch())
+    runner, recording = _recording_runner()
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
         app.session.set(Place.OUTPUT, "targets", ())
         await pilot.press("ctrl+r")
         await settle(pilot, app)
-    assert _recorded(app).resumed == [frozenset({"write-case", "write-assembly"})]
+    assert _recorded(recording).resumed == [frozenset({"write-case", "write-assembly"})]
 
 
 @pytest.mark.asyncio
 async def test_a_resume_is_never_automatic() -> None:
     """Decision 10: kernel work takes minutes, and a run that starts on a keystroke is hostile."""
-    app = Workbench(_session(), launch=_recording_launch())
+    runner, recording = _recording_runner()
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
         app.session.set(Place.DRILLING, "grid_mm", 0.5)
         await app.redraw()
         await pilot.pause()
-    assert _recorded(app).resumed == []
+    assert _recorded(recording).resumed == []
 
 
 @pytest.mark.asyncio
 async def test_the_roadmap_retreats_to_the_place_a_change_touched() -> None:
     """Decision 4: the marker is the earliest place owning a stale step."""
-    app = Workbench(_session(), launch=_recording_launch())
+    runner, _recording = _recording_runner()
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -790,14 +876,15 @@ async def test_the_roadmap_retreats_to_the_place_a_change_touched() -> None:
 @pytest.mark.asyncio
 async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
     """Decision 8: the manifest records what made the outputs."""
-    app = Workbench(_session(), launch=_recording_launch())
+    runner, recording = _recording_runner()
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
         app.session.set(Place.DRILLING, "title", "Tar")
         await pilot.press("ctrl+r")
         await settle(pilot, app)
-    assert _recorded(app).declared[-1].drilling.title.value == "Tar"
+    assert _recorded(recording).declared[-1].drilling.title.value == "Tar"
 
 
 # -- an invocation that said "do not ask me" -------------------------------
@@ -806,7 +893,7 @@ async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
 @pytest.mark.asyncio
 async def test_an_argument_beyond_the_panel_opens_with_the_run_already_moving() -> None:
     """Decision 1: there is no batch flag, because there is nothing to batch."""
-    app = Workbench(_session(), launch=_fake_launch(), autostart=True)
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(), autostart=True)
     async with app.run_test() as pilot:
         await settle(pilot, app)
         assert app.session.phase is Phase.DONE
@@ -815,7 +902,7 @@ async def test_an_argument_beyond_the_panel_opens_with_the_run_already_moving() 
 @pytest.mark.asyncio
 async def test_a_project_opened_to_be_looked_at_starts_nothing() -> None:
     """The control: a manifest value is a standing declaration, not an act of intent."""
-    app = Workbench(_session(), launch=_fake_launch())
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -825,42 +912,30 @@ async def test_a_project_opened_to_be_looked_at_starts_nothing() -> None:
 # -- the boundary the worker reports through -------------------------------
 
 
-def _accepts_presentation(presentation: Presentation) -> None:
-    """Structural conformance, enforced by mypy rather than at runtime."""
-
-
-def test_the_workbench_presentation_satisfies_the_boundary() -> None:
-    """ADR-0013 pinned ``Presentation``; this is the terminal's implementation of it."""
-    _accepts_presentation(WorkbenchPresentation(Workbench(_session())))
-
-
 @pytest.mark.asyncio
-async def test_every_call_crosses_back_to_the_app_thread() -> None:
-    """Textual forbids touching the UI from a worker; nothing here may.
+async def test_an_event_the_pump_carries_in_is_applied_on_the_app_thread() -> None:
+    """Textual forbids touching the UI from a worker; the pump must not either.
 
-    The double records what it was asked to run rather than running it, so a
-    method that reached a widget directly would leave this list short. The
-    fault is in the sequence because it crosses through ``_tell`` rather
-    than through the presentation, and it is no less a worker's call.
+    ``_pump`` reads every event on its own worker thread. ``show`` is
+    patched to record the thread it actually runs on rather than trusting
+    that ``_tell``'s crossing happened by its name alone -- a direct call
+    from the worker would pass a test that only checked ``call_from_thread``
+    was named, since nothing stops a name being called from the wrong place.
     """
-    app = Workbench(_session(), launch=_fake_launch())
-    crossings: list[str] = []
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=ThreadRunner(composers.narrating))
+    seen: list[int] = []
+    original_show = app.show
 
-    def crossed(callback, *args, **kwargs):  # type: ignore[no-untyped-def]
-        crossings.append(callback.__name__)
-        return callback(*args, **kwargs)
+    def recording_show(plan: RunPlan) -> None:
+        seen.append(get_ident())
+        original_show(plan)
 
+    app.show = recording_show  # type: ignore[method-assign]
     async with app.run_test() as pilot:
-        app.call_from_thread = crossed  # type: ignore[method-assign]
-        presentation = WorkbenchPresentation(app)
-        presentation.begin(DRILL_AND_DOCK)
-        presentation.update(0.5, ("seat",))
-        presentation.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai")
-        presentation.report(["read 8 holes"])
-        run._tell(app, app.fault, OSError("disk full"))
-        await pilot.pause()
-
-    assert crossings == ["show", "advance", "settle", "record", "fault"]
+        main_thread = get_ident()
+        await pilot.press("r", "ctrl+r")
+        await settle(pilot, app)
+    assert seen == [main_thread]
 
 
 @pytest.mark.asyncio
@@ -870,11 +945,7 @@ async def test_a_fault_on_the_worker_reaches_the_main_thread() -> None:
     The fault happens where nothing can print it, so it travels to the app,
     which outlives the run and can show it. The run ends; the app does not.
     """
-
-    def explode(*_args: object, **_kwargs: object) -> NoReturn:
-        raise OSError("disk full")
-
-    app = Workbench(_session(), launch=Launch(panel=PANEL, compose=explode))
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=ThreadRunner(composers.refusing))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
@@ -882,54 +953,69 @@ async def test_a_fault_on_the_worker_reaches_the_main_thread() -> None:
         assert app.session.phase is Phase.DONE
 
 
-def _asking(presentation: WorkbenchPresentation, results: list[str]) -> Callable[[], None]:
-    """A worker body recording how ``ask`` ended: answered, or abandoned."""
-
-    def body() -> None:
-        try:
-            results.append(
-                presentation.ask(
-                    Choice(
-                        prompt="reference outline is within tolerance of more than one footprint",
-                        candidates=("1590B", "1590B2"),
-                        code="ambiguous-enclosure",
-                    )
-                )
-            )
-        except Cancelled:
-            results.append("cancelled")
-
-    return body
-
-
-async def _await_result(results: list[str], timeout: float = 5.0) -> None:
-    """Poll for the worker's recorded outcome, bounded so a stall fails fast."""
-
-    async def poll() -> None:
-        while not results:
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(poll(), timeout=timeout)
-
-
 @pytest.mark.asyncio
 async def test_the_app_going_away_abandons_a_pending_question() -> None:
     """A screen the shutdown popped never calls back; the wait must still end.
 
     Nothing else ends it: the answer is a keypress, and there is no longer
-    anybody to press one, so a worker left waiting would hold a thread for
-    as long as the process lived.
+    anybody to press one. ``ThreadRunner.close()`` asserts the served
+    thread returns on ``Close``, so a run left waiting on this question
+    would fail loudly here rather than hang the suite -- Task 4's
+    ``test_a_quit_during_a_pause_ends_without_a_signal`` is the same
+    guarantee for a real process.
     """
-    app = Workbench(_session(), launch=_fake_launch())
-    results: list[str] = []
-
+    runner, asking = _asking_runner("ambiguous-enclosure")
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
-        presentation = WorkbenchPresentation(app)
-        app.run_worker(_asking(presentation, results), thread=True)
+        await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
-        assert results == []
-
+        assert _answers(asking) == []
         app.exit()
-        await _await_result(results)
+        await pilot.pause()
+    assert not app.is_running
 
-    assert results == ["cancelled"]
+
+class _DyingRunner:
+    """A runner that reports the process died the moment it is asked to run."""
+
+    def __init__(self) -> None:
+        self.starts = 0
+
+    def start(self, panel: Path, plan: RunPlan, settings: Settings) -> None:
+        self.starts += 1
+
+    def resume(self, stale: frozenset[str], settings: Settings) -> None:
+        self.starts += 1
+
+    def answer(self, asked: int, text: str) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def events(self) -> Iterator[wire.Event]:
+        yield wire.Died("the run's process ended without reporting", None)
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_died_finishes_the_session() -> None:
+    """A run that stops being reported must not leave the session `RUNNING`.
+
+    Every place is read-only while the session is running, so a path that
+    left it there on a crash would lock the whole workbench with no way
+    back -- worse than the crash it came from.
+    """
+    runner = _DyingRunner()
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await settle(pilot, app)
+        assert app.session.phase is Phase.DONE
+        assert app.session.may_run()
+        await pilot.press("ctrl+r")
+        await settle(pilot, app)
+    assert runner.starts == 2
+    assert app.session.phase is Phase.DONE

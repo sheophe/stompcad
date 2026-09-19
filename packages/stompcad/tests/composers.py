@@ -21,7 +21,16 @@ from stompcad.plan import RunPlan
 from stompcad.present import Choice, Presentation
 from stompmodel.diagnostics import Diagnostic, Severity
 
-__all__ = ["BURN_SECONDS", "asking", "burning", "faulting", "holding", "refusing", "steady"]
+__all__ = [
+    "BURN_SECONDS",
+    "asking",
+    "burning",
+    "faulting",
+    "holding",
+    "narrating",
+    "refusing",
+    "steady",
+]
 
 #: How long ``burning`` holds the interpreter it is running in. Long enough
 #: that an interface sharing that interpreter could not hide it, short
@@ -79,6 +88,27 @@ def steady(
     but the lines the run already sends.
     """
     presentation.begin(plan)
+    for step in plan.steps:
+        presentation.finish_step(step, f"pid {os.getpid()}")
+    return Driver(plan, presentation, options), _Data(), None
+
+
+def narrating(
+    plan: RunPlan,
+    presentation: Presentation,
+    options: RunOptions,
+    project: Project | None = None,
+    stop: Callable[[], bool] | None = None,
+) -> tuple[Driver, _Data, None]:
+    """A position and a report line, the two events no other composer sends.
+
+    Nothing in the suite drove ``Advanced`` or ``Reported`` across the
+    boundary before this: both are values ``wire.py`` closes over, and a
+    value nothing exercises is a value nothing has actually proven crosses.
+    """
+    presentation.begin(plan)
+    presentation.update(0.5, ("seat",))
+    presentation.report(["read 8 holes"])
     for step in plan.steps:
         presentation.finish_step(step, f"pid {os.getpid()}")
     return Driver(plan, presentation, options), _Data(), None

@@ -12,6 +12,7 @@ import pytest
 
 from stompcad.cancel import EXIT_CANCELLED
 from stompcad.plan import DRILL_AND_DOCK
+from stompcad.present import Presentation
 from stompcad.workbench import serve, wire
 
 from . import composers
@@ -85,6 +86,43 @@ def test_a_start_reports_the_plan_then_each_step(served: Any) -> None:
     assert server.until(wire.Began).plan == DRILL_AND_DOCK
     assert server.until(wire.Settled).step == DRILL_AND_DOCK.steps[0]
     assert server.until(wire.Completed).code == 0
+
+
+def _accepts_presentation(presentation: Presentation) -> None:
+    """Structural conformance, enforced by mypy rather than at runtime."""
+
+
+def test_the_served_presentation_satisfies_the_boundary() -> None:
+    """``_Down`` is this side's ``Presentation`` now; ADR-0013 pinned the protocol.
+
+    ``WorkbenchPresentation`` implemented it in the interface's process; the
+    run's own process is where decision 18 put the implementation, and
+    nothing had checked that this one still satisfies it.
+    """
+    commands_out, commands_in = multiprocessing.Pipe(duplex=False)
+    events_out, events_in = multiprocessing.Pipe(duplex=False)
+    stopping = threading.Event()
+    runs = serve._Runs(composers.steady, commands_in, events_out, stopping)
+    _accepts_presentation(runs._down())
+    for end in (commands_out, commands_in, events_out, events_in):
+        with suppress(OSError):
+            end.close()
+
+
+def test_a_position_and_a_report_cross_with_their_values_intact(served: Any) -> None:
+    """``update`` and ``report`` are events too, though nothing had sent one until now.
+
+    Every other composer only ever calls ``begin``, ``finish_step`` and
+    ``ask``, so ``Advanced`` and ``Reported`` were values ``wire.py`` closed
+    over that no test had ever put on the wire.
+    """
+    server = served(composers.narrating)
+    server.send(wire.Start(PANEL, DRILL_AND_DOCK, runnable()))
+    advanced = server.until(wire.Advanced)
+    assert advanced.position == 0.5
+    assert advanced.path == ("seat",)
+    reported = server.until(wire.Reported)
+    assert reported.lines == ("read 8 holes",)
 
 
 def test_a_driver_is_announced_before_the_run_is_finished(served: Any) -> None:

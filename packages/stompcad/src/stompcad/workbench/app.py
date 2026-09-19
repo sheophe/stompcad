@@ -11,7 +11,7 @@ key before any binding is checked. The stop is, because it must outrank a modal.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,6 @@ from stompmodel.model import CaseFace
 
 from .. import discover
 from ..cancel import EXIT_CANCELLED
-from ..drive import Driver
 from ..plan import RunPlan, Step
 from ..present import step_line
 from .dialog import Dialog
@@ -65,6 +64,7 @@ from .places import (
     table_bindings,
 )
 from .run import Launch, may_resume, start
+from .runner import ProcessRunner, Runner
 from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
 from .theme import shades
@@ -109,6 +109,7 @@ class Workbench(App[int], inherit_bindings=False):
         launch: Launch | None = None,
         autostart: bool = False,
         cache: Path | None = None,
+        runner: Runner | None = None,
     ) -> None:
         super().__init__()
         self.session = session
@@ -117,6 +118,7 @@ class Workbench(App[int], inherit_bindings=False):
         # owns that location at the press rather than here, because it is a
         # repository script and an app installed elsewhere has no such tool.
         self.cache = cache
+        self.runner: Runner = runner or ProcessRunner()
         # Decision 1: an invocation carrying something beyond the panel means
         # "do not ask me", so the app opens with the run already moving. A
         # manifest value is a standing declaration and starts nothing, or
@@ -133,13 +135,18 @@ class Workbench(App[int], inherit_bindings=False):
         self.branch = ""
         self.stopping = False
         self.failure: BaseException | None = None
-        # What outlives one run: the driver, because its held intermediates
-        # are what the next `Ctrl+R` spends, and whether this run is that.
-        self.driver: Driver | None = None
+        # What outlives one run: a driver in the run's own process, which
+        # the next `Ctrl+R` spends, and whether this run is that. The app
+        # holds no driver -- it holds the fact that one exists.
+        self.composed = False
         self.resuming = False
-        # What a paused run is waiting on: the one callback that lets the
-        # worker go again, held only while a gap is unanswered.
-        self._answer: Callable[[str], None] | None = None
+        # One worker carries events in for the app's whole life, started
+        # with the first run rather than at open, because the runner has
+        # no process to listen to until then.
+        self.listening = False
+        # What a paused run is waiting on: the number of the question the
+        # runner has open, held only while a gap is unanswered.
+        self._asked = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -152,6 +159,10 @@ class Workbench(App[int], inherit_bindings=False):
         await self.redraw()
         if self.autostart and self.session.may_run():
             self.action_start_run()
+
+    def on_unmount(self) -> None:
+        """The run's process is asked to go, and waited for if it is writing."""
+        self.runner.close()
 
     # -- drawing -----------------------------------------------------------
 
@@ -393,10 +404,6 @@ class Workbench(App[int], inherit_bindings=False):
 
     # -- the run -----------------------------------------------------------
 
-    def keep(self, driver: Driver) -> None:
-        """Hold the run's driver: its intermediates are what a resume spends."""
-        self.driver = driver
-
     def show(self, plan: RunPlan) -> None:
         """The plan the run intends to take, which may be less than the whole."""
         self.plan = plan
@@ -489,15 +496,19 @@ class Workbench(App[int], inherit_bindings=False):
         self._refresh()
 
     def action_stop_run(self) -> None:
-        """Ask the run to stop; the sink notices at its next reported leaf."""
+        """Ask the run to stop; it is heard at its next reported leaf."""
         if self.session.phase in (Phase.RUNNING, Phase.PAUSED):
             self.stopping = True
+            self.runner.stop()
             self.message = "stopping…"
 
-    def enquire(self, gap: PendingGap, chosen: Callable[[str], None]) -> None:
+    def enquire(self, asked: int, gap: PendingGap) -> None:
         """Stop for this gap and go to the place that answers it. Decision 12."""
         self.session.pause(gap)
-        self._answer = chosen
+        # Which question is open, so an answer can name it. An answer that
+        # arrives for a question already closed is stale, and a boundary
+        # delays everything, so the run needs to be able to tell.
+        self._asked = asked
         self._refresh()
         self._open_gap_picker()
 
@@ -525,7 +536,7 @@ class Workbench(App[int], inherit_bindings=False):
         empty one revises a field into something no step can read. Both
         leave the run paused, with the gap's own row to reopen the picker.
         """
-        if answer is None or self._answer is None:
+        if answer is None or self.session.gap is None:
             return
         ticked = _many(answer) if isinstance(answer, tuple) else (str(answer),)
         if not ticked:
@@ -544,18 +555,21 @@ class Workbench(App[int], inherit_bindings=False):
 
     def action_continue_run(self) -> None:
         """The focused row a place answering by a free edit gains."""
-        if self.session.gap is None or self._answer is None:
+        if self.session.gap is None:
             return
         self._resume("")
 
     def _resume(self, answer: str) -> None:
-        """Let the waiting run go again, once the session says it is running."""
-        chosen = self._answer
-        assert chosen is not None  # every caller checks; this is the narrowing
-        self._answer = None
+        """Let the waiting run go again, once the session says it is running.
+
+        The session is told first and the run second: the answer crosses a
+        boundary, so the run goes again at a moment this side does not
+        choose, and a place still read-only when it does is a place the
+        user was locked out of for no reason.
+        """
         self.session.resumed()
         self._refresh()
-        chosen(answer)
+        self.runner.answer(self._asked, answer)
 
     def action_escape(self) -> None:
         """The ladder, innermost first: a modal, an editor, then the run itself."""
