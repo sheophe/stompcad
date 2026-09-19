@@ -32,6 +32,8 @@ from .. import discover
 from ..drive import DOCK_TARGET_NAMES
 from ..settings import Origin, as_flag_string
 from .dialog import Dialog
+from .families import FAMILIES, Family, Remedy
+from .findings import Finding
 from .keys import (
     CONFIGURATION,
     GLOBAL_VERBS,
@@ -56,12 +58,16 @@ __all__ = [
     "RunView",
     "NO_RUN",
     "position_line",
+    "FamilyBlock",
+    "family_blocks",
+    "finding_line",
     "finding_lines",
     "output_lines",
     "pane_for",
     "Rows",
     "FocusRow",
     "ValueRow",
+    "FindingRow",
     "RunRow",
     "GapRow",
     "Editor",
@@ -245,21 +251,61 @@ def position_line(position: float, branch: str) -> str:
     return f"  {position:.0%}  {branch}"
 
 
-def finding_lines(session: Session) -> tuple[str, ...]:
-    """What the `Findings` place lists, in the order the run raised them.
+@dataclass(frozen=True, slots=True)
+class FamilyBlock:
+    """One family and the findings under it, in the run's own order."""
 
-    Plan 4 replaces this body with the six families, their shared prose and
-    the jump to the row that addresses each finding. It is a function rather
-    than a widget so that replacement changes what is said and not where it
-    is said.
+    family: Family
+    findings: tuple[Finding, ...]
+
+
+def family_blocks(session: Session) -> tuple[FamilyBlock, ...]:
+    """The findings grouped by remedy, only for families that hold something.
+
+    Seven headings over one finding is a form rather than a report. Within
+    a family the run's order survives, because the record must agree with
+    the step lines a piped run printed.
     """
-    if not session.findings:
+    held: dict[Family, list[Finding]] = {}
+    for finding in session.findings:
+        held.setdefault(finding.family, []).append(finding)
+    return tuple(FamilyBlock(family, tuple(held[family])) for family in Family if family in held)
+
+
+def finding_line(finding: Finding) -> str:
+    """One finding: its register where its family has them, then what was raised."""
+    register = f"{finding.register.value:<32}" if finding.register is not None else ""
+    raised = finding.diagnostic
+    return f"  {register}{raised.severity.value:<8}{raised.code:<28}{raised.message}"
+
+
+def _block_lines(block: FamilyBlock) -> Iterator[tuple[str, Finding | None]]:
+    """Each line of one family's block, and the finding a line stands for."""
+    prose = FAMILIES[block.family]
+    yield block.family.value, None
+    yield f"  {prose.means}", None
+    yield f"  {prose.routes}", None
+    for finding in block.findings:
+        yield finding_line(finding), finding
+        if finding.secondary:
+            yield f"      {finding.secondary}", None
+
+
+def finding_lines(session: Session) -> tuple[str, ...]:
+    """What the `Findings` place says: the families, their prose, the findings.
+
+    Decision 11 groups by remedy, so the first thing read is what to do
+    rather than who objected.
+    """
+    blocks = family_blocks(session)
+    if not blocks:
         return ("Nothing to report.",)
-    return tuple(
-        f"{finding.diagnostic.severity.value:<8}{finding.diagnostic.code:<28}"
-        f"{finding.diagnostic.message}"
-        for finding in session.findings
-    )
+    lines: list[str] = []
+    for block in blocks:
+        if lines:
+            lines.append("")
+        lines.extend(line for line, _finding in _block_lines(block))
+    return tuple(lines)
 
 
 def output_lines(session: Session) -> tuple[str, ...]:
@@ -318,8 +364,38 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
         if gap is not None and gap.place is place:
             pane.compose_add_child(GapRow(gap))
     else:
-        pane.compose_add_child(Static("\n".join(finding_lines(session)), markup=False))
+        _compose_findings(pane, session)
     return pane
+
+
+def _compose_findings(pane: Rows, session: Session) -> None:
+    """The families as text, with each finding a row answers made focusable.
+
+    The lines are ``finding_lines``'s own, so what is read and what can be
+    focused cannot disagree. Only a finding with a remedy becomes a row: a
+    row that goes nowhere on `enter` teaches the key to be distrusted.
+    """
+    blocks = family_blocks(session)
+    if not blocks:
+        pane.compose_add_child(Static("Nothing to report.", markup=False))
+        return
+    text: list[str] = []
+
+    def flush() -> None:
+        if text:
+            pane.compose_add_child(Static("\n".join(text), markup=False))
+            text.clear()
+
+    for index, block in enumerate(blocks):
+        if index:
+            text.append("")
+        for line, finding in _block_lines(block):
+            if finding is not None and finding.remedy is not None:
+                flush()
+                pane.compose_add_child(FindingRow(finding.remedy, line))
+            else:
+                text.append(line)
+    flush()
 
 
 class Rows(VerticalScroll):
@@ -367,6 +443,21 @@ class FocusRow(Static):
         """
         rows = list(self.screen.query(FocusRow))
         rows[(rows.index(self) + (1 if forward else -1)) % len(rows)].focus()
+
+
+class FindingRow(FocusRow):
+    """A finding a row answers, and `enter` to go there. Decision 11.
+
+    ``field`` stays the empty string it inherits: that attribute names the
+    value a row carries, and this row carries none -- it carries where one
+    lives, which is ``remedy``.
+    """
+
+    BINDINGS = [Binding("enter", "app.address_finding", "go there", show=False)]
+
+    def __init__(self, remedy: Remedy, text: str) -> None:
+        super().__init__(text, markup=False)
+        self.remedy = remedy
 
 
 class ValueRow(FocusRow):

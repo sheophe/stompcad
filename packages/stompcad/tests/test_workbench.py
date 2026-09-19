@@ -32,7 +32,14 @@ from stompcad.workbench.keys import (
     TO_SIDEBAR,
     Place,
 )
-from stompcad.workbench.places import FIELDS, FocusRow, PickerScreen, ValueRow
+from stompcad.workbench.places import (
+    FIELDS,
+    FindingRow,
+    FocusRow,
+    PickerScreen,
+    ValueRow,
+    finding_lines,
+)
 from stompcad.workbench.session import Session
 from stompcad.workbench.sidebar import Sidebar, SidebarRow
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -950,6 +957,63 @@ async def test_information_is_listed_but_not_counted() -> None:
         row = next(row for row in app.session.rows() if row.place is Place.FINDINGS)
         assert row.count == 0
         assert not row.attention
+
+
+def test_findings_are_grouped_under_their_family_with_its_prose() -> None:
+    session = _session()
+    session.record_findings([
+        Diagnostic.warning("off-grid", "hole 7 moved onto the grid"),
+        Diagnostic.error("wrong-enclosure", "1590B does not match the outline"),
+    ])
+    lines = "\n".join(finding_lines(session))
+    assert "Change the artwork" in lines and "Change a setting" in lines
+    assert "needs attention" in lines, "the family's prose is missing"
+    assert "hole 7 moved onto the grid" in lines
+
+
+def test_a_family_with_no_findings_is_not_drawn() -> None:
+    session = _session()
+    session.record_findings([Diagnostic.warning("off-grid", "…")])
+    assert "Fix or re-export a board" not in "\n".join(finding_lines(session))
+
+
+def test_a_fit_finding_is_stated_in_its_register() -> None:
+    """The gravest register reached by a WARNING: the case a severity rule gets wrong."""
+    session = _session()
+    session.record_findings([
+        Diagnostic.warning("enclosure-too-shallow", "the lid will not close"),
+        Diagnostic.info("zero-clearance", "RV1 touches the wall"),
+    ])
+    lines = "\n".join(finding_lines(session))
+    assert "do not build this yet" in lines
+    assert "result available for inspection" in lines
+
+
+def test_a_second_route_is_offered_where_there_is_one() -> None:
+    session = _session()
+    session.record_findings([Diagnostic.warning("off-grid", "…")])
+    assert "set the grid" in "\n".join(finding_lines(session))
+
+
+def test_nothing_to_report_is_still_said() -> None:
+    assert finding_lines(_session()) == ("Nothing to report.",)
+
+
+@pytest.mark.asyncio
+async def test_the_findings_place_mounts_the_prose_and_the_rows_a_finding_answers() -> None:
+    """What is drawn, not only what the function returns: prose on screen, and
+    a row for the finding a row answers but not for the one no row does."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([
+            Diagnostic.error("wrong-case-model", "the model is a 1590A"),
+            Diagnostic.warning("multiple-boards", "three boards in one file"),
+        ])
+        await pilot.press("f")
+        shown = app.pane_text()
+        assert "Change a setting" in shown and "Worth knowing" in shown
+        assert "three boards in one file" in shown
+        assert len(list(app.query(FindingRow))) == 1
 
 
 @pytest.mark.asyncio
