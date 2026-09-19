@@ -399,7 +399,9 @@ class Session:
         return place.value in blocked or place in self.finding_places()
 
     def finding_places(self) -> frozenset[Place]:
-        """Every place holding a finding's remedy. Empty until plan 4 classifies."""
+        """Every place holding a finding's remedy; worth-knowing findings have
+        none, so they mark nothing.
+        """
         return frozenset(
             finding.place for finding in self._findings if finding.place is not None
         )

@@ -1,4 +1,4 @@
-"""The count the sidebar carries, and the seam plan 4 fills."""
+"""The count the sidebar carries, and where each finding's remedy sends it."""
 
 from __future__ import annotations
 

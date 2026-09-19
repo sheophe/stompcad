@@ -49,9 +49,9 @@ class Register(Enum):
     """How gravely a fit finding is stated. Decision 11 names three.
 
     The code decides before the severity does: ``enclosure-too-shallow`` is
-    a WARNING that means the case will not close and ``every-seating
-    -clashes`` an INFO that means nothing fits, and both are graver than an
-    ERROR that only withheld an artefact.
+    a WARNING that means the case will not close and
+    ``every-seating-clashes`` an INFO that means nothing fits, and both are
+    graver than an ERROR that only withheld an artefact.
     """
 
     INSPECT = "result available for inspection"
@@ -128,7 +128,7 @@ FAMILIES: dict[Family, Prose] = {
         means="The board file looks like the problem, rather than the panel.",
         routes=(
             "Re-export the board, or supply the file that was meant. Widening a "
-            "tolerance can hide one of these; it does not fix it."
+            "tolerance can hide a wrong board file; it does not fix one."
         ),
         codes=frozenset({"no-correspondence", "no-substrate", "unreadable-board"}),
     ),

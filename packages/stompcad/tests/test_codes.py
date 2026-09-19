@@ -346,8 +346,9 @@ def test_a_diagnostic_built_at_import_counts_only_if_something_keeps_it(
     tmp_path: Path,
 ) -> None:
     """A named constant is reached when it is named; a loose statement's result
-    is discarded, so no run can report it. Both verdicts err loud: calling a
-    code unreachable fails the real test for somebody to read."""
+    is discarded, so no run can report it. Calling either unreachable errs
+    loud, failing the real test for somebody to read; the graph also errs
+    quiet elsewhere, crediting a dead method inside a reached class as live."""
     src = _tree(tmp_path, {
         "tool/__init__.py": "",
         "tool/stages.py": (

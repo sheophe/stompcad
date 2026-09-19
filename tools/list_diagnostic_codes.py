@@ -216,9 +216,11 @@ def reached(roots: Iterable[Path], entry: str) -> frozenset[Unit]:
     """Every unit reachable from ``entry``'s own units, by what each names.
 
     Naming a class reaches all of it, since a stage is built by name and run
-    through a protocol. Where this errs it errs loud: dispatch it cannot
-    follow, and a loose module statement whose diagnostic nothing keeps, are
-    both called unreachable, which fails the test for somebody to read.
+    through a protocol. That errs loud where dispatch it cannot follow, or a
+    loose module statement whose diagnostic nothing keeps, is called
+    unreachable and fails the test for somebody to read; it errs quiet
+    where a dead method inside a reached class counts as live, because the
+    whole class was reached and the graph does not look inside it.
     """
     graph = _Graph(_modules(roots))
     start = [unit for unit in graph.units if unit[0] == entry]

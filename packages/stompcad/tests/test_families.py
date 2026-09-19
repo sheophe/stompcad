@@ -114,6 +114,11 @@ def test_worth_knowing_and_the_size_check_have_no_remedy() -> None:
     assert remedy_of(Diagnostic.info("reference-size-mismatch", "…")) is None
 
 
+def test_no_worth_knowing_code_has_a_remedy() -> None:
+    """Decision 11: a code marking no place cannot also name a row to jump to."""
+    assert not FAMILIES[Family.KNOWING].codes & set(REMEDIES)
+
+
 def test_a_second_route_is_offered_where_there_honestly_is_one() -> None:
     assert "grid" in secondary_of(Diagnostic.warning("off-grid", "…"))
     assert "artwork" in secondary_of(_NEAR_MISS)
