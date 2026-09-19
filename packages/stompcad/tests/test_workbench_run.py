@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,9 @@ from stompcad.workbench.keys import Place
 from stompcad.workbench.places import FocusRow, ValueRow
 from stompcad.workbench.run import Launch
 from stompcad.workbench.session import PendingGap, Phase, Session
+from stompdrill.errors import EmptyLayerError, LayerNotFoundError
 from stompmodel.diagnostics import EXIT_WARNINGS, Diagnostic, Severity
+from stompmodel.errors import StompError
 from stompmodel.progress import Scope
 
 from . import composers
@@ -591,9 +594,75 @@ async def test_a_fault_after_the_app_has_gone_is_not_raised_on_the_worker() -> N
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.pause()
-    faulted = wire.Faulted("builtins:ValueError", "the kernel gave up", "")
+    faulted = wire.Faulted("builtins:ValueError", "the kernel gave up", "", False)
     app.runner = _OneShot(faulted)
     run._pump(app)  # the crossing cannot be made; the fault has nowhere to go
+
+
+# -- a fault, rebuilt as one of two kinds ---------------------------------
+
+
+def test_a_refusal_keeps_the_sentence_the_run_wrote() -> None:
+    """The message a tool built is the message a builder reads, once.
+
+    ``EmptyLayerError`` builds its own sentence from the layer it was
+    given, so handing that sentence back to it as a layer name is how a
+    tool's instruction comes back wrapped around itself. The sentence is
+    what tells a builder to give drill circles a stroke, so it crosses
+    whole or it has not crossed.
+    """
+    original = EmptyLayerError("Drill")
+    failure = run._failure(
+        wire.Faulted("stompdrill.errors:EmptyLayerError", str(original), "", True)
+    )
+    assert str(failure) == str(original)
+
+
+def test_a_refusal_whose_class_takes_more_than_a_sentence_is_still_a_refusal() -> None:
+    """The exit code follows the kind, and most kinds carry more than a message.
+
+    ``LayerNotFoundError`` names the layer and what was there instead, so
+    nothing on this side could have rebuilt it from one string. It is a
+    ``StompError`` all the same, which is the whole of what ``main`` reads.
+    """
+    original = LayerNotFoundError("Drill", ("Artwork", "Text"))
+    failure = run._failure(
+        wire.Faulted("stompdrill.errors:LayerNotFoundError", str(original), "", True)
+    )
+    assert isinstance(failure, StompError)
+    assert str(failure) == str(original)
+
+
+def test_a_defect_keeps_the_traceback_of_the_process_that_made_it() -> None:
+    """``main`` has no branch for one, so what is left to show is where it happened."""
+    failure = run._failure(
+        wire.Faulted("builtins:ZeroDivisionError", "the run broke", "Traceback…\n", False)
+    )
+    assert isinstance(failure, run.RunFailed)
+    assert "Traceback…" in str(failure)
+    assert "builtins:ZeroDivisionError" in str(failure)
+
+
+def test_a_defect_brings_nothing_of_its_own_into_the_interface() -> None:
+    """A kind names a class, and naming one is not leave to import it.
+
+    A fault raised inside the kernel names a kernel module, and importing
+    that here would load OpenCASCADE into the one interpreter decision 18
+    keeps free of it -- on the thread that draws, at the moment something
+    has already gone wrong.
+    """
+    sys.modules.pop("xmlrpc.client", None)
+    failure = run._failure(
+        wire.Faulted("xmlrpc.client:Fault", "the kernel gave up", "Traceback…\n", False)
+    )
+    assert isinstance(failure, run.RunFailed)
+    assert "xmlrpc.client" not in sys.modules
+
+
+def test_a_kind_that_names_nothing_at_all_is_still_a_fault() -> None:
+    """The control: a name nobody can resolve must not become a second failure."""
+    failure = run._failure(wire.Faulted("nowhere:AtAll", "the run broke", "", False))
+    assert isinstance(failure, run.RunFailed)
 
 
 @pytest.mark.asyncio
@@ -949,7 +1018,8 @@ async def test_a_fault_on_the_worker_reaches_the_main_thread() -> None:
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await settle(pilot, app)
-        assert isinstance(app.failure, OSError)
+        assert isinstance(app.failure, StompError)
+        assert str(app.failure) == "disk full"
         assert app.session.phase is Phase.DONE
 
 

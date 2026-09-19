@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from stompmodel.errors import StompError
 
 from ..plan import DRILL_AND_DOCK, RunPlan
 from ..present import Choice
@@ -128,22 +129,18 @@ def apply(app: Workbench, event: Event) -> None:
 
 
 def _failure(event: Faulted) -> BaseException:
-    """The fault, rebuilt as the type ``main`` still chooses an exit code from.
+    """The fault as one of the two kinds ``main`` chooses an exit code from.
 
-    An exception is an object and a pipe carries values, so the class is
-    named and remade here. A class that will not import, or will not take
-    one string, becomes ``RunFailed`` carrying the remote traceback --
-    which is worth more than the local one, since the local one names the
-    line that re-raised.
+    A refusal keeps its sentence and its exit code; anything else keeps the
+    traceback of the process that made it, which is worth more than the
+    local one. The class itself is not rebuilt from the name that crossed:
+    importing it would run whatever module a pipe named in the interpreter
+    kept free of the kernel, and would hand a message already built to a
+    constructor that formats one, which reads it out twice.
     """
-    module, _, name = event.kind.partition(":")
-    try:
-        kind = getattr(import_module(module), name)
-        if not (isinstance(kind, type) and issubclass(kind, BaseException)):
-            raise TypeError(event.kind)
-        return kind(event.text)
-    except (ImportError, AttributeError, TypeError, ValueError):
-        return RunFailed(f"{event.kind}: {event.text}\n{event.detail}")
+    if event.refusal:
+        return StompError(event.text)
+    return RunFailed(f"{event.kind}: {event.text}\n{event.detail}")
 
 
 def gap_for(question: Choice) -> PendingGap:

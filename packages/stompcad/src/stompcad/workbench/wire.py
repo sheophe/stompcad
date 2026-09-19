@@ -161,15 +161,17 @@ class Faulted:
 
     ``main`` chooses an exit code from the exception's type, so a fault
     that arrives as a sentence alone collapses branches the command line
-    still has. ``kind`` is the class's import path, from which the far side
-    rebuilds it where it can. ``detail`` is the traceback as the run's own
-    process formatted it, because a traceback pointing at the line that
-    re-raised names the messenger.
+    still has. ``refusal`` is that branch, decided where the exception
+    itself is, because the side that reads a pipe must not import what the
+    pipe names. ``kind`` names the class for a reader; ``detail`` is the
+    traceback as the run's own process formatted it, because a traceback
+    pointing at the line that re-raised names the messenger.
     """
 
     kind: str
     text: str
     detail: str
+    refusal: bool
 
 
 @dataclass(frozen=True, slots=True)

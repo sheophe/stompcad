@@ -69,7 +69,7 @@ def test_every_command_crosses(command: wire.Command) -> None:
         wire.Asked(1, Choice("which part?", ("1590B", "1590B2"), False, "ambiguous-enclosure")),
         wire.Composed(),
         wire.Completed(0, (), (Path("/project/tar-case.drl"),), {1: ("RV1",)}),
-        wire.Faulted("builtins:OSError", "disk full", "Traceback...\n"),
+        wire.Faulted("builtins:OSError", "disk full", "Traceback...\n", True),
         wire.Died("the run's process ended without reporting", 1),
     ],
 )

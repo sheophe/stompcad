@@ -229,7 +229,16 @@ object and the pipe carries values, so what crosses is its sentence and
 whether `main` has a branch for its kind. A fault `main` would have mapped
 is re-raised as a `StompError` with the same sentence, so the printed line
 and the exit code are unchanged; anything else is re-raised as `RunFailed`,
-which `main` does not catch, so a defect still leaves a traceback. The
+which `main` does not catch, so a defect still leaves a traceback. Which of
+the two it is, is decided in the run's own process, where the exception
+still is. The class is named for a reader and never rebuilt from that name:
+the interface would be importing whatever a pipe told it to — the kernel's
+own module, for a fault the kernel raised, into the one interpreter kept
+free of it — and a class that builds its message from its arguments would
+build a second one around the first, so the instruction a tool wrote for a
+builder would reach them wrapped around itself. The remote traceback
+travels with a defect, because the traceback the interface could produce
+names the line that re-raised. The
 presentation boundary itself does not move: `Presentation` is the same
 protocol with the same five methods, and what changed is that one
 implementation of it now writes into a pipe.

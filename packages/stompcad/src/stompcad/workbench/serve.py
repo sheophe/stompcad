@@ -332,14 +332,16 @@ def _offered(choice: Choice, text: str) -> str:
 def _faulted(failure: BaseException) -> Faulted:
     """A fault with enough of itself left for ``main`` to treat it as one.
 
-    The class path travels so the far side can rebuild the type ``main``
-    branches on; the traceback travels because the one the interface could
-    produce would name the line that re-raised, which is this plan's own
-    plumbing rather than anything that went wrong.
+    Whether the command line has a branch for this kind is decided here,
+    where the exception is, rather than by rebuilding the class over there
+    from a name: the interface would then import whatever a pipe told it
+    to, the kernel's own module included. The traceback travels because the
+    one the interface could produce names the line that re-raised.
     """
     kind = type(failure)
     return Faulted(
         f"{kind.__module__}:{kind.__qualname__}",
         str(failure),
         "".join(format_exception(type(failure), failure, failure.__traceback__)),
+        isinstance(failure, (StompError, OSError)),
     )

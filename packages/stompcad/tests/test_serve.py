@@ -102,7 +102,7 @@ def test_the_served_presentation_satisfies_the_boundary() -> None:
     commands_out, commands_in = multiprocessing.Pipe(duplex=False)
     events_out, events_in = multiprocessing.Pipe(duplex=False)
     stopping = threading.Event()
-    runs = serve._Runs(composers.steady, commands_in, events_out, stopping)
+    runs = serve._Runs(composers.steady, commands_out, events_in, stopping)
     _accepts_presentation(runs._down())
     for end in (commands_out, commands_in, events_out, events_in):
         with suppress(OSError):
@@ -255,11 +255,25 @@ def test_a_fault_carries_the_traceback_of_where_it_happened(served: Any) -> None
     assert "composers.py" in server.until(wire.Faulted).detail
 
 
-def test_a_fault_the_command_line_branches_on_keeps_its_kind(served: Any) -> None:
-    """``main`` chooses an exit code by type, so the type has to survive."""
+def test_a_fault_the_command_line_branches_on_crosses_as_a_refusal(served: Any) -> None:
+    """``main`` chooses an exit code by type, so the branch is decided here.
+
+    Decided by the side holding the exception, because the side reading the
+    pipe must not import what the pipe names: the kind travels for a reader
+    to see, and the answer travels beside it.
+    """
     server = served(composers.refusing)
     server.send(wire.Start(PANEL, DRILL_AND_DOCK, runnable()))
-    assert server.until(wire.Faulted).kind == "builtins:OSError"
+    faulted = server.until(wire.Faulted)
+    assert faulted.kind == "builtins:OSError"
+    assert faulted.refusal
+
+
+def test_a_fault_the_command_line_has_no_branch_for_is_not_a_refusal(served: Any) -> None:
+    """The control: a flag set for everything would send every defect to exit `3`."""
+    server = served(composers.faulting)
+    server.send(wire.Start(PANEL, DRILL_AND_DOCK, runnable()))
+    assert not server.until(wire.Faulted).refusal
 
 
 def test_an_entry_that_cannot_be_imported_is_reported(served: Any) -> None:
