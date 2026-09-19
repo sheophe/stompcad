@@ -485,7 +485,7 @@ class Session:
         self._exit_code = code
 
     def record_findings(self, diagnostics: Sequence[Diagnostic]) -> None:
-        """What the run found, classified by whatever ``classify`` knows today."""
+        """What the run found, classified into a family, a remedy and a register."""
         self._findings = classify(diagnostics)
 
     def record_designators(self, designators: Mapping[int, tuple[str, ...]]) -> None:
