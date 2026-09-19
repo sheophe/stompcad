@@ -121,7 +121,8 @@ def _composer(entry: str | Callable[..., Any]) -> Callable[..., Any]:
     if not isinstance(entry, str):
         return entry
     module, _, name = entry.partition(":")
-    return getattr(import_module(module), name)  # type: ignore[no-any-return]
+    composer: Callable[..., Any] = getattr(import_module(module), name)
+    return composer
 
 
 class _Runs:
