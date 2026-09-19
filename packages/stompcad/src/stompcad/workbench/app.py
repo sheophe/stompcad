@@ -154,6 +154,9 @@ class Workbench(App[int], inherit_bindings=False):
         self.outcomes: dict[str, str] = {}
         self.position = 0.0
         self.branch = ""
+        # That a stop was asked for this run, which is not the same as the
+        # run having heard one: the runner is asked as well, and only the
+        # ask reaches the process. Cleared as each run starts.
         self.stopping = False
         self.failure: BaseException | None = None
         # What outlives one run: a driver in the run's own process, which
@@ -513,7 +516,15 @@ class Workbench(App[int], inherit_bindings=False):
         # crossing: a window in which a place still accepts an edit is a
         # window in which a value can change under work already under way.
         self.session.start_run(self.resuming)
-        start(self)
+        try:
+            start(self)
+        except Exception as failure:  # noqa: BLE001 - shown, not raised
+            # Decision 1: a process that will not start is this run's
+            # failure, not the workbench's. Letting it out of an action
+            # tears the application down and costs the user the session
+            # they opened to look at a project.
+            self.fault(failure)
+            return
         self._refresh()
 
     def action_stop_run(self) -> None:

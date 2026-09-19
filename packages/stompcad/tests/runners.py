@@ -32,6 +32,10 @@ class ThreadRunner:
 
     def __init__(self, compose: Callable[..., Any]) -> None:
         self._compose = compose
+        # How many times a stop was actually asked of the runner. The app
+        # keeps its own note that it asked; a test reading only that note
+        # passes with the ask deleted, which is the half that does the work.
+        self.stops = 0
         self._stopping = threading.Event()
         self._busy = threading.Event()
         self._thread: threading.Thread | None = None
@@ -51,6 +55,7 @@ class ThreadRunner:
         self._serving().send(Answer(asked, text))
 
     def stop(self) -> None:
+        self.stops += 1
         self._stopping.set()
 
     def events(self) -> Iterator[Event]:

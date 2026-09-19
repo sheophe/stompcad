@@ -376,23 +376,31 @@ async def test_an_open_field_keeps_the_chords_no_place_claims() -> None:
 
 @pytest.mark.asyncio
 async def test_esc_on_the_run_place_stops_the_run() -> None:
-    """Decision 14: `esc` is the cancel of the thing that place owns."""
-    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
+    """Decision 14: `esc` is the cancel of the thing that place owns.
+
+    The runner is asked as well as the flag set: only the ask reaches the
+    run, and a test reading the flag alone passes with the ask deleted.
+    """
+    runner = _runner(hold=True)
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
         await pilot.press("escape")
         assert app.stopping
+        assert runner.stops == 1
 
 
 @pytest.mark.asyncio
 async def test_ctrl_c_stops_a_run_from_anywhere() -> None:
-    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
+    runner = _runner(hold=True)
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
         await pilot.press("d", "ctrl+c")
         assert app.stopping
+        assert runner.stops == 1
 
 
 @pytest.mark.asyncio
@@ -420,7 +428,8 @@ async def test_q_confirms_while_a_run_is_in_flight() -> None:
 @pytest.mark.asyncio
 async def test_the_stop_is_heard_over_a_modal_holding_the_screen() -> None:
     """Why the stop is the one priority binding: a modal hides the app's table."""
-    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
+    runner = _runner(hold=True)
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -429,6 +438,7 @@ async def test_the_stop_is_heard_over_a_modal_holding_the_screen() -> None:
         assert app.screen.query("#confirm")
         await pilot.press("ctrl+c")
         assert app.stopping
+        assert runner.stops == 1
 
 
 @pytest.mark.asyncio
@@ -586,6 +596,95 @@ class _OneShot:
 
     def close(self) -> None:
         return None
+
+
+class _Stream:
+    """A runner that reports exactly these events, in this order, per run."""
+
+    def __init__(self, events: list[wire.Event]) -> None:
+        self._events = events
+        self.starts = 0
+
+    def start(self, panel: Path, plan: RunPlan, settings: Settings) -> None:
+        self.starts += 1
+
+    def resume(self, stale: frozenset[str], settings: Settings) -> None:
+        self.starts += 1
+
+    def answer(self, asked: int, text: str) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def events(self) -> Iterator[wire.Event]:
+        yield from self._events
+
+    def close(self) -> None:
+        return None
+
+
+class _Unstartable:
+    """A runner whose process will not start: no descriptors, no memory, no luck."""
+
+    def start(self, panel: Path, plan: RunPlan, settings: Settings) -> None:
+        raise OSError("too many open files")
+
+    def resume(self, stale: frozenset[str], settings: Settings) -> None:
+        raise OSError("too many open files")
+
+    def answer(self, asked: int, text: str) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def events(self) -> Iterator[wire.Event]:
+        yield from ()
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_an_event_no_handler_can_apply_ends_the_run_and_not_the_pump() -> None:
+    """The pump is the session's only liveness, so one bad event must not take it.
+
+    A question whose code names no place is the reachable shape: the run's
+    side refuses a question carrying no code at all, and nothing checks
+    that the code it does carry is one a place answers. With the worker
+    gone the session stays working, every later run is refused as one
+    already in flight, and no second listener is ever started.
+    """
+    unanswerable = wire.Asked(1, Choice("which part?", ("1590B",), False, "answered-nowhere"))
+    later = wire.Settled(DRILL_AND_DOCK.steps[0], "read 8 holes")
+    runner = _Stream([unanswerable, later])
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await settle(pilot, app)
+        assert isinstance(app.failure, KeyError)
+        assert app.outcomes.get(DRILL_AND_DOCK.steps[0].key) == "read 8 holes"
+        app.action_start_run()
+        assert app.message != "a run is already working"
+        assert runner.starts == 2
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_cannot_be_started_keeps_the_workbench() -> None:
+    """Decision 1: a transient failure must not cost somebody the session they opened.
+
+    Starting a run is where a process is made, and making one can fail for
+    reasons that have nothing to do with the project. Out of the action it
+    would tear the application down and leave the terminal.
+    """
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_Unstartable())
+    async with app.run_test() as pilot:
+        await pilot.press("r", "ctrl+r")
+        await pilot.pause()
+        assert app.is_running, "the workbench went with the run"
+        assert isinstance(app.failure, OSError)
+        assert app.session.phase is not Phase.RUNNING
 
 
 @pytest.mark.asyncio

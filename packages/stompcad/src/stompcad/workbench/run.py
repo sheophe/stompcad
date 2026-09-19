@@ -97,9 +97,23 @@ def _pump(app: Workbench) -> None:
     """
     try:
         for event in app.runner.events():
-            _tell(app, apply, app, event)
+            _tell(app, _applied, app, event)
     finally:
         app.listening = False
+
+
+def _applied(app: Workbench, event: Event) -> None:
+    """One event, with a handler's own failure kept off this worker.
+
+    A raise crossing back ends the pump for the session, and the session it
+    leaves behind is still working: every later run is refused as one
+    already in flight, and no second listener is ever started. A handler
+    that breaks ends its run instead, which the workbench knows how to draw.
+    """
+    try:
+        apply(app, event)
+    except Exception as failure:  # noqa: BLE001 - shown, not raised
+        app.fault(failure)
 
 
 def apply(app: Workbench, event: Event) -> None:
