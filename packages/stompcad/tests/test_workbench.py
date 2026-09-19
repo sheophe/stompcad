@@ -516,8 +516,8 @@ async def test_a_local_key_pressed_in_another_place_is_refused_and_says_so() -> 
 
 
 @pytest.mark.asyncio
-async def test_the_window_verb_reports_that_no_viewer_is_installed() -> None:
-    """Decision 13: `available()` false means `w` explains, never fails. Plan 4 fills it."""
+async def test_the_window_verb_away_from_an_artefact_says_where_the_viewer_opens() -> None:
+    """Decision 13 as decided: `w` never picks a file for the builder."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("w")

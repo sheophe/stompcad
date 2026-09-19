@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from textual import events
 from textual.app import ComposeResult
@@ -45,6 +46,7 @@ from .keys import (
     Place,
 )
 from .session import PendingGap, Session
+from .window import ViewMode, view_mode_for
 
 __all__ = [
     "Kind",
@@ -63,11 +65,13 @@ __all__ = [
     "finding_line",
     "finding_lines",
     "output_lines",
+    "output_entries",
     "pane_for",
     "Rows",
     "FocusRow",
     "ValueRow",
     "FindingRow",
+    "OutputRow",
     "RunRow",
     "GapRow",
     "Editor",
@@ -308,6 +312,14 @@ def finding_lines(session: Session) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def output_entries(session: Session) -> tuple[tuple[str, Path, str], ...]:
+    """Each artefact's kind, its path, and the line stating what is known of it."""
+    return tuple(
+        (name, path, f"{name:<14}{path}  — {session.label_for(path, exists=path.is_file())}")
+        for name, path in session.settings.output.targets.value
+    )
+
+
 def output_lines(session: Session) -> tuple[str, ...]:
     """Each artefact, where it goes, and what is honestly known about it.
 
@@ -324,10 +336,7 @@ def output_lines(session: Session) -> tuple[str, ...]:
         # question instead, which the editable row above already states.
         answered = targets.provenance.origin is not Origin.DEFAULT
         return ("check only — writes nothing",) if answered else ()
-    return tuple(
-        f"{name:<14}{path}  — {session.label_for(path, exists=path.is_file())}"
-        for name, path in targets.value
-    )
+    return tuple(line for _name, _path, line in output_entries(session))
 
 
 def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
@@ -359,7 +368,7 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
         if place is Place.OUTPUT:
             # Beside the row that chooses them, never in place of it: what an
             # artefact is called is editable, what is known about it is not.
-            pane.compose_add_child(Static("\n".join(output_lines(session)), markup=False))
+            _compose_outputs(pane, session)
         gap = session.gap
         if gap is not None and gap.place is place:
             pane.compose_add_child(GapRow(gap))
@@ -458,6 +467,52 @@ class FindingRow(FocusRow):
     def __init__(self, remedy: Remedy, text: str) -> None:
         super().__init__(text, markup=False)
         self.remedy = remedy
+
+
+class OutputRow(FocusRow):
+    """One artefact the viewer can show, and `enter` to look at it.
+
+    Nothing opens by itself: the window appears only when somebody asks for
+    this row's file. Viewing is not editing, so this row answers under a run
+    too -- writes are staged and committed together, so what is on disk is a
+    committed file. An artefact the viewer does not draw is listed, not a row.
+    """
+
+    BINDINGS = [Binding("enter", "app.view_output", "view", show=False)]
+
+    def __init__(self, kind: str, path: Path, mode: ViewMode, text: str) -> None:
+        super().__init__(text, markup=False)
+        self.kind = kind
+        self.path = path
+        self.mode = mode
+
+
+def _compose_outputs(pane: Rows, session: Session) -> None:
+    """Each artefact the viewer can show as a row, the others listed as text.
+
+    Kept in the order the targets are declared, so rows and listed lines read
+    as one list. An artefact with no view -- the run's report -- is never a
+    row, so `enter` cannot land on it.
+    """
+    entries = output_entries(session)
+    if not entries:
+        pane.compose_add_child(Static("\n".join(output_lines(session)), markup=False))
+        return
+    text: list[str] = []
+
+    def flush() -> None:
+        if text:
+            pane.compose_add_child(Static("\n".join(text), markup=False))
+            text.clear()
+
+    for kind, path, line in entries:
+        mode = view_mode_for(kind)
+        if mode is None:
+            text.append(line)
+        else:
+            flush()
+            pane.compose_add_child(OutputRow(kind, path, mode, line))
+    flush()
 
 
 class ValueRow(FocusRow):
