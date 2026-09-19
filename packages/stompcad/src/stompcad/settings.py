@@ -87,6 +87,30 @@ def as_flag_string(value: object) -> object:
     return value.value if isinstance(value, Enum) else value
 
 
+def _stated(value: object) -> str:
+    """One value as a row states it, in the spelling its own tool uses.
+
+    A list reaches a row as a tuple, and interpolating one states Python's
+    spelling of the value -- ``(PosixPath('/x.stp'),)`` -- where the row
+    has to state the value. An artefact is a pair, so it states both
+    halves: a format with no destination names no file. Absence is one
+    state whichever type carries it, and a blank row states nothing at all.
+    """
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_item(item) for item in value) if value else "none"
+    if value is None or value == "":
+        return "none"
+    return str(as_flag_string(value))
+
+
+def _item(item: object) -> str:
+    """One item of a list, and the one shape that is a pair rather than a value."""
+    if isinstance(item, tuple) and len(item) == 2:
+        name, destination = item
+        return f"{name}: {destination}"
+    return str(as_flag_string(item))
+
+
 def disagreement(declared: object | None, value: object) -> object | None:
     """The project's value where it differs from this one, else ``None``.
 
@@ -118,10 +142,10 @@ class Resolved(Generic[_T]):
 
     def describe(self) -> str:
         """``0.5, you set this — the project says 0.25``, or the first half alone."""
-        stated = f"{as_flag_string(self.value)}, {self.provenance.describe()}"
+        stated = f"{_stated(self.value)}, {self.provenance.describe()}"
         if self.project is None:
             return stated
-        return f"{stated} — the project says {as_flag_string(self.project)}"
+        return f"{stated} — the project says {_stated(self.project)}"
 
 
 def pick(
