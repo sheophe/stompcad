@@ -276,6 +276,32 @@ async def test_the_footer_always_states_the_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_way_out_is_on_screen_before_anybody_asks_for_it() -> None:
+    """The footer names the key that leaves, so nobody has to know it already.
+
+    A full-screen application that states no way out is one a builder has to
+    look up how to leave, and looking that up is not part of making a pedal.
+    """
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "q to quit" in str(app.query_one("#mode", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_the_field_names_its_own_way_out_rather_than_the_application_s() -> None:
+    """`q` types a letter here, so the footer must not offer it as the exit."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter")
+        stated = str(app.query_one("#mode", Static).content)
+        assert "esc leaves the field" in stated
+        assert "quit" not in stated
+
+
+@pytest.mark.asyncio
 async def test_the_keys_screen_lists_every_key_the_table_holds() -> None:
     """`?` teaches the letters, from the same table the bindings are built from."""
     app = Workbench(_session())

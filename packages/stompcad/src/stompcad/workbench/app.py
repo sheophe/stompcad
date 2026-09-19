@@ -217,9 +217,16 @@ class Workbench(App[int], inherit_bindings=False):
             self._base.query_one("#mode", Static).update(self._mode_line())
 
     def _mode_line(self) -> str:
+        """What this mode answers, and the way out of it, always on screen.
+
+        The exit is stated rather than learnt: a full-screen application
+        nobody can leave without looking it up first is a trap, whatever
+        else it does well. Typing names `esc` instead, because `q` there
+        types a letter and offering it as the exit would be untrue.
+        """
         if self.mode() == "typing":
             return "  typing — letters type here; esc leaves the field" + self._tail()
-        return "  moving — arrows or letters move you; ? for the keys" + self._tail()
+        return "  moving — arrows or letters move you; ? for the keys, q to quit" + self._tail()
 
     def _tail(self) -> str:
         return f"    {self.message}" if self.message else ""
