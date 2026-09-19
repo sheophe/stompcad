@@ -394,7 +394,16 @@ class GapRow(FocusRow):
 class Editor(Input):
     """The one open text field: while it has focus, letters type rather than jump."""
 
-    BINDINGS = [Binding("escape", "close", "close", show=False)]
+    #: ``Option+Backspace`` takes the word behind the cursor, as it does in
+    #: every other field on this platform. Which spelling arrives is the
+    #: terminal's choice -- the plain escape form reaches Textual as
+    #: ``ctrl+w``, which is already the word behind; a terminal speaking the
+    #: extended protocol sends ``alt+backspace``, which Textual binds to the
+    #: word *ahead*. Restated here so both routes remove the same word.
+    BINDINGS = [
+        Binding("escape", "close", "close", show=False),
+        Binding("alt+backspace,ctrl+backspace", "delete_left_word", "delete a word", show=False),
+    ]
 
     def __init__(self, row: ValueRow) -> None:
         super().__init__(id="editor")

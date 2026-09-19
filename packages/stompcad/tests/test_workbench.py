@@ -421,6 +421,42 @@ async def test_an_open_text_field_suppresses_every_bare_letter() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["alt+backspace", "ctrl+backspace", "ctrl+w"])
+async def test_a_word_key_takes_the_word_behind_the_cursor(key: str) -> None:
+    """Every spelling a terminal sends for `Option+Backspace` removes a word.
+
+    Which one arrives depends on the terminal: the plain escape form reaches
+    Textual as ``ctrl+w``, and one speaking the extended protocol sends
+    ``alt+backspace``, which Textual binds to the word *ahead* of the cursor.
+    """
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter")
+        editor = app.query_one("#editor", Input)
+        editor.value = "one two three"
+        editor.cursor_position = len(editor.value)
+        await pilot.press(key)
+        assert editor.value == "one two "
+
+
+@pytest.mark.asyncio
+async def test_backspace_alone_still_takes_one_character() -> None:
+    """The control: a field that deleted a word per keystroke could not be typed in."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        await _focus_row(pilot, app, "title")
+        await pilot.press("enter")
+        editor = app.query_one("#editor", Input)
+        editor.value = "one two three"
+        editor.cursor_position = len(editor.value)
+        await pilot.press("backspace")
+        assert editor.value == "one two thre"
+
+
+@pytest.mark.asyncio
 async def test_closing_the_field_gives_the_letters_back() -> None:
     """The control: a suppression that never lifted would be a trap, not a mode."""
     app = Workbench(_session())
