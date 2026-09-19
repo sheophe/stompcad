@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import NoReturn
@@ -13,15 +13,13 @@ import pytest
 from textual.pilot import Pilot
 from textual.widgets import Input, SelectionList, Static
 
-from stompcad import cli, manifest
+from stompcad import cli
 from stompcad.cancel import EXIT_CANCELLED, Cancelled
-from stompcad.cli import Resolution
 from stompcad.drive import Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan
 from stompcad.present import Choice, Presentation
-from stompcad.readiness import readiness
 from stompcad.resolve import RESOLVABLE
-from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
+from stompcad.settings import Settings
 from stompcad.workbench import run
 from stompcad.workbench.app import Workbench
 from stompcad.workbench.dialog import Dialog
@@ -32,9 +30,9 @@ from stompcad.workbench.session import PendingGap, Phase, Session
 from stompmodel.diagnostics import EXIT_WARNINGS, Diagnostic, Severity
 from stompmodel.progress import Scope
 
-__all__: list[str] = []
+from .projects import PANEL, session, settle
 
-_PANEL = Path("/project/tar.ai")
+__all__: list[str] = []
 
 
 # -- the run, faked -------------------------------------------------------
@@ -96,7 +94,7 @@ class _Compose:
 
 def _fake_launch(hold: bool = False, finding: Diagnostic | None = None) -> Launch:
     """A launch whose composed run costs nothing; Task 11 runs the real one."""
-    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Compose(hold, finding))
+    return Launch(panel=PANEL, plan=DRILL_AND_DOCK, compose=_Compose(hold, finding))
 
 
 class _Asking:
@@ -136,7 +134,7 @@ class _Asking:
 
 def _launch_raising(code: str, candidates: tuple[str, ...] = ("1590B", "1590B2")) -> Launch:
     """A launch whose run stops once on this code and waits to be answered."""
-    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Asking(code, candidates))
+    return Launch(panel=PANEL, plan=DRILL_AND_DOCK, compose=_Asking(code, candidates))
 
 
 def _answers(app: Workbench) -> list[str]:
@@ -211,7 +209,7 @@ class _Recording:
 
 def _recording_launch(driver: type[_RecordingDriver] = _RecordingDriver) -> Launch:
     """A launch whose driver outlives its run, as a real one's does."""
-    return Launch(panel=_PANEL, plan=DRILL_AND_DOCK, compose=_Recording(driver))
+    return Launch(panel=PANEL, plan=DRILL_AND_DOCK, compose=_Recording(driver))
 
 
 def _recorded(app: Workbench) -> _RecordingDriver:
@@ -248,49 +246,9 @@ async def _open_editor(pilot: Pilot[int], app: Workbench, field: str) -> None:
 
 def _session(ready: bool = True) -> Session:
     """A session whose edits are checked by the real consuming tool, as a run's are."""
-    resolved = _runnable() if ready else replace(_runnable(), boards=DEFAULTS.boards)
-    return Session(
-        Resolution(
-            settings=resolved,
-            notes=(),
-            blockers=readiness(resolved),
-            project=manifest.Manifest(),
-        ),
-        validator=lambda settings, place: cli.validate_place(settings, place, _PANEL),
+    return session(
+        ready, validator=lambda settings, place: cli.validate_place(settings, place, PANEL)
     )
-
-
-def _runnable() -> Settings:
-    """A project with nothing outstanding, so a run is one keypress away."""
-    base = Settings.of_defaults(_PANEL)
-    return replace(
-        base,
-        enclosure=replace(
-            base.enclosure,
-            case_model=Resolved(Path("/project/1590B.stp"), Provenance(Origin.PROJECT)),
-        ),
-        boards=replace(
-            base.boards,
-            boards=Resolved((Path("/project/tar-pcb.stp"),), Provenance(Origin.PROJECT)),
-            panel_reference=Resolved("RV*", Provenance(Origin.PROJECT)),
-        ),
-        output=replace(
-            base.output,
-            targets=Resolved(
-                (("excellon", Path("/project/tar-case.drl")),), Provenance(Origin.PROJECT)
-            ),
-        ),
-    )
-
-
-async def _settle(pilot: Pilot[int], app: Workbench) -> None:
-    """Pause until the run is no longer working, however many frames that takes."""
-    for _ in range(400):
-        if app.session.phase is not Phase.RUNNING:
-            return
-        await pilot.pause()
-        await asyncio.sleep(0.01)
-    raise AssertionError(f"the run never settled; the phase is {app.session.phase}")
 
 
 async def _edit_first_row(pilot: Pilot[int], app: Workbench) -> None:
@@ -494,7 +452,7 @@ async def test_a_run_finishing_while_the_dialog_is_open_keeps_its_own_code() -> 
     """
     finding = Diagnostic(Severity.WARNING, "off-grid", "a hole moved 0.01 mm")
     composed = _Compose(hold=True, finding=finding)
-    app = Workbench(_session(), launch=Launch(panel=_PANEL, compose=composed))
+    app = Workbench(_session(), launch=Launch(panel=PANEL, compose=composed))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
@@ -502,7 +460,7 @@ async def test_a_run_finishing_while_the_dialog_is_open_keeps_its_own_code() -> 
         await pilot.pause()
         assert app.screen.query("#confirm"), "no dialog, so nothing raced it"
         composed.released.set()  # the run finishes with the dialog still open
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert app.session.phase is Phase.DONE
         await pilot.press("enter")
         await pilot.pause()
@@ -516,7 +474,7 @@ async def test_quitting_after_a_completed_run_keeps_the_code_it_earned() -> None
     app = Workbench(_session(), launch=_fake_launch(finding=finding))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         await pilot.press("q")
         await pilot.pause()
     assert app.return_value == EXIT_WARNINGS
@@ -539,7 +497,7 @@ async def test_a_cancelled_run_earns_the_shell_s_own_stop_code() -> None:
         await pilot.press("r", "ctrl+r")
         await pilot.pause()
         await pilot.press("ctrl+c")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         await pilot.press("q")
         await pilot.pause()
     assert app.return_value == EXIT_CANCELLED
@@ -556,10 +514,10 @@ async def test_a_stopped_run_still_owns_what_it_committed() -> None:
     app = Workbench(_session(), launch=_recording_launch(_StoppingDriver))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         app.session.set(Place.OUTPUT, "targets", ())
         await pilot.press("ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert app.session.exit_code == EXIT_CANCELLED
         assert app.session.label_for(_ARTEFACT, exists=True) == "made by this run"
 
@@ -573,7 +531,7 @@ async def test_each_step_is_credited_as_it_completes() -> None:
     app = Workbench(_session(), launch=_fake_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert app.session.reached(Place.DRILLING)
 
 
@@ -583,7 +541,7 @@ async def test_the_run_place_keeps_the_line_a_pipe_would_have_received() -> None
     app = Workbench(_session(), launch=_fake_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert any("quantise" in line for line in app.settled)
 
 
@@ -609,7 +567,7 @@ async def test_a_fault_after_the_app_has_gone_is_not_raised_on_the_worker() -> N
     def explode(*_args: object, **_kwargs: object) -> NoReturn:
         raise ValueError("the kernel gave up")
 
-    app = Workbench(_session(), launch=Launch(panel=_PANEL, compose=explode))
+    app = Workbench(_session(), launch=Launch(panel=PANEL, compose=explode))
     async with app.run_test() as pilot:
         await pilot.pause()
     run._attempt(app)  # the crossing cannot be made; the fault has nowhere to go
@@ -623,7 +581,7 @@ async def test_the_settled_lines_are_padded_to_the_plan_the_run_declared() -> No
     app = Workbench(_session(), launch=_fake_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         width = max(len(step.label) for step in DRILL_AND_DOCK.steps)
         assert step_line("quantise", "quantise done", width) in app.settled
 
@@ -661,7 +619,7 @@ async def test_committing_the_answer_is_the_continuation() -> None:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
         await pilot.press("enter")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert app.session.phase is Phase.DONE
         assert _answers(app) == ["1590B"]
 
@@ -779,7 +737,7 @@ async def test_a_ticked_designator_still_answers_and_continues() -> None:
         await pilot.pause()
 
         await pilot.press("enter")
-        await _settle(pilot, app)
+        await settle(pilot, app)
 
         assert app.session.phase is Phase.DONE
         assert _answers(app) == ["RV1"]
@@ -794,10 +752,10 @@ async def test_a_second_ctrl_r_after_a_change_resumes_rather_than_starting_over(
     app = Workbench(_session(), launch=_recording_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         app.session.set(Place.OUTPUT, "targets", ())
         await pilot.press("ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
     assert _recorded(app).resumed == [frozenset({"write-case", "write-assembly"})]
 
 
@@ -807,7 +765,7 @@ async def test_a_resume_is_never_automatic() -> None:
     app = Workbench(_session(), launch=_recording_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         app.session.set(Place.DRILLING, "grid_mm", 0.5)
         await app.redraw()
         await pilot.pause()
@@ -820,7 +778,7 @@ async def test_the_roadmap_retreats_to_the_place_a_change_touched() -> None:
     app = Workbench(_session(), launch=_recording_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         app.session.set(Place.DRILLING, "grid_mm", 0.5)
         await app.redraw()
         await pilot.pause()
@@ -835,10 +793,10 @@ async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
     app = Workbench(_session(), launch=_recording_launch())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         app.session.set(Place.DRILLING, "title", "Tar")
         await pilot.press("ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
     assert _recorded(app).declared[-1].drilling.title.value == "Tar"
 
 
@@ -850,7 +808,7 @@ async def test_an_argument_beyond_the_panel_opens_with_the_run_already_moving() 
     """Decision 1: there is no batch flag, because there is nothing to batch."""
     app = Workbench(_session(), launch=_fake_launch(), autostart=True)
     async with app.run_test() as pilot:
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert app.session.phase is Phase.DONE
 
 
@@ -916,10 +874,10 @@ async def test_a_fault_on_the_worker_reaches_the_main_thread() -> None:
     def explode(*_args: object, **_kwargs: object) -> NoReturn:
         raise OSError("disk full")
 
-    app = Workbench(_session(), launch=Launch(panel=_PANEL, compose=explode))
+    app = Workbench(_session(), launch=Launch(panel=PANEL, compose=explode))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
-        await _settle(pilot, app)
+        await settle(pilot, app)
         assert isinstance(app.failure, OSError)
         assert app.session.phase is Phase.DONE
 
