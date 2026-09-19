@@ -13,6 +13,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import uuid4
 
 from stompcad.cancel import Cancelled
@@ -23,8 +24,10 @@ from stompmodel.diagnostics import Diagnostic, Severity
 
 __all__ = [
     "BURN_SECONDS",
+    "MARK",
     "asking",
     "burning",
+    "deaf",
     "faulting",
     "holding",
     "narrating",
@@ -36,6 +39,11 @@ __all__ = [
 #: that an interface sharing that interpreter could not hide it, short
 #: enough to sit in a suite.
 BURN_SECONDS = 3.0
+
+#: Where ``deaf`` records that it reached the end of its work. Named in the
+#: environment because the only other channel is the pipe, and the case
+#: under test is one where nobody is left reading it.
+MARK = "STOMPCAD_RUN_MARK"
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +156,32 @@ def burning(
         sum(index * index for index in range(20_000))
         if stop is not None and stop():
             raise Cancelled("cancelled while working")
+    for step in plan.steps:
+        presentation.finish_step(step, f"pid {os.getpid()}")
+    return Driver(plan, presentation, options), _Data(), None
+
+
+def deaf(
+    plan: RunPlan,
+    presentation: Presentation,
+    options: RunOptions,
+    project: Project | None = None,
+    stop: Callable[[], bool] | None = None,
+) -> tuple[Driver, _Data, None]:
+    """Work that never hears its stop, which is what a wait is for.
+
+    ``burning`` asks and gives way, so it proves nothing about a process
+    that will not: the interface's promise is that such a run is waited for
+    rather than signalled. The mark is written after the work and before
+    anything is reported, so a run cut short leaves none to find.
+    """
+    presentation.begin(plan)
+    deadline = time.monotonic() + BURN_SECONDS
+    while time.monotonic() < deadline:
+        sum(index * index for index in range(20_000))
+    mark = os.environ.get(MARK)
+    if mark:
+        Path(mark).write_text("finished", encoding="utf-8")
     for step in plan.steps:
         presentation.finish_step(step, f"pid {os.getpid()}")
     return Driver(plan, presentation, options), _Data(), None

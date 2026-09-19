@@ -11,6 +11,7 @@ Nothing here is built until the first run asks for it; see ``_serving``.
 
 from __future__ import annotations
 
+import atexit
 from collections.abc import Iterator
 from contextlib import suppress
 from multiprocessing import get_context
@@ -41,6 +42,20 @@ GRACE = 2.0
 #: is heard at the next reported leaf, and a leaf may sit behind a long
 #: kernel call, so this is long enough to cover one and still end.
 SETTLE = 30.0
+
+
+def _waited_out(process: BaseProcess, busy: EventType) -> None:
+    """Hold the interpreter's own exit while a run is still in flight.
+
+    ``multiprocessing`` ends every daemon child from an exit handler of its
+    own, and a signal does not unwind ``drive._write`` between staging and
+    committing. ``atexit`` runs the last registration first and this one is
+    made after that handler exists, so the wait happens before the signal
+    would. Unbounded on purpose: a window that takes a moment to close is
+    the lesser harm beside a half-written set of artefacts.
+    """
+    while process.is_alive() and busy.is_set():
+        process.join(GRACE)
 
 
 class Runner(Protocol):
@@ -132,7 +147,8 @@ class ProcessRunner:
         so a process with a run in flight is waited for -- the stop reaches
         it at its next leaf the way `esc` already does. Only a process
         sitting in its command loop is ever ended outright, and there
-        nothing is in flight to roll back.
+        nothing is in flight to roll back. One still busy when this gives
+        up is waited out at interpreter exit rather than signalled there.
         """
         if self._process is None:
             return
@@ -191,11 +207,13 @@ class ProcessRunner:
             self._context = get_context("spawn")
             self._stopping = self._context.Event()
             self._busy = self._context.Event()
+        busy = self._busy
+        assert busy is not None  # made with the context, just above
         commands_out, commands_in = self._context.Pipe(duplex=False)
         events_out, events_in = self._context.Pipe(duplex=False)
         process = self._context.Process(
             target=child,
-            args=(commands_out, events_in, self._stopping, self._entry, self._busy),
+            args=(commands_out, events_in, self._stopping, self._entry, busy),
             daemon=True,
         )
         try:
@@ -205,6 +223,9 @@ class ProcessRunner:
                 with suppress(OSError):
                     end.close()
             raise
+        # A daemon, so a parent killed outright strands nothing; waited out
+        # first, so the daemon's own end is never a signal into a write.
+        atexit.register(_waited_out, process, busy)
         # Each end belongs to one side. Closing the copies this process
         # kept is what makes the reader see EOF when the run's process
         # goes, rather than waiting on a pipe it is itself holding open.

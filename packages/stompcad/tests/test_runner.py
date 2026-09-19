@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,6 +17,7 @@ from stompcad.plan import DRILL_AND_DOCK
 from stompcad.workbench import wire
 from stompcad.workbench.runner import GRACE, ProcessRunner
 
+from . import composers
 from .projects import PANEL, runnable
 
 __all__: list[str] = []
@@ -227,3 +229,62 @@ def test_closing_ends_the_process(runner: Any) -> None:
 def test_closing_a_runner_that_never_ran_is_quiet(runner: Any) -> None:
     """Most sessions end without a run; ending one must not need a process."""
     runner().close()
+
+
+def test_a_close_waits_out_a_run_that_will_not_stop(runner: Any) -> None:
+    """``busy`` is the whole of the shutdown argument, and nothing else tests it.
+
+    ``drive._write`` stages and then commits with no cancellation point
+    between, so a signal there is how a half-written set of artefacts is
+    made. The exit code is the assertion: a process ended by ``terminate``
+    reports the signal that ended it, and one left to finish reports zero.
+    """
+    process = runner("tests.composers:deaf")
+    process.start(PANEL, DRILL_AND_DOCK, runnable())
+    _until(process, wire.Began)
+    child = process._process  # noqa: SLF001 - how it ended is what is asserted
+    assert child is not None
+    started = time.monotonic()
+    process.close()
+    waited = time.monotonic() - started
+    assert child.exitcode == 0, f"a run in flight was signalled: exit {child.exitcode}"
+    assert waited > GRACE, "the close gave up on a run that was still working"
+
+
+#: A workbench that never gets to close its runner: the exception that tore
+#: the application down, an interpreter ended some other way. The mark is
+#: written by the run itself, so it exists only if the run reached its end.
+_UNCLOSED_SCRIPT = (
+    "from stompcad.plan import DRILL_AND_DOCK\n"
+    "from stompcad.workbench import wire\n"
+    "from stompcad.workbench.runner import ProcessRunner\n"
+    "from tests.projects import PANEL, runnable\n"
+    "runner = ProcessRunner(entry='tests.composers:deaf')\n"
+    "runner.start(PANEL, DRILL_AND_DOCK, runnable())\n"
+    "for event in runner.events():\n"
+    "    if isinstance(event, wire.Began):\n"
+    "        break\n"
+)
+
+
+def test_a_run_in_flight_survives_the_interpreter_that_started_it(tmp_path: Any) -> None:
+    """The promise holds for an exit nobody asked for, not only for a quit.
+
+    ``multiprocessing`` ends every daemon child from its own exit handler,
+    and a run cut short there is cut short between the staging and the
+    commit as surely as one cut short by `q`. Run in a fresh interpreter
+    because what is asserted is how that interpreter ends.
+    """
+    mark = tmp_path / "finished"
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-c", _UNCLOSED_SCRIPT],
+        cwd=Path(__file__).resolve().parent.parent,
+        env={**os.environ, composers.MARK: str(mark)},
+        capture_output=True,
+        text=True,
+        timeout=_PATIENCE,
+    )
+    assert result.returncode == 0, result.stderr
+    assert mark.exists(), "the run was cut short by the exit of the process that asked for it"
+    assert time.monotonic() - started > GRACE, "nothing was waited for"

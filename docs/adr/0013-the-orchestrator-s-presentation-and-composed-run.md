@@ -210,6 +210,14 @@ without reporting is itself reported: every way a run can finish reaches the
 session, because a session left believing a run is working holds every
 place read-only with no way back.
 
+That promise covers the interpreter's own exit as well as the quit, because
+`multiprocessing` ends every daemon child from an exit handler of its own
+and a run cut short there is cut short between the staging and the commit
+as surely as one cut short by `q`. The residual risk is accepted rather than
+removed: a run that never hears its stop delays the window's close for as
+long as it takes, which is the deliberate trade against a half-written set
+of artefacts.
+
 What crosses is what a pipe already receives: step lines, positions,
 diagnostics, the questions a pause asks, the answers it takes, a stop, and
 the paths written. Nothing the kernel builds travels. `ask` no longer blocks
