@@ -13,7 +13,7 @@ from rich.cells import cell_len
 from textual.binding import Binding, BindingsMap
 from textual.command import CommandPalette
 from textual.pilot import Pilot
-from textual.widgets import Input, SelectionList, Static
+from textual.widgets import Input, Rule, SelectionList, Static
 
 from stompcad import cli, manifest
 from stompcad.cli import Resolution
@@ -145,6 +145,21 @@ async def test_a_place_that_needs_the_user_is_marked_and_the_others_are_not() ->
         lines = {line.split()[0] if line.split() else "": line for line in app.sidebar_text().splitlines()}
         assert "!" in "".join(line for name, line in lines.items() if "Boards" in line)
         assert "!" not in "".join(line for name, line in lines.items() if "Drilling" in line)
+
+
+@pytest.mark.asyncio
+async def test_a_group_separator_is_one_drawn_line() -> None:
+    """Decision 4: the groups are divided by a rule, not by dashes and air.
+
+    A row of hyphens reads as content, and the widget's own margin puts a
+    blank line either side of it, which reads as a gap between places.
+    """
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rules = list(app.query(Rule))
+        assert [rule.line_style for rule in rules] == ["solid", "solid"]
+        assert [rule.outer_size.height for rule in rules] == [1, 1]
 
 
 def test_the_sidebar_binds_exactly_its_own_table() -> None:

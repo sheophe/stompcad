@@ -5,9 +5,8 @@ this place needs the user are three channels: a background, a marker on the
 left, a marker on the right. The characters are this implementation's
 choice -- the specification leaves them open -- but the separation is not.
 
-The sidebar is one of two panes. `←` from a place focuses it, `↑`/`↓` step
-between places, and `→` or `enter` goes back in. A step, a click and a
-bare letter all resolve to one place change, so no route disagrees.
+One of two panes: `←` focuses it, `↑`/`↓` step between places, `→` goes
+back in; a step, a click and a letter are one change, so none disagrees.
 """
 
 from __future__ import annotations
@@ -55,6 +54,9 @@ class Sidebar(Vertical):
 
     DEFAULT_CSS = """
     Sidebar { width: 18; border-right: solid $panel; }
+    /* The widget's own margin is a blank line either side, which reads as a
+       gap between two places rather than as the division of two groups. */
+    Sidebar Rule { margin: 0; color: $panel; }
     Sidebar SidebarRow.-selected { background: $accent 20%; }
     Sidebar:focus SidebarRow.-selected { background: $accent 60%; }
     """
@@ -76,7 +78,7 @@ class Sidebar(Vertical):
     def compose(self) -> ComposeResult:
         for place in SIDEBAR_ORDER:
             if place is CONFIGURATION[0] or (place is Place.RUN):
-                yield Rule(line_style="ascii")
+                yield Rule()
             yield SidebarRow(place)
 
     def show(self, rows: tuple[Row, ...]) -> None:
