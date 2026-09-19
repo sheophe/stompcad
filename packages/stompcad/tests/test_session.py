@@ -110,6 +110,43 @@ def test_an_edit_agreeing_with_the_project_shows_no_disagreement() -> None:
     assert session.settings.drilling.grid_mm.describe() == "0.25, you set this"
 
 
+def test_naming_a_model_answers_the_part_its_filename_names() -> None:
+    """Decision 6: a model named in the workbench fills the part nobody has."""
+    session = _session(_settings(enclosure=DEFAULTS.enclosure))
+    session.set(Place.ENCLOSURE, "case_model", Path("/models/1590B.stp"))
+    case = session.settings.enclosure.case
+    assert case.value == "1590B"
+    assert case.describe() == "1590B, inferred from 1590B.stp"
+
+
+def test_a_part_somebody_named_survives_a_model_that_disagrees() -> None:
+    """The control: inference below the project is inference that never wins."""
+    session = _session(_settings(
+        enclosure=replace(
+            DEFAULTS.enclosure, case=Resolved("1590BB", Provenance(Origin.PROJECT))
+        ),
+    ))
+    session.set(Place.ENCLOSURE, "case_model", Path("/models/1590B.stp"))
+    assert session.settings.enclosure.case.value == "1590BB"
+
+
+def test_a_model_naming_no_part_leaves_the_part_unanswered() -> None:
+    """A stem the catalogue does not list is a filename, not an enclosure."""
+    session = _session(_settings(enclosure=DEFAULTS.enclosure))
+    session.set(Place.ENCLOSURE, "case_model", Path("/models/Tar.stp"))
+    assert session.settings.enclosure.case.value is None
+
+
+def test_a_new_model_withdraws_the_part_the_old_one_named() -> None:
+    """An inference outlives the file it came from only as a wrong answer."""
+    session = _session(_settings(enclosure=DEFAULTS.enclosure))
+    session.set(Place.ENCLOSURE, "case_model", Path("/models/1590B.stp"))
+    session.set(Place.ENCLOSURE, "case_model", Path("/models/Tar.stp"))
+    case = session.settings.enclosure.case
+    assert case.value is None
+    assert case.provenance.origin is Origin.DEFAULT
+
+
 def test_an_output_change_makes_only_the_write_steps_stale() -> None:
     """Decision 10: propagation follows data, and a filename costs no kernel work."""
     session = _session()
