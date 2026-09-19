@@ -32,7 +32,7 @@ from stompcad.workbench.keys import (
 )
 from stompcad.workbench.places import FIELDS, PickerScreen, ValueRow
 from stompcad.workbench.session import Session
-from stompcad.workbench.sidebar import Sidebar
+from stompcad.workbench.sidebar import Sidebar, SidebarRow
 from stompmodel.diagnostics import Diagnostic, Severity
 from tests.conftest import TAR_AI
 
@@ -151,15 +151,18 @@ async def test_a_place_that_needs_the_user_is_marked_and_the_others_are_not() ->
 async def test_a_group_separator_is_one_drawn_line() -> None:
     """Decision 4: the groups are divided by a rule, not by dashes and air.
 
-    A row of hyphens reads as content, and the widget's own margin puts a
-    blank line either side of it, which reads as a gap between places.
+    Measured as the distance between the places it divides, because that is
+    what a reader sees: the widget's own margin is a blank line either side,
+    and it is outside the size the rule reports for itself.
     """
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()
-        rules = list(app.query(Rule))
-        assert [rule.line_style for rule in rules] == ["solid", "solid"]
-        assert [rule.outer_size.height for rule in rules] == [1, 1]
+        bar = app.query_one(Sidebar)
+        rows = {row.place: row.region.y for row in bar.query(SidebarRow)}
+        assert [rule.line_style for rule in bar.query(Rule)] == ["solid", "solid"]
+        assert rows[Place.ARTWORK] - rows[Place.PROJECT] == 2
+        assert rows[Place.RUN] - rows[Place.OUTPUT] == 2
 
 
 def test_the_sidebar_binds_exactly_its_own_table() -> None:

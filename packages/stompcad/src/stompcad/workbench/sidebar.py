@@ -55,8 +55,10 @@ class Sidebar(Vertical):
     DEFAULT_CSS = """
     Sidebar { width: 18; border-right: solid $panel; }
     /* The widget's own margin is a blank line either side, which reads as a
-       gap between two places rather than as the division of two groups. */
-    Sidebar Rule { margin: 0; color: $panel; }
+       gap between two places rather than as the division of two groups. Its
+       class is named here because ``Rule.-horizontal`` sets that margin,
+       and a selector of bare types loses to one naming a class. */
+    Sidebar Rule.-horizontal { margin: 0; color: $panel; }
     Sidebar SidebarRow.-selected { background: $accent 20%; }
     Sidebar:focus SidebarRow.-selected { background: $accent 60%; }
     """
