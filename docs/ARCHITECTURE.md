@@ -107,7 +107,7 @@ written and a mode, on request only — opening one is never a side effect of
 a run finishing. Findings cross a boundary of their own kind:
 `stompcad.workbench.families` groups every diagnostic by remedy, chosen per
 finding, into seven families — the routes out of a finding, not the tool
-that raised it. Completeness and reachability are enforced by
+that raised it. Completeness and reachability are guarded by
 `tools/list_diagnostic_codes.py` and the test that runs it, rather than by a
 count recorded here.
 

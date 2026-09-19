@@ -1,9 +1,12 @@
 # ADR-0014: The workbench and its resolution
 
-**Status:** Accepted, amended twice: the sidebar now takes focus and the
-arrows move between it and the place (see *The key model is semi-modal*);
+**Status:** Accepted, amended three times: the sidebar now takes focus and
+the arrows move between it and the place (see *The key model is semi-modal*);
 the boards lost their discovered rank and the enclosure part gained one in
-the workbench alone (see *Resolution has four ranks*).
+the workbench alone (see *Resolution has four ranks*); the window opens only
+when asked, and `enter` gained two subject-specific meanings — on a finding
+it goes to the place that answers it, on an artefact in `Output` it opens the
+viewer (see *The window shows what a run wrote, and opens only when asked*).
 
 ## Context
 
@@ -70,11 +73,11 @@ application it cannot answer and would otherwise hang against.
 ### The key model is semi-modal: bare letters are global, Ctrl is local
 
 Each of the eight places owns one unique bare letter — `p` `a` `e` `d` `b` `o`
-`r` `f` — and three letters no place claims are global verbs: `w` opens the
-window on the current subject, `q` quits, `?` shows the keys. Arrows move
+`r` `f` — and three letters no place claims are global verbs: `w` views the
+focused artefact, `q` quits, `?` shows the keys. Arrows move
 between neighbouring elements, `enter` enters or commits — on a finding a row
 answers, it goes to that row; on an artefact in `Output`, it opens the
-viewer; both are commit what the line is for — `esc` cancels or closes,
+viewer; both commit what the line is for — `esc` cancels or closes,
 everywhere. `tab` and `Ctrl`+letter belong to the place. The workbench
 has two panes, the sidebar and the place, and the arrows move between them:
 `←` from a place focuses the sidebar, `↑`/`↓` there step between places, and

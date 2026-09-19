@@ -248,13 +248,12 @@ finding in `Findings` that a row can answer, it goes to that row. On an
 artefact in `Output`, it opens the viewer on the file the run wrote, and `w`
 does the same to whichever artefact is focused there — a second key for the
 same act, never a way to pick a file itself. Nothing opens on its own: a run
-finishing never pops a window, and pressing either key where neither
-applies says so rather than guessing what was meant. The run's report is
+finishing never pops a window, and pressing `w` anywhere else says where the
+viewer opens rather than guessing what was meant. The run's report is
 listed in `Output` alongside every other artefact but is never opened in the
 viewer, because it is a record of placements rather than a picture. With no
-viewer installed, or no display to show one on, the workbench says so and
-loses nothing but the picture — the report and every artefact are still
-written and still listed.
+viewer available, the workbench says so and names the file's path instead —
+the report and every artefact are still written and still listed.
 
 An open text field keeps the editing keys the platform already has, so
 `Option`+`Backspace` removes the word behind the cursor.
