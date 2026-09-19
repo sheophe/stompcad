@@ -35,6 +35,7 @@ from ..cancel import EXIT_CANCELLED
 from ..drive import Driver
 from ..plan import RunPlan, Step
 from ..present import step_line
+from .footer import MOVING, TYPING, Mode, ModeLine
 from .keys import (
     GLOBAL_VERBS,
     LOCAL_KEYS,
@@ -80,7 +81,6 @@ class Workbench(App[int], inherit_bindings=False):
 
     CSS = """
     #body { width: 1fr; padding: 0 1; }
-    #mode { dock: bottom; height: 1; background: $panel; }
     """
 
     BINDINGS = [
@@ -132,7 +132,7 @@ class Workbench(App[int], inherit_bindings=False):
         with Horizontal():
             yield Sidebar()
             yield Vertical(id="body")
-        yield Static(id="mode")
+        yield ModeLine()
 
     async def on_mount(self) -> None:
         self._base = self.screen
@@ -142,11 +142,11 @@ class Workbench(App[int], inherit_bindings=False):
 
     # -- drawing -----------------------------------------------------------
 
-    def mode(self) -> str:
-        """Which mode the footer states. Decision 3's one hazard, closed."""
+    def mode(self) -> Mode:
+        """Which mode is in force. Decision 3's one hazard, closed."""
         focused = self.focused
         typing = focused is not None and focused.can_focus and _is_text(focused)
-        return "typing" if typing else "moving"
+        return TYPING if typing else MOVING
 
     async def redraw(self, field: str | None = None) -> None:
         """Draw the sidebar, the current place and the mode line.
@@ -214,22 +214,7 @@ class Workbench(App[int], inherit_bindings=False):
 
     def _show_mode(self) -> None:
         if self._base is not None and self.is_running:
-            self._base.query_one("#mode", Static).update(self._mode_line())
-
-    def _mode_line(self) -> str:
-        """What this mode answers, and the way out of it, always on screen.
-
-        The exit is stated rather than learnt: a full-screen application
-        nobody can leave without looking it up first is a trap, whatever
-        else it does well. Typing names `esc` instead, because `q` there
-        types a letter and offering it as the exit would be untrue.
-        """
-        if self.mode() == "typing":
-            return "  typing — letters type here; esc leaves the field" + self._tail()
-        return "  moving — arrows or letters move you; ? for the keys, q to quit" + self._tail()
-
-    def _tail(self) -> str:
-        return f"    {self.message}" if self.message else ""
+            self._base.query_one(ModeLine).show(self.mode(), self.message)
 
     def watch_message(self) -> None:
         self._show_mode()

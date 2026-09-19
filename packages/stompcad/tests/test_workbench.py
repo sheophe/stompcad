@@ -20,6 +20,7 @@ from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench.app import Workbench, _key_list
+from stompcad.workbench.footer import MOVING, TYPING, Hint, ModeLine
 from stompcad.workbench.keys import (
     GLOBAL_VERBS,
     LOCAL_KEYS,
@@ -271,8 +272,8 @@ async def test_the_footer_always_states_the_mode() -> None:
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert app.mode() == "moving"
-        assert "moving" in str(app.query_one("#mode", Static).content).lower()
+        assert app.mode() is MOVING
+        assert "moving" in str(app.query_one(ModeLine).content).lower()
 
 
 @pytest.mark.asyncio
@@ -285,7 +286,7 @@ async def test_the_way_out_is_on_screen_before_anybody_asks_for_it() -> None:
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert "q to quit" in str(app.query_one("#mode", Static).content)
+        assert Hint("q", "quit").describe() in str(app.query_one(ModeLine).content)
 
 
 @pytest.mark.asyncio
@@ -296,8 +297,8 @@ async def test_the_field_names_its_own_way_out_rather_than_the_application_s() -
         await pilot.press("d")
         await _focus_row(pilot, app, "title")
         await pilot.press("enter")
-        stated = str(app.query_one("#mode", Static).content)
-        assert "esc leaves the field" in stated
+        stated = str(app.query_one(ModeLine).content)
+        assert any(hint.describe() in stated for hint in TYPING.hints if "esc" in hint.keys)
         assert "quit" not in stated
 
 
@@ -445,8 +446,8 @@ async def test_an_open_text_field_suppresses_every_bare_letter() -> None:
         await pilot.press("b", "o", "a", "r", "d")
         assert app.session.place is Place.DRILLING
         assert app.query_one("#editor", Input).value == "board"
-        assert app.mode() == "typing"
-        assert "typing" in str(app.query_one("#mode", Static).content).lower()
+        assert app.mode() is TYPING
+        assert "typing" in str(app.query_one(ModeLine).content).lower()
 
 
 @pytest.mark.asyncio
@@ -493,7 +494,7 @@ async def test_closing_the_field_gives_the_letters_back() -> None:
         await pilot.press("d")
         await _focus_row(pilot, app, "title")
         await pilot.press("enter", "escape")
-        assert "moving" in str(app.query_one("#mode", Static).content).lower()
+        assert "moving" in str(app.query_one(ModeLine).content).lower()
         await pilot.press("b")
         assert app.session.place is Place.BOARDS
 
@@ -521,7 +522,7 @@ async def test_a_choice_row_opens_a_picker_rather_than_a_field() -> None:
         await _focus_row(pilot, app, "drill_standard")
         await pilot.press("enter")
         assert app.screen.query("#picker")
-        assert app.mode() == "moving"
+        assert app.mode() is MOVING
 
 
 @pytest.mark.asyncio
