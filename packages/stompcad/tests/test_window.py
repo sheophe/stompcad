@@ -46,6 +46,19 @@ class _Opened:
         self.closed += 1
 
 
+class _Raising:
+    """A window that answers available and then breaks its promise not to raise."""
+
+    def available(self) -> bool:
+        return True
+
+    def open(self, request: ViewRequest) -> None:
+        raise OSError("no display connection")
+
+    def close_all(self) -> None:
+        return None
+
+
 def _with_outputs(tmp_path: Path, *kinds: str, written: bool = True) -> Session:
     """A project making these artefacts, on disk or not, at real paths."""
     made: list[tuple[str, Path]] = []
@@ -169,6 +182,18 @@ async def test_no_viewer_is_explained_rather_than_raised(tmp_path: Path) -> None
         await _focus_the_artefact(pilot)
         await pilot.press("enter")
         assert "no viewer" in app.message
+        assert app.is_running
+
+
+@pytest.mark.asyncio
+async def test_a_viewer_that_raises_is_caught_and_named(tmp_path: Path) -> None:
+    """The contract says `open` never raises; a viewer that does is the
+    viewer's failure, reported by name, not the workbench's crash."""
+    app = Workbench(_with_outputs(tmp_path, "excellon"), window=_Raising())
+    async with app.run_test() as pilot:
+        await _focus_the_artefact(pilot)
+        await pilot.press("enter")
+        assert "no display connection" in app.message
         assert app.is_running
 
 

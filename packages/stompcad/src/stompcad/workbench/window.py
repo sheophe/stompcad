@@ -49,7 +49,11 @@ class ViewRequest:
 
 
 class Window(Protocol):
-    """Somewhere a viewer might be, and the three things it is asked."""
+    """Somewhere a viewer might be, and the three things it is asked.
+
+    ``open`` and ``close_all`` return promptly and never raise; a viewer
+    that fails is the viewer's own failure to report, not the workbench's.
+    """
 
     def available(self) -> bool: ...
     def open(self, request: ViewRequest) -> None: ...
@@ -84,9 +88,9 @@ VIEWS: dict[str, ViewMode] = {
     "assembly": ViewMode.MODEL,
 }
 
-#: Artefacts listed in `Output` but never offered to the viewer, so `enter`
-#: cannot land on them. The run's report is a record of placements rather
-#: than a picture, and is not a row.
+#: Kinds listed in `Output` on purpose but given no entry in `VIEWS`; that
+#: absence, not this set, is what stops `enter` landing on them. The run's
+#: report is a record of placements rather than a picture, and is not a row.
 UNVIEWABLE = frozenset({"report"})
 
 

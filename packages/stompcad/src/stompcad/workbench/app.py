@@ -191,8 +191,10 @@ class Workbench(App[int], inherit_bindings=False):
 
     def on_unmount(self) -> None:
         """The run's process is asked to go, and waited for if it is writing."""
-        self.runner.close()
-        self.window.close_all()
+        try:
+            self.runner.close()
+        finally:
+            self.window.close_all()
 
     # -- drawing -----------------------------------------------------------
 
@@ -315,7 +317,9 @@ class Workbench(App[int], inherit_bindings=False):
 
         Every way it cannot open is said rather than raised: a viewer that
         failed loudly would make itself a dependency of the workbench, which
-        is the one thing this boundary exists to prevent.
+        is the one thing this boundary exists to prevent. The contract says
+        ``open`` never raises, so a raise here is the viewer breaking its
+        own promise, caught rather than trusted.
         """
         row = self.focused
         if not isinstance(row, OutputRow):
@@ -323,9 +327,12 @@ class Workbench(App[int], inherit_bindings=False):
         elif not row.path.is_file():
             self.message = f"{row.path.name} has not been written yet"
         elif not self.window.available():
-            self.message = "no viewer is available: install one, or check the display"
+            self.message = f"no viewer is available; the file is at {row.path}"
         else:
-            self.window.open(ViewRequest(row.path, row.mode, row.path.name))
+            try:
+                self.window.open(ViewRequest(row.path, row.mode, row.path.name))
+            except Exception as error:
+                self.message = f"the viewer could not open {row.path.name}: {error}"
 
     async def action_go(self, place: str) -> None:
         self._leave_modal()
