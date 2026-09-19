@@ -584,15 +584,12 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     """The four ranks, assembled once, with every disagreement carried.
 
     Three orderings are load-bearing. The panel comes first, because every
-    other rank is read relative to it. Every value a user can type is then
-    resolved and validated, before the first discovery opens the artwork:
-    CLAUDE.md's "validate options before opening the artwork" has nowhere
-    else to happen for a value carried only by a hand-edited project file.
-    That is why the dock half's three lengths and its designator filter
-    resolve up there, though the board list beside them cannot. Discovery
-    follows, needing the panel to read its layers and the case model to
-    exclude it from the board candidates; and the targets are checked once
-    resolved, because a project may supply them as readily as a flag may.
+    other rank is read relative to it. Every value a user can type is
+    resolved and validated before the first discovery opens the artwork,
+    because CLAUDE.md's "validate options before opening the artwork" has
+    nowhere else to happen for a hand-edited project file -- which is why
+    the dock half's lengths and its designator filter resolve up there.
+    The targets are checked last, once resolution has supplied them.
     """
     notes: list[str] = []
     panel, panel_resolved, missing, candidates = _resolve_panel(args, directory)
@@ -725,11 +722,14 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     boards_arg = tuple(Path(board) for board in args.boards) if args.boards else None
     boards_project_raw = _project(project, "boards", "boards")
     boards_project = None if boards_project_raw is None else tuple(boards_project_raw)
-    boards_discovery = Discovery(
-        discover.board_candidates(panel.parent, panel, case_model_resolved.value), "found beside it",
-    )
+    # The boards have no discovered rank. A filename says nothing about what
+    # a model holds -- a board, the enclosure, or an assembly exported under
+    # a name of its own -- so a directory scan would dock whatever was in it.
+    # ``discover.board_candidates`` still offers them to the picker, where
+    # the builder is the one who says which are boards, and an unresolved
+    # list is what ``readiness`` asks about.
     boards_resolved = _pick_noting(
-        boards_arg, boards_project, boards_discovery, DEFAULTS.boards.boards.value,
+        boards_arg, boards_project, None, DEFAULTS.boards.boards.value,
         panel=panel, label="boards", notes=notes,
     )
     boards_settings = BoardSettings(

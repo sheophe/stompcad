@@ -290,12 +290,11 @@ def test_a_bare_emit_takes_its_path_from_the_naming_scheme(tmp_path: Path) -> No
     assert resolved.settings.output.targets.value == (("excellon", tmp_path / "tar-case.drl"),)
 
 
-def test_an_argument_beats_a_conflicting_discovery(tmp_path: Path) -> None:
-    """The rank a bare argument reaches is stronger than what was found beside it.
+def test_an_argument_names_the_board_among_models_nobody_asked_for(tmp_path: Path) -> None:
+    """One named board, and the other model beside it stays where it is.
 
-    Two board models sit in the directory, so discovery has an answer of
-    its own; naming one on the command line still wins, the pair no other
-    test here exercises.
+    The control for the test below: the directory is the same, so an empty
+    list there is the absence of a rank rather than an empty directory.
     """
     from stompcad.cli import build_parser, resolve
     from stompcad.settings import Origin
@@ -310,6 +309,31 @@ def test_an_argument_beats_a_conflicting_discovery(tmp_path: Path) -> None:
     boards = resolved.settings.boards.boards
     assert boards.value == (tmp_path / "other.stp",)
     assert boards.provenance.origin is Origin.ARGUMENT
+
+
+def test_models_beside_the_artwork_are_never_docked_unasked(tmp_path: Path) -> None:
+    """A STEP file beside the artwork is a candidate to offer, not a board.
+
+    Nothing in a filename says whether a model is a board, an enclosure or
+    an assembly somebody exported under a name of their own, so adopting
+    the directory would dock whatever happened to be in it. Unresolved is
+    the honest state, and it is the one that asks.
+    """
+    from stompcad.cli import build_parser, resolve
+    from stompcad.readiness import Blocker
+    from stompcad.settings import Origin
+
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    for name in ("tar-pcb.stp", "TarAssembled.stp"):
+        (tmp_path / name).write_bytes(b"")
+    resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    boards = resolved.settings.boards.boards
+    assert boards.value == ()
+    assert boards.provenance.origin is Origin.DEFAULT
+    assert Blocker.BOARDS_UNRESOLVED in {
+        blocker for blocker, _place, _advice in resolved.blockers.blockers
+    }
 
 
 def test_a_case_model_filename_never_becomes_a_declared_case(tmp_path: Path) -> None:
