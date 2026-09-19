@@ -24,6 +24,7 @@ from stompcad.resolve import RESOLVABLE
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench import run
 from stompcad.workbench.app import Workbench
+from stompcad.workbench.dialog import Dialog
 from stompcad.workbench.keys import Place
 from stompcad.workbench.places import FocusRow, ValueRow
 from stompcad.workbench.run import Launch, WorkbenchPresentation
@@ -671,8 +672,8 @@ async def test_the_picker_says_that_choosing_continues_the_run() -> None:
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
         await _paused(pilot, app)
-        label = str(app.screen.query_one("#picker-label", Static).content)
-        assert "continue" in label.lower()
+        titled = app.screen.query_one(Dialog).border_title
+        assert titled is not None and "continue" in str(titled).lower()
 
 
 @pytest.mark.asyncio

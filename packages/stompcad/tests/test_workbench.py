@@ -20,6 +20,7 @@ from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
 from stompcad.workbench.app import Workbench, _key_list
+from stompcad.workbench.dialog import Dialog
 from stompcad.workbench.footer import MOVING, TYPING, Hint, ModeLine
 from stompcad.workbench.keys import (
     GLOBAL_VERBS,
@@ -356,6 +357,38 @@ async def test_the_field_names_its_own_way_out_rather_than_the_application_s() -
         stated = str(app.query_one(ModeLine).content)
         assert any(hint.describe() in stated for hint in TYPING.hints if "esc" in hint.keys)
         assert "quit" not in stated
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("place", "field", "titled"),
+    [(Place.BOARDS, "boards", "Boards"), (Place.OUTPUT, "targets", "Artefacts")],
+)
+async def test_a_picker_is_named_in_its_border_by_the_row_it_opened_on(
+    place: Place, field: str, titled: str
+) -> None:
+    """A window says what it is where a window says it, not on a line inside.
+
+    By the row's own shown name rather than the field behind it: `Output`
+    words its question as artefacts, and a window titled `Targets` would
+    name something the screen never showed.
+    """
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press(next(key for key, each in PLACE_KEYS.items() if each is place))
+        await _focus_row(pilot, app, field)
+        await pilot.press("enter")
+        assert app.screen.query_one(Dialog).border_title == titled
+        assert not app.screen.query("#picker-label")
+
+
+@pytest.mark.asyncio
+async def test_the_keys_window_is_named_in_its_border_too() -> None:
+    """Every modal is framed by the one type that cannot be built untitled."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("question_mark")
+        assert app.screen.query_one(Dialog).border_title == "Keys"
 
 
 @pytest.mark.asyncio

@@ -35,6 +35,7 @@ from ..cancel import EXIT_CANCELLED
 from ..drive import Driver
 from ..plan import RunPlan, Step
 from ..present import step_line
+from .dialog import Dialog
 from .footer import MOVING, TYPING, Mode, ModeLine
 from .keys import (
     GLOBAL_VERBS,
@@ -58,6 +59,7 @@ from .places import (
     choices_for,
     chosen_for,
     field_of,
+    label_of,
     pane_for,
     position_line,
     table_bindings,
@@ -338,6 +340,7 @@ class Workbench(App[int], inherit_bindings=False):
             field,
             choices,
             multiple=field.kind is Kind.MANY,
+            label=label_of(self.session, place, field.name),
             chosen=chosen_for(self.session, place, field.name),
         )
         self.push_screen(picker, lambda answer: self._picked(place, field, answer))
@@ -786,9 +789,8 @@ class KeysScreen(ModalScreen[None]):
 
     DEFAULT_CSS = """
     KeysScreen { align: center middle; }
-    KeysScreen > Vertical {
+    KeysScreen > Dialog {
         max-width: 100%; max-height: 100%; overflow: auto auto;
-        border: round $accent; background: $surface;
     }
     """
 
@@ -804,8 +806,7 @@ class KeysScreen(ModalScreen[None]):
         width = max(cell_len(line) for line in lines)
         height = len(lines)
         rows, columns = _KEYS_MARGIN
-        with Vertical(id="keys") as window:
-            window.border_title = "Keys"
+        with Dialog("Keys", id="keys") as window:
             window.styles.padding = (rows, columns)
             # Sized from the text rather than left to `auto`: an auto-sized
             # container around an auto-sized text collapses to its border.
@@ -827,10 +828,7 @@ class ConfirmScreen(ModalScreen[bool]):
 
     DEFAULT_CSS = """
     ConfirmScreen { align: center middle; }
-    ConfirmScreen > Vertical {
-        width: 52; height: auto; border: round $accent;
-        background: $surface; padding: 0 1;
-    }
+    ConfirmScreen > Dialog { width: 52; height: auto; padding: 0 1; }
     """
 
     BINDINGS = [
@@ -839,7 +837,7 @@ class ConfirmScreen(ModalScreen[bool]):
     ]
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm"):
+        with Dialog("Quit", id="confirm"):
             yield Static("A run is working. Quit anyway?", markup=False)
             yield Static("enter — stop it and quit     esc — stay", markup=False)
 

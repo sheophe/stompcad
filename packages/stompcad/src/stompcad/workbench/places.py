@@ -11,13 +11,14 @@ list once a run has read a board and an expression until then.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
@@ -30,6 +31,7 @@ from stompmodel.model import CaseFace
 from .. import discover
 from ..drive import DOCK_TARGET_NAMES
 from ..settings import Origin, as_flag_string
+from .dialog import Dialog
 from .keys import (
     CONFIGURATION,
     GLOBAL_VERBS,
@@ -47,6 +49,7 @@ __all__ = [
     "Field",
     "FIELDS",
     "field_of",
+    "label_of",
     "choices_for",
     "chosen_for",
     "table_bindings",
@@ -123,6 +126,19 @@ FIELDS: dict[Place, tuple[Field, ...]] = {
 def field_of(place: Place, name: str) -> Field:
     """This place's row for one field, from the one table stating them."""
     return next(field for field in FIELDS[place] if field.name == name)
+
+
+def label_of(session: Session, place: Place, field: str) -> str:
+    """The name this row shows, which is what a window over it is called.
+
+    Joined by field name, as every other join to ``rows()`` is: a place may
+    word a question better than the attribute behind it does, and a window
+    titled by the attribute would name something the screen never showed.
+    """
+    # Annotated because ``place.value`` names the attribute: the record is
+    # reached by name, so nothing but this states what its rows hold.
+    rows: Iterator[tuple[str, str, str]] = getattr(session.settings, place.value).rows()
+    return next(shown for name, shown, _stated in rows if name == field)
 
 
 def choices_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
@@ -469,10 +485,7 @@ class PickerScreen(ModalScreen[object]):
 
     DEFAULT_CSS = """
     PickerScreen { align: center middle; }
-    PickerScreen > Vertical {
-        width: 60; height: auto; max-height: 80%;
-        border: round $accent; background: $surface; padding: 0 1;
-    }
+    PickerScreen > Dialog { width: 60; height: auto; max-height: 80%; padding: 0 1; }
     PickerScreen #picker { height: auto; max-height: 20; }
     """
 
@@ -490,12 +503,15 @@ class PickerScreen(ModalScreen[object]):
         self.field = field
         self.choices = choices
         self.multiple = multiple
-        self.label = label or ("" if field is None else field.name.replace("_", " "))
+        # What the window is called. A row's own shown name rather than the
+        # field behind it, because the two differ where a place words a
+        # question better than its attribute does -- ``targets`` is shown,
+        # and so asked about, as artefacts.
+        self.heading = (label or ("" if field is None else field.name.replace("_", " "))).capitalize()
         self.chosen = chosen
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static(self.label, id="picker-label", markup=False)
+        with Dialog(self.heading):
             if self.multiple:
                 yield Ticks(
                     *((choice, choice, choice in self.chosen) for choice in self.choices),
