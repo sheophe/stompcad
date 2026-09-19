@@ -1121,3 +1121,50 @@ async def test_ctrl_f_without_the_acquiring_tool_says_no_location_is_known(
         await pilot.press("e", "ctrl+f")
         assert "no cache location is known" in app.message
         assert "tools/fetch_case_model.py" in app.message
+
+
+_NEAR_MISS = Diagnostic.warning(
+    "unmatched-part",
+    "RV1 lands 0.412 mm from hole 7, its nearest",
+    data=(("designator", "RV1"), ("nearest_hole", 7), ("offset_nm", 412000)),
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("found", "place", "field"),
+    [
+        (Diagnostic.warning("nesting-truncated", "a form nests past the depth read"),
+         Place.ARTWORK, "form_depth"),
+        (Diagnostic.error("wrong-case-model", "the model is a 1590A"),
+         Place.ENCLOSURE, "case_model"),
+        (_NEAR_MISS, Place.BOARDS, "match_tolerance_mm"),
+    ],
+)
+async def test_enter_on_a_finding_jumps_to_the_field_that_answers_it(
+    found: Diagnostic, place: Place, field: str
+) -> None:
+    """The row, not only the place. None of these fields is its place's first
+    row, which is where a jump carrying only the place would land."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([found])
+        await pilot.press("f")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session.place is place
+        assert isinstance(app.focused, ValueRow)
+        assert app.focused.field == field
+
+
+@pytest.mark.asyncio
+async def test_a_jump_needs_a_row_to_land_on() -> None:
+    """The control: a finding no row answers is text, so enter moves nowhere."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        app.session.record_findings([Diagnostic.warning("multiple-boards", "three boards")])
+        await pilot.press("f")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session.place is Place.FINDINGS
+        assert not list(app.query(FindingRow))

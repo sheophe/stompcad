@@ -50,6 +50,7 @@ from .keys import (
 from .places import (
     Editor,
     Field,
+    FindingRow,
     FocusRow,
     GapRow,
     Kind,
@@ -287,6 +288,22 @@ class Workbench(App[int], inherit_bindings=False):
         )
 
     # -- moving ------------------------------------------------------------
+
+    async def action_address_finding(self) -> None:
+        """Go to the row that answers the focused finding. Decision 11.
+
+        The place and the field travel together, because a place alone lands
+        on its first row -- an input file, for most places -- and not on the
+        value the finding is about. The move is ``action_go``'s own, so a
+        jump leaves a picker and a message exactly as a bare letter does.
+        """
+        row = self.focused
+        if not isinstance(row, FindingRow):
+            return
+        self._leave_modal()
+        self.session.go(row.remedy.place)
+        self.message = ""
+        await self.redraw(row.remedy.field)
 
     async def action_go(self, place: str) -> None:
         self._leave_modal()
