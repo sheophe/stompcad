@@ -59,8 +59,8 @@ class Sidebar(Vertical):
        class is named here because ``Rule.-horizontal`` sets that margin,
        and a selector of bare types loses to one naming a class. */
     Sidebar Rule.-horizontal { margin: 0; color: $panel; }
-    Sidebar SidebarRow.-selected { background: $accent 20%; }
-    Sidebar:focus SidebarRow.-selected { background: $accent 60%; }
+    Sidebar SidebarRow.-selected { background: $selection-idle; }
+    Sidebar:focus SidebarRow.-selected { background: $selection-focused; }
     """
 
     can_focus = True

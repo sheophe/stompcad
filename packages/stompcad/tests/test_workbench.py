@@ -31,7 +31,7 @@ from stompcad.workbench.keys import (
     TO_SIDEBAR,
     Place,
 )
-from stompcad.workbench.places import FIELDS, PickerScreen, ValueRow
+from stompcad.workbench.places import FIELDS, FocusRow, PickerScreen, ValueRow
 from stompcad.workbench.session import Session
 from stompcad.workbench.sidebar import Sidebar, SidebarRow
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -164,6 +164,62 @@ async def test_a_group_separator_is_one_drawn_line() -> None:
         assert [rule.line_style for rule in bar.query(Rule)] == ["solid", "solid"]
         assert rows[Place.ARTWORK] - rows[Place.PROJECT] == 2
         assert rows[Place.RUN] - rows[Place.OUTPUT] == 2
+
+
+@pytest.mark.asyncio
+async def test_the_arrows_wrap_inside_the_pane_that_holds_focus() -> None:
+    """Decision 3: `↑`/`↓` move within a pane; only `←`/`→` change which pane.
+
+    Walking off the end used to hand focus to the next focusable widget,
+    which is the list -- so the arrows changed panes by accident, and a
+    builder who overshot the last row left the place without asking to.
+    """
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        fields = [row.field for row in app.query(ValueRow)]
+        for _ in fields:
+            await pilot.press("down")
+        assert isinstance(app.focused, ValueRow)
+        assert app.focused.field == fields[0]
+        await pilot.press("up")
+        assert isinstance(app.focused, ValueRow)
+        assert app.focused.field == fields[-1]
+
+
+@pytest.mark.asyncio
+async def test_no_number_of_arrows_leaves_the_place_for_the_list() -> None:
+    """The control: a pane that only wrapped at one end still leaks at the other."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        for key in ("down",) * 9 + ("up",) * 9:
+            await pilot.press(key)
+            assert not isinstance(app.focused, Sidebar)
+
+
+@pytest.mark.asyncio
+async def test_both_panes_mark_their_selection_alike_while_they_answer() -> None:
+    """One colour means "the arrows answer here", whichever pane is answering."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        answering = app.focused
+        assert isinstance(answering, FocusRow)
+        in_place = answering.styles.background
+        await pilot.press("left")
+        assert app.query_one("#row-drilling", SidebarRow).styles.background == in_place
+
+
+@pytest.mark.asyncio
+async def test_the_pane_that_is_not_answering_marks_it_more_quietly() -> None:
+    """The control: one colour for both states would say the arrows answer both."""
+    app = Workbench(_session())
+    async with app.run_test() as pilot:
+        await pilot.press("d")
+        quiet = app.query_one("#row-drilling", SidebarRow).styles.background
+        await pilot.press("left")
+        assert app.query_one("#row-drilling", SidebarRow).styles.background != quiet
 
 
 def test_the_sidebar_binds_exactly_its_own_table() -> None:

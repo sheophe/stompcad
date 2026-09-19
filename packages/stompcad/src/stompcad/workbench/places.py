@@ -334,8 +334,23 @@ class FocusRow(Static):
     field: str = ""
 
     DEFAULT_CSS = """
-    FocusRow:focus { background: $accent 30%; }
+    FocusRow:focus { background: $selection-focused; }
     """
+
+    BINDINGS = [
+        Binding("up", "step_row(False)", "previous row", show=False),
+        Binding("down", "step_row(True)", "next row", show=False),
+    ]
+
+    def action_step_row(self, forward: bool) -> None:
+        """The neighbouring row, wrapping at both ends of the place.
+
+        Bound rather than left to the focus chain, which runs on past the
+        last row into the next focusable widget -- the list. That made the
+        arrows change panes by accident, where only `←` and `→` may.
+        """
+        rows = list(self.screen.query(FocusRow))
+        rows[(rows.index(self) + (1 if forward else -1)) % len(rows)].focus()
 
 
 class ValueRow(FocusRow):

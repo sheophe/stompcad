@@ -65,6 +65,7 @@ from .places import (
 from .run import Launch, may_resume, start
 from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
+from .theme import shades
 
 __all__ = ["Workbench", "KeysScreen", "ConfirmScreen"]
 
@@ -89,6 +90,16 @@ class Workbench(App[int], inherit_bindings=False):
     ]
 
     message: reactive[str] = reactive("")
+
+    def get_css_variables(self) -> dict[str, str]:
+        """Textual's own variables, plus the two selection shades.
+
+        Given to the stylesheet rather than written into each widget, so
+        the sidebar and a place cannot come to mark the same state two
+        different ways -- which is exactly what they had done.
+        """
+        variables = super().get_css_variables()
+        return {**variables, **shades(variables["accent"])}
 
     def __init__(
         self,
