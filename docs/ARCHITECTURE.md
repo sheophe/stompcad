@@ -101,6 +101,16 @@ holds the rules a project resolves and stales by, and the Textual modules
 under `stompcad.workbench` draw them. See
 [docs/specs/stompcad-workbench.md](specs/stompcad-workbench.md).
 
+Beside that process boundary sits a second, narrower one: the viewer.
+`stompcad.workbench.window` hands it a path to a file a run has already
+written and a mode, on request only — opening one is never a side effect of
+a run finishing. Findings cross a boundary of their own kind:
+`stompcad.workbench.families` groups every diagnostic by remedy, chosen per
+finding, into seven families — the routes out of a finding, not the tool
+that raised it. Completeness and reachability are enforced by
+`tools/list_diagnostic_codes.py` and the test that runs it, rather than by a
+count recorded here.
+
 Because a first `spawn` synchronisation primitive starts multiprocessing's
 resource tracker, which reads `sys.stderr.fileno()`, the workbench primes it
 in `Workbench.__init__` before Textual takes the terminal: Textual's

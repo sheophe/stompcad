@@ -232,8 +232,8 @@ moment a run can be stopped there is nothing half-written on disk to remove.
 
 Each place has one bare letter: `p` Project, `a` Artwork, `e` Enclosure,
 `d` Drilling, `b` Boards, `o` Output, `r` Run, `f` Findings. Three bare
-letters are global verbs: `w` opens the viewer window, `q` quits, `?` shows
-the keys. `[` and `]` step to the previous and next place. Three
+letters are global verbs: `w` views the focused artefact, `q` quits, `?`
+shows the keys. `[` and `]` step to the previous and next place. Three
 `Ctrl`+letters belong to one place each: `Ctrl+L` re-reads the artwork,
 `Ctrl+F` looks in the cache for an enclosure model, `Ctrl+R` starts or
 resumes the run.
@@ -242,6 +242,19 @@ The arrows reach everything the letters do, for anyone who has not learnt
 them yet. The workbench has two panes: `←` from a place moves to the list of
 places, `↑`/`↓` there step between places, and `→` or `enter` goes back in.
 Inside a place, `↑`/`↓` move between its rows.
+
+`enter` means something different depending on the row it lands on. On a
+finding in `Findings` that a row can answer, it goes to that row. On an
+artefact in `Output`, it opens the viewer on the file the run wrote, and `w`
+does the same to whichever artefact is focused there — a second key for the
+same act, never a way to pick a file itself. Nothing opens on its own: a run
+finishing never pops a window, and pressing either key where neither
+applies says so rather than guessing what was meant. The run's report is
+listed in `Output` alongside every other artefact but is never opened in the
+viewer, because it is a record of placements rather than a picture. With no
+viewer installed, or no display to show one on, the workbench says so and
+loses nothing but the picture — the report and every artefact are still
+written and still listed.
 
 An open text field keeps the editing keys the platform already has, so
 `Option`+`Backspace` removes the word behind the cursor.
