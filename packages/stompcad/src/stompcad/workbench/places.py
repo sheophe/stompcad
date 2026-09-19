@@ -248,7 +248,7 @@ def position_line(position: float, branch: str) -> str:
 def finding_lines(session: Session) -> tuple[str, ...]:
     """What the `Findings` place lists, in the order the run raised them.
 
-    Plan 3 replaces this body with the six families, their shared prose and
+    Plan 4 replaces this body with the six families, their shared prose and
     the jump to the row that addresses each finding. It is a function rather
     than a widget so that replacement changes what is said and not where it
     is said.

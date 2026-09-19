@@ -1,10 +1,10 @@
 """A run's findings, and the count the sidebar carries.
 
 The workbench specification's decision 11 groups findings into six families
-by remedy, and gives each family its prose; that is plan 3's whole subject.
+by remedy, and gives each family its prose; that is plan 4's whole subject.
 What plan 2 needs is the seam: one ``Finding`` per diagnostic, a count that
 covers errors and warnings but never information, and a place a remedy can
-live in. Until plan 3 fills ``classify``, every finding has an empty family
+live in. Until plan 4 fills ``classify``, every finding has an empty family
 and no place -- honest rather than provisional, since nothing here claims a
 classification it has not made.
 """
@@ -31,7 +31,7 @@ _COUNTED = frozenset({Severity.ERROR, Severity.WARNING})
 class Finding:
     """One diagnostic, the family that owns its remedy, and where that lives.
 
-    ``family`` and ``place`` are empty here and filled by plan 3. A finding
+    ``family`` and ``place`` are empty here and filled by plan 4. A finding
     belongs to exactly one family; a code usually does, which is why the
     classification is per finding rather than per code.
     """

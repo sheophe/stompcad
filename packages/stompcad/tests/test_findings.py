@@ -1,4 +1,4 @@
-"""The count the sidebar carries, and the seam plan 3 fills."""
+"""The count the sidebar carries, and the seam plan 4 fills."""
 
 from __future__ import annotations
 

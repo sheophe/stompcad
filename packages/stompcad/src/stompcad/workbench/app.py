@@ -623,7 +623,7 @@ class Workbench(App[int], inherit_bindings=False):
         Decision 13: ``available()`` false means ``w`` explains why rather
         than failing, and the default implementation is the null one -- so
         the whole workbench ships, runs and passes its suite with no window
-        in existence. Plan 3 replaces this body with ``Window.open``.
+        in existence. Plan 4 replaces this body with ``Window.open``.
         """
         self.message = "no viewer is installed, so there is nothing to open"
 
