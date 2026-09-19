@@ -1,7 +1,9 @@
 # ADR-0014: The workbench and its resolution
 
-**Status:** Accepted, amended: the sidebar now takes focus, and the arrows
-move between it and the place (see *The key model is semi-modal*).
+**Status:** Accepted, amended twice: the sidebar now takes focus and the
+arrows move between it and the place (see *The key model is semi-modal*);
+the boards lost their discovered rank and the enclosure part gained one in
+the workbench alone (see *Resolution has four ranks*).
 
 ## Context
 
@@ -138,21 +140,38 @@ about its own inputs, then a default matching what each tool already assumes
 on its own command line. Discovery sits between the manifest and the default
 because it is stronger evidence than an assumption and weaker than a
 declaration typed on purpose — the panel found beside the working directory,
-the layers read from the artwork itself, the boards found in the project
-directory, the case model found in the enclosure cache or named by a `.stp`
-whose stem is a catalogue part, the panel-reference designators read from the
-boards, and the match tolerance derived from the drill grid are none of them
-guesses, but none of them is what the builder typed either.
+the layers read from the artwork itself, the case model found in the
+enclosure cache, the panel-reference designators read from the boards, and
+the match tolerance derived from the drill grid are none of them guesses,
+but none of them is what the builder typed either.
 
-The enclosure part is not among them, and a model's filename is discovery of
-the model rather than of the part. `stompdrill` identifies the part from the
-measured footprint, and where that measurement ties it may try a supplied
-model's stem against the tie — a guess it reports as inferred and abandons
-where it disagrees, leaving the tie standing for a picker to settle.
-Resolving that same stem to `case` here would hand the guess to that stage as
-a declaration, and a declared part that disagrees is an error. So `case`
-resolves from the argument, the project or nothing at all; the model travels
-beside it, and the stage that measures owns what the filename is worth.
+The boards are not among them. A `.stp` beside the artwork may be a board,
+the enclosure, or an assembly somebody exported under a name of their own,
+and nothing outside the file tells the three apart, so a directory scan does
+not resolve the question — it docks whatever happened to be in the
+directory. Those files are offered as the list a builder ticks, which is
+discovery of the candidates and not of the answer. Until that tick the board
+list is unresolved, and an unresolved list stops the run and asks.
+
+The enclosure part is not among them either, and a model's filename is
+discovery of the model rather than of the part. `stompdrill` identifies the
+part from the measured footprint, and where that measurement ties it may try
+a supplied model's stem against the tie — a guess it reports as inferred and
+abandons where it disagrees, leaving the tie standing for a picker to
+settle. Resolving that same stem to `case` in a headless run would hand the
+guess to that stage as a declaration, and a declared part that disagrees is
+an error rather than the ambiguity it really is. So the command line
+resolves `case` from an argument, the project or nothing at all.
+
+**Amended.** In the workbench that stem does answer an unanswered part,
+because there the guess is made in the open: the row states the part, says
+which filename it was inferred from, and is changed in one keystroke before
+any run. A guess a builder has seen and left standing is a declaration, and
+the run treats it as one — which is exactly what a guess nobody ever saw is
+not. It is withdrawn with the file that made it, so naming a different model
+re-answers the part or leaves it unanswered rather than keeping an inference
+the named model no longer supports. Anything the project or the builder said
+outranks it, so naming a model never overrules a person.
 
 A project value that discovery contradicts is a finding, not an override. If
 the manifest names a drill layer the artwork no longer has, the run reports
@@ -238,8 +257,8 @@ report a position behind the one already announced.
 ### A run starts only when the readiness matrix allows it
 
 Whether a run may start is a stated matrix, not an inference from whichever
-values happen to be present. No panel blocks a start. Boards neither
-discovered nor declared block it too — an unresolved question about the
+values happen to be present. No panel blocks a start. Boards nobody has
+named block it too — an unresolved question about the
 pedal's boards is not the same as a decision that this pedal has none, and
 the driver's own "skip docking" behaviour cannot tell those two apart, so the
 workbench must. An explicitly confirmed empty board list is itself declared

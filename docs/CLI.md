@@ -175,10 +175,11 @@ stompcad PANEL.ai BOARD.stp --case 1590B --case-model 1590B.stp \
 
 `stompcad` runs `stompdrill` and `stompcollider` together as one invocation. It
 drills `PANEL.ai`, then seats each `BOARD.stp` inside the case it has just
-drilled and reports the clashes. Naming no board and finding none beside the
-panel does not run the drill half alone: it leaves the run refusing to
-start, because a question nobody has answered is not the same as an answer
-of none. A drill-only run is declared, not merely omitted, by recording an
+drilled and reports the clashes. Naming no board does not run the drill half
+alone: it leaves the run refusing to start, because a question nobody has
+answered is not the same as an answer of none. Models sitting beside the
+panel are never taken for boards — nothing outside a `.stp` says whether it
+holds a board, an enclosure or a finished assembly. A drill-only run is declared, not merely omitted, by recording an
 empty board list in the project file described below. Each of the run's steps
 prints one line as it completes, so a piped run reads as a log of what
 happened.
