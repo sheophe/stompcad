@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from stompcad import discover
+from stompdrill.pipeline.enclosure import fitting_parts as parts_fitting
+from stompdrill.sources import AiPdfSource
 from tests.conftest import TAR_AI
 
 
@@ -75,3 +77,27 @@ def test_the_catalogue_parts_are_the_tool_s_own_once_each_in_order() -> None:
     parts = discover.catalogue_parts()
     assert set(parts) == {part for names in footprints().values() for part in names}
     assert list(parts) == sorted(set(parts))
+
+
+def test_the_fitting_parts_are_read_from_the_artworks_own_outline() -> None:
+    """tar.ai is drawn to a 1590B backplate, which several parts share."""
+    parts = discover.fitting_parts(TAR_AI, "Drill", "Background", 1)
+    assert "1590B" in parts
+
+
+def test_the_fit_is_the_tools_own_answer_rather_than_a_second_opinion() -> None:
+    """The control that keeps one matching rule: same file, same parts."""
+    raw = AiPdfSource(TAR_AI, drill_layer="Drill", reference_layer="Background").read()
+    assert raw.reference is not None
+    assert discover.fitting_parts(TAR_AI, "Drill", "Background", 1) == parts_fitting(raw.reference)
+
+
+def test_an_artwork_that_cannot_be_read_narrows_nothing(tmp_path: Path) -> None:
+    """A read that fails is not an answer about enclosures, so it offers none."""
+    nothing = tmp_path / "not-artwork.ai"
+    nothing.write_bytes(b"this is not a PDF")
+    assert discover.fitting_parts(nothing, "Drill", "Background", 1) == ()
+
+
+def test_a_layer_the_artwork_has_not_got_narrows_nothing() -> None:
+    assert discover.fitting_parts(TAR_AI, "Drill", "NoSuchLayer", 1) == ()

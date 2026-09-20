@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from stompdrill.enclosures import footprints
+from stompdrill.pipeline.enclosure import fitting_parts as parts_fitting
 from stompdrill.pipeline.enclosure import infer_part_name
 from stompdrill.sources import AiPdfSource
 
@@ -23,6 +24,7 @@ __all__ = [
     "board_candidates",
     "part_from_model",
     "catalogue_parts",
+    "fitting_parts",
     "output_path",
 ]
 
@@ -103,6 +105,28 @@ def catalogue_parts() -> tuple[str, ...]:
     offers answers the tool already recognises rather than inventing a list.
     """
     return tuple(sorted({part for parts in footprints().values() for part in parts}))
+
+
+def fitting_parts(
+    panel: Path, drill_layer: str, reference_layer: str, form_depth: int
+) -> tuple[str, ...]:
+    """Every catalogue part this artwork's reference outline admits.
+
+    The workbench asks before a run so a picker can offer what the tool would
+    accept. Empty is one answer with three causes -- no outline, nothing
+    fitting, or a file that would not read -- because all three narrow
+    nothing, and the run is what reports why properly.
+    """
+    try:
+        raw = AiPdfSource(
+            panel,
+            drill_layer=drill_layer,
+            reference_layer=reference_layer,
+            form_depth=form_depth,
+        ).read()
+    except Exception:  # noqa: BLE001 - a read that fails narrows nothing
+        return ()
+    return () if raw.reference is None else parts_fitting(raw.reference)
 
 
 def output_path(format_name: str, panel: Path) -> Path:
