@@ -9,7 +9,7 @@ import pytest
 from stompdrill.enclosures import footprints
 from stompdrill.pipeline import IdentifyHammondFootprint, normalize_part_name
 from stompdrill.pipeline import enclosure as enclosure_stage
-from stompdrill.pipeline.enclosure import infer_part_name
+from stompdrill.pipeline.enclosure import fitting_parts, infer_part_name
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.model import RawOutline
 from stompmodel.units import Millimetre, Nanometre
@@ -904,3 +904,43 @@ class TestInferredEnclosure:
 
         assert match is None
         assert codes(diagnostics) == ["ambiguous-enclosure"]
+
+
+def test_fitting_parts_names_every_part_a_measurement_admits() -> None:
+    """The 1590B footprint within slack: the workbench narrows a picker with this."""
+    outline = RawOutline(Millimetre(112.4), Millimetre(60.5))
+    assert "1590B" in fitting_parts(outline)
+
+
+def test_fitting_parts_admits_a_panel_drawn_the_other_way_round() -> None:
+    """Rotation is the quantiser's rule, and one rule means one answer."""
+    upright = RawOutline(Millimetre(112.4), Millimetre(60.5))
+    turned = RawOutline(Millimetre(60.5), Millimetre(112.4))
+    assert set(fitting_parts(turned)) == set(fitting_parts(upright))
+
+
+def test_fitting_parts_agrees_with_the_quantiser_on_a_tie() -> None:
+    """The control that makes this one rule rather than two that look alike.
+
+    A measurement several footprints admit reports its parts as candidates; the
+    same measurement must name exactly those parts here. Equality, not
+    containment: returning the whole catalogue would satisfy a subset check.
+    """
+    outline = RawOutline(Millimetre(112.4), Millimetre(60.5))
+    _reference, _match, diagnostics = IdentifyHammondFootprint().quantise(outline, (0.0, 0.0))
+    ambiguous = [item for item in diagnostics if item.code == "ambiguous-enclosure"]
+    assert ambiguous, "this fixture is the tie these tests are about"
+    declared = dict(ambiguous[0].data)["candidates"]
+    named = {part.strip() for part in str(declared).split(",") if part.strip()}
+    assert named == set(fitting_parts(outline))
+
+
+def test_fitting_parts_names_nothing_for_an_outline_the_catalogue_has_not_got() -> None:
+    outline = RawOutline(Millimetre(400.0), Millimetre(15.0))
+    assert fitting_parts(outline) == ()
+
+
+def test_fitting_parts_refuses_a_negative_tolerance() -> None:
+    """The quantiser refuses one at construction; a second door must not be open."""
+    with pytest.raises(ValueError, match="negative"):
+        fitting_parts(RawOutline(Millimetre(112.4), Millimetre(60.5)), Nanometre(-1))

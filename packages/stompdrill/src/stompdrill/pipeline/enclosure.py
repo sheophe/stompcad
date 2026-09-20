@@ -29,6 +29,7 @@ __all__ = [
     "DEFAULT_TOLERANCE_NM",
     "normalize_part_name",
     "infer_part_name",
+    "fitting_parts",
     "IdentifyHammondFootprint",
 ]
 
@@ -75,6 +76,58 @@ def infer_part_name(path: Path) -> str | None:
 def _catalogue_parts() -> frozenset[str]:
     """Every base part the catalogue lists, for a filename to be checked against."""
     return frozenset(part for parts in footprints().values() for part in parts)
+
+
+def fitting_parts(
+    outline: RawOutline, tolerance_nm: Nanometre = DEFAULT_TOLERANCE_NM
+) -> tuple[str, ...]:
+    """Every catalogue part whose footprint admits this measurement.
+
+    Published because a picker upstream must offer the parts this tool would
+    accept: a second implementation of the slack or of the rotation rule would
+    offer a builder parts the run then refuses.
+    """
+    check_nanometres("fitting_parts", tolerance_nm=tolerance_nm)
+    if tolerance_nm < 0:
+        raise ValueError(
+            f"tolerance_nm cannot be a negative distance, got {tolerance_nm!r}"
+        )
+    catalogue = footprints()
+    return tuple(
+        part
+        for footprint, _rotated in _matching_footprints(outline, tolerance_nm)
+        for part in catalogue[footprint]
+    )
+
+
+def _matching_footprints(outline: RawOutline, tolerance_nm: Nanometre) -> list[_Match]:
+    """Sorted matching footprints and rotation; prefer square unrotated."""
+    width, height = scaled_nm(outline.width), scaled_nm(outline.height)
+    found: list[_Match] = []
+    for footprint in sorted(footprints()):
+        length_nm, width_nm = footprint
+        if _fits(width, height, length_nm, width_nm, tolerance_nm):
+            found.append((footprint, False))
+        elif _fits(width, height, width_nm, length_nm, tolerance_nm):
+            found.append((footprint, True))
+    return found
+
+
+def _fits(
+    width: Decimal,
+    height: Decimal,
+    width_nm: Nanometre,
+    height_nm: Nanometre,
+    tolerance_nm: Nanometre,
+) -> bool:
+    """Both axes, and both are load-bearing: an outline that is right across
+    and 4 mm out top to bottom is not that enclosure."""
+    return _near(width, width_nm, tolerance_nm) and _near(height, height_nm, tolerance_nm)
+
+
+def _near(measured: Decimal, catalogue_nm: Nanometre, tolerance_nm: Nanometre) -> bool:
+    """Compare an unrounded measurement to one dimension, boundary inclusive."""
+    return abs(measured - catalogue_nm) <= tolerance_nm
 
 
 class IdentifyHammondFootprint:
@@ -225,27 +278,8 @@ class IdentifyHammondFootprint:
 
     # -- matching --------------------------------------------------------
     def _matches(self, outline: RawOutline) -> list[_Match]:
-        """Return sorted matching footprints and rotation; prefer square unrotated."""
-        width, height = scaled_nm(outline.width), scaled_nm(outline.height)
-        found: list[_Match] = []
-        for footprint in sorted(footprints()):
-            length_nm, width_nm = footprint
-            if self._fits(width, height, length_nm, width_nm):
-                found.append((footprint, False))
-            elif self._fits(width, height, width_nm, length_nm):
-                found.append((footprint, True))
-        return found
-
-    def _fits(
-        self, width: Decimal, height: Decimal, width_nm: Nanometre, height_nm: Nanometre
-    ) -> bool:
-        """Both axes, and both are load-bearing: an outline that is right across
-        and 4 mm out top to bottom is not that enclosure."""
-        return self._near(width, width_nm) and self._near(height, height_nm)
-
-    def _near(self, measured: Decimal, catalogue_nm: Nanometre) -> bool:
-        """Compare an unrounded measurement to one dimension, boundary inclusive."""
-        return abs(measured - catalogue_nm) <= self.tolerance_nm
+        """This instance's slack applied to the published rule."""
+        return _matching_footprints(outline, self.tolerance_nm)
 
     # -- diagnostics -----------------------------------------------------
     def _unknown(self, measured: ReferenceOutline) -> Diagnostic:
