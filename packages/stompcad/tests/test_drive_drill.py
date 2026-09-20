@@ -202,6 +202,43 @@ def test_a_supplied_model_bypasses_the_cache(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.hammond
+def test_a_supplied_model_is_loaded_with_no_drilled_enclosure_asked_for(tmp_path: Path) -> None:
+    """A path the operator named costs no download, so needing one does not gate
+    it: stompdrill given that flag checks clearance, and this must too. ``json``
+    records the case registration and every stage run, so a clearance check this
+    run skipped would show in the bytes."""
+    model = _model()
+    mine, theirs = tmp_path / "mine.json", tmp_path / "theirs.json"
+
+    stompdrill_cli.main([
+        str(TAR_AI), "--case", "1590B", "--case-model", str(model),
+        "--emit", f"json={theirs}",
+    ])
+
+    _drill(_tar_options(tmp_path, case_model=model, targets=(("json", mine),)), _refuse)
+
+    assert mine.read_bytes() == theirs.read_bytes()
+
+
+@pytest.mark.hammond
+def test_a_retry_that_identifies_nothing_holds_no_model(tmp_path: Path) -> None:
+    """Every attempt opens its own model. One left over from the attempt before
+    would name a file for a part this panel has just been declared not to be."""
+    options = _tar_options(
+        tmp_path, case_model=_model(), targets=(("step", tmp_path / "tar-case.stp"),)
+    )
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options, None, _refuse)
+
+    with track(NullSink()) as scope:
+        driver.run_drill(scope)
+        assert driver._case_model is not None, "the control: the first attempt opened one"
+        again = driver.retry("quantise", replace(options, case="1590BB"), scope)
+
+    assert again.worst_severity is Severity.ERROR, "the control: this attempt identified nothing"
+    assert driver._case_model is None
+
+
 def test_a_model_that_cannot_be_had_stops_the_run_and_names_the_part(tmp_path: Path) -> None:
     """Decision 7: an error before any artefact is written, saying why."""
 

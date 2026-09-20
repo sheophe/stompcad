@@ -331,7 +331,9 @@ class Driver:
         self._project = project
         # How a model is got hold of, so a test can hand one over without a
         # network and a run can fetch one without a builder.
-        self._acquire = acquire if acquire is not None else cases.acquire
+        self._acquire: Callable[[str], Path] = (
+            acquire if acquire is not None else cases.acquire
+        )
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
@@ -845,6 +847,13 @@ class Driver:
         if include is not None or exclude is not None:
             standard = standard.select(include=include, exclude=exclude)
         warn_over_nm = None if options.grid_warn_mm is None else nm_from_mm(options.grid_warn_mm)
+        # Every attempt opens its own model, so every attempt starts without
+        # one. An attempt that identifies nothing returns below without
+        # reaching ``_open_model``, and a retry honoured from what this step
+        # holds keeps its holds -- so the attempt before it would otherwise
+        # still be naming a file for a part this panel has just been declared
+        # not to be, for the three steps that read it.
+        self._case_model = None
         leaves = scope.steps(2)
         identify = next(leaves)
         identify.label("enclosure")
@@ -864,6 +873,7 @@ class Driver:
             # and the chosen part's model is opened on that attempt.
             return data
         model_slot = next(leaves)  # closes the identification leaf
+        model_slot.label("case model")
         opened = self._open_model(data, model_slot)
         next(leaves, None)  # exhaust: this is what closes the model leaf
         return opened
@@ -872,23 +882,21 @@ class Driver:
         """Acquire and load the enclosure model this run needs, if any.
 
         The cache holds one file per designator, so the part identified here
-        is what names the file. A model that cannot be had is an ERROR on the
-        data, which is what withholds every artefact: half a description of a
-        panel is worse than none.
+        is what names the file, and a path the command line supplied is loaded
+        whatever the run produces. A model that cannot be had is an ERROR on
+        the data, which is what withholds every artefact: half a description
+        of a panel is worse than none.
         """
         options = self._options
-        # Every attempt opens its own model. A retry that identifies nothing,
-        # or cannot acquire, must not leave the last attempt's model in force
-        # for the three steps that read it.
-        self._case_model = None
         part = _model_part(options.case, data)
-        if not _needs_model(options):
-            return data
-        if options.case_model is None and part is None:
+        # A path the operator named costs no download and was asked for by
+        # name, so needing a model does not gate it: ``stompdrill`` given that
+        # flag checks clearance, and this must produce what that produces.
+        if options.case_model is None and (part is None or not _needs_model(options)):
             return data
         leaves = scope.steps(2)
         acquiring = next(leaves)
-        acquiring.label("case model" if part is None else f"case model {part}")
+        acquiring.label("acquiring" if part is None else f"acquiring {part}")
         path = options.case_model
         if path is None:
             assert part is not None  # the branch above returned without one
@@ -899,7 +907,7 @@ class Driver:
                     data, diagnostics=data.diagnostics + (_unavailable(part, failure),)
                 )
         loading = next(leaves)  # closes the acquiring leaf
-        loading.label("case model")
+        loading.label(f"loading {path.name}")
         try:
             self._case_model = load_case_model(
                 path,
