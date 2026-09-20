@@ -33,8 +33,10 @@ _RAISERS = frozenset({"error", "warning", "info"})
 #: would report ``FrameStyle``, a drawing style, as a code with no family.
 _CODE_ENUMS = frozenset({"Rejection"})
 
-#: The packages whose calls raise the codes a run can report.
-_TOOLS = ("stompdrill", "stompcollider")
+#: The packages whose calls raise the codes a run can report. The orchestrator
+#: is one of them: a model it could not obtain is a failure of the run rather
+#: than of either tool, so nothing below it is in a position to say so.
+_TOOLS = ("stompdrill", "stompcollider", "stompcad")
 
 #: A code no unit the driver reaches can raise, and why. Recorded rather than
 #: omitted, so the family table states what the workbench cannot show.

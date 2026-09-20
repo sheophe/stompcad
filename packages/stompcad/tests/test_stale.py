@@ -80,3 +80,10 @@ def test_every_step_consumes_only_attributes_some_step_holds() -> None:
     held = {attribute for attributes in _STEP_HOLDS.values() for attribute in attributes}
     for key, consumed in _STEP_CONSUMES.items():
         assert set(consumed) <= held, key
+
+
+def test_the_enclosure_settings_re_run_from_the_step_that_opens_the_model() -> None:
+    """The model is opened at quantise, so its settings no longer re-read artwork."""
+    assert "quantise" in _stale("case_face")
+    assert "read-panel" not in _stale("case_face")
+    assert "read-panel" not in _stale("case_model")

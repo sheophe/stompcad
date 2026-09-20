@@ -49,6 +49,7 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
+from stompmodel.errors import StompError
 from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import Scope, Sink, track
 from stompmodel.protocols import (
@@ -63,6 +64,7 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, nm_from_mm
 
+from . import cases
 from .cancel import CancellingSink
 from .manifest import DOCK_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
 from .plan import DRILL_AND_DOCK, RunPlan, Step
@@ -87,10 +89,10 @@ _DOCK_FROM = 4
 _STEP_INPUTS: dict[str, frozenset[str]] = {
     "read-panel": frozenset({
         "panel", "drill_layer", "reference_layer", "form_depth",
-        "case", "case_model", "case_face", "case_margin_mm",
     }),
     "quantise": frozenset({
-        "case", "grid_mm", "grid_warn_mm", "drill_standard", "drill_sizes", "no_drill_sizes",
+        "case", "case_model", "case_face", "case_margin_mm",
+        "grid_mm", "grid_warn_mm", "drill_standard", "drill_sizes", "no_drill_sizes",
     }),
     "drill": frozenset(),
     "write-case": frozenset({"targets", "title"}),
@@ -138,8 +140,8 @@ _RESOLVABLE_STEPS: frozenset[str] = frozenset(gap.step for gap in RESOLVABLE.val
 #: producer of what it reads is stale, and a stage that produced nothing by
 #: this table could never make the stage after it stale.
 _STEP_HOLDS: dict[str, tuple[str, ...]] = {
-    "read-panel": ("_case_model", "_raw"),
-    "quantise": ("_quantised",),
+    "read-panel": ("_raw",),
+    "quantise": ("_quantised", "_case_model"),
     "drill": ("_drilled",),
     "read-boards": ("_scan", "_geometry", "_docked", "_dock_pipeline", "_dock_data"),
     "match": ("_dock_data",),
@@ -321,11 +323,15 @@ class Driver:
         presentation: Presentation,
         options: RunOptions,
         project: Project | None = None,
+        acquire: Callable[[str], Path] | None = None,
     ) -> None:
         self._plan = plan
         self._presentation = presentation
         self._options = options
         self._project = project
+        # How a model is got hold of, so a test can hand one over without a
+        # network and a run can fetch one without a builder.
+        self._acquire = acquire if acquire is not None else cases.acquire
         self._case_model: OcpCaseModel | None = None
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
@@ -503,7 +509,9 @@ class Driver:
             self._read_panel(next(slots))
             outcome = self._read_outcome()
             self._quantised = self._quantise(next(slots))
-            return self._quantised, outcome, (("quantise", _quantise_outcome(self._quantised)),)
+            return self._quantised, outcome, (
+                ("quantise", _quantise_outcome(self._quantised, self._case_model)),
+            )
         if key in _STAGE_ORDER:
             if self._dock_data is None or self._dock_pipeline is None:
                 raise ValueError(f"{key!r} cannot run before the boards are read")
@@ -515,7 +523,7 @@ class Driver:
         if key == "quantise":
             assert self._raw is not None
             self._quantised = self._quantise(scope)
-            return self._quantised, _quantise_outcome(self._quantised), ()
+            return self._quantised, _quantise_outcome(self._quantised, self._case_model), ()
         if key == "drill":
             assert self._quantised is not None
             self._drilled = self._drill(self._quantised, scope)
@@ -709,7 +717,7 @@ class Driver:
         quantise_slot.label(quantise_step.label)
         quantised = self._quantise(quantise_slot)
         self._quantised = self._settled(
-            "quantise", quantised, _quantise_outcome(quantised), quantise_slot
+            "quantise", quantised, _quantise_outcome(quantised, self._case_model), quantise_slot
         )
 
         drill_step = self._plan.steps[2]
@@ -806,18 +814,14 @@ class Driver:
         return admit(self._docked, parse_filter(self._options.panel_reference))
 
     def _read_panel(self, scope: Scope) -> None:
-        """Load the artwork and, when named, the case model -- the read step's leaves."""
+        """Load the artwork -- the read step's one leaf.
+
+        The model is not read here. Which enclosure this panel is may only be
+        known once its outline has been matched, so the file that the part
+        names is opened where the part is decided.
+        """
         options = self._options
-        read_leaves = scope.steps(2 if options.case_model is not None else 1)
-        if options.case_model is not None:
-            case_slot = next(read_leaves)
-            case_slot.label("case model")
-            self._case_model = load_case_model(
-                options.case_model,
-                face=options.case_face,
-                margin_nm=nm_from_mm(options.case_margin_mm),
-                part=options.case,
-            )
+        read_leaves = scope.steps(1)
         artwork_slot = next(read_leaves)
         artwork_slot.label("artwork")
         source = AiPdfSource(
@@ -830,10 +834,7 @@ class Driver:
         next(read_leaves, None)  # exhaust: this is what closes the artwork leaf
 
     def _read_outcome(self) -> str:
-        model = self._case_model
-        return self._options.panel.name if model is None else (
-            f"{self._options.panel.name}, {model.model_name}"
-        )
+        return self._options.panel.name
 
     def _quantise(self, scope: Scope) -> DrillData:
         assert self._raw is not None  # _read_panel always runs first
@@ -844,15 +845,78 @@ class Driver:
         if include is not None or exclude is not None:
             standard = standard.select(include=include, exclude=exclude)
         warn_over_nm = None if options.grid_warn_mm is None else nm_from_mm(options.grid_warn_mm)
-        return quantise(
+        leaves = scope.steps(2)
+        identify = next(leaves)
+        identify.label("enclosure")
+        data = quantise(
             self._raw,
             enclosure=IdentifyHammondFootprint(
                 expected_part=options.case, case_model=options.case_model
             ),
             diameters=SnapDiametersToDrillTable(standard),
             positions=SnapPositions(nm_from_mm(options.grid_mm), warn_over_nm),
-            scope=scope,
+            scope=identify,
         )
+        if data.worst_severity is Severity.ERROR:
+            # Nothing is credited while a question is outstanding: drawing the
+            # next leaf closes this one, and ADR-0013 forbids crediting a step
+            # before its gap is answered. A tie is answered, this runs again,
+            # and the chosen part's model is opened on that attempt.
+            return data
+        model_slot = next(leaves)  # closes the identification leaf
+        opened = self._open_model(data, model_slot)
+        next(leaves, None)  # exhaust: this is what closes the model leaf
+        return opened
+
+    def _open_model(self, data: DrillData, scope: Scope) -> DrillData:
+        """Acquire and load the enclosure model this run needs, if any.
+
+        The cache holds one file per designator, so the part identified here
+        is what names the file. A model that cannot be had is an ERROR on the
+        data, which is what withholds every artefact: half a description of a
+        panel is worse than none.
+        """
+        options = self._options
+        # Every attempt opens its own model. A retry that identifies nothing,
+        # or cannot acquire, must not leave the last attempt's model in force
+        # for the three steps that read it.
+        self._case_model = None
+        part = _model_part(options.case, data)
+        if not _needs_model(options):
+            return data
+        if options.case_model is None and part is None:
+            return data
+        leaves = scope.steps(2)
+        acquiring = next(leaves)
+        acquiring.label("case model" if part is None else f"case model {part}")
+        path = options.case_model
+        if path is None:
+            assert part is not None  # the branch above returned without one
+            try:
+                path = self._acquire(part)
+            except cases.ModelUnavailable as failure:
+                return replace(
+                    data, diagnostics=data.diagnostics + (_unavailable(part, failure),)
+                )
+        loading = next(leaves)  # closes the acquiring leaf
+        loading.label("case model")
+        try:
+            self._case_model = load_case_model(
+                path,
+                face=options.case_face,
+                margin_nm=nm_from_mm(options.case_margin_mm),
+                # The part that keyed the file, not the declaration that may be
+                # absent: a model acquired for an identified part would
+                # otherwise be identified again from its own STEP names.
+                part=part if part is not None else options.case,
+            )
+        except (OSError, StompError) as failure:
+            return replace(
+                data,
+                diagnostics=data.diagnostics + (_unavailable(part or path.stem, failure),),
+            )
+        next(leaves, None)  # exhaust: this is what closes the loading leaf
+        return data
 
     def _drill(self, data: DrillData, scope: Scope) -> DrillData:
         stages: list[Stage[DrillData]] = [
@@ -996,6 +1060,7 @@ def compose(
     options: RunOptions,
     project: Project | None = None,
     stop: Callable[[], bool] | None = None,
+    acquire: Callable[[str], Path] | None = None,
 ) -> tuple[Driver, DrillData, DockData | None]:
     """One composed run: the driver, and what each half produced.
 
@@ -1004,7 +1069,7 @@ def compose(
     returns to an application and the other to a process -- never what a run
     is, and a second composition is how the two would drift apart.
     """
-    driver = Driver(plan, presentation, options, project)
+    driver = Driver(plan, presentation, options, project, acquire)
     sink: Sink = presentation if stop is None else CancellingSink(presentation, stop)
     with track(sink) as scope:
         drill, dock = driver.run(scope)
@@ -1093,9 +1158,48 @@ def _selected_sizes(text: str | None) -> tuple[Nanometre, ...] | None:
     return tuple(nm_from_mm(float(size)) for size in text.split(",") if size.strip())
 
 
-def _quantise_outcome(data: DrillData) -> str:
-    """What quantisation produced: the holes it accepted and the tools they need."""
-    return f"{len(data.holes)} holes, {len(data.tools())} tools"
+def _needs_model(options: RunOptions) -> bool:
+    """Whether this run has anything to do with an enclosure model.
+
+    Docking seats boards inside one, and a drilled enclosure is an artefact
+    made from one. A run that asked for neither is a drill-only run, and
+    acquiring a model it will not use would change what it produces in order
+    to fetch something nobody asked for.
+    """
+    return bool(options.boards) or any(name == "step" for name, _path in options.targets)
+
+
+def _model_part(declared: str | None, data: DrillData) -> str | None:
+    """The part whose model this run needs, where exactly one is known.
+
+    A declaration settles it. Otherwise the identification does, and only
+    where it names one part: a footprint several parts share names no file,
+    and choosing the first would pick an enclosure nobody asked for.
+    """
+    if declared is not None:
+        return declared
+    match = data.enclosure
+    if match is None:
+        return None
+    if match.selected_part is not None:
+        return match.selected_part
+    return match.candidates[0] if len(match.candidates) == 1 else None
+
+
+def _unavailable(part: str, failure: Exception) -> Diagnostic:
+    """Report a model that could not be had, naming the part and the reason."""
+    return Diagnostic.error(
+        "case-model-unavailable",
+        f"the enclosure model for {part} could not be obtained: {failure}; "
+        f"choose a different case, or put the model in the cache by hand",
+        data=(("part", part),),
+    )
+
+
+def _quantise_outcome(data: DrillData, model: OcpCaseModel | None = None) -> str:
+    """What quantisation produced: the holes accepted, their tools, and the model opened."""
+    stated = f"{len(data.holes)} holes, {len(data.tools())} tools"
+    return stated if model is None else f"{stated}, {model.model_name}"
 
 
 def _drill_outcome(data: DrillData) -> str:
