@@ -270,6 +270,9 @@ class Session:
         the same fit changes nothing, so opening a project cannot make the
         run it just finished stale.
         """
+        # What the artwork says, and whether a read is still owed: true
+        # regardless of the guard below, since a run holding the place shut
+        # does not make the picker's narrowed list stop being what fits.
         self._fits = tuple(parts)
         self._fit_pending = False
         case = self._settings.enclosure.case

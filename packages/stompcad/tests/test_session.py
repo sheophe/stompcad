@@ -547,3 +547,12 @@ def test_the_case_is_pending_between_opening_and_the_read() -> None:
     assert session.fit_pending
     session.record_fit(())
     assert not session.fit_pending
+
+
+def test_a_fit_landing_mid_run_does_not_raise() -> None:
+    """A run holds ``Enclosure`` closed; a read racing it must not crash the
+    session with the ``Locked`` that answering the place would raise."""
+    session = _fitting()
+    session.begin_run(_PLAN)
+    session.record_fit(("1590B",))
+    assert session.settings.enclosure.case.value is None
