@@ -13,7 +13,7 @@ import pytest
 from textual.pilot import Pilot
 from textual.widgets import Input, SelectionList, Static
 
-from stompcad import cli
+from stompcad import cli, discover
 from stompcad.cancel import EXIT_CANCELLED, Cancelled
 from stompcad.drive import Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan
@@ -1188,3 +1188,44 @@ async def test_a_died_finishes_the_session() -> None:
         await settle(pilot, app)
     assert runner.starts == 2
     assert app.session.phase is Phase.DONE
+
+
+@pytest.mark.asyncio
+async def test_an_autostarted_run_waits_for_the_read_and_starts_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: `on_mount` asks whether it may run while its own read is
+    outstanding, so the start belongs to the read landing -- and belongs to it
+    once, not once for each route that could have taken it."""
+    reading = Event()
+    starts: list[int] = []
+    composed = _Compose(hold=False)
+
+    def counting(*arguments: object) -> tuple[Driver, _Data, _Data | None]:
+        starts.append(1)
+        return composed(*arguments)  # type: ignore[arg-type]
+
+    def slow(*_arguments: object) -> tuple[str, ...]:
+        reading.wait(5)
+        return ()
+
+    monkeypatch.setattr(discover, "fitting_parts", slow)
+    app = Workbench(
+        session(), launch=Launch(panel=PANEL), runner=ThreadRunner(counting), autostart=True
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert _phase(app) is Phase.IDLE
+        reading.set()
+        for _ in range(400):
+            if not app.session.fit_pending:
+                break
+            await pilot.pause()
+        await settle(pilot, app)
+        assert _phase(app) is Phase.DONE
+        assert starts == [1]
+
+
+def _phase(app: Workbench) -> Phase:
+    """Where the run stands, read fresh: mypy would keep a narrowed one narrow."""
+    return app.session.phase

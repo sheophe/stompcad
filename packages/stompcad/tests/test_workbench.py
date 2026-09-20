@@ -14,7 +14,7 @@ from textual.command import CommandPalette
 from textual.pilot import Pilot
 from textual.widgets import Input, Rule, SelectionList, Static
 
-from stompcad import cli, manifest
+from stompcad import cli, discover, manifest
 from stompcad.cli import Resolution
 from stompcad.readiness import readiness
 from stompcad.settings import DEFAULTS, Origin, Provenance, Resolved, Settings
@@ -37,8 +37,10 @@ from stompcad.workbench.places import (
     FocusRow,
     PickerScreen,
     ValueRow,
+    choices_for,
     finding_lines,
 )
+from stompcad.workbench.run import Launch
 from stompcad.workbench.session import Session
 from stompcad.workbench.sidebar import Sidebar, SidebarRow
 from stompmodel.diagnostics import Diagnostic, Severity
@@ -86,6 +88,31 @@ def _runnable() -> Settings:
             ),
         ),
     )
+
+
+def _fitting_session() -> Session:
+    """A runnable project whose enclosure nobody has answered, so a read can.
+
+    The ordinary session declares its part in the project file, and a
+    declaration outranks a read; a test about what a read answers, or fails
+    to, needs the question still open.
+    """
+    return _session(replace(_runnable(), enclosure=replace(DEFAULTS.enclosure)))
+
+
+async def _settle_fit(app: Workbench, pilot: Pilot[int], patience: int = 200) -> None:
+    """Pause until no read of the artwork is outstanding."""
+    for _ in range(patience):
+        if not app.session.fit_pending:
+            await pilot.pause()
+            return
+        await pilot.pause()
+    raise AssertionError("the artwork was still being read")
+
+
+def _row_text(app: Workbench, field: str) -> str:
+    """What one row of the open place states, as it is drawn."""
+    return str(app.query_one(f"#value-{field}", Static).content)
 
 
 def _targets(paths: dict[str, Path]) -> Settings:
@@ -939,6 +966,10 @@ async def test_information_is_listed_but_not_counted() -> None:
     """Decision 4: a run that inferred an enclosure succeeded, and owes nothing."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
+        # The read the project's opening starts draws when it lands, so it is
+        # let land before this test draws by hand; two draws at once mount two
+        # panes under one id.
+        await _settle_fit(app, pilot)
         app.session.record_findings([
             Diagnostic(Severity.INFO, "seating-search-bounded", "bounded at 20 mm"),
         ])
@@ -1103,3 +1134,165 @@ async def test_a_jump_needs_a_row_to_land_on() -> None:
         await pilot.pause()
         assert app.session.place is Place.FINDINGS
         assert not list(app.query(FindingRow))
+
+
+# -- reading which enclosures the outline fits -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_picker_offers_only_the_parts_that_fit() -> None:
+    """Decision 2: a part the outline refuses would only become wrong-enclosure."""
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        app.session.record_fit(("1590B", "1590B2"))
+        await app.redraw()
+        assert choices_for(app.session, Place.ENCLOSURE, "case") == ("1590B", "1590B2")
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_a_fit_that_narrows_nothing_offers_the_whole_catalogue() -> None:
+    """The control: a narrowed list must never be mistaken for the only answers."""
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        app.session.record_fit(())
+        await app.redraw()
+        offered = choices_for(app.session, Place.ENCLOSURE, "case")
+        assert offered == discover.catalogue_parts()
+        assert len(offered) > 2
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_the_case_row_says_it_is_still_working_the_fit_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: between opening and the read there is no answer yet, which
+    is not the same as none."""
+    monkeypatch.setattr(discover, "fitting_parts", lambda *_args: ())
+    app = Workbench(_fitting_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        app.session.go(Place.ENCLOSURE)
+        app.session.begin_fit()
+        await app.redraw()
+        assert "working out" in _row_text(app, "case")
+        app.session.record_fit(())
+        await app.redraw()
+        assert "working out" not in _row_text(app, "case")
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_opening_a_project_reads_the_outline_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The read happens without anybody asking, and the row is drawn from it."""
+    asked: list[tuple[Path, str, str, int]] = []
+
+    def fake(panel: Path, drill_layer: str, reference_layer: str, form_depth: int) -> tuple[str, ...]:
+        asked.append((panel, drill_layer, reference_layer, form_depth))
+        return ("1590B",)
+
+    monkeypatch.setattr(discover, "fitting_parts", fake)
+    app = Workbench(_fitting_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        assert asked == [(_PANEL, "Drill", "Background", DEFAULTS.artwork.form_depth.value)]
+        assert app.session.settings.enclosure.case.value == "1590B"
+
+
+@pytest.mark.asyncio
+async def test_changing_a_layer_reads_the_outline_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[str] = []
+
+    def fake(panel: Path, drill_layer: str, reference_layer: str, form_depth: int) -> tuple[str, ...]:
+        reads.append(reference_layer)
+        return ()
+
+    monkeypatch.setattr(discover, "fitting_parts", fake)
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        app._commit(Place.ARTWORK, "reference_layer", "Outline")
+        await _settle_fit(app, pilot)
+        assert reads == ["Background", "Outline"]
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_read_never_lands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow first read must not answer for a project that has moved on.
+
+    No worker races here: the newer read is represented by its own generation
+    number, so the stale answer is delivered against a state that cannot move
+    under it, and what it failed to change is what is asserted.
+    """
+    monkeypatch.setattr(discover, "fitting_parts", lambda *_args: ())
+    app = Workbench(_fitting_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        stale = app._fit_generation
+        app._fit_generation += 1  # a newer read, still outstanding
+        app.session.begin_fit()
+        app._fit_read(stale, ("1590BB",))
+        assert app.session.fits == ()
+        assert app.session.fit_pending
+        assert app.session.settings.enclosure.case.value != "1590BB"
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_a_run_waits_for_an_outstanding_read() -> None:
+    """An unsettled fit is an unanswered question: a run under one could be a
+    run under a part the artwork was about to answer."""
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        app.session.begin_fit()
+        assert not app.session.may_run()
+        assert "reading" in app.session.statement().lower()
+        app.session.record_fit(("1590B",))
+        assert app.session.may_run()
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_saying_the_artwork_changed_reads_it_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`Ctrl+L` is how a re-exported artwork is declared, and a re-export is
+    exactly when the outline may now fit something else."""
+    reads: list[int] = []
+
+    def fake(*_arguments: object) -> tuple[str, ...]:
+        reads.append(1)
+        return ()
+
+    monkeypatch.setattr(discover, "fitting_parts", fake)
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        before = len(reads)
+        app.action_reread_artwork()
+        await _settle_fit(app, pilot)
+        assert len(reads) == before + 1
+
+
+@pytest.mark.asyncio
+async def test_changing_a_value_that_does_not_decide_the_outline_reads_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control for the re-read: only what chooses an outline causes one."""
+    reads: list[str] = []
+
+    def fake(panel: Path, drill_layer: str, reference_layer: str, form_depth: int) -> tuple[str, ...]:
+        reads.append(reference_layer)
+        return ()
+
+    monkeypatch.setattr(discover, "fitting_parts", fake)
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        before = len(reads)
+        app._commit(Place.DRILLING, "grid_mm", "0.5")
+        await pilot.pause()
+        assert len(reads) == before

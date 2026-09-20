@@ -392,10 +392,16 @@ class Session:
         return self._blockers
 
     def may_run(self) -> bool:
-        """Decision 17's matrix, plus decision 9's unreadable project."""
+        """Decision 17's matrix, decision 9's unreadable project, and the read.
+
+        A fit still outstanding is an unanswered question like any other: the
+        part it is about to supply is an input the run would otherwise take
+        without it.
+        """
         return (
             self._obstacle is None
             and self._blockers.ready
+            and not self._fit_pending
             and self._phase in (Phase.IDLE, Phase.DONE)
         )
 
@@ -408,6 +414,8 @@ class Session:
         if self._phase is Phase.PAUSED and self._gap is not None:
             return f"Waiting for you in {self._gap.place.value.capitalize()}."
         if self._blockers.ready:
+            if self._fit_pending:
+                return "Reading the artwork to see which enclosures it fits."
             return "Everything needed is here. Press Enter to run."
         return "; ".join(sentence for _blocker, _place, sentence in self._blockers.blockers)
 

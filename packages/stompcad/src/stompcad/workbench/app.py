@@ -171,6 +171,11 @@ class Workbench(App[int], inherit_bindings=False):
         # What a paused run is waiting on: the number of the question the
         # runner has open, held only while a gap is unanswered.
         self._asked = 0
+        # Which read of the artwork is the current one. A read is started by
+        # opening a project and by any edit that changes which outline would
+        # be read; an older answer landing afterwards is discarded rather than
+        # applied to a project that has moved on.
+        self._fit_generation = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -181,6 +186,7 @@ class Workbench(App[int], inherit_bindings=False):
     async def on_mount(self) -> None:
         self._base = self.screen
         await self.redraw()
+        self._read_fit()
         if self.autostart and self.session.may_run():
             self.action_start_run()
 
@@ -452,6 +458,59 @@ class Workbench(App[int], inherit_bindings=False):
             self.message = str(failure)
             return
         self.message = ""
+        if place is Place.ARTWORK and field in _OUTLINE_FIELDS:
+            self._read_fit()
+
+    def _read_fit(self) -> None:
+        """Read which enclosures this artwork's outline admits. Decision 1.
+
+        Off the interface thread: an artwork is a PDF to parse, and a
+        workbench that stopped drawing while it parsed would be a workbench
+        that freezes when a project opens.
+        """
+        self._fit_generation += 1
+        generation = self._fit_generation
+        artwork = self.session.settings.artwork
+        panel = artwork.panel.value
+        if panel is None:
+            self.session.record_fit(())
+            return
+        self.session.begin_fit()
+        drill_layer = artwork.drill_layer.value
+        reference_layer = artwork.reference_layer.value
+        form_depth = artwork.form_depth.value
+        self.run_worker(
+            lambda: self._fit_worker(
+                generation, panel, drill_layer, reference_layer, form_depth
+            ),
+            thread=True,
+            name="fit",
+        )
+
+    def _fit_worker(
+        self,
+        generation: int,
+        panel: Path,
+        drill_layer: str,
+        reference_layer: str,
+        form_depth: int,
+    ) -> None:
+        """The read itself, on a worker thread, reporting back through the app."""
+        parts = discover.fitting_parts(panel, drill_layer, reference_layer, form_depth)
+        self.call_from_thread(self._fit_read, generation, parts)
+
+    def _fit_read(self, generation: int, parts: tuple[str, ...]) -> None:
+        """Take a read's answer, unless the project has moved on since.
+
+        An autostart is started from here rather than from ``on_mount``,
+        which asks whether it may run while its own read is outstanding.
+        """
+        if generation != self._fit_generation:
+            return
+        self.session.record_fit(parts)
+        self._refresh()
+        if self.autostart and self.session.phase is Phase.IDLE and self.session.may_run():
+            self.action_start_run()
 
     def _adopt_panel(self, value: object) -> None:
         """Resolve the project this path names, and aim the run at it.
@@ -742,9 +801,14 @@ class Workbench(App[int], inherit_bindings=False):
         except Locked as failure:
             self.message = str(failure)
             return
+        self._read_fit()
         self.message = f"{panel.name} will be read again on the next run"
         self._refresh()
 
+
+#: The values that decide which outline is read. Anything else changes what a
+#: run does with the artwork, not which artwork is read, so it starts no read.
+_OUTLINE_FIELDS = frozenset({"panel", "drill_layer", "reference_layer", "form_depth"})
 
 #: Rows whose empty answer means "not given" rather than an empty string.
 _OPTIONAL = frozenset({
