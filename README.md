@@ -81,18 +81,20 @@ with `--case`, for example `--case 1590B`.
 ## Check hole clearance and create a drilled model
 
 Supply a STEP model to check the holes against the enclosure's walls, ribs and
-screw bosses. The repository includes a helper for downloading Hammond models:
+screw bosses. `stompcad` fetches the Hammond model the part names and keeps it
+in `$XDG_CACHE_HOME/stompcad/cases`, or `~/.cache/stompcad/cases` where that
+variable is unset, under the part's own name:
 
 ```bash
-python tools/fetch_case_model.py 1590BB
 stompdrill PANEL.ai --case 1590BB \
   --case-model ~/.cache/stompcad/cases/1590BB.stp \
   --emit step=drilled.stp --emit json=drill.json
 ```
 
-The helper prints the cached model's path. You can also supply a model you
-already have. `stompdrill` cuts the holes into that model; it doesn't generate
-the enclosure itself.
+`stompdrill` takes an exact path and fetches nothing itself. To fill the cache
+by hand, put the file there under that name — `1590BB.stp` for `1590BB` — or
+pass any STEP model you already have to `--case-model` directly. `stompdrill`
+cuts the holes into that model; it doesn't generate the enclosure itself.
 
 Without `--case-model`, you can still create drill files and drawings, but hole
 clearance against the enclosure's solid geometry isn't checked.
