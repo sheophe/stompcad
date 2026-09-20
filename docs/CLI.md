@@ -68,15 +68,12 @@ the run then reports `inferred-enclosure`, naming the file it read the part
 from. With neither a declaration nor a model whose filename names a tied part,
 the tool reports `ambiguous-enclosure`.
 
-Get a published Hammond model with:
-
-```bash
-python tools/fetch_case_model.py 1590BB
-```
-
-This repository helper downloads the model and prints its cached path. It is
-separate from the installed packages. You can supply another existing STEP
-model directly.
+`stompdrill` never fetches a model itself; supply an existing STEP file with
+`--case-model`. `stompcad` fetches and caches Hammond models by part, keeping
+each in `$XDG_CACHE_HOME/stompcad/cases`, or `~/.cache/stompcad/cases` where
+that variable is unset, named `PART.stp`. To supply one yourself, place it
+there under that name — `1590BB.stp` for `1590BB` — or pass any existing STEP
+model to `--case-model` directly.
 
 ### Output formats
 
@@ -196,7 +193,7 @@ record behind either way.
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--case PART` | Base designator the panel is drawn for, e.g. `1590B` | Identified from the footprint |
-| `--case-model PATH` | STEP model of the enclosure; required to dock a board | None |
+| `--case-model PATH` | A STEP model to use instead of the one cached for this part | The cache, filled from `--case` or from the artwork's own outline |
 | `--panel-reference EXPR` | Which designators are panel references, e.g. `'RV*,SW*,D(3..4),!RV5'` | None |
 | `--emit FORMAT=PATH` | Write an artifact; repeatable | Nothing is written |
 
@@ -208,9 +205,10 @@ project file: a name neither half can render is a usage error naming it, and
 two targets naming one file are refused exactly as both tools refuse them.
 
 Neither fact docking needs has a default. `--panel-reference` names the
-components chosen for this particular pedal, and `--case-model` supplies the
+components chosen for this particular pedal, and the part supplies the
 enclosure the boards are seated in; naming a board without either is a usage
-error rather than a guess.
+error rather than a guess. `--case-model` overrides that model with a file
+named directly.
 
 When the footprint matches more than one part, no `--case` is declared and a
 `--case-model` is supplied, the part may be inferred from the model's filename:
@@ -218,7 +216,8 @@ a model named `1590B.stp` settles a tie the artwork alone leaves open, provided
 that name is one of the tied parts. A run that inferred the part records an
 informational finding naming the model it took the name from, and asking for
 `--case` to state it instead, so an enclosure nobody declared is never
-chosen silently.
+chosen silently. In the workbench the part is read from the artwork's
+reference outline instead, and the model follows from the part.
 
 An error anywhere stops the whole run. The drill half's errors withhold its
 artefacts and leave the boards unread, and the dock half's withhold the report
@@ -233,10 +232,9 @@ moment a run can be stopped there is nothing half-written on disk to remove.
 Each place has one bare letter: `p` Project, `a` Artwork, `e` Enclosure,
 `d` Drilling, `b` Boards, `o` Output, `r` Run, `f` Findings. Three bare
 letters are global verbs: `w` views the focused artefact, `q` quits, `?`
-shows the keys. `[` and `]` step to the previous and next place. Three
+shows the keys. `[` and `]` step to the previous and next place. Two
 `Ctrl`+letters belong to one place each: `Ctrl+L` re-reads the artwork,
-`Ctrl+F` looks in the cache for an enclosure model, `Ctrl+R` starts or
-resumes the run.
+`Ctrl+R` starts or resumes the run.
 
 The arrows reach everything the letters do, for anyone who has not learnt
 them yet. The workbench has two panes: `←` from a place moves to the list of
@@ -279,11 +277,16 @@ naming the same values the options above do:
 ```json
 {
   "version": 1,
-  "enclosure": { "case": "1590B", "case_model": "1590B.stp" },
+  "enclosure": { "case": "1590B" },
   "boards": { "boards": ["tar-pcb.stp"], "panel_reference": "RV*,SW*" },
   "output": { "targets": { "excellon": "tar-case.drl" } }
 }
 ```
+
+`enclosure.case_model` is no longer read: the model is a setting resolved
+from the command line alone, never from the project. A project that still
+carries the key is told so once, and the key stays in the file — refusing to
+resolve from a key is not a reason to delete it from somebody's file.
 
 Paths are stored relative to the file, so a project that is copied or shared
 still works. A declared value beats a default and beats anything the run
@@ -426,3 +429,9 @@ obstruction.
 For an empty drill layer, check its name, top-level position and circle strokes.
 The error reports how many paths were found, helping distinguish missing shapes
 from shapes that weren't recognised as circles.
+
+### stompcad diagnostics
+
+A known part whose model cannot be had raises `case-model-unavailable`,
+naming the part and the reason the model could not be obtained. It withholds
+every artefact, as any other error does, and exits `2`, like any other error.

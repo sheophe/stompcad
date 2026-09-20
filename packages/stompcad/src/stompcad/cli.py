@@ -173,11 +173,10 @@ def validate_targets(targets: Sequence[tuple[str, Path]], where: str = "--emit")
     CLAUDE.md: "Validate all requested targets together before rendering."
     ``_write_case`` and ``_write_dock`` each filter to the names their own
     half owns; those two sets are disjoint, so a name outside their union
-    would otherwise be silently dropped rather than reported. Collecting
-    every bad name here, rather than raising on the first, is what makes one
-    round trip enough for a caller who mistyped more than one. ``where``
-    names the rank that asked, because a flag and a project key are edited
-    in different places.
+    would otherwise be silently dropped. Collecting every bad name here,
+    rather than raising on the first, is what makes one round trip enough for
+    a caller who mistyped more than one. ``where`` names the rank that asked,
+    since a flag and a project key are edited in different places.
     """
     known = _known_targets()
     bad = sorted({name for name, _path in targets if name not in known})

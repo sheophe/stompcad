@@ -37,8 +37,9 @@ the workbench and how its inputs resolve;
 binding specification.
 
 Enclosure geometry comes from a supplied model. `stompdrill` uses it to verify
-clearance and cut the selected holes. Model acquisition is handled separately
-by `tools/fetch_case_model.py`.
+clearance and cut the selected holes. `stompcad` acquires it: the part names the
+file, and `stompcad.cases` keeps a cache of Hammond models, fetching one it has
+not got.
 
 All outputs from one invocation must agree on the geometry they describe.
 
@@ -87,6 +88,9 @@ Validate options before opening the artwork or board input. Bad standards,
 unstocked sizes, unknown part numbers and invalid designator filters are usage
 errors. `--case-face` and `--case-margin` are validated even without a case
 model.
+
+`stompcad`'s `--case-model` names a file to use instead of the cached one, and
+the workbench does not ask for it at all.
 
 Validate all requested targets together before rendering. Both CLIs use the
 shared target checks and staged writes in `stompmodel.protocols`; do not add a

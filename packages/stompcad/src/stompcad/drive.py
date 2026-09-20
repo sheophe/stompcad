@@ -449,18 +449,13 @@ class Driver:
     ) -> tuple[DrillData | DockData, str, tuple[tuple[str, str], ...]]:
         """The work of a retry, with its outcome(s) returned rather than reported.
 
-        A resolution loop asks and runs again until there is nothing left
-        to ask, and must not credit the step in between -- so the caller
-        decides when the step has finished, not this: nothing here calls
-        ``finish_step``, including for the third element below.
-
-        That element names every *other* step this call also credited,
-        beyond ``key`` itself. Only ``read-panel`` returns one: it has
-        nothing of ``DrillData``'s own shape to report, so it pays for
-        ``quantise`` to produce one -- which sets ``_quantised``, the hold
-        ``_STEP_HOLDS`` declares belongs to ``quantise``. Leaving that
-        credit unpaid would make ``_STEP_HOLDS``'s claim about who assigns
-        what silently false the one time it is not this call's own key.
+        A resolution loop runs again until nothing is left to ask, so the
+        caller credits the step, not this call. The third element names
+        every *other* step credited here too: only ``read-panel`` returns
+        one, since it has nothing of ``DrillData``'s own shape to report, so
+        it pays for ``quantise`` to run instead -- crediting the hold
+        ``_STEP_HOLDS`` assigns there, since leaving it unpaid would make
+        that claim silently false.
         """
         if key in _STAGE_STEPS:
             keys = [step.key for step in self._plan.steps]
