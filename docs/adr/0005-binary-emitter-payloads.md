@@ -27,7 +27,11 @@ the byte count returned by `commit`.
 The restriction concerns requested output paths. `stompgeom.writer.render_step` also
 uses a scratch file because the kernel writer accepts only a path. `render_step` returns finished
 STEP bytes and leaves no file for the caller. Publishing those bytes to the requested
-path still goes through `StagedWrite.commit`.
+path still goes through `StagedWrite.commit`. `stompcad.cases.extract` renames a
+downloaded enclosure model into the machine-local cache, which no caller requested and
+which no run rolls back, so it falls outside this restriction too. It performs the same
+atomic rename for a reason of its own: a half-written model in that cache would be
+trusted by every later run.
 
 The original decision implemented payload dispatch directly in the command line:
 

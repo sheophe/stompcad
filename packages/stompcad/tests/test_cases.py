@@ -252,3 +252,22 @@ def test_the_download_request_identifies_itself(serve: Serve, agents: list[str])
     base = serve({"/1590B.zip": b"payload"})
     assert cases.download(f"{base}/1590B.zip") == b"payload"
     assert agents and "stompcad" in agents[-1]
+
+
+def test_the_suite_s_own_guard_refuses_a_url_off_this_machine() -> None:
+    """The standing control for ``conftest``'s ``no_downloads``.
+
+    Every other test here reaches a local server, so none of them would
+    notice that guard rotting open. This is what holds "no test reaches the
+    network" to something that ships rather than to a run once by hand.
+    """
+    with pytest.raises(AssertionError, match="hammfg"):
+        cases.download("https://www.hammfg.com/files/parts/stp/1590B.zip")
+
+
+def test_the_guard_reads_the_host_rather_than_the_start_of_the_url() -> None:
+    """A name merely beginning with the loopback address is somebody else's."""
+    with pytest.raises(AssertionError):
+        cases.download("http://127.0.0.1.example.com/1590B.zip")
+    with pytest.raises(AssertionError):
+        cases.download("http://localhost.example.com/1590B.zip")

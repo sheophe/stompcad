@@ -10,6 +10,7 @@ inventing a third convention.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -36,7 +37,9 @@ def no_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
     real = cases.download
 
     def guarded(url: str) -> bytes:
-        if not url.startswith(("http://127.0.0.1", "http://localhost")):
+        # The host itself, never a prefix of the URL: ``127.0.0.1.example.com``
+        # begins with the loopback address and belongs to somebody else.
+        if urlsplit(url).hostname not in {"127.0.0.1", "localhost"}:
             raise AssertionError(f"a test tried to download {url}")
         return real(url)
 
