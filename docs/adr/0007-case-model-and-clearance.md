@@ -33,6 +33,14 @@ holes it has already decided on. Acquiring the file is outside the package's
 scope: `tools/fetch_case_model.py` is a stopgap downloader outside the distributed
 package, with `stompcad` named as its successor.
 
+**Amended.** The succession has happened. `stompcad` owns acquisition: it keeps
+an XDG-located cache keyed by part designator, fetches a missing model from the
+manufacturer, and hands `stompdrill` the cached path like any other. The stopgap
+script is gone rather than kept beside it, since two downloaders would be two
+answers to where a model comes from. Nothing about this package changes: it is
+still handed a path, still verifies the model it is given, and still refuses to
+synthesise an enclosure.
+
 `--case-model` resolves before the panel is opened, alongside the other flags.
 An unreadable model, a model with no recognisable enclosure, or one with no
 drillable face is a usage error. The parsed `CaseModel` is built once and feeds
