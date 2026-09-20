@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from stompmodel.diagnostics import Diagnostic
 
 from .. import drive, stale
-from ..discover import part_from_model
 from ..plan import RunPlan
 from ..present import Choice
 from ..readiness import Blocker, Readiness, readiness
@@ -31,7 +30,7 @@ from .keys import CONFIGURATION, SIDEBAR_ORDER, Place, neighbour
 if TYPE_CHECKING:  # ``cli`` imports the application, which imports this module
     from ..cli import Resolution
 
-__all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session"]
+__all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session", "FITS"]
 
 #: Decision 2's two labels, and the reason neither is persisted: the manifest
 #: holds no hashes, so the workbench cannot know an existing artefact was made
@@ -44,10 +43,14 @@ MADE = "made by this run"
 #: them. Recomputing readiness alone would leave a refused run marked nowhere.
 _STANDING = (Blocker.REFUSED_VALUE, Blocker.UNREADABLE_PROJECT)
 
-#: The ranks a model's filename may answer over: nothing said, or the last
+#: The ranks the artwork's own fit may answer over: nothing said, or the last
 #: thing this rule itself said. A part from the project or from the user
-#: outranks a filename, so naming a model never overrules a person.
+#: outranks a measurement, so reading the outline never overrules a person.
 _INFERABLE = (Origin.DEFAULT, Origin.DISCOVERED)
+
+#: What a row states when the outline is what answered it. Compared as well as
+#: shown: it is how a withdrawal tells this rule's own answer from anybody else's.
+FITS = "fits the reference outline"
 
 
 class Locked(Exception):
@@ -153,6 +156,8 @@ class Session:
         self._findings = ()
         self._written = frozenset()
         self._designators: dict[int, tuple[str, ...]] = {}
+        self._fits: tuple[str, ...] = ()
+        self._fit_pending = False
 
     # -- what there is to look at -----------------------------------------
 
@@ -183,6 +188,16 @@ class Session:
     @property
     def panel_candidates(self) -> tuple[Path, ...]:
         return self._panel_candidates
+
+    @property
+    def fits(self) -> tuple[str, ...]:
+        """Every part the artwork's outline admits; empty narrows nothing."""
+        return self._fits
+
+    @property
+    def fit_pending(self) -> bool:
+        """Whether a read is outstanding, so an unanswered part is not yet news."""
+        return self._fit_pending
 
     @property
     def findings(self) -> tuple[Finding, ...]:
@@ -230,28 +245,6 @@ class Session:
             field,
             Resolved(value, Provenance(Origin.USER), disagreement(declared, value)),
         )
-        if place is Place.ENCLOSURE and field == "case_model":
-            self._follow_model(value)
-
-    def _follow_model(self, model: Any) -> None:
-        """The part the model's filename names, where nobody has named one.
-
-        Decision 6 gives the headless run no discovered rank for the part,
-        because there a filename would be a guess nobody ever saw. Here the
-        row states where it came from and is edited in one keystroke, so the
-        guess is offered rather than smuggled in. Withdrawn with the file
-        that made it: an inference outliving its model is a wrong answer.
-        ``part_from_model`` reads the name alone, so this opens nothing.
-        """
-        if self._settings.enclosure.case.provenance.origin not in _INFERABLE:
-            return
-        part = part_from_model(model) if isinstance(model, Path) else None
-        if part is None:
-            self._replace_value(
-                Place.ENCLOSURE, "case", Resolved(None, Provenance(Origin.DEFAULT))
-            )
-            return
-        self.adopt(Place.ENCLOSURE, "case", Discovery(part, f"inferred from {model.name}"))
 
     def adopt(self, place: Place, field: str, found: Discovery[Any]) -> None:
         """Take a value the tool found, recording that it was found rather than set.
@@ -263,6 +256,34 @@ class Session:
         self._replace_value(
             place, field, Resolved(found.value, Provenance(Origin.DISCOVERED, found.detail))
         )
+
+    def begin_fit(self) -> None:
+        """Say a read of the artwork is outstanding. Decision 1."""
+        self._fit_pending = True
+
+    def record_fit(self, parts: Sequence[str]) -> None:
+        """What the outline admits, and what that answers.
+
+        Exactly one part answers an unanswered question; anything else
+        withdraws an answer this rule gave earlier, because a fit that no
+        longer holds is a wrong answer rather than an old one. Re-reading
+        the same fit changes nothing, so opening a project cannot make the
+        run it just finished stale.
+        """
+        self._fits = tuple(parts)
+        self._fit_pending = False
+        case = self._settings.enclosure.case
+        if case.provenance.origin not in _INFERABLE or not self.may_edit(Place.ENCLOSURE):
+            return
+        if len(self._fits) == 1:
+            if case.value == self._fits[0] and case.provenance.detail == FITS:
+                return
+            self.adopt(Place.ENCLOSURE, "case", Discovery(self._fits[0], FITS))
+            return
+        if case.provenance.detail == FITS:
+            self._replace_value(
+                Place.ENCLOSURE, "case", Resolved(None, Provenance(Origin.DEFAULT))
+            )
 
     def _replace_value(self, place: Place, field: str, resolved: Resolved[Any]) -> None:
         """One value, at whatever rank supplied it, put in force.

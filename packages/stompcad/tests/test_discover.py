@@ -49,11 +49,6 @@ def test_a_pcb_suffix_sorts_first_because_it_is_ours() -> None:
     assert discover.board_candidates.__doc__ is not None
 
 
-def test_a_part_is_read_from_a_model_filename(tmp_path: Path) -> None:
-    assert discover.part_from_model(tmp_path / "1590BB.stp") == "1590BB"
-    assert discover.part_from_model(tmp_path / "not-a-part.stp") is None
-
-
 def test_every_format_has_a_file_name() -> None:
     from stompcad.drive import DOCK_TARGET_NAMES
     from stompdrill.emitters import available

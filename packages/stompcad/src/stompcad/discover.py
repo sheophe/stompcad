@@ -14,7 +14,6 @@ from pathlib import Path
 
 from stompdrill.enclosures import footprints
 from stompdrill.pipeline.enclosure import fitting_parts as parts_fitting
-from stompdrill.pipeline.enclosure import infer_part_name
 from stompdrill.sources import AiPdfSource
 
 __all__ = [
@@ -22,7 +21,6 @@ __all__ = [
     "panels",
     "layers",
     "board_candidates",
-    "part_from_model",
     "catalogue_parts",
     "fitting_parts",
     "output_path",
@@ -83,18 +81,6 @@ def board_candidates(
         and not any(path.name == f"{stem}{suffix}" for suffix in _OURS)
     ]
     return tuple(sorted(found, key=lambda path: (not path.stem.endswith("-pcb"), path.name)))
-
-
-def part_from_model(path: Path) -> str | None:
-    """The catalogue part a model's filename names, or ``None``.
-
-    Which model this is, never which part the panel is drawn for: the stem
-    is what keys the enclosure cache, and resolving it to ``case`` would
-    hand a guess to the drill stage as a declaration. ``stompdrill`` owns
-    that rule and owns verifying its answer against the measurement;
-    restating either here would give one question two answers.
-    """
-    return infer_part_name(path)
 
 
 def catalogue_parts() -> tuple[str, ...]:
