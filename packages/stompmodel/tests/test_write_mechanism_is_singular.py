@@ -23,14 +23,23 @@ PACKAGE = Path(__file__).resolve().parent.parent
 #: generator -- a private copy could as easily hide there as in a package.
 SOURCE_ROOTS = tuple(pkg / "src" for pkg in member_package_dirs()) + (REPO / "tools",)
 OWNER_MODULE = REPO / "packages" / "stompmodel" / "src" / "stompmodel" / "protocols.py"
+CACHE_MODULE = REPO / "packages" / "stompcad" / "src" / "stompcad" / "cases.py"
 
-#: The definitions allowed to state the mechanism: ``stage_payload`` builds
-#: the temporary name and ``StagedWrite.commit`` performs the atomic
-#: replace. ``discard`` is deliberately absent -- it states neither shape,
-#: and sanctioning a definition pre-emptively is the too-wide exemption
-#: this replaces. A definition, not a file: a second statement added
-#: elsewhere in ``protocols.py`` is a breach like any other.
-_SANCTIONED = frozenset({"stage_payload", "commit"})
+#: The definitions allowed to state the mechanism, by the module each is in.
+#: In the owner: ``stage_payload`` builds the temporary name and
+#: ``StagedWrite.commit`` performs the atomic replace. ``discard`` is
+#: deliberately absent -- it states neither shape, and sanctioning a
+#: definition pre-emptively is the too-wide exemption this replaces. In
+#: ``stompcad.cases``: ``extract`` renames a downloaded enclosure model into
+#: the machine-local cache, which is neither an artefact nor a caller-visible
+#: output path, so ADR-0005's staged writes and their rollback do not govern
+#: it -- but a half-written model there would be trusted by every later run,
+#: so it owes the same atomicity and states it for itself. A definition, not
+#: a file: a second statement elsewhere in either module is a breach.
+_SANCTIONED: dict[Path, frozenset[str]] = {
+    OWNER_MODULE: frozenset({"stage_payload", "commit"}),
+    CACHE_MODULE: frozenset({"extract"}),
+}
 
 
 def _outside(tree: ast.Module, sanctioned: Collection[str] = ()) -> list[ast.AST]:
@@ -174,7 +183,7 @@ def test_a_second_statement_in_the_rules_own_home_is_caught() -> None:
         "    os.replace(tmp, path)\n"
         '    return f".{target.name}.{id(target)}.tmp"\n'
     )
-    assert _offending_lines(spliced, _SANCTIONED)
+    assert _offending_lines(spliced, _SANCTIONED[OWNER_MODULE])
 
 
 def test_the_exemption_covers_the_owning_definitions_and_nothing_more() -> None:
@@ -188,7 +197,20 @@ def test_the_exemption_covers_the_owning_definitions_and_nothing_more() -> None:
     home = OWNER_MODULE.read_text(encoding="utf-8")
 
     assert _offending_lines(home), "the home no longer states the mechanism it owns"
-    assert _offending_lines(home, _SANCTIONED) == []
+    assert _offending_lines(home, _SANCTIONED[OWNER_MODULE]) == []
+
+
+def test_the_cache_exemption_covers_one_definition_and_nothing_more() -> None:
+    """The same pair of probes for the enclosure cache's own atomic write.
+
+    Unexempted it really does state the mechanism, so the exemption is
+    load-bearing and a renamed or moved ``extract`` fails loudly rather
+    than silently widening; exempted, nothing else in the module states it.
+    """
+    source = CACHE_MODULE.read_text(encoding="utf-8")
+
+    assert _offending_lines(source), "the cache no longer states the mechanism it was given"
+    assert _offending_lines(source, _SANCTIONED[CACHE_MODULE]) == []
 
 
 def test_the_scan_reaches_every_workspace_member():
@@ -229,7 +251,7 @@ def test_no_module_outside_stompmodel_protocols_writes_an_artefacts_bytes():
         for lines in [
             _offending_lines(
                 path.read_text(encoding="utf-8"),
-                _SANCTIONED if path == OWNER_MODULE else (),
+                _SANCTIONED.get(path, ()),
             )
         ]
         if lines

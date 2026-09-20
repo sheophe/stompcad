@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -98,15 +97,6 @@ def _targets(paths: dict[str, Path]) -> Settings:
             base.output,
             targets=Resolved(tuple(sorted(paths.items())), Provenance(Origin.PROJECT)),
         ),
-    )
-
-
-def _declared_case(part: str) -> Settings:
-    """A project that names its enclosure part and holds no model for it yet."""
-    base = Settings.of_defaults(_PANEL)
-    return replace(
-        base,
-        enclosure=replace(base.enclosure, case=Resolved(part, Provenance(Origin.PROJECT))),
     )
 
 
@@ -1050,49 +1040,6 @@ async def test_ctrl_l_re_reads_the_artwork_s_own_layer_list() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ctrl_f_adopts_a_model_the_cache_already_holds(tmp_path: Path) -> None:
-    """CLAUDE.md: acquiring a model is separate work, so this only looks."""
-    cache = tmp_path / "cases"
-    cache.mkdir()
-    (cache / "1590B.stp").write_text("ISO-10303-21;\n", encoding="utf-8")
-    app = Workbench(_session(_declared_case("1590B")), cache=cache)
-    async with app.run_test() as pilot:
-        await pilot.press("e", "ctrl+f")
-        assert app.session.settings.enclosure.case_model.value == cache / "1590B.stp"
-        assert app.session.settings.enclosure.case_model.provenance.origin is Origin.DISCOVERED
-
-
-@pytest.mark.asyncio
-async def test_ctrl_f_downloads_nothing_and_says_where_to_get_one(tmp_path: Path) -> None:
-    """The control: a key that fetched would make the workbench acquire models."""
-    app = Workbench(_session(_declared_case("1590B")), cache=tmp_path / "empty")
-    async with app.run_test() as pilot:
-        await pilot.press("e", "ctrl+f")
-        assert "fetch_case_model" in app.message
-        assert app.session.settings.enclosure.case_model.value is None
-
-
-@pytest.mark.asyncio
-async def test_ctrl_f_refuses_while_a_run_holds_the_place(tmp_path: Path) -> None:
-    """Decision 5: a key that adopts a value is a mutation, and a run holds the place.
-
-    The control is the test above: with no run the same press over the same
-    cache adopts the model, so this refusal is the run's and not the cache's.
-    """
-    cache = tmp_path / "cases"
-    cache.mkdir()
-    (cache / "1590B.stp").write_text("ISO-10303-21;\n", encoding="utf-8")
-    app = Workbench(_session(_declared_case("1590B")), cache=cache)
-    async with app.run_test() as pilot:
-        app.session.begin_run(frozenset({"read-panel", "quantise"}))
-        await pilot.press("e", "ctrl+f")
-        assert app.session.settings.enclosure.case_model.value is None
-        assert "enclosure" in app.message and "run" in app.message
-        await pilot.press("d")
-        assert app.session.place is Place.DRILLING, "the refusal never left the action"
-
-
-@pytest.mark.asyncio
 async def test_ctrl_l_refuses_while_a_run_holds_the_place() -> None:
     """Decision 5: invalidating is the statement an edit makes, so a run refuses it.
 
@@ -1108,19 +1055,6 @@ async def test_ctrl_l_refuses_while_a_run_holds_the_place() -> None:
         assert "artwork" in app.message and "run" in app.message
         await pilot.press("d")
         assert app.session.place is Place.DRILLING, "the refusal never left the action"
-
-
-@pytest.mark.asyncio
-async def test_ctrl_f_without_the_acquiring_tool_says_no_location_is_known(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The fallback: `tools` is a repository script, so an app cannot count on it."""
-    monkeypatch.setitem(sys.modules, "tools.fetch_case_model", None)
-    app = Workbench(_session(_declared_case("1590B")))
-    async with app.run_test() as pilot:
-        await pilot.press("e", "ctrl+f")
-        assert "no cache location is known" in app.message
-        assert "tools/fetch_case_model.py" in app.message
 
 
 _NEAR_MISS = Diagnostic.warning(

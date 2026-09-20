@@ -147,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default=None,
         help="a STEP model of the enclosure; enables clearance checking "
-        "(see tools/fetch_case_model.py)",
+        "(a Hammond STEP file; `stompcad` fetches and caches these)",
     )
     parser.add_argument(
         "--case-face",

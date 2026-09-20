@@ -92,8 +92,8 @@ pytest_add_cli_args_test_selection = [
 # mutmut runs the test command from inside mutants/, one directory deeper than
 # this file's own location, so the "../.." above (correct for a plain `pytest`
 # invocation, which runs from this directory) resolves one level short of the
-# repository root and tests/conftest.py's `from tools.fetch_case_model import
-# ...` -- needed only to register the hammond fixtures, not to run them --
-# fails for every test, not only the ones marked hammond. `-o` overrides the
-# ini value for this run alone, so the plain-pytest path above is untouched.
+# repository root, and the tests that read `tools.check_docstrings` and
+# `tools.workspace_membership` -- convention gates over the tree, not
+# behaviour -- fail to collect at all. `-o` overrides the ini value for this
+# run alone, so the plain-pytest path above is untouched.
 pytest_add_cli_args = ["-o", "pythonpath=../../.."]

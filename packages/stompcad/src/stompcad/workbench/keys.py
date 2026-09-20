@@ -88,7 +88,6 @@ GLOBAL_VERBS: dict[str, str] = {
 #: would be two meanings for one chord, which ``conflicts`` reports.
 LOCAL_KEYS: dict[str, tuple[Place, str]] = {
     "ctrl+l": (Place.ARTWORK, "re-read the artwork"),
-    "ctrl+f": (Place.ENCLOSURE, "look again for a cached model"),
     "ctrl+r": (Place.RUN, "start or resume the run"),
 }
 

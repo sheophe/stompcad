@@ -131,17 +131,12 @@ class Workbench(App[int], inherit_bindings=False):
         session: Session,
         launch: Launch | None = None,
         autostart: bool = False,
-        cache: Path | None = None,
         runner: Runner | None = None,
         window: Window | None = None,
     ) -> None:
         super().__init__()
         self.session = session
         self.launch = launch
-        # Where cached enclosure models live. ``None`` asks the tool that
-        # owns that location at the press rather than here, because it is a
-        # repository script and an app installed elsewhere has no such tool.
-        self.cache = cache
         self.runner: Runner = runner or ProcessRunner()
         self.window: Window = window or NullWindow()
         _prime_multiprocessing()
@@ -728,8 +723,6 @@ class Workbench(App[int], inherit_bindings=False):
             self.message = f"{key} belongs to {owner.value.capitalize()} ({detail})"
         elif key == "ctrl+l":
             self.action_reread_artwork()
-        elif key == "ctrl+f":
-            self.action_find_model()
         else:
             self.action_start_run()
 
@@ -751,52 +744,6 @@ class Workbench(App[int], inherit_bindings=False):
             return
         self.message = f"{panel.name} will be read again on the next run"
         self._refresh()
-
-    def action_find_model(self) -> None:
-        """`Ctrl+F`: look in the cache for this part's model. Never downloads.
-
-        CLAUDE.md keeps model acquisition in ``tools/fetch_case_model.py``,
-        so this asks the cache what it already holds and names that tool
-        where it holds nothing. A workbench that fetched would be a
-        workbench that acquires models, which is somebody else's decision.
-        """
-        part = self.session.settings.enclosure.case.value
-        if part is None:
-            self.message = "name the enclosure part first, so there is something to look for"
-            return
-        cache = self._cache()
-        if cache is None:
-            self.message = "no cache location is known; tools/fetch_case_model.py owns one"
-            return
-        found = discover.cached_model(part, cache)
-        if found is None:
-            self.message = f"no cached model for {part}; tools/fetch_case_model.py acquires one"
-            return
-        try:
-            self.session.adopt(Place.ENCLOSURE, "case_model", found)
-        except (Refused, Locked) as failure:
-            # The same two a row's own edit shows rather than takes: a run
-            # holds the place, or the tool that consumes the model says no.
-            self.message = str(failure)
-            return
-        self.message = f"using {found.value.name}, {found.detail}"
-        self._refresh()
-
-    def _cache(self) -> Path | None:
-        """Where cached models live, or ``None`` when nothing here knows.
-
-        ``tools/fetch_case_model.py`` owns that location and is a repository
-        script rather than an installed package, so it is asked for at the
-        press: an app that cannot import it knows no location, which is not
-        the same as an app that failed to start.
-        """
-        if self.cache is not None:
-            return self.cache
-        try:
-            from tools.fetch_case_model import cache_dir
-        except ImportError:
-            return None
-        return cache_dir()
 
 
 #: Rows whose empty answer means "not given" rather than an empty string.

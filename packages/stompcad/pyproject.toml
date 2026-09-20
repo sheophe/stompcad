@@ -54,8 +54,8 @@ stompcollider = { workspace = true }
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "hypothesis", "mypy", "ruff"]
 
-# `pythonpath` reaches the repo root: `tests/conftest.py` reads
-# `tools.fetch_case_model.cache_dir`, mirroring the reason every other
+# `pythonpath` reaches the repo root: `tests/test_codes.py` reads
+# `tools.list_diagnostic_codes`, mirroring the reason every other
 # member's `pythonpath` gives for the same setting.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -63,7 +63,7 @@ addopts = "-q"
 pythonpath = ["../.."]
 
 # `mypy_path` gains the repo root for the same reason `pythonpath` does above:
-# `tests/conftest.py` imports `tools.fetch_case_model`.
+# `tests/test_codes.py` imports `tools.list_diagnostic_codes`.
 [tool.mypy]
 files = ["src", "tests"]
 # The root config's own comment defers `strict` as scoped follow-up work

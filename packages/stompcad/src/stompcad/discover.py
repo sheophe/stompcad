@@ -16,14 +16,11 @@ from stompdrill.enclosures import footprints
 from stompdrill.pipeline.enclosure import infer_part_name
 from stompdrill.sources import AiPdfSource
 
-from .settings import Discovery
-
 __all__ = [
     "ARTEFACT_NAMES",
     "panels",
     "layers",
     "board_candidates",
-    "cached_model",
     "part_from_model",
     "catalogue_parts",
     "output_path",
@@ -84,14 +81,6 @@ def board_candidates(
         and not any(path.name == f"{stem}{suffix}" for suffix in _OURS)
     ]
     return tuple(sorted(found, key=lambda path: (not path.stem.endswith("-pcb"), path.name)))
-
-
-def cached_model(part: str, cache: Path) -> Discovery[Path] | None:
-    """The enclosure model already cached for this part, if one is."""
-    candidate = cache / f"{part}.stp"
-    if not candidate.is_file():
-        return None
-    return Discovery(candidate, f"cached for {part}")
 
 
 def part_from_model(path: Path) -> str | None:

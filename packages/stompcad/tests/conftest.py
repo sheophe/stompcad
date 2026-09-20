@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.fetch_case_model import cache_dir
+from stompcad import cases
 
 __all__ = ["TAR_AI", "TAR_PCB", "PANEL_REFERENCE", "case_model", "NullSink"]
 
@@ -25,8 +25,22 @@ PANEL_REFERENCE = "RV*,SW*,D(3..4),!RV5"
 
 def case_model(part: str = "1590B") -> Path | None:
     """The cached enclosure model, or ``None``. Never downloads."""
-    candidate = cache_dir() / f"{part}.stp"
-    return candidate if candidate.is_file() else None
+    return cases.cached(part, cases.cache_dir())
+
+
+@pytest.fixture(autouse=True)
+def no_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reaches the manufacturer. A local server stands in where a
+    download is the subject, and anything else fails here rather than
+    depending on this machine having a network."""
+    real = cases.download
+
+    def guarded(url: str) -> bytes:
+        if not url.startswith(("http://127.0.0.1", "http://localhost")):
+            raise AssertionError(f"a test tried to download {url}")
+        return real(url)
+
+    monkeypatch.setattr("stompcad.cases.download", guarded)
 
 
 class NullSink:

@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default=None,
         help="a STEP model of the enclosure; required to dock a board "
-        "(see tools/fetch_case_model.py)",
+        "(a Hammond STEP file; `stompcad` fetches and caches these)",
     )
     parser.add_argument(
         "--panel-reference",
