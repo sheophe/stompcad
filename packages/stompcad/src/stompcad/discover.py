@@ -99,9 +99,11 @@ def fitting_parts(
     """Every catalogue part this artwork's reference outline admits.
 
     The workbench asks before a run so a picker can offer what the tool would
-    accept. Empty is one answer with three causes -- no outline, nothing
-    fitting, or a file that would not read -- because all three narrow
-    nothing, and the run is what reports why properly.
+    accept. Empty is one answer with several causes -- no outline, nothing
+    fitting, or work that would not complete -- because each narrows nothing,
+    and the run is what reports why properly. The match is inside the guard
+    with the read: a caller waiting on this cannot tell them apart, and one
+    that raised would leave it waiting.
     """
     try:
         raw = AiPdfSource(
@@ -110,9 +112,9 @@ def fitting_parts(
             reference_layer=reference_layer,
             form_depth=form_depth,
         ).read()
+        return () if raw.reference is None else parts_fitting(raw.reference)
     except Exception:  # noqa: BLE001 - a read that fails narrows nothing
         return ()
-    return () if raw.reference is None else parts_fitting(raw.reference)
 
 
 def output_path(format_name: str, panel: Path) -> Path:

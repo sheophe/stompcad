@@ -141,7 +141,8 @@ class Workbench(App[int], inherit_bindings=False):
         self.window: Window = window or NullWindow()
         _prime_multiprocessing()
         # Decision 1: an invocation carrying something beyond the panel means
-        # "do not ask me", so the app opens with the run already moving. A
+        # "do not ask me", so the app opens with the run already moving -- from
+        # the moment the opening read lands, which is the last question. A
         # manifest value is a standing declaration and starts nothing, or
         # opening last week's project to look at it would cost kernel work.
         self.autostart = autostart
@@ -184,11 +185,16 @@ class Workbench(App[int], inherit_bindings=False):
         yield ModeLine()
 
     async def on_mount(self) -> None:
+        """Start the read before the first frame, so the frame states the truth.
+
+        Drawing first would open on "Everything needed is here", which a run
+        started that instant would be refused -- the read the opening begins
+        is outstanding. Nothing autostarts here: ``_fit_read`` is where a run
+        may begin, because it is where the last question is answered.
+        """
         self._base = self.screen
-        await self.redraw()
         self._read_fit()
-        if self.autostart and self.session.may_run():
-            self.action_start_run()
+        await self.redraw()
 
     def on_unmount(self) -> None:
         """The run's process is asked to go, and waited for if it is writing."""
@@ -466,7 +472,11 @@ class Workbench(App[int], inherit_bindings=False):
 
         Off the interface thread: an artwork is a PDF to parse, and a
         workbench that stopped drawing while it parsed would be a workbench
-        that freezes when a project opens.
+        that freezes when a project opens. The question is marked outstanding
+        at once, so the next frame states it, while the read itself starts a
+        turn later: ``Widget.focus`` is deferred too, and an answer landing
+        inside a draw queues its redraw ahead of that draw's own focus, which
+        then never reaches the row it was meant for.
         """
         self._fit_generation += 1
         generation = self._fit_generation
@@ -476,9 +486,24 @@ class Workbench(App[int], inherit_bindings=False):
             self.session.record_fit(())
             return
         self.session.begin_fit()
-        drill_layer = artwork.drill_layer.value
-        reference_layer = artwork.reference_layer.value
-        form_depth = artwork.form_depth.value
+        self.call_later(
+            self._start_fit,
+            generation,
+            panel,
+            artwork.drill_layer.value,
+            artwork.reference_layer.value,
+            artwork.form_depth.value,
+        )
+
+    def _start_fit(
+        self,
+        generation: int,
+        panel: Path,
+        drill_layer: str,
+        reference_layer: str,
+        form_depth: int,
+    ) -> None:
+        """Put the read on a worker thread, clear of any draw in flight."""
         self.run_worker(
             lambda: self._fit_worker(
                 generation, panel, drill_layer, reference_layer, form_depth
@@ -495,9 +520,20 @@ class Workbench(App[int], inherit_bindings=False):
         reference_layer: str,
         form_depth: int,
     ) -> None:
-        """The read itself, on a worker thread, reporting back through the app."""
-        parts = discover.fitting_parts(panel, drill_layer, reference_layer, form_depth)
-        self.call_from_thread(self._fit_read, generation, parts)
+        """The read itself, on a worker thread, reporting back through the app.
+
+        The report is unconditional. A thread that died without one would
+        leave the fit outstanding for the application's whole life, and an
+        outstanding fit refuses every run -- so a read that breaks settles
+        as the empty answer it is, which narrows nothing.
+        """
+        parts: tuple[str, ...] = ()
+        try:
+            parts = discover.fitting_parts(panel, drill_layer, reference_layer, form_depth)
+        except Exception:  # noqa: BLE001 - a read that fails narrows nothing
+            parts = ()
+        finally:
+            self.call_from_thread(self._fit_read, generation, parts)
 
     def _fit_read(self, generation: int, parts: tuple[str, ...]) -> None:
         """Take a read's answer, unless the project has moved on since.

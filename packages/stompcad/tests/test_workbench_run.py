@@ -1217,10 +1217,6 @@ async def test_an_autostarted_run_waits_for_the_read_and_starts_once(
         await pilot.pause()
         assert _phase(app) is Phase.IDLE
         reading.set()
-        for _ in range(400):
-            if not app.session.fit_pending:
-                break
-            await pilot.pause()
         await settle(pilot, app)
         assert _phase(app) is Phase.DONE
         assert starts == [1]

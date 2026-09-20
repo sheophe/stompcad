@@ -74,7 +74,16 @@ def runnable() -> Settings:
 
 
 async def settle(pilot: Pilot[int], app: Workbench, patience: int = 400) -> None:
-    """Pause until the run is no longer working, however many frames that takes."""
+    """Pause until the run is no longer working, however many frames that takes.
+
+    A read of the artwork is waited out first. A run may not start under one,
+    and an autostarted run starts as it lands, so looking only at the phase
+    would return before the run being waited for had begun.
+    """
+    for _ in range(patience):
+        if not app.session.fit_pending:
+            break
+        await pilot.pause()
     for _ in range(patience):
         if app.session.phase is not Phase.RUNNING:
             return

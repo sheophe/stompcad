@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from stompcad import discover
 from stompdrill.pipeline.enclosure import fitting_parts as parts_fitting
 from stompdrill.sources import AiPdfSource
@@ -96,3 +98,15 @@ def test_an_artwork_that_cannot_be_read_narrows_nothing(tmp_path: Path) -> None:
 
 def test_a_layer_the_artwork_has_not_got_narrows_nothing() -> None:
     assert discover.fitting_parts(TAR_AI, "Drill", "NoSuchLayer", 1) == ()
+
+
+def test_a_match_that_will_not_complete_narrows_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole answer is guarded, not the read alone: a caller waiting on a
+    worker thread cannot tell a match that broke from a file that would not
+    read, and one that raised would leave it waiting for ever."""
+
+    def broken(_outline: object) -> tuple[str, ...]:
+        raise RuntimeError("the matching rule broke")
+
+    monkeypatch.setattr(discover, "parts_fitting", broken)
+    assert discover.fitting_parts(TAR_AI, "Drill", "Background", 1) == ()

@@ -6,6 +6,7 @@ import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 import pytest
 from rich.cells import cell_len
@@ -1296,3 +1297,46 @@ async def test_changing_a_value_that_does_not_decide_the_outline_reads_nothing(
         app._commit(Place.DRILLING, "grid_mm", "0.5")
         await pilot.pause()
         assert len(reads) == before
+
+
+@pytest.mark.asyncio
+async def test_a_read_that_breaks_still_settles_the_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker that dies without reporting would leave the question open for
+    the application's whole life: an outstanding fit refuses every run, and
+    only `Ctrl+L` would ever ask again."""
+
+    def broken(*_arguments: object) -> tuple[str, ...]:
+        raise RuntimeError("the artwork reader broke")
+
+    monkeypatch.setattr(discover, "fitting_parts", broken)
+    app = Workbench(_session(), launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await _settle_fit(app, pilot)
+        assert not app.session.fit_pending
+        assert app.session.may_run()
+
+
+@pytest.mark.asyncio
+async def test_the_opening_frame_states_the_read_it_has_begun(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drawing before the read began would open on a part stated as none and a
+    run offered, while `may_run` already refuses one for the read in flight."""
+    reading = Event()
+
+    def slow(*_arguments: object) -> tuple[str, ...]:
+        reading.wait(5)
+        return ()
+
+    monkeypatch.setattr(discover, "fitting_parts", slow)
+    session = _fitting_session()
+    session.go(Place.ENCLOSURE)
+    app = Workbench(session, launch=Launch(panel=_PANEL))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "working out" in _row_text(app, "case")
+        assert not app.session.may_run()
+        reading.set()
+        await _settle_fit(app, pilot)
