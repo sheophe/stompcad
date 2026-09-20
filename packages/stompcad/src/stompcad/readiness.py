@@ -26,7 +26,7 @@ class Blocker(Enum):
 
     NO_PANEL = "no artwork is selected"
     BOARDS_UNRESOLVED = "it is not yet settled whether this pedal has boards"
-    NO_CASE_MODEL = "a board is seated in the case, so the case model is needed"
+    NO_CASE_PART = "a board is seated in the case, so the enclosure part is needed"
     NO_PANEL_REFERENCE = "which components mount to the panel is a pedal-specific fact"
     NO_BOARD_FOR_ASSEMBLY = "an assembly needs at least one board to seat"
     NO_TARGETS = "nothing has been chosen to make"
@@ -79,11 +79,11 @@ def readiness(settings: Settings) -> Readiness:
             "Tick the boards to dock, or confirm this pedal has none.",
         ))
     elif boards.value:
-        if settings.enclosure.case_model.value is None:
+        if settings.enclosure.case.value is None and settings.enclosure.case_model.value is None:
             found.append((
-                Blocker.NO_CASE_MODEL,
+                Blocker.NO_CASE_PART,
                 "enclosure",
-                "Choose the enclosure model the boards are seated in.",
+                "Choose the enclosure part, so its model can be fetched.",
             ))
         if not settings.boards.panel_reference.value:
             found.append((

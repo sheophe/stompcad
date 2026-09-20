@@ -47,7 +47,7 @@ VERSION = 1
 #: field added to ``settings`` without a row here is never remembered.
 PLACES: dict[str, frozenset[str]] = {
     "artwork": frozenset({"drill_layer", "reference_layer", "form_depth"}),
-    "enclosure": frozenset({"case", "case_model", "case_face", "case_margin_mm"}),
+    "enclosure": frozenset({"case", "case_face", "case_margin_mm"}),
     "drilling": frozenset({
         "grid_mm", "grid_warn_mm", "drill_standard", "drill_sizes",
         "no_drill_sizes", "title",
@@ -87,7 +87,6 @@ _SHAPES: dict[str, _Shape] = {
     "reference_layer": _Shape.TEXT,
     "form_depth": _Shape.COUNT,
     "case": _Shape.TEXT_OR_NULL,
-    "case_model": _Shape.PATH_OR_NULL,
     "case_face": _Shape.TEXT,
     "case_margin_mm": _Shape.NUMBER,
     "grid_mm": _Shape.NUMBER,
@@ -165,7 +164,6 @@ def _found(value: Any) -> str:
 #: is handled separately: it is stored as a mapping of format to path, so it
 #: round-trips through its own branch rather than through these two shapes.
 _PATHS: dict[str, frozenset[str]] = {
-    "enclosure": frozenset({"case_model"}),
     "boards": frozenset({"boards"}),
 }
 

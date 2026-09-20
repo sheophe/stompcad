@@ -72,7 +72,7 @@ def _runnable() -> Settings:
         base,
         enclosure=replace(
             base.enclosure,
-            case_model=Resolved(Path("/project/1590B.stp"), Provenance(Origin.PROJECT)),
+            case=Resolved("1590B", Provenance(Origin.PROJECT)),
         ),
         boards=replace(
             base.boards,
@@ -1071,15 +1071,16 @@ _NEAR_MISS = Diagnostic.warning(
         (Diagnostic.warning("nesting-truncated", "a form nests past the depth read"),
          Place.ARTWORK, "form_depth"),
         (Diagnostic.error("wrong-case-model", "the model is a 1590A"),
-         Place.ENCLOSURE, "case_model"),
+         Place.ENCLOSURE, "case"),
         (_NEAR_MISS, Place.BOARDS, "match_tolerance_mm"),
     ],
 )
 async def test_enter_on_a_finding_jumps_to_the_field_that_answers_it(
     found: Diagnostic, place: Place, field: str
 ) -> None:
-    """The row, not only the place. None of these fields is its place's first
-    row, which is where a jump carrying only the place would land."""
+    """The row, not only the place. ``form_depth`` and ``match_tolerance_mm``
+    are not their places' first rows, which is where a jump carrying only the
+    place would land."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         app.session.record_findings([found])

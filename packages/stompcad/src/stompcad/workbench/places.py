@@ -110,7 +110,6 @@ FIELDS: dict[Place, tuple[Field, ...]] = {
     ),
     Place.ENCLOSURE: (
         Field("case", Kind.CHOICE),
-        Field("case_model", Kind.PATH),
         Field("case_face", Kind.CHOICE),
         Field("case_margin_mm", Kind.NUMBER),
     ),

@@ -119,8 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-model",
         metavar="PATH",
         default=None,
-        help="a STEP model of the enclosure; required to dock a board "
-        "(a Hammond STEP file; `stompcad` fetches and caches these)",
+        help="a STEP model to use instead of the one cached for this part; "
+        "the cache is filled from the part itself",
     )
     parser.add_argument(
         "--panel-reference",
@@ -664,13 +664,12 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         None,
         DEFAULTS.enclosure.case.value,
     )
+    # The model has no project rank and no discovered one: the part names the
+    # file, and the cache holds it. This flag is the one route that bypasses
+    # both, so it is the only rank left.
     case_model_arg = None if args.case_model is None else Path(args.case_model)
-    case_model_project = _project(project, "enclosure", "case_model")
-    # Locating the enclosure cache is separate work this run does not take
-    # on (CLAUDE.md); a supplied model is the only rank that can be found
-    # without it, so no discovery narrows a model left unnamed.
     case_model_resolved = _pick_noting(
-        case_model_arg, case_model_project, None, DEFAULTS.enclosure.case_model.value,
+        case_model_arg, None, None, DEFAULTS.enclosure.case_model.value,
         panel=panel, label="case model", notes=notes,
     )
     case_margin_resolved = pick(

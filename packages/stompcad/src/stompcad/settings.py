@@ -201,7 +201,12 @@ class Artwork:
 
 @dataclass(frozen=True, slots=True)
 class Enclosure:
-    """The `e` place: which box, which model of it, and which face is drilled."""
+    """The `e` place: which box it is, and which face of it is drilled.
+
+    ``case_model`` is a value without a row: the command line may name a file
+    to use instead of the cached one, and the workbench asks for the part
+    instead, because the part is what names the file.
+    """
 
     case: Resolved[str | None]
     case_model: Resolved[Path | None]
@@ -211,7 +216,6 @@ class Enclosure:
     def rows(self) -> Iterator[tuple[str, str, str]]:
         """Each field, its row's name and what it states, as ``Artwork.rows``."""
         yield "case", "case", self.case.describe()
-        yield "case_model", "case model", self.case_model.describe()
         yield "case_face", "drilled face", self.case_face.describe()
         yield "case_margin_mm", "clearance margin", self.case_margin_mm.describe()
 

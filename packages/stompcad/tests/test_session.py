@@ -34,7 +34,7 @@ def _settings(**places: object) -> Settings:
         Settings.of_defaults(_PANEL),
         enclosure=replace(
             DEFAULTS.enclosure,
-            case_model=Resolved(Path("/project/1590B.stp"), Provenance(Origin.PROJECT)),
+            case=Resolved("1590B", Provenance(Origin.PROJECT)),
         ),
         boards=replace(
             DEFAULTS.boards,

@@ -180,7 +180,7 @@ REMEDIES: dict[str, Remedy] = {
     "nesting-truncated": Remedy(Place.ARTWORK, "form_depth"),
     "under-constrained-board": Remedy(Place.BOARDS, "panel_reference"),
     "unmatched-enclosure": Remedy(Place.ENCLOSURE, "case"),
-    "wrong-case-model": Remedy(Place.ENCLOSURE, "case_model"),
+    "wrong-case-model": Remedy(Place.ENCLOSURE, "case"),
     "wrong-enclosure": Remedy(Place.ENCLOSURE, "case"),
     "ambiguous-enclosure": Remedy(Place.ENCLOSURE, "case"),
     "empty-group": Remedy(Place.BOARDS, "panel_reference"),

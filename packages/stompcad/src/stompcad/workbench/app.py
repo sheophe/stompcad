@@ -748,7 +748,7 @@ class Workbench(App[int], inherit_bindings=False):
 
 #: Rows whose empty answer means "not given" rather than an empty string.
 _OPTIONAL = frozenset({
-    "case", "case_model", "grid_warn_mm", "drill_sizes", "no_drill_sizes", "match_tolerance_mm",
+    "case", "grid_warn_mm", "drill_sizes", "no_drill_sizes", "match_tolerance_mm",
 })
 
 

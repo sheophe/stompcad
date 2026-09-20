@@ -57,7 +57,7 @@ def runnable() -> Settings:
         base,
         enclosure=replace(
             base.enclosure,
-            case_model=Resolved(Path("/project/1590B.stp"), Provenance(Origin.PROJECT)),
+            case=Resolved("1590B", Provenance(Origin.PROJECT)),
         ),
         boards=replace(
             base.boards,
