@@ -222,6 +222,34 @@ def test_a_supplied_model_is_loaded_with_no_drilled_enclosure_asked_for(tmp_path
 
 
 @pytest.mark.hammond
+def test_a_supplied_model_is_loaded_under_the_part_stompdrill_loads_it_under(
+    tmp_path: Path,
+) -> None:
+    """A cache file is keyed by the part that fetched it, so identification is
+    that file's identity; a path the operator supplied was named by nothing
+    here, so it keeps stompdrill's rule -- the declaration, or the STEP product
+    name where there is none. The 1590B model under a tied part's filename is
+    what tells the two apart: the filename settles the tie, and ``json`` records
+    the registration, so a model loaded under the identified part shows in the
+    bytes and in what ``wrong-case-model`` would name.
+    """
+    supplied = tmp_path / "1590B2.stp"
+    supplied.write_bytes(_model().read_bytes())
+    mine, theirs = tmp_path / "mine.json", tmp_path / "theirs.json"
+
+    stompdrill_cli.main([
+        str(TAR_AI), "--case-model", str(supplied), "--emit", f"json={theirs}",
+    ])
+
+    _drill(
+        _tar_options(tmp_path, case=None, case_model=supplied, targets=(("json", mine),)),
+        _refuse,
+    )
+
+    assert mine.read_bytes() == theirs.read_bytes()
+
+
+@pytest.mark.hammond
 def test_a_retry_that_identifies_nothing_holds_no_model(tmp_path: Path) -> None:
     """Every attempt opens its own model. One left over from the attempt before
     would name a file for a part this panel has just been declared not to be."""

@@ -891,10 +891,14 @@ class Driver:
             return data
         leaves = scope.steps(2)
         acquiring = next(leaves)
-        acquiring.label("acquiring" if part is None else f"acquiring {part}")
         path = options.case_model
-        if path is None:
+        if path is not None:
+            # Nothing is acquired here: the operator handed the file over, so
+            # this leaf stands for a model already in hand.
+            acquiring.label(f"supplied {path.name}")
+        else:
             assert part is not None  # the branch above returned without one
+            acquiring.label(f"acquiring {part}")
             try:
                 path = self._acquire(part)
             except cases.ModelUnavailable as failure:
@@ -908,10 +912,12 @@ class Driver:
                 path,
                 face=options.case_face,
                 margin_nm=nm_from_mm(options.case_margin_mm),
-                # The part that keyed the file, not the declaration that may be
-                # absent: a model acquired for an identified part would
-                # otherwise be identified again from its own STEP names.
-                part=part if part is not None else options.case,
+                # A cache file was keyed by the part that fetched it, so the
+                # identification is that file's identity. A path the operator
+                # supplied was named by nothing here, so it keeps
+                # ``stompdrill``'s own rule under the flag it came from: the
+                # declaration, or the STEP product name where there is none.
+                part=options.case if options.case_model is not None else part,
             )
         except (OSError, StompError) as failure:
             return replace(
@@ -1162,12 +1168,13 @@ def _selected_sizes(text: str | None) -> tuple[Nanometre, ...] | None:
 
 
 def _needs_model(options: RunOptions) -> bool:
-    """Whether this run has anything to do with an enclosure model.
+    """Whether this run has to acquire an enclosure model of its own.
 
     Docking seats boards inside one, and a drilled enclosure is an artefact
     made from one. A run that asked for neither is a drill-only run, and
     acquiring a model it will not use would change what it produces in order
-    to fetch something nobody asked for.
+    to fetch something nobody asked for. A path the operator supplied is a
+    different question, settled where it is loaded.
     """
     return bool(options.boards) or any(name == "step" for name, _path in options.targets)
 
