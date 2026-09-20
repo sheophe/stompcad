@@ -84,6 +84,8 @@ async def settle(pilot: Pilot[int], app: Workbench, patience: int = 400) -> None
         if not app.session.fit_pending:
             break
         await pilot.pause()
+    else:
+        raise AssertionError("the artwork was still being read")
     for _ in range(patience):
         if app.session.phase is not Phase.RUNNING:
             return

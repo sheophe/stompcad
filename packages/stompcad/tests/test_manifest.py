@@ -193,10 +193,13 @@ def test_the_schema_covers_every_field_a_place_carries() -> None:
     from stompcad.manifest import PLACES
     from stompcad.settings import DEFAULTS
 
+    resolved_elsewhere = {"artwork": {"panel"}, "enclosure": {"case_model"}}
+
     for place, allowed in PLACES.items():
         carried = {field.name for field in fields(getattr(DEFAULTS, place))}
         assert allowed <= carried, f"{place}: schema names a field settings does not carry"
-        assert carried - allowed <= {"panel", "case_model"}, (
+        exempt: set[str] = resolved_elsewhere.get(place, set())
+        assert carried - allowed <= exempt, (
             f"{place}: settings carries a field the schema forgets"
         )
 

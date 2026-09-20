@@ -66,7 +66,7 @@ from .places import (
     position_line,
     table_bindings,
 )
-from .run import Launch, may_resume, start
+from .run import Launch, may_resume, start, tell
 from .runner import ProcessRunner, Runner
 from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
@@ -533,7 +533,7 @@ class Workbench(App[int], inherit_bindings=False):
         except Exception:  # noqa: BLE001 - a read that fails narrows nothing
             parts = ()
         finally:
-            self.call_from_thread(self._fit_read, generation, parts)
+            tell(self, self._fit_read, generation, parts)
 
     def _fit_read(self, generation: int, parts: tuple[str, ...]) -> None:
         """Take a read's answer, unless the project has moved on since.

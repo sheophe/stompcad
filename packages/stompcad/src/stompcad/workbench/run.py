@@ -37,7 +37,7 @@ from .wire import (
 if TYPE_CHECKING:
     from .app import Workbench
 
-__all__ = ["Launch", "RunFailed", "may_resume", "start"]
+__all__ = ["Launch", "RunFailed", "may_resume", "start", "tell"]
 
 
 class RunFailed(Exception):
@@ -97,7 +97,7 @@ def _pump(app: Workbench) -> None:
     """
     try:
         for event in app.runner.events():
-            _tell(app, _applied, app, event)
+            tell(app, _applied, app, event)
     finally:
         app.listening = False
 
@@ -170,7 +170,7 @@ def gap_for(question: Choice) -> PendingGap:
     return PendingGap(question.code, row.step, Place(row.place), question)
 
 
-def _tell(app: Workbench, report: Callable[..., None], *carried: object) -> None:
+def tell(app: Workbench, report: Callable[..., None], *carried: object) -> None:
     """Cross to the app thread, or give up because the crossing cannot be made.
 
     ``call_from_thread`` raises once the app has gone, which a confirmed

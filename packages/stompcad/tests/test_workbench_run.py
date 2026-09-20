@@ -1086,7 +1086,7 @@ async def test_an_event_the_pump_carries_in_is_applied_on_the_app_thread() -> No
 
     ``_pump`` reads every event on its own worker thread. ``show`` is
     patched to record the thread it actually runs on rather than trusting
-    that ``_tell``'s crossing happened by its name alone -- a direct call
+    that ``tell``'s crossing happened by its name alone -- a direct call
     from the worker would pass a test that only checked ``call_from_thread``
     was named, since nothing stops a name being called from the wrong place.
     """

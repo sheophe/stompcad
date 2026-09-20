@@ -150,9 +150,10 @@ def test_a_board_without_a_case_part_is_a_usage_error(
 ) -> None:
     """A board is seated in the drilled case, and the part is what names its model.
 
-    Without this refusal the run reaches the ``step`` emitter and fails
-    there, deep inside the dock half's own read -- exit 3 either way, which
-    is why the message is what this asserts.
+    Without this refusal the run would open the artwork and stop in the
+    enclosure step at ``ambiguous-enclosure``, since this fixture's outline
+    ties -- exit 3 either way, because a captured stream cannot answer the
+    question that raises, which is why the message is what this asserts.
     """
     code = cli.main([
         str(TAR_AI), str(TAR_PCB), "--panel-reference", PANEL_REFERENCE,

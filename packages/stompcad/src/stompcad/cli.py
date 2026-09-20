@@ -667,9 +667,8 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     # file, and the cache holds it. This flag is the one route that bypasses
     # both, so it is the only rank left.
     case_model_arg = None if args.case_model is None else Path(args.case_model)
-    case_model_resolved = _pick_noting(
-        case_model_arg, None, None, DEFAULTS.enclosure.case_model.value,
-        panel=panel, label="case model", notes=notes,
+    case_model_resolved = pick(
+        case_model_arg, None, None, DEFAULTS.enclosure.case_model.value
     )
     case_margin_resolved = pick(
         None, _project(project, "enclosure", "case_margin_mm"), None,
