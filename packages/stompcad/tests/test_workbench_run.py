@@ -671,6 +671,37 @@ async def test_an_event_no_handler_can_apply_ends_the_run_and_not_the_pump() -> 
 
 
 @pytest.mark.asyncio
+async def test_the_sidebar_marks_a_place_while_the_run_is_still_working() -> None:
+    """Decision 4: the marker says how far the project has got, as it gets there.
+
+    A change made before a run is answered by the steps that run under it,
+    so each place is marked as its own steps complete. Every marker landing
+    together at the end tells a builder nothing while the run is the thing
+    they are watching.
+    """
+    steps = DRILL_AND_DOCK.steps
+    runner = _Stream([
+        wire.Began(DRILL_AND_DOCK),
+        wire.Settled(steps[0], "8 holes"),
+        wire.Settled(steps[1], "8 holes, 3 tools"),
+    ])
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
+    async with app.run_test() as pilot:
+        for _ in range(400):
+            if not app.session.fit_pending:
+                break
+            await pilot.pause()
+        app.session.set(Place.ENCLOSURE, "case", "1590B2")
+        await pilot.press("r", "ctrl+r")
+        for _ in range(400):
+            await pilot.pause()
+            if app.outcomes.get("quantise") is not None:
+                break
+        assert app.session.phase is Phase.RUNNING, "the stream ends without completing"
+        assert "\u2713 Enclosure" in app.sidebar_text()
+
+
+@pytest.mark.asyncio
 async def test_a_run_that_cannot_be_started_keeps_the_workbench() -> None:
     """Decision 1: a transient failure must not cost somebody the session they opened.
 

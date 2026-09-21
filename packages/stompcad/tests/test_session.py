@@ -145,6 +145,29 @@ def test_the_left_marker_is_derived_from_the_stale_set() -> None:
     assert session.reached(Place.ARTWORK)
 
 
+def test_a_run_marks_a_place_as_its_own_steps_complete() -> None:
+    """Decision 4: credit less invalidation, asked of each step and not each field.
+
+    A value set before a run is what that run is about to use, so the steps
+    reading it earn their place's marker as they complete. The artwork's own
+    answer made this the ordinary case rather than a corner of it: every
+    project that opens without a declared enclosure now carries a change
+    into its first run, and holding every marker back until the last step
+    reports one run as five places' work arriving at once.
+    """
+    session = _fitting()
+    session.record_fit(["1590B"])
+    session.start_run(resuming=False)
+
+    session.credit("read-panel")
+    assert session.reached(Place.ARTWORK)
+    assert not session.reached(Place.ENCLOSURE)
+
+    session.credit("quantise")
+    assert session.reached(Place.ENCLOSURE)
+    assert not session.reached(Place.DRILLING), "read boards and write case have not run"
+
+
 def test_a_credited_step_clears_a_change_only_once_every_reader_has_run() -> None:
     """`targets` is read twice; clearing it at the first would un-stale the second."""
     session = _session()

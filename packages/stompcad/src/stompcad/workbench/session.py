@@ -311,7 +311,7 @@ class Session:
             except Exception as failure:  # the consuming tool's own refusal
                 self._settings = previous
                 raise Refused(str(failure)) from failure
-        self._changed = self._changed | {field}
+        self._invalidated(frozenset({field}))
         self._restate(place)
 
     def _restate(self, place: Place) -> None:
@@ -353,7 +353,19 @@ class Session:
         """
         if not self.may_edit(place):
             raise Locked(f"{place.value} does not accept an edit while a run is active")
-        self._changed = self._changed | frozenset(fields)
+        self._invalidated(frozenset(fields))
+
+    def _invalidated(self, fields: frozenset[str]) -> None:
+        """Record a change, and withdraw the credit it has just made untrue.
+
+        One statement of what a change costs, so the marker and the stale
+        set cannot read it differently. Credit goes now rather than being
+        subtracted again when the marker is read: a field clears only once
+        every step it invalidated has re-run, and until then it would go on
+        denying the steps that already did.
+        """
+        self._changed = self._changed | fields
+        self._completed = self._completed - drive.invalidated(fields)
 
     def stale(self) -> frozenset[str]:
         """The steps a resume would run, derived from the driver's own tables."""
@@ -377,14 +389,16 @@ class Session:
     def reached(self, place: Place) -> bool:
         """Whether the last run got this place's work done and it still stands.
 
-        Derived from the same two facts a resume is: what the run credited,
-        less what a change has since invalidated. There is no second thing
-        to keep in step, which is decision 4's whole requirement.
+        Credit is the whole answer, because a change withdraws its own:
+        ``_invalidated`` takes back the steps it made untrue as it records
+        the field. Asking the change set a second time here would deny a
+        step that has since re-run under the new value, since a field
+        clears only once every step it invalidated has.
         """
         if place not in CONFIGURATION:
             return False
         expected = drive.steps_of_place(place.value) & self._planned
-        return bool(expected) and expected <= (self._completed - self.stale())
+        return bool(expected) and expected <= self._completed
 
     # -- whether a run may start ------------------------------------------
 
