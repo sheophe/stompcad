@@ -85,18 +85,17 @@ def test_model_path_rejects_a_designator_outside_the_catalogue():
         model_path("1590ZZ")
 
 
-def test_the_cache_directory_is_the_one_the_fetch_script_writes(monkeypatch):
-    """Harness and helper must not disagree about where models live.
+def test_the_cache_directory_follows_the_published_rule(monkeypatch):
+    """Harness and application must not disagree about where models live.
 
-    Compared against the helper's own function, not a re-typed literal: a
-    literal can only match today's value, not prove the two can never diverge.
+    The two spellings now live in packages that may not import each other,
+    so the published rule is what both are held to: ``$XDG_CACHE_HOME``,
+    else ``~/.cache``, then ``stompcad/cases``. ``stompcad`` has a test of
+    its own asserting the same rule against its own module.
     """
-    from tools import fetch_case_model
-
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
-    assert cache_dir is fetch_case_model.cache_dir
-    assert cache_dir() == fetch_case_model.cache_dir() == Path.home() / ".cache" / "stompcad" / "cases"
+    assert cache_dir() == Path.home() / ".cache" / "stompcad" / "cases"
 
 
 def test_the_cache_directory_honours_xdg_cache_home(monkeypatch, tmp_path):

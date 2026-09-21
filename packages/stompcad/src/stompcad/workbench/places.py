@@ -110,7 +110,6 @@ FIELDS: dict[Place, tuple[Field, ...]] = {
     ),
     Place.ENCLOSURE: (
         Field("case", Kind.CHOICE),
-        Field("case_model", Kind.PATH),
         Field("case_face", Kind.CHOICE),
         Field("case_margin_mm", Kind.NUMBER),
     ),
@@ -163,7 +162,10 @@ def choices_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
     if field in ("drill_layer", "reference_layer"):
         return () if panel is None else discover.layers(panel)
     if field == "case":
-        return discover.catalogue_parts()
+        # Decision 2: the parts the artwork admits, and the catalogue only
+        # where it admits nothing. Offering a part the outline refuses would
+        # be offering a wrong-enclosure error one keystroke away.
+        return session.fits or discover.catalogue_parts()
     if field == "case_face":
         return tuple(face.value for face in CaseFace)
     if field == "drill_standard":
@@ -364,7 +366,9 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
     elif place in CONFIGURATION:
         record = getattr(session.settings, place.value)
         for field, label, stated in record.rows():
-            pane.compose_add_child(ValueRow(place, field, f"{label:<18}{stated}"))
+            pane.compose_add_child(
+                ValueRow(place, field, f"{label:<18}{_stating(session, place, field, stated)}")
+            )
         if place is Place.OUTPUT:
             # Beside the row that chooses them, never in place of it: what an
             # artefact is called is editable, what is known about it is not.
@@ -375,6 +379,23 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
     else:
         _compose_findings(pane, session)
     return pane
+
+
+def _stating(session: Session, place: Place, field: str, stated: str) -> str:
+    """What a row states, with the one question a read may still be answering.
+
+    The part is read from the artwork after the project opens, so until that
+    read lands there is no answer yet -- which is not the same as none, and a
+    row stating "none" would be stating a conclusion nobody has reached.
+    """
+    if (
+        place is Place.ENCLOSURE
+        and field == "case"
+        and session.fit_pending
+        and session.settings.enclosure.case.provenance.origin is Origin.DEFAULT
+    ):
+        return "working out which enclosures the outline fits"
+    return stated
 
 
 def _compose_findings(pane: Rows, session: Session) -> None:

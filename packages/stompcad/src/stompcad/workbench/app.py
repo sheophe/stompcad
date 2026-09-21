@@ -66,7 +66,7 @@ from .places import (
     position_line,
     table_bindings,
 )
-from .run import Launch, may_resume, start
+from .run import Launch, may_resume, start, tell
 from .runner import ProcessRunner, Runner
 from .session import Locked, PendingGap, Phase, Refused, Session
 from .sidebar import Sidebar
@@ -131,22 +131,18 @@ class Workbench(App[int], inherit_bindings=False):
         session: Session,
         launch: Launch | None = None,
         autostart: bool = False,
-        cache: Path | None = None,
         runner: Runner | None = None,
         window: Window | None = None,
     ) -> None:
         super().__init__()
         self.session = session
         self.launch = launch
-        # Where cached enclosure models live. ``None`` asks the tool that
-        # owns that location at the press rather than here, because it is a
-        # repository script and an app installed elsewhere has no such tool.
-        self.cache = cache
         self.runner: Runner = runner or ProcessRunner()
         self.window: Window = window or NullWindow()
         _prime_multiprocessing()
         # Decision 1: an invocation carrying something beyond the panel means
-        # "do not ask me", so the app opens with the run already moving. A
+        # "do not ask me", so the app opens with the run already moving -- from
+        # the moment the opening read lands, which is the last question. A
         # manifest value is a standing declaration and starts nothing, or
         # opening last week's project to look at it would cost kernel work.
         self.autostart = autostart
@@ -176,6 +172,11 @@ class Workbench(App[int], inherit_bindings=False):
         # What a paused run is waiting on: the number of the question the
         # runner has open, held only while a gap is unanswered.
         self._asked = 0
+        # Which read of the artwork is the current one. A read is started by
+        # opening a project and by any edit that changes which outline would
+        # be read; an older answer landing afterwards is discarded rather than
+        # applied to a project that has moved on.
+        self._fit_generation = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -184,10 +185,16 @@ class Workbench(App[int], inherit_bindings=False):
         yield ModeLine()
 
     async def on_mount(self) -> None:
+        """Start the read before the first frame, so the frame states the truth.
+
+        Drawing first would open on "Everything needed is here", which a run
+        started that instant would be refused -- the read the opening begins
+        is outstanding. Nothing autostarts here: ``_fit_read`` is where a run
+        may begin, because it is where the last question is answered.
+        """
         self._base = self.screen
+        self._read_fit()
         await self.redraw()
-        if self.autostart and self.session.may_run():
-            self.action_start_run()
 
     def on_unmount(self) -> None:
         """The run's process is asked to go, and waited for if it is writing."""
@@ -457,6 +464,89 @@ class Workbench(App[int], inherit_bindings=False):
             self.message = str(failure)
             return
         self.message = ""
+        if place is Place.ARTWORK and field in _OUTLINE_FIELDS:
+            self._read_fit()
+
+    def _read_fit(self) -> None:
+        """Read which enclosures this artwork's outline admits. Decision 1.
+
+        Off the interface thread: an artwork is a PDF to parse, and a
+        workbench that stopped drawing while it parsed would be a workbench
+        that freezes when a project opens. The question is marked outstanding
+        at once, so the next frame states it, while the read itself starts a
+        turn later: ``Widget.focus`` is deferred too, and an answer landing
+        inside a draw queues its redraw ahead of that draw's own focus, which
+        then never reaches the row it was meant for.
+        """
+        self._fit_generation += 1
+        generation = self._fit_generation
+        artwork = self.session.settings.artwork
+        panel = artwork.panel.value
+        if panel is None:
+            self.session.record_fit(())
+            return
+        self.session.begin_fit()
+        self.call_later(
+            self._start_fit,
+            generation,
+            panel,
+            artwork.drill_layer.value,
+            artwork.reference_layer.value,
+            artwork.form_depth.value,
+        )
+
+    def _start_fit(
+        self,
+        generation: int,
+        panel: Path,
+        drill_layer: str,
+        reference_layer: str,
+        form_depth: int,
+    ) -> None:
+        """Put the read on a worker thread, clear of any draw in flight."""
+        self.run_worker(
+            lambda: self._fit_worker(
+                generation, panel, drill_layer, reference_layer, form_depth
+            ),
+            thread=True,
+            name="fit",
+        )
+
+    def _fit_worker(
+        self,
+        generation: int,
+        panel: Path,
+        drill_layer: str,
+        reference_layer: str,
+        form_depth: int,
+    ) -> None:
+        """The read itself, on a worker thread, reporting back through the app.
+
+        The report is unconditional. A thread that died without one would
+        leave the fit outstanding for the application's whole life, and an
+        outstanding fit refuses every run -- so a read that breaks settles
+        as the empty answer it is, which narrows nothing.
+        """
+        parts: tuple[str, ...] = ()
+        try:
+            parts = discover.fitting_parts(panel, drill_layer, reference_layer, form_depth)
+        except Exception:  # noqa: BLE001 - a read that fails narrows nothing
+            parts = ()
+        finally:
+            tell(self, self._fit_read, generation, parts)
+
+    def _fit_read(self, generation: int, parts: tuple[str, ...]) -> None:
+        """Take a read's answer, unless the project has moved on since.
+
+        An autostart is started from here rather than from ``on_mount``,
+        which asks whether it may run while its own read is outstanding.
+        """
+        if generation != self._fit_generation:
+            return
+        self.session.record_fit(parts)
+        self._refresh()
+        if self.autostart and self.session.phase is Phase.IDLE and self.session.may_run():
+            self.action_start_run()
 
     def _adopt_panel(self, value: object) -> None:
         """Resolve the project this path names, and aim the run at it.
@@ -728,8 +818,6 @@ class Workbench(App[int], inherit_bindings=False):
             self.message = f"{key} belongs to {owner.value.capitalize()} ({detail})"
         elif key == "ctrl+l":
             self.action_reread_artwork()
-        elif key == "ctrl+f":
-            self.action_find_model()
         else:
             self.action_start_run()
 
@@ -749,59 +837,18 @@ class Workbench(App[int], inherit_bindings=False):
         except Locked as failure:
             self.message = str(failure)
             return
+        self._read_fit()
         self.message = f"{panel.name} will be read again on the next run"
         self._refresh()
 
-    def action_find_model(self) -> None:
-        """`Ctrl+F`: look in the cache for this part's model. Never downloads.
 
-        CLAUDE.md keeps model acquisition in ``tools/fetch_case_model.py``,
-        so this asks the cache what it already holds and names that tool
-        where it holds nothing. A workbench that fetched would be a
-        workbench that acquires models, which is somebody else's decision.
-        """
-        part = self.session.settings.enclosure.case.value
-        if part is None:
-            self.message = "name the enclosure part first, so there is something to look for"
-            return
-        cache = self._cache()
-        if cache is None:
-            self.message = "no cache location is known; tools/fetch_case_model.py owns one"
-            return
-        found = discover.cached_model(part, cache)
-        if found is None:
-            self.message = f"no cached model for {part}; tools/fetch_case_model.py acquires one"
-            return
-        try:
-            self.session.adopt(Place.ENCLOSURE, "case_model", found)
-        except (Refused, Locked) as failure:
-            # The same two a row's own edit shows rather than takes: a run
-            # holds the place, or the tool that consumes the model says no.
-            self.message = str(failure)
-            return
-        self.message = f"using {found.value.name}, {found.detail}"
-        self._refresh()
-
-    def _cache(self) -> Path | None:
-        """Where cached models live, or ``None`` when nothing here knows.
-
-        ``tools/fetch_case_model.py`` owns that location and is a repository
-        script rather than an installed package, so it is asked for at the
-        press: an app that cannot import it knows no location, which is not
-        the same as an app that failed to start.
-        """
-        if self.cache is not None:
-            return self.cache
-        try:
-            from tools.fetch_case_model import cache_dir
-        except ImportError:
-            return None
-        return cache_dir()
-
+#: The values that decide which outline is read. Anything else changes what a
+#: run does with the artwork, not which artwork is read, so it starts no read.
+_OUTLINE_FIELDS = frozenset({"panel", "drill_layer", "reference_layer", "form_depth"})
 
 #: Rows whose empty answer means "not given" rather than an empty string.
 _OPTIONAL = frozenset({
-    "case", "case_model", "grid_warn_mm", "drill_sizes", "no_drill_sizes", "match_tolerance_mm",
+    "case", "grid_warn_mm", "drill_sizes", "no_drill_sizes", "match_tolerance_mm",
 })
 
 

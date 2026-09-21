@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from stompmodel.diagnostics import Diagnostic
 
 from .. import drive, stale
-from ..discover import part_from_model
 from ..plan import RunPlan
 from ..present import Choice
 from ..readiness import Blocker, Readiness, readiness
@@ -31,7 +30,7 @@ from .keys import CONFIGURATION, SIDEBAR_ORDER, Place, neighbour
 if TYPE_CHECKING:  # ``cli`` imports the application, which imports this module
     from ..cli import Resolution
 
-__all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session"]
+__all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session", "FITS"]
 
 #: Decision 2's two labels, and the reason neither is persisted: the manifest
 #: holds no hashes, so the workbench cannot know an existing artefact was made
@@ -44,10 +43,14 @@ MADE = "made by this run"
 #: them. Recomputing readiness alone would leave a refused run marked nowhere.
 _STANDING = (Blocker.REFUSED_VALUE, Blocker.UNREADABLE_PROJECT)
 
-#: The ranks a model's filename may answer over: nothing said, or the last
+#: The ranks the artwork's own fit may answer over: nothing said, or the last
 #: thing this rule itself said. A part from the project or from the user
-#: outranks a filename, so naming a model never overrules a person.
+#: outranks a measurement, so reading the outline never overrules a person.
 _INFERABLE = (Origin.DEFAULT, Origin.DISCOVERED)
+
+#: What a row states when the outline is what answered it. Compared as well as
+#: shown: it is how a withdrawal tells this rule's own answer from anybody else's.
+FITS = "fits the reference outline"
 
 
 class Locked(Exception):
@@ -153,6 +156,8 @@ class Session:
         self._findings = ()
         self._written = frozenset()
         self._designators: dict[int, tuple[str, ...]] = {}
+        self._fits: tuple[str, ...] = ()
+        self._fit_pending = False
 
     # -- what there is to look at -----------------------------------------
 
@@ -183,6 +188,16 @@ class Session:
     @property
     def panel_candidates(self) -> tuple[Path, ...]:
         return self._panel_candidates
+
+    @property
+    def fits(self) -> tuple[str, ...]:
+        """Every part the artwork's outline admits; empty narrows nothing."""
+        return self._fits
+
+    @property
+    def fit_pending(self) -> bool:
+        """Whether a read is outstanding, so an unanswered part is not yet news."""
+        return self._fit_pending
 
     @property
     def findings(self) -> tuple[Finding, ...]:
@@ -230,28 +245,6 @@ class Session:
             field,
             Resolved(value, Provenance(Origin.USER), disagreement(declared, value)),
         )
-        if place is Place.ENCLOSURE and field == "case_model":
-            self._follow_model(value)
-
-    def _follow_model(self, model: Any) -> None:
-        """The part the model's filename names, where nobody has named one.
-
-        Decision 6 gives the headless run no discovered rank for the part,
-        because there a filename would be a guess nobody ever saw. Here the
-        row states where it came from and is edited in one keystroke, so the
-        guess is offered rather than smuggled in. Withdrawn with the file
-        that made it: an inference outliving its model is a wrong answer.
-        ``part_from_model`` reads the name alone, so this opens nothing.
-        """
-        if self._settings.enclosure.case.provenance.origin not in _INFERABLE:
-            return
-        part = part_from_model(model) if isinstance(model, Path) else None
-        if part is None:
-            self._replace_value(
-                Place.ENCLOSURE, "case", Resolved(None, Provenance(Origin.DEFAULT))
-            )
-            return
-        self.adopt(Place.ENCLOSURE, "case", Discovery(part, f"inferred from {model.name}"))
 
     def adopt(self, place: Place, field: str, found: Discovery[Any]) -> None:
         """Take a value the tool found, recording that it was found rather than set.
@@ -263,6 +256,37 @@ class Session:
         self._replace_value(
             place, field, Resolved(found.value, Provenance(Origin.DISCOVERED, found.detail))
         )
+
+    def begin_fit(self) -> None:
+        """Say a read of the artwork is outstanding. Decision 1."""
+        self._fit_pending = True
+
+    def record_fit(self, parts: Sequence[str]) -> None:
+        """What the outline admits, and what that answers.
+
+        Exactly one part answers an unanswered question; anything else
+        withdraws an answer this rule gave earlier, because a fit that no
+        longer holds is a wrong answer rather than an old one. Re-reading
+        the same fit changes nothing, so opening a project cannot make the
+        run it just finished stale.
+        """
+        # What the artwork says, and whether a read is still owed: true
+        # regardless of the guard below, since a run holding the place shut
+        # does not make the picker's narrowed list stop being what fits.
+        self._fits = tuple(parts)
+        self._fit_pending = False
+        case = self._settings.enclosure.case
+        if case.provenance.origin not in _INFERABLE or not self.may_edit(Place.ENCLOSURE):
+            return
+        if len(self._fits) == 1:
+            if case.value == self._fits[0] and case.provenance.detail == FITS:
+                return
+            self.adopt(Place.ENCLOSURE, "case", Discovery(self._fits[0], FITS))
+            return
+        if case.provenance.detail == FITS:
+            self._replace_value(
+                Place.ENCLOSURE, "case", Resolved(None, Provenance(Origin.DEFAULT))
+            )
 
     def _replace_value(self, place: Place, field: str, resolved: Resolved[Any]) -> None:
         """One value, at whatever rank supplied it, put in force.
@@ -287,7 +311,7 @@ class Session:
             except Exception as failure:  # the consuming tool's own refusal
                 self._settings = previous
                 raise Refused(str(failure)) from failure
-        self._changed = self._changed | {field}
+        self._invalidated(frozenset({field}))
         self._restate(place)
 
     def _restate(self, place: Place) -> None:
@@ -329,7 +353,19 @@ class Session:
         """
         if not self.may_edit(place):
             raise Locked(f"{place.value} does not accept an edit while a run is active")
-        self._changed = self._changed | frozenset(fields)
+        self._invalidated(frozenset(fields))
+
+    def _invalidated(self, fields: frozenset[str]) -> None:
+        """Record a change, and withdraw the credit it has just made untrue.
+
+        One statement of what a change costs, so the marker and the stale
+        set cannot read it differently. Credit goes now rather than being
+        subtracted again when the marker is read: a field clears only once
+        every step it invalidated has re-run, and until then it would go on
+        denying the steps that already did.
+        """
+        self._changed = self._changed | fields
+        self._completed = self._completed - drive.invalidated(fields)
 
     def stale(self) -> frozenset[str]:
         """The steps a resume would run, derived from the driver's own tables."""
@@ -353,14 +389,16 @@ class Session:
     def reached(self, place: Place) -> bool:
         """Whether the last run got this place's work done and it still stands.
 
-        Derived from the same two facts a resume is: what the run credited,
-        less what a change has since invalidated. There is no second thing
-        to keep in step, which is decision 4's whole requirement.
+        Credit is the whole answer, because a change withdraws its own:
+        ``_invalidated`` takes back the steps it made untrue as it records
+        the field. Asking the change set a second time here would deny a
+        step that has since re-run under the new value, since a field
+        clears only once every step it invalidated has.
         """
         if place not in CONFIGURATION:
             return False
         expected = drive.steps_of_place(place.value) & self._planned
-        return bool(expected) and expected <= (self._completed - self.stale())
+        return bool(expected) and expected <= self._completed
 
     # -- whether a run may start ------------------------------------------
 
@@ -368,10 +406,16 @@ class Session:
         return self._blockers
 
     def may_run(self) -> bool:
-        """Decision 17's matrix, plus decision 9's unreadable project."""
+        """Decision 17's matrix, decision 9's unreadable project, and the read.
+
+        A fit still outstanding is an unanswered question like any other: the
+        part it is about to supply is an input the run would otherwise take
+        without it.
+        """
         return (
             self._obstacle is None
             and self._blockers.ready
+            and not self._fit_pending
             and self._phase in (Phase.IDLE, Phase.DONE)
         )
 
@@ -384,6 +428,8 @@ class Session:
         if self._phase is Phase.PAUSED and self._gap is not None:
             return f"Waiting for you in {self._gap.place.value.capitalize()}."
         if self._blockers.ready:
+            if self._fit_pending:
+                return "Reading the artwork to see which enclosures it fits."
             return "Everything needed is here. Press Enter to run."
         return "; ".join(sentence for _blocker, _place, sentence in self._blockers.blockers)
 

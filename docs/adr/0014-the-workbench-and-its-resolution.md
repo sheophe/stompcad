@@ -1,12 +1,15 @@
 # ADR-0014: The workbench and its resolution
 
-**Status:** Accepted, amended three times: the sidebar now takes focus and
+**Status:** Accepted, amended four times: the sidebar now takes focus and
 the arrows move between it and the place (see *The key model is semi-modal*);
 the boards lost their discovered rank and the enclosure part gained one in
 the workbench alone (see *Resolution has four ranks*); the window opens only
 when asked, and `enter` gained two subject-specific meanings — on a finding
 it goes to the place that answers it, on an artefact in `Output` it opens the
-viewer (see *The window shows what a run wrote, and opens only when asked*).
+viewer (see *The window shows what a run wrote, and opens only when asked*);
+the enclosure part is now discovered from the reference outline, and the
+model-filename guess it once made is retired with the field that guess read
+(see *Resolution has four ranks*).
 
 ## Context
 
@@ -169,8 +172,8 @@ about its own inputs, then a default matching what each tool already assumes
 on its own command line. Discovery sits between the manifest and the default
 because it is stronger evidence than an assumption and weaker than a
 declaration typed on purpose — the panel found beside the working directory,
-the layers read from the artwork itself, the case model found in the
-enclosure cache, the panel-reference designators read from the boards, and
+the layers read from the artwork itself, the enclosure part that fits the
+reference outline, the panel-reference designators read from the boards, and
 the match tolerance derived from the drill grid are none of them guesses,
 but none of them is what the builder typed either.
 
@@ -192,15 +195,20 @@ guess to that stage as a declaration, and a declared part that disagrees is
 an error rather than the ambiguity it really is. So the command line
 resolves `case` from an argument, the project or nothing at all.
 
-**Amended.** In the workbench that stem does answer an unanswered part,
-because there the guess is made in the open: the row states the part, says
-which filename it was inferred from, and is changed in one keystroke before
-any run. A guess a builder has seen and left standing is a declaration, and
-the run treats it as one — which is exactly what a guess nobody ever saw is
-not. It is withdrawn with the file that made it, so naming a different model
-re-answers the part or leaves it unanswered rather than keeping an inference
-the named model no longer supports. Anything the project or the builder said
-outranks it, so naming a model never overrules a person.
+**Amended.** The workbench discovers the part from the artwork itself. A
+reference outline is a measurement of a backplate, and the catalogue is a table
+of backplates, so the file already says which enclosures it could be. Where
+exactly one part fits, the row states it and says that it fits the reference
+outline; where several do, the part stays unanswered and the picker offers those
+parts alone, because an ambiguity the tool declares is the builder's to settle
+and a picker that offered the rest would be offering errors. Where nothing fits,
+or there is no outline to read, the picker offers the whole catalogue: a
+narrowed list must never be mistaken for the only answers there are. Anything
+the project or the builder said outranks the fit, and the fit is withdrawn when
+a later read stops supporting it. The earlier amendment's inference from a case
+model's filename is retired with the field it read: the workbench no longer asks
+for a model path, so no filename is left to guess from, and the outline is the
+better witness anyway.
 
 A project value that discovery contradicts is a finding, not an override. If
 the manifest names a drill layer the artwork no longer has, the run reports
@@ -211,8 +219,8 @@ is news the builder needs, not noise a resolver quietly absorbs.
 ### Every value carries its origin, and a disagreement is shown, not summarised
 
 Every resolved value states which rank supplied it, in words a builder can
-act on rather than the rank's name: from the artwork, found beside it,
-inferred from the model, from the project, from the command line, or a plain
+act on rather than the rank's name: from the artwork, found beside it, fits
+the reference outline, from the project, from the command line, or a plain
 default. Where two ranks disagree — an argument overriding a project value,
 or a discovered value the project also states — both are shown together at
 the row, not folded into one number with the other recorded elsewhere. An
@@ -292,11 +300,12 @@ pedal's boards is not the same as a decision that this pedal has none, and
 the driver's own "skip docking" behaviour cannot tell those two apart, so the
 workbench must. An explicitly confirmed empty board list is itself declared
 intent: it is written to the manifest, means drill-only, and is never asked
-again. Selecting boards requires a case model and a panel-reference
-expression; selecting the assembly or report artefact requires at least one
-board; and selecting no artefact at all requires an explicit confirmation
-that the run checks only and writes nothing, because a run that quietly
-writes nothing must not be indistinguishable from one that failed to.
+again. Selecting boards requires the enclosure part and a panel-reference
+expression, since the part is what names the model's file; selecting the
+assembly or report artefact requires at least one board; and selecting no
+artefact at all requires an explicit confirmation that the run checks only
+and writes nothing, because a run that quietly writes nothing must not be
+indistinguishable from one that failed to.
 
 ## Consequences
 

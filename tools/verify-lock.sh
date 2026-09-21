@@ -132,12 +132,12 @@ REFERENCE="$REF_DIR/SHA256SUMS"            # must not resolve against $OUT
 OUT="$REF_DIR/artefacts"
 PY="$ROOT/.venv/bin/python"
 
-# The cache location is tools/fetch_case_model.cache_dir()'s rule, not a second
+# The cache location is stompcad.cases.cache_dir()'s rule, not a second
 # copy of it: $XDG_CACHE_HOME, or ~/.cache under it.
 MODEL="${XDG_CACHE_HOME:-$HOME/.cache}/stompcad/cases/1590B.stp"
 if [ ! -f "$MODEL" ]; then
     echo "LOCK FAILED: no 1590B model at $MODEL"
-    echo "  fetch it with: $PY tools/fetch_case_model.py 1590B"
+    echo "  acquire it through stompcad, or place it in that cache by hand"
     exit 2
 fi
 if [ ! -x "$PY" ]; then

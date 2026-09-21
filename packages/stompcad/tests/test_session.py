@@ -34,7 +34,7 @@ def _settings(**places: object) -> Settings:
         Settings.of_defaults(_PANEL),
         enclosure=replace(
             DEFAULTS.enclosure,
-            case_model=Resolved(Path("/project/1590B.stp"), Provenance(Origin.PROJECT)),
+            case=Resolved("1590B", Provenance(Origin.PROJECT)),
         ),
         boards=replace(
             DEFAULTS.boards,
@@ -60,6 +60,11 @@ def _session(settings: Settings | None = None, project: manifest.Manifest | None
             project=held,
         )
     )
+
+
+def _fitting() -> Session:
+    """A session whose enclosure nobody has answered, so the artwork can."""
+    return _session(_settings(enclosure=replace(DEFAULTS.enclosure)))
 
 
 def test_a_complete_project_may_run_and_says_so() -> None:
@@ -110,43 +115,6 @@ def test_an_edit_agreeing_with_the_project_shows_no_disagreement() -> None:
     assert session.settings.drilling.grid_mm.describe() == "0.25, you set this"
 
 
-def test_naming_a_model_answers_the_part_its_filename_names() -> None:
-    """Decision 6: a model named in the workbench fills the part nobody has."""
-    session = _session(_settings(enclosure=DEFAULTS.enclosure))
-    session.set(Place.ENCLOSURE, "case_model", Path("/models/1590B.stp"))
-    case = session.settings.enclosure.case
-    assert case.value == "1590B"
-    assert case.describe() == "1590B, inferred from 1590B.stp"
-
-
-def test_a_part_somebody_named_survives_a_model_that_disagrees() -> None:
-    """The control: inference below the project is inference that never wins."""
-    session = _session(_settings(
-        enclosure=replace(
-            DEFAULTS.enclosure, case=Resolved("1590BB", Provenance(Origin.PROJECT))
-        ),
-    ))
-    session.set(Place.ENCLOSURE, "case_model", Path("/models/1590B.stp"))
-    assert session.settings.enclosure.case.value == "1590BB"
-
-
-def test_a_model_naming_no_part_leaves_the_part_unanswered() -> None:
-    """A stem the catalogue does not list is a filename, not an enclosure."""
-    session = _session(_settings(enclosure=DEFAULTS.enclosure))
-    session.set(Place.ENCLOSURE, "case_model", Path("/models/Tar.stp"))
-    assert session.settings.enclosure.case.value is None
-
-
-def test_a_new_model_withdraws_the_part_the_old_one_named() -> None:
-    """An inference outlives the file it came from only as a wrong answer."""
-    session = _session(_settings(enclosure=DEFAULTS.enclosure))
-    session.set(Place.ENCLOSURE, "case_model", Path("/models/1590B.stp"))
-    session.set(Place.ENCLOSURE, "case_model", Path("/models/Tar.stp"))
-    case = session.settings.enclosure.case
-    assert case.value is None
-    assert case.provenance.origin is Origin.DEFAULT
-
-
 def test_an_output_change_makes_only_the_write_steps_stale() -> None:
     """Decision 10: propagation follows data, and a filename costs no kernel work."""
     session = _session()
@@ -175,6 +143,29 @@ def test_the_left_marker_is_derived_from_the_stale_set() -> None:
     assert not session.reached(Place.DRILLING)
     assert not session.reached(Place.OUTPUT)
     assert session.reached(Place.ARTWORK)
+
+
+def test_a_run_marks_a_place_as_its_own_steps_complete() -> None:
+    """Decision 4: credit less invalidation, asked of each step and not each field.
+
+    A value set before a run is what that run is about to use, so the steps
+    reading it earn their place's marker as they complete. The artwork's own
+    answer made this the ordinary case rather than a corner of it: every
+    project that opens without a declared enclosure now carries a change
+    into its first run, and holding every marker back until the last step
+    reports one run as five places' work arriving at once.
+    """
+    session = _fitting()
+    session.record_fit(["1590B"])
+    session.start_run(resuming=False)
+
+    session.credit("read-panel")
+    assert session.reached(Place.ARTWORK)
+    assert not session.reached(Place.ENCLOSURE)
+
+    session.credit("quantise")
+    assert session.reached(Place.ENCLOSURE)
+    assert not session.reached(Place.DRILLING), "read boards and write case have not run"
 
 
 def test_a_credited_step_clears_a_change_only_once_every_reader_has_run() -> None:
@@ -520,3 +511,71 @@ def test_designators_are_every_board_s_names_once_in_name_order() -> None:
     assert not session.designators
     session.record_designators({1: ("SW1", "RV1"), 2: ("RV1", "RV2")})
     assert session.designators == ("RV1", "RV2", "SW1")
+
+
+def test_one_fitting_part_answers_the_case_and_says_it_fits() -> None:
+    session = _fitting()
+    session.record_fit(("1590B",))
+    case = session.settings.enclosure.case
+    assert case.value == "1590B"
+    assert case.provenance.origin is Origin.DISCOVERED
+    assert case.describe().endswith("fits the reference outline")
+
+
+def test_several_fitting_parts_leave_the_case_unanswered() -> None:
+    """An ambiguity the tool declares is the builder's to settle. Nothing picks."""
+    session = _fitting()
+    session.record_fit(("1590B", "1590B2", "1590BS"))
+    assert session.settings.enclosure.case.value is None
+    assert session.fits == ("1590B", "1590B2", "1590BS")
+
+
+def test_a_fit_that_no_longer_holds_is_withdrawn() -> None:
+    session = _fitting()
+    session.record_fit(("1590B",))
+    session.record_fit(("1590B", "1590BB"))
+    assert session.settings.enclosure.case.value is None
+
+
+def test_the_fit_does_not_overrule_a_part_somebody_stated() -> None:
+    session = _fitting()
+    session.set(Place.ENCLOSURE, "case", "1590BB")
+    session.record_fit(("1590B",))
+    assert session.settings.enclosure.case.value == "1590BB"
+    assert session.fits == ("1590B",)
+
+
+def test_a_stated_part_survives_a_fit_that_admits_nothing() -> None:
+    """The control for the withdrawal above: only this rule's own answer goes."""
+    session = _session()
+    session.set(Place.ENCLOSURE, "case", "1590BB")
+    session.record_fit(())
+    assert session.settings.enclosure.case.value == "1590BB"
+
+
+def test_reading_the_same_fit_twice_marks_nothing_stale() -> None:
+    """Re-reading an artwork that says the same thing changes nothing, so a
+    run that has just finished does not become stale under it."""
+    session = _fitting()
+    session.record_fit(("1590B",))
+    before = session.stale()
+    session.record_fit(("1590B",))
+    assert session.stale() == before
+
+
+def test_the_case_is_pending_between_opening_and_the_read() -> None:
+    session = _fitting()
+    assert not session.fit_pending
+    session.begin_fit()
+    assert session.fit_pending
+    session.record_fit(())
+    assert not session.fit_pending
+
+
+def test_a_fit_landing_mid_run_does_not_raise() -> None:
+    """A run holds ``Enclosure`` closed; a read racing it must not crash the
+    session with the ``Locked`` that answering the place would raise."""
+    session = _fitting()
+    session.begin_run(_PLAN)
+    session.record_fit(("1590B",))
+    assert session.settings.enclosure.case.value is None

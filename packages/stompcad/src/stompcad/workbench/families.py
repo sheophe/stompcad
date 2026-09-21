@@ -110,8 +110,8 @@ FAMILIES: dict[Family, Prose] = {
             "artwork can be the cause instead, and where it can, the line says so."
         ),
         codes=frozenset({
-            "ambiguous-pairing", "grid-ambiguous", "grid-too-fine",
-            "nesting-truncated", "reference-size-mismatch",
+            "ambiguous-pairing", "case-model-unavailable", "grid-ambiguous",
+            "grid-too-fine", "nesting-truncated", "reference-size-mismatch",
             "under-constrained-board", "unmatched-enclosure", "wrong-case-model",
             "wrong-enclosure",
         }),
@@ -175,12 +175,13 @@ _CANNOT_ASSEMBLE = frozenset({"enclosure-too-shallow", "every-seating-clashes"})
 #: refusal names a change to the drawing, and information marks no place.
 REMEDIES: dict[str, Remedy] = {
     "ambiguous-pairing": Remedy(Place.BOARDS, "panel_reference"),
+    "case-model-unavailable": Remedy(Place.ENCLOSURE, "case"),
     "grid-ambiguous": Remedy(Place.DRILLING, "grid_mm"),
     "grid-too-fine": Remedy(Place.DRILLING, "grid_mm"),
     "nesting-truncated": Remedy(Place.ARTWORK, "form_depth"),
     "under-constrained-board": Remedy(Place.BOARDS, "panel_reference"),
     "unmatched-enclosure": Remedy(Place.ENCLOSURE, "case"),
-    "wrong-case-model": Remedy(Place.ENCLOSURE, "case_model"),
+    "wrong-case-model": Remedy(Place.ENCLOSURE, "case"),
     "wrong-enclosure": Remedy(Place.ENCLOSURE, "case"),
     "ambiguous-enclosure": Remedy(Place.ENCLOSURE, "case"),
     "empty-group": Remedy(Place.BOARDS, "panel_reference"),

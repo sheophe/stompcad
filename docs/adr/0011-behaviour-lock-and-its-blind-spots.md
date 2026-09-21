@@ -26,7 +26,7 @@ to reconstruct it again.
 ## Decision
 
 Track the procedure in `tools/verify-lock.sh`, beside `build_catalogue.py`,
-`check_docstrings.py`, `fetch_case_model.py` and `workspace_membership.py`.
+`check_docstrings.py` and `workspace_membership.py`.
 References in commit messages can then point to a reviewable file.
 
 Never commit `SHA256SUMS`, in `tools/` or elsewhere. Capture the reference at the

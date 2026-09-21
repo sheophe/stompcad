@@ -182,16 +182,26 @@ def test_every_length_survives_the_round_trip(tmp_path: Path) -> None:
 
 
 def test_the_schema_covers_every_field_a_place_carries() -> None:
-    """A field added to settings without a row in PLACES is never remembered."""
+    """A field added to settings without a row in PLACES is never remembered.
+
+    ``panel`` names the manifest, and ``case_model`` is resolved from the
+    command line alone, so the project file has nothing to declare for
+    either.
+    """
     from dataclasses import fields
 
     from stompcad.manifest import PLACES
     from stompcad.settings import DEFAULTS
 
+    resolved_elsewhere = {"artwork": {"panel"}, "enclosure": {"case_model"}}
+
     for place, allowed in PLACES.items():
         carried = {field.name for field in fields(getattr(DEFAULTS, place))}
         assert allowed <= carried, f"{place}: schema names a field settings does not carry"
-        assert carried - allowed <= {"panel"}, f"{place}: settings carries a field the schema forgets"
+        exempt: set[str] = resolved_elsewhere.get(place, set())
+        assert carried - allowed <= exempt, (
+            f"{place}: settings carries a field the schema forgets"
+        )
 
 
 def test_a_carried_over_path_reaches_the_next_half_as_the_string_it_was(tmp_path: Path) -> None:
@@ -327,7 +337,6 @@ def test_an_unknown_section_survives_being_read_and_written_back(tmp_path: Path)
         ("artwork", "form_depth", 1.5),
         ("artwork", "drill_layer", None),
         ("enclosure", "case", ["1590B"]),
-        ("enclosure", "case_model", 3),
         ("enclosure", "case_margin_mm", "1"),
     ],
 )
@@ -359,7 +368,7 @@ def test_a_nullable_key_still_accepts_null(tmp_path: Path) -> None:
     """The fields a run leaves unset are written as ``null`` and must read back."""
     panel = _write(tmp_path, {
         "version": 1,
-        "enclosure": {"case": None, "case_model": None},
+        "enclosure": {"case": None},
         "drilling": {"grid_warn_mm": None, "drill_sizes": None, "no_drill_sizes": None},
         "boards": {"match_tolerance_mm": None},
     })
@@ -499,3 +508,15 @@ def test_no_format_name_belongs_to_both_halves() -> None:
     from stompdrill.emitters import available
 
     assert not frozenset(available()) & manifest.DOCK_TARGET_NAMES
+
+
+def test_a_project_declaring_a_case_model_is_told_it_is_no_longer_read(tmp_path: Path) -> None:
+    """Told once, and kept in the file: refusing to resolve from a key is not
+    a reason to delete it."""
+    panel = _write(
+        tmp_path, {"version": 1, "enclosure": {"case": "1590B", "case_model": "1590B.stp"}}
+    )
+    read_back = manifest.read(panel)
+    assert read_back.values["enclosure"] == {"case": "1590B"}
+    assert any("case_model" in note for note in read_back.notes)
+    assert read_back.stored["enclosure"]["case_model"] == "1590B.stp"

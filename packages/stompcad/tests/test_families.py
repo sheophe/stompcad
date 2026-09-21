@@ -96,10 +96,14 @@ def test_every_remedy_names_a_row_its_place_holds() -> None:
 
 
 def test_a_remedy_carries_the_field_not_just_the_place() -> None:
-    """None of these is its place's first row, which is where a place alone lands."""
+    """``form_depth`` is not its place's first row, which is where a place alone lands."""
     assert remedy_of(Diagnostic.warning("nesting-truncated", "…")) == REMEDIES["nesting-truncated"]
     assert REMEDIES["nesting-truncated"].field == "form_depth"
-    assert REMEDIES["wrong-case-model"].field == "case_model"
+
+
+def test_a_model_that_disagrees_sends_the_builder_to_the_part() -> None:
+    """The part chooses the model, so the part is where a wrong one is answered."""
+    assert REMEDIES["wrong-case-model"].field == "case"
 
 
 def test_a_near_miss_goes_to_the_tolerance_and_an_axisless_part_nowhere() -> None:

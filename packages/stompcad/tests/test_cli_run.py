@@ -145,21 +145,22 @@ def test_a_board_without_a_panel_reference_is_a_usage_error(
     assert "Tick the components that mount through the panel" in capsys.readouterr().err
 
 
-def test_a_board_without_a_case_model_is_a_usage_error(
+def test_a_board_without_a_case_part_is_a_usage_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A board is seated in the drilled case, so there must be one to seat it in.
+    """A board is seated in the drilled case, and the part is what names its model.
 
-    Without this refusal the run reaches the ``step`` emitter and fails
-    there, deep inside the dock half's own read -- exit 3 either way, which
-    is why the message is what this asserts.
+    Without this refusal the run would open the artwork and stop in the
+    enclosure step at ``ambiguous-enclosure``, since this fixture's outline
+    ties -- exit 3 either way, because a captured stream cannot answer the
+    question that raises, which is why the message is what this asserts.
     """
     code = cli.main([
-        str(TAR_AI), str(TAR_PCB), "--case", "1590B", "--panel-reference", PANEL_REFERENCE,
+        str(TAR_AI), str(TAR_PCB), "--panel-reference", PANEL_REFERENCE,
     ])
 
     assert code == EXIT_USAGE
-    assert "Choose the enclosure model the boards are seated in" in capsys.readouterr().err
+    assert "Choose the enclosure part" in capsys.readouterr().err
 
 
 def test_a_captured_stream_is_not_a_terminal() -> None:
@@ -632,7 +633,7 @@ def test_an_unanswered_panel_reference_is_still_a_blocker(tmp_path: Path) -> Non
     (tmp_path / "board.stp").write_bytes(b"")
     panel = _declaring(
         tmp_path,
-        {"boards": {"boards": ["board.stp"]}, "enclosure": {"case_model": "1590B.stp"}},
+        {"boards": {"boards": ["board.stp"]}, "enclosure": {"case": "1590B"}},
     )
     resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
 

@@ -174,6 +174,12 @@ memoises, count its distinct keys: `Clashes`'s second stage counts distinct
 board-pair seatings, not the combinations the product enumerates. Where a loop
 cannot be counted, give it one leaf and say so.
 
+The enclosure step's span covers identifying the enclosure and then the model it
+needs: acquiring the file, which may mean a download, and loading it. A download
+is a leaf like any other, because this protocol divides a span into slots and has
+no fractional unit; a step that says which part it is fetching states the work
+honestly, where a byte count would need a mechanism that does not exist.
+
 Dividing a span equally among a loop's items is a deliberate simplification
 where those items differ in cost. `Deduplicate` compares each hole against the
 groups collected so far, so its last hole costs more than its first. The
@@ -183,15 +189,17 @@ the kernel. Predicting the difference would take the work itself.
 ### Callers other than `Pipeline` divide their own spans
 
 Two substantial pieces of work sit outside both pipelines. Reading happens
-before either: the drill document, the case model and each board file.
-Quantisation happens between reading and `stompdrill`'s pipeline, and
-`quantise()` is an ordinary function rather than a `Pipeline`. A `Scope` is
-usable by any caller, and the protocol names `Pipeline` nowhere.
+before either: the drill document and each board file. Quantisation happens
+between reading and `stompdrill`'s pipeline, and `quantise()` is an ordinary
+function rather than a `Pipeline`; the case model is acquired and loaded
+inside it, at the enclosure step, once identification names the part to load
+one for. A `Scope` is usable by any caller, and the protocol names `Pipeline`
+nowhere.
 
 ```mermaid
 flowchart TD
     root["root: the whole invocation"]
-    read["read: the drill document, the case model, each board file"]
+    read["read: the drill document, each board file"]
     drill["drill: quantise, stompdrill's pipeline, its emitters"]
     dock["dock: stompcollider's pipeline, its emitters"]
     report["report: the reduced status and the terminal report"]

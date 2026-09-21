@@ -13,19 +13,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from stompdrill.enclosures import footprints
-from stompdrill.pipeline.enclosure import infer_part_name
+from stompdrill.pipeline.enclosure import fitting_parts as parts_fitting
 from stompdrill.sources import AiPdfSource
-
-from .settings import Discovery
 
 __all__ = [
     "ARTEFACT_NAMES",
     "panels",
     "layers",
     "board_candidates",
-    "cached_model",
-    "part_from_model",
     "catalogue_parts",
+    "fitting_parts",
     "output_path",
 ]
 
@@ -86,26 +83,6 @@ def board_candidates(
     return tuple(sorted(found, key=lambda path: (not path.stem.endswith("-pcb"), path.name)))
 
 
-def cached_model(part: str, cache: Path) -> Discovery[Path] | None:
-    """The enclosure model already cached for this part, if one is."""
-    candidate = cache / f"{part}.stp"
-    if not candidate.is_file():
-        return None
-    return Discovery(candidate, f"cached for {part}")
-
-
-def part_from_model(path: Path) -> str | None:
-    """The catalogue part a model's filename names, or ``None``.
-
-    Which model this is, never which part the panel is drawn for: the stem
-    is what keys the enclosure cache, and resolving it to ``case`` would
-    hand a guess to the drill stage as a declaration. ``stompdrill`` owns
-    that rule and owns verifying its answer against the measurement;
-    restating either here would give one question two answers.
-    """
-    return infer_part_name(path)
-
-
 def catalogue_parts() -> tuple[str, ...]:
     """Every base part the enclosure catalogue lists, for a picker to offer.
 
@@ -114,6 +91,30 @@ def catalogue_parts() -> tuple[str, ...]:
     offers answers the tool already recognises rather than inventing a list.
     """
     return tuple(sorted({part for parts in footprints().values() for part in parts}))
+
+
+def fitting_parts(
+    panel: Path, drill_layer: str, reference_layer: str, form_depth: int
+) -> tuple[str, ...]:
+    """Every catalogue part this artwork's reference outline admits.
+
+    The workbench asks before a run so a picker can offer what the tool would
+    accept. Empty is one answer with several causes -- no outline, nothing
+    fitting, or work that would not complete -- because each narrows nothing,
+    and the run is what reports why properly. The match is inside the guard
+    with the read: a caller waiting on this cannot tell them apart, and one
+    that raised would leave it waiting.
+    """
+    try:
+        raw = AiPdfSource(
+            panel,
+            drill_layer=drill_layer,
+            reference_layer=reference_layer,
+            form_depth=form_depth,
+        ).read()
+        return () if raw.reference is None else parts_fitting(raw.reference)
+    except Exception:  # noqa: BLE001 - a read that fails narrows nothing
+        return ()
 
 
 def output_path(format_name: str, panel: Path) -> Path:

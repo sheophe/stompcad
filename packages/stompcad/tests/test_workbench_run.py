@@ -13,7 +13,7 @@ import pytest
 from textual.pilot import Pilot
 from textual.widgets import Input, SelectionList, Static
 
-from stompcad import cli
+from stompcad import cli, discover
 from stompcad.cancel import EXIT_CANCELLED, Cancelled
 from stompcad.drive import Driver, Project, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan
@@ -671,6 +671,37 @@ async def test_an_event_no_handler_can_apply_ends_the_run_and_not_the_pump() -> 
 
 
 @pytest.mark.asyncio
+async def test_the_sidebar_marks_a_place_while_the_run_is_still_working() -> None:
+    """Decision 4: the marker says how far the project has got, as it gets there.
+
+    A change made before a run is answered by the steps that run under it,
+    so each place is marked as its own steps complete. Every marker landing
+    together at the end tells a builder nothing while the run is the thing
+    they are watching.
+    """
+    steps = DRILL_AND_DOCK.steps
+    runner = _Stream([
+        wire.Began(DRILL_AND_DOCK),
+        wire.Settled(steps[0], "8 holes"),
+        wire.Settled(steps[1], "8 holes, 3 tools"),
+    ])
+    app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
+    async with app.run_test() as pilot:
+        for _ in range(400):
+            if not app.session.fit_pending:
+                break
+            await pilot.pause()
+        app.session.set(Place.ENCLOSURE, "case", "1590B2")
+        await pilot.press("r", "ctrl+r")
+        for _ in range(400):
+            await pilot.pause()
+            if app.outcomes.get("quantise") is not None:
+                break
+        assert app.session.phase is Phase.RUNNING, "the stream ends without completing"
+        assert "\u2713 Enclosure" in app.sidebar_text()
+
+
+@pytest.mark.asyncio
 async def test_a_run_that_cannot_be_started_keeps_the_workbench() -> None:
     """Decision 1: a transient failure must not cost somebody the session they opened.
 
@@ -1086,7 +1117,7 @@ async def test_an_event_the_pump_carries_in_is_applied_on_the_app_thread() -> No
 
     ``_pump`` reads every event on its own worker thread. ``show`` is
     patched to record the thread it actually runs on rather than trusting
-    that ``_tell``'s crossing happened by its name alone -- a direct call
+    that ``tell``'s crossing happened by its name alone -- a direct call
     from the worker would pass a test that only checked ``call_from_thread``
     was named, since nothing stops a name being called from the wrong place.
     """
@@ -1188,3 +1219,40 @@ async def test_a_died_finishes_the_session() -> None:
         await settle(pilot, app)
     assert runner.starts == 2
     assert app.session.phase is Phase.DONE
+
+
+@pytest.mark.asyncio
+async def test_an_autostarted_run_waits_for_the_read_and_starts_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: `on_mount` asks whether it may run while its own read is
+    outstanding, so the start belongs to the read landing -- and belongs to it
+    once, not once for each route that could have taken it."""
+    reading = Event()
+    starts: list[int] = []
+    composed = _Compose(hold=False)
+
+    def counting(*arguments: object) -> tuple[Driver, _Data, _Data | None]:
+        starts.append(1)
+        return composed(*arguments)  # type: ignore[arg-type]
+
+    def slow(*_arguments: object) -> tuple[str, ...]:
+        reading.wait(5)
+        return ()
+
+    monkeypatch.setattr(discover, "fitting_parts", slow)
+    app = Workbench(
+        session(), launch=Launch(panel=PANEL), runner=ThreadRunner(counting), autostart=True
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert _phase(app) is Phase.IDLE
+        reading.set()
+        await settle(pilot, app)
+        assert _phase(app) is Phase.DONE
+        assert starts == [1]
+
+
+def _phase(app: Workbench) -> Phase:
+    """Where the run stands, read fresh: mypy would keep a narrowed one narrow."""
+    return app.session.phase

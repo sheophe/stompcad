@@ -285,14 +285,17 @@ def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
     kernel precision, so ``build_frame``'s own tie-break (the lower-indexed
     free axis) -- not "the larger span" -- governs it there. Executed, not
     assumed: this is what the ADR's narrowing paragraph reports, rather than
-    a premise nothing checked. Requires a pre-fetched model (``python
-    tools/fetch_case_model.py 1590LB``); skipped, not failed, if absent.
+    a premise nothing checked. Requires a model already in the shared cache;
+    skipped, not failed, if absent.
     """
-    from tools.fetch_case_model import cache_dir
+    from .hammond import cache_dir
 
     path = cache_dir() / "1590LB.stp"
     if not path.is_file():
-        pytest.skip("1590LB not cached; run `python tools/fetch_case_model.py 1590LB`")
+        pytest.skip(
+            "1590LB not cached; run the stompcad workbench for that part, "
+            "or fetch it by hand"
+        )
 
     document = read_step(path)
     box = select_solid(document, CaseFace.BOX)

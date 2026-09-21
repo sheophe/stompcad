@@ -47,8 +47,8 @@ def test_a_step_prints_when_it_finishes_not_when_it_starts() -> None:
     writer.update(0.0, ("read panel",))
     assert out.getvalue() == ""
 
-    writer.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp")
-    assert out.getvalue() == "  read panel      tar.ai, 1590B.stp\n"
+    writer.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai")
+    assert out.getvalue() == "  read panel      tar.ai\n"
 
 
 def test_finish_step_before_begin_leaves_the_label_unpadded() -> None:
@@ -56,9 +56,9 @@ def test_finish_step_before_begin_leaves_the_label_unpadded() -> None:
     out = io.StringIO()
     writer = PlainWriter(out)
 
-    writer.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai, 1590B.stp")
+    writer.finish_step(DRILL_AND_DOCK.steps[0], "tar.ai")
 
-    assert out.getvalue() == "  read panel  tar.ai, 1590B.stp\n"
+    assert out.getvalue() == "  read panel  tar.ai\n"
 
 
 def test_report_writes_each_line_terminated_and_nothing_else() -> None:

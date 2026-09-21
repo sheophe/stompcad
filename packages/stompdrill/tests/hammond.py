@@ -7,15 +7,18 @@ tests assert against, cross-checked against stompdrill's own catalogue.
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
+import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from urllib.request import Request, urlopen
 
 import pytest
-
-from tools.fetch_case_model import cache_dir
 
 __all__ = [
     "HammondModel", "MODELS", "BB_PROBES", "BB_RELIEF_MM",
@@ -110,24 +113,56 @@ def model_path(part: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def cache_dir() -> Path:
+    """Where models are cached, spelled from the same published rule stompcad uses.
+
+    Not imported from ``stompcad``: the dependency order runs the other way,
+    and these tests must pass with only this package installed. The rule is
+    ``$XDG_CACHE_HOME``, else ``~/.cache``, then ``stompcad/cases``.
+    """
+    root = os.environ.get("XDG_CACHE_HOME")
+    base = Path(root) if root else Path.home() / ".cache"
+    return base / "stompcad" / "cases"
+
+
+def _fetch(part: str) -> Path:
+    """Download one model into the cache. Test-only, and deliberately small.
+
+    Written to a temporary file and renamed, as the application's own fetcher
+    does: this shares that cache, and a half-written file left here would be
+    trusted by every later run of the workbench.
+    """
+    url = f"https://www.hammfg.com/files/parts/stp/{part}.zip"
+    request = Request(url, headers={"User-Agent": "stompdrill-tests (+hammfg.com)"})
+    with urlopen(request) as response:  # noqa: S310 - fixed host, fixed part names
+        payload = bytes(response.read())
+    with tempfile.TemporaryDirectory() as scratch:
+        archive = Path(scratch) / f"{part}.zip"
+        archive.write_bytes(payload)
+        with zipfile.ZipFile(archive) as zf:
+            entry = next(
+                name for name in zf.namelist() if Path(name).name.upper() == f"{part}.STP"
+            )
+            cache_dir().mkdir(parents=True, exist_ok=True)
+            target = cache_dir() / f"{part}.stp"
+            handle, staged = tempfile.mkstemp(dir=cache_dir(), prefix=f".{part}.")
+            try:
+                with zf.open(entry) as source, os.fdopen(handle, "wb") as sink:
+                    shutil.copyfileobj(source, sink)
+                os.replace(staged, target)
+            except BaseException:
+                Path(staged).unlink(missing_ok=True)
+                raise
+    return target
+
+
 def require_model(part: str) -> Path:
     """The cached model, fetched if absent. Skips the test when unobtainable."""
     found = model_path(part)
     if found is not None:
         return found
     try:
-        from tools.fetch_case_model import download, extract, url_for
-    except ImportError:  # pragma: no cover - the helper is always present here
-        pytest.skip(f"cannot fetch {part}: tools.fetch_case_model is unavailable")
-
-    import tempfile
-
-    try:
-        payload = download(url_for(part))
-        with tempfile.TemporaryDirectory() as scratch:
-            archive = Path(scratch) / f"{part}.zip"
-            archive.write_bytes(payload)
-            return extract(archive, part, cache_dir())
+        return _fetch(part)
     except Exception as failure:  # noqa: BLE001 - any failure is a skip, not an error
         pytest.skip(f"cannot fetch {part}: {failure}")
 

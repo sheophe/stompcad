@@ -83,7 +83,9 @@ read the drill document through `stompmodel` without importing `stompdrill`.
 `stompcad` calls each phase of both tools directly, in the order their own
 command lines call them, and holds each result between the steps. It reports
 the run as nine named steps, writes through the same staged-write transaction
-both tools use, and produces artefacts byte-identical to theirs. See
+both tools use, and produces artefacts byte-identical to theirs. The
+enclosure step identifies the panel and then opens the model the identified
+part names, so the model is acquired where the part is decided. See
 [ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 The orchestrator's presentation is the workbench on a terminal and the plain
@@ -98,7 +100,8 @@ same step lines a pipe, a dumb terminal or a CI runner reads as a log of
 what happened. The workbench renders strings, positions and paths, and
 reaches for a viewer rather than a kernel: `stompcad.workbench.session`
 holds the rules a project resolves and stales by, and the Textual modules
-under `stompcad.workbench` draw them. See
+under `stompcad.workbench` draw them. `stompcad.cases` owns the enclosure
+model cache — where it is, what is in it, and fetching what is not. See
 [docs/specs/stompcad-workbench.md](specs/stompcad-workbench.md).
 
 Beside that process boundary sits a second, narrower one: the viewer.

@@ -1,12 +1,12 @@
-"""There is exactly one statement of how an artefact's bytes reach a path.
+"""How an artefact's bytes reach a path has one home and a named set of exclusions.
 
-``stompmodel.protocols`` (``stage_payload``/``StagedWrite.commit``) is the
-rule's one home: the atomic ``os.replace`` and the ``.{name}.{hex}.tmp``
-temporary naming it depends on. A module that restates either itself is the
-defect ticket 26 exists to remove. This gate lives in the owner's own suite
-(ticket 25's convention). It must not fire on ``stompgeom.writer``'s kernel
-scratch file (``tempfile.mkstemp``), already carved out by ADR-0005's
-"caller-visible" qualifier. See ADR-0001, ADR-0005 and ADR-0008.
+``stompmodel.protocols`` (``stage_payload``/``StagedWrite.commit``) is that
+home: the atomic ``os.replace`` and the ``.{name}.{hex}.tmp`` temporary naming
+it depends on. A module that restates either for a caller-visible artefact is
+the defect ticket 26 exists to remove; ``_SANCTIONED`` below names every
+definition excluded from that, and says why. This gate lives in the owner's
+own suite (ticket 25's convention), and never fires on ``stompgeom.writer``'s
+kernel scratch file. See ADR-0001, ADR-0005 and ADR-0008.
 """
 
 from __future__ import annotations
@@ -23,14 +23,24 @@ PACKAGE = Path(__file__).resolve().parent.parent
 #: generator -- a private copy could as easily hide there as in a package.
 SOURCE_ROOTS = tuple(pkg / "src" for pkg in member_package_dirs()) + (REPO / "tools",)
 OWNER_MODULE = REPO / "packages" / "stompmodel" / "src" / "stompmodel" / "protocols.py"
+CACHE_MODULE = REPO / "packages" / "stompcad" / "src" / "stompcad" / "cases.py"
 
-#: The definitions allowed to state the mechanism: ``stage_payload`` builds
-#: the temporary name and ``StagedWrite.commit`` performs the atomic
-#: replace. ``discard`` is deliberately absent -- it states neither shape,
-#: and sanctioning a definition pre-emptively is the too-wide exemption
-#: this replaces. A definition, not a file: a second statement added
-#: elsewhere in ``protocols.py`` is a breach like any other.
-_SANCTIONED = frozenset({"stage_payload", "commit"})
+#: The definitions allowed to state the mechanism, by the module each is in.
+#: In the owner: ``stage_payload`` builds the temporary name and
+#: ``StagedWrite.commit`` performs the atomic replace. ``discard`` is
+#: deliberately absent -- it states neither shape, and sanctioning a
+#: definition pre-emptively is the too-wide exemption this replaces. In
+#: ``stompcad.cases``: ``extract`` renames a downloaded enclosure model into
+#: the machine-local cache. It is excluded because ADR-0005 scopes the
+#: restriction to a requested output path, and because staging the whole of
+#: a STEP model through a payload would materialise it in memory to reuse a
+#: writer it does not need. It owes the same atomicity for its own reason: a
+#: half-written model there would be trusted by every later run. A definition,
+#: not a file: a second statement elsewhere in either module is a breach.
+_SANCTIONED: dict[Path, frozenset[str]] = {
+    OWNER_MODULE: frozenset({"stage_payload", "commit"}),
+    CACHE_MODULE: frozenset({"extract"}),
+}
 
 
 def _outside(tree: ast.Module, sanctioned: Collection[str] = ()) -> list[ast.AST]:
@@ -174,7 +184,7 @@ def test_a_second_statement_in_the_rules_own_home_is_caught() -> None:
         "    os.replace(tmp, path)\n"
         '    return f".{target.name}.{id(target)}.tmp"\n'
     )
-    assert _offending_lines(spliced, _SANCTIONED)
+    assert _offending_lines(spliced, _SANCTIONED[OWNER_MODULE])
 
 
 def test_the_exemption_covers_the_owning_definitions_and_nothing_more() -> None:
@@ -188,7 +198,21 @@ def test_the_exemption_covers_the_owning_definitions_and_nothing_more() -> None:
     home = OWNER_MODULE.read_text(encoding="utf-8")
 
     assert _offending_lines(home), "the home no longer states the mechanism it owns"
-    assert _offending_lines(home, _SANCTIONED) == []
+    assert _offending_lines(home, _SANCTIONED[OWNER_MODULE]) == []
+
+
+def test_the_cache_exemption_covers_one_definition_and_nothing_more() -> None:
+    """The same pair of probes for the enclosure cache's own atomic write.
+
+    Unexempted it really does state the mechanism, so the exemption is
+    load-bearing and a renamed or moved ``extract`` fails loudly rather
+    than silently widening; exempted, nothing else in the module states it.
+    """
+    assert CACHE_MODULE in _source_files(), "the sanctioned module is no longer where this looks"
+    source = CACHE_MODULE.read_text(encoding="utf-8")
+
+    assert _offending_lines(source), "the cache no longer states the mechanism it was given"
+    assert _offending_lines(source, _SANCTIONED[CACHE_MODULE]) == []
 
 
 def test_the_scan_reaches_every_workspace_member():
@@ -214,14 +238,15 @@ def test_the_scan_reaches_every_workspace_member():
 # ---------------------------------------------------------------------------
 
 
-def test_no_module_outside_stompmodel_protocols_writes_an_artefacts_bytes():
-    """Criterion 1 and 6: the mechanism has one statement, in one module.
+def test_no_unsanctioned_definition_states_the_write_mechanism():
+    """Criterion 1 and 6: the mechanism has one home, and its exclusions are named.
 
-    No definition outside ``stage_payload`` and ``StagedWrite.commit`` may
-    call ``os.replace`` or build the ``.{...}.{...}.tmp`` temporary name --
-    both are the owner's alone, published as ``stage_payload`` and the two
-    verbs on the ``StagedWrite`` it returns. A definition, not a module:
-    a second statement in ``protocols.py`` itself is caught here too.
+    No definition may call ``os.replace`` or build the ``.{...}.{...}.tmp``
+    temporary name unless ``_SANCTIONED`` names it: the owner's own
+    ``stage_payload`` and ``StagedWrite.commit``, and the exclusions listed
+    beside them with their reasons. A definition, not a module -- a second
+    statement in ``protocols.py`` itself, or beside a sanctioned definition
+    in a module holding one, is caught here too.
     """
     offenders = {
         str(path): lines
@@ -229,13 +254,14 @@ def test_no_module_outside_stompmodel_protocols_writes_an_artefacts_bytes():
         for lines in [
             _offending_lines(
                 path.read_text(encoding="utf-8"),
-                _SANCTIONED if path == OWNER_MODULE else (),
+                _SANCTIONED.get(path, ()),
             )
         ]
         if lines
     }
     assert offenders == {}, (
-        "a definition outside stage_payload and StagedWrite.commit performs "
-        "the atomic replace or builds the temporary-name shape itself -- call "
-        "stage_payload and commit/discard the value it returns instead"
+        "a definition _SANCTIONED does not name performs the atomic replace or "
+        "builds the temporary-name shape itself -- if it writes a caller-visible "
+        "artefact, call stage_payload and commit/discard the value it returns; if "
+        "it writes something else, name it in _SANCTIONED with the reason"
     )

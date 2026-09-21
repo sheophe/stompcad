@@ -1,13 +1,12 @@
 """The project file: declared intent, beside the artwork, named from it.
 
 Spec decisions 8 and 9. One object per configuration place, keyed by the
-place's own name, plus a schema version. The panel itself is absent: the
-manifest is named after it, so recording it would be a second answer to a
-question the filename already settles.
+place's own name, plus a schema version. The panel itself is absent: its
+name is the manifest's own name, so storing it again would be redundant.
 
-Paths are stored relative to this file's own directory. An absolute path
-would survive exactly until the project was moved or shared, and a project
-that stops working when it is copied is not a project file.
+Paths are stored relative to this file's directory: an absolute path would
+survive only until the project was moved or shared, and a project that
+breaks when copied is not a project file.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ VERSION = 1
 #: field added to ``settings`` without a row here is never remembered.
 PLACES: dict[str, frozenset[str]] = {
     "artwork": frozenset({"drill_layer", "reference_layer", "form_depth"}),
-    "enclosure": frozenset({"case", "case_model", "case_face", "case_margin_mm"}),
+    "enclosure": frozenset({"case", "case_face", "case_margin_mm"}),
     "drilling": frozenset({
         "grid_mm", "grid_warn_mm", "drill_standard", "drill_sizes",
         "no_drill_sizes", "title",
@@ -87,7 +86,6 @@ _SHAPES: dict[str, _Shape] = {
     "reference_layer": _Shape.TEXT,
     "form_depth": _Shape.COUNT,
     "case": _Shape.TEXT_OR_NULL,
-    "case_model": _Shape.PATH_OR_NULL,
     "case_face": _Shape.TEXT,
     "case_margin_mm": _Shape.NUMBER,
     "grid_mm": _Shape.NUMBER,
@@ -165,7 +163,6 @@ def _found(value: Any) -> str:
 #: is handled separately: it is stored as a mapping of format to path, so it
 #: round-trips through its own branch rather than through these two shapes.
 _PATHS: dict[str, frozenset[str]] = {
-    "enclosure": frozenset({"case_model"}),
     "boards": frozenset({"boards"}),
 }
 
@@ -184,15 +181,13 @@ class ManifestError(StompError):
 class Manifest:
     """What a project declares, and what was passed over on the way in.
 
-    ``values`` is what the run resolves from, so it holds only what this
-    build knows, with each path resolved against the project. ``stored`` is
-    the file: every section and key it declared, in the spelling it used --
-    a relative string, not the ``Path`` ``values`` resolves it to -- and
-    including the keys this build does not recognise. ``payload_for``
-    carries a held declaration forward through ``stored``, so a value
-    already on disk reaches the next file byte-identical to what the project
-    declared, and a key a later version wrote survives an older build
-    opening that file rather than being deleted by it.
+    ``values`` is what the run resolves from, so it holds only what this build
+    knows, each path already resolved against the project. ``stored`` is the
+    file itself: every section and key it declared, in the relative spelling it
+    used -- including keys this build does not recognise. ``payload_for``
+    carries a held declaration through ``stored``, so a value on disk reaches
+    the next file byte-identical to the project's declaration, and a key a
+    later version wrote survives an older build opening it.
     """
 
     values: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -208,15 +203,13 @@ def manifest_path(panel: Path) -> Path:
 def read(panel: Path) -> Manifest:
     """This project's declarations, or an empty one where there is no file.
 
-    An unknown key is a note rather than a refusal, which is what lets a
-    file written by a later version still open; it is ignored by the run
-    and kept by the file, because refusing to resolve from a key is not a
-    reason to delete it. A file that is not an object, or not JSON at all,
-    is refused: a manifest that cannot be understood must not be silently
-    treated as absent. A known key of the wrong shape is refused here too,
-    and for the same reason the options a flag carries are checked before
-    the artwork is opened: a declaration only a later step would find
-    unusable reaches that step as a traceback, part-way into a run.
+    An unknown key is a note, not a refusal -- refusing to resolve from it is
+    not a reason to delete it, so a later version's file still opens here,
+    though the run ignores the key. A file that is not an object, or not JSON
+    at all, is refused: an unreadable manifest must not be silently treated as
+    absent. A known key of the wrong shape is refused too, for the same reason
+    a flag's options are checked before the artwork opens: a bad declaration
+    should not reach a later step as a traceback.
     """
     path = manifest_path(panel)
     if not path.is_file():

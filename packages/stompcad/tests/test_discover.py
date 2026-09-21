@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from stompcad import discover
-from tests.conftest import TAR_AI, case_model
+from stompdrill.pipeline.enclosure import fitting_parts as parts_fitting
+from stompdrill.sources import AiPdfSource
+from tests.conftest import TAR_AI
 
 
 def test_one_panel_in_a_directory_is_found(tmp_path: Path) -> None:
@@ -49,24 +51,6 @@ def test_a_pcb_suffix_sorts_first_because_it_is_ours() -> None:
     assert discover.board_candidates.__doc__ is not None
 
 
-def test_a_part_is_read_from_a_model_filename(tmp_path: Path) -> None:
-    assert discover.part_from_model(tmp_path / "1590BB.stp") == "1590BB"
-    assert discover.part_from_model(tmp_path / "not-a-part.stp") is None
-
-
-@pytest.mark.hammond
-def test_a_cached_model_is_found_by_part() -> None:
-    cached = case_model("1590B")
-    assert cached is not None
-    found = discover.cached_model("1590B", cached.parent)
-    assert found is not None and found.value == cached
-    assert found.detail == "cached for 1590B"
-
-
-def test_no_cached_model_is_none_not_a_fabricated_path(tmp_path: Path) -> None:
-    assert discover.cached_model("1590B", tmp_path) is None
-
-
 def test_every_format_has_a_file_name() -> None:
     from stompcad.drive import DOCK_TARGET_NAMES
     from stompdrill.emitters import available
@@ -90,3 +74,39 @@ def test_the_catalogue_parts_are_the_tool_s_own_once_each_in_order() -> None:
     parts = discover.catalogue_parts()
     assert set(parts) == {part for names in footprints().values() for part in names}
     assert list(parts) == sorted(set(parts))
+
+
+def test_the_fitting_parts_are_read_from_the_artworks_own_outline() -> None:
+    """tar.ai is drawn to a 1590B backplate, which several parts share."""
+    parts = discover.fitting_parts(TAR_AI, "Drill", "Background", 1)
+    assert "1590B" in parts
+
+
+def test_the_fit_is_the_tools_own_answer_rather_than_a_second_opinion() -> None:
+    """The control that keeps one matching rule: same file, same parts."""
+    raw = AiPdfSource(TAR_AI, drill_layer="Drill", reference_layer="Background").read()
+    assert raw.reference is not None
+    assert discover.fitting_parts(TAR_AI, "Drill", "Background", 1) == parts_fitting(raw.reference)
+
+
+def test_an_artwork_that_cannot_be_read_narrows_nothing(tmp_path: Path) -> None:
+    """A read that fails is not an answer about enclosures, so it offers none."""
+    nothing = tmp_path / "not-artwork.ai"
+    nothing.write_bytes(b"this is not a PDF")
+    assert discover.fitting_parts(nothing, "Drill", "Background", 1) == ()
+
+
+def test_a_layer_the_artwork_has_not_got_narrows_nothing() -> None:
+    assert discover.fitting_parts(TAR_AI, "Drill", "NoSuchLayer", 1) == ()
+
+
+def test_a_match_that_will_not_complete_narrows_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole answer is guarded, not the read alone: a caller waiting on a
+    worker thread cannot tell a match that broke from a file that would not
+    read, and one that raised would leave it waiting for ever."""
+
+    def broken(_outline: object) -> tuple[str, ...]:
+        raise RuntimeError("the matching rule broke")
+
+    monkeypatch.setattr(discover, "parts_fitting", broken)
+    assert discover.fitting_parts(TAR_AI, "Drill", "Background", 1) == ()
