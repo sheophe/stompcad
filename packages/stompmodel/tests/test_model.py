@@ -1299,6 +1299,15 @@ def test_the_drilled_plate_keeps_the_artwork_outline_it_was_drawn_against():
     assert data.for_surface(SURFACE_FACE).reference == outline
 
 
+def test_a_projection_of_an_empty_registration_stays_empty():
+    """Absent, not empty, is a distinction a projection must not erase: a
+    reader of the projected document still needs to tell "no model was
+    supplied" from "a model was supplied and its walls were left alone"."""
+    data = DrillData().with_surfaces([])
+
+    assert data.for_surface(SURFACE_FACE).surfaces == ()
+
+
 def test_projecting_onto_a_wall_the_document_never_registered_is_refused():
     with pytest.raises(ValueError, match="left"):
         DrillData(holes=(_hole_on("left"),)).for_surface("left")
