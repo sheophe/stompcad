@@ -15,6 +15,7 @@ from stompmodel.model import (
     CaseFace,
     CaseRegistration,
     DrillData,
+    DrilledSurface,
     EnclosureMatch,
     Hole,
     Origin,
@@ -1160,3 +1161,144 @@ def test_renumbering_and_moving_a_hole_keep_its_surface():
     assert hole.moved_to(Nanometre(5), Nanometre(5)).surface == "top"
     assert hole.with_diameter(Nanometre(8_000_000)).surface == "top"
     assert hole.translated(Nanometre(1), Nanometre(1)).surface == "top"
+
+
+# --------------------------------------------------------------------------
+# a document states each surface, and projects onto one
+# --------------------------------------------------------------------------
+
+
+def a_frame(origin_nm=(0, 0, 0)) -> FaceFrame:
+    """A right-handed frame whose ``w`` is +Z: the one every surface test needs."""
+    return FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(origin_nm[0]), Nanometre(origin_nm[1]), Nanometre(origin_nm[2])),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+
+
+def a_surface(key: str = "left", width_nm: int = 30_000_000, height_nm: int = 20_000_000):
+    """One surface centred on its own frame, 2 mm thick."""
+    return DrilledSurface(
+        key=key,
+        frame=a_frame(),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-width_nm // 2),
+            Nanometre(-height_nm // 2),
+            Nanometre(width_nm // 2),
+            Nanometre(height_nm // 2),
+        ),
+    )
+
+
+def _hole_on(surface: str) -> Hole:
+    return Hole.from_measurement(
+        Nanometre(0), Nanometre(0), Nanometre(7_000_000), surface=surface
+    )
+
+
+def test_a_surface_states_the_extent_its_artefacts_are_framed_by():
+    surface = a_surface(width_nm=30_000_000, height_nm=20_000_000)
+
+    assert surface.extent.width_nm == 30_000_000
+    assert surface.extent.height_nm == 20_000_000
+
+
+def test_a_surface_no_enclosure_has_is_refused():
+    with pytest.raises(ValueError, match="sideways"):
+        DrilledSurface(
+            key="sideways",
+            frame=a_frame(),
+            thickness_nm=Nanometre(2_000_000),
+            bounds_nm=(Nanometre(0), Nanometre(0), Nanometre(1), Nanometre(1)),
+        )
+
+
+def test_a_surface_with_no_material_behind_it_is_refused():
+    """Thickness is what a cut has to clear; zero would drill nothing and a
+    negative depth would drill the wrong way."""
+    with pytest.raises(ValueError, match="thickness"):
+        DrilledSurface(
+            key="left",
+            frame=a_frame(),
+            thickness_nm=Nanometre(0),
+            bounds_nm=(Nanometre(0), Nanometre(0), Nanometre(1), Nanometre(1)),
+        )
+
+
+def test_a_surface_whose_bounds_are_inverted_is_refused():
+    with pytest.raises(ValueError, match="bounds"):
+        DrilledSurface(
+            key="left",
+            frame=a_frame(),
+            thickness_nm=Nanometre(2_000_000),
+            bounds_nm=(Nanometre(10), Nanometre(0), Nanometre(-10), Nanometre(5)),
+        )
+
+
+def test_a_document_registers_no_surface_until_one_is_recorded():
+    """Absent, not empty: a reader must tell "no model was supplied" from
+    "a model was supplied and its walls were left alone"."""
+    assert DrillData().surfaces is None
+    assert DrillData().surface_of(SURFACE_FACE) is None
+
+
+def test_two_records_for_one_surface_are_refused():
+    with pytest.raises(ValueError, match="twice"):
+        DrillData().with_surfaces([a_surface("left"), a_surface("left")])
+
+
+def test_a_document_names_the_one_surface_its_holes_are_on():
+    holeless = DrillData()
+    panel = DrillData(holes=(_hole_on(SURFACE_FACE),))
+    wall = DrillData(holes=(_hole_on("left"),))
+    both = DrillData(holes=(_hole_on(SURFACE_FACE), _hole_on("left")))
+
+    assert holeless.surface == SURFACE_FACE
+    assert panel.surface == SURFACE_FACE
+    assert wall.surface == "left"
+    assert both.surface is None
+
+
+def test_the_drilled_plate_is_always_a_key_even_with_no_holes_on_it():
+    """A run has always written one drill file; a document whose holes all
+    landed on walls must still write the panel's, empty, or a builder would
+    think the panel was never drilled."""
+    data = DrillData(holes=(_hole_on("top"), _hole_on("left")))
+
+    assert data.surface_keys() == (SURFACE_FACE, "left", "top")
+
+
+def test_a_projection_keeps_only_its_own_holes_and_its_own_extent():
+    data = DrillData(
+        holes=(_hole_on(SURFACE_FACE), _hole_on("left"), _hole_on("left")),
+        reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000)),
+    ).with_surfaces([a_surface("left", 30_000_000, 20_000_000)])
+
+    wall = data.for_surface("left")
+
+    assert len(wall.holes) == 2
+    assert wall.surface == "left"
+    assert wall.reference is not None
+    assert (wall.reference.width_nm, wall.reference.height_nm) == (30_000_000, 20_000_000)
+    assert wall.surfaces is not None and len(wall.surfaces) == 1
+
+
+def test_the_drilled_plate_keeps_the_artwork_outline_it_was_drawn_against():
+    """The panel's boundary is a measurement off the artwork, not a region
+    bound, and it is what its sheet dimensions and its Excellon count from."""
+    outline = ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000))
+    data = DrillData(holes=(_hole_on(SURFACE_FACE),), reference=outline).with_surfaces(
+        [a_surface(SURFACE_FACE, 90_000_000, 40_000_000)]
+    )
+
+    assert data.for_surface(SURFACE_FACE).reference == outline
+
+
+def test_projecting_onto_a_wall_the_document_never_registered_is_refused():
+    with pytest.raises(ValueError, match="left"):
+        DrillData(holes=(_hole_on("left"),)).for_surface("left")
