@@ -11,7 +11,7 @@ import pytest
 from stompdrill.pipeline import RouteHoles
 from stompmodel.model import DrillData, Hole, RawHole, ReferenceOutline
 from stompmodel.units import Millimetre, Nanometre
-from tests.conftest import at
+from tests.conftest import at, make_data
 
 __all__: list[str] = []
 
@@ -215,3 +215,85 @@ def test_a_realistic_panel_routes_without_the_cubic_term() -> None:
     assert len(routed.holes) == 300
     assert [index for index, _ in routed.numbered()] == list(range(1, 301))
     assert elapsed < 2.0, f"routing 300 holes took {elapsed:.2f}s; the cubic form took 11.95 s"
+
+
+def test_the_drilled_plate_is_numbered_before_any_wall():
+    """Surface-major, in the published order: ADR-0006's seventh amendment."""
+    data = make_data(
+        at(0, 0, 7_000_000, surface="top"),
+        at(0, 0, 7_000_000, surface="left"),
+        at(0, 0, 7_000_000),
+    )
+
+    routed = RouteHoles().apply(data)
+    order = [(hole.index, hole.surface) for hole in routed.holes]
+
+    assert sorted(order) == [(1, "face"), (2, "left"), (3, "top")]
+
+
+def test_a_tool_block_is_contiguous_within_a_surface_and_does_not_span_two():
+    """Two diameters on each of two surfaces: four blocks, not two."""
+    data = make_data(
+        at(-10_000_000, 0, 5_000_000),
+        at(10_000_000, 0, 7_000_000),
+        at(-10_000_000, 0, 5_000_000, surface="left"),
+        at(10_000_000, 0, 7_000_000, surface="left"),
+    )
+
+    routed = RouteHoles().apply(data)
+    sequence = [
+        (hole.surface, hole.diameter_nm)
+        for hole in sorted(routed.holes, key=lambda h: h.index or 0)
+    ]
+
+    assert sequence == [
+        ("face", 5_000_000),
+        ("face", 7_000_000),
+        ("left", 5_000_000),
+        ("left", 7_000_000),
+    ]
+
+
+def test_the_plate_keeps_its_numbers_when_walls_are_added_and_routed_again():
+    """What lets the panel's artefacts be written before a wall hole exists:
+    a second pass appends, and cannot renumber what is already on a sheet."""
+    panel = make_data(
+        at(-19_000_000, -18_750_000, 5_000_000),
+        at(19_000_000, -18_750_000, 5_000_000),
+        at(0, 18_000_000, 7_000_000),
+    )
+    first = RouteHoles().apply(panel)
+
+    second = RouteHoles().apply(
+        first.with_holes(
+            first.holes + (at(0, 0, 12_000_000, surface="left"),)
+        )
+    )
+
+    before = {(h.x_nm, h.y_nm, h.diameter_nm): h.index for h in first.holes}
+    after = {
+        (h.x_nm, h.y_nm, h.diameter_nm): h.index
+        for h in second.holes
+        if h.surface == "face"
+    }
+    assert before == after
+    assert [h.index for h in second.holes if h.surface == "left"] == [4]
+
+
+def test_one_surface_routes_exactly_as_it_did_before():
+    """The byte lock's own claim, at the stage that decides every number."""
+    data = make_data(
+        at(-19_000_000, -18_750_000, 5_000_000),
+        at(19_000_000, -18_750_000, 5_000_000),
+        at(-40_000_000, 18_000_000, 7_000_000),
+        at(40_000_000, 18_000_000, 7_000_000),
+    )
+
+    routed = RouteHoles().apply(data)
+
+    assert sorted((h.index, h.x_nm, h.y_nm) for h in routed.holes) == [
+        (1, -19_000_000, -18_750_000),
+        (2, 19_000_000, -18_750_000),
+        (3, -40_000_000, 18_000_000),
+        (4, 40_000_000, 18_000_000),
+    ]
