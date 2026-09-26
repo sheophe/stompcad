@@ -1,0 +1,107 @@
+{
+  "format": "stompcad-drill-data",
+  "version": 6,
+  "units": "nm",
+  "origin": "centre",
+  "source": {
+    "path": "panel.ai",
+    "drill_layer": "Drill",
+    "reference_layer": "",
+    "layers_found": [],
+    "producer": "stompdrill"
+  },
+  "reference": {
+    "width_nm": 112400000,
+    "height_nm": 60500000,
+    "centre_x_nm": 0,
+    "centre_y_nm": 0,
+    "raw": {
+      "width": 112.4,
+      "height": 60.5
+    }
+  },
+  "tools": [
+    {
+      "number": 1,
+      "diameter_nm": 5000000,
+      "count": 1
+    },
+    {
+      "number": 2,
+      "diameter_nm": 7000000,
+      "count": 1
+    }
+  ],
+  "holes": [
+    {
+      "x_nm": -19000000,
+      "y_nm": -18750000,
+      "diameter_nm": 5000000,
+      "tool": 1,
+      "raw": {
+        "x": -19.0,
+        "y": -18.75,
+        "diameter": 5.0
+      },
+      "index": 1
+    },
+    {
+      "x_nm": 19000000,
+      "y_nm": -18750000,
+      "diameter_nm": 7000000,
+      "tool": 2,
+      "raw": {
+        "x": 19.0,
+        "y": -18.75,
+        "diameter": 7.0
+      },
+      "index": 2
+    }
+  ],
+  "diagnostics": [],
+  "processing": [
+    {
+      "name": "snap",
+      "parameters": {
+        "grid_nm": 500000
+      }
+    }
+  ],
+  "enclosure": {
+    "family": "Hammond 1590",
+    "length_nm": 112400000,
+    "width_nm": 60500000,
+    "candidates": [
+      "1590B"
+    ],
+    "rotated": false,
+    "selected_part": "1590B"
+  },
+  "case": {
+    "part": "1590B",
+    "face": "box",
+    "model": "1590B.stp",
+    "frame": {
+      "origin_nm": [
+        0,
+        0,
+        -2000000
+      ],
+      "u": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "v": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "w": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  }
+}
