@@ -10,6 +10,8 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import EmitterError
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
+    SURFACE_FACE,
+    SURFACES,
     CaseFace,
     CaseRegistration,
     DrillData,
@@ -1109,3 +1111,52 @@ def test_the_latest_snap_run_is_the_one_that_counts() -> None:
         )
     )
     assert data.grid_nm == 250_000
+
+
+def test_a_hole_is_on_the_drilled_plate_unless_it_says_otherwise():
+    """The default is what keeps every existing construction valid, and what
+    makes a document written before walls existed still mean what it said."""
+    hole = Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(7_000_000))
+
+    assert hole.surface == SURFACE_FACE
+    assert SURFACE_FACE == "face"
+
+
+def test_a_measurement_can_name_the_surface_it_was_taken_on():
+    hole = Hole.from_measurement(
+        Nanometre(1_000), Nanometre(2_000), Nanometre(7_000_000), surface="left"
+    )
+
+    assert hole.surface == "left"
+    assert hole.raw.x == pytest.approx(0.001)
+
+
+def test_a_surface_no_enclosure_has_is_refused_at_construction():
+    """A key is a name a builder reads off a sheet and a path, so a typo must
+    fail where it was written rather than name a file nothing can drill."""
+    with pytest.raises(ValueError, match="sideways"):
+        Hole.from_measurement(
+            Nanometre(0), Nanometre(0), Nanometre(7_000_000), surface="sideways"
+        )
+
+
+def test_every_surface_name_is_legal_including_the_one_nothing_produces():
+    """``back`` is reserved by the spec and produced by nothing; a vocabulary
+    that refused it would make adding it a change to this guard."""
+    for key in SURFACES:
+        assert Hole.from_measurement(
+            Nanometre(0), Nanometre(0), Nanometre(7_000_000), surface=key
+        ).surface == key
+
+
+def test_renumbering_and_moving_a_hole_keep_its_surface():
+    """``replace``-based transforms must carry the new field; one that dropped
+    it would silently move a wall hole onto the panel."""
+    hole = Hole.from_measurement(
+        Nanometre(0), Nanometre(0), Nanometre(7_000_000), surface="top"
+    )
+
+    assert hole.with_number(3).surface == "top"
+    assert hole.moved_to(Nanometre(5), Nanometre(5)).surface == "top"
+    assert hole.with_diameter(Nanometre(8_000_000)).surface == "top"
+    assert hole.translated(Nanometre(1), Nanometre(1)).surface == "top"

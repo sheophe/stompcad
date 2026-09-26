@@ -25,7 +25,15 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, ReferenceOutline, SourceInfo
+from stompmodel.model import (
+    SURFACE_FACE,
+    CaseFace,
+    CaseRegistration,
+    DrillData,
+    Hole,
+    ReferenceOutline,
+    SourceInfo,
+)
 from stompmodel.protocols import Pipeline
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
@@ -121,13 +129,23 @@ def clean_registry():
         base.REGISTRY.update(saved)
 
 
-def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int | None = None) -> Hole:
+def at(
+    x_nm: int,
+    y_nm: int,
+    diameter_nm: int = 7_000_000,
+    *,
+    index: int | None = None,
+    surface: str = SURFACE_FACE,
+) -> Hole:
     """One quantised hole, numbered as if RouteHoles had already run.
 
     Plain integers are branded here so a test may write the literal it means;
-    this helper is the suite's nanometre boundary.
+    this helper is the suite's nanometre boundary. ``surface`` defaults to the
+    drilled plate, so every existing call means what it meant.
     """
-    hole = Hole.from_measurement(Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm))
+    hole = Hole.from_measurement(
+        Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm), surface=surface
+    )
     return hole if index is None else hole.with_number(index)
 
 

@@ -28,6 +28,8 @@ from .units import (
 )
 
 __all__ = [
+    "SURFACES",
+    "SURFACE_FACE",
     "Origin",
     "RawHole",
     "Hole",
@@ -52,6 +54,20 @@ __all__ = [
 #: read, so no consumer needs either literal.
 SNAP_STAGE: str = "snap"
 SNAP_GRID_PARAMETER: str = "grid_nm"
+
+
+#: Every plane of one enclosure that holes are cut in, named from the viewer
+#: standing at the pedal's face -- which is the frame a builder already thinks
+#: in. The order is the order ``RouteHoles`` numbers them in (ADR-0006's
+#: seventh amendment), so a reader needs no second list to sort by. ``back``
+#: is a legal name that nothing produces yet: the opposite plate is a
+#: different solid, and cutting two in one model is not decided.
+SURFACES: tuple[str, ...] = ("face", "back", "left", "right", "top", "bottom")
+
+#: The drilled plate -- whichever solid it is. A lid-drilled run's holes are
+#: on ``face`` too, because ``face`` names the plate the bit enters and not
+#: the box's own outer side.
+SURFACE_FACE: str = "face"
 
 
 class Origin(Enum):
@@ -84,11 +100,13 @@ class RawHole:
 
 @dataclass(frozen=True, slots=True)
 class Hole:
-    """One drilled hole in the canonical frame.
+    """One drilled hole in the canonical frame of the surface it is cut in.
 
     Nominal coordinates and diameter are whole nanometres. ``index`` is the
     drill sequence a routing stage assigns; it is ``None`` until routed and
-    numbered from 1 thereafter.
+    numbered from 1 thereafter. ``surface`` names the plane those coordinates
+    are measured in, so a hole is meaningless apart from that surface's own
+    frame -- which ``DrillData.surfaces`` states.
     """
 
     x_nm: Nanometre
@@ -96,6 +114,7 @@ class Hole:
     diameter_nm: Nanometre
     raw: RawHole
     index: int | None = None
+    surface: str = SURFACE_FACE
 
     def __post_init__(self) -> None:
         check_nanometres(
@@ -106,6 +125,11 @@ class Hole:
                 f"holes are numbered from 1, not {self.index}: this number is what "
                 f"the drawing balloons, the schedule and the report all print"
             )
+        if self.surface not in SURFACES:
+            raise ValueError(
+                f"{self.surface!r} is no surface of an enclosure; a hole is cut in "
+                f"one of {', '.join(SURFACES)}"
+            )
 
     @classmethod
     def from_measurement(
@@ -113,6 +137,8 @@ class Hole:
         x_nm: Nanometre,
         y_nm: Nanometre,
         diameter_nm: Nanometre,
+        *,
+        surface: str = SURFACE_FACE,
     ) -> Hole:
         """Build an unrouted hole whose nominal values are still its measured values.
 
@@ -124,6 +150,7 @@ class Hole:
             y_nm=y_nm,
             diameter_nm=diameter_nm,
             raw=RawHole(mm_from_nm(x_nm), mm_from_nm(y_nm), mm_from_nm(diameter_nm)),
+            surface=surface,
         )
 
     def with_number(self, number: int) -> Hole:
