@@ -260,7 +260,9 @@ def test_a_turned_panel_still_reaches_the_reframe(reframe_spy):
 
     A portrait outline against a landscape footprint is the one case that
     must reframe, so a zero count there would be the instrument finding
-    nothing rather than the shortcut working.
+    nothing rather than the shortcut working. Five, not one: the panel's
+    single hole plus the four corners ``apply()`` reframes to register the
+    checked plate's own bounds as a surface.
     """
     model = TwinFrameCase(_FOOTPRINT)
 
@@ -268,7 +270,7 @@ def test_a_turned_panel_still_reaches_the_reframe(reframe_spy):
         _panel(width_nm=60_500_000, height_nm=112_400_000)
     )
 
-    assert len(reframe_spy) == 1
+    assert len(reframe_spy) == 5
     assert model.seen != [(Nanometre(3 * MM), Nanometre(-4 * MM))]
     assert result.case is not None
     assert result.case.frame != FakeCase.frame

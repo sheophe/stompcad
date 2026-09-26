@@ -9,7 +9,14 @@ from stompdrill.pipeline import CheckCaseClearance
 from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM, IdentifyHammondFootprint
 from stompmodel.diagnostics import Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, EnclosureMatch, RawOutline, ReferenceOutline
+from stompmodel.model import (
+    SURFACE_FACE,
+    CaseFace,
+    CaseRegistration,
+    EnclosureMatch,
+    RawOutline,
+    ReferenceOutline,
+)
 from stompmodel.units import Nanometre, mm_from_nm
 from tests.conftest import FakeCase, at, codes, make_data
 
@@ -651,6 +658,46 @@ def test_the_trigger_matches_the_drawn_width_across_the_whole_catalogue(enclosur
         f"{enclosure.part} drawn {drawn_width} x {drawn_height} mm: "
         f"expected identity={expect_identity}"
     )
+
+
+def test_the_checked_plate_is_registered_as_a_surface():
+    """A hole's coordinates are in this frame, so the document has to carry it
+    even on a run that touches no wall."""
+    data = CheckCaseClearance(FakeCase()).apply(make_data(at(0, 0, 7_000_000)))
+
+    assert data.surfaces is not None
+    (surface,) = data.surfaces
+    assert surface.key == SURFACE_FACE
+    assert surface.thickness_nm == FakeCase.plate_nm
+    assert surface.frame == data.case.frame
+
+
+def test_the_registered_bounds_are_the_play_area_in_the_frame_checked():
+    model = FakeCase()
+    stage = CheckCaseClearance(model)
+    data = stage.apply(make_data(at(0, 0, 7_000_000)))
+
+    (surface,) = data.surfaces
+    assert surface.bounds_nm == model.play_area_nm
+
+
+def test_a_run_with_no_case_model_registers_no_surface():
+    """``surfaces`` absent is how a reader tells "no model" from "a model whose
+    walls were left alone"."""
+    assert make_data(at(0, 0, 7_000_000)).surfaces is None
+
+
+def test_a_zero_plate_model_registers_an_empty_surface_tuple_not_none():
+    """A model with no material describes no plate, but it was still
+    supplied -- ``()``, not ``None``, is the claim that distinguishes it from
+    no model at all.
+    """
+    model = FakeCase()
+    model.plate_nm = Nanometre(0)
+
+    data = CheckCaseClearance(model).apply(make_data(at(0, 0, 7_000_000)))
+
+    assert data.surfaces == ()
 
 
 def test_the_near_square_band_is_computed_and_is_exactly_1590lb():
