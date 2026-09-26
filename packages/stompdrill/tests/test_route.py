@@ -266,7 +266,7 @@ def test_the_plate_keeps_its_numbers_when_walls_are_added_and_routed_again():
 
     second = RouteHoles().apply(
         first.with_holes(
-            first.holes + (at(0, 0, 12_000_000, surface="left"),)
+            first.holes + (at(0, 0, 6_000_000, surface="left"),)
         )
     )
 
