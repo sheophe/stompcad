@@ -17,6 +17,7 @@ from stompmodel.model import (
     CaseFace,
     CaseRegistration,
     DrillData,
+    DrilledSurface,
     EnclosureMatch,
     Hole,
     RawHole,
@@ -73,6 +74,28 @@ _FRAME = FaceFrame(
 )
 
 _REGISTRATION = CaseRegistration(part="1590BB", face=CaseFace.BOX, model="1590BB.stp", frame=_FRAME)
+
+
+def _left_surface() -> DrilledSurface:
+    """One 2 mm wall, 30 by 20 mm, centred on its own frame."""
+    return DrilledSurface(
+        key="left",
+        frame=FaceFrame(
+            basis=CoordinateFrame(
+                origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+                u=(1.0, 0.0, 0.0),
+                v=(0.0, 1.0, 0.0),
+                w=(0.0, 0.0, 1.0),
+            )
+        ),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-15_000_000),
+            Nanometre(-10_000_000),
+            Nanometre(15_000_000),
+            Nanometre(10_000_000),
+        ),
+    )
 
 
 def _make_data(*given: Hole) -> DrillData:
@@ -238,6 +261,7 @@ def test_top_level_key_order_is_stable_and_documented() -> None:
         "processing",
         "enclosure",
         "case",
+        "surfaces",
     ]
 
 
@@ -246,7 +270,7 @@ def test_document_declares_its_format_and_canonical_frame() -> None:
     document = to_document(_fixture_data())
 
     assert document["format"] == "stompcad-drill-data"
-    assert document["version"] == 6
+    assert document["version"] == 7
     assert document["units"] == "nm"
     assert document["origin"] == "centre"
 
@@ -499,7 +523,9 @@ def test_a_case_registration_with_a_left_handed_basis_is_refused() -> None:
 def test_holes_carry_nominal_and_raw_provenance() -> None:
     emitted = to_document(_fixture_data())["holes"]
 
-    assert list(emitted[0]) == ["x_nm", "y_nm", "diameter_nm", "tool", "raw", "index"]
+    assert list(emitted[0]) == [
+        "x_nm", "y_nm", "diameter_nm", "tool", "raw", "index", "surface",
+    ]
     assert emitted[0]["x_nm"] == -40_000_000
     assert emitted[0]["y_nm"] == 18_000_000
     assert emitted[0]["diameter_nm"] == 7_000_000
@@ -1301,3 +1327,87 @@ def test_the_codec_does_not_round_or_cluster_values() -> None:
     assert document["holes"][0]["diameter_nm"] == 6_999_800
     assert document["holes"][0]["raw"]["x"] == 0.1234567
     assert len(document["tools"]) == 2
+
+
+# --------------------------------------------------------------------------
+# surfaces
+# --------------------------------------------------------------------------
+
+
+def test_a_hole_states_the_surface_it_is_cut_in():
+    data = DrillData(
+        holes=(
+            Hole.from_measurement(
+                Nanometre(0), Nanometre(0), Nanometre(7_000_000), surface="left"
+            ).with_number(1),
+        )
+    ).with_surfaces([_left_surface()])
+
+    document = to_document(data)
+
+    assert document["holes"][0]["surface"] == "left"
+    assert list(document["holes"][0]) == [
+        "x_nm", "y_nm", "diameter_nm", "tool", "raw", "index", "surface",
+    ]
+
+
+def test_a_document_with_no_model_registers_no_surface():
+    """Absent, not empty -- the field's whole job is telling those apart."""
+    document = to_document(DrillData())
+
+    assert document["surfaces"] is None
+
+
+def test_a_surface_travels_whole():
+    data = DrillData().with_surfaces([_left_surface()])
+
+    (payload,) = to_document(data)["surfaces"]
+
+    assert payload["key"] == "left"
+    assert payload["thickness_nm"] == 2_000_000
+    assert payload["bounds_nm"] == [-15_000_000, -10_000_000, 15_000_000, 10_000_000]
+    assert payload["frame"]["w"] == [0.0, 0.0, 1.0]
+
+
+def test_a_round_trip_returns_every_surface_and_every_hole_on_it():
+    data = DrillData(
+        holes=(
+            Hole.from_measurement(
+                Nanometre(0), Nanometre(0), Nanometre(7_000_000)
+            ).with_number(1),
+            Hole.from_measurement(
+                Nanometre(1_000_000), Nanometre(0), Nanometre(5_000_000), surface="left"
+            ).with_number(2),
+        )
+    ).with_surfaces([_left_surface()])
+
+    restored = from_document(to_document(data))
+
+    assert [hole.surface for hole in restored.holes] == ["face", "left"]
+    assert restored.surfaces == data.surfaces
+
+
+def test_a_hole_on_a_surface_the_document_never_registered_is_refused():
+    """Its coordinates name a frame the document does not carry, so nothing
+    downstream could place it, draw it or cut it."""
+    document = to_document(
+        DrillData(
+            holes=(
+                Hole.from_measurement(
+                    Nanometre(0), Nanometre(0), Nanometre(7_000_000), surface="left"
+                ).with_number(1),
+            )
+        ).with_surfaces([_left_surface()])
+    )
+    document["surfaces"] = None
+
+    with pytest.raises(DocumentError, match="left"):
+        from_document(document)
+
+
+def test_a_document_at_the_previous_version_is_refused():
+    document = to_document(DrillData())
+    document["version"] = 6
+
+    with pytest.raises(DocumentError, match="version 6, expected 7"):
+        from_document(document)

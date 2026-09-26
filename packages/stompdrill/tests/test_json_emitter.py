@@ -20,7 +20,7 @@ from stompdrill.pipeline import (
     SnapPositions,
 )
 from stompdrill.quantise import RawDrillData, quantise
-from stompmodel.codec import to_document
+from stompmodel.codec import VERSION, to_document
 from stompmodel.errors import EmitterError
 from stompmodel.model import (
     DrillData,
@@ -237,7 +237,7 @@ def test_diagnostic_payloads_survive_serialisation():
     after = Pipeline([Deduplicate()]).run(data)
     doc = json.loads(JsonEmitter().emit(after))
 
-    assert doc["version"] == 6
+    assert doc["version"] == VERSION
     duplicate = next(d for d in doc["diagnostics"] if d["code"] == "duplicate-hole")
     assert duplicate["data"]["dropped"] == 1
     assert duplicate["location_nm"] == [doc["holes"][0]["x_nm"], doc["holes"][0]["y_nm"]]
