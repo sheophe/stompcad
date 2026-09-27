@@ -282,8 +282,9 @@ class Clash:
     is its least extent and ``axis`` that axis. ``bbox_volume_nm3`` is the box's
     own volume and ``common_volume_nm3`` the region's -- the box answers
     how far to move, the region how much is in the way. ``part`` names this
-    board's own solid where two solids met, ``None`` where the whole board
-    was checked at once. See "Clashes" in the spec.
+    board's own solid where two solids met, ``None`` where several of them
+    were checked at once -- the whole board, or every one of its solids a
+    wall is not about to be drilled for. See "Clashes" in the spec.
     """
 
     with_: str

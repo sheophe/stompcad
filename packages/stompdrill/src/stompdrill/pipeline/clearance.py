@@ -24,14 +24,15 @@ from stompmodel.units import Nanometre, format_nm
 
 from ..cad import CaseModel, Rejection
 
-__all__ = ["REASON", "CheckCaseClearance"]
+__all__ = ["CheckCaseClearance"]
 
-#: What each refusal means, in the clause a finding reads. Every clause names
-#: the drilled plate, which is what this stage checks; a wall is a surface and
-#: not a face (``docs/GLOSSARY.md``), so ``pipeline.walls`` states the same
-#: three refusals in its own surface-neutral clauses rather than borrowing
-#: these -- neither set reads correctly in the other's sentence.
-REASON: dict[Rejection, str] = {
+#: What each refusal means, in the clause a finding reads. Private, because
+#: this stage is its only reader: every clause names the drilled plate, which
+#: is what this stage checks, and a wall is a surface and not a face
+#: (``docs/GLOSSARY.md``), so ``pipeline.walls`` states the same three
+#: refusals in its own surface-neutral clauses rather than borrowing these --
+#: neither set reads correctly in the other's sentence.
+_REASON: dict[Rejection, str] = {
     Rejection.OFF_FACE: "lies outside the drilled face",
     Rejection.THROUGH_BOSS: "meets a boss or rib in the plate",
     Rejection.OBSTRUCTED: "is obstructed behind the plate once assembled",
@@ -200,7 +201,7 @@ class CheckCaseClearance:
             rejection.value,
             f"⌀{format_nm(hole.diameter_nm)} mm hole at "
             f"({format_nm(hole.x_nm)}, {format_nm(hole.y_nm)}) "
-            f"{REASON[rejection]} of {self.model.part} {self.model.face.value}",
+            f"{_REASON[rejection]} of {self.model.part} {self.model.face.value}",
             location_nm=(hole.x_nm, hole.y_nm),
             data=(("diameter_nm", hole.diameter_nm), ("face", self.model.face.value)),
         )

@@ -474,7 +474,9 @@ def format_wall_features(data: DockData) -> list[str]:
     # Keyed on ``wall`` itself, as ``Clashes._excluded`` is: a part the
     # expression named and measured nothing of is still held to its
     # interference, so listing it here would be a false account of a finding
-    # the report still carries.
+    # the report still carries. Excused rather than excused *a clash*: the
+    # exclusion is what a part is exempt from, and a part standing clear of
+    # the wall it points at had no clash to lose.
     excused = sorted(
         (board.ordinal, component.designator)
         for board in data.boards
@@ -507,7 +509,7 @@ def format_wall_features(data: DockData) -> list[str]:
         # answers for it with the drill half's own refusals, and standalone
         # this line is the whole account there is.
         lines.append(
-            "  case clashes excused: "
+            "  excused from case clashes: "
             + ", ".join(f"#{ordinal} {part}" for ordinal, part in excused)
         )
     if unmeasured:

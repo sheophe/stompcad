@@ -81,12 +81,13 @@ def radial_reach(
 ) -> float | None:
     """Where material further than ``radius_mm`` from the axis reaches, along ``direction``.
 
-    The greatest coordinate along ``direction`` of any part of ``shape``
-    lying **strictly** outside a cylinder of ``radius_mm`` about the axis
-    through ``axis_location_mm``; ``None`` when none of it does. Strictness
-    is the kernel's: material exactly on the cylinder is coincident with it
-    and the cut removes it, so a shaft exactly filling its bore reaches
-    nothing -- see "Fit clearance" in ``stompcollider-technical.md``.
+    The greatest coordinate along ``direction`` of any part of ``shape`` lying
+    **strictly** outside a cylinder of ``radius_mm`` about the axis through
+    ``axis_location_mm``; ``None`` when none of it does. Strictness is the
+    kernel's, so a shaft exactly filling its bore reaches nothing -- see "Fit
+    clearance" in ``stompcollider-technical.md``. One box over the whole
+    residue, which the highest of :func:`radial_bands` does **not** reproduce:
+    each ``Bnd_Box`` gaps by its own shape's tolerance, and a profile is locked.
     """
     found = _residue("radial_reach", shape, axis_location_mm, direction, radius_mm)
     if found is None:
@@ -124,7 +125,9 @@ def _residue(
 
     One cut serving both public questions, and each reads it its own way: a
     box over the whole residue answers the reach, and a box per solid answers
-    the bands. ``None`` where nothing lies outside the cylinder.
+    the bands. Two measures and not one spelled twice -- each box carries its
+    own shape's tolerance as a gap, so neither is a rearrangement of the
+    other. ``None`` where nothing lies outside the cylinder.
     """
     require_kernel()
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut

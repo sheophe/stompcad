@@ -1626,16 +1626,22 @@ def test_the_ray_survives_a_non_trivial_carrier_and_case_frame() -> None:
 
 
 def test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported() -> None:
-    """It is going to be drilled for, so the metal in the way is the point."""
+    """It is going to be drilled for, so the metal in the way is the point.
+
+    Asserted on the finding's absence rather than on its ``part``: nothing in
+    ``_against_case`` names a part, so a claim about that field would hold with
+    the exclusion taken out altogether. ``J1`` is the only one of board 1's
+    solids reaching ``WALL`` at this placement, so excusing it must leave the
+    board no case finding at all.
+    """
     data = _staged_dock_data(wall=("J1",), clashing=("J1",))
     found = Clashes(_case_solids(), _board_solids()).apply(data)
-    reported = {
-        clash.part
-        for placements in found.placements.values()
-        for placement in placements
+    assert [
+        clash
+        for placement in found.placements[1]
         for clash in placement.clashes
-    }
-    assert "J1" not in reported
+        if clash.kind == "case"
+    ] == []
 
 
 def test_a_part_the_wall_filter_did_not_admit_still_clashes() -> None:
@@ -1654,22 +1660,6 @@ def test_a_part_the_wall_filter_did_not_admit_still_clashes() -> None:
     assert two[0].common_volume_nm3 < one[0].common_volume_nm3
     every = tuple(_wall_component(part) for part in ("J1", "RV1", "RV2"))
     assert _wall_clashes(every) == []
-
-
-def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
-    """Dropped from the accounting as well as the findings, per decision 12.
-
-    Two seatings identical but for a wall-admitted part's interference must
-    rank on something else, because that interference is about to become a
-    hole.
-    """
-    data = _staged_dock_data(wall=("J1",), clashing=("J1",))
-    found = Clashes(_case_solids(), _board_solids()).apply(data)
-    assert all(
-        not any(clash.part == "J1" for clash in placement.clashes)
-        for placements in found.placements.values()
-        for placement in placements
-    )
 
 
 def test_a_board_with_a_wall_admitted_part_is_walked_per_solid_only_to_filter() -> None:
@@ -1797,8 +1787,17 @@ def test_naming_one_part_leaves_the_others_counted_as_one_clash() -> None:
     assert named[0].part is None
 
 
-def test_the_named_part_s_own_volume_leaves_the_one_clash_that_remains() -> None:
-    """The control: one clash either way would also be true if nothing was excused."""
+def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
+    """Dropped from the accounting as well as the findings, per decision 12.
+
+    ``rank_key`` reads how many clashes a placement carries and then their
+    volume, so those two numbers *are* the accounting: the count above stays
+    one, and the volume here loses the excused part's own share. Two seatings
+    identical but for a wall-admitted part's interference therefore rank on
+    something else, because that interference is about to become a hole.
+    Compared against the same scene with nothing excused, since one
+    placement's figures alone would not say what the exclusion changed.
+    """
     plain = _wall_clashes(())
     named = _wall_clashes((_wall_component("J1"),))
     assert named[0].common_volume_nm3 < plain[0].common_volume_nm3

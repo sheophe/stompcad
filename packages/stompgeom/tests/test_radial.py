@@ -1,4 +1,4 @@
-"""``radial_reach`` and ``axial_extent``: measuring a solid about an axis.
+"""``axial_extent``, ``radial_reach`` and ``radial_bands``: measuring a solid.
 
 Shapes are built here rather than read from a file: the rule under test is
 about geometry, not about STEP, and a hand-built stepped shaft states the
@@ -14,7 +14,7 @@ from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
 from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
 
-from stompgeom.radial import axial_extent, radial_reach
+from stompgeom.radial import axial_extent, radial_bands, radial_reach
 
 __all__: list[str] = []
 
@@ -126,8 +126,6 @@ def test_material_too_wide_in_two_places_is_two_bands_and_not_one_span() -> None
     from the first to the last would claim the shaft's own width is a collar's
     all the way between them.
     """
-    from stompgeom.radial import radial_bands
-
     shaft = _cylinder(1.0, 0.0, 20.0)
     low = _cylinder(5.0, 0.0, 2.0)
     high = _cylinder(5.0, 18.0, 20.0)
@@ -142,15 +140,11 @@ def test_material_too_wide_in_two_places_is_two_bands_and_not_one_span() -> None
 
 
 def test_a_radius_nothing_exceeds_is_no_bands_at_all() -> None:
-    from stompgeom.radial import radial_bands
-
     assert radial_bands(_shaft(), _ORIGIN, _UP, 6.5) == ()
 
 
 def test_one_wide_feature_is_one_band_over_its_own_extent() -> None:
     """The flange, and not the shaft standing on it, is what exceeds the radius."""
-    from stompgeom.radial import radial_bands
-
     bands = radial_bands(_shaft(), _ORIGIN, _UP, 4.0)
     assert len(bands) == 1
     assert bands[0][0] == pytest.approx(0.0, abs=1e-6)

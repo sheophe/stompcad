@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 #: What each refusal means on a wall, in the clause a finding reads. A sibling
-#: of ``clearance.REASON`` rather than a reuse of it: every clause there names
+#: of ``clearance._REASON`` rather than a reuse of it: every clause there names
 #: the drilled plate, and ``docs/GLOSSARY.md`` keeps "face" and "surface"
 #: apart, so a builder told a wall hole left the drilled face would go and
 #: look at the wrong surface. Each clause here takes the surface that follows
