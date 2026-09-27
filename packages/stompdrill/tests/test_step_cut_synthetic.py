@@ -7,10 +7,13 @@ but nothing here needs a cached model, so it belongs in the default suite.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
+import pytest
+
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace
+from stompmodel.model import CaseFace, DrilledSurface
 from stompmodel.units import Nanometre
 
 #: A 10 mm cube, drilled face up, at the model origin -- shape and position
@@ -160,7 +163,6 @@ def test_cut_shape_steps_over_a_null_shaped_leaf_and_cuts_the_next_match() -> No
 
 def test_cut_shape_refuses_when_no_leaf_matches() -> None:
     """Criterion 2: refusal is unchanged when no name-matching leaf is cut."""
-    import pytest
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
     from OCP.TCollection import TCollection_ExtendedString
@@ -289,7 +291,6 @@ def test_cut_shape_reads_the_registrations_face_not_the_models_own(tmp_path) -> 
     ``registration_for``, whose face is always the model's own, so none of
     them can see that regression.
     """
-    import pytest
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
     from OCP.TCollection import TCollection_ExtendedString
@@ -325,5 +326,157 @@ def test_cut_shape_reads_the_registrations_face_not_the_models_own(tmp_path) -> 
             "cut the model's own face (box) instead of the registration's (lid)"
         )
         assert _volume_mm3(lid_after) < _volume_mm3(lid_shape)
+    finally:
+        undo()
+
+
+def _right_wall_surface() -> DrilledSurface:
+    """The cube's +X side: 2 mm of material, datum at the side's centre.
+
+    ``u`` is +Y and ``v`` is +Z, so ``u × v`` is +X -- the outward normal of
+    that side. The origin sits on the inner plane at x = 8, which is where
+    every ``FaceFrame``'s origin sits.
+    """
+    return DrilledSurface(
+        key="right",
+        frame=FaceFrame(
+            CoordinateFrame(
+                origin_nm=(
+                    Nanometre(8_000_000),
+                    Nanometre(5_000_000),
+                    Nanometre(5_000_000),
+                ),
+                u=(0.0, 1.0, 0.0),
+                v=(0.0, 0.0, 1.0),
+                w=(1.0, 0.0, 0.0),
+            )
+        ),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-4_000_000),
+            Nanometre(-4_000_000),
+            Nanometre(4_000_000),
+            Nanometre(4_000_000),
+        ),
+    )
+
+
+def test_a_wall_hole_is_cut_along_that_wall_s_own_axis() -> None:
+    """The axis is the surface's, not the plate's. A real wall is drafted by up
+    to 2.5°, so a cut along the plate's normal is not a hole through the wall.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompdrill.emitters.step import cut_shape
+    from stompgeom.cylinders import cylindrical_faces
+    from tests.conftest import at, make_data, registration_for
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    document = _two_leaf_document(box)
+    model = _model(document, _drilled_face_frame())
+    data = make_data(
+        at(0, 0, 4_000_000, index=1, surface="right")
+    ).with_case(registration_for(model)).with_surfaces([_right_wall_surface()])
+    before = _volume_mm3(_named_solid_shapes(document, "BOX")[0])
+
+    _document, undo, _touched = cut_shape(model, data)
+    try:
+        (cut,) = _named_solid_shapes(document, "BOX")
+        bores = [
+            cylinder
+            for cylinder in cylindrical_faces(cut)
+            if abs(abs(cylinder.axis_direction[0]) - 1.0) < 1e-9
+        ]
+        assert len(bores) == 1
+        assert bores[0].radius_mm == pytest.approx(2.0)
+        # The cut is 4 mm long -- the 2 mm wall plus a millimetre either side
+        # -- but this fixture is a solid cube, so the millimetre in front of
+        # the outer plane meets no material and 3 mm of it goes.
+        assert before - _volume_mm3(cut) == pytest.approx(math.pi * 4.0 * 3.0, rel=1e-6)
+    finally:
+        undo()
+
+
+def test_the_plate_and_a_wall_are_cut_into_one_solid() -> None:
+    """One object, two passes, one file -- the whole point of the feature."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompdrill.emitters.step import cut_shape
+    from stompgeom.cylinders import cylindrical_faces
+    from tests.conftest import at, make_data, registration_for
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    document = _two_leaf_document(box)
+    model = _model(document, _drilled_face_frame())
+    data = make_data(
+        at(2_500_000, 2_500_000, 4_000_000, index=1),
+        at(0, 0, 4_000_000, index=2, surface="right"),
+    ).with_case(registration_for(model)).with_surfaces([_right_wall_surface()])
+
+    _document, undo, _touched = cut_shape(model, data)
+    try:
+        (cut,) = _named_solid_shapes(document, "BOX")
+        axes = {
+            tuple(round(abs(component), 9) for component in cylinder.axis_direction)
+            for cylinder in cylindrical_faces(cut)
+        }
+        assert (0.0, 0.0, 1.0) in axes
+        assert (1.0, 0.0, 0.0) in axes
+    finally:
+        undo()
+
+
+def test_a_wall_hole_with_no_registered_surface_is_refused() -> None:
+    """Its coordinates name a frame the document does not carry, so there is
+    nothing to cut along and a guess would drill the wrong side."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from stompdrill.emitters.step import cut_shape
+    from stompmodel.errors import EmitterError
+    from tests.conftest import at, make_data, registration_for
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    document = _two_leaf_document(box)
+    model = _model(document, _drilled_face_frame())
+    data = make_data(
+        at(0, 0, 4_000_000, index=1, surface="right")
+    ).with_case(registration_for(model))
+
+    with pytest.raises(EmitterError, match="right"):
+        cut_shape(model, data)
+
+
+def test_a_wall_hole_is_cut_at_its_own_frame_s_u_and_v() -> None:
+    """``u`` first, then ``v``: at a wall's own datum a swapped pair is
+    invisible, and off it the bore lands somewhere else on the right side.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_State
+
+    from stompdrill.emitters.step import cut_shape
+    from tests.conftest import at, make_data, registration_for
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), _SIZE_MM, _SIZE_MM, _SIZE_MM).Shape()
+    document = _two_leaf_document(box)
+    model = _model(document, _drilled_face_frame())
+    # Canonical (2, -1) on the +X wall is model (8, 7, 4); swapping u and v
+    # would put it at (8, 4, 7), which is four millimetres away.
+    data = make_data(
+        at(2_000_000, -1_000_000, 4_000_000, index=1, surface="right")
+    ).with_case(registration_for(model)).with_surfaces([_right_wall_surface()])
+
+    _document, undo, _touched = cut_shape(model, data)
+    try:
+        (cut,) = _named_solid_shapes(document, "BOX")
+        assert _classify(cut, (9.0, 7.0, 4.0)) == TopAbs_State.TopAbs_OUT, (
+            "the bore is not where the wall's own u and v put it"
+        )
+        assert _classify(cut, (9.0, 4.0, 7.0)) == TopAbs_State.TopAbs_IN, (
+            "cut at the swapped pair instead"
+        )
     finally:
         undo()
