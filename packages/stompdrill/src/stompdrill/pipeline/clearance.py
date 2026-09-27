@@ -175,8 +175,8 @@ class CheckCaseClearance:
         A hole's coordinates mean nothing apart from this frame, so a document
         that was checked against a model states it once per surface rather than
         leaving one consumer to read ``case`` and another to read here. A model
-        with no material or no play area registers nothing: there is no plate
-        to describe, and a stage owes a diagnostic rather than an exception.
+        with no material or no play area records no surface at all: a record
+        nothing could be measured against is worse than none.
         """
         x0, y0, x1, y1 = self._play_area_in(frame)
         if self.model.plate_nm <= 0 or x1 <= x0 or y1 <= y0:

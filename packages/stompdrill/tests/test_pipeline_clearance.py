@@ -274,6 +274,7 @@ def test_a_turned_panel_still_reaches_the_reframe(reframe_spy):
     assert model.seen != [(Nanometre(3 * MM), Nanometre(-4 * MM))]
     assert result.case is not None
     assert result.case.frame != FakeCase.frame
+    assert result.surfaces[0].frame == result.case.frame != FakeCase.frame
 
 
 def test_describe_reports_the_play_area_untouched_for_a_value_equal_frame(reframe_spy):
