@@ -8,7 +8,6 @@ but nothing here needs a cached model, so it belongs in the default suite.
 from __future__ import annotations
 
 import math
-from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -85,7 +84,6 @@ def _model(document: Any, frame: FaceFrame) -> Any:
         drilled_position_mm=_SIZE_MM, inner_position_mm=0.0,
         document=document, target_shape=None,
         document_timestamp="1970-01-01T00:00:00+00:00",
-        walls=(), wall_regions=MappingProxyType({}),
     )
 
 

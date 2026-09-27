@@ -58,12 +58,15 @@ class OcpCaseModel:
     document_timestamp: str
     #: Every wall this model discovered, each as the record a document carries.
     #: A tuple and not a mapping, so the order discovery fixed is the order a
-    #: consumer sees (ADR-0006).
-    walls: tuple[DrilledSurface, ...]
+    #: consumer sees (ADR-0006). Empty for a model whose walls could not be
+    #: discovered (a lid with no facing companion plate, say) as well as for
+    #: one built without wall support at all -- both are "no walls" to a
+    #: consumer, and neither can express anything a default would lose.
+    walls: tuple[DrilledSurface, ...] = ()
     #: Each wall's outer and inner drillable region, keyed by surface. Two,
     #: because a hole coaxial with its component crosses the two planes at
     #: different places and must clear the region at each (decision 8).
-    wall_regions: Mapping[str, tuple[Any, Any]]
+    wall_regions: Mapping[str, tuple[Any, Any]] = MappingProxyType({})
 
     def classify(
         self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre
@@ -179,7 +182,18 @@ def load_case_model(
 
     walls = []
     regions: dict[str, tuple[Any, Any]] = {}
-    for wall in find_walls(solid, axis):
+    try:
+        discovered_walls = find_walls(solid, axis)
+    except StompdrillError:
+        # A model whose walls cannot be discovered has none -- a lid is a
+        # flat closure plate with nothing behind its lateral levels to face,
+        # which is a fact about the lid, not a load failure. Wall drilling
+        # is opt-in, and a feature naming an unreachable wall is refused by
+        # ``DrillWalls`` itself (``wall-feature-unreachable``), which is
+        # where that diagnostic belongs -- not here, blocking a load the
+        # panel's own face never needed.
+        discovered_walls = ()
+    for wall in discovered_walls:
         lateral = nearest_axis(wall.outward)
         wall_axis_index = max(range(3), key=lambda index: abs(lateral[index]))
         frame = build_wall_frame(wall, faces.outward)

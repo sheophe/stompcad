@@ -419,3 +419,26 @@ def test_a_hole_over_the_floor_fillet_behind_a_wall_is_through_boss(hammond_b: P
         model.classify_wall(surface.key, edge, edge, Nanometre(50_000))
         is Rejection.THROUGH_BOSS
     )
+
+
+@pytest.mark.hammond
+def test_a_lid_with_no_facing_wall_plate_loads_with_no_walls(hammond_a: Path) -> None:
+    """1590A's lid is a flat closure plate: none of its four lateral levels
+    has a facing companion, because there is nothing behind them to face.
+    That is a fact about this lid, not a load failure -- wall drilling is
+    opt-in, and a feature naming an unreachable wall is refused downstream,
+    by name, as ``wall-feature-unreachable``.
+    """
+    model = load_case_model(hammond_a, face=CaseFace.LID, margin_nm=Nanometre(500_000))
+    assert model.walls == ()
+
+
+@pytest.mark.hammond
+def test_the_same_enclosure_s_box_still_finds_its_four_walls(hammond_a: Path) -> None:
+    """The tolerant path must not swallow the ordinary case: 1590A's own box
+    finds its four walls exactly as any other catalogued enclosure's does.
+    """
+    model = load_case_model(hammond_a, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert sorted(surface.key for surface in model.walls) == [
+        "bottom", "left", "right", "top"
+    ]
