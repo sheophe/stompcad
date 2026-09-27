@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from stompdrill.cad import load_case_model
 from stompdrill.enclosures import HAMMOND_1590
 from stompdrill.pipeline import CheckCaseClearance
 from stompdrill.pipeline.enclosure import DEFAULT_TOLERANCE_NM, IdentifyHammondFootprint
@@ -714,3 +717,18 @@ def test_the_near_square_band_is_computed_and_is_exactly_1590lb():
     ]
 
     assert near_square == ["1590LB"]
+
+
+@pytest.mark.hammond
+def test_the_panel_s_own_play_area_is_unchanged_by_wall_discovery(hammond_b: Path) -> None:
+    """ADR-0011's negative: adding a question must not move an existing answer.
+
+    The figure is 1590B's own, measured off ``load_case_model`` -- the
+    catalogue's own 1590BB numbers are a different enclosure's and would
+    fail here for a reason that has nothing to do with wall discovery.
+    """
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert model.play_area_nm == (
+        Nanometre(-52_526_080), Nanometre(-26_726_080),
+        Nanometre(52_526_080), Nanometre(26_726_080),
+    )

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -240,6 +241,7 @@ def _stub_ocp_case_model(*, document=None):
         box_region=None, box_frame=None,
         drilled_position_mm=0.0, inner_position_mm=0.0,
         document=document, target_shape=None, document_timestamp="",
+        walls=(), wall_regions=MappingProxyType({}),
     )
 
 

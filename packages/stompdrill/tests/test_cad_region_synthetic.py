@@ -11,6 +11,8 @@ comment and fix-round-2 report), so only synthetic geometry can.
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from stompdrill.cad import Rejection
 from stompdrill.cad.loader import OcpCaseModel
 from stompdrill.cad.region import build_region, classify_bounds, contains, contains_at_depth
@@ -144,6 +146,7 @@ def test_obstructed_is_reachable_with_a_genuine_raised_boss():
         box_region=box_region, box_frame=own_frame,
         drilled_position_mm=0.0, inner_position_mm=0.0,
         document=None, target_shape=None, document_timestamp="",
+        walls=(), wall_regions=MappingProxyType({}),
     )
 
     assert model.classify(nm(10.0), nm(5.0), nm(1.0)) is Rejection.OBSTRUCTED
@@ -193,6 +196,7 @@ def test_the_box_check_still_reframes_through_mirrored_frames():
         box_region=box_region, box_frame=box_frame,
         drilled_position_mm=0.0, inner_position_mm=0.0,
         document=None, target_shape=None, document_timestamp="",
+        walls=(), wall_regions=MappingProxyType({}),
     )
 
     # own_frame is the identity, so own-canonical x is kernel x directly: +10

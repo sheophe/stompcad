@@ -8,9 +8,11 @@ which is the only way to reach the boundary the definition draws.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
+from stompdrill.cad import Rejection, WallModel, load_case_model
 from stompdrill.cad.walls import (
     LATERAL_LIMIT,
     Wall,
@@ -22,11 +24,15 @@ from stompdrill.cad.walls import (
     wall_bounds_nm,
 )
 from stompdrill.errors import StompdrillError
+from stompdrill.pipeline.diameters import DEFAULT_STANDARD, DRILL_STANDARDS
+from stompdrill.pipeline.route import RouteHoles
+from stompdrill.pipeline.walls import DrillWalls
 from stompgeom.levels import Direction, Level
 from stompgeom.shapes import compound
 from stompgeom.step import bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
-from stompmodel.units import Nanometre
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, Profile, WallFeature
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 __all__: list[str] = []
 
@@ -245,3 +251,171 @@ def test_a_slightly_drafted_wall_keys_the_same_as_an_undrafted_one() -> None:
     tilt = math.radians(2.5)
     drafted = (0.0, -math.sin(tilt), -math.cos(tilt))
     assert surface_key(_synthetic_wall(outward=drafted), face) == "bottom"
+
+
+# ---------------------------------------------------------------------------
+# A real supplied model discovers and answers for its own walls (Task 16)
+# ---------------------------------------------------------------------------
+
+
+def _face_frame_of(model: object) -> FaceFrame:
+    """``model``'s own drilled-face registration, named so a test reads the
+    two frames it converts between."""
+    return model.frame  # type: ignore[attr-defined]
+
+
+def _solid_named(payload: bytes, keyword: str) -> object:
+    """One named solid read back from an emitted STEP ``payload``.
+
+    Round-tripped through a scratch file because ``read_step`` reads a path,
+    never bytes directly -- the same route ``test_step_cut.py`` uses to
+    verify a cut, so this checks what a consumer of the file would see.
+    """
+    import tempfile
+
+    from stompgeom.step import read_step
+
+    with tempfile.TemporaryDirectory() as scratch:
+        target = Path(scratch) / "cut.stp"
+        target.write_bytes(payload)
+        return read_step(target).named(keyword)[0].shape
+
+
+def _drilled_right_wall(hammond_path: Path):
+    """Cut one hole into the real casting's right wall: the whole of phase B.
+
+    Factored out so the cutting test below drills the same hole without
+    restating the ray or the feature that produces it.
+    """
+    model = load_case_model(hammond_path, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    wall = next(surface for surface in model.walls if surface.key == "right")
+    outside = wall.frame.basis.to_model(
+        Nanometre(0), Nanometre(0), Nanometre(wall.thickness_nm + 5_000_000)
+    )
+    face = _face_frame_of(model)
+    origin = face.basis.to_canonical(outside)
+    feature = WallFeature(
+        designator="J1",
+        board=1,
+        origin_nm=tuple(nm_from_mm(value) for value in origin),  # type: ignore[arg-type]
+        direction=(
+            dot(wall.frame.basis.w, face.basis.u),
+            dot(wall.frame.basis.w, face.basis.v),
+            dot(wall.frame.basis.w, face.basis.w),
+        ),
+        profile=Profile(
+            steps=((Nanometre(4_750_000), Nanometre(0), Nanometre(10_000_000)),)
+        ),
+    )
+    data = DrillData(
+        case=CaseRegistration("1590B", CaseFace.BOX, hammond_path.name, face),
+        surfaces=(),
+    )
+    found = DrillWalls(model, (feature,), DRILL_STANDARDS[DEFAULT_STANDARD]).apply(data)
+    return model, found
+
+
+@pytest.mark.hammond
+def test_a_loaded_model_satisfies_the_wall_contract(hammond_b: Path) -> None:
+    model = load_case_model(
+        hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000)
+    )
+    assert isinstance(model, WallModel)
+    assert sorted(surface.key for surface in model.walls) == [
+        "bottom", "left", "right", "top"
+    ]
+
+
+@pytest.mark.hammond
+def test_the_middle_of_every_wall_is_drillable(hammond_b: Path) -> None:
+    """A wall's datum is the centre of its own region, so it had better be inside it."""
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    for surface in model.walls:
+        assert model.admits(surface.key, Nanometre(0), Nanometre(0)) is True
+
+
+@pytest.mark.hammond
+def test_a_point_past_a_wall_s_own_bounds_is_not_drillable(hammond_b: Path) -> None:
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    for surface in model.walls:
+        _x0, _y0, x1, _y1 = surface.bounds_nm
+        assert model.admits(surface.key, Nanometre(x1 + 1_000_000), Nanometre(0)) is False
+
+
+@pytest.mark.hammond
+def test_a_hole_in_the_middle_of_a_wall_is_accepted_at_a_sane_diameter(
+    hammond_b: Path,
+) -> None:
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    centre = (Nanometre(0), Nanometre(0))
+    for surface in model.walls:
+        assert model.classify_wall(surface.key, centre, centre, Nanometre(4_000_000)) is None
+
+
+@pytest.mark.hammond
+def test_a_hole_wider_than_the_wall_is_refused_as_off_face(hammond_b: Path) -> None:
+    """A ⌀60 hole in a 26 mm wall leaves it on both sides, whatever else is behind."""
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    centre = (Nanometre(0), Nanometre(0))
+    for surface in model.walls:
+        assert model.classify_wall(
+            surface.key, centre, centre, Nanometre(30_000_000)
+        ) is Rejection.OFF_FACE
+
+
+@pytest.mark.hammond
+def test_a_wall_hole_is_cut_end_to_end_from_a_hand_built_feature(hammond_b: Path) -> None:
+    """The whole of phase B, on a real casting, with the dock half stood in for.
+
+    The ray is derived from the discovered wall's own frame rather than typed:
+    a coordinate typed here would be a second statement of where that wall is.
+    """
+    _model, found = _drilled_right_wall(hammond_b)
+    assert [d.code for d in found.diagnostics] == []
+    assert len(found.holes) == 1
+    assert found.holes[0].surface == "right"
+    assert found.holes[0].diameter_nm == 9_500_000
+    assert [surface.key for surface in found.surfaces or ()] == ["right"]
+
+
+@pytest.mark.hammond
+def test_the_wall_hole_this_stage_placed_is_cut_into_the_model(
+    tmp_path: Path, hammond_b: Path
+) -> None:
+    """Plan 1 taught the cutter a wall's own axis; this is the first real wall to cut.
+
+    Measured on the emitted solid's volume rather than on its bytes: what is
+    being checked is that metal left, and by roughly the cylinder's worth.
+    """
+    from stompdrill.emitters.step import StepEmitter, StepOptions
+    from stompgeom.shapes import volume_mm3
+
+    model, data = _drilled_right_wall(hammond_b)
+    routed = RouteHoles().apply(data)
+    before = volume_mm3(model.target_shape)
+    payload = StepEmitter(StepOptions(model=model)).emit(routed)
+    after = volume_mm3(_solid_named(payload, "BOX"))
+    assert routed.surfaces is not None
+    bore = math.pi * 4.75**2 * mm_from_nm(routed.surfaces[0].thickness_nm)
+    assert before - after == pytest.approx(bore, rel=0.02)
+
+
+@pytest.mark.hammond
+def test_a_hole_over_the_floor_fillet_behind_a_wall_is_through_boss(hammond_b: Path) -> None:
+    """Ruling 2's own discriminator: the wall's own lower edge, where the
+    inner face ends at the floor fillet before the outer face does.
+
+    Every test above still passes with the inner check deleted -- none of
+    them reaches a point where the two regions disagree. This one does: a
+    point just inside the outer region's own bound, derived from
+    ``bounds_nm`` rather than typed, sits past where the inner region's
+    fillet has already retreated.
+    """
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    surface = next(surface for surface in model.walls if surface.key == "right")
+    _x0, y0, _x1, _y1 = surface.bounds_nm
+    edge = (Nanometre(0), Nanometre(y0 + 1_000_000))
+    assert (
+        model.classify_wall(surface.key, edge, edge, Nanometre(50_000))
+        is Rejection.THROUGH_BOSS
+    )
