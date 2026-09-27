@@ -18,7 +18,7 @@ from .errors import StompgeomError
 from .kernel import require_kernel
 from .levels import Direction
 
-__all__ = ["axial_extent", "radial_reach"]
+__all__ = ["axial_extent", "radial_bands", "radial_reach"]
 
 #: How far past each end of the solid the cutting cylinder is built. A tool
 #: that only has to contain the solid has no other natural size, and the
@@ -88,6 +88,44 @@ def radial_reach(
     and the cut removes it, so a shaft exactly filling its bore reaches
     nothing -- see "Fit clearance" in ``stompcollider-technical.md``.
     """
+    found = _residue("radial_reach", shape, axis_location_mm, direction, radius_mm)
+    if found is None:
+        return None
+    return _box(*found).CornerMax().Z()
+
+
+def radial_bands(
+    shape: Any,
+    axis_location_mm: tuple[float, float, float],
+    direction: Direction,
+    radius_mm: float,
+) -> tuple[tuple[float, float], ...]:
+    """Where material outside ``radius_mm`` lies along ``direction``, least first.
+
+    One ``(low, high)`` per separate piece of it, because a part may be too
+    wide in two places with nothing between them and a single pair spanning
+    both would claim material the gap does not hold. Ordered on the pairs
+    themselves, so the kernel's walk reaches no answer (ADR-0006). Empty
+    where nothing lies outside the cylinder; strictness is as
+    :func:`radial_reach` states it.
+    """
+    found = _residue("radial_bands", shape, axis_location_mm, direction, radius_mm)
+    return () if found is None else _pieces(*found)
+
+
+def _residue(
+    caller: str,
+    shape: Any,
+    axis_location_mm: tuple[float, float, float],
+    direction: Direction,
+    radius_mm: float,
+) -> tuple[Any, Any] | None:
+    """What of ``shape`` lies outside the cylinder, with the frame it reads in.
+
+    One cut serving both public questions, and each reads it its own way: a
+    box over the whole residue answers the reach, and a box per solid answers
+    the bands. ``None`` where nothing lies outside the cylinder.
+    """
     require_kernel()
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
@@ -96,13 +134,13 @@ def radial_reach(
     from OCP.TopExp import TopExp_Explorer
 
     check_millimetres(
-        "radial_reach",
+        caller,
         radius_mm=radius_mm,
         **{f"axis_location_mm[{i}]": v for i, v in enumerate(axis_location_mm)},
         **{f"direction[{i}]": v for i, v in enumerate(direction)},
     )
     if radius_mm < 0.0:
-        raise ValueError(f"radial_reach needs a radius, not {radius_mm!r}")
+        raise ValueError(f"{caller} needs a radius, not {radius_mm!r}")
 
     location = _turned(direction)
     box = _box(shape, location)
@@ -146,4 +184,26 @@ def radial_reach(
         residue, TopAbs_ShapeEnum.TopAbs_VERTEX
     ).More():
         return None
-    return _box(residue, location).CornerMax().Z()
+    return (residue, location)
+
+
+def _pieces(residue: Any, location: Any) -> tuple[tuple[float, float], ...]:
+    """Each solid of ``residue`` as its extent along the turned frame's own Z.
+
+    A cut of one solid by another yields solids; a residue carrying none is
+    boxed whole rather than reported as nothing, because material was found
+    and a shell or a face is still where it is.
+    """
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp_Explorer
+
+    found = []
+    explorer = TopExp_Explorer(residue, TopAbs_ShapeEnum.TopAbs_SOLID)
+    while explorer.More():
+        box = _box(explorer.Current(), location)
+        found.append((box.CornerMin().Z(), box.CornerMax().Z()))
+        explorer.Next()
+    if not found:
+        whole = _box(residue, location)
+        found.append((whole.CornerMin().Z(), whole.CornerMax().Z()))
+    return tuple(sorted(found))

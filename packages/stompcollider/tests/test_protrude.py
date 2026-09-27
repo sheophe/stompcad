@@ -868,3 +868,57 @@ def test_the_committed_board_s_jack_measures_the_stack_the_plan_recorded(
                 (7_530_000, 3_000_000, 23_610_000),
             }
             assert outward.bore_mm == pytest.approx(4.150)
+
+
+def _collared_jack() -> StepSolid:
+    """A 3 mm barrel 20 mm long with an 8 mm collar on its outermost 2 mm.
+
+    The shape a wall span meets: the collar stands *outside* the wall, which
+    the barrel passes through, so the wide material is shallower than the span
+    rather than deeper. The committed board's jack is the other way round --
+    its 7.530 mm flange sits behind the wall -- so nothing measured reaches
+    this arrangement.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+
+    barrel = _pin(3.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    collar = _pin(8.0, 2.0, at=(18.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    fused = BRepAlgoAPI_Fuse(barrel, collar)
+    assert fused.IsDone()
+    return StepSolid(name="J1", shape=fused.Shape())
+
+
+def _outward(features: tuple[Any, ...]) -> Any:
+    return next(f for f in features if f.direction[0] > 0.0)
+
+
+def _widest_at(feature: Any, depth_mm: float) -> float:
+    """The widest radius the stack claims at one depth from the tip."""
+    return max(
+        band.radius_mm
+        for band in feature.stack
+        if band.depth_from_tip_min_mm <= depth_mm <= band.depth_from_tip_max_mm
+    )
+
+
+def test_a_probed_band_claims_no_material_the_part_does_not_have_at_that_depth() -> None:
+    """The wall's question is a span, not an insertion depth.
+
+    Through a panel, everything behind the first obstruction is unreachable, so
+    a band running to the part's far end is the truth about how deep it can go.
+    Across a wall's span only the material *in* the span is in the hole, and a
+    band open to the far end reports a collar standing clear of the wall as
+    though it were inside it -- which sizes the hole to the collar.
+    """
+    solid = _collared_jack()
+    found = wall_features_of(solid, _UP, probes_nm=(Nanometre(4_000_000),))
+    assert len(found) == 2
+    # 5 mm from the tip is three millimetres behind the collar, where the part
+    # is the bare barrel.
+    assert _widest_at(_outward(found), 5.0) == pytest.approx(3.0, abs=1e-6)
+
+
+def test_a_probed_band_still_states_material_that_is_in_the_span() -> None:
+    """The control: bounding a band must not stop it reporting the collar itself."""
+    found = wall_features_of(_collared_jack(), _UP, probes_nm=(Nanometre(4_000_000),))
+    assert _widest_at(_outward(found), 1.0) > 4.0

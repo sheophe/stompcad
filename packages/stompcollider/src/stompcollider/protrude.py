@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.levels import Direction, direction_bin
-from stompgeom.radial import axial_extent, radial_reach
+from stompgeom.radial import axial_extent, radial_bands, radial_reach
 from stompgeom.step import StepSolid
 from stompmodel.frames import dot
 from stompmodel.units import Nanometre, mm_from_nm
@@ -160,7 +160,11 @@ def _coaxial_classes(faces: Sequence[Cylinder]) -> tuple[tuple[Cylinder, ...], .
 
 
 def protrusion_of(
-    solid: StepSolid, carrier_normal: Direction, probes_nm: Sequence[Nanometre] = ()
+    solid: StepSolid,
+    carrier_normal: Direction,
+    probes_nm: Sequence[Nanometre] = (),
+    *,
+    bounded: bool = False,
 ) -> RawComponent | None:
     """``solid``'s measured protrusion, or ``None`` when it has no axis.
 
@@ -168,8 +172,9 @@ def protrusion_of(
     panel, and the admitted cylinder reaching furthest along it fixes the
     axis. ``probes_nm`` are the radii the panel's holes admit; the solid is
     cut against each, which is what states the width of a can or a body no
-    cylinder describes. A component yielding no admissible cylinder has no
-    axis and cannot pair.
+    cylinder describes, and ``bounded`` is which question those cuts answer
+    (see ``_cut``). A component yielding no admissible cylinder has no axis
+    and cannot pair.
     """
     admitted = admissible(solid, carrier_normal)
     if not admitted:
@@ -192,7 +197,7 @@ def protrusion_of(
             for cylinder in admitted
             if tipmost.is_coaxial_with(cylinder)
         )
-        + _cut(solid, tipmost, carrier_normal, tip_mm, probes_nm),
+        + _cut(solid, tipmost, carrier_normal, tip_mm, probes_nm, bounded),
     )
 
 
@@ -202,35 +207,38 @@ def _cut(
     outward: Direction,
     tip_mm: float,
     probes_nm: Sequence[Nanometre],
+    bounded: bool = False,
 ) -> tuple[RawCylinder, ...]:
-    """One band per probe radius the solid is wider than somewhere.
+    """A band per probe radius the solid is wider than somewhere.
 
-    *Strictly* wider than the probe is, in whole nanometres, at least one
-    nanometre wider, and ``probe_nm + 1`` is both the radius the cut is
-    measured at and the radius the band records -- one number, not two.
-    The radius a profile is asked about is a radius it was probed at:
-    ``model.admitting_radius`` states it once, for this module's caller and
-    for ``Match``. Each band runs to the part's far end, the deepest depth.
+    *Strictly* wider than the probe, in whole nanometres, and ``probe_nm + 1``
+    is both the radius the cut is measured at and the radius the band records
+    -- one number, not two, as ``model.admitting_radius`` states for this
+    module's caller and for ``Match``. ``bounded`` picks the question: a panel
+    asks an insertion depth, so a band runs to the part's far end because
+    nothing behind the first obstruction is reachable; a wall asks a span,
+    where material outside the span is not in the hole, so each band covers
+    only the material that made it.
     """
     ends_mm = tip_mm - axial_extent(solid.shape, outward)[0]
-    bands = []
+    found: list[RawCylinder] = []
     for probe_nm in sorted(set(probes_nm)):
-        reach_mm = radial_reach(
-            solid.shape,
-            tipmost.axis_location_mm,
-            outward,
-            mm_from_nm(Nanometre(probe_nm + 1)),
-        )
-        if reach_mm is None:
-            continue
-        bands.append(
+        radius_mm = mm_from_nm(Nanometre(probe_nm + 1))
+        where = (solid.shape, tipmost.axis_location_mm, outward, radius_mm)
+        if bounded:
+            spans = [(tip_mm - high, tip_mm - low) for low, high in radial_bands(*where)]
+        else:
+            reach_mm = radial_reach(*where)
+            spans = [] if reach_mm is None else [(tip_mm - reach_mm, ends_mm)]
+        found.extend(
             RawCylinder(
-                radius_mm=mm_from_nm(Nanometre(probe_nm + 1)),
-                depth_from_tip_min_mm=tip_mm - reach_mm,
-                depth_from_tip_max_mm=ends_mm,
+                radius_mm=radius_mm,
+                depth_from_tip_min_mm=shallow,
+                depth_from_tip_max_mm=deep,
             )
+            for shallow, deep in spans
         )
-    return tuple(bands)
+    return tuple(found)
 
 
 def _measured(cylinder: Cylinder, outward: Direction, tip_mm: float) -> RawCylinder:
@@ -293,10 +301,11 @@ def wall_features_of(
 
     Neither sign is known to point at a wall, so neither is chosen here:
     resolving that is the drill side's, which alone knows where the walls
-    are. ``protrusion_of`` does the measuring unchanged -- which is what
-    brings ``_cut``, and with it the width of a shell no cylindrical face of
-    its own describes. Ordered on the direction itself, so the pair's order
-    is geometry and not this loop's (ADR-0006).
+    are. ``protrusion_of`` does the measuring -- which is what brings ``_cut``,
+    and with it the width of a shell no cylindrical face of its own describes
+    -- and it is asked for bounded bands, because a wall holds only what
+    crosses it. Ordered on the direction itself, so the pair's order is
+    geometry and not this loop's (ADR-0006).
     """
     axis = wall_axis(solid, carrier_normal)
     if axis is None:
@@ -305,7 +314,7 @@ def wall_features_of(
     bore_mm = bore_of(faces, axis)
     found = []
     for direction in sorted((axis, negated(axis))):
-        measured = protrusion_of(solid, direction, probes_nm)
+        measured = protrusion_of(solid, direction, probes_nm, bounded=True)
         if measured is None or measured.axis_xy_mm is None or measured.tip_mm is None:
             continue
         u, v = basis_about(direction)

@@ -117,3 +117,41 @@ def test_a_radius_beyond_the_whole_solid_is_answered_without_a_boolean() -> None
 def test_a_radius_below_zero_is_refused_rather_than_measured() -> None:
     with pytest.raises(ValueError, match="needs a radius"):
         radial_reach(_shaft(), _ORIGIN, _UP, -1.0)
+
+
+def test_material_too_wide_in_two_places_is_two_bands_and_not_one_span() -> None:
+    """A gap holds no material, so no band may cover it.
+
+    Two collars sixteen millimetres apart on one thin shaft: a single pair
+    from the first to the last would claim the shaft's own width is a collar's
+    all the way between them.
+    """
+    from stompgeom.radial import radial_bands
+
+    shaft = _cylinder(1.0, 0.0, 20.0)
+    low = _cylinder(5.0, 0.0, 2.0)
+    high = _cylinder(5.0, 18.0, 20.0)
+    fused = BRepAlgoAPI_Fuse(BRepAlgoAPI_Fuse(shaft, low).Shape(), high).Shape()
+
+    bands = radial_bands(fused, _ORIGIN, _UP, 3.0)
+    assert len(bands) == 2
+    assert bands[0][0] == pytest.approx(0.0, abs=1e-6)
+    assert bands[0][1] == pytest.approx(2.0, abs=1e-6)
+    assert bands[1][0] == pytest.approx(18.0, abs=1e-6)
+    assert bands[1][1] == pytest.approx(20.0, abs=1e-6)
+
+
+def test_a_radius_nothing_exceeds_is_no_bands_at_all() -> None:
+    from stompgeom.radial import radial_bands
+
+    assert radial_bands(_shaft(), _ORIGIN, _UP, 6.5) == ()
+
+
+def test_one_wide_feature_is_one_band_over_its_own_extent() -> None:
+    """The flange, and not the shaft standing on it, is what exceeds the radius."""
+    from stompgeom.radial import radial_bands
+
+    bands = radial_bands(_shaft(), _ORIGIN, _UP, 4.0)
+    assert len(bands) == 1
+    assert bands[0][0] == pytest.approx(0.0, abs=1e-6)
+    assert bands[0][1] == pytest.approx(5.0, abs=1e-6)
