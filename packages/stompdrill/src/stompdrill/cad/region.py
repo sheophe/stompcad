@@ -23,6 +23,13 @@ __all__ = [
     "contains_at_depth", "clearance_reason",
 ]
 
+#: How far a point may sit off a face and still be classified on it.
+#: ``Precision::Confusion()``, the kernel's own coincidence tolerance, which
+#: is what "on this face" means to the classifier below; named once because
+#: three questions here ask it and a second value would let two of them
+#: disagree about whether one point is inside one region.
+_CLASSIFIER_TOLERANCE_MM = 1e-7
+
 #: How close a companion's in-plane footprint must sit to a hole's own to
 #: count as its match. Measured gaps top out at ~4e-7 mm across every cached
 #: model (kernel-float noise); 0.01 mm is four orders of magnitude looser
@@ -169,7 +176,9 @@ def contains(
     )
     point: list[float] = list(frame.basis.to_model(x_nm, y_nm, depth_nm))
 
-    classifier = BRepClass_FaceClassifier(region, gp_Pnt(*point), 1e-7)
+    classifier = BRepClass_FaceClassifier(
+        region, gp_Pnt(*point), _CLASSIFIER_TOLERANCE_MM
+    )
     if classifier.State() != TopAbs_State.TopAbs_IN:
         return False
 
@@ -218,7 +227,8 @@ def contains_at_depth(
     if on_plane.Value() > mm_from_nm(Nanometre(1)):
         return False
 
-    if BRepClass_FaceClassifier(region, point, 1e-7).State() != TopAbs_State.TopAbs_IN:
+    state = BRepClass_FaceClassifier(region, point, _CLASSIFIER_TOLERANCE_MM).State()
+    if state != TopAbs_State.TopAbs_IN:
         return False
     distance = BRepExtrema_DistShapeShape(vertex, _boundary(region))
     if not distance.IsDone():
@@ -258,7 +268,9 @@ def clearance_reason(
         adaptor = BRepAdaptor_Curve(edge)
         if adaptor.GetType() == GeomAbs_CurveType.GeomAbs_Circle:
             centre = adaptor.Circle().Location()
-            classifier = BRepClass_FaceClassifier(region, centre, 1e-7)
+            classifier = BRepClass_FaceClassifier(
+                region, centre, _CLASSIFIER_TOLERANCE_MM
+            )
             if classifier.State() != TopAbs_State.TopAbs_IN:
                 return "concave"
         return "convex"
