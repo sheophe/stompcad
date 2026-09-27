@@ -377,10 +377,10 @@ def test_the_datum_is_the_outer_box_s_own_centre_not_a_looser_pin(part: str) -> 
     ``wall_bounds_nm`` cannot see the datum move (a wall's bounds are always
     stated symmetrically), so this checks the frame's own mapping against a
     centre computed afresh, not against ``build_wall_frame``'s own output --
-    the guard concern 3 found missing. 10 nm clears the real implementation's
-    own round-trip noise, measured under 0.5 nm on every cached model, by
-    twenty times, while staying thousands of times below the tens-of-microns
-    divergence a datum silently swapped for the centroid produces.
+    the guard that the datum is the box centre and not the centroid. 10 nm
+    clears the real implementation's own round-trip noise, measured under
+    0.5 nm on every cached model, by twenty times, while staying thousands
+    of times below the tens-of-microns divergence a centroid datum produces.
     """
     solid, axis = _box(part)
     drilled = find_faces(solid, axis)
