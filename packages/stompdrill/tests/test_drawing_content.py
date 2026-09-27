@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from stompdrill.emitters.drawing import content
+from stompdrill.emitters.drawing.build import SheetText
+from stompdrill.emitters.drawing.layout import Layout
+from stompdrill.emitters.drawing.sheet import A4_LANDSCAPE
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import SNAP_GRID_PARAMETER, SNAP_STAGE, DrillData, EnclosureMatch, StageRun
-from tests.conftest import at, make_data
+from stompmodel.model import (
+    SNAP_GRID_PARAMETER,
+    SNAP_STAGE,
+    SURFACE_FACE,
+    DrillData,
+    EnclosureMatch,
+    ReferenceOutline,
+    StageRun,
+)
+from stompmodel.units import Nanometre
+from tests.conftest import at, make_data, wall_surface
 
 
 def test_the_schedule_reads_the_number_through_numbered_not_list_position():
@@ -217,3 +229,59 @@ def test_notes_fall_back_to_saying_there_were_none():
 
     assert note.severity is Severity.INFO
     assert "No diagnostics" in note.text
+
+
+def test_a_wall_sheet_names_its_surface():
+    """Two sheets in a builder's hands and nothing else tells them apart."""
+    data = make_data(
+        at(0, 0, 7_000_000, index=1, surface="left"),
+        reference=ReferenceOutline(Nanometre(30_000_000), Nanometre(20_000_000)),
+    ).with_surfaces([wall_surface("left")])
+    layout = Layout.for_sheet(A4_LANDSCAPE, data)
+
+    named = {field.name: field.value for field in content.title_fields(data, SheetText(), layout)}
+
+    assert named["SURFACE"] == "LEFT"
+
+
+def test_a_panel_sheet_states_no_surface_row():
+    """The byte lock: a sheet of the drilled plate is what it always was."""
+    data = make_data(
+        at(0, 0, 7_000_000, index=1),
+        reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000)),
+    )
+    layout = Layout.for_sheet(A4_LANDSCAPE, data)
+
+    assert "SURFACE" not in {
+        field.name for field in content.title_fields(data, SheetText(), layout)
+    }
+
+
+def test_a_finding_on_one_surface_does_not_flag_a_hole_on_another():
+    """Both hold a hole at the origin; only the wall's is duplicated."""
+    duplicate = Diagnostic(
+        severity=Severity.WARNING,
+        code="duplicate-hole",
+        message="two holes share a point",
+        location_nm=(Nanometre(0), Nanometre(0)),
+        data=(("diameter_nm", 7_000_000), ("surface", "left")),
+    )
+
+    assert content.flagged_holes((duplicate,), surface="left") == frozenset(
+        {(0, 0, 7_000_000)}
+    )
+    assert content.flagged_holes((duplicate,), surface=SURFACE_FACE) == frozenset()
+
+
+def test_a_finding_that_names_no_surface_belongs_to_the_drilled_plate():
+    """Every finding written before surfaces existed, and every panel finding
+    written since: the default has to be the plate or none of them would match."""
+    duplicate = Diagnostic(
+        severity=Severity.WARNING,
+        code="duplicate-hole",
+        message="two holes share a point",
+        location_nm=(Nanometre(0), Nanometre(0)),
+        data=(("diameter_nm", 7_000_000),),
+    )
+
+    assert content.flagged_holes((duplicate,)) == frozenset({(0, 0, 7_000_000)})

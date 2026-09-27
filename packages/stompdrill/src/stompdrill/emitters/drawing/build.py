@@ -13,7 +13,7 @@ from itertools import pairwise
 
 from stompmodel.diagnostics import Severity
 from stompmodel.errors import EmitterError
-from stompmodel.model import DrillData, Hole
+from stompmodel.model import SURFACE_FACE, DrillData, Hole
 from stompmodel.units import Nanometre, format_nm, mm_from_nm
 
 from .content import (
@@ -428,7 +428,7 @@ def _build_centrelines(layout: Layout, pens: Pens) -> list[Item]:
 
 def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     drawn: list[Item] = []
-    flagged = flagged_holes(data.diagnostics)
+    flagged = flagged_holes(data.diagnostics, data.surface or SURFACE_FACE)
 
     for number, hole in data.numbered():
         cx, cy = layout.point(mm_from_nm(hole.x_nm), mm_from_nm(hole.y_nm))

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.model import DrillData, EnclosureMatch, Hole
+from stompmodel.model import SURFACE_FACE, DrillData, EnclosureMatch, Hole
 from stompmodel.units import Nanometre, format_nm
 
 from ...pipeline import DRILL_STANDARDS
@@ -48,6 +48,7 @@ __all__ = [
     "tool_summary",
     "note_lines",
     "title_cell_width",
+    "surface_note",
     "title_fields",
     "plain_title_lines",
     "grid_value",
@@ -255,7 +256,7 @@ def schedule_rows(data: DrillData) -> tuple[ScheduleRow, ...]:
     """Format every hole's schedule line, in the model's own hole order."""
     tools = data.tools()
     label = diameter_label(data)
-    flagged = flagged_holes(data.diagnostics)
+    flagged = flagged_holes(data.diagnostics, data.surface or SURFACE_FACE)
     # The position is rendered with ``format_nm`` rather than an f-string over
     # ``mm_from_nm``: it is an integer and this is the one rendering of it, so
     # there is no float in between for the drill file to disagree with. It is
@@ -311,6 +312,17 @@ def _capped(value: str, limit: int) -> str:
     return value[: limit - 1] + "…"
 
 
+def surface_note(data: DrillData) -> str:
+    """Which surface this sheet is of, upper-cased, or empty for the plate.
+
+    Empty for the drilled plate because that is every sheet this project drew
+    before walls existed, and a row that appeared on all of them would move
+    bytes the behaviour lock holds still.
+    """
+    key = data.surface
+    return "" if key in (None, SURFACE_FACE) else key.upper()
+
+
 def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[TitleField, ...]:
     """The title block's fields, per ISO 7200 Tables 1-3.
 
@@ -322,7 +334,7 @@ def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[Titl
     """
     room = capacity(title_cell_width(layout) - 2 * TITLE_CELL_PADDING, TITLE_VALUE_FONT)
     source = data.source
-    stated: tuple[tuple[str, str, int, bool], ...] = (
+    stated: list[tuple[str, str, int, bool]] = [
         ("LEGAL OWNER", text.company or ABSENT, 0, True),
         ("TITLE", text.title or "PANEL DRILL DRAWING", 25, True),
         ("IDENT NO", text.drawing_no or ABSENT, 16, True),
@@ -343,7 +355,10 @@ def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[Titl
         ("SOURCE", source.path or ABSENT, 0, False),
         ("DRILL LAYER", source.drill_layer or ABSENT, 0, False),
         ("REFERENCE LAYER", source.reference_layer or ABSENT, 0, False),
-    )
+    ]
+    note = surface_note(data)
+    if note:
+        stated.append(("SURFACE", note, 0, False))
     return tuple(
         TitleField(name, _capped(value, limit), limit, mandatory)
         for name, value, limit, mandatory in stated
@@ -353,7 +368,7 @@ def title_fields(data: DrillData, text: SheetText, layout: Layout) -> tuple[Titl
 def plain_title_lines(data: DrillData, text: SheetText, layout: Layout, room: int) -> tuple[str, ...]:
     """The lines the non-ISO title block states, in the order it states them."""
     source = data.source
-    return (
+    lines: list[str] = [
         f"TITLE  {text.title or 'PANEL DRILL DRAWING'}",
         f"DRG No  {text.drawing_no or ABSENT}",
         enclosure_note(data, room),
@@ -366,7 +381,11 @@ def plain_title_lines(data: DrillData, text: SheetText, layout: Layout, room: in
             f"LAYERS  drill={source.drill_layer or ABSENT} "
             f"ref={source.reference_layer or ABSENT}"
         ),
-    )
+    ]
+    note = surface_note(data)
+    if note:
+        lines.append(f"SURFACE  {note}")
+    return tuple(lines)
 
 
 def grid_note(data: DrillData) -> str:
@@ -484,16 +503,22 @@ def designator(part: str, match: EnclosureMatch) -> str:
     return part
 
 
-def flagged_holes(diagnostics: Sequence[Diagnostic]) -> frozenset[tuple[int, int, int]]:
-    """Return the (place, diameter) pairs ``duplicate-hole`` findings name.
+def flagged_holes(
+    diagnostics: Sequence[Diagnostic], surface: str = SURFACE_FACE
+) -> frozenset[tuple[int, int, int]]:
+    """Return the (place, diameter) pairs ``duplicate-hole`` findings name here.
 
     Location alone is not enough: a ⌀3 hole can share a point with a
     duplicated ⌀7 pair, and only ``diameter_nm`` from the finding's own
-    payload tells them apart.
+    payload tells them apart. Nor is a point enough across surfaces, which
+    each have their own origin, so a finding naming none belongs to the
+    drilled plate -- where every finding written before walls existed was.
     """
     flagged: set[tuple[int, int, int]] = set()
     for d in diagnostics:
         if d.code != DUP_CODE or d.location_nm is None:
+            continue
+        if (d.get("surface") or SURFACE_FACE) != surface:
             continue
         diameter_nm = d.get("diameter_nm")
         if diameter_nm is None:
