@@ -20,7 +20,7 @@ from ..errors import StompdrillError
 
 __all__ = [
     "classify_bounds", "build_region", "region_bbox_nm", "contains",
-    "clearance_reason",
+    "contains_at_depth", "clearance_reason",
 ]
 
 #: How close a companion's in-plane footprint must sit to a hole's own to
@@ -179,6 +179,51 @@ def contains(
     if not distance.IsDone():
         raise StompdrillError("could not measure clearance to the region boundary")
     return distance.Value() >= clearance
+
+
+def contains_at_depth(
+    region: Any,
+    frame: FaceFrame,
+    x_nm: Nanometre,
+    y_nm: Nanometre,
+    depth_nm: Nanometre,
+    radius_nm: Nanometre,
+    margin_nm: Nanometre,
+) -> bool:
+    """Is the drill circle, grown by the margin, wholly inside ``region``?
+
+    A sibling of :func:`contains` rather than a parameter on it. That one
+    reads the region's plane off a kernel axis, which is exact for the drilled
+    plate -- whose region is normal to one -- and meaningless for a wall,
+    whose region is drafted so that its box along the drill axis spans the
+    wall's whole height. Here the caller names the plane along the frame's own
+    ``w``, which is the only frame a wall's region has.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_State
+
+    point = gp_Pnt(*frame.basis.to_model(x_nm, y_nm, depth_nm))
+    vertex = BRepBuilderAPI_MakeVertex(point).Vertex()
+
+    # Unlike a kernel axis, nothing else confirms ``depth_nm`` names
+    # ``region``'s own plane, and the classifier below takes any depth on
+    # its footprint as inside it; one nanometre in millimetres is the
+    # finest distance a canonical depth can even state.
+    on_plane = BRepExtrema_DistShapeShape(vertex, region)
+    if not on_plane.IsDone():
+        raise StompdrillError("could not measure the point's own distance to the region")
+    if on_plane.Value() > mm_from_nm(Nanometre(1)):
+        return False
+
+    if BRepClass_FaceClassifier(region, point, 1e-7).State() != TopAbs_State.TopAbs_IN:
+        return False
+    distance = BRepExtrema_DistShapeShape(vertex, _boundary(region))
+    if not distance.IsDone():
+        raise StompdrillError("could not measure clearance to the region boundary")
+    return distance.Value() >= mm_from_nm(Nanometre(radius_nm + margin_nm))
 
 
 def clearance_reason(

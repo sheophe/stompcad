@@ -15,8 +15,9 @@ from typing import Any
 from stompgeom.levels import Direction, Level, direction_bin, levels
 from stompgeom.shapes import compound
 from stompgeom.step import StepSolid
-from stompmodel.frames import dot
-from stompmodel.units import Nanometre
+from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
+from stompmodel.model import SURFACES, DrilledSurface
+from stompmodel.units import Nanometre, nm_from_mm
 
 from ..errors import StompdrillError
 from .case import _inner_level, _plates
@@ -24,11 +25,15 @@ from .case import _inner_level, _plates
 __all__ = [
     "LATERAL_LIMIT",
     "Wall",
+    "build_wall_frame",
     "draft_degrees",
+    "drilled_surface",
     "find_walls",
     "is_lateral",
     "lateral_plates",
     "nearest_axis",
+    "surface_key",
+    "wall_bounds_nm",
 ]
 
 #: How much of a level's normal may lie along the drill axis and still be a
@@ -188,3 +193,127 @@ def _parallel_to(found: list[Level], outer: Level) -> list[Level]:
     return [
         level for level in found if direction_bin(level.direction) in {key, opposite}
     ]
+
+
+def build_wall_frame(wall: Wall, drilled_outward: Direction) -> FaceFrame:
+    """Right-handed ``(u, v, w)`` with ``w`` this wall's outward normal.
+
+    ``v`` leans along ``drilled_outward``, so looking at the wall from outside
+    -- along ``-w`` -- ``u`` runs right and ``v`` runs towards the drilled
+    face, which is how a builder holds a pedal while marking its side. The
+    ``u``/``v`` datum is the centre of the outer region's bounding box,
+    because a wall carries no artwork to centre on and a box's centre is what
+    a drawing dimensions from; depth zero is then carried to the inner plane,
+    as ``FaceFrame`` states for every frame.
+    """
+    w = wall.outward
+    # No tie-break is needed or possible: a lateral normal is never parallel
+    # to the drill axis, so this cross product is never degenerate.
+    u = _normalised(cross(drilled_outward, w))
+    v = cross(w, u)
+    provisional = CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)), u=u, v=v, w=w
+    )
+    box = _projected_box(wall.outer_faces, provisional)
+    centre_u_nm = nm_from_mm((box[0] + box[3]) / 2.0)
+    centre_v_nm = nm_from_mm((box[1] + box[4]) / 2.0)
+    outer_depth_nm = nm_from_mm((box[2] + box[5]) / 2.0)
+    origin = provisional.to_model(
+        centre_u_nm, centre_v_nm, Nanometre(outer_depth_nm - wall.plate_nm)
+    )
+    return FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(
+                nm_from_mm(origin[0]), nm_from_mm(origin[1]), nm_from_mm(origin[2])
+            ),
+            u=u,
+            v=v,
+            w=w,
+        )
+    )
+
+
+def wall_bounds_nm(
+    region: Any, frame: FaceFrame
+) -> tuple[Nanometre, Nanometre, Nanometre, Nanometre]:
+    """``region``'s extent in ``frame``, stated symmetrically about its datum.
+
+    Halved rather than measured twice: the datum is the box's own centre, and
+    independent minima and maxima would let rounding put them a nanometre
+    apart -- which ``DrilledSurface`` refuses, because a wall's artefacts are
+    framed by that extent's size alone. An odd span therefore floors,
+    narrowing the drillable region rather than widening it.
+    """
+    box = _projected_box(region, frame.basis)
+    half_u = Nanometre(nm_from_mm(box[3] - box[0]) // 2)
+    half_v = Nanometre(nm_from_mm(box[4] - box[1]) // 2)
+    return (Nanometre(-half_u), Nanometre(-half_v), half_u, half_v)
+
+
+def surface_key(wall: Wall, face_frame: FaceFrame) -> str:
+    """Which of the four wall names this one carries.
+
+    Read from the projection of the wall's outward direction onto the drilled
+    face's own ``u`` and ``v``: the dominant component with its sign names it,
+    so nothing is keyed by position in a list and the order the kernel
+    enumerates faces in cannot change a name. The draft tilts out of the face
+    plane, which this projection drops -- which is why a drafted wall and an
+    undrafted one key alike.
+    """
+    along_u = dot(wall.outward, face_frame.basis.u)
+    along_v = dot(wall.outward, face_frame.basis.v)
+    if abs(along_u) >= abs(along_v):
+        return "right" if along_u > 0.0 else "left"
+    return "top" if along_v > 0.0 else "bottom"
+
+
+def drilled_surface(
+    wall: Wall, key: str, frame: FaceFrame, region: Any
+) -> DrilledSurface:
+    """This wall as the record a document carries, so a hole in it means something.
+
+    ``region`` is the **outer** surface's: it is what a builder marks, what a
+    printed template is taped to, and what a drill file's lower-left origin
+    counts from, so it is the one rectangle the document can state. A hole is
+    still checked against the inner region as well, at the point its own axis
+    crosses that plane -- see ``pipeline.walls``.
+    """
+    if key not in SURFACES:
+        raise StompdrillError(f"{key!r} is no surface of an enclosure")
+    return DrilledSurface(
+        key=key,
+        frame=frame,
+        thickness_nm=wall.plate_nm,
+        bounds_nm=wall_bounds_nm(region, frame),
+    )
+
+
+def _projected_box(
+    shape: Any, basis: CoordinateFrame
+) -> tuple[float, float, float, float, float, float]:
+    """``shape``'s extent on ``basis``'s own three axes, least first per axis.
+
+    Every one of the model box's eight corners is projected, not the two
+    measured extremes: a wall's plane is drafted, so the extreme corner there
+    is not the extreme corner here. Exact for a rectangle tilted about one of
+    its own in-plane axes, which is what a drafted wall is.
+    """
+    from stompgeom.step import bounding_box_mm
+
+    box = bounding_box_mm(shape)
+    projected = [
+        basis.to_canonical((x, y, z))
+        for x in (box[0], box[3])
+        for y in (box[1], box[4])
+        for z in (box[2], box[5])
+    ]
+    lows = tuple(min(point[axis] for point in projected) for axis in range(3))
+    highs = tuple(max(point[axis] for point in projected) for axis in range(3))
+    return (lows[0], lows[1], lows[2], highs[0], highs[1], highs[2])
+
+
+def _normalised(a: Direction) -> Direction:
+    length = math.sqrt(dot(a, a))
+    if length == 0.0:  # pragma: no cover - a lateral normal is never the drill axis
+        raise StompdrillError("degenerate wall frame")
+    return (a[0] / length, a[1] / length, a[2] / length)

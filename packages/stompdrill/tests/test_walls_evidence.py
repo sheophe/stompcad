@@ -13,13 +13,24 @@ from pathlib import Path
 
 import pytest
 
-from stompdrill.cad.case import _plates, select_solid
-from stompdrill.cad.walls import Wall, draft_degrees, find_walls, lateral_plates, nearest_axis
+from stompdrill.cad.case import _plates, build_frame, find_faces, select_solid
+from stompdrill.cad.region import build_region
+from stompdrill.cad.walls import (
+    Wall,
+    build_wall_frame,
+    draft_degrees,
+    drilled_surface,
+    find_walls,
+    lateral_plates,
+    nearest_axis,
+    surface_key,
+    wall_bounds_nm,
+)
 from stompgeom.levels import direction_bin, levels
 from stompgeom.step import StepSolid, assembly_spans, read_step
 from stompmodel.frames import dot
 from stompmodel.model import CaseFace
-from stompmodel.units import mm_from_nm
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 from . import hammond
 
@@ -231,3 +242,100 @@ def test_the_order_walls_come_back_in_is_the_geometry_s(part: str) -> None:
     outward = [nearest_axis(wall.outward) for wall in find_walls(solid, axis)]
     assert outward == sorted(outward)
     assert len(set(outward)) == 4
+
+
+def _centroid_mm(shape: object) -> tuple[float, float, float]:
+    """``shape``'s own mass centroid, a mechanics quantity ruling 1 sets apart."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(shape, props)
+    centre = props.CentreOfMass()
+    return (centre.X(), centre.Y(), centre.Z())
+
+
+#: Each model's wall spans in its own frame, ``(u, v)`` in millimetres, sorted.
+#: ``u`` is the longer on every wall of every model, which is why the panel's
+#: "u is the longer span" convention survives unchanged on a wall.
+SPANS: dict[str, tuple[tuple[float, float], ...]] = {
+    "1590A": ((26.5000, 25.0609), (26.5000, 25.0609), (80.6000, 25.0609), (80.6000, 25.0609)),
+    "1590B": ((48.5000, 26.0280), (48.5000, 26.0280), (100.4000, 26.0280), (100.4000, 26.0280)),
+    "1590BB": ((83.0000, 29.0713), (83.0000, 29.0713), (108.5000, 29.0713), (108.5000, 29.0713)),
+    "1590BB2": ((83.0000, 32.7767), (83.0000, 32.7767), (108.5000, 32.7767), (108.5000, 32.7767)),
+    "1590BBS": ((82.0000, 37.1307), (82.0000, 37.1307), (107.5000, 37.1307), (107.5000, 37.1307)),
+    "1590LB": ((40.6030, 25.5443),) * 4,
+    "1590Y": ((88.0014, 37.0389),) * 4,
+}
+
+#: How far each model's outer wall region's own centroid sits from the centre
+#: of its bounding box, in nanometres. Ruling 1: five models agree to under a
+#: nanometre and two do not, which is why the datum is the box's centre.
+CENTROID_OFFSETS: dict[str, int] = {
+    "1590A": 0, "1590B": 1, "1590BB": 1, "1590BB2": 0,
+    "1590BBS": 1, "1590LB": 66_461, "1590Y": 68_771,
+}
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", sorted(SPANS))
+def test_every_wall_spans_what_was_measured_in_its_own_frame(part: str) -> None:
+    solid, axis = _box(part)
+    drilled = find_faces(solid, axis)
+    measured = []
+    for wall in find_walls(solid, axis):
+        frame = build_wall_frame(wall, drilled.outward)
+        x0, _y0, x1, y1 = wall_bounds_nm(wall.outer_faces, frame)
+        span_u = mm_from_nm(Nanometre(x1 - x0))
+        span_v = mm_from_nm(Nanometre(y1 * 2))
+        measured.append((round(span_u, 4), round(span_v, 4)))
+    assert sorted(measured) == sorted(SPANS[part])
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", sorted(SPANS))
+def test_u_is_the_longer_span_on_every_wall(part: str) -> None:
+    solid, axis = _box(part)
+    drilled = find_faces(solid, axis)
+    for wall in find_walls(solid, axis):
+        x0, y0, x1, y1 = wall_bounds_nm(wall.outer_faces, build_wall_frame(wall, drilled.outward))
+        assert x1 - x0 > y1 - y0
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", sorted(CENTROID_OFFSETS))
+def test_the_centroid_and_the_box_centre_differ_by_what_was_measured(part: str) -> None:
+    """Ruling 1's own evidence: two models make the two datums disagree.
+
+    Asserted rather than merely recorded, because if every model agreed the
+    ruling would be moot and the datum could be either -- and a future model
+    that disagrees by more than these two is worth failing over.
+    """
+    solid, axis = _box(part)
+    drilled = find_faces(solid, axis)
+    offsets = set()
+    for wall in find_walls(solid, axis):
+        frame = build_wall_frame(wall, drilled.outward)
+        centroid = frame.basis.to_canonical(_centroid_mm(wall.outer_faces))
+        offsets.add(max(abs(nm_from_mm(centroid[0])), abs(nm_from_mm(centroid[1]))))
+    assert max(offsets) == pytest.approx(CENTROID_OFFSETS[part], abs=2)
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", sorted(SPANS))
+def test_every_wall_states_a_surface_the_document_accepts(part: str) -> None:
+    """``DrilledSurface`` refuses an off-centre wall, so this is the centring check too."""
+    solid, axis = _box(part)
+    drilled = find_faces(solid, axis)
+    face_frame = build_frame(drilled, axis)
+    keys = []
+    for wall in find_walls(solid, axis):
+        frame = build_wall_frame(wall, drilled.outward)
+        region = build_region(wall.inner, axis, drilled.outward[axis])
+        key = surface_key(wall, face_frame)
+        surface = drilled_surface(wall, key, frame, wall.outer_faces)
+        assert surface.key == key
+        assert surface.thickness_nm == wall.plate_nm
+        keys.append(key)
+        assert region is not None
+    assert sorted(keys) == ["bottom", "left", "right", "top"]
