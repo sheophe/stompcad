@@ -1,7 +1,7 @@
-"""Where a feature's ray crosses one wall's two planes, restated in its frame.
+"""Where a feature's ray crosses a wall, how wide its hole is, and the stage.
 
 Frames and arithmetic here; the drillable region is the model's question, so
-this module is testable against a fake one exactly as ``clearance.py`` is.
+the stage below is testable against a fake one exactly as ``clearance.py`` is.
 """
 
 from __future__ import annotations
@@ -202,11 +202,12 @@ def stocked_diameter_nm(
 class DrillWalls:
     """Cut the holes a seating puts in the walls, and refuse what cannot be made.
 
-    An ordinary ``Stage``, appended only by the orchestrator: it asserts that
-    no other stage ran and reads only what a document already carries. It runs
-    after the clash so it works from the ranking that survived re-ranking,
-    which is the only ranking that will not change under it. Holes leave here
-    unnumbered, because ``RouteHoles`` alone assigns ``Hole.index``.
+    An ordinary ``Stage``, appended only by the orchestrator: it assumes
+    nothing about which stages ran and reads only what a document already
+    carries. The orchestrator appends it after the clash so it works from the
+    ranking that survived re-ranking, which is the only ranking that will not
+    change under it. Holes leave here unnumbered, because ``RouteHoles`` alone
+    assigns ``Hole.index``.
     """
 
     name: ClassVar[str] = "drill-walls"
@@ -317,9 +318,9 @@ class DrillWalls:
             reached = ", ".join(sorted(met.key for _f, met, _s in found))
             if len({feature.direction for feature, _met, _s in found}) == 1:
                 raise StompdrillError(
-                    f"one ray of {rays[0].designator}'s axis lands inside more than one "
-                    f"wall's drillable region ({reached}); this enclosure is not one "
-                    f"this version drills"
+                    f"one ray of board {rays[0].board}'s {rays[0].designator} axis lands "
+                    f"inside more than one wall's drillable region ({reached}); this "
+                    f"enclosure is not one this version drills"
                 )
             raise StompdrillError(
                 f"both measured signs of board {rays[0].board}'s {rays[0].designator} "
@@ -364,8 +365,8 @@ def _unreachable(board: int, designator: str) -> Diagnostic:
     return Diagnostic.error(
         "wall-feature-unreachable",
         f"board {board}'s {designator} was named as a wall reference, but its axis "
-        f"reaches no wall of this enclosure in the seating that was chosen, so no "
-        f"hole can be cut for it",
+        f"reaches no drillable part of any wall of this enclosure in the seating that "
+        f"was chosen, so no hole can be cut for it",
         data=(("board", board), ("designator", designator)),
     )
 

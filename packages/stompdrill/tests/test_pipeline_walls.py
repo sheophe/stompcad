@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, replace
 
 import pytest
 
-from stompdrill.cad import Rejection
+from stompdrill.cad import Rejection, WallModel
 from stompdrill.cli import build_parser, build_pipeline
 from stompdrill.errors import StompdrillError
 from stompdrill.pipeline.diameters import DEFAULT_STANDARD, DRILL_STANDARDS
@@ -273,6 +273,15 @@ class _FakeWalls:
         return self.rejecting.get(key)
 
 
+def test_the_fake_really_is_a_wall_model() -> None:
+    """``DrillWalls`` is typed against ``WallModel``, so the fake must satisfy it.
+
+    Without this, every test below would drive a shape that merely happens to
+    have the right method names today.
+    """
+    assert isinstance(_FakeWalls(walls=(_wall(),)), WallModel)
+
+
 def _data() -> DrillData:
     """A document registering a case and its plate, as the clearance stage leaves one."""
     return DrillData(
@@ -401,13 +410,12 @@ def test_a_ray_grazing_a_wall_is_refused_rather_than_raising(along: float) -> No
     """A whisker off parallel meets the plane, unboundedly far along the wall.
 
     ``crossing`` answers *where* a ray meets a plane and owns no bound, so the
-    bound is this stage's. The two magnitudes are the two things that go wrong
-    without it: at 1e-9 the crossing is thirty kilometres from the datum and a
-    hole would be cut there, and below about 1e-22 the travelled distance is
-    one ``nm_from_mm`` refuses outright -- it scales through ``Decimal``, whose
-    context cannot state 1e22 mm as whole nanometres, so the stage would raise
-    where a refusal is owed. The fake's region admits every point, which is
-    what makes both cases discriminate here rather than only the second.
+    bound is this stage's. Two magnitudes, because two things go wrong without
+    it: at 1e-9 the crossing is thirty kilometres from the datum and a hole
+    would be cut there, and below about 1e-22 the travel is a magnitude
+    ``nm_from_mm`` refuses outright, so the stage would raise where a refusal
+    is owed. The fake's region admits every point, which is what makes both
+    cases discriminate here rather than only the second.
     """
     model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
     graze = replace(

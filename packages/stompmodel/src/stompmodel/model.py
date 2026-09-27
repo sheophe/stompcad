@@ -427,9 +427,9 @@ class WallFeature:
     away from its board, so a depth in ``profile`` sits at
     ``origin_nm - depth · direction``. Neither sign of an in-plane axis is
     known to point at a wall, so a component states one of these per sign and
-    the drill side keeps whichever reaches one. ``bore_nm`` is a floor on the
-    radius a hole must admit rather than a step of the profile: a plug enters
-    the bore however little material surrounds it there.
+    the drill side resolves them against the walls it found. ``bore_nm`` is a
+    floor on the radius a hole must admit rather than a step of the profile: a
+    plug enters the bore however little material surrounds it there.
     """
 
     designator: str

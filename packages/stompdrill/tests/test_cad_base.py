@@ -1,12 +1,12 @@
-"""The kernel-free case-model contract."""
+"""The two kernel-free model contracts, and that neither implies the other."""
 
 from __future__ import annotations
 
 import pytest
 
-from stompdrill.cad import CaseModel, Rejection
+from stompdrill.cad import CaseModel, Rejection, WallModel
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace
+from stompmodel.model import CaseFace, DrilledSurface
 from stompmodel.units import Nanometre
 
 
@@ -31,6 +31,18 @@ class Stub:
     )
 
     def classify(self, x_nm, y_nm, radius_nm):
+        return None
+
+
+class WallStub:
+    """Minimal structural implementation of the wall contract, and only that."""
+
+    walls: tuple[DrilledSurface, ...] = ()
+
+    def admits(self, key, x_nm, y_nm):
+        return True
+
+    def classify_wall(self, key, outer_nm, inner_nm, radius_nm):
         return None
 
 
@@ -67,6 +79,34 @@ def test_an_object_missing_classify_does_not_satisfy_the_protocol():
         )
 
     assert not isinstance(Incomplete(), CaseModel)
+
+
+def test_a_structural_implementation_satisfies_the_wall_protocol():
+    assert isinstance(WallStub(), WallModel)
+
+
+def test_an_object_missing_classify_wall_does_not_satisfy_the_wall_protocol():
+    class Incomplete:
+        walls: tuple[DrilledSurface, ...] = ()
+
+        def admits(self, key, x_nm, y_nm):
+            return True
+
+    assert not isinstance(Incomplete(), WallModel)
+
+
+def test_the_two_model_contracts_are_separate_and_neither_implies_the_other():
+    """Which is the whole reason there are two.
+
+    ``Stub`` is shaped like every clearance fake in the suite: it satisfies
+    ``CaseModel`` while answering no wall question, so adding the wall members
+    to ``CaseModel`` instead would have broken all of them. Both directions are
+    asserted, because one alone would pass if the protocols were merged.
+    """
+    assert isinstance(Stub(), CaseModel)
+    assert not isinstance(Stub(), WallModel)
+    assert isinstance(WallStub(), WallModel)
+    assert not isinstance(WallStub(), CaseModel)
 
 
 def test_every_case_face_has_a_step_keyword():
