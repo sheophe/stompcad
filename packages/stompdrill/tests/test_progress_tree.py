@@ -13,11 +13,12 @@ from pathlib import Path
 from stompdrill import cli
 from stompdrill.emitters.excellon import ExcellonEmitter
 from stompdrill.emitters.json_out import JsonEmitter
+from stompdrill.pipeline.route import RouteHoles
 from stompdrill.quantise import RawDrillData, quantise
 from stompmodel.model import DrillData
 from stompmodel.progress import track
 from stompmodel.protocols import Emitter
-from tests.conftest import FakeCase, build_pipeline_for_test
+from tests.conftest import FakeCase, at, build_pipeline_for_test, make_data
 
 __all__: list[str] = []
 
@@ -209,4 +210,32 @@ def test_the_emit_span_divides_by_requested_target(tar_routed, tmp_path) -> None
     # target is drawn, not leave it suspended for a later ``next()`` -- so
     # the position it left behind is already at the scope's own end before
     # track()'s own exit forces one.
+    assert settled[-1][0] == 1.0
+
+
+def test_the_routing_span_closes_when_its_last_tool_block_is_done() -> None:
+    """The router's own division must be exhausted, not left at its last leaf.
+
+    Drawing one slot per block with ``next()`` and never resuming the
+    generator past the final block leaves that leaf and the routing span
+    suspended: the position stops short of the scope's end, and only the
+    garbage collector ever closes them. Counted here over three blocks --
+    two tools on the plate and one on a wall -- so a division that stopped
+    one leaf early cannot land on 1.0 by arithmetic accident.
+    """
+    recorder = Recorder()
+    data = make_data(
+        at(0, 0, 7_000_000),
+        at(10_000_000, 0, 5_000_000),
+        at(0, 0, 5_000_000, surface="left"),
+    )
+
+    with track(recorder) as scope:
+        RouteHoles().apply(data, scope)
+        # Snapshot before track()'s own exit forces 1.0 regardless, so this
+        # reads only what the routing division itself left behind.
+        settled = list(recorder.updates)
+
+    under_route = [path for _position, path in settled if path]
+    assert len(under_route) >= 3, "the router opened fewer leaves than it has blocks"
     assert settled[-1][0] == 1.0

@@ -93,15 +93,19 @@ def _routed(holes: Sequence[Hole], scope: Scope = NO_PROGRESS) -> list[Hole]:
     """
     by_surface = {key: [hole for hole in holes if hole.surface == key] for key in SURFACES}
     present = [(key, block) for key, block in by_surface.items() if block]
-    leaves = sum(len({hole.diameter_nm for hole in block}) for _key, block in present)
-    slots = scope.steps(leaves)
+    blocks = [
+        (key, diameter, [hole for hole in block if hole.diameter_nm == diameter])
+        for key, block in present
+        for diameter in sorted({hole.diameter_nm for hole in block})
+    ]
     ordered: list[Hole] = []
-    for key, block in present:
-        for diameter in sorted({hole.diameter_nm for hole in block}):
-            slot = next(slots)
-            slot.label(f"{key} tool {mm_from_nm(diameter):.3f}")
-            tool = [hole for hole in block if hole.diameter_nm == diameter]
-            ordered += _two_opt(_nearest_neighbour(tool))
+    # Flattened and zipped rather than drawn one slot at a time: a division
+    # advances a slot's span on the *next* draw and reclaims its own only when
+    # exhausted, so a hand-driven generator leaves the last leaf and this whole
+    # span open. ``strict=True`` keeps the count and the walk one fact.
+    for (key, diameter, tool), slot in zip(blocks, scope.steps(len(blocks)), strict=True):
+        slot.label(f"{key} tool {mm_from_nm(diameter):.3f}")
+        ordered += _two_opt(_nearest_neighbour(tool))
     return ordered
 
 
