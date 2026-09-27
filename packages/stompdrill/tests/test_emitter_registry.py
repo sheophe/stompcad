@@ -201,3 +201,29 @@ def test_a_text_payload_is_still_written_as_utf8(tmp_path):
     assert path.read_text(encoding="utf-8") == "⌀7.000"
     # ⌀ is three bytes in UTF-8, so the count is not the character count.
     assert "8 bytes" in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# every format chooses its own artefact granularity
+# ---------------------------------------------------------------------------
+
+
+def test_every_registered_emitter_states_whether_it_is_per_surface():
+    """``emitters.surfaces.artefacts`` reads ``per_surface`` with ``getattr``,
+    so a stranger's format defaults to whole-job; ours must not inherit that.
+
+    A per-setup format that forgot the declaration would quietly write one
+    file holding holes from several frames, which no machine can run. Read out
+    of ``vars`` rather than by ``getattr``, because an inherited value is
+    exactly what this refuses to accept as a choice. The recipe in
+    ``CONTRIBUTING.md`` names the choice; this is what enforces it.
+    """
+    from stompdrill.emitters import available, get_emitter
+
+    declared = {name: vars(get_emitter(name)).get("per_surface") for name in available()}
+    undeclared = [name for name, value in declared.items() if not isinstance(value, bool)]
+
+    assert undeclared == [], (
+        "these formats inherit the whole-job default instead of choosing: "
+        f"{undeclared}"
+    )

@@ -50,6 +50,10 @@ class StepEmitter:
     media_type: ClassVar[str] = "model/step"
     extension: ClassVar[str] = ".stp"
 
+    #: One object drilled in several setups is still one object, so the cut
+    #: model is one file. See ``emitters.surfaces.artefacts``, which reads this.
+    per_surface: ClassVar[bool] = False
+
     def __init__(self, options: StepOptions | None = None) -> None:
         self.options = options if options is not None else StepOptions()
         if self.options.model is None:
@@ -208,7 +212,6 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
         return None
-    assert data.case is not None, "cut_shape already refused a missing registration"
 
     cylinders = []
     for _number, hole in holes:

@@ -35,6 +35,10 @@ class JsonEmitter:
     media_type: ClassVar[str] = "application/json"
     extension: ClassVar[str] = ".json"
 
+    #: The document describes the whole job, surfaces and all, so it is one
+    #: file. See ``emitters.surfaces.artefacts``, which is what reads this.
+    per_surface: ClassVar[bool] = False
+
     def __init__(self, options: JsonOptions | None = None) -> None:
         self.options = options if options is not None else JsonOptions()
 

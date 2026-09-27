@@ -132,3 +132,22 @@ def test_a_sheet_over_two_surfaces_at_once_is_refused():
 
     with pytest.raises(EmitterError, match="one surface"):
         build_scene(emitter.layout(data), data, SheetText())
+
+
+def test_a_wall_s_drill_file_counts_from_that_wall_s_own_lower_left():
+    """The CLI's own default origin, on a wall, not the centre these tests
+    otherwise pass.
+
+    ``ExcellonOptions()`` is ``LOWER_LEFT``, so the wall's file counts from
+    the corner of the wall's own region: a hole 1 mm inside the low edge of a
+    30 by 20 mm wall is at X1.000, whatever the panel's outline measures.
+    """
+    data = make_data(
+        at(-14_000_000, 9_000_000, 5_000_000, index=1, surface="left"),
+        reference=ReferenceOutline(Nanometre(112_400_000), Nanometre(60_500_000)),
+    ).with_surfaces([wall_surface("left", 30_000_000, 20_000_000)])
+
+    written = dict(artefacts(ExcellonEmitter(), Path("out/tar-case.drl"), data))
+
+    wall = written[Path("out/tar-case-left.drl")]
+    assert "X1.000Y19.000" in wall
