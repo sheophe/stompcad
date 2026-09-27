@@ -346,14 +346,35 @@ def test_the_published_bin_is_the_one_the_partition_groups_on() -> None:
     found = levels(_cylinder(radius=3.0, height=8.0))
     assert found
     for level in found:
-        assert direction_bin(level.direction) == direction_bin(level.direction)
         rebuilt = _unit(direction_bin(level.direction), 1e6)
         assert rebuilt == pytest.approx(level.direction, abs=0.0)
 
 
 def test_two_directions_a_millionth_apart_can_land_in_one_bin_or_two() -> None:
-    """A bin, not a merge tolerance: the boundary is sharp, and that is the point."""
-    from stompgeom.levels import direction_bin
+    """A bin, not a merge tolerance: the same-sized gap lands two directions
+    together or apart depending only on where the rounding boundary falls
+    between them, never on how far apart they are. Both pairs are derived
+    from ``_DIRECTION_SCALE`` itself, so this fails if the granularity ever
+    moves rather than quietly keeping a stale literal.
 
-    assert direction_bin((1.0, 0.0, 0.0)) == (1_000_000, 0, 0)
-    assert direction_bin((0.0, -1.0, 0.0)) == (0, -1_000_000, 0)
+    Raw component pairs, not unit vectors: ``direction_bin`` neither reads
+    nor needs a direction's length, only each component's own
+    scaled-and-rounded value, so a bare float pair exercises it directly.
+    """
+    from stompgeom.levels import _DIRECTION_SCALE, direction_bin
+
+    step = 1.0 / _DIRECTION_SCALE
+    gap = 0.6 * step
+
+    # Centred inside one bin: the gap stays clear of every boundary.
+    centre = 3 * step
+    together = (centre - gap / 2, 0.0, 0.0)
+    still_together = (centre + gap / 2, 0.0, 0.0)
+    assert direction_bin(together) == direction_bin(still_together)
+
+    # Straddling the boundary between two bins: the identical-sized gap now
+    # crosses it.
+    boundary = 3.5 * step
+    apart = (boundary - gap / 2, 0.0, 0.0)
+    now_apart = (boundary + gap / 2, 0.0, 0.0)
+    assert direction_bin(apart) != direction_bin(now_apart)

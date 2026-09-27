@@ -338,3 +338,18 @@ def test_an_axis_a_degree_off_the_plane_is_not_in_it() -> None:
     tilt = math.radians(1.0)
     off = _a_cylinder(direction=(0.0, math.sin(tilt), math.cos(tilt)))
     assert off.is_normal_to((0.0, 1.0, 0.0)) is False
+
+
+def test_an_oblique_axis_answers_false_to_both_questions() -> None:
+    """The two predicates are opposite modes of one filter, not each other's
+    complement: an axis can lie along neither a direction nor the plane it
+    is normal to. Leaning exactly 45 degrees between x and z answers both
+    questions False against each -- proof that a caller reading "not
+    parallel" as "in the plane" would wrongly admit a part's oblique
+    feature as though it pointed somewhere it does not.
+    """
+    leaning = _a_cylinder(direction=_unit((1.0, 0.0, 1.0)))
+
+    for reference in ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)):
+        assert leaning.is_parallel_to(reference) is False
+        assert leaning.is_normal_to(reference) is False
