@@ -23,19 +23,20 @@ import pytest
 from stompcollider.cli import (
     build_pipeline,
     format_case,
+    format_wall_features,
     main,
     parse_pin,
     parse_pitches,
     parse_place,
 )
 from stompcollider.errors import UsageError
-from stompcollider.model import DockData
+from stompcollider.model import Board, Component, DockData, WallCandidate
 from stompcollider.sources import step as source_step
 from stompgeom.build import PlacedSolid, build_document
 from stompgeom.step import StepDocument, read_step, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, StageRun
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, Profile, StageRun, WallFeature
 from stompmodel.units import Nanometre, nm_from_mm
 
 # --------------------------------------------------------------------------
@@ -158,6 +159,26 @@ def _partless() -> StepDocument:
     return _document((*_board_a_parts(), _slab(200.0)))
 
 
+def _sideways(at: tuple[float, float, float], radius: float, length: float) -> Any:
+    """A cylinder along the model's own x axis: in the carrier plane, not through it."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    return BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(*at), gp_Dir(1.0, 0.0, 0.0)), radius, length
+    ).Shape()
+
+
+@lru_cache(maxsize=None)
+def _board_with_jack() -> StepDocument:
+    """Board A's own parts plus one sideways jack, admitted only by a wall filter.
+
+    Placed off every RV pin's footprint and inside the slab's own thickness,
+    so its presence changes nothing the panel-reference tests already check.
+    """
+    return _document((*_board_a_parts(), ("J1", _sideways((12.0, 8.0, -0.8), 1.2, 5.0))))
+
+
 @lru_cache(maxsize=None)
 def _case(*, post: bool, bores: tuple[tuple[float, float], ...]) -> StepDocument:
     """The drilled panel, bored where the holes are, optionally with a post.
@@ -197,6 +218,11 @@ def _identity_face() -> FaceFrame:
             w=(0.0, 0.0, 1.0),
         )
     )
+
+
+def _dock_data() -> DockData:
+    """The bare value a library caller formats without ever running a pipeline."""
+    return DockData(case=CaseRegistration("1590B", CaseFace.BOX, "case.stp", _identity_face()))
 
 
 def _drill(
@@ -1299,3 +1325,180 @@ def test_a_run_with_no_wall_expression_reports_exactly_what_it_did_before(
     written = run.report.read_text(encoding="utf-8")
     assert [d["code"] for d in json.loads(written)["diagnostics"]] == ["clash"]
     assert "wall" not in written.lower()
+
+
+# --------------------------------------------------------------------------
+# WALL FEATURES: what the run measured, and what it was asked for but found
+# nothing of.
+# --------------------------------------------------------------------------
+
+
+def _a_wall_feature(*, bore_nm: Nanometre | None = None) -> WallFeature:
+    """One ray, in the case's face frame, whose profile's widest step is 6.000 mm."""
+    return WallFeature(
+        designator="J1",
+        board=1,
+        origin_nm=(nm_from_mm(10.0), nm_from_mm(5.0), nm_from_mm(2.0)),
+        direction=(1.0, 0.0, 0.0),
+        profile=Profile(
+            (
+                (nm_from_mm(6.0), Nanometre(0), nm_from_mm(3.0)),
+                (nm_from_mm(4.0), nm_from_mm(3.0), nm_from_mm(8.0)),
+            )
+        ),
+        bore_nm=bore_nm,
+    )
+
+
+def _a_wall_candidate() -> WallCandidate:
+    """The same ray, before a placement carries it into the case's frame."""
+    return WallCandidate(
+        designator="J1",
+        tip_nm=(nm_from_mm(10.0), nm_from_mm(5.0), nm_from_mm(2.0)),
+        direction=(1.0, 0.0, 0.0),
+        profile=Profile(((nm_from_mm(6.0), Nanometre(0), nm_from_mm(3.0)),)),
+    )
+
+
+def _dock_data_with_component(*, wall_admitted: bool, wall: tuple[WallCandidate, ...] = ()) -> DockData:
+    """One board carrying one component, its wall state set directly.
+
+    Values rather than a board file: what the report line does is decided by
+    the two flags a filter leaves on a component, not by any geometry a real
+    board would supply.
+    """
+    component = Component(
+        designator="J1", protrusion=None, wall_admitted=wall_admitted, wall=wall
+    )
+    board = Board(
+        ordinal=1,
+        designators=("J1",),
+        extent_nm=(Nanometre(30_000_000), Nanometre(20_000_000), Nanometre(1_600_000)),
+        carrier=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        ),
+        components=(component,),
+    )
+    return replace(_dock_data(), boards=(board,))
+
+
+def test_a_run_with_no_wall_feature_prints_no_block_at_all() -> None:
+    """Absent, not empty: a builder who asked for nothing is told nothing."""
+    assert format_wall_features(_dock_data()) == []
+
+
+def test_each_feature_is_one_line_naming_its_part_board_and_ray() -> None:
+    data = replace(_dock_data(), wall_features=(_a_wall_feature(),))
+    lines = format_wall_features(data)
+    assert lines[1] == "WALL FEATURES (1)"
+    assert "J1" in lines[2]
+    assert "#1" in lines[2]
+
+
+def test_a_measured_bore_is_stated_and_an_absent_one_is_not() -> None:
+    """A bore is a floor on the radius a hole must admit, so a builder reading
+    this wants to see the figure itself, not one doubled into a diameter it
+    is not (``WallFeature.bore_nm``, ``stompmodel.model``)."""
+    with_bore = replace(
+        _dock_data(), wall_features=(_a_wall_feature(bore_nm=Nanometre(3_175_000)),)
+    )
+    without = replace(_dock_data(), wall_features=(_a_wall_feature(),))
+    assert "3.175" in "\n".join(format_wall_features(with_bore))
+    assert "bore" not in "\n".join(format_wall_features(without))
+
+
+def test_the_widest_radius_the_profile_states_is_on_the_line() -> None:
+    """Not the hole's diameter: which wall it meets, and so its span, is not known here."""
+    data = replace(_dock_data(), wall_features=(_a_wall_feature(),))
+    assert "6.000" in "\n".join(format_wall_features(data))
+
+
+def test_a_named_part_with_no_in_plane_feature_is_stated_in_the_report() -> None:
+    """The controller ruling: ``wall_admitted`` names an intent, ``wall`` what
+    was found. A glob naming a jack may also name a header with no sideways
+    cylinder at all -- ordinary use, and no diagnostic -- but a silent
+    report would let a builder believe the expression found something.
+    """
+    data = _dock_data_with_component(wall_admitted=True, wall=())
+
+    lines = format_wall_features(data)
+
+    assert "WALL FEATURES (0)" in lines
+    assert any("J1" in line and "no in-plane feature" in line for line in lines)
+
+
+def test_a_run_where_every_named_part_measured_carries_no_such_line() -> None:
+    """The control: a component that is admitted *and* carries a candidate,
+    in a run whose one feature came from it, must not also read as unmeasured.
+    """
+    data = replace(
+        _dock_data_with_component(wall_admitted=True, wall=(_a_wall_candidate(),)),
+        wall_features=(_a_wall_feature(),),
+    )
+
+    lines = format_wall_features(data)
+
+    assert "WALL FEATURES (1)" in lines
+    assert not any("no in-plane feature" in line for line in lines)
+
+
+def test_the_unmeasured_lines_are_ordered_by_board_then_designator() -> None:
+    """Sorted, because two boards built in either order must report alike (ADR-0006)."""
+
+    def _board(ordinal: int, designator: str) -> Board:
+        return Board(
+            ordinal=ordinal,
+            designators=(designator,),
+            extent_nm=(Nanometre(1_000_000), Nanometre(1_000_000), Nanometre(1_000_000)),
+            carrier=CoordinateFrame(
+                origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+                u=(1.0, 0.0, 0.0),
+                v=(0.0, 1.0, 0.0),
+                w=(0.0, 0.0, 1.0),
+            ),
+            components=(
+                Component(designator=designator, protrusion=None, wall_admitted=True, wall=()),
+            ),
+        )
+
+    forward = replace(_dock_data(), boards=(_board(1, "J1"), _board(2, "J2")))
+    backward = replace(_dock_data(), boards=(_board(2, "J2"), _board(1, "J1")))
+
+    assert format_wall_features(forward) == format_wall_features(backward)
+
+
+def test_a_run_naming_a_jack_reports_its_measured_features(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """An end-to-end run through ``main``, using this file's own synthetic
+    kernel geometry rather than a ``tar_pcb``/``drill_document``/``case_model``
+    fixture set: no such fixtures exist anywhere in this repository, so this
+    substitutes the board and case builders every other test in this module
+    already uses. ``--report`` here writes ``ReportEmitter``'s JSON artefact,
+    not the terminal block under test, so the assertion reads stdout instead.
+    """
+    run = _prepare(tmp_path, monkeypatch, board=_board_with_jack())
+
+    code = main([*run.argv, "--wall-reference", "J1"])
+
+    assert code in {0, 1}
+    printed = capsys.readouterr().out
+    assert "WALL FEATURES (2)" in printed
+
+
+def test_a_run_with_no_wall_expression_prints_no_wall_features_block(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Decision 18 on real printed output, not only on the bare function:
+    ``test_a_run_with_no_wall_expression_reports_exactly_what_it_did_before``
+    reads the ``--report`` JSON artefact, which never carried this text
+    either way, so it cannot see this block appear or vanish. This is the
+    guard that actually would.
+    """
+    run = _prepare(tmp_path, monkeypatch)
+
+    assert main(run.argv) == _BASELINE_EXIT
+    assert "WALL FEATURES" not in capsys.readouterr().out

@@ -172,6 +172,13 @@ which hole the part is for cannot be told from two expressions that both name
 it. It is a finding rather than a usage error because it is decidable only once
 a board file has been read and its designators are known.
 
+A run whose expression admits a component with an in-plane feature adds a
+`WALL FEATURES` block to the terminal report, naming each part's ray and its
+widest radius. A component the expression names but that yields no such
+feature is listed there too, without a position; this is ordinary use, not a
+diagnostic, and does not change the exit code. The block is absent entirely
+when `--wall-reference` is not given.
+
 ### Placement and clashes
 
 The tool matches the panel components to holes, then searches for an insertion
