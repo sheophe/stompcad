@@ -2,11 +2,13 @@
 
 **Status:** Accepted, with the optional `stompdrill[step]` extra superseded by
 [ADR-0009](0009-shared-model-package-and-dependency-order.md). The kernel is now
-`stompgeom`'s unconditional dependency and reaches `stompdrill` through it.
+`stompgeom`'s unconditional dependency and reaches `stompdrill` through it. A
+later amendment adds a second cutting pass, over the walls the same model lets
+a run discover.
 
 This ADR retains the original extra decision and its rationale as history. The
-current installation and the later frame and protocol amendments are described
-below. The remaining decisions still apply.
+current installation, the later frame and protocol amendments, and the wall
+amendment are described below. The remaining decisions still apply.
 
 ## Context
 
@@ -46,6 +48,11 @@ An unreadable model, a model with no recognisable enclosure, or one with no
 drillable face is a usage error. The parsed `CaseModel` is built once and feeds
 both consumers, following ADR-0001's rule that shared facts are computed before
 the emitter fan-out. ADR-0007, Figure 1 shows that flow.
+
+**Amended.** The model is now read for two cutting passes, not one: the
+panel's plate holes as before, then the holes a seating puts in its walls,
+which the amendment below finds by lateral projection over this same parsed
+model.
 
 ```mermaid
 flowchart LR
@@ -207,6 +214,37 @@ rule requires. The real cached `1590LB` model measures 50.6 mm on both axes, wit
 a difference of 0.0 at kernel precision. Its `u` follows the lower-indexed free
 axis tie-break. The supplied model therefore cannot verify whether the
 catalogue's 0.05 mm ranking matches the casting.
+
+### Amendment: the case is cut in two passes, and walls are found by lateral projection
+
+**Accepted.** One enclosure model, drilled in two passes of one pipeline: the panel's holes as
+before, then the holes a seating puts in the walls. The same model carries both, and a run with
+no second pass cuts exactly what it cuts now.
+
+A **wall** is discovered, never declared. Keep the plate levels that are *lateral* — whose
+outward normal lies nearer the plane perpendicular to the drill axis than the axis itself —
+group those by the nearest signed kernel axis, and the extreme level along that axis is the
+wall's outer surface. Its inner surface and any companion step are then found as `find_faces`
+finds the panel's, over the population of levels parallel to that outer surface's own
+direction: a wall's inner surface arrives in a *different* direction bin, because the draft
+tilts the two oppositely, so `_facing` over the whole lateral population would pair a wall with
+the opposite wall's outer face instead.
+
+Projection rather than draft, because draft is a property of casting and not of the definition
+of a wall: an undrafted enclosure still resolves under this rule. The 45° boundary is where
+"lateral" and "axial" meet rather than a tolerance; `tools/measure_walls.py` prints the measured
+populations, which sit at 1.150°–2.500° and exactly 90.000° on every catalogued model, so
+nothing real comes near it.
+
+A wall hole is cut **along its component's own axis**, not normal to the wall. A jack's plug must
+not bind, and a drafted wall would put a wall-normal hole up to 2.500° off the part it admits.
+The opening on the outer surface is therefore a slight ellipse, major axis `d / cos θ` — 1.001 d
+at 2.500°, under the drill standard's own granularity — and in exchange no draft allowance is
+added to any diameter.
+
+The clearance rules are unchanged, applied per wall: a hole whose circle leaves the wall's
+drillable region is `hole-off-face`, and one fouling what stands behind that wall is
+`hole-through-boss`.
 
 ## Rationale
 
