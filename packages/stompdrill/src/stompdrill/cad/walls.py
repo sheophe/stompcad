@@ -82,26 +82,20 @@ def lateral_plates(solid: StepSolid, axis: int) -> tuple[Level, ...]:
     )
 
 
-def nearest_axis(direction: Direction, axis: Direction | None = None) -> Direction:
+def nearest_axis(direction: Direction) -> Direction:
     """The signed kernel axis ``direction`` leans on most.
 
     Grouping a wall's outer and inner surfaces -- which lean oppositely out
     of the footprint plane, landing in different direction bins -- means
     grouping on the axis they share. An exact tie takes the lower index,
-    reachable only by an in-plane 45° level no casting has. Refuses
-    ``axis`` itself: a lateral level's own filter already keeps it off the
-    drill axis, so landing there is a construction failure, not a wall.
+    reachable only by an in-plane 45° level no casting has. Which axes a
+    wall may lean on is not this answer's business: ``_grouped_by_axis``
+    owns that rule, and stating it twice would be two rules to keep in step.
     """
     lead = max(range(_COMPONENTS), key=lambda index: (abs(direction[index]), -index))
     unit = [0.0, 0.0, 0.0]
     unit[lead] = 1.0 if direction[lead] > 0.0 else -1.0
-    result = (unit[0], unit[1], unit[2])
-    if axis is not None and result == axis:
-        raise StompdrillError(
-            f"{direction!r} leans nearest the drill axis {axis!r}, which no "
-            "lateral level's own axis can be"
-        )
-    return result
+    return (unit[0], unit[1], unit[2])
 
 
 @dataclass(frozen=True)
@@ -163,10 +157,13 @@ def _grouped_by_axis(found: list[Level], axis: int) -> dict[Direction, list[Leve
     unit = [0.0, 0.0, 0.0]
     unit[axis] = 1.0
     along = (unit[0], unit[1], unit[2])
+    # An equality and not a threshold: both are signed unit kernel axes, so
+    # "leans on the drill axis" is membership in the two signs of it.
+    on_axis = {along, (-along[0], -along[1], -along[2])}
     groups: dict[Direction, list[Level]] = {}
     for level in found:
         leans = nearest_axis(level.direction)
-        if abs(dot(leans, along)) > 0.5:
+        if leans in on_axis:
             raise StompdrillError(
                 f"a lateral level facing {level.direction} leans on the drill axis, so "
                 f"it belongs to no wall; this enclosure is not one this version drills"

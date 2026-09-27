@@ -59,9 +59,10 @@ class OcpCaseModel:
     #: Every wall this model discovered, each as the record a document carries.
     #: A tuple and not a mapping, so the order discovery fixed is the order a
     #: consumer sees (ADR-0006). Empty for a model whose walls could not be
-    #: discovered (a lid with no facing companion plate, say) as well as for
-    #: one built without wall support at all -- both are "no walls" to a
-    #: consumer, and neither can express anything a default would lose.
+    #: discovered or framed (a lid with nothing behind its lateral levels to
+    #: face, say) as well as for one built without wall support at all -- both
+    #: are "no walls" to a consumer, and neither can express anything a
+    #: default would lose.
     walls: tuple[DrilledSurface, ...] = ()
     #: Each wall's outer and inner drillable region, keyed by surface. Two,
     #: because a hole coaxial with its component crosses the two planes at
@@ -180,28 +181,36 @@ def load_case_model(
         box_region = build_region(box_faces.inner, axis, box_faces.outward[axis])
         box_frame = build_frame(box_faces, axis)
 
-    walls = []
+    walls: list[DrilledSurface] = []
     regions: dict[str, tuple[Any, Any]] = {}
     try:
-        discovered_walls = find_walls(solid, axis)
+        # The whole answer, not just its first step: framing a wall, keying it,
+        # building its two regions and stating its record can each refuse, and
+        # a model that reached one of those is as much "no walls" as one whose
+        # walls were never found. A lid is the ordinary case -- a flat closure
+        # plate with nothing behind its lateral levels to face, which is a fact
+        # about the lid and not a load failure. Wall drilling is opt-in, and a
+        # feature naming an unreachable wall is refused by ``DrillWalls``
+        # itself (``wall-feature-unreachable``), which is where that diagnostic
+        # belongs -- not here, blocking a load the panel's face never needed.
+        for wall in find_walls(solid, axis):
+            lateral = nearest_axis(wall.outward)
+            wall_axis_index = max(range(3), key=lambda index: abs(lateral[index]))
+            frame = build_wall_frame(wall, faces.outward)
+            key = surface_key(wall, own_frame)
+            outer = build_region(
+                wall.outer_faces, wall_axis_index, wall.outward[wall_axis_index]
+            )
+            inner = build_region(
+                wall.inner, wall_axis_index, wall.outward[wall_axis_index]
+            )
+            walls.append(drilled_surface(wall, key, frame, outer))
+            regions[key] = (outer, inner)
     except StompdrillError:
-        # A model whose walls cannot be discovered has none -- a lid is a
-        # flat closure plate with nothing behind its lateral levels to face,
-        # which is a fact about the lid, not a load failure. Wall drilling
-        # is opt-in, and a feature naming an unreachable wall is refused by
-        # ``DrillWalls`` itself (``wall-feature-unreachable``), which is
-        # where that diagnostic belongs -- not here, blocking a load the
-        # panel's own face never needed.
-        discovered_walls = ()
-    for wall in discovered_walls:
-        lateral = nearest_axis(wall.outward)
-        wall_axis_index = max(range(3), key=lambda index: abs(lateral[index]))
-        frame = build_wall_frame(wall, faces.outward)
-        key = surface_key(wall, own_frame)
-        outer = build_region(wall.outer_faces, wall_axis_index, wall.outward[wall_axis_index])
-        inner = build_region(wall.inner, wall_axis_index, wall.outward[wall_axis_index])
-        walls.append(drilled_surface(wall, key, frame, outer))
-        regions[key] = (outer, inner)
+        # Partly built walls are discarded rather than kept: a model reporting
+        # three of its four walls would let a ray resolve to whichever of them
+        # survived, and a hole would be cut from an incomplete enclosure.
+        walls, regions = [], {}
 
     return OcpCaseModel(
         part=part or _part_of(solid.name),

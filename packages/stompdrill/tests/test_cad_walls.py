@@ -151,12 +151,14 @@ def test_an_exact_tie_between_two_axes_breaks_on_the_lower_index() -> None:
     assert nearest_axis((root, 0.0, root)) == (1.0, 0.0, 0.0)
 
 
-def test_a_direction_leaning_on_the_drill_axis_is_refused() -> None:
-    """Ruling 8: a lateral level's own filter should already keep it off the
-    drill axis, so landing there anyway is a construction failure to raise,
-    not a wall grouping to make silently."""
-    with pytest.raises(StompdrillError):
-        nearest_axis((0.01, 0.01, 0.9999), (0.0, 0.0, 1.0))
+def test_the_axis_a_direction_leans_on_is_answered_and_never_refused() -> None:
+    """Ruling 8's rule has one spelling, and it is the grouping's own.
+
+    ``nearest_axis`` answers which axis, not whether a wall may lean on it: the
+    drill axis is a fact about the grouping, which refuses that case by name
+    below, and two spellings of one rule would be two rules to keep in step.
+    """
+    assert nearest_axis((0.01, 0.01, 0.9999)) == (0.0, 0.0, 1.0)
 
 
 def _grouped(levels_: list[Level], axis: int) -> object:
@@ -461,3 +463,25 @@ def test_a_key_naming_no_discovered_wall_is_refused_through_both_questions(
         model.admits("diagonal", Nanometre(0), Nanometre(0))
     with pytest.raises(StompdrillError, match="no diagonal wall"):
         model.classify_wall("diagonal", centre, centre, Nanometre(4_000_000))
+
+
+@pytest.mark.hammond
+def test_a_wall_that_cannot_be_framed_leaves_no_walls_and_not_a_failed_load(
+    hammond_b: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard covers discovery *and* everything discovery's answer is put through.
+
+    Framing a wall, keying it, building its two regions and stating its record
+    can each refuse, and a load the panel's own face never needed must not turn
+    into a hard error because one of them did. ``build_wall_frame`` stands for
+    the four: patched to refuse, the model loads with no walls at all.
+    """
+    from stompdrill.cad import walls as walls_module
+
+    def refuse(*_args: object, **_kwargs: object) -> FaceFrame:
+        raise StompdrillError("degenerate wall frame")
+
+    monkeypatch.setattr(walls_module, "build_wall_frame", refuse)
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert model.walls == ()
+    assert dict(model.wall_regions) == {}
