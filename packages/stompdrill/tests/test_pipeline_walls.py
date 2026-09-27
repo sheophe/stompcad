@@ -173,8 +173,8 @@ def test_the_span_rule_is_the_difference_between_two_stocked_sizes() -> None:
 
 
 def test_a_step_boundary_inside_the_span_is_evaluated_and_not_skipped() -> None:
-    """The profile is piecewise constant, so the widest step inside the span governs."""
-    across = required_radius_nm(_jack(), (Nanometre(2_000_000), Nanometre(4_000_000)))
+    """Neither endpoint reaches the wide step; only its interior boundary does."""
+    across = required_radius_nm(_jack(), (Nanometre(1_000_000), Nanometre(24_000_000)))
     assert across == 7_530_000
 
 
