@@ -11,10 +11,10 @@ from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from stompmodel.frames import FaceFrame
-from stompmodel.model import CaseFace
+from stompmodel.model import CaseFace, DrilledSurface
 from stompmodel.units import Nanometre
 
-__all__ = ["Rejection", "CaseModel", "step_keyword"]
+__all__ = ["Rejection", "CaseModel", "WallModel", "step_keyword"]
 
 
 class Rejection(Enum):
@@ -62,6 +62,42 @@ class CaseModel(Protocol):
     def classify(
         self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre
     ) -> Rejection | None: ...
+
+
+@runtime_checkable
+class WallModel(Protocol):
+    """The kernel-free wall contract: what ``DrillWalls`` needs of a model.
+
+    A second protocol rather than three more members on ``CaseModel``: that
+    one is what the clearance stage needs, and every fake in the suite
+    satisfies its ``isinstance``. Two questions, because picking a wall needs
+    a point and refusing a hole needs its radius, and the radius is not known
+    until the wall -- and so the span -- is.
+    """
+
+    @property
+    def walls(self) -> tuple[DrilledSurface, ...]:
+        """Every wall this model discovered, each as the record a document carries."""
+        ...
+
+    def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
+        """Whether this point lies in that wall's drillable region at all."""
+        ...
+
+    def classify_wall(
+        self,
+        key: str,
+        outer_nm: tuple[Nanometre, Nanometre],
+        inner_nm: tuple[Nanometre, Nanometre],
+        radius_nm: Nanometre,
+    ) -> Rejection | None:
+        """Refuse a sized hole, naming which rule refused it.
+
+        Both crossings, because a hole coaxial with its component meets the
+        two planes at different places (decision 8) and must clear the
+        drillable region at each.
+        """
+        ...
 
 
 #: The upper-cased product-name substring each face's solid is found by.

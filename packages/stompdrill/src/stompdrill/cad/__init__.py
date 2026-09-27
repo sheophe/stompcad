@@ -9,7 +9,14 @@ what a live kernel document actually requires, where ``CaseModel`` names
 only what clearance requires.
 """
 
-from .base import CaseModel, Rejection, step_keyword
+from .base import CaseModel, Rejection, WallModel, step_keyword
 from .loader import OcpCaseModel, load_case_model
 
-__all__ = ["CaseModel", "OcpCaseModel", "Rejection", "load_case_model", "step_keyword"]
+__all__ = [
+    "CaseModel",
+    "OcpCaseModel",
+    "Rejection",
+    "WallModel",
+    "load_case_model",
+    "step_keyword",
+]

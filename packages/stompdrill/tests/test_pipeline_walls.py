@@ -8,11 +8,36 @@ test that decides whether a crossing is drillable is the model's, and
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+
+import pytest
+
+from stompdrill.cad import Rejection
+from stompdrill.cli import build_parser, build_pipeline
+from stompdrill.errors import StompdrillError
 from stompdrill.pipeline.diameters import DEFAULT_STANDARD, DRILL_STANDARDS
-from stompdrill.pipeline.walls import crossing, required_radius_nm, stocked_diameter_nm
+from stompdrill.pipeline.walls import (
+    DrillWalls,
+    crossing,
+    required_radius_nm,
+    stocked_diameter_nm,
+)
+from stompmodel.diagnostics import Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import DrilledSurface, Profile, WallFeature
+from stompmodel.model import (
+    SURFACE_FACE,
+    CaseFace,
+    CaseRegistration,
+    DrillData,
+    DrilledSurface,
+    Profile,
+    ReferenceOutline,
+    WallFeature,
+)
 from stompmodel.units import Nanometre
+from tests.conftest import FakeCase
 
 __all__: list[str] = []
 
@@ -214,3 +239,260 @@ def test_a_narrowed_standard_can_refuse_what_the_full_one_stocks() -> None:
     )
     assert stocked_diameter_nm(Nanometre(3_500_000), narrowed) == 8_000_000
     assert stocked_diameter_nm(Nanometre(4_500_000), narrowed) is None
+
+
+# ---------------------------------------------------------------------------
+# DrillWalls
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeWalls:
+    """A wall model that answers with arithmetic, so the stage is testable alone.
+
+    ``admitting`` names the surfaces whose region accepts a point at all and
+    ``rejecting`` maps a surface to the refusal it gives a sized hole, which is
+    every question ``DrillWalls`` asks of a model.
+    """
+
+    walls: tuple[DrilledSurface, ...]
+    admitting: frozenset[str] = frozenset()
+    rejecting: Mapping[str, Rejection] = field(default_factory=dict)
+
+    def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
+        return key in self.admitting
+
+    def classify_wall(
+        self,
+        key: str,
+        outer_nm: tuple[Nanometre, Nanometre],
+        inner_nm: tuple[Nanometre, Nanometre],
+        radius_nm: Nanometre,
+    ) -> Rejection | None:
+        return self.rejecting.get(key)
+
+
+def _data() -> DrillData:
+    """A document registering a case and its plate, as the clearance stage leaves one."""
+    return DrillData(
+        holes=(),
+        reference=ReferenceOutline.from_measurement(
+            Nanometre(112_400_000), Nanometre(60_500_000)
+        ),
+        case=CaseRegistration("1590B", CaseFace.BOX, "1590B.stp", FACE),
+        surfaces=(
+            DrilledSurface(
+                key=SURFACE_FACE,
+                frame=FACE,
+                thickness_nm=Nanometre(2_000_000),
+                bounds_nm=(
+                    Nanometre(-55_000_000), Nanometre(-30_000_000),
+                    Nanometre(55_000_000), Nanometre(30_000_000),
+                ),
+            ),
+        ),
+    )
+
+
+def _seated(across_mm: float = 0.0, designator: str = "J1") -> WallFeature:
+    """``_jack()`` tipping half a millimetre outside the 2 mm wall ``_wall()`` is.
+
+    The whole of that wall then lies inside the barrel's outermost three
+    millimetres, which is the span rule's own case: the hole admits the
+    5.700 mm bushing and not the 7.530 mm flange standing behind it, so this
+    is the feature whose hole a reader can check against the file's own
+    ``required_radius_nm`` tests. ``across_mm`` slides the tip along the wall,
+    so two features can differ in where their holes land.
+    """
+    return replace(
+        _jack(),
+        designator=designator,
+        origin_nm=(
+            Nanometre(30_500_000), Nanometre(int(across_mm * 1_000_000)), Nanometre(0)
+        ),
+    )
+
+
+def _stage(model: _FakeWalls, *features: WallFeature) -> DrillWalls:
+    return DrillWalls(model, features, DRILL_STANDARDS[DEFAULT_STANDARD])
+
+
+def _drill_pipeline() -> object:
+    """The pipeline ``cli.build_pipeline`` composes with a case model supplied.
+
+    Built the way ``test_cli`` and ``test_invariant`` build theirs -- parsed
+    defaults plus the one attribute the CLI attaches -- rather than a second
+    namespace builder of this module's own.
+    """
+    args = build_parser().parse_args(["panel.ai"])
+    args.case_model_object = FakeCase()
+    return build_pipeline(args)
+
+
+def test_a_stage_with_no_feature_changes_nothing_at_all() -> None:
+    """Decision 18's byte identity, at the stage rather than at the artefact."""
+    data = _data()
+    found = _stage(_FakeWalls(walls=(_wall(),))).apply(data)
+    assert found.holes == ()
+    assert found.surfaces == data.surfaces
+    assert found.diagnostics == ()
+
+
+def test_a_reachable_feature_becomes_a_hole_on_the_wall_it_reaches() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    found = _stage(model, _seated()).apply(_data())
+    assert len(found.holes) == 1
+    hole = found.holes[0]
+    assert hole.surface == "right"
+    assert hole.index is None
+    assert hole.diameter_nm == 11_400_000
+
+
+def test_the_hole_sits_where_the_axis_crosses_the_outer_plane() -> None:
+    """The surface a builder marks, which is why the datum is stated there."""
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    found = _stage(model, _seated()).apply(_data())
+    assert (found.holes[0].x_nm, found.holes[0].y_nm) == (Nanometre(0), Nanometre(0))
+
+
+def test_a_wall_that_took_a_hole_is_registered_beside_the_plate() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    found = _stage(model, _seated()).apply(_data())
+    assert [surface.key for surface in found.surfaces or ()] == [SURFACE_FACE, "right"]
+
+
+def test_a_wall_nothing_was_drilled_in_is_not_registered() -> None:
+    """A wall with no hole is not a setup, so it is owed no record and no file."""
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall(key="left")), admitting=frozenset({"right"})
+    )
+    found = _stage(model, _seated()).apply(_data())
+    assert [surface.key for surface in found.surfaces or ()] == [SURFACE_FACE, "right"]
+
+
+def test_a_run_that_drilled_no_wall_registers_exactly_what_it_was_handed() -> None:
+    """``None`` and an empty tuple are different claims in the document (codec)."""
+    data = replace(_data(), surfaces=None)
+    found = _stage(_FakeWalls(walls=(_wall(key="right"),)), _seated()).apply(data)
+    assert found.surfaces is None
+
+
+def test_a_feature_reaching_no_wall_is_an_error_naming_the_component() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),))
+    found = _stage(model, _seated()).apply(_data())
+    refused = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]
+    assert len(refused) == 1
+    assert refused[0].severity is Severity.ERROR
+    assert "J1" in refused[0].message
+    assert found.holes == ()
+
+
+def test_both_signs_of_one_axis_earn_one_finding_and_not_two() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),))
+    outward = _seated()
+    inward = replace(outward, direction=(-1.0, 0.0, 0.0))
+    found = _stage(model, outward, inward).apply(_data())
+    assert len([d for d in found.diagnostics if d.code == "wall-feature-unreachable"]) == 1
+
+
+@pytest.mark.parametrize("along", [1e-9, 1e-30])
+def test_a_ray_grazing_a_wall_is_refused_rather_than_raising(along: float) -> None:
+    """A whisker off parallel meets the plane, unboundedly far along the wall.
+
+    ``crossing`` answers *where* a ray meets a plane and owns no bound, so the
+    bound is this stage's. The two magnitudes are the two things that go wrong:
+    at 1e-9 the crossing is thirty kilometres from the datum, which no region
+    holds; below about 1e-22 the travelled distance is one ``nm_from_mm``
+    refuses outright, because it scales through ``Decimal`` and that context
+    cannot state 1e22 mm as whole nanometres.
+    """
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    graze = replace(
+        _seated(), direction=(along, math.sqrt(1.0 - along * along), 0.0)
+    )
+    found = _stage(model, graze).apply(_data())
+    assert [d.code for d in found.diagnostics] == ["wall-feature-unreachable"]
+    assert found.holes == ()
+
+
+def test_a_hole_whose_circle_leaves_the_wall_is_refused_as_off_face() -> None:
+    model = _FakeWalls(
+        walls=(_wall(key="right"),),
+        admitting=frozenset({"right"}),
+        rejecting={"right": Rejection.OFF_FACE},
+    )
+    found = _stage(model, _seated()).apply(_data())
+    assert [d.code for d in found.diagnostics] == ["hole-off-face"]
+    assert found.holes == ()
+
+
+def test_a_hole_fouling_what_stands_behind_the_wall_is_refused_as_through_boss() -> None:
+    model = _FakeWalls(
+        walls=(_wall(key="right"),),
+        admitting=frozenset({"right"}),
+        rejecting={"right": Rejection.THROUGH_BOSS},
+    )
+    found = _stage(model, _seated()).apply(_data())
+    assert [d.code for d in found.diagnostics] == ["hole-through-boss"]
+
+
+def test_a_requirement_past_the_standard_s_stock_is_the_unstocked_refusal() -> None:
+    """An existing code on a new surface, rather than a fifth one invented for it."""
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    huge = replace(
+        _seated(),
+        profile=Profile(steps=((Nanometre(20_000_000), Nanometre(0), Nanometre(10_000_000)),)),
+    )
+    found = _stage(model, huge).apply(_data())
+    assert [d.code for d in found.diagnostics] == ["unknown-diameter"]
+    assert found.holes == ()
+
+
+def test_a_ray_landing_in_two_regions_is_refused_rather_than_tie_broken() -> None:
+    """Decision 13's ambiguity, which Task 11 measures to be unreachable.
+
+    Refused and not tie-broken: nothing argued for a preference, and an
+    enclosure whose walls overlap in projection is outside this version.
+    """
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall(key="top")),
+        admitting=frozenset({"right", "top"}),
+    )
+    with pytest.raises(StompdrillError, match="more than one wall"):
+        _stage(model, _seated()).apply(_data())
+
+
+def test_a_document_registering_no_case_has_no_frame_to_resolve_against() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    with pytest.raises(StompdrillError, match="registers no case model"):
+        _stage(model, _seated()).apply(replace(_data(), case=None))
+
+
+def test_holes_come_back_in_an_order_the_geometry_fixes() -> None:
+    """Board, then designator: no mapping's iteration order reaches a hole (ADR-0006)."""
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    first, second = _seated(), _seated(across_mm=5.0, designator="J4")
+    one = _stage(model, first, second).apply(_data())
+    other = _stage(model, second, first).apply(_data())
+    assert [h.raw for h in one.holes] == [h.raw for h in other.holes]
+    assert one.holes[0].x_nm != one.holes[1].x_nm
+
+
+def test_the_standalone_pipeline_composes_no_wall_stage() -> None:
+    """Decision 18: ``stompdrill`` drills no wall, because it has no seating.
+
+    Asserted on the composed stages and not on the flags: a stage reachable
+    from ``build_pipeline`` would be reachable from the command line, and
+    ``DrillWalls`` needs a ranking nothing there can produce.
+    """
+    composed = _drill_pipeline()
+    assert not any(isinstance(stage, DrillWalls) for stage in composed)
+    assert "drill-walls" not in {stage.name for stage in composed}
+
+
+def test_the_stage_records_the_standard_and_the_feature_count_it_ran_with() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    run = _stage(model, _seated()).describe()
+    assert run.name == "drill-walls"
+    assert dict(run.parameters)["standard"] == "metric"
+    assert dict(run.parameters)["features"] == 1

@@ -113,8 +113,8 @@ FAMILIES: dict[Family, Prose] = {
             "ambiguous-pairing", "case-model-unavailable",
             "component-claimed-twice", "grid-ambiguous", "grid-too-fine",
             "nesting-truncated", "reference-size-mismatch",
-            "under-constrained-board", "unmatched-enclosure", "wrong-case-model",
-            "wrong-enclosure",
+            "under-constrained-board", "unmatched-enclosure",
+            "wall-feature-unreachable", "wrong-case-model", "wrong-enclosure",
         }),
     ),
     Family.CANDIDATES: Prose(

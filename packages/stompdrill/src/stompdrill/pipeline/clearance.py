@@ -24,9 +24,12 @@ from stompmodel.units import Nanometre, format_nm
 
 from ..cad import CaseModel, Rejection
 
-__all__ = ["CheckCaseClearance"]
+__all__ = ["REASON", "CheckCaseClearance"]
 
-_REASON: dict[Rejection, str] = {
+#: What each refusal means, in the clause a finding reads. Published because
+#: ``DrillWalls`` restates the same three refusals on a wall, and two copies
+#: would let the two stages describe one rejection differently.
+REASON: dict[Rejection, str] = {
     Rejection.OFF_FACE: "lies outside the drilled face",
     Rejection.THROUGH_BOSS: "meets a boss or rib in the plate",
     Rejection.OBSTRUCTED: "is obstructed behind the plate once assembled",
@@ -195,7 +198,7 @@ class CheckCaseClearance:
             rejection.value,
             f"⌀{format_nm(hole.diameter_nm)} mm hole at "
             f"({format_nm(hole.x_nm)}, {format_nm(hole.y_nm)}) "
-            f"{_REASON[rejection]} of {self.model.part} {self.model.face.value}",
+            f"{REASON[rejection]} of {self.model.part} {self.model.face.value}",
             location_nm=(hole.x_nm, hole.y_nm),
             data=(("diameter_nm", hole.diameter_nm), ("face", self.model.face.value)),
         )
