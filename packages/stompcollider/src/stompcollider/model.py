@@ -384,13 +384,13 @@ class DockData:
     holes: tuple[Hole, ...] = ()
     placements: Mapping[int, tuple[Placement, ...]] = field(default_factory=dict)
     unmatched_holes: tuple[int, ...] = ()
+    diagnostics: tuple[Diagnostic, ...] = ()
+    processing: tuple[StageRun, ...] = ()
     #: Every admitted component's feature as a ray in the case's face frame,
     #: filled by ``Clashes`` once the ranking has settled. Empty for a run
     #: with no wall expression, which is what keeps that run's outputs
     #: byte-identical (decision 18).
     wall_features: tuple[WallFeature, ...] = ()
-    diagnostics: tuple[Diagnostic, ...] = ()
-    processing: tuple[StageRun, ...] = ()
 
     def __post_init__(self) -> None:
         # A copy, not a wrapped alias: a caller's dict mutated after

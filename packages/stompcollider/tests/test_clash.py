@@ -1545,3 +1545,58 @@ def test_reversing_the_placements_tuple_emits_the_same_ray() -> None:
         )
     )
     assert forward.wall_features == reversed_.wall_features
+
+
+def _permuted_frame() -> CoordinateFrame:
+    """A board carrier that swaps and negates axes rather than merely turning one.
+
+    Composed with ``_turned_frame`` as the case basis, every one of a ray's
+    three projected components comes out non-zero -- an axis-aligned fixture
+    cannot tell a swapped or negated projection from a correct one, because
+    two of its three components are already zero regardless of the bug.
+    """
+    return CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        u=(0.0, 0.0, 1.0),
+        v=(0.0, 1.0, 0.0),
+        w=(-1.0, 0.0, 0.0),
+    )
+
+
+def test_the_ray_survives_a_non_trivial_carrier_and_case_frame() -> None:
+    """Origin and direction, checked against values worked out by hand.
+
+    ``sum(c * c for c in direction) == 1`` and "opposite of its twin" both
+    survive a swapped or negated projection; only a literal expected tuple,
+    from a frame where every projection is non-zero, does not. The board's
+    carrier permutes and negates axes and the case frame turns a quarter, so
+    ``u``, ``v`` and ``w`` are each exercised away from zero -- the expected
+    numbers below are worked out once by hand and typed literally, not read
+    back from ``_wall_features`` itself.
+    """
+    designator = "J1"
+    profile = Profile(steps=((Nanometre(3_000_000), Nanometre(0), Nanometre(5_000_000)),))
+    candidate = WallCandidate(
+        designator=designator,
+        tip_nm=(Nanometre(5_000_000), Nanometre(0), Nanometre(0)),
+        direction=(0.6, 0.48, 0.64),
+        profile=profile,
+    )
+    component = Component(
+        designator=designator,
+        protrusion=None,
+        wall_admitted=True,
+        wall=(candidate,),
+    )
+    board = _board(1, carrier=_permuted_frame(), components=(component,))
+    data = _dock(
+        (board,),
+        {1: (_placement(x_mm=10.0),)},
+        frame=_turned_frame(),
+    )
+    solids = {1: (_solid("P", _box((0, 0, 0), 1, 1, 1)),)}
+    found = Clashes(_enclosure(), solids).apply(data)
+
+    (feature,) = found.wall_features
+    assert feature.direction == pytest.approx((0.64, 0.48, -0.6))
+    assert feature.origin_nm == (_nm(10.0), Nanometre(0), _nm(-5.0))
