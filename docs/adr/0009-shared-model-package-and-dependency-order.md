@@ -20,6 +20,8 @@ This ADR adds `stompmodel` to the four packages decided in
 - Record `stompcad` as a built member rather than a planned one. Its own
   decisions are
   [ADR-0013](0013-the-orchestrator-s-presentation-and-composed-run.md).
+- Move `Profile` and `admitting_radius` into `stompmodel`, because `stompdrill`
+  now reads a component's radial profile too.
 
 The decisions and their reasons are set out below.
 
@@ -88,6 +90,8 @@ It holds:
 - `StompError`, with `EmitterError` and `DocumentError` beneath it. Each tool's
   error base, including `StompdrillError`, descends from `StompError`. Callers can
   catch all workspace errors together while retaining tool-specific types.
+- `Profile` and the `admitting_radius` it is queried with, stating a component's
+  radius-versus-depth stack and the radius a hole of a given diameter admits.
 
 Only the following four admission rules permit additions to `stompmodel`.
 
