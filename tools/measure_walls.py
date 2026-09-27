@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from stompdrill.cad.case import _plates, select_solid
-from stompdrill.cad.walls import draft_degrees, lateral_plates
+from stompdrill.cad.walls import draft_degrees, find_walls, lateral_plates
 from stompgeom.levels import direction_bin, levels
 from stompgeom.step import assembly_spans, read_step
 from stompmodel.model import CaseFace
@@ -74,6 +74,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"    {draft_degrees(level.direction, along):7.3f}°  "
                 f"{level.area_mm2:9.2f} mm²  offset {mm_from_nm(level.offset_nm):9.3f} mm  "
                 f"{tuple(round(component, 6) for component in level.direction)}"
+            )
+        for wall in find_walls(solid, axis):
+            print(
+                f"    wall {tuple(round(c, 6) for c in wall.outward)}  "
+                f"outer {wall.outer.area_mm2:9.2f} mm²  "
+                f"plate {mm_from_nm(wall.plate_nm):.4f} mm"
             )
     if missing:
         print(f"not cached: {', '.join(missing)}", file=sys.stderr)

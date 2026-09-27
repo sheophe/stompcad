@@ -81,3 +81,27 @@ def test_a_direction_leaning_on_the_drill_axis_is_refused() -> None:
     not a wall grouping to make silently."""
     with pytest.raises(StompdrillError):
         nearest_axis((0.01, 0.01, 0.9999), (0.0, 0.0, 1.0))
+
+
+def _grouped(levels_: list[Level], axis: int) -> object:
+    """Drive the grouping without a solid, so a synthetic level can reach it."""
+    from stompdrill.cad.walls import _grouped_by_axis
+
+    return _grouped_by_axis(levels_, axis)
+
+
+def test_a_lateral_level_leaning_on_the_drill_axis_is_refused_and_not_grouped() -> None:
+    """Ruling 8: lateral by the definition, yet it would bin to the axis itself.
+
+    Unreachable on every catalogued model -- nothing measures between 2.500°
+    and 90.000° -- and here so a custom model cannot pass through it unseen.
+    """
+    root = 0.6
+    rest = math.sqrt((1.0 - root * root) / 2.0)
+    with pytest.raises(StompdrillError, match="leans on the drill axis"):
+        _grouped([_level((rest, root, rest))], axis=1)
+
+
+def test_four_groups_or_it_is_not_an_enclosure_this_drills() -> None:
+    with pytest.raises(StompdrillError, match="four walls"):
+        _grouped([_level((0.0, 0.0, 1.0)), _level((0.0, 0.0, -1.0))], axis=1)
