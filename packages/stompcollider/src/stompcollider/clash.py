@@ -342,14 +342,13 @@ class Clashes:
     ) -> tuple[Clash, ...]:
         """Every case solid this placement meets. None is privileged or exempt.
 
-        Only ``CASE_KIND`` may exclude a designator: a wall is lateral and
-        a closure is axial by definition, so no hole is ever cut in what
-        closes over the cavity, and dropping that clash would excuse
-        interference no hole explains. Across several case solids the
-        exclusion stays per designator rather than per solid -- which wall
-        a ray crosses is the drill half's own question, not this one's --
-        and it removes bodies from a solid's intersection rather than
-        splitting that intersection per body.
+        Only ``CASE_KIND`` may exclude a designator: a wall is lateral and a
+        closure is axial by definition, so no hole is ever cut in what closes
+        over the cavity, and dropping that clash would excuse interference no
+        hole explains. Across several case solids the exclusion stays per
+        designator rather than per solid -- which wall a ray crosses is the
+        drill half's question -- and it takes bodies out of one intersection
+        rather than splitting that intersection per body.
         """
         excluded = self._excluded(board)
         inside, beyond = self._split.of(basis, board.extent_nm)

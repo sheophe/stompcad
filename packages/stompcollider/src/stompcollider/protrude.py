@@ -213,14 +213,13 @@ def _cut(
 ) -> tuple[RawCylinder, ...]:
     """A band per probe radius the solid is wider than somewhere.
 
-    *Strictly* wider than the probe, in whole nanometres, and ``probe_nm + 1``
-    is both the radius the cut is measured at and the radius the band records
-    -- one number, not two, as ``model.admitting_radius`` states for this
-    module's caller and for ``Match``. ``bounded`` picks the question: a panel
-    asks an insertion depth, so a band runs to the part's far end because
-    nothing behind the first obstruction is reachable; a wall asks a span,
-    where material outside the span is not in the hole, so each band covers
-    only the material that made it.
+    *Strictly* wider, in whole nanometres, and ``probe_nm + 1`` is both the
+    radius the cut is measured at and the radius the band records -- one
+    number, as ``model.admitting_radius`` states for this module's caller and
+    for ``Match``. ``bounded`` picks the question: a panel asks an insertion
+    depth, so a band runs to the part's far end because nothing behind the
+    first obstruction is reachable; a wall asks a span, where material outside
+    it is not in the hole, so a band covers the material that made it.
     """
     ends_mm = tip_mm - axial_extent(solid.shape, outward)[0]
     found: list[RawCylinder] = []
