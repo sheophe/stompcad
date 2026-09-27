@@ -17,7 +17,7 @@ from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_le
 from .diagnostics import of_severity as _of_severity
 from .diagnostics import worst_severity as _worst_severity
 from .errors import EmitterError
-from .frames import FaceFrame
+from .frames import FaceFrame, check_unit_direction
 from .units import (
     Millimetre,
     Nanometre,
@@ -40,6 +40,7 @@ __all__ = [
     "CaseRegistration",
     "admitting_radius",
     "Profile",
+    "WallFeature",
     "DrilledSurface",
     "SourceInfo",
     "StageRun",
@@ -416,6 +417,42 @@ class Profile:
         anything the canonical representation cannot state is not a fact.
         """
         return any(radius == radius_nm for radius, _low, _high in self.steps)
+
+
+@dataclass(frozen=True, slots=True)
+class WallFeature:
+    """One seated component's cylindrical feature, as a ray in the case's face frame.
+
+    ``origin_nm`` is the feature's tip and ``direction`` the unit ray leading
+    away from its board, so a depth in ``profile`` sits at
+    ``origin_nm - depth · direction``. Neither sign of an in-plane axis is
+    known to point at a wall, so a component states one of these per sign and
+    the drill side keeps whichever reaches one. ``bore_nm`` is a floor on the
+    radius a hole must admit rather than a step of the profile: a plug enters
+    the bore however little material surrounds it there.
+    """
+
+    designator: str
+    board: int
+    origin_nm: tuple[Nanometre, Nanometre, Nanometre]
+    direction: tuple[float, float, float]
+    profile: Profile
+    bore_nm: Nanometre | None = None
+
+    def __post_init__(self) -> None:
+        if not self.designator:
+            raise ValueError(
+                "a wall feature needs the designator of the component it was measured from"
+            )
+        if self.board < 1:
+            raise ValueError(f"boards are numbered from 1, not {self.board}")
+        lengths = {f"origin_nm[{i}]": v for i, v in enumerate(self.origin_nm)}
+        if self.bore_nm is not None:
+            lengths["bore_nm"] = self.bore_nm
+        check_nanometres("WallFeature", **lengths)
+        check_unit_direction("WallFeature.direction", self.direction)
+        if self.bore_nm is not None and self.bore_nm <= 0:
+            raise ValueError(f"a bore a plug passes through has a positive radius, not {self.bore_nm}")
 
 
 #: A surface's extent is a rectangle, so it is exactly four values.

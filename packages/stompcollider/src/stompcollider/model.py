@@ -17,7 +17,14 @@ from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.diagnostics import of_severity as _of_severity
 from stompmodel.diagnostics import worst_severity as _worst_severity
 from stompmodel.frames import CoordinateFrame, check_unit_direction
-from stompmodel.model import CaseRegistration, Hole, Profile, StageRun, admitting_radius
+from stompmodel.model import (
+    CaseRegistration,
+    Hole,
+    Profile,
+    StageRun,
+    WallFeature,
+    admitting_radius,
+)
 from stompmodel.units import Nanometre, check_nanometres
 
 __all__ = [
@@ -29,6 +36,7 @@ __all__ = [
     # (ADR-0009). Kept in this list so every existing importer is unaffected.
     "admitting_radius",
     "Profile",
+    "WallFeature",
     "Protrusion",
     "WallCandidate",
     "Component",
@@ -376,6 +384,11 @@ class DockData:
     holes: tuple[Hole, ...] = ()
     placements: Mapping[int, tuple[Placement, ...]] = field(default_factory=dict)
     unmatched_holes: tuple[int, ...] = ()
+    #: Every admitted component's feature as a ray in the case's face frame,
+    #: filled by ``Clashes`` once the ranking has settled. Empty for a run
+    #: with no wall expression, which is what keeps that run's outputs
+    #: byte-identical (decision 18).
+    wall_features: tuple[WallFeature, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     processing: tuple[StageRun, ...] = ()
 

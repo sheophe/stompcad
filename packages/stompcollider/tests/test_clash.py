@@ -25,9 +25,11 @@ from stompcollider.match import _apply
 from stompcollider.model import (
     Board,
     Clash,
+    Component,
     Correspondence,
     DockData,
     Placement,
+    WallCandidate,
 )
 from stompcollider.seat import Seat, rank_key
 from stompcollider.solids import placement_transform
@@ -35,9 +37,9 @@ from stompgeom.shapes import placed
 from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, StageRun
+from stompmodel.model import CaseFace, CaseRegistration, Profile, StageRun
 from stompmodel.protocols import Stage
-from stompmodel.units import Nanometre, nm_from_mm
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 # --------------------------------------------------------------------------
 # Kernel solids. Nothing here is a cube, and nothing is centred on the
@@ -140,13 +142,14 @@ def _board(
     ordinal: int = 1,
     carrier: CoordinateFrame | None = None,
     panel_face: str | None = "+w",
+    components: tuple[Component, ...] = (),
 ) -> Board:
     return Board(
         ordinal=ordinal,
         designators=(f"J{ordinal}",),
         extent_nm=(_nm(10.0), _nm(10.0), _nm(2.0)),
         carrier=carrier or _identity_frame(),
-        components=(),
+        components=components,
         panel_face=panel_face,
     )
 
@@ -1395,3 +1398,150 @@ def test_an_ordinary_clash_volume_is_still_stated_at_three_decimals() -> None:
     ]
 
     assert "by 80.000 mm³" in detail[0].message
+
+
+# --------------------------------------------------------------------------
+# ``wall_features``: each admitted candidate, restated in the case's frame.
+# --------------------------------------------------------------------------
+
+
+def _wall_component(designator: str) -> Component:
+    """One admitted component with a candidate for each sign of its axis."""
+    profile = Profile(steps=((Nanometre(3_000_000), Nanometre(0), Nanometre(5_000_000)),))
+    return Component(
+        designator=designator,
+        protrusion=None,
+        wall_admitted=True,
+        wall=(
+            WallCandidate(
+                designator=designator,
+                tip_nm=(_nm(5.0), Nanometre(0), Nanometre(0)),
+                direction=(1.0, 0.0, 0.0),
+                profile=profile,
+            ),
+            WallCandidate(
+                designator=designator,
+                tip_nm=(_nm(-5.0), Nanometre(0), Nanometre(0)),
+                direction=(-1.0, 0.0, 0.0),
+                profile=profile,
+            ),
+        ),
+    )
+
+
+def _case_solids() -> tuple[StepSolid, ...]:
+    return _enclosure()
+
+
+def _board_solids() -> dict[int, tuple[StepSolid, ...]]:
+    """Board 1 and 2 as ``_two_stage_scene`` states them, plus two boards
+    the case and every other board leave untouched -- what the ordering
+    test needs to name two boards without a clash of its own."""
+    return {
+        1: (_solid("A", _box((0, 0, 0), 10, 10, 4)),),
+        2: (_solid("C", _box((30, 0, 0), 10, 10, 4)),),
+        3: (_solid("D", _box((60, 0, 0), 6, 6, 6)),),
+        4: (_solid("E", _box((80, 20, 0), 6, 6, 6)),),
+    }
+
+
+def _staged_dock_data(wall: tuple[str, ...] = ()) -> DockData:
+    """``_two_stage_scene``'s board 1 and 2, plus two case-clean boards, with
+    the named designators carrying one wall candidate per sign.
+
+    Board 1 keeps its re-ranking dynamics -- ``x = 25`` clean of the case
+    but fouling board 2, ``x = 100`` clean of both -- so the emitted ray
+    can be checked against the seating stage two actually settles on.
+    """
+
+    def _components(ordinal: int) -> tuple[Component, ...]:
+        designator = f"J{ordinal}"
+        return (_wall_component(designator),) if designator in wall else ()
+
+    boards = (
+        _board(1, components=_components(1)),
+        _board(2, components=_components(2)),
+        _board(3, components=_components(3)),
+        _board(4, components=_components(4)),
+    )
+    placements = {
+        1: (_placement(rank=1, x_mm=25.0), _placement(rank=2, x_mm=100.0)),
+        2: (_placement(),),
+        3: (_placement(),),
+        4: (_placement(),),
+    }
+    return _dock(boards, placements)
+
+
+def test_no_admitted_component_means_no_wall_feature() -> None:
+    """A run with no wall expression emits nothing, which is decision 18's promise."""
+    data = _staged_dock_data()
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert found.wall_features == ()
+
+
+def test_an_admitted_component_s_candidate_arrives_in_the_case_s_frame() -> None:
+    """The ray is restated, not recomputed: one transform, applied to point and direction."""
+    data = _staged_dock_data(wall=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert [f.designator for f in found.wall_features] == ["J1", "J1"]
+    assert {f.board for f in found.wall_features} == {1}
+    for feature in found.wall_features:
+        assert sum(c * c for c in feature.direction) == pytest.approx(1.0)
+
+
+def test_the_two_signs_stay_two_features_because_neither_is_chosen_here() -> None:
+    data = _staged_dock_data(wall=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    first, second = found.wall_features
+    assert first.direction == pytest.approx(tuple(-c for c in second.direction))
+
+
+def test_features_come_back_in_an_order_the_geometry_fixes() -> None:
+    """Board, then designator, then direction: no mapping's iteration order (ADR-0006)."""
+    data = _staged_dock_data(wall=("J4", "J1"))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    keys = [(f.board, f.designator, f.direction) for f in found.wall_features]
+    assert keys == sorted(keys)
+
+
+def test_the_feature_is_emitted_for_the_seating_the_ranking_settled_on() -> None:
+    """Rank 1 after re-ranking, never the placement Seat happened to list first.
+
+    The expected ray is recomputed here through the published transform rather
+    than typed: what is under test is that the stage used the chosen seating,
+    and a typed coordinate would also be asserting the transform's arithmetic.
+    """
+    data = _staged_dock_data(wall=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    chosen = min(found.placements[1], key=lambda placement: placement.rank)
+    assert chosen.rank == 1
+    basis = found.case.frame.basis
+    motion = placement_transform(found.boards[0], chosen, basis)
+    expected = set()
+    for component in found.boards[0].components:
+        for candidate in component.wall:
+            placed = basis.to_canonical(
+                motion.apply_point(
+                    tuple(mm_from_nm(value) for value in candidate.tip_nm)  # type: ignore[arg-type]
+                )
+            )
+            expected.add(tuple(nm_from_mm(value) for value in placed))
+    assert {feature.origin_nm for feature in found.wall_features} == expected
+
+
+def test_reversing_the_placements_tuple_emits_the_same_ray() -> None:
+    """Rank decides, not position: the mapping's own order must reach no artefact."""
+    data = _staged_dock_data(wall=("J1",))
+    stage = Clashes(_case_solids(), _board_solids())
+    forward = stage.apply(data)
+    reversed_ = Clashes(_case_solids(), _board_solids()).apply(
+        replace(
+            data,
+            placements={
+                ordinal: tuple(reversed(placements))
+                for ordinal, placements in data.placements.items()
+            },
+        )
+    )
+    assert forward.wall_features == reversed_.wall_features

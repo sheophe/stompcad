@@ -22,10 +22,10 @@ from typing import Any, ClassVar
 from stompgeom.shapes import common, compound, interferes, placed, volume_mm3
 from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.frames import CoordinateFrame
-from stompmodel.model import StageRun
+from stompmodel.frames import CoordinateFrame, dot
+from stompmodel.model import StageRun, WallFeature
 from stompmodel.progress import NO_PROGRESS, Scope
-from stompmodel.units import Nanometre, format_nm, nm_from_mm
+from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
 from .insert import CavitySplit, _drain
@@ -36,6 +36,7 @@ from .solids import (
     Body,
     bodies,
     boxes_overlap,
+    placement_transform,
     solid_name,
 )
 
@@ -241,7 +242,57 @@ class Clashes:
         return replace(
             data,
             placements=seated,
+            wall_features=self._wall_features(seated, boards, basis),
             diagnostics=data.diagnostics + _findings(seated) + notes,
+        )
+
+    def _wall_features(
+        self,
+        placements: Mapping[int, tuple[Placement, ...]],
+        boards: Mapping[int, Board],
+        basis: CoordinateFrame,
+    ) -> tuple[WallFeature, ...]:
+        """Each admitted component's candidate, restated in the case's face frame.
+
+        Read from the ranking this stage has just settled, at rank 1: a
+        feature emitted against a seating the run then re-ranked would name a
+        position nothing chose. One ``RigidTransform`` per board carries both
+        the tip and the direction, so a point and the ray through it cannot
+        disagree about where the board ended up.
+        """
+        found = []
+        for ordinal in sorted(placements):
+            seating = placements[ordinal]
+            if not seating:
+                continue
+            chosen = min(seating, key=lambda placement: placement.rank)
+            board = boards[ordinal]
+            motion = placement_transform(board, chosen, basis)
+            for component in board.components:
+                for candidate in component.wall:
+                    tip = motion.apply_point(
+                        tuple(mm_from_nm(value) for value in candidate.tip_nm)  # type: ignore[arg-type]
+                    )
+                    ray = motion.apply_direction(candidate.direction)
+                    placed = basis.to_canonical(tip)
+                    found.append(
+                        WallFeature(
+                            designator=candidate.designator,
+                            board=ordinal,
+                            origin_nm=(
+                                nm_from_mm(placed[0]),
+                                nm_from_mm(placed[1]),
+                                nm_from_mm(placed[2]),
+                            ),
+                            direction=(
+                                dot(ray, basis.u), dot(ray, basis.v), dot(ray, basis.w)
+                            ),
+                            profile=candidate.profile,
+                            bore_nm=candidate.bore_nm,
+                        )
+                    )
+        return tuple(
+            sorted(found, key=lambda f: (f.board, f.designator, f.direction))
         )
 
     def _board_for(self, ordinal: int, boards: Mapping[int, Board]) -> Board:
