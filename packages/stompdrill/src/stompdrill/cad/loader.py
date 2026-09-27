@@ -107,8 +107,8 @@ class OcpCaseModel:
         """
         from .region import contains_at_depth
 
-        outer, _inner = self.wall_regions[key]
         surface = self._wall(key)
+        outer, _inner = self.wall_regions[key]
         return contains_at_depth(
             outer, surface.frame, x_nm, y_nm, surface.thickness_nm,
             Nanometre(0), Nanometre(0),
@@ -132,8 +132,8 @@ class OcpCaseModel:
         """
         from .region import contains_at_depth
 
-        outer, inner = self.wall_regions[key]
         surface = self._wall(key)
+        outer, inner = self.wall_regions[key]
         if not contains_at_depth(
             outer, surface.frame, outer_nm[0], outer_nm[1],
             surface.thickness_nm, radius_nm, self.margin_nm,

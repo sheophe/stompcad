@@ -414,6 +414,9 @@ def test_a_hole_over_the_floor_fillet_behind_a_wall_is_through_boss(hammond_b: P
     model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
     surface = next(surface for surface in model.walls if surface.key == "right")
     _x0, y0, _x1, _y1 = surface.bounds_nm
+    # Measured directly against the real regions at radius/margin zero: outer
+    # accepts and inner rejects from y0+200,000 through y0+2,900,000 nm. Both
+    # offsets below sit inside that band, with room either side of them.
     edge = (Nanometre(0), Nanometre(y0 + 1_000_000))
     assert (
         model.classify_wall(surface.key, edge, edge, Nanometre(50_000))
@@ -442,3 +445,19 @@ def test_the_same_enclosure_s_box_still_finds_its_four_walls(hammond_a: Path) ->
     assert sorted(surface.key for surface in model.walls) == [
         "bottom", "left", "right", "top"
     ]
+
+
+@pytest.mark.hammond
+def test_a_key_naming_no_discovered_wall_is_refused_through_both_questions(
+    hammond_b: Path,
+) -> None:
+    """``_wall``'s own lookup failure, reached through the two public
+    questions that share it -- an untested raise is a raise whose message
+    nobody has read.
+    """
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    centre = (Nanometre(0), Nanometre(0))
+    with pytest.raises(StompdrillError, match="no diagonal wall"):
+        model.admits("diagonal", Nanometre(0), Nanometre(0))
+    with pytest.raises(StompdrillError, match="no diagonal wall"):
+        model.classify_wall("diagonal", centre, centre, Nanometre(4_000_000))
