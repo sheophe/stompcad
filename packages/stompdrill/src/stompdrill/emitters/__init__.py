@@ -11,6 +11,7 @@ from .drawing_svg import DrawingOptions, DrawingSvgEmitter
 from .excellon import ExcellonEmitter, ExcellonOptions
 from .json_out import JsonEmitter, JsonOptions
 from .step import StepEmitter, StepOptions
+from .surfaces import artefacts, sibling
 
 __all__ = [
     "REGISTRY",
@@ -27,4 +28,6 @@ __all__ = [
     "JsonOptions",
     "StepEmitter",
     "StepOptions",
+    "artefacts",
+    "sibling",
 ]

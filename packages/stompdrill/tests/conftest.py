@@ -30,6 +30,7 @@ from stompmodel.model import (
     CaseFace,
     CaseRegistration,
     DrillData,
+    DrilledSurface,
     Hole,
     ReferenceOutline,
     SourceInfo,
@@ -58,6 +59,7 @@ __all__ = [
     "tar_quantised",
     "tar_routed",
     "build_pipeline_for_test",
+    "wall_surface",
 ]
 
 _TAR_FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
@@ -147,6 +149,34 @@ def at(
         Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm), surface=surface
     )
     return hole if index is None else hole.with_number(index)
+
+
+def wall_surface(
+    key: str = "left", width_nm: int = 30_000_000, height_nm: int = 20_000_000
+) -> DrilledSurface:
+    """One 2 mm wall centred on its own frame, for tests that need no kernel.
+
+    The frame's ``w`` is +Z so a hand-built hole's coordinates read as they are
+    written; which way a real wall faces is plan 2's measurement.
+    """
+    return DrilledSurface(
+        key=key,
+        frame=FaceFrame(
+            basis=CoordinateFrame(
+                origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+                u=(1.0, 0.0, 0.0),
+                v=(0.0, 1.0, 0.0),
+                w=(0.0, 0.0, 1.0),
+            )
+        ),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-width_nm // 2),
+            Nanometre(-height_nm // 2),
+            Nanometre(width_nm // 2),
+            Nanometre(height_nm // 2),
+        ),
+    )
 
 
 def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:

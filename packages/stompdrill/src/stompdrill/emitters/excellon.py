@@ -48,11 +48,16 @@ class ExcellonEmitter:
     media_type: ClassVar[str] = "text/x-excellon"
     extension: ClassVar[str] = ".drl"
 
+    #: A drill file is one machine setup, so one surface gets one file. See
+    #: ``emitters.surfaces.artefacts``, which is what reads this.
+    per_surface: ClassVar[bool] = True
+
     def __init__(self, options: ExcellonOptions | None = None) -> None:
         self.options = options if options is not None else ExcellonOptions()
 
     # -- public ----------------------------------------------------------
     def emit(self, data: DrillData) -> str:
+        self._reject_many_surfaces(data)
         self._reject_errors(data)
         self._reject_unrouted(data)
         framed, origin_comment = self._reframe(data)
@@ -88,6 +93,21 @@ class ExcellonEmitter:
         return "\n".join(lines) + "\n"
 
     # -- internals -------------------------------------------------------
+    def _reject_many_surfaces(self, data: DrillData) -> None:
+        """Refuse a document whose holes are in more than one frame.
+
+        Two frames in one file would put a wall hole at a panel coordinate and
+        the file would look complete. ``emitters.surfaces.artefacts`` projects
+        onto one surface before emitting, so this is the guard that makes the
+        projection not optional.
+        """
+        if data.surface is None:
+            raise EmitterError(
+                "excellon: a drill file describes one surface, and these holes are "
+                "on several — emit through emitters.surfaces.artefacts, which "
+                "writes one file per surface"
+            )
+
     def _reject_errors(self, data: DrillData) -> None:
         """Refuse ERROR-bearing data, naming distinct diagnostic codes in order."""
         errors = data.of_severity(Severity.ERROR)
