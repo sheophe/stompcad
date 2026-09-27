@@ -1244,3 +1244,58 @@ def test_the_report_says_so_when_no_matching_was_ever_recorded() -> None:
     bare = DockData(case=CaseRegistration("1590B", CaseFace.BOX, "case.stp", _identity_face()))
 
     assert any("(not recorded)" in line for line in format_case(bare))
+
+
+# --------------------------------------------------------------------------
+# --wall-reference: refused before a file opens, and admitting nothing by default.
+# --------------------------------------------------------------------------
+
+
+def test_a_malformed_wall_expression_is_refused_before_a_file_is_opened(
+    tmp_path, capsys
+) -> None:
+    """The same grammar as ``--panel-reference``, so the same usage failure.
+
+    Named paths that do not exist: a run that reached them would report the
+    missing file instead, which is what tells the refusal from an open.
+    """
+    argv = [
+        str(tmp_path / "nowhere.json"), str(tmp_path / "nowhere.stp"),
+        "--case-model", str(tmp_path / "nowhere.stp"),
+        "--panel-reference", "RV*",
+        "--match-tolerance", "0.125",
+    ]
+
+    assert main([*argv, "--wall-reference", "J("]) == 3
+    refused = capsys.readouterr().err
+    assert "designator filter" in refused and "nowhere.json" not in refused
+
+
+def test_a_designator_both_expressions_name_stops_the_run(tmp_path, monkeypatch) -> None:
+    """The flag reaches the composition: one designator, two claims, exit 2.
+
+    The one effect ``--wall-reference`` has on an artefact today, so it is
+    what shows the flag is wired through ``_run`` rather than parsed and
+    dropped. ``RV1`` is a panel reference of the baseline run.
+    """
+    run = _prepare(tmp_path, monkeypatch)
+
+    assert main([*run.argv, "--wall-reference", "RV1"]) == 2
+    assert run.written() == (False, False)
+
+
+def test_a_run_with_no_wall_expression_reports_exactly_what_it_did_before(
+    tmp_path, monkeypatch
+) -> None:
+    """Decision 18: the existing artefacts are unchanged when nothing is named.
+
+    The control for the test above, on the same board and the same panel
+    expression: a default admitting anything would claim every one of those
+    panel references and stop this run too.
+    """
+    run = _prepare(tmp_path, monkeypatch)
+
+    assert main(run.argv) == _BASELINE_EXIT
+    written = run.report.read_text(encoding="utf-8")
+    assert [d["code"] for d in json.loads(written)["diagnostics"]] == ["clash"]
+    assert "wall" not in written.lower()

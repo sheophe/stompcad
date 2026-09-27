@@ -39,8 +39,16 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
-from .compose import admit, board_geometry, build_pipeline, derived_tolerance, docked, registration
-from .designators import parse_filter
+from .compose import (
+    admit,
+    admit_walls,
+    board_geometry,
+    build_pipeline,
+    derived_tolerance,
+    docked,
+    registration,
+)
+from .designators import NOTHING, parse_filter
 from .emitters import AssemblyEmitter, ReportEmitter
 from .emitters.assembly import Solids
 from .errors import UsageError
@@ -58,6 +66,7 @@ __all__ = [
     "parse_place",
     "parse_pin",
     "admit",
+    "admit_walls",
     "board_geometry",
 ]
 
@@ -108,6 +117,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="which designators are panel references, e.g. 'RV*,SW*,D(3..4),!RV5'; "
         "required, because a default would be a pedal-specific fact",
+    )
+    parser.add_argument(
+        "--wall-reference",
+        metavar="EXPR",
+        default=None,
+        help="which designators may meet a wall, e.g. 'J*,!J3'; the same grammar "
+        "as --panel-reference and no default, because nothing is cut into a wall "
+        "unless you name the part",
     )
     parser.add_argument(
         "--match-tolerance",
@@ -508,6 +525,9 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     # comes from has to be read first; it is still a usage failure, so the
     # distinction costs no exit code.
     panel_reference = parse_filter(args.panel_reference)
+    wall_reference = (
+        NOTHING if args.wall_reference is None else parse_filter(args.wall_reference)
+    )
     tolerance_nm = (
         None
         if args.match_tolerance is None
@@ -518,14 +538,19 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     drill = Path(args.drill)
     source = BoardSource(
-        drill, [Path(board) for board in args.boards], Path(args.case_model)
+        drill,
+        [Path(board) for board in args.boards],
+        Path(args.case_model),
+        wall_reference=wall_reference,
     )
     try:
         scan = source.scan()
         if tolerance_nm is None:
             tolerance_nm = derived_tolerance(scan.drill, drill)
         case = registration(scan, drill)
-        data = admit(docked(scan, case), panel_reference)
+        data = admit_walls(
+            admit(docked(scan, case), panel_reference), wall_reference, panel_reference
+        )
         geometry = board_geometry(scan, case)
         pipeline = build_pipeline(
             tolerance_nm,
