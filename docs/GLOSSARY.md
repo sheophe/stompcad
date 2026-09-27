@@ -119,6 +119,13 @@ and do not classify it as an obstruction.
 The flat, drillable region of the drilled face, inside the draft-angle taper
 and clear of the corner bosses.
 
+**Surface**:
+One plane of an enclosure that holes are cut in, named from the viewer at the
+pedal's face: `face`, `back`, `left`, `right`, `top`, `bottom`. `face` is the
+drilled plate whichever solid it is. A **face** in the `CaseFace` sense is
+which *solid* is drilled, `box` or `lid`; the two words are not
+interchangeable.
+
 ## Boards and docking
 
 **Board**:

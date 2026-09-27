@@ -129,11 +129,14 @@ outline. Model operations handle coordinate transforms; emitters convert to the
 frames and units required by their formats.
 
 `DrillData` carries geometry, diagnostics, processing history, tool assignments
-and drilling order. Its versioned JSON codec is shared by both tools. Version 6
+and drilling order. Its versioned JSON codec is shared by both tools. Version 7
 uses `CaseRegistration` for the enclosure part, drilled face, model filename and
-face frame. The snapping-stage name and grid-pitch key are shared constants;
-`DrillData.grid_nm` reads them, and `stompcollider` uses that pitch to derive its
-default matching tolerance.
+face frame. A hole states the surface it is cut in, and the document states one
+`DrilledSurface` record per surface — its frame, the material a cut must clear
+and the drillable bounds — once for every surface the run registered; the field
+is absent when no case model was supplied. The snapping-stage name and
+grid-pitch key are shared constants; `DrillData.grid_nm` reads them, and
+`stompcollider` uses that pitch to derive its default matching tolerance.
 
 The emitters format the completed data without recalculating domain decisions.
 They return text or bytes. Both CLIs use `stompmodel.protocols` to validate targets,

@@ -2896,3 +2896,68 @@ def test_the_command_line_renders_no_progress(capsys, tmp_path) -> None:
     assert "\x1b[" not in captured.out
     assert "\x1b[" not in captured.err
     assert "%" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# _write renders through stompdrill.emitters.surfaces.artefacts: one --emit
+# can put a file on disk for every surface a document registers.
+# ---------------------------------------------------------------------------
+
+
+def test_one_emit_can_put_a_file_on_disk_for_every_surface(tmp_path):
+    """A drill file is per setup, so a document over two surfaces writes two --
+    and the caller named one path."""
+    from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
+    from stompmodel.model import Origin
+    from tests.conftest import at, make_data, wall_surface
+
+    data = make_data(
+        at(0, 0, 7_000_000, index=1),
+        at(0, 0, 5_000_000, index=2, surface="left"),
+    ).with_surfaces([wall_surface("left")])
+    emitter = ExcellonEmitter(ExcellonOptions(origin=Origin.CENTRE))
+
+    lines = cli._write([(emitter, tmp_path / "tar-case.drl")], data)
+
+    assert (tmp_path / "tar-case.drl").exists()
+    assert (tmp_path / "tar-case-left.drl").exists()
+    assert len(lines) == 2
+
+
+def test_a_run_over_one_surface_writes_exactly_one_file_per_format(tmp_path):
+    """The lock's negative: no sibling appears for a document with no walls."""
+    from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
+    from stompmodel.model import Origin
+    from tests.conftest import at, make_data
+
+    data = make_data(at(0, 0, 7_000_000, index=1))
+    emitter = ExcellonEmitter(ExcellonOptions(origin=Origin.CENTRE))
+
+    cli._write([(emitter, tmp_path / "tar-case.drl")], data)
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["tar-case.drl"]
+
+
+def test_a_sibling_that_collides_with_another_target_is_refused(tmp_path):
+    """Two artefacts reaching one file is the failure staged writes cannot
+    undo, and it can only be seen once the surfaces are known."""
+    from stompdrill.cli import UsageError
+    from stompdrill.emitters.excellon import ExcellonEmitter, ExcellonOptions
+    from stompmodel.model import Origin
+    from tests.conftest import at, make_data, wall_surface
+
+    data = make_data(
+        at(0, 0, 7_000_000, index=1),
+        at(0, 0, 5_000_000, index=2, surface="left"),
+    ).with_surfaces([wall_surface("left")])
+    emitter = ExcellonEmitter(ExcellonOptions(origin=Origin.CENTRE))
+
+    with pytest.raises(UsageError, match="one file"):
+        cli._write(
+            [
+                (emitter, tmp_path / "tar-case.drl"),
+                (emitter, tmp_path / "tar-case-left.drl"),
+            ],
+            data,
+        )
+    assert list(tmp_path.iterdir()) == []
