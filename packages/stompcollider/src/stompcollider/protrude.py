@@ -98,7 +98,7 @@ def wall_axis(solid: StepSolid, carrier_normal: Direction) -> Direction | None:
     bins: dict[tuple[int, int, int], list[Cylinder]] = {}
     for face in faces:
         key = direction_bin(face.axis_direction)
-        bins.setdefault(max(key, tuple(-c for c in key)), []).append(face)  # type: ignore[arg-type]
+        bins.setdefault(max(key, (-key[0], -key[1], -key[2])), []).append(face)
     best = max(
         bins.items(),
         key=lambda item: (clad_length(item[1], item[1][0].axis_direction), item[0]),
@@ -107,20 +107,47 @@ def wall_axis(solid: StepSolid, carrier_normal: Direction) -> Direction | None:
 
 
 def bore_of(faces: Sequence[Cylinder], direction: Direction) -> float | None:
-    """The largest concave radius among the faces along ``direction``, or ``None``.
+    """The largest concave radius in the deepest-clad class along ``direction``.
 
-    A plug entering a bore has to pass the wall even where no material of
-    the part protrudes, which is the whole reason a bore is measured at all
-    (decision 7). Parallel rather than coaxial: a part's bore and its
-    envelope are one feature seen from two sides, and a bore offset from the
-    envelope's own axis is still a bore that plug goes into.
+    ``None`` when no face is parallel to ``direction`` or the winning class
+    is wholly convex. A hole is cut on one ray -- the feature's own axis --
+    so a bore on a different, merely parallel line belongs to a different
+    feature and cannot size this one's hole (decision 7's restriction).
     """
-    concave = [
-        face.radius_mm
-        for face in faces
-        if face.concave and face.is_parallel_to(direction)
-    ]
+    parallel = [face for face in faces if face.is_parallel_to(direction)]
+    if not parallel:
+        return None
+    u, v = basis_about(direction)
+    best = max(
+        _coaxial_classes(parallel),
+        key=lambda cls: (
+            clad_length(cls, direction),
+            min(_projected(f, u) for f in cls),
+            min(_projected(f, v) for f in cls),
+        ),
+    )
+    concave = [face.radius_mm for face in best if face.concave]
     return max(concave) if concave else None
+
+
+def _coaxial_classes(faces: Sequence[Cylinder]) -> tuple[tuple[Cylinder, ...], ...]:
+    """``faces``, all mutually parallel, split into their own coaxial lines.
+
+    First-fit against each class's own first member. Real coaxial faces
+    share one line at the kernel's own precision and a distinct line sits
+    far outside it, so which face a class happens to test first never moves
+    a face to a different class -- membership is a fact about the geometry,
+    not the walk that built ``faces`` (ADR-0006).
+    """
+    classes: list[list[Cylinder]] = []
+    for face in faces:
+        for members in classes:
+            if members[0].is_coaxial_with(face):
+                members.append(face)
+                break
+        else:
+            classes.append([face])
+    return tuple(tuple(members) for members in classes)
 
 
 def protrusion_of(

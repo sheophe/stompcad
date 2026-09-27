@@ -698,3 +698,61 @@ def test_the_committed_board_s_bore_is_never_wider_than_its_own_material(
             assert bore_of(faces, axis) == pytest.approx(4.150)
             widest = max(f.radius_mm for f in faces if f.is_parallel_to(axis))
             assert widest == pytest.approx(7.530)
+
+
+# --------------------------------------------------------------------------
+# bore_of reads the deepest-clad coaxial class, not every parallel face
+# --------------------------------------------------------------------------
+
+
+def _a_bore_fixture() -> tuple[Cylinder, ...]:
+    """A winning coaxial class and a shorter, wider, off-axis concave face.
+
+    The winning class clads 10 mm on one line and carries a 2 mm bore; a
+    second, parallel line 8 mm away clads only 1 mm but carries a wider,
+    5 mm bore. A rule reading every parallel face would report the wider
+    bore; a rule reading only the winning line's own material would not.
+    """
+    return (
+        _a_face(radius=6.0, direction=(0.0, 0.0, 1.0), extent=(0.0, 10.0)),
+        _a_face(
+            radius=2.0,
+            direction=(0.0, 0.0, 1.0),
+            extent=(0.0, 10.0),
+            concave=True,
+        ),
+        _a_face(
+            radius=5.0,
+            direction=(0.0, 0.0, 1.0),
+            extent=(0.0, 1.0),
+            at=(8.0, 0.0, 0.0),
+            concave=True,
+        ),
+    )
+
+
+def test_bore_of_reads_the_winning_lines_own_bore_not_a_wider_offset_one() -> None:
+    """Decision: coaxial, not merely parallel -- a hole is cut on one ray."""
+    faces = _a_bore_fixture()
+
+    assert bore_of(faces, (0.0, 0.0, 1.0)) == pytest.approx(2.0)
+
+
+def test_reordering_the_faces_does_not_change_which_bore_wins() -> None:
+    """ADR-0006's own control: two spellings of one face list agree."""
+    faces = _a_bore_fixture()
+
+    assert bore_of(faces, (0.0, 0.0, 1.0)) == bore_of(
+        tuple(reversed(faces)), (0.0, 0.0, 1.0)
+    )
+
+
+def test_bore_of_is_none_when_nothing_is_concave() -> None:
+    """The documented ``None`` branch, exercised directly rather than by
+    absence: a face set that is parallel and coaxial but wholly convex."""
+    faces = (
+        _a_face(radius=3.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 5.0)),
+        _a_face(radius=1.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 5.0)),
+    )
+
+    assert bore_of(faces, (1.0, 0.0, 0.0)) is None
