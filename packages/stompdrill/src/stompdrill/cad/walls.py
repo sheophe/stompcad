@@ -19,7 +19,7 @@ from stompmodel.frames import dot
 from stompmodel.units import Nanometre
 
 from ..errors import StompdrillError
-from .case import _inner_level, _nearest_companion_level, _plates
+from .case import _inner_level, _plates
 
 __all__ = [
     "LATERAL_LIMIT",
@@ -103,12 +103,12 @@ def nearest_axis(direction: Direction, axis: Direction | None = None) -> Directi
 class Wall:
     """One wall of a drilled solid: its two surfaces, and what stands behind it.
 
-    ``inner`` is the inner level's own coplanar patches plus its nearest
-    companion's, which is exactly the bundle ``Faces.inner`` is -- so
-    ``region.build_region`` and ``region.classify_bounds`` take a wall's
-    without a branch. ``outer_faces`` is the outer level's patches, which is
-    what the drillable region a builder marks is built from (see the plan's
-    ruling 2).
+    ``inner`` carries only the inner level's own coplanar patches, never a
+    companion's: ``_nearest_companion_level`` filters on facing alone, which
+    a plate's whole-span population makes safe but a wall's narrower lateral
+    one does not -- it can and measurably does pick up an unrelated feature
+    that merely shares the wall's draft. A smaller ``inner`` only tightens
+    the containment check a later stage runs, never loosens it.
     """
 
     outer: Level
@@ -135,12 +135,11 @@ def find_walls(solid: StepSolid, axis: int) -> tuple[Wall, ...]:
         )
         parallel = _parallel_to(plates, outer)
         inner = _inner_level(parallel, outer)
-        companion = _nearest_companion_level(parallel, inner)
         found.append(
             Wall(
                 outer=outer,
                 outer_faces=compound(outer.faces),
-                inner=compound(inner.faces + (companion.faces if companion else ())),
+                inner=compound(inner.faces),
                 plate_nm=Nanometre(inner.offset_nm + outer.offset_nm),
                 outward=outer.direction,
             )
