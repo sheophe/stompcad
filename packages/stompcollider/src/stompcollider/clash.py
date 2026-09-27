@@ -323,6 +323,30 @@ class Clashes:
             self._placed[key] = cached
         return cached
 
+    def _excluded(self, board: Board) -> frozenset[str]:
+        """Designators whose interference is about to become a hole.
+
+        Keyed on ``wall`` itself, never on ``wall_admitted``: the flag only
+        records what a builder's expression named, and a named part with no
+        candidate found is not about to be drilled for -- excluding it on
+        the flag alone would drop a clash nothing downstream could ever
+        report again, for the one part still needing it.
+        """
+        return frozenset(
+            component.designator for component in board.components if component.wall
+        )
+
+    def _designator(self, board: Board, body_name: str) -> str:
+        """The bare component name inside a qualified board-solid name.
+
+        ``board_solid_name`` always prefixes a board solid with its own
+        group, so stripping that one known prefix recovers the name
+        ``Component.designator`` states without a second naming rule for it
+        (ADR-0006: identity comes from the geometry's own record).
+        """
+        prefix = f"board:{board.ordinal}:"
+        return body_name[len(prefix):] if body_name.startswith(prefix) else body_name
+
     def _against_case(
         self, board: Board, placement: Placement, basis: CoordinateFrame
     ) -> tuple[Clash, ...]:
@@ -331,11 +355,12 @@ class Clashes:
         Stated per case solid rather than per pair: a wall is one thing to
         move the board away from, however many of its parts reach into it.
         Only the parts whose boxes reach that solid are compounded for the
-        boolean -- rule 2's own filter, changing no answer, since a solid
-        whose box misses cannot contribute to the shared region. Each
-        finding notes whether it is against the cavity or what closes over
-        it, deciding nothing reported but everything about ranking a seating.
+        boolean -- rule 2's own filter. A board carrying a wall-admitted
+        component is instead checked solid by solid and its excluded
+        parts dropped, because a clash with no ``part`` cannot be excluded
+        without excluding real interference with it (decision 12).
         """
+        excluded = self._excluded(board)
         inside, beyond = self._split.of(basis, board.extent_nm)
         bodies = self._bodies(board, placement, basis)
         found = []
@@ -343,13 +368,26 @@ class Clashes:
             (one, CLOSURE_KIND) for one in beyond
         ]:
             box = solid.box_mm
-            meeting = [body.shape for body in bodies if boxes_overlap(body.box, box)]
+            meeting = [body for body in bodies if boxes_overlap(body.box, box)]
             if not meeting:
                 continue
-            region = common(compound(meeting), solid.shape)
+            name = solid_name(solid, box, "case")
+            if excluded:
+                for body in meeting:
+                    part = self._designator(board, body.name)
+                    if part in excluded:
+                        continue
+                    region = common(body.shape, solid.shape)
+                    if region is None:
+                        continue
+                    clash = _clash_from(region, basis, name, kind, part=part)
+                    if clash is not None:
+                        found.append(clash)
+                continue
+            region = common(compound([body.shape for body in meeting]), solid.shape)
             if region is None:
                 continue
-            clash = _clash_from(region, basis, solid_name(solid, box, "case"), kind)
+            clash = _clash_from(region, basis, name, kind)
             if clash is not None:
                 found.append(clash)
         return tuple(sorted(found, key=_clash_key))

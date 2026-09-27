@@ -1436,27 +1436,43 @@ def _case_solids() -> tuple[StepSolid, ...]:
 def _board_solids() -> dict[int, tuple[StepSolid, ...]]:
     """Board 1 and 2 as ``_two_stage_scene`` states them, plus two boards
     the case and every other board leave untouched -- what the ordering
-    test needs to name two boards without a clash of its own."""
+    test needs to name two boards without a clash of its own.
+
+    Board 1 carries two named solids, ``J1`` and ``RV1``, side by side
+    along ``x``, so a placement shift can bring either or both into
+    ``WALL`` without disturbing the other's own local position.
+    """
     return {
-        1: (_solid("A", _box((0, 0, 0), 10, 10, 4)),),
+        1: (
+            _solid("J1", _box((0, 0, 0), 4, 4, 4)),
+            _solid("RV1", _box((6, 0, 0), 4, 4, 4)),
+        ),
         2: (_solid("C", _box((30, 0, 0), 10, 10, 4)),),
         3: (_solid("D", _box((60, 0, 0), 6, 6, 6)),),
         4: (_solid("E", _box((80, 20, 0), 6, 6, 6)),),
     }
 
 
-def _staged_dock_data(wall: tuple[str, ...] = ()) -> DockData:
+def _staged_dock_data(
+    wall: tuple[str, ...] = (), clashing: tuple[str, ...] = ()
+) -> DockData:
     """``_two_stage_scene``'s board 1 and 2, plus two case-clean boards, with
     the named designators carrying one wall candidate per sign.
 
     Board 1 keeps its re-ranking dynamics -- ``x = 25`` clean of the case
-    but fouling board 2, ``x = 100`` clean of both -- so the emitted ray
-    can be checked against the seating stage two actually settles on.
+    but fouling board 2, ``x = 100`` clean of both -- unless ``clashing``
+    asks board 1's solids to meet ``WALL`` instead, at a shift chosen so
+    only the requested one or two of ``J1``/``RV1`` (:func:`_board_solids`)
+    reach it.
     """
 
     def _components(ordinal: int) -> tuple[Component, ...]:
         designator = f"J{ordinal}"
         return (_wall_component(designator),) if designator in wall else ()
+
+    rank1_x = 25.0
+    if clashing:
+        rank1_x = 17.0 if "RV1" in clashing else 19.0
 
     boards = (
         _board(1, components=_components(1)),
@@ -1465,7 +1481,7 @@ def _staged_dock_data(wall: tuple[str, ...] = ()) -> DockData:
         _board(4, components=_components(4)),
     )
     placements = {
-        1: (_placement(rank=1, x_mm=25.0), _placement(rank=2, x_mm=100.0)),
+        1: (_placement(rank=1, x_mm=rank1_x), _placement(rank=2, x_mm=100.0)),
         2: (_placement(),),
         3: (_placement(),),
         4: (_placement(),),
@@ -1600,3 +1616,112 @@ def test_the_ray_survives_a_non_trivial_carrier_and_case_frame() -> None:
     (feature,) = found.wall_features
     assert feature.direction == pytest.approx((0.64, 0.48, -0.6))
     assert feature.origin_nm == (_nm(10.0), Nanometre(0), _nm(-5.0))
+
+
+# --------------------------------------------------------------------------
+# A clash leaves the accounting only for a part a wall will be drilled for
+# (decision 12). Keyed on ``Component.wall``, never on ``wall_admitted``:
+# the flag records what a builder's expression named, not what it found.
+# --------------------------------------------------------------------------
+
+
+def test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported() -> None:
+    """It is going to be drilled for, so the metal in the way is the point."""
+    data = _staged_dock_data(wall=("J1",), clashing=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    reported = {
+        clash.part
+        for placements in found.placements.values()
+        for placement in placements
+        for clash in placement.clashes
+    }
+    assert "J1" not in reported
+
+
+def test_a_part_the_wall_filter_did_not_admit_still_clashes() -> None:
+    """The exclusion is per component, never per board."""
+    data = _staged_dock_data(wall=("J1",), clashing=("J1", "RV1"))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    reported = {
+        clash.part
+        for placements in found.placements.values()
+        for placement in placements
+        for clash in placement.clashes
+    }
+    assert "RV1" in reported
+
+
+def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
+    """Dropped from the accounting as well as the findings, per decision 12.
+
+    Two seatings identical but for a wall-admitted part's interference must
+    rank on something else, because that interference is about to become a
+    hole.
+    """
+    data = _staged_dock_data(wall=("J1",), clashing=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert all(
+        not any(clash.part == "J1" for clash in placement.clashes)
+        for placements in found.placements.values()
+        for placement in placements
+    )
+
+
+def test_a_board_with_a_wall_admitted_part_is_checked_solid_by_solid() -> None:
+    """So ``part`` is never None for it, which is what makes the exclusion possible."""
+    data = _staged_dock_data(wall=("J1",), clashing=("J1", "RV1"))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    parts = [
+        clash.part
+        for placement in found.placements[1]
+        for clash in placement.clashes
+        if clash.kind in ("case", "closure")
+    ]
+    assert parts and all(part is not None for part in parts)
+
+
+def test_a_board_with_no_wall_admitted_part_is_checked_exactly_as_before() -> None:
+    """The byte-identity decision 18 promises: no wall expression, no change at all."""
+    data = _staged_dock_data(clashing=("J1", "RV1"))
+    before = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert any(
+        clash.part is None
+        for placements in before.placements.values()
+        for placement in placements
+        for clash in placement.clashes
+    )
+
+
+def test_the_cavity_predicate_is_unchanged_by_the_exclusion() -> None:
+    """Seating is not a findings question: a part being drilled for still stops a board.
+
+    A self-comparison of two freshly built stages on the same data would
+    hold regardless of whether the exclusion touched ``_clears_the_cavity``
+    -- it is true by construction. The real discriminator is the arrested
+    seating itself: ``J1`` reaches ``WALL`` here exactly as it does in
+    ``test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported``, so
+    the board must still fail to clear the cavity even though that same
+    interference is dropped from ``clashes`` (decision 15's ordering).
+    """
+    data = _staged_dock_data(wall=("J1",), clashing=("J1",))
+    stage = Clashes(_case_solids(), _board_solids())
+    board = data.boards[0]
+    placement = data.placements[1][0]
+    basis = data.case.frame.basis
+    assert stage._clears_the_cavity(board, placement, basis) is False
+
+
+def test_a_wall_admitted_but_empty_part_s_clash_still_reports() -> None:
+    """``wall_admitted`` records what the expression named, never that it
+    found anything; a header a glob happens to match this way gets no ray
+    and no hole, so keying the exclusion on the flag would drop a real
+    clash nothing downstream could ever report again. Only ``wall`` itself
+    -- the candidate the filter actually measured -- may excuse one.
+    """
+    component = Component(designator="J1", protrusion=None, wall_admitted=True, wall=())
+    board = _board(1, components=(component,))
+    data = _dock((board,), {1: (_placement(x_mm=19.0),)})
+    solids = {1: (_solid("J1", _box((0, 0, 0), 4, 4, 4)),)}
+    found = Clashes(_enclosure(), solids).apply(data)
+    clashes = found.placements[1][0].clashes
+    assert any(clash.with_ == "WALL" for clash in clashes)
