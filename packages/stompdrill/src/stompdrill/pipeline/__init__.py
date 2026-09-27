@@ -18,6 +18,7 @@ from .enclosure import CATALOGUE, IdentifyHammondFootprint, normalize_part_name
 from .route import RouteHoles
 from .snap import ReviewGridTies, SnapPositions
 from .validate import CheckOutlineContainment, CheckReferenceSize
+from .walls import Crossing, crossing
 
 __all__ = [
     "SnapPositions",
@@ -36,4 +37,6 @@ __all__ = [
     "IdentifyHammondFootprint",
     "normalize_part_name",
     "CATALOGUE",
+    "Crossing",
+    "crossing",
 ]
