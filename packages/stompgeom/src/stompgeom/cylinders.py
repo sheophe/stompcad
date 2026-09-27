@@ -47,6 +47,13 @@ class Cylinder:
     radius_mm: float
     extent_mm: tuple[float, float]
 
+    #: Whether the solid's material lies outside this radius rather than
+    #: inside it -- a bore, not a shaft. Last and defaulting, so a caller
+    #: stating only a measured surface says nothing about a side it did not
+    #: look at. Read from the face's own orientation, the one bit the kernel
+    #: publishes about which way a surface faces.
+    concave: bool = False
+
     def __post_init__(self) -> None:
         for name, vector, width in (
             ("axis_location_mm", self.axis_location_mm, _VECTOR_COMPONENTS),
@@ -77,6 +84,11 @@ class Cylinder:
             raise ValueError(
                 f"Cylinder.axis_direction must be unit length, not "
                 f"{self.axis_direction!r} (length {length!r})"
+            )
+        if type(self.concave) is not bool:
+            raise TypeError(
+                f"Cylinder.concave states which side its material is on, "
+                f"not {self.concave!r}"
             )
 
     def is_parallel_to(self, direction: Direction) -> bool:
@@ -126,7 +138,7 @@ def cylindrical_faces(shape: Any) -> tuple[Cylinder, ...]:
     require_kernel()
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.GeomAbs import GeomAbs_SurfaceType
-    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopAbs import TopAbs_Orientation, TopAbs_ShapeEnum
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
@@ -134,7 +146,8 @@ def cylindrical_faces(shape: Any) -> tuple[Cylinder, ...]:
     explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_FACE)
     while explorer.More():
         # A bare TopoDS_Shape has no surface; downcast before adapting one.
-        surface = BRepAdaptor_Surface(TopoDS.Face_s(explorer.Current()))
+        face = TopoDS.Face_s(explorer.Current())
+        surface = BRepAdaptor_Surface(face)
         if surface.GetType() == GeomAbs_SurfaceType.GeomAbs_Cylinder:
             cylinder = surface.Cylinder()
             axis = cylinder.Axis()
@@ -147,6 +160,11 @@ def cylindrical_faces(shape: Any) -> tuple[Cylinder, ...]:
                     # V parametrises a cylinder along its own axis, so the
                     # face's V bounds are its axial trim directly.
                     extent_mm=(surface.FirstVParameter(), surface.LastVParameter()),
+                    # A reversed face has the solid on the far side of its
+                    # own normal, which for a cylinder is the outside: the
+                    # same bit ``levels._partition`` reads to flip a plane's
+                    # outward direction.
+                    concave=face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED,
                 )
             )
         explorer.Next()
