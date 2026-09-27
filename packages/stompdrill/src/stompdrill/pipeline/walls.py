@@ -30,11 +30,14 @@ __all__ = [
     "stocked_diameter_nm",
 ]
 
-#: The furthest a ray may run to reach a wall and still be running *at* it: a
-#: kilometre. An enclosure is hundreds of millimetres across, so no crossing
-#: inside this bound is answered differently, and ``nm_from_mm`` scales
-#: through ``Decimal``, whose context refuses a magnitude some sixteen orders
-#: further out -- which a ray a whisker off parallel to a wall reaches easily.
+#: The furthest a ray may run to reach a wall and still be running *at* it.
+#: Two measured figures fix it and it sits between them: the widest catalogued
+#: enclosure is under 200 mm across, so nothing inside this bound is answered
+#: differently from how the region would answer it, and ``nm_from_mm`` scales
+#: through ``Decimal``, whose context refuses about 1e22 mm outright -- which a
+#: ray a whisker off parallel to a wall reaches easily. A kilometre is three
+#: orders above the first and sixteen below the second, so it is loose against
+#: both rather than tuned to either.
 _REACH_MM: float = 1e6
 
 
@@ -292,11 +295,13 @@ class DrillWalls:
     ) -> tuple[WallFeature, Crossing, DrilledSurface] | None:
         """The one wall this component's axis reaches, or ``None`` for none.
 
-        Refused rather than tie-broken where the axis lands in two walls:
-        decision 13's ambiguity is unreachable by construction -- perpendicular
-        wall levels are millimetres apart on every catalogued model -- so an
-        enclosure where it happens is outside this version, and inventing a
-        preference would hide that.
+        Two refusals, told apart by whether the hits share a direction. One ray
+        in two regions is decision 13's ambiguity, unreachable while
+        perpendicular wall levels stay millimetres apart, so an enclosure where
+        it happens is outside this version. Two *signs* each reaching a wall is
+        routine, because a part inside a box points at one wall forwards and
+        another backwards; which sign carries the hole is undecided, so it says
+        so rather than preferring one.
         """
         found = []
         for feature in rays:
@@ -309,10 +314,17 @@ class DrillWalls:
                 if self.model.admits(met.key, met.outer_nm[0], met.outer_nm[1]):
                     found.append((feature, met, surface))
         if len(found) > 1:
+            reached = ", ".join(sorted(met.key for _f, met, _s in found))
+            if len({feature.direction for feature, _met, _s in found}) == 1:
+                raise StompdrillError(
+                    f"one ray of {rays[0].designator}'s axis lands inside more than one "
+                    f"wall's drillable region ({reached}); this enclosure is not one "
+                    f"this version drills"
+                )
             raise StompdrillError(
-                f"{rays[0].designator}'s axis lands inside more than one wall's drillable "
-                f"region ({', '.join(sorted(met.key for _f, met, _s in found))}); this "
-                f"enclosure is not one this version drills"
+                f"both measured signs of board {rays[0].board}'s {rays[0].designator} "
+                f"axis reach a wall ({reached}), and which of the two carries the hole "
+                f"is not a choice this version makes"
             )
         return found[0] if found else None
 

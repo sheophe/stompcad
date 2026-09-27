@@ -465,6 +465,66 @@ def test_a_ray_landing_in_two_regions_is_refused_rather_than_tie_broken() -> Non
         _stage(model, _seated()).apply(_data())
 
 
+def _wall_facing_back(key: str = "left", at_mm: float = -30.0) -> DrilledSurface:
+    """A 2 mm wall at ``at_mm`` along -X, facing -X, the mirror of ``_wall()``.
+
+    Needed because the backward sign of an axis reaches the *opposite* wall, and
+    ``_wall()`` only ever faces +X, so one of the two signs could never resolve.
+    """
+    return DrilledSurface(
+        key=key,
+        frame=FaceFrame(
+            basis=CoordinateFrame(
+                origin_nm=(Nanometre(int((at_mm + 2.0) * 1_000_000)), Nanometre(0), Nanometre(0)),
+                u=(0.0, 0.0, -1.0),
+                v=(0.0, -1.0, 0.0),
+                w=(-1.0, 0.0, 0.0),
+            )
+        ),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-20_000_000), Nanometre(-10_000_000),
+            Nanometre(20_000_000), Nanometre(10_000_000),
+        ),
+    )
+
+
+def test_two_signs_of_one_axis_reaching_two_walls_is_refused_as_undecided() -> None:
+    """The marker for a rule this version does not have.
+
+    A part anywhere inside a box points at one wall forwards and the opposite
+    wall backwards, so both measured signs resolve and nothing here says which
+    carries the hole. The refusal is that limit stated, and it is told apart
+    from the one-ray-in-two-regions refusal by the directions of the hits.
+    """
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall_facing_back(key="left")),
+        admitting=frozenset({"right", "left"}),
+    )
+    outward = _seated()
+    backward = replace(outward, direction=(-1.0, 0.0, 0.0))
+    with pytest.raises(StompdrillError, match="both measured signs") as refusal:
+        _stage(model, outward, backward).apply(_data())
+    # Both named, so the raise is two genuine hits and not one counted twice.
+    assert "left, right" in str(refusal.value)
+
+
+def test_the_two_multi_wall_refusals_are_not_one_message() -> None:
+    """A message true of the unreachable case is false of the routine one."""
+    corner = _FakeWalls(
+        walls=(_wall(key="right"), _wall(key="top")),
+        admitting=frozenset({"right", "top"}),
+    )
+    signs = _FakeWalls(
+        walls=(_wall(key="right"), _wall_facing_back(key="left")),
+        admitting=frozenset({"right", "left"}),
+    )
+    with pytest.raises(StompdrillError, match="one ray of"):
+        _stage(corner, _seated()).apply(_data())
+    with pytest.raises(StompdrillError, match="not a choice this version makes"):
+        _stage(signs, _seated(), replace(_seated(), direction=(-1.0, 0.0, 0.0))).apply(_data())
+
+
 def test_a_document_registering_no_case_has_no_frame_to_resolve_against() -> None:
     model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
     with pytest.raises(StompdrillError, match="registers no case model"):
