@@ -12,7 +12,9 @@ from stompmodel.frames import CoordinateFrame, FaceFrame, dot
 from stompmodel.model import DrilledSurface, WallFeature
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
-__all__ = ["Crossing", "crossing"]
+from .diameters import DrillStandard
+
+__all__ = ["Crossing", "crossing", "required_radius_nm", "stocked_diameter_nm"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,3 +94,44 @@ def _at(
         nm_from_mm(projected_v),
         nm_from_mm(-distance_mm),
     )
+
+
+def required_radius_nm(
+    feature: WallFeature, span_nm: tuple[Nanometre, Nanometre]
+) -> Nanometre:
+    """The radius a hole must admit: the material in the wall, or the bore.
+
+    Over the wall's own span and not the whole part, because a part is
+    assembled *through* a wall rather than pushed through it: a modelled nut
+    sits outside and is fitted afterwards, and sizing a hole to admit it would
+    drill half again as wide as the bushing needs. The profile is piecewise
+    constant, so the span's ends and every step boundary inside it are the
+    only depths worth asking about. The bore is a floor rather than a step: a
+    plug enters it however little material surrounds it there.
+    """
+    low, high = span_nm
+    depths = {low, high} | {
+        boundary
+        for _radius, first, last in feature.profile.steps
+        for boundary in (first, last)
+        if low < boundary < high
+    }
+    material = max(feature.profile.radius_at(Nanometre(depth)) for depth in sorted(depths))
+    return Nanometre(max(material, feature.bore_nm or 0))
+
+
+def stocked_diameter_nm(
+    required_nm: Nanometre, standard: DrillStandard
+) -> Nanometre | None:
+    """The smallest stocked size admitting a part ``required_nm`` in radius.
+
+    A bound and not a nearest: ``SnapDiametersToDrillTable`` snaps a
+    *measurement*, where rounding either way is honest, and this is a
+    requirement, where rounding down leaves the part not fitting. The answer
+    set is the operator's own selected standard, exactly as ADR-0002 states
+    it. ``None`` where the standard stocks nothing wide enough, which the
+    caller reports as the existing unstocked refusal.
+    """
+    wanted = Nanometre(required_nm * 2)
+    admitting = [size for size in standard.sizes_nm if size >= wanted]
+    return min(admitting) if admitting else None
