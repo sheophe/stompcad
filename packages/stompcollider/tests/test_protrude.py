@@ -26,12 +26,13 @@ from stompcollider.protrude import (
     in_plane,
     protrusion_of,
     wall_axis,
+    wall_features_of,
 )
 from stompcollider.raw import RawComponent
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.step import StepDocument, StepSolid, read_step
 from stompmodel.frames import dot
-from stompmodel.units import Nanometre, mm_from_nm
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
 
@@ -756,3 +757,114 @@ def test_bore_of_is_none_when_nothing_is_concave() -> None:
     )
 
     assert bore_of(faces, (1.0, 0.0, 0.0)) is None
+
+
+# --------------------------------------------------------------------------
+# wall_features_of: both signs of the in-plane axis, in the board's own frame
+# --------------------------------------------------------------------------
+
+
+def test_a_part_with_no_in_plane_cylinder_yields_no_wall_feature() -> None:
+    solid = StepSolid(name="RV1", shape=_pin(3.0, 8.0))
+    assert wall_features_of(solid, (0.0, 0.0, 1.0)) == ()
+
+
+def test_a_wall_feature_is_measured_both_ways_along_its_axis() -> None:
+    """Neither sign is known to point at a wall, so neither is chosen here."""
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    found = wall_features_of(solid, (0.0, 0.0, 1.0))
+    assert len(found) == 2
+    first, second = found
+    assert first.direction == tuple(-c for c in second.direction)
+    assert first.tip_mm != second.tip_mm
+
+
+def test_the_pair_comes_back_in_an_order_the_geometry_fixes() -> None:
+    """Ordered on the direction itself: a loop's order must reach no artefact."""
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    found = wall_features_of(solid, (0.0, 0.0, 1.0))
+    assert [f.direction for f in found] == sorted(f.direction for f in found)
+
+
+def test_the_tip_is_the_far_end_of_the_part_along_its_own_direction() -> None:
+    """A 20 mm rod from the origin: one sign tips at 20, the other at 0."""
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    tips = {
+        round(f.direction[0]): pytest.approx(f.tip_mm[0], abs=1e-9)
+        for f in wall_features_of(solid, (0.0, 0.0, 1.0))
+    }
+    assert tips[1] == 20.0
+    assert tips[-1] == 0.0
+
+
+def test_a_tube_s_bore_is_measured_off_the_solid_and_not_assumed() -> None:
+    """The read the committed board cannot make govern -- ruling 7.
+
+    A tube, not a jack: what is under test is that a concave coaxial face
+    reaches ``bore_mm`` at all. Whether a bore *governs* a diameter is
+    arithmetic over a profile, and the drill side drives that.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    outer = _pin(5.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    bore = _pin(3.0, 30.0, at=(-5.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    cut = BRepAlgoAPI_Cut(outer, bore)
+    assert cut.IsDone()
+    solid = StepSolid(name="J9", shape=cut.Shape())
+
+    found = wall_features_of(solid, (0.0, 0.0, 1.0))
+    assert len(found) == 2
+    for feature in found:
+        assert feature.bore_mm == pytest.approx(3.0)
+
+
+def test_a_solid_part_states_no_bore_rather_than_a_zero_one() -> None:
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    assert all(f.bore_mm is None for f in wall_features_of(solid, (0.0, 0.0, 1.0)))
+
+
+@pytest.mark.boards
+def test_the_committed_board_s_jack_measures_the_stack_the_plan_recorded(
+    document: StepDocument,
+) -> None:
+    """The profile the span rule is asserted against, in whole nanometres.
+
+    Stated in nanometres and not millimetres because these are the numbers
+    ``canonicalise`` will scale to, and a float assertion here would not
+    notice the day the scaling changed.
+    """
+    for substrate, parts in group(document, substrates(document)):
+        normal = carrier_frame(substrate).w  # type: ignore[union-attr]
+        for part in parts:
+            if part.name != "J1":
+                continue
+            outward = next(
+                f for f in wall_features_of(part, normal) if f.direction[0] < 0.0
+            )
+            steps = {
+                (
+                    nm_from_mm(c.radius_mm),
+                    nm_from_mm(c.depth_from_tip_min_mm),
+                    nm_from_mm(c.depth_from_tip_max_mm),
+                )
+                for c in outward.stack
+            }
+            assert steps == {
+                (4_150_000, 0, 3_000_000),
+                (5_700_000, 0, 3_000_000),
+                (3_250_000, 3_000_000, 24_483_612),
+                (7_530_000, 3_000_000, 23_610_000),
+            }
+            assert outward.bore_mm == pytest.approx(4.150)

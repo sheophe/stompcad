@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder
+from stompcollider.raw import RawBoard, RawBoards, RawComponent, RawCylinder, RawWallFeature
 from stompmodel.diagnostics import Diagnostic
 
 _CYLINDER = RawCylinder(radius_mm=1.0, depth_from_tip_min_mm=0.0, depth_from_tip_max_mm=1.0)
@@ -114,4 +114,45 @@ def test_a_board_carrier_origin_must_be_finite_millimetres() -> None:
             carrier_v=(0.0, 1.0, 0.0),
             carrier_w=(0.0, 0.0, 1.0),
             components=(RawComponent(designator="R1", axis_xy_mm=None),),
+        )
+
+
+def test_a_wall_feature_needs_the_designator_of_the_part_it_came_from() -> None:
+    with pytest.raises(ValueError, match="designator"):
+        RawWallFeature(
+            designator="",
+            tip_mm=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0),
+            stack=(RawCylinder(1.0, 0.0, 2.0),),
+        )
+
+
+def test_a_wall_feature_needs_a_cylinder_because_its_axis_came_from_one() -> None:
+    with pytest.raises(ValueError, match="at least one cylinder"):
+        RawWallFeature(
+            designator="J1",
+            tip_mm=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0),
+            stack=(),
+        )
+
+
+def test_a_wall_feature_s_direction_is_a_unit_vector() -> None:
+    with pytest.raises(ValueError, match="unit length"):
+        RawWallFeature(
+            designator="J1",
+            tip_mm=(0.0, 0.0, 0.0),
+            direction=(2.0, 0.0, 0.0),
+            stack=(RawCylinder(1.0, 0.0, 2.0),),
+        )
+
+
+def test_a_bore_that_is_stated_is_a_positive_millimetre_radius() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        RawWallFeature(
+            designator="J1",
+            tip_mm=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0),
+            stack=(RawCylinder(1.0, 0.0, 2.0),),
+            bore_mm=0.0,
         )

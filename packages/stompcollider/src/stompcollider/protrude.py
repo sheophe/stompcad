@@ -21,10 +21,19 @@ from stompgeom.step import StepSolid
 from stompmodel.frames import dot
 from stompmodel.units import Nanometre, mm_from_nm
 
-from .boards import basis_about
-from .raw import RawComponent, RawCylinder
+from .boards import basis_about, negated
+from .raw import RawComponent, RawCylinder, RawWallFeature
 
-__all__ = ["admissible", "bore_of", "clad_length", "in_plane", "protrusion_of", "reach_along", "wall_axis"]
+__all__ = [
+    "admissible",
+    "bore_of",
+    "clad_length",
+    "in_plane",
+    "protrusion_of",
+    "reach_along",
+    "wall_axis",
+    "wall_features_of",
+]
 
 
 def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, ...]:
@@ -273,3 +282,46 @@ def _projected(cylinder: Cylinder, axis: Direction) -> float:
     stands for the whole line.
     """
     return dot(cylinder.axis_location_mm, axis)
+
+
+def wall_features_of(
+    solid: StepSolid,
+    carrier_normal: Direction,
+    probes_nm: Sequence[Nanometre] = (),
+) -> tuple[RawWallFeature, ...]:
+    """``solid``'s in-plane feature, measured along both signs of its axis.
+
+    Neither sign is known to point at a wall, so neither is chosen here:
+    resolving that is the drill side's, which alone knows where the walls
+    are. ``protrusion_of`` does the measuring unchanged -- which is what
+    brings ``_cut``, and with it the width of a shell no cylindrical face of
+    its own describes. Ordered on the direction itself, so the pair's order
+    is geometry and not this loop's (ADR-0006).
+    """
+    axis = wall_axis(solid, carrier_normal)
+    if axis is None:
+        return ()
+    faces = in_plane(solid, carrier_normal)
+    bore_mm = bore_of(faces, axis)
+    found = []
+    for direction in sorted((axis, negated(axis))):
+        measured = protrusion_of(solid, direction, probes_nm)
+        if measured is None or measured.axis_xy_mm is None or measured.tip_mm is None:
+            continue
+        u, v = basis_about(direction)
+        tip = tuple(
+            u[i] * measured.axis_xy_mm[0]
+            + v[i] * measured.axis_xy_mm[1]
+            + direction[i] * measured.tip_mm
+            for i in range(3)
+        )
+        found.append(
+            RawWallFeature(
+                designator=solid.name,
+                tip_mm=(tip[0], tip[1], tip[2]),
+                direction=direction,
+                stack=measured.stack,
+                bore_mm=bore_mm,
+            )
+        )
+    return tuple(found)
