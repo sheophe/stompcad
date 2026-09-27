@@ -1434,13 +1434,13 @@ def _case_solids() -> tuple[StepSolid, ...]:
 
 
 def _board_solids() -> dict[int, tuple[StepSolid, ...]]:
-    """Board 1 and 2 as ``_two_stage_scene`` states them, plus two boards
-    the case and every other board leave untouched -- what the ordering
-    test needs to name two boards without a clash of its own.
+    """This section's own four boards, independent of ``_two_stage_scene``'s.
 
     Board 1 carries two named solids, ``J1`` and ``RV1``, side by side
     along ``x``, so a placement shift can bring either or both into
-    ``WALL`` without disturbing the other's own local position.
+    ``WALL`` without disturbing the other's own local position. Boards 3
+    and 4 are what the ordering test needs to name two boards the case and
+    every other board leave untouched, without a clash of their own.
     """
     return {
         1: (
@@ -1725,3 +1725,23 @@ def test_a_wall_admitted_but_empty_part_s_clash_still_reports() -> None:
     found = Clashes(_enclosure(), solids).apply(data)
     clashes = found.placements[1][0].clashes
     assert any(clash.with_ == "WALL" for clash in clashes)
+
+
+def test_a_wall_admitted_part_s_closure_clash_still_reports() -> None:
+    """No hole is ever cut in what closes over the cavity -- a wall is
+    lateral, a closure is axial -- so a clash kinded ``closure`` is never
+    one a hole explains, whatever its ``part`` names elsewhere.
+
+    One board solid, named ``J1``, reaches through ``_closed_enclosure``'s
+    own wall shell (``BOX``, ``case``) and on into its backplate (``PLATE``,
+    ``closure``) at once, so a kind-agnostic exclusion and a correctly
+    scoped one disagree only on the second finding.
+    """
+    component = _wall_component("J1")
+    board = _board(1, components=(component,))
+    data = _dock((board,), {1: (_placement(),)})
+    solids = {1: (_solid("J1", _box((39, -5, -29), 10, 10, 15)),)}
+    found = Clashes(_closed_enclosure(), solids).apply(data)
+    kinds_with = {(clash.kind, clash.with_) for clash in found.placements[1][0].clashes}
+    assert ("case", "BOX") not in kinds_with
+    assert ("closure", "PLATE") in kinds_with

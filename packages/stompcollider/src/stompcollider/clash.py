@@ -34,6 +34,7 @@ from .seat import rank_key, shortfall_nm
 from .solids import (
     MODEL_FRAME,
     Body,
+    board_designator,
     bodies,
     boxes_overlap,
     placement_transform,
@@ -336,34 +337,26 @@ class Clashes:
             component.designator for component in board.components if component.wall
         )
 
-    def _designator(self, board: Board, body_name: str) -> str:
-        """The bare component name inside a qualified board-solid name.
-
-        ``board_solid_name`` always prefixes a board solid with its own
-        group, so stripping that one known prefix recovers the name
-        ``Component.designator`` states without a second naming rule for it
-        (ADR-0006: identity comes from the geometry's own record).
-        """
-        prefix = f"board:{board.ordinal}:"
-        return body_name[len(prefix):] if body_name.startswith(prefix) else body_name
-
     def _against_case(
         self, board: Board, placement: Placement, basis: CoordinateFrame
     ) -> tuple[Clash, ...]:
         """Every case solid this placement meets. None is privileged or exempt.
 
-        Stated per case solid rather than per pair: a wall is one thing to
-        move the board away from, however many of its parts reach into it.
-        Only the parts whose boxes reach that solid are compounded for the
-        boolean -- rule 2's own filter. A board carrying a wall-admitted
-        component is instead checked solid by solid and its excluded
-        parts dropped, because a clash with no ``part`` cannot be excluded
-        without excluding real interference with it (decision 12).
+        Only ``CASE_KIND`` may exclude a designator: a wall is lateral and
+        a closure is axial by definition, so no hole is ever cut in what
+        closes over the cavity, and dropping that clash would excuse
+        interference no hole explains. Across several case solids the
+        exclusion stays per designator rather than per solid -- which wall
+        a ray crosses is the drill half's own question, not this one's.
         """
         excluded = self._excluded(board)
         inside, beyond = self._split.of(basis, board.extent_nm)
         bodies = self._bodies(board, placement, basis)
         found = []
+        # Per case solid rather than per pair: a wall is one thing to move
+        # a board away from, however many of its parts reach into it, and
+        # only the parts whose boxes reach that solid are ever compounded
+        # or walked -- rule 2's own filter, changing no answer.
         for solid, kind in [(one, CASE_KIND) for one in inside] + [
             (one, CLOSURE_KIND) for one in beyond
         ]:
@@ -372,9 +365,9 @@ class Clashes:
             if not meeting:
                 continue
             name = solid_name(solid, box, "case")
-            if excluded:
+            if excluded and kind == CASE_KIND:
                 for body in meeting:
-                    part = self._designator(board, body.name)
+                    part = board_designator(body.name, board.ordinal)
                     if part in excluded:
                         continue
                     region = common(body.shape, solid.shape)
