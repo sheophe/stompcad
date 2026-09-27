@@ -1401,19 +1401,23 @@ def test_each_feature_is_one_line_naming_its_part_board_and_ray() -> None:
 def test_a_measured_bore_is_stated_and_an_absent_one_is_not() -> None:
     """A bore is a floor on the radius a hole must admit, so a builder reading
     this wants to see the figure itself, not one doubled into a diameter it
-    is not (``WallFeature.bore_nm``, ``stompmodel.model``)."""
+    is not (``WallFeature.bore_nm``, ``stompmodel.model``) -- and labelled a
+    radius, since every other length near a hole in this toolchain is a
+    diameter and an unlabelled number would be read as one."""
     with_bore = replace(
         _dock_data(), wall_features=(_a_wall_feature(bore_nm=Nanometre(3_175_000)),)
     )
     without = replace(_dock_data(), wall_features=(_a_wall_feature(),))
-    assert "3.175" in "\n".join(format_wall_features(with_bore))
+    assert "bore radius 3.175" in "\n".join(format_wall_features(with_bore))
     assert "bore" not in "\n".join(format_wall_features(without))
 
 
 def test_the_widest_radius_the_profile_states_is_on_the_line() -> None:
-    """Not the hole's diameter: which wall it meets, and so its span, is not known here."""
+    """Not the hole's diameter: which wall it meets, and so its span, is not
+    known here. Labelled a radius for the same reason the bore is: nothing
+    else on the line would tell a builder it is not the usual diameter."""
     data = replace(_dock_data(), wall_features=(_a_wall_feature(),))
-    assert "6.000" in "\n".join(format_wall_features(data))
+    assert "widest radius 6.000" in "\n".join(format_wall_features(data))
 
 
 def test_a_named_part_with_no_in_plane_feature_is_stated_in_the_report() -> None:

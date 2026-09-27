@@ -476,7 +476,11 @@ def format_wall_features(data: DockData) -> list[str]:
     lines = ["", f"WALL FEATURES ({len(data.wall_features)})"]
     for feature in data.wall_features:
         widest = max(radius for radius, _low, _high in feature.profile.steps)
-        bore = "" if feature.bore_nm is None else f"  bore {format_nm(feature.bore_nm)} mm"
+        bore = (
+            ""
+            if feature.bore_nm is None
+            else f"  bore radius {format_nm(feature.bore_nm)} mm"
+        )
         lines.append(
             _field(
                 f"#{feature.board} {feature.designator}",
@@ -484,7 +488,7 @@ def format_wall_features(data: DockData) -> list[str]:
                 f"{format_nm(feature.origin_nm[2])}) mm  "
                 f"along ({feature.direction[0]:+.3f}, {feature.direction[1]:+.3f}, "
                 f"{feature.direction[2]:+.3f})  "
-                f"widest {format_nm(Nanometre(widest))} mm{bore}",
+                f"widest radius {format_nm(Nanometre(widest))} mm{bore}",
             )
         )
     if unmeasured:
