@@ -7,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from stompcollider import designators
-from stompcollider.designators import parse_filter
+from stompcollider.designators import NOTHING, parse_filter
 from stompcollider.errors import UsageError
 
 _PRESENT = ("D1", "D2", "D3", "D4", "RV1", "RV2", "SW1", "SW10", "C1")
@@ -148,3 +148,14 @@ def test_parse_and_apply_is_idempotent(chosen: list[str]) -> None:
     expression = ",".join(chosen)
     once = parse_filter(expression).admit(_PRESENT)
     assert parse_filter(expression).admit(once) == once
+
+
+def test_a_parsed_filter_remembers_the_expression_it_came_from() -> None:
+    """So a diagnostic can name it without a second parameter at every call."""
+    assert parse_filter("J*,!J3").source == "J*,!J3"
+
+
+def test_the_default_filter_admits_nothing() -> None:
+    """Decision 11's default, stated once rather than spelled at each caller."""
+    assert NOTHING.admit(("J1", "RV1", "SW1")) == frozenset()
+    assert NOTHING.source == ""

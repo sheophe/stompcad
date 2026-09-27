@@ -17,6 +17,7 @@ from stompcollider.model import (
     Placement,
     Profile,
     Protrusion,
+    WallCandidate,
     admitting_radius,
 )
 from stompmodel.diagnostics import Diagnostic, Severity, of_severity, worst_severity
@@ -656,3 +657,76 @@ def test_the_profile_this_module_publishes_is_the_shared_one() -> None:
     from stompmodel.model import Profile as Shared
 
     assert Published is Shared
+
+
+# --------------------------------------------------------------------------
+# The wall filter's two fields, and the candidate they admit.
+# --------------------------------------------------------------------------
+
+
+def test_a_component_admits_nothing_to_a_wall_until_the_filter_says_so() -> None:
+    """Unlike ``admitted``: a panel reference is the common case, a wall one is not."""
+    component = Component(designator="J1", protrusion=None)
+    assert component.admitted is True
+    assert component.wall_admitted is False
+    assert component.wall == ()
+
+
+def test_wall_admission_is_a_bool_and_not_a_number_that_looks_like_one() -> None:
+    with pytest.raises(TypeError, match="wall-reference filter"):
+        Component(designator="J1", protrusion=None, wall_admitted=1)  # type: ignore[arg-type]
+
+
+def test_a_wall_candidate_carries_a_unit_direction_and_a_profile() -> None:
+    candidate = WallCandidate(
+        designator="J1",
+        tip_nm=(Nanometre(1_000_000), Nanometre(0), Nanometre(0)),
+        direction=(1.0, 0.0, 0.0),
+        profile=Profile(steps=((Nanometre(2_000_000), Nanometre(0), Nanometre(3_000_000)),)),
+    )
+    assert candidate.bore_nm is None
+    with pytest.raises(ValueError, match="unit length"):
+        dataclasses.replace(candidate, direction=(0.0, 0.0, 0.0))
+
+
+def test_a_wall_candidate_needs_the_designator_it_came_from() -> None:
+    """A candidate names its part, because a hole is cut for a named part."""
+    with pytest.raises(ValueError, match="designator"):
+        WallCandidate(
+            designator="",
+            tip_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            direction=(1.0, 0.0, 0.0),
+            profile=Profile(steps=((Nanometre(1), Nanometre(0), Nanometre(1)),)),
+        )
+
+
+def test_a_bore_a_plug_passes_through_has_a_positive_radius() -> None:
+    """Zero admits nothing, so it states no floor on a hole's own radius."""
+    with pytest.raises(ValueError, match="positive radius"):
+        WallCandidate(
+            designator="J1",
+            tip_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            direction=(1.0, 0.0, 0.0),
+            profile=Profile(steps=((Nanometre(1), Nanometre(0), Nanometre(1)),)),
+            bore_nm=Nanometre(0),
+        )
+
+
+def test_a_component_the_wall_filter_never_admitted_carries_no_candidate() -> None:
+    """The invariant that keeps ``wall`` from meaning two things at once."""
+    with pytest.raises(ValueError, match="never admitted"):
+        Component(
+            designator="J1",
+            protrusion=None,
+            wall_admitted=False,
+            wall=(
+                WallCandidate(
+                    designator="J1",
+                    tip_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+                    direction=(1.0, 0.0, 0.0),
+                    profile=Profile(
+                        steps=((Nanometre(1_000_000), Nanometre(0), Nanometre(1_000_000)),)
+                    ),
+                ),
+            ),
+        )

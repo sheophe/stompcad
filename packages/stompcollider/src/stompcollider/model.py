@@ -16,7 +16,7 @@ from types import MappingProxyType
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.diagnostics import of_severity as _of_severity
 from stompmodel.diagnostics import worst_severity as _worst_severity
-from stompmodel.frames import CoordinateFrame
+from stompmodel.frames import CoordinateFrame, check_unit_direction
 from stompmodel.model import CaseRegistration, Hole, Profile, StageRun, admitting_radius
 from stompmodel.units import Nanometre, check_nanometres
 
@@ -30,6 +30,7 @@ __all__ = [
     "admitting_radius",
     "Profile",
     "Protrusion",
+    "WallCandidate",
     "Component",
     "Board",
     "Correspondence",
@@ -82,6 +83,36 @@ class Protrusion:
 
 
 @dataclass(frozen=True, slots=True)
+class WallCandidate:
+    """One in-plane feature of a component, in its board file's own coordinates.
+
+    Not yet a ``WallFeature``: that one is a ray in the case's face frame, and
+    reaching it needs the placement nobody has chosen when a board is read.
+    ``tip_nm`` is the feature's far end along ``direction``, and every depth in
+    ``profile`` is measured back from it. ``bore_nm`` is a floor on the radius
+    a hole must admit, not a step of the profile -- a plug enters the bore
+    however little material surrounds it there.
+    """
+
+    designator: str
+    tip_nm: tuple[Nanometre, Nanometre, Nanometre]
+    direction: tuple[float, float, float]
+    profile: Profile
+    bore_nm: Nanometre | None = None
+
+    def __post_init__(self) -> None:
+        if not self.designator:
+            raise ValueError("a wall candidate needs the designator of the part it came from")
+        lengths = {f"tip_nm[{i}]": v for i, v in enumerate(self.tip_nm)}
+        if self.bore_nm is not None:
+            lengths["bore_nm"] = self.bore_nm
+        check_nanometres("WallCandidate", **lengths)
+        check_unit_direction("WallCandidate.direction", self.direction)
+        if self.bore_nm is not None and self.bore_nm <= 0:
+            raise ValueError(f"a bore has a positive radius, not {self.bore_nm}")
+
+
+@dataclass(frozen=True, slots=True)
 class Component:
     """One named solid: its designator, its protrusion, and whether it counts.
 
@@ -96,6 +127,15 @@ class Component:
     designator: str
     protrusion: Protrusion | None
     admitted: bool = True
+    #: Whether the *wall*-reference filter kept this part. Separate from
+    #: ``admitted`` and defaulting the other way: a panel reference is what
+    #: most parts are, and a wall reference is what none is until a builder
+    #: names it (decision 11).
+    wall_admitted: bool = False
+    #: Its in-plane feature, once per sign of the axis, or none. Empty for
+    #: every part the wall filter did not admit, and for one it admitted that
+    #: has no in-plane cylinder.
+    wall: tuple[WallCandidate, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.designator:
@@ -104,6 +144,16 @@ class Component:
             raise TypeError(
                 f"Component.admitted states whether the panel-reference filter "
                 f"kept this part, not {self.admitted!r}"
+            )
+        if type(self.wall_admitted) is not bool:
+            raise TypeError(
+                f"Component.wall_admitted states whether the wall-reference filter "
+                f"kept this part, not {self.wall_admitted!r}"
+            )
+        if self.wall and not self.wall_admitted:
+            raise ValueError(
+                f"{self.designator} carries a wall candidate the filter never admitted; "
+                f"a candidate exists because the filter asked for one"
             )
 
 
