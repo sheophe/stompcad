@@ -177,6 +177,18 @@ Return a `str` or `bytes` payload; let the CLI stage and commit it through
 error (exit 3, no output). Exceptions from the emitter's later `emit` call keep
 their traceback. Drawing backends expose `render(scene, title)`.
 
+Declare `per_surface` on the class. `stompdrill.emitters.surfaces.artefacts`
+reads it to decide how many files one emitter owes: `True` means the format
+describes one machine setup, so it is emitted once per surface, from a
+projection onto that surface, and the files after the first are named by
+`surfaces.sibling`; `False` means it describes the whole job and stays one
+file. A drill file and a printed template take `True`; the drill document and
+the cut model take `False`. `artefacts` reads it with `getattr` so a
+third-party format that never heard of surfaces is treated as whole-job, but
+every emitter in this repository states it — a test in
+`packages/stompdrill/tests/test_emitter_registry.py` refuses one that inherits
+the default instead of choosing.
+
 ### Add a stage
 
 Implement `stompmodel`'s `Stage` protocol, including `describe()`, and insert the

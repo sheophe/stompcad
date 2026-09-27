@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from stompmodel.model import DrillData, Hole, StageRun
+from stompmodel.model import SURFACES, DrillData, Hole, StageRun
 from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import mm_from_nm
 
@@ -84,18 +84,28 @@ def _two_opt(route: list[Hole]) -> list[Hole]:
 
 
 def _routed(holes: Sequence[Hole], scope: Scope = NO_PROGRESS) -> list[Hole]:
-    """Tool-major blocks, ascending by size, each routed on its own.
+    """Surface-major, then tool-major blocks within each, each routed on its own.
 
-    One leaf per diameter, not per hole: ``_two_opt``'s pass count inside a
-    block follows from the geometry and is not knowable beforehand, so the
-    holes within a block are not visited once each.
+    A tool block cannot span a surface, because changing surface means taking
+    the part off the machine: ADR-0006's seventh amendment. The surface order
+    is the published vocabulary's, not a measurement, because no geometry
+    distinguishes one named plane from another.
     """
+    by_surface = {key: [hole for hole in holes if hole.surface == key] for key in SURFACES}
+    present = [(key, block) for key, block in by_surface.items() if block]
+    blocks = [
+        (key, diameter, [hole for hole in block if hole.diameter_nm == diameter])
+        for key, block in present
+        for diameter in sorted({hole.diameter_nm for hole in block})
+    ]
     ordered: list[Hole] = []
-    diameters = sorted({hole.diameter_nm for hole in holes})
-    for diameter, slot in zip(diameters, scope.steps(len(diameters)), strict=True):
-        slot.label(f"tool {mm_from_nm(diameter):.3f}")
-        block = [hole for hole in holes if hole.diameter_nm == diameter]
-        ordered += _two_opt(_nearest_neighbour(block))
+    # Flattened and zipped rather than drawn one slot at a time: a division
+    # advances a slot's span on the *next* draw and reclaims its own only when
+    # exhausted, so a hand-driven generator leaves the last leaf and this whole
+    # span open. ``strict=True`` keeps the count and the walk one fact.
+    for (key, diameter, tool), slot in zip(blocks, scope.steps(len(blocks)), strict=True):
+        slot.label(f"{key} tool {mm_from_nm(diameter):.3f}")
+        ordered += _two_opt(_nearest_neighbour(tool))
     return ordered
 
 

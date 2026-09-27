@@ -1,6 +1,6 @@
 # ADR-0006: Toolpath ordering and hole numbering
 
-**Status:** Accepted, with six amendments in place:
+**Status:** Accepted, with seven amendments in place:
 
 1. Remove the `RouteHoles(key=…)` argument.
 2. Require every pipeline selection rule to be total on geometry.
@@ -12,6 +12,8 @@
    without auditing the set in `Hole`, `DrillData` or `DrillData.numbered()`.
 6. Extend the second amendment to `stompcollider`'s registration, and require one
    canonical spelling for a placement's rotation.
+7. Number surface-major, one contiguous tool block per surface rather than per
+   document.
 
 The decisions and their history are recorded below.
 
@@ -281,3 +283,31 @@ path can hold two spellings of one rotation — including the codec reading a do
 written before this amendment, which is why the angle is normalised rather than refused.
 Only an out-of-range angle is reduced, because reducing an in-range one perturbs it by an
 ulp and would give back the exactness the motion is computed with.
+
+### Amendment 7: numbering is surface-major
+
+One enclosure is drilled in more than one setup once holes are cut in its walls
+as well as its face, and a tool block cannot span a setup: the part comes off
+the machine and goes back on in a different orientation between them. So
+`RouteHoles` orders surfaces by `stompmodel.model.SURFACES` — `face`, `back`,
+`left`, `right`, `top`, `bottom` — and applies the routing algorithm above
+unchanged within each, one contiguous block per diameter per surface. Numbers
+stay globally unique `1…n`, so a balloon, a schedule row and a report line still
+identify exactly one hole, and `codec.from_document`'s set check is unchanged.
+
+The order is the surface list's own, not a geometric one, because a surface is
+not a position: the six names are a closed vocabulary and no measurement
+distinguishes them. Selection still depends on geometry everywhere it chooses
+*among* candidates, which is what the second amendment requires.
+
+One consequence is load-bearing elsewhere: a hole on the drilled plate takes a
+number that does not depend on whether any wall was drilled, because its surface
+sorts first and its block is closed before the next surface opens. That is what
+lets the panel's own artefacts be written before a later stage finds a wall hole,
+and it makes a second `RouteHoles` pass leave the plate's numbers exactly as
+they were.
+
+A per-surface artefact numbers its *tools* from 1 within its own file, because
+an Excellon file's tool table is that setup's own. The document's tool table
+stays global, one number per diameter across the job. The hole number is the
+identity that crosses artefacts; the tool number is not.

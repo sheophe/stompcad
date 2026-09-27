@@ -25,7 +25,16 @@ from stompdrill.pipeline import (
 from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData, Hole, ReferenceOutline, SourceInfo
+from stompmodel.model import (
+    SURFACE_FACE,
+    CaseFace,
+    CaseRegistration,
+    DrillData,
+    DrilledSurface,
+    Hole,
+    ReferenceOutline,
+    SourceInfo,
+)
 from stompmodel.protocols import Pipeline
 from stompmodel.units import Nanometre
 from tests.hammond import hammond_a, hammond_b, hammond_bb, hammond_y  # noqa: F401  (pytest fixtures)
@@ -50,6 +59,7 @@ __all__ = [
     "tar_quantised",
     "tar_routed",
     "build_pipeline_for_test",
+    "wall_surface",
 ]
 
 _TAR_FIXTURE = Path(__file__).parent / "fixtures" / "tar.ai"
@@ -121,14 +131,52 @@ def clean_registry():
         base.REGISTRY.update(saved)
 
 
-def at(x_nm: int, y_nm: int, diameter_nm: int = 7_000_000, *, index: int | None = None) -> Hole:
+def at(
+    x_nm: int,
+    y_nm: int,
+    diameter_nm: int = 7_000_000,
+    *,
+    index: int | None = None,
+    surface: str = SURFACE_FACE,
+) -> Hole:
     """One quantised hole, numbered as if RouteHoles had already run.
 
     Plain integers are branded here so a test may write the literal it means;
-    this helper is the suite's nanometre boundary.
+    this helper is the suite's nanometre boundary. ``surface`` defaults to the
+    drilled plate, so every existing call means what it meant.
     """
-    hole = Hole.from_measurement(Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm))
+    hole = Hole.from_measurement(
+        Nanometre(x_nm), Nanometre(y_nm), Nanometre(diameter_nm), surface=surface
+    )
     return hole if index is None else hole.with_number(index)
+
+
+def wall_surface(
+    key: str = "left", width_nm: int = 30_000_000, height_nm: int = 20_000_000
+) -> DrilledSurface:
+    """One 2 mm wall centred on its own frame, for tests that need no kernel.
+
+    The frame's ``w`` is +Z so a hand-built hole's coordinates read as they are
+    written; which way a real wall faces is plan 2's measurement.
+    """
+    return DrilledSurface(
+        key=key,
+        frame=FaceFrame(
+            basis=CoordinateFrame(
+                origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+                u=(1.0, 0.0, 0.0),
+                v=(0.0, 1.0, 0.0),
+                w=(0.0, 0.0, 1.0),
+            )
+        ),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-width_nm // 2),
+            Nanometre(-height_nm // 2),
+            Nanometre(width_nm // 2),
+            Nanometre(height_nm // 2),
+        ),
+    )
 
 
 def holes(*specs: tuple[int, ...]) -> tuple[Hole, ...]:

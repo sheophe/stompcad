@@ -85,6 +85,17 @@ model to `--case-model` directly.
 | `json` | Drill document for library use or `stompcollider` |
 | `step` | Supplied enclosure model with the holes cut; requires `--case-model` |
 
+A target names one file for a format that describes the whole job — the drill
+document and the cut model — and one file **per surface** for a format that
+describes a machine setup: the Excellon drill file and both drawing sheets. The
+drilled plate takes the path named; every other surface takes a sibling with its
+key inserted before the extension, so `--emit excellon=tar-case.drl` also writes
+`tar-case-left.drl` when there are holes in the left wall. Every file of one run
+is written as one transaction, so either all of them land or none does.
+
+`stompdrill` never produces a wall hole: it reads artwork, which says nothing
+about the walls. The sibling naming is what `stompcad` writes through.
+
 Use `--title TEXT` to set the title in drawings and headers. It defaults to an
 empty string.
 

@@ -28,6 +28,7 @@ from stompmodel.model import CaseFace, DrillData
 from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.protocols import (
     Emitter,
+    Payload,
     Pipeline,
     Stage,
     check_target_set,
@@ -39,6 +40,7 @@ from stompmodel.units import Nanometre, format_nm, nm_from_mm
 from .cad import OcpCaseModel
 from .emitters import available
 from .emitters.build import OutputSettings, make_emitter
+from .emitters.surfaces import artefacts
 from .enclosures import HAMMOND_1590
 from .errors import UsageError
 from .formatting import format_mm
@@ -665,24 +667,29 @@ def _write(
 ) -> list[str]:
     """Render every artefact, then stage every one, then commit every one.
 
-    Rendering divides ``scope`` one leaf per emitter, each where that
-    emitter does its own work. Staging writes temporaries and committing
-    renames them, both after every render is done, inside this function's
-    own span and undivided -- honest about where the time goes without
-    inventing leaves for two fast steps. Staging and the whole-set
-    transaction are ``stompmodel``'s; see ADR-0001 and ADR-0005.
+    One emitter owes one file per surface for a per-setup format, so the set
+    staged is wider than the set named -- and the whole of it is one
+    transaction, which is what keeps ADR-0001's promise meaning the same under
+    a split. Two paths reaching one file can only be seen once the surfaces
+    are, so the expanded set is checked here; the named set was checked before
+    the artwork was opened.
     """
-    rendered = []
+    rendered: list[tuple[str, Path, Payload]] = []
     for (emitter, path), slot in zip(emitters, scope.steps(len(emitters)), strict=True):
         slot.label(emitter.name)
-        rendered.append((emitter, path, emitter.emit(data)))
-    staged = stage_all([(path, payload) for _emitter, path, payload in rendered])
+        rendered += [
+            (emitter.name, written, payload)
+            for written, payload in artefacts(emitter, path, data)
+        ]
+    try:
+        check_target_set([path for _name, path, _payload in rendered])
+    except ValueError as error:
+        raise UsageError(str(error)) from error
+    staged = stage_all([(path, payload) for _name, path, payload in rendered])
     sizes = commit_all(staged)
     return [
-        f"wrote {written.path}  ({emitter.name}, {size} bytes)"
-        for (emitter, _path, _payload), written, size in zip(
-            rendered, staged, sizes, strict=True
-        )
+        f"wrote {written.path}  ({name}, {size} bytes)"
+        for (name, _path, _payload), written, size in zip(rendered, staged, sizes, strict=True)
     ]
 
 

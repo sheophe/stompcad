@@ -28,6 +28,8 @@ from .units import (
 )
 
 __all__ = [
+    "SURFACES",
+    "SURFACE_FACE",
     "Origin",
     "RawHole",
     "Hole",
@@ -36,6 +38,7 @@ __all__ = [
     "EnclosureMatch",
     "CaseFace",
     "CaseRegistration",
+    "DrilledSurface",
     "SourceInfo",
     "StageRun",
     "DrillData",
@@ -52,6 +55,20 @@ __all__ = [
 #: read, so no consumer needs either literal.
 SNAP_STAGE: str = "snap"
 SNAP_GRID_PARAMETER: str = "grid_nm"
+
+
+#: Every plane of one enclosure that holes are cut in, named from the viewer
+#: standing at the pedal's face -- which is the frame a builder already thinks
+#: in. The order is the order ``RouteHoles`` numbers them in (ADR-0006's
+#: seventh amendment), so a reader needs no second list to sort by. ``back``
+#: is a legal name that nothing produces yet: the opposite plate is a
+#: different solid, and cutting two in one model is not decided.
+SURFACES: tuple[str, ...] = ("face", "back", "left", "right", "top", "bottom")
+
+#: The drilled plate -- whichever solid it is. A lid-drilled run's holes are
+#: on ``face`` too, because ``face`` names the plate the bit enters and not
+#: the box's own outer side.
+SURFACE_FACE: str = "face"
 
 
 class Origin(Enum):
@@ -84,11 +101,13 @@ class RawHole:
 
 @dataclass(frozen=True, slots=True)
 class Hole:
-    """One drilled hole in the canonical frame.
+    """One drilled hole in the canonical frame of the surface it is cut in.
 
     Nominal coordinates and diameter are whole nanometres. ``index`` is the
     drill sequence a routing stage assigns; it is ``None`` until routed and
-    numbered from 1 thereafter.
+    numbered from 1 thereafter. ``surface`` names the plane those coordinates
+    are measured in, so a hole is meaningless apart from that surface's own
+    frame -- which ``DrillData.surfaces`` states.
     """
 
     x_nm: Nanometre
@@ -96,6 +115,7 @@ class Hole:
     diameter_nm: Nanometre
     raw: RawHole
     index: int | None = None
+    surface: str = SURFACE_FACE
 
     def __post_init__(self) -> None:
         check_nanometres(
@@ -106,6 +126,11 @@ class Hole:
                 f"holes are numbered from 1, not {self.index}: this number is what "
                 f"the drawing balloons, the schedule and the report all print"
             )
+        if self.surface not in SURFACES:
+            raise ValueError(
+                f"{self.surface!r} is no surface of an enclosure; a hole is cut in "
+                f"one of {', '.join(SURFACES)}"
+            )
 
     @classmethod
     def from_measurement(
@@ -113,6 +138,8 @@ class Hole:
         x_nm: Nanometre,
         y_nm: Nanometre,
         diameter_nm: Nanometre,
+        *,
+        surface: str = SURFACE_FACE,
     ) -> Hole:
         """Build an unrouted hole whose nominal values are still its measured values.
 
@@ -124,6 +151,7 @@ class Hole:
             y_nm=y_nm,
             diameter_nm=diameter_nm,
             raw=RawHole(mm_from_nm(x_nm), mm_from_nm(y_nm), mm_from_nm(diameter_nm)),
+            surface=surface,
         )
 
     def with_number(self, number: int) -> Hole:
@@ -316,6 +344,78 @@ class CaseRegistration:
             )
 
 
+#: A surface's extent is a rectangle, so it is exactly four values.
+_BOUNDS_VALUES = 4
+
+
+@dataclass(frozen=True, slots=True)
+class DrilledSurface:
+    """One plane of the enclosure that holes are cut in, and what frames them.
+
+    ``frame.basis``'s origin sits on the inner plane like every ``FaceFrame``'s,
+    so the plane the bit enters is ``origin + thickness_nm · w`` for every
+    surface and no consumer branches on the key. ``bounds_nm`` is
+    ``(x0, y0, x1, y1)`` in this surface's own canonical frame: the drillable
+    region's extent. A wall's must be centred on that origin, because
+    ``extent`` states a size and no offset; the drilled plate's boundary is a
+    measurement off the artwork and is exempt.
+    """
+
+    key: str
+    frame: FaceFrame
+    thickness_nm: Nanometre
+    bounds_nm: tuple[Nanometre, Nanometre, Nanometre, Nanometre]
+
+    def __post_init__(self) -> None:
+        if self.key not in SURFACES:
+            raise ValueError(
+                f"{self.key!r} is no surface of an enclosure; one of "
+                f"{', '.join(SURFACES)}"
+            )
+        if len(self.bounds_nm) != _BOUNDS_VALUES:
+            raise ValueError(
+                f"DrilledSurface.bounds_nm must have exactly {_BOUNDS_VALUES} "
+                f"values, not {len(self.bounds_nm)}"
+            )
+        check_nanometres(
+            "DrilledSurface",
+            thickness_nm=self.thickness_nm,
+            **{f"bounds_nm[{i}]": value for i, value in enumerate(self.bounds_nm)},
+        )
+        if self.thickness_nm <= 0:
+            raise ValueError(
+                f"DrilledSurface.thickness_nm is the material a cut must clear, so "
+                f"it is positive, not {self.thickness_nm}"
+            )
+        x0, y0, x1, y1 = self.bounds_nm
+        if x1 <= x0 or y1 <= y0:
+            raise ValueError(
+                f"DrilledSurface.bounds_nm must run low to high in both axes, "
+                f"not {self.bounds_nm}"
+            )
+        if self.key != SURFACE_FACE and (x0 + x1 != 0 or y0 + y1 != 0):
+            raise ValueError(
+                f"the {self.key} surface's datum is not in the middle of its "
+                f"drillable region {self.bounds_nm}: a wall's drill file and its "
+                f"sheet are framed by that region's size alone, so an off-centre "
+                f"datum would place every hole on it wrongly — state the region "
+                f"about its own centre"
+            )
+
+    @property
+    def extent(self) -> ReferenceOutline:
+        """This surface's own size, as the outline its artefacts are framed by.
+
+        A ``ReferenceOutline`` rather than a second size type: it is what the
+        drill file's lower-left origin and the sheet's layout already take, so
+        a surface reaches both with no conversion.
+        """
+        x0, y0, x1, y1 = self.bounds_nm
+        return ReferenceOutline.from_measurement(
+            Nanometre(x1 - x0), Nanometre(y1 - y0)
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class SourceInfo:
     """Where the data came from, for title blocks and file headers."""
@@ -386,6 +486,7 @@ class DrillData:
     processing: tuple[StageRun, ...] = ()
     enclosure: EnclosureMatch | None = None
     case: CaseRegistration | None = None
+    surfaces: tuple[DrilledSurface, ...] | None = None
 
     # -- transforms ------------------------------------------------------
     def with_holes(self, holes: Iterable[Hole]) -> DrillData:
@@ -409,6 +510,23 @@ class DrillData:
     def with_case(self, case: CaseRegistration) -> DrillData:
         """Record the supplied case model this data was decided against."""
         return replace(self, case=case)
+
+    def with_surfaces(self, surfaces: Iterable[DrilledSurface]) -> DrillData:
+        """Record every surface this document's holes are framed by.
+
+        One record per key: two would leave a hole's coordinates ambiguous,
+        which is the one thing this field exists to stop.
+        """
+        recorded = tuple(surfaces)
+        seen: set[str] = set()
+        for surface in recorded:
+            if surface.key in seen:
+                raise ValueError(
+                    f"surface {surface.key!r} is registered twice; a hole's "
+                    f"coordinates name one frame"
+                )
+            seen.add(surface.key)
+        return replace(self, surfaces=recorded)
 
     def with_origin(self, origin: Origin) -> DrillData:
         """Translate every hole into the requested frame.
@@ -446,6 +564,57 @@ class DrillData:
                 )
             pairs.append((hole.index, hole))
         return tuple(pairs)
+
+    def surface_of(self, key: str) -> DrilledSurface | None:
+        """The record for one surface, or ``None`` when none was registered."""
+        for surface in self.surfaces or ():
+            if surface.key == key:
+                return surface
+        return None
+
+    @property
+    def surface(self) -> str | None:
+        """Which surface this document's holes are on, or ``None`` for several.
+
+        Read from the holes, not from ``surfaces``: a whole document may
+        register four walls and have cut into one, and what a per-setup
+        artefact needs to know is which frame its coordinates are in.
+        """
+        keys = {hole.surface for hole in self.holes}
+        if len(keys) > 1:
+            return None
+        return keys.pop() if keys else SURFACE_FACE
+
+    def surface_keys(self) -> tuple[str, ...]:
+        """Every surface owed an artefact, the drilled plate always among them.
+
+        A run has always written one drill file for the panel, so the plate
+        stays in the set even when nothing landed on it; a wall with no hole
+        is not a setup and gets no file.
+        """
+        occupied = {hole.surface for hole in self.holes} | {SURFACE_FACE}
+        return tuple(key for key in SURFACES if key in occupied)
+
+    def for_surface(self, key: str) -> DrillData:
+        """This document narrowed to one surface, ready for a per-setup artefact.
+
+        The drilled plate keeps the artwork's own reference outline, because
+        that boundary is a measurement its sheet dimensions and its drill file
+        count from; a wall was read from no drawing, so its own extent stands
+        in.
+        """
+        surface = self.surface_of(key)
+        if key != SURFACE_FACE and surface is None:
+            raise EmitterError(
+                f"surface {key!r} frames holes this document never registered; "
+                f"record it with with_surfaces before projecting onto it"
+            )
+        return replace(
+            self,
+            holes=tuple(hole for hole in self.holes if hole.surface == key),
+            reference=self.reference if key == SURFACE_FACE else surface.extent,  # type: ignore[union-attr]
+            surfaces=self.surfaces if surface is None else (surface,),
+        )
 
     def tools(self) -> Mapping[Nanometre, int]:
         """Map nominal diameter to 1-based tool number, ascending by size."""

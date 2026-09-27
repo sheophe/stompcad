@@ -67,6 +67,10 @@ class DrawingSvgEmitter:
     media_type: ClassVar[str] = "image/svg+xml"
     extension: ClassVar[str] = ".svg"
 
+    #: A printed template is one machine setup, so one surface gets one sheet.
+    #: See ``emitters.surfaces.artefacts``, which is what reads this.
+    per_surface: ClassVar[bool] = True
+
     def __init__(self, options: DrawingOptions | None = None) -> None:
         self.options = options or DrawingOptions()
 

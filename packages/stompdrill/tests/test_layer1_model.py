@@ -162,6 +162,14 @@ def fact_set(data: DrillData) -> dict[str, object]:
             "found": list(data.source.layers_found),
         },
         "tools": [[diameter_nm, number] for diameter_nm, number in data.tools().items()],
+        "surfaces": None if data.surfaces is None else [
+            {
+                "key": surface.key,
+                "thickness_nm": surface.thickness_nm,
+                "bounds_nm": list(surface.bounds_nm),
+            }
+            for surface in data.surfaces
+        ],
         "holes": [
             {"index": index, "x_nm": hole.x_nm, "y_nm": hole.y_nm,
              "diameter_nm": hole.diameter_nm}

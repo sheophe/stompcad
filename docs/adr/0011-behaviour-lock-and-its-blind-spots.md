@@ -181,3 +181,16 @@ The shell script is outside `ruff`, `mypy` and the docstring audit. Two Python
 gates cover it explicitly: the emitter-coverage check reads its text, and the
 completeness controls source it and exercise capture and verification. The
 repository's other Python checks do not validate the script.
+
+### The multi-surface document
+
+Adding a surface to the document moved the drill document's bytes and nothing
+else's: a format that gains a field gains a version. The Excellon file, both
+drawing sheets and the cut model are unchanged for a run that drills no walls,
+and no sibling file appears — the harness's own set comparison is what proves the
+second half, because it refuses a directory that gained a row.
+
+The document's own claim is narrower and is checked by a test rather than a
+digest: `packages/stompmodel/tests/test_document_version_7.py` compares version 7
+against a captured version-6 document over identical input and requires the
+difference to be the version, one key per hole and one section at the top.

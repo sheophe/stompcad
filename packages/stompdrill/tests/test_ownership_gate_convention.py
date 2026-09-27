@@ -304,6 +304,7 @@ _GUILTY_PROBE_SOURCE = (
     "from OCP.XCAFDoc import XCAFDoc_ShapeTool\n"
     "from OCP.TDF import TDF_Label\n"
     '_FACES = {"box": "BOX", "lid": "LID"}\n'
+    '_SURFACES = ("face", "back", "left", "right", "top", "bottom")\n'
     "def guard(name, value):\n"
     "    if type(value) is not int:\n"
     # Deliberately paraphrased: this probe shares no wording with any

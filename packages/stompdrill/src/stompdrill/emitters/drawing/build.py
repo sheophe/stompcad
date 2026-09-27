@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from stompmodel.diagnostics import Severity
-from stompmodel.model import DrillData, Hole
+from stompmodel.errors import EmitterError
+from stompmodel.model import SURFACE_FACE, DrillData, Hole
 from stompmodel.units import Nanometre, format_nm, mm_from_nm
 
 from .content import (
@@ -153,7 +154,18 @@ def arrow(x: float, y: float, dx: float, dy: float) -> Polygon:
 
 
 def build_scene(layout: Layout, data: DrillData, options: SheetText) -> Scene:
-    """Resolve everything the sheet shows, in draw order."""
+    """Resolve everything the sheet shows, in draw order.
+
+    One sheet is one surface: its outline, its dimensions and its balloons are
+    all in that surface's own frame, so holes from two would be drawn at
+    coordinates that mean nothing together.
+    """
+    if data.surface is None:
+        raise EmitterError(
+            "a drill drawing describes one surface, and these holes are on "
+            "several — emit through emitters.surfaces.artefacts, which draws one "
+            "sheet per surface"
+        )
     pens = pens_for(GROUP_0_7, layout.frame)
     items: list[Item] = []
     items += _build_frame(layout, pens)
@@ -416,7 +428,7 @@ def _build_centrelines(layout: Layout, pens: Pens) -> list[Item]:
 
 def _build_holes(layout: Layout, data: DrillData, pens: Pens) -> list[Item]:
     drawn: list[Item] = []
-    flagged = flagged_holes(data.diagnostics)
+    flagged = flagged_holes(data.diagnostics, data.surface or SURFACE_FACE)
 
     for number, hole in data.numbered():
         cx, cy = layout.point(mm_from_nm(hole.x_nm), mm_from_nm(hole.y_nm))

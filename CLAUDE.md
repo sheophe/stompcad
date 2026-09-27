@@ -9,6 +9,7 @@ for automated work in this repository.
 
 `stompdrill` reads Adobe Illustrator artwork and creates drill files, drawings,
 a JSON drill document and, when given an enclosure model, a drilled STEP model.
+It drills the surfaces a document registers and discovers none of its own.
 `DrillData` is its library integration contract. KiCad data and component
 semantics are outside this package's scope.
 
@@ -168,6 +169,12 @@ depends only on the `Stage` protocol.
 
 - Canonical coordinates use a Y-up frame with the origin at the reference
   outline's centre. Emitters transform coordinates through model operations.
+- A hole's coordinates are canonical in the frame of the surface it is cut in,
+  and `DrillData.surfaces` states that frame, the material a cut must clear and
+  the drillable bounds, once per surface. A document with no supplied case model
+  registers none. Numbering is surface-major; a tool's block is contiguous
+  within a surface, never across two, because changing surface is a setup change
+  (ADR-0006, amendment 7).
 - Raw lengths are finite float millimetres. Canonical lengths are integer
   nanometres, selected by exact decimal scaling before representation rounding.
 - Use `Millimetre` for measurements, `Nanometre` for canonical lengths and

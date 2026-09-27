@@ -16,9 +16,11 @@ from .diagnostics import Diagnostic, Severity
 from .errors import DocumentError
 from .frames import CoordinateFrame, FaceFrame
 from .model import (
+    SURFACE_FACE,
     CaseFace,
     CaseRegistration,
     DrillData,
+    DrilledSurface,
     EnclosureMatch,
     Hole,
     RawHole,
@@ -32,7 +34,7 @@ from .units import Millimetre, Nanometre
 __all__ = ["FORMAT", "VERSION", "to_document", "from_document"]
 
 FORMAT = "stompcad-drill-data"
-VERSION = 6
+VERSION = 7
 
 #: The frame every document is written in, stated by the writer and checked by
 #: the reader. Named once, because a reader checking a second copy of these
@@ -71,6 +73,7 @@ def to_document(data: DrillData) -> dict[str, Any]:
         "processing": [_stage_run(r) for r in data.processing],
         "enclosure": _enclosure(data.enclosure),
         "case": _case(data.case),
+        "surfaces": _surfaces(data.surfaces),
     }
 
 
@@ -106,6 +109,7 @@ def _hole(hole: Hole, tool: int, number: int) -> dict[str, Any]:
         "tool": tool,
         "raw": {"x": hole.raw.x, "y": hole.raw.y, "diameter": hole.raw.diameter},
         "index": number,
+        "surface": hole.surface,
     }
 
 
@@ -170,6 +174,28 @@ def _case(case: CaseRegistration | None) -> dict[str, Any] | None:
     }
 
 
+def _surfaces(
+    surfaces: tuple[DrilledSurface, ...] | None,
+) -> list[dict[str, Any]] | None:
+    """Emit every registered surface, or ``null`` when none was.
+
+    ``null`` rather than an empty list: no supplied model and a supplied model
+    whose walls were left alone are different claims, and a reader that could
+    not tell them apart would have to guess which frame a hole is in.
+    """
+    if surfaces is None:
+        return None
+    return [
+        {
+            "key": surface.key,
+            "frame": _frame(surface.frame),
+            "thickness_nm": surface.thickness_nm,
+            "bounds_nm": list(surface.bounds_nm),
+        }
+        for surface in surfaces
+    ]
+
+
 def _frame(frame: FaceFrame) -> dict[str, Any]:
     """Emit a face frame's basis as a nested object."""
     basis = frame.basis
@@ -207,7 +233,7 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
     # a value. The cause is chained, so a reader defect that ever raised one of
     # these for its own reasons is re-attributed but not erased.
     try:
-        return DrillData(
+        data = DrillData(
             holes=_read_holes(document["holes"]),
             reference=_read_reference(document["reference"]),
             diagnostics=tuple(_read_diagnostic(d) for d in document["diagnostics"]),
@@ -215,7 +241,10 @@ def from_document(document: Mapping[str, Any]) -> DrillData:
             processing=tuple(_read_stage_run(r) for r in document["processing"]),
             enclosure=_read_enclosure(document["enclosure"]),
             case=_read_case(document["case"]),
+            surfaces=_read_surfaces(document["surfaces"]),
         )
+        _check_surfaces_frame_every_hole(data)
+        return data
     except KeyError as missing:
         raise DocumentError(f"{FORMAT} document has no {missing.args[0]!r}") from missing
     except (IndexError, TypeError, ValueError, AttributeError) as malformed:
@@ -288,6 +317,7 @@ def _read_hole(payload: Mapping[str, Any]) -> Hole:
             Millimetre(payload["raw"]["y"]),
             Millimetre(payload["raw"]["diameter"]),
         ),
+        surface=payload["surface"],
     )
     return hole.with_number(payload["index"])
 
@@ -344,6 +374,40 @@ def _read_case(payload: Mapping[str, Any] | None) -> CaseRegistration | None:
         model=payload["model"],
         frame=_read_frame(payload["frame"]),
     )
+
+
+def _read_surfaces(
+    payload: Iterable[Mapping[str, Any]] | None,
+) -> tuple[DrilledSurface, ...] | None:
+    """Restore every surface, each vector handed whole to the frame's own guard."""
+    if payload is None:
+        return None
+    return tuple(
+        DrilledSurface(
+            key=entry["key"],
+            frame=_read_frame(entry["frame"]),
+            thickness_nm=Nanometre(entry["thickness_nm"]),
+            bounds_nm=tuple(Nanometre(value) for value in entry["bounds_nm"]),  # type: ignore[arg-type]
+        )
+        for entry in payload
+    )
+
+
+def _check_surfaces_frame_every_hole(data: DrillData) -> None:
+    """Refuse a hole whose surface the document never registered.
+
+    A hole's coordinates are in its surface's frame, so one without that
+    record cannot be placed, drawn or cut. The drilled plate is exempt: a
+    document with no supplied model has no frame for it and never needed one.
+    """
+    for hole in data.holes:
+        if hole.surface == SURFACE_FACE:
+            continue
+        if data.surface_of(hole.surface) is None:
+            raise DocumentError(
+                f"{FORMAT} has a hole on surface {hole.surface!r}, which the "
+                f"document never registers, so its coordinates name no frame"
+            )
 
 
 def _read_frame(payload: Mapping[str, Any]) -> FaceFrame:

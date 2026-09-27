@@ -10,7 +10,15 @@ from typing import ClassVar
 
 from stompmodel.diagnostics import Diagnostic
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseRegistration, DrillData, EnclosureMatch, Hole, StageRun
+from stompmodel.model import (
+    SURFACE_FACE,
+    CaseRegistration,
+    DrillData,
+    DrilledSurface,
+    EnclosureMatch,
+    Hole,
+    StageRun,
+)
 from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm
 
@@ -98,8 +106,14 @@ class CheckCaseClearance:
         # document must state what it was checked against either way. The
         # frame recorded is the one holes were actually checked in, so the
         # cutter reads it back rather than re-deriving its own.
-        return data.with_diagnostics(*diagnostics).with_case(
-            CaseRegistration(self.model.part, self.model.face, self.model.model_name, frame)
+        return (
+            data.with_diagnostics(*diagnostics)
+            .with_case(
+                CaseRegistration(
+                    self.model.part, self.model.face, self.model.model_name, frame
+                )
+            )
+            .with_surfaces(self._registered(frame))
         )
 
     def _reconciled_frame(self, data: DrillData) -> FaceFrame:
@@ -154,6 +168,27 @@ class CheckCaseClearance:
         xs = [corner[0] for corner in corners]
         ys = [corner[1] for corner in corners]
         return (Nanometre(min(xs)), Nanometre(min(ys)), Nanometre(max(xs)), Nanometre(max(ys)))
+
+    def _registered(self, frame: FaceFrame) -> tuple[DrilledSurface, ...]:
+        """The drilled plate as a surface, in the frame holes were checked in.
+
+        A hole's coordinates mean nothing apart from this frame, so a document
+        that was checked against a model states it once per surface rather than
+        leaving one consumer to read ``case`` and another to read here. A model
+        with no material or no play area records no surface at all: a record
+        nothing could be measured against is worse than none.
+        """
+        x0, y0, x1, y1 = self._play_area_in(frame)
+        if self.model.plate_nm <= 0 or x1 <= x0 or y1 <= y0:
+            return ()
+        return (
+            DrilledSurface(
+                key=SURFACE_FACE,
+                frame=frame,
+                thickness_nm=self.model.plate_nm,
+                bounds_nm=(x0, y0, x1, y1),
+            ),
+        )
 
     def _reject(self, hole: Hole, rejection: Rejection) -> Diagnostic:
         return Diagnostic.error(

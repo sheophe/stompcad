@@ -19,8 +19,8 @@ from stompgeom.step import StepLabel, leaf_labels
 from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
 from stompmodel.frames import FaceFrame
-from stompmodel.model import DrillData
-from stompmodel.units import mm_from_nm, nm_from_mm
+from stompmodel.model import SURFACE_FACE, DrillData, Hole
+from stompmodel.units import Millimetre, mm_from_nm, nm_from_mm
 
 from ..cad import OcpCaseModel, step_keyword
 from .base import register_emitter
@@ -49,6 +49,10 @@ class StepEmitter:
     name: ClassVar[str] = "step"
     media_type: ClassVar[str] = "model/step"
     extension: ClassVar[str] = ".stp"
+
+    #: One object drilled in several setups is still one object, so the cut
+    #: model is one file. See ``emitters.surfaces.artefacts``, which reads this.
+    per_surface: ClassVar[bool] = False
 
     def __init__(self, options: StepOptions | None = None) -> None:
         self.options = options if options is not None else StepOptions()
@@ -208,22 +212,61 @@ def _drill_compound(model: OcpCaseModel, data: DrillData) -> Any | None:
     holes = sorted(data.numbered(), key=lambda pair: pair[0])
     if not holes:
         return None
-    assert data.case is not None, "cut_shape already refused a missing registration"
-    frame = data.case.frame
-
-    # Bounded by the two levels the clearance check already found, plus a
-    # little either side. An unbounded cylinder would punch the far wall too.
-    overshoot = 1.0
-    depth = abs(model.inner_position_mm - model.drilled_position_mm) + 2 * overshoot
-    direction = tuple(-component for component in frame.basis.w)
 
     cylinders = []
-    for _, hole in holes:
-        start = _face_point(model, frame, hole, overshoot)
+    for _number, hole in holes:
+        start, direction, depth = _bore(model, data, hole)
         axis = gp_Ax2(gp_Pnt(*start), gp_Dir(*direction))
         radius = float(mm_from_nm(hole.diameter_nm)) / 2
         cylinders.append(BRepPrimAPI_MakeCylinder(axis, radius, depth).Shape())
     return compound(cylinders)
+
+
+#: How far outside a surface a cut starts, and clears behind, in millimetres.
+#: An unbounded cylinder would punch the far wall too.
+_OVERSHOOT_MM = 1.0
+
+
+def _bore(
+    model: OcpCaseModel, data: DrillData, hole: Hole
+) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
+    """Where one hole's tool starts, which way it runs, and how far.
+
+    The plate is bounded by the two levels the clearance check already found;
+    a wall is bounded by its own record, because a wall is drafted and a cut
+    along the plate's normal would not be a hole through it at all. The
+    plate's branch keeps the arithmetic it had, so a document with no wall
+    hole builds the compound it always built.
+    """
+    assert data.case is not None, "cut_shape already refused a missing registration"
+    if hole.surface == SURFACE_FACE:
+        frame = data.case.frame
+        depth = (
+            abs(model.inner_position_mm - model.drilled_position_mm) + 2 * _OVERSHOOT_MM
+        )
+        start = _face_point(model, frame, hole, _OVERSHOOT_MM)
+        return start, _inward(frame.basis.w), depth
+    surface = data.surface_of(hole.surface)
+    if surface is None:
+        raise EmitterError(
+            f"hole {hole.index} is on surface {hole.surface!r}, which this document "
+            f"never registers, so there is no frame to cut it along"
+        )
+    basis = surface.frame.basis
+    thickness_mm = float(mm_from_nm(surface.thickness_nm))
+    start = basis.to_model(
+        hole.x_nm, hole.y_nm, nm_from_mm(Millimetre(thickness_mm + _OVERSHOOT_MM))
+    )
+    return (
+        (float(start[0]), float(start[1]), float(start[2])),
+        _inward(basis.w),
+        thickness_mm + 2 * _OVERSHOOT_MM,
+    )
+
+
+def _inward(normal: tuple[float, float, float]) -> tuple[float, float, float]:
+    """The way the bit runs: against a surface's own outward normal."""
+    return (-normal[0], -normal[1], -normal[2])
 
 
 def _face_point(
