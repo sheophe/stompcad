@@ -16,12 +16,21 @@ from typing import Any
 
 import pytest
 
+from stompcollider.boards import carrier_frame, group, substrates
 from stompcollider.canonicalise import _canonicalise_component
 from stompcollider.model import Profile
-from stompcollider.protrude import admissible, protrusion_of
+from stompcollider.protrude import (
+    admissible,
+    bore_of,
+    clad_length,
+    in_plane,
+    protrusion_of,
+    wall_axis,
+)
 from stompcollider.raw import RawComponent
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.step import StepDocument, StepSolid, read_step
+from stompmodel.frames import dot
 from stompmodel.units import Nanometre, mm_from_nm
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
@@ -567,3 +576,125 @@ def test_a_probe_exactly_on_a_tangent_face_finds_no_more_than_a_narrower_one(
     tangent_band = bands[mm_from_nm(Nanometre(tangent + 1))]
 
     assert tangent_band.depth_from_tip_min_mm >= narrower_band.depth_from_tip_min_mm
+
+
+# --------------------------------------------------------------------------
+# A wall feature's axis is the one its material clads the most of
+# --------------------------------------------------------------------------
+
+
+def _a_face(
+    radius: float,
+    direction: tuple[float, float, float],
+    extent: tuple[float, float],
+    at: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    concave: bool = False,
+) -> Cylinder:
+    """One cylindrical face stated directly, for a measure that reads only fields."""
+    return Cylinder(
+        axis_location_mm=at,
+        axis_direction=direction,
+        radius_mm=radius,
+        extent_mm=extent,
+        concave=concave,
+    )
+
+
+def test_a_part_with_no_in_plane_cylinder_has_no_wall_axis() -> None:
+    """A part that only protrudes through the panel reaches no wall."""
+    solid = StepSolid(name="RV1", shape=_pin(3.0, 8.0))
+    assert wall_axis(solid, (0.0, 0.0, 1.0)) is None
+
+
+def test_the_axis_with_the_most_material_along_it_wins() -> None:
+    """Two in-plane axes, one clad 20 mm and one clad 1 mm: the long one is the feature.
+
+    Built rather than measured so the margin is stated, not inherited: the
+    committed board's own separation is asserted separately below.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+
+    barrel = _pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    pin = _pin(0.5, 1.0, at=(5.0, 0.0, 0.0), along=(0.0, 1.0, 0.0))
+    fused = BRepAlgoAPI_Fuse(barrel, pin)
+    assert fused.IsDone()
+    solid = StepSolid(name="J1", shape=fused.Shape())
+
+    found = wall_axis(solid, (0.0, 0.0, 1.0))
+    assert found is not None
+    assert abs(dot(found, (1.0, 0.0, 0.0))) == pytest.approx(1.0)
+
+
+def test_two_short_features_far_apart_on_one_line_do_not_outrank_a_long_one() -> None:
+    """The measure the plan corrects the spec on, stated as a fixture.
+
+    Two 0.5 mm rings 16 mm apart span 17 mm and clad 1 mm. A span measure
+    prefers them to a 10 mm barrel; a clad measure does not, and it is the
+    clad length a hole has to admit.
+    """
+    ring_low = _pin(0.5, 0.5, at=(0.0, 0.0, 0.0), along=(0.0, 1.0, 0.0))
+    ring_high = _pin(0.5, 0.5, at=(0.0, 16.0, 0.0), along=(0.0, 1.0, 0.0))
+    faces = cylindrical_faces(ring_low) + cylindrical_faces(ring_high)
+    assert clad_length(faces, (0.0, 1.0, 0.0)) == pytest.approx(1.0)
+
+
+def test_a_seam_s_two_halves_clad_the_same_length_as_one_whole_face() -> None:
+    """Invariance to tessellation, which is the reason for this measure.
+
+    One surface reported as two patches covering the same extent must not
+    count double -- ``cylindrical_faces`` reports per face and says a
+    consumer owes that its own answer.
+    """
+    whole = _a_face(radius=2.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 10.0))
+    halves = (
+        _a_face(radius=2.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 6.0)),
+        _a_face(radius=2.0, direction=(1.0, 0.0, 0.0), extent=(4.0, 10.0)),
+    )
+    assert clad_length((whole,), (1.0, 0.0, 0.0)) == pytest.approx(10.0)
+    assert clad_length(halves, (1.0, 0.0, 0.0)) == pytest.approx(10.0)
+
+
+@pytest.mark.boards
+def test_the_committed_board_s_jacks_measure_what_the_plan_recorded(
+    document: StepDocument,
+) -> None:
+    """Decision 7's Evidence, as assertions. A drift here fails a suite.
+
+    Both jacks, not one: they are mirrored on the board and a rule reading
+    the kernel's walk order would answer differently for the pair.
+    """
+    for substrate, parts in group(document, substrates(document)):
+        normal = carrier_frame(substrate).w  # type: ignore[union-attr]
+        for part in parts:
+            if part.name not in {"J1", "J4"}:
+                continue
+            faces = in_plane(part, normal)
+            assert len(faces) == 12
+            assert admissible(part, normal) == ()
+            axis = wall_axis(part, normal)
+            assert axis is not None
+            assert clad_length(
+                [f for f in faces if f.is_parallel_to(axis)], axis
+            ) == pytest.approx(24.484, abs=1e-3)
+            pins = [f for f in faces if not f.is_parallel_to(axis)]
+            assert len(pins) == 4
+            assert {round(f.radius_mm, 3) for f in pins} == {0.550}
+            assert clad_length(pins, pins[0].axis_direction) == pytest.approx(1.0)
+
+
+@pytest.mark.boards
+def test_the_committed_board_s_bore_is_never_wider_than_its_own_material(
+    document: StepDocument,
+) -> None:
+    """Why Task 5 has to build a fixture: this one cannot exercise the bore branch."""
+    for substrate, parts in group(document, substrates(document)):
+        normal = carrier_frame(substrate).w  # type: ignore[union-attr]
+        for part in parts:
+            if part.name != "J1":
+                continue
+            faces = in_plane(part, normal)
+            axis = wall_axis(part, normal)
+            assert axis is not None
+            assert bore_of(faces, axis) == pytest.approx(4.150)
+            widest = max(f.radius_mm for f in faces if f.is_parallel_to(axis))
+            assert widest == pytest.approx(7.530)

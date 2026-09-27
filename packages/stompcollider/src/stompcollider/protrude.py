@@ -12,10 +12,10 @@ is the one place they become canonical lengths. See ADR-0003 and ADR-0008.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from stompgeom.cylinders import Cylinder, cylindrical_faces
-from stompgeom.levels import Direction
+from stompgeom.levels import Direction, direction_bin
 from stompgeom.radial import axial_extent, radial_reach
 from stompgeom.step import StepSolid
 from stompmodel.frames import dot
@@ -24,7 +24,7 @@ from stompmodel.units import Nanometre, mm_from_nm
 from .boards import basis_about
 from .raw import RawComponent, RawCylinder
 
-__all__ = ["admissible", "protrusion_of", "reach_along"]
+__all__ = ["admissible", "bore_of", "clad_length", "in_plane", "protrusion_of", "reach_along", "wall_axis"]
 
 
 def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, ...]:
@@ -34,11 +34,93 @@ def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, .
     so admitting one risks an axis that means nothing. Parallelism is
     sign-agnostic; only :func:`protrusion_of` reads the direction's sign.
     """
+    return _about(solid, lambda cylinder: cylinder.is_parallel_to(carrier_normal))
+
+
+def _about(
+    solid: StepSolid, keep: Callable[[Cylinder], bool]
+) -> tuple[Cylinder, ...]:
+    """``solid``'s cylindrical faces that ``keep`` admits.
+
+    One walk and one predicate, because :func:`admissible` and
+    :func:`in_plane` are the same filter in two modes -- through the panel and
+    along the board -- and writing the walk twice would let them drift apart.
+    """
     return tuple(
-        cylinder
-        for cylinder in cylindrical_faces(solid.shape)
-        if cylinder.is_parallel_to(carrier_normal)
+        cylinder for cylinder in cylindrical_faces(solid.shape) if keep(cylinder)
     )
+
+
+def in_plane(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, ...]:
+    """``solid``'s cylindrical faces whose axis lies in the carrier plane.
+
+    :func:`admissible` inverted: that one keeps what could pass *through* a
+    flat panel, this one what runs *along* the board, at a wall. Not its
+    complement -- a face oblique to both is neither, and neither question
+    admits one. Perpendicularity is the kernel's own, as parallelism is there.
+    """
+    return _about(solid, lambda cylinder: cylinder.is_normal_to(carrier_normal))
+
+
+def clad_length(faces: Sequence[Cylinder], direction: Direction) -> float:
+    """How much of ``direction`` these faces' own surfaces actually cover, in mm.
+
+    The union of their axial extents, not the span between the extremes and
+    not their sum: a gap between two features is not material, and one
+    surface an exporter split into patches is still that surface -- which
+    ``cylindrical_faces`` states is not a fact about the part. Both are why
+    this and not reach decides an axis.
+    """
+    spans = sorted(reach_along(face, direction) for face in faces)
+    total, covered_to = 0.0, None
+    for low, high in spans:
+        if covered_to is None or low > covered_to:
+            total += high - low
+            covered_to = high
+        elif high > covered_to:
+            total += high - covered_to
+            covered_to = high
+    return total
+
+
+def wall_axis(solid: StepSolid, carrier_normal: Direction) -> Direction | None:
+    """The in-plane direction ``solid``'s material clads the most of, or ``None``.
+
+    Grouped on ``direction_bin`` so a bore's two half-faces agree on one
+    axis, and sign-folded because an in-plane axis has two and neither is
+    known to point at a wall -- the caller measures both. Ties break on the
+    bin itself, which is geometry, so two spellings of one part agree
+    (ADR-0006).
+    """
+    faces = in_plane(solid, carrier_normal)
+    if not faces:
+        return None
+    bins: dict[tuple[int, int, int], list[Cylinder]] = {}
+    for face in faces:
+        key = direction_bin(face.axis_direction)
+        bins.setdefault(max(key, tuple(-c for c in key)), []).append(face)  # type: ignore[arg-type]
+    best = max(
+        bins.items(),
+        key=lambda item: (clad_length(item[1], item[1][0].axis_direction), item[0]),
+    )
+    return best[1][0].axis_direction
+
+
+def bore_of(faces: Sequence[Cylinder], direction: Direction) -> float | None:
+    """The largest concave radius among the faces along ``direction``, or ``None``.
+
+    A plug entering a bore has to pass the wall even where no material of
+    the part protrudes, which is the whole reason a bore is measured at all
+    (decision 7). Parallel rather than coaxial: a part's bore and its
+    envelope are one feature seen from two sides, and a bore offset from the
+    envelope's own axis is still a bore that plug goes into.
+    """
+    concave = [
+        face.radius_mm
+        for face in faces
+        if face.concave and face.is_parallel_to(direction)
+    ]
+    return max(concave) if concave else None
 
 
 def protrusion_of(
