@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from stompmodel.frames import CoordinateFrame, RigidTransform
+from stompmodel.frames import CoordinateFrame, RigidTransform, check_unit_direction
 from stompmodel.units import Nanometre
 
 #: A frame whose axes are deliberately not the kernel's own: ``u`` runs along
@@ -431,3 +431,23 @@ def test_placement_onto_still_produces_a_transform_this_check_admits() -> None:
         origin_nm=(50_000_000, 0, 0), u=(0.0, 1.0, 0.0), v=(-1.0, 0.0, 0.0), w=(0.0, 0.0, 1.0)
     )
     assert source.placement_onto(target).apply_direction(source.u) == target.u
+
+
+def test_a_direction_that_is_not_unit_length_is_refused_by_name() -> None:
+    with pytest.raises(ValueError, match="Thing.direction must be unit length"):
+        check_unit_direction("Thing.direction", (1.0, 1.0, 0.0))
+
+
+def test_a_direction_with_the_wrong_arity_is_refused_before_its_length() -> None:
+    with pytest.raises(ValueError, match="exactly three components"):
+        check_unit_direction("Thing.direction", (1.0, 0.0))  # type: ignore[arg-type]
+
+
+def test_a_direction_holding_an_infinity_is_refused_as_not_finite() -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        check_unit_direction("Thing.direction", (float("inf"), 0.0, 0.0))
+
+
+def test_a_unit_direction_passes_whichever_way_it_points() -> None:
+    for direction in ((1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0)):
+        check_unit_direction("Thing.direction", direction)

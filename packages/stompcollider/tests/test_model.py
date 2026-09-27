@@ -648,3 +648,11 @@ def test_clash_names_its_own_solid_or_names_none() -> None:
     )
     with pytest.raises(ValueError, match="own solid"):
         Clash("b:2:Q", "board", _bbox(), Nanometre(1), "w", 1, 1, "")
+
+
+def test_the_profile_this_module_publishes_is_the_shared_one() -> None:
+    """Re-exported so importers are unaffected, and identical so they cannot diverge."""
+    from stompcollider.model import Profile as Published
+    from stompmodel.model import Profile as Shared
+
+    assert Published is Shared
