@@ -107,6 +107,23 @@ class Cylinder:
             gp_Dir(*direction), Precision.Angular_s()
         )
 
+    def is_normal_to(self, direction: Direction) -> bool:
+        """Whether this axis lies in the plane ``direction`` is normal to.
+
+        ``gp_Dir.IsNormal`` at ``Precision::Angular()``: the kernel's own
+        declaration, as ``is_parallel_to`` takes the kernel's for sameness,
+        rather than a dot product compared against a figure chosen here.
+        Sign-agnostic for the same reason that one is -- which way a
+        cylindrical surface's axis points is the exporter's convention.
+        """
+        require_kernel()
+        from OCP.gp import gp_Dir
+        from OCP.Precision import Precision
+
+        return gp_Dir(*self.axis_direction).IsNormal(
+            gp_Dir(*direction), Precision.Angular_s()
+        )
+
     def is_coaxial_with(self, other: Cylinder) -> bool:
         """Whether ``other``'s axis is this one's line.
 

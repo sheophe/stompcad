@@ -312,3 +312,29 @@ def test_concavity_is_a_bool_and_not_a_number_that_looks_like_one() -> None:
     """``1`` is not a side of a surface, and an int here would read as one."""
     with pytest.raises(TypeError, match="which side its material"):
         _a_cylinder(concave=1)  # type: ignore[arg-type]
+
+
+def test_an_axis_in_the_plane_is_normal_to_that_plane_s_own_normal() -> None:
+    lying_along_z = _a_cylinder(direction=(0.0, 0.0, 1.0))
+    assert lying_along_z.is_normal_to((1.0, 0.0, 0.0)) is True
+    assert lying_along_z.is_normal_to((0.0, 1.0, 0.0)) is True
+
+
+def test_an_axis_along_the_normal_is_not_in_the_plane() -> None:
+    assert _a_cylinder(direction=(0.0, 0.0, 1.0)).is_normal_to((0.0, 0.0, 1.0)) is False
+
+
+def test_perpendicularity_does_not_care_which_way_either_points() -> None:
+    """A cylindrical surface's axis sign is the exporter's convention, not the part's."""
+    for direction in ((0.0, 0.0, 1.0), (0.0, 0.0, -1.0)):
+        for normal in ((1.0, 0.0, 0.0), (-1.0, 0.0, 0.0)):
+            assert _a_cylinder(direction=direction).is_normal_to(normal) is True
+
+
+def test_an_axis_a_degree_off_the_plane_is_not_in_it() -> None:
+    """The kernel's angular precision, not a tolerance chosen here."""
+    import math
+
+    tilt = math.radians(1.0)
+    off = _a_cylinder(direction=(0.0, math.sin(tilt), math.cos(tilt)))
+    assert off.is_normal_to((0.0, 1.0, 0.0)) is False
