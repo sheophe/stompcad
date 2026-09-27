@@ -347,7 +347,9 @@ class Clashes:
         closes over the cavity, and dropping that clash would excuse
         interference no hole explains. Across several case solids the
         exclusion stays per designator rather than per solid -- which wall
-        a ray crosses is the drill half's own question, not this one's.
+        a ray crosses is the drill half's own question, not this one's --
+        and it removes bodies from a solid's intersection rather than
+        splitting that intersection per body.
         """
         excluded = self._excluded(board)
         inside, beyond = self._split.of(basis, board.extent_nm)
@@ -366,17 +368,20 @@ class Clashes:
                 continue
             name = solid_name(solid, box, "case")
             if excluded and kind == CASE_KIND:
-                for body in meeting:
-                    part = board_designator(body.name, board.ordinal)
-                    if part in excluded:
-                        continue
-                    region = common(body.shape, solid.shape)
-                    if region is None:
-                        continue
-                    clash = _clash_from(region, basis, name, kind, part=part)
-                    if clash is not None:
-                        found.append(clash)
-                continue
+                # The walk is per body only to *filter*: what a hole will
+                # explain leaves the accounting, and the rest is intersected
+                # once, exactly as an unexcused board's is. Reporting a clash
+                # per surviving body instead would change how many clashes a
+                # placement carries, and ``rank_key`` compares that count
+                # before it compares volume -- so naming one part would move
+                # the seating of every other.
+                meeting = [
+                    body
+                    for body in meeting
+                    if board_designator(body.name, board.ordinal) not in excluded
+                ]
+                if not meeting:
+                    continue
             region = common(compound([body.shape for body in meeting]), solid.shape)
             if region is None:
                 continue

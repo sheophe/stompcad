@@ -922,3 +922,19 @@ def test_a_probed_band_still_states_material_that_is_in_the_span() -> None:
     """The control: bounding a band must not stop it reporting the collar itself."""
     found = wall_features_of(_collared_jack(), _UP, probes_nm=(Nanometre(4_000_000),))
     assert _widest_at(_outward(found), 1.0) > 4.0
+
+
+def test_the_axis_comes_back_on_the_sign_the_direction_fixes_not_the_walk() -> None:
+    """Sign-folded, as this answer has always said it was.
+
+    ``basis_about`` flips with the sign, and ``bore_of`` separates two parallel
+    coaxial classes on where their axes sit in that basis -- so handed the sign
+    the kernel's walk happened to give, an exact clad-length tie between two
+    classes of different bore would resolve on walk order (ADR-0006). The pair
+    the caller measures is sorted either way, so folding costs it nothing.
+    """
+    solid = StepSolid(
+        name="J1", shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    )
+    # The part's axis is +/-X; the lesser of the two signed spellings is -X.
+    assert wall_axis(solid, _UP) == (-1.0, 0.0, 0.0)

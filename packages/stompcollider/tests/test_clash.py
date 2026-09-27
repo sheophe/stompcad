@@ -1639,16 +1639,21 @@ def test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported() -> None:
 
 
 def test_a_part_the_wall_filter_did_not_admit_still_clashes() -> None:
-    """The exclusion is per component, never per board."""
-    data = _staged_dock_data(wall=("J1",), clashing=("J1", "RV1"))
-    found = Clashes(_case_solids(), _board_solids()).apply(data)
-    reported = {
-        clash.part
-        for placements in found.placements.values()
-        for placement in placements
-        for clash in placement.clashes
-    }
-    assert "RV1" in reported
+    """The exclusion is per component, never per board.
+
+    Stated on the material rather than on ``Clash.part``: what survives the
+    filter is intersected once per case solid, exactly as an unexcused board's
+    is, so the finding carries the volume of what is still in the way and not
+    the name of the solid that put it there. Excusing a second designator
+    takes its share out of that volume; excusing all three leaves no finding.
+    """
+    one = _wall_clashes((_wall_component("J1"),))
+    two = _wall_clashes((_wall_component("J1"), _wall_component("RV1")))
+    assert len(one) == 1
+    assert len(two) == 1
+    assert two[0].common_volume_nm3 < one[0].common_volume_nm3
+    every = tuple(_wall_component(part) for part in ("J1", "RV1", "RV2"))
+    assert _wall_clashes(every) == []
 
 
 def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
@@ -1667,8 +1672,14 @@ def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
     )
 
 
-def test_a_board_with_a_wall_admitted_part_is_checked_solid_by_solid() -> None:
-    """So ``part`` is never None for it, which is what makes the exclusion possible."""
+def test_a_board_with_a_wall_admitted_part_is_walked_per_solid_only_to_filter() -> None:
+    """``part`` stays ``None``, because the accounting must not change shape.
+
+    The per-body walk is what tells an excused designator from the rest, and
+    it is all it is for: naming each survivor in its own finding would let a
+    placement carry more clashes than the same seating carries with no wall
+    expression, and ``rank_key`` reads that count before it reads volume.
+    """
     data = _staged_dock_data(wall=("J1",), clashing=("J1", "RV1"))
     found = Clashes(_case_solids(), _board_solids()).apply(data)
     parts = [
@@ -1677,7 +1688,7 @@ def test_a_board_with_a_wall_admitted_part_is_checked_solid_by_solid() -> None:
         for clash in placement.clashes
         if clash.kind in ("case", "closure")
     ]
-    assert parts and all(part is not None for part in parts)
+    assert parts and all(part is None for part in parts)
 
 
 def test_a_board_with_no_wall_admitted_part_is_checked_exactly_as_before() -> None:
@@ -1745,3 +1756,49 @@ def test_a_wall_admitted_part_s_closure_clash_still_reports() -> None:
     kinds_with = {(clash.kind, clash.with_) for clash in found.placements[1][0].clashes}
     assert ("case", "BOX") not in kinds_with
     assert ("closure", "PLATE") in kinds_with
+
+
+def _three_solids_in_one_wall() -> dict[int, tuple[StepSolid, ...]]:
+    """``J1``, ``RV1`` and ``RV2`` side by side, all three reaching into ``WALL``.
+
+    Three and not two, so the count under test differs between one clash per
+    case solid and one per surviving body even after a designator is excluded.
+    """
+    return {
+        1: (
+            _solid("J1", _box((0, 0, 0), 4, 4, 4)),
+            _solid("RV1", _box((0, 6, 0), 4, 4, 4)),
+            _solid("RV2", _box((0, 12, 0), 4, 4, 4)),
+        )
+    }
+
+
+def _wall_clashes(components: tuple[Component, ...]) -> list[Clash]:
+    data = _dock((_board(1, components=components),), {1: (_placement(x_mm=19.0),)})
+    found = Clashes(_enclosure(), _three_solids_in_one_wall()).apply(data)
+    return [
+        clash for clash in found.placements[1][0].clashes if clash.with_ == "WALL"
+    ]
+
+
+def test_naming_one_part_leaves_the_others_counted_as_one_clash() -> None:
+    """Decision 12's promise: every other clash is ranked exactly as today.
+
+    ``rank_key`` compares how many clashes a placement carries before it
+    compares their volume, so a board reported one clash per body where it was
+    reported one per case solid ranks differently -- and a seating would turn
+    on a builder having named an unrelated part. The per-body walk survives
+    for the filtering; the intersection is taken once over what it kept.
+    """
+    plain = _wall_clashes(())
+    named = _wall_clashes((_wall_component("J1"),))
+    assert len(plain) == 1
+    assert len(named) == 1
+    assert named[0].part is None
+
+
+def test_the_named_part_s_own_volume_leaves_the_one_clash_that_remains() -> None:
+    """The control: one clash either way would also be true if nothing was excused."""
+    plain = _wall_clashes(())
+    named = _wall_clashes((_wall_component("J1"),))
+    assert named[0].common_volume_nm3 < plain[0].common_volume_nm3

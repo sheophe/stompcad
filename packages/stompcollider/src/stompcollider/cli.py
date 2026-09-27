@@ -455,21 +455,31 @@ def format_summary(data: DockData) -> list[str]:
 
 
 def format_wall_features(data: DockData) -> list[str]:
-    """Every feature this run measured, and every named part that yielded none.
+    """What this run measured, what it found nothing of, and what it excused.
 
     Absent, not empty, when nothing was asked: a builder who passed no wall
     expression asked no question, and a heading over nothing reads like a
-    failure. The widest radius the profile states, not a diameter: which
-    wall a ray meets, and so the span that sizes the hole, is not known
-    here. A named part with no in-plane feature is not a diagnostic -- a
-    glob naming a jack may also name a header -- but a silent report would
-    let a builder believe the expression found something.
+    failure. The widest radius the profile states, not a diameter: which wall
+    a ray meets, and so the span that sizes the hole, is not known here. A
+    named part with no in-plane feature is not a diagnostic -- a glob naming
+    a jack may also name a header -- but a silent report would let a builder
+    believe the expression found something.
     """
     unmeasured = sorted(
         (board.ordinal, component.designator)
         for board in data.boards
         for component in board.components
         if component.wall_admitted and not component.wall
+    )
+    # Keyed on ``wall`` itself, as ``Clashes._excluded`` is: a part the
+    # expression named and measured nothing of is still held to its
+    # interference, so listing it here would be a false account of a finding
+    # the report still carries.
+    excused = sorted(
+        (board.ordinal, component.designator)
+        for board in data.boards
+        for component in board.components
+        if component.wall
     )
     if not data.wall_features and not unmeasured:
         return []
@@ -490,6 +500,15 @@ def format_wall_features(data: DockData) -> list[str]:
                 f"{feature.direction[2]:+.3f})  "
                 f"widest radius {format_nm(Nanometre(widest))} mm{bore}",
             )
+        )
+    if excused:
+        # Interference is this tool's deliverable, so a clash decision 12
+        # dropped from the ranking cannot simply be absent: a composed run
+        # answers for it with the drill half's own refusals, and standalone
+        # this line is the whole account there is.
+        lines.append(
+            "  case clashes excused: "
+            + ", ".join(f"#{ordinal} {part}" for ordinal, part in excused)
         )
     if unmeasured:
         lines.append(f"  named, no feature ({len(unmeasured)})")

@@ -1449,6 +1449,37 @@ def test_a_run_where_every_named_part_measured_carries_no_such_line() -> None:
     assert not any("no in-plane feature" in line for line in lines)
 
 
+def test_the_excused_case_clashes_are_accounted_for_by_name() -> None:
+    """Interference is this tool's deliverable, so none of it may just vanish.
+
+    A composed run has the drill half's refusals as the replacement account for
+    a clash decision 12 excused; standalone there is no wall stage, so the only
+    place that fact can be stated is here. Named, because a builder reading a
+    clean report needs to know which parts were not held to it.
+    """
+    data = replace(
+        _dock_data_with_component(wall_admitted=True, wall=(_a_wall_candidate(),)),
+        wall_features=(_a_wall_feature(),),
+    )
+
+    lines = format_wall_features(data)
+
+    assert any("case clashes excused" in line and "J1" in line for line in lines)
+
+
+def test_a_named_part_that_measured_nothing_excuses_no_clash_and_is_not_listed() -> None:
+    """The control, and ``Clashes._excluded``'s own rule: the candidate excuses
+    a clash, never the flag. A part the expression named and found nothing of
+    is still held to its interference, so claiming it was excused would be a
+    false account of a finding that is right there in the report.
+    """
+    data = _dock_data_with_component(wall_admitted=True, wall=())
+
+    assert not any(
+        "case clashes excused" in line for line in format_wall_features(data)
+    )
+
+
 def test_the_unmeasured_lines_are_ordered_by_board_then_designator() -> None:
     """Sorted, because two boards built in either order must report alike (ADR-0006)."""
 

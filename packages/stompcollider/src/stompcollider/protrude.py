@@ -95,11 +95,12 @@ def clad_length(faces: Sequence[Cylinder], direction: Direction) -> float:
 def wall_axis(solid: StepSolid, carrier_normal: Direction) -> Direction | None:
     """The in-plane direction ``solid``'s material clads the most of, or ``None``.
 
-    Grouped on ``direction_bin`` so a bore's two half-faces agree on one
-    axis, and sign-folded because an in-plane axis has two and neither is
-    known to point at a wall -- the caller measures both. Ties break on the
-    bin itself, which is geometry, so two spellings of one part agree
-    (ADR-0006).
+    Grouped on ``direction_bin`` so a bore's two half-faces agree on one axis,
+    and sign-folded to the lesser of the two because neither is known to point
+    at a wall -- the caller measures both. Folded rather than handed back as
+    the walk found it: ``basis_about`` flips with the sign, so a tie-break read
+    in that basis would turn on the walk. Ties break on the bin itself, which
+    is geometry, so two spellings of one part agree (ADR-0006).
     """
     faces = in_plane(solid, carrier_normal)
     if not faces:
@@ -112,7 +113,8 @@ def wall_axis(solid: StepSolid, carrier_normal: Direction) -> Direction | None:
         bins.items(),
         key=lambda item: (clad_length(item[1], item[1][0].axis_direction), item[0]),
     )
-    return best[1][0].axis_direction
+    axis = best[1][0].axis_direction
+    return min(axis, negated(axis))
 
 
 def bore_of(faces: Sequence[Cylinder], direction: Direction) -> float | None:

@@ -176,8 +176,11 @@ A run whose expression admits a component with an in-plane feature adds a
 `WALL FEATURES` block to the terminal report, naming each part's ray and its
 widest radius. A component the expression names but that yields no such
 feature is listed there too, without a position; this is ordinary use, not a
-diagnostic, and does not change the exit code. The block is absent entirely
-when `--wall-reference` is not given.
+diagnostic, and does not change the exit code. The block also names the
+components whose clash with the case was excused, because a hole is about to be
+cut for them: that interference leaves the ranking and the findings, and this
+line is the only account of it a standalone run has. The block is absent
+entirely when `--wall-reference` is not given.
 
 ### Placement and clashes
 
