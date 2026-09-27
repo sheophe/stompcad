@@ -36,6 +36,7 @@ from stompmodel.model import (
     ReferenceOutline,
     WallFeature,
 )
+from stompmodel.protocols import Pipeline
 from stompmodel.units import Nanometre
 from tests.conftest import FakeCase
 
@@ -317,7 +318,7 @@ def _stage(model: _FakeWalls, *features: WallFeature) -> DrillWalls:
     return DrillWalls(model, features, DRILL_STANDARDS[DEFAULT_STANDARD])
 
 
-def _drill_pipeline() -> object:
+def _drill_pipeline() -> Pipeline[DrillData]:
     """The pipeline ``cli.build_pipeline`` composes with a case model supplied.
 
     Built the way ``test_cli`` and ``test_invariant`` build theirs -- parsed
@@ -400,11 +401,13 @@ def test_a_ray_grazing_a_wall_is_refused_rather_than_raising(along: float) -> No
     """A whisker off parallel meets the plane, unboundedly far along the wall.
 
     ``crossing`` answers *where* a ray meets a plane and owns no bound, so the
-    bound is this stage's. The two magnitudes are the two things that go wrong:
-    at 1e-9 the crossing is thirty kilometres from the datum, which no region
-    holds; below about 1e-22 the travelled distance is one ``nm_from_mm``
-    refuses outright, because it scales through ``Decimal`` and that context
-    cannot state 1e22 mm as whole nanometres.
+    bound is this stage's. The two magnitudes are the two things that go wrong
+    without it: at 1e-9 the crossing is thirty kilometres from the datum and a
+    hole would be cut there, and below about 1e-22 the travelled distance is
+    one ``nm_from_mm`` refuses outright -- it scales through ``Decimal``, whose
+    context cannot state 1e22 mm as whole nanometres, so the stage would raise
+    where a refusal is owed. The fake's region admits every point, which is
+    what makes both cases discriminate here rather than only the second.
     """
     model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
     graze = replace(
