@@ -16,7 +16,7 @@ from pathlib import Path
 from stompcollider.boards import group, substrates
 from stompcollider.canonicalise import canonicalise
 from stompcollider.cli import admit
-from stompcollider.designators import parse_filter
+from stompcollider.designators import NOTHING, parse_filter
 from stompcollider.model import Board, DockData, Placement, admitting_radius
 from stompcollider.raw import RawBoards
 from stompcollider.sources.step import _board
@@ -125,7 +125,9 @@ def dock(document: StepDocument) -> DockData:
         sorted({admitting_radius(hole.diameter_nm) for hole in holes()})
     )
     boards = tuple(
-        _board(substrate, parts, FIXTURE, probes)
+        # Stated, not inherited: the reader takes no default for this, so the
+        # tar build declares that nothing of it may meet a wall.
+        _board(substrate, parts, FIXTURE, probes, wall_reference=NOTHING)
         for substrate, parts in group(document, substrates(document))
     )
     data = canonicalise(RawBoards(boards=boards), case())

@@ -131,13 +131,13 @@ def admit_walls(
 ) -> DockData:
     """Mark every component the wall filter admits, and refuse the ones both claim.
 
-    Its own function rather than a second half of :func:`admit`, because
-    ``stompcad`` resolves no wall expression yet and a code raised inside a
-    function the driver calls would be recorded as reachable before anything
-    could reach it. Each expression is asked here rather than one being read
-    back off ``admitted``, so neither answer depends on :func:`admit` having
-    run. ``component-claimed-twice`` is a finding and not a usage failure: it
-    is decidable only once designators are known, and those come out of a file.
+    Its own function rather than a second half of :func:`admit`: ``stompcad``
+    resolves no wall expression yet, so a code raised inside a function the
+    driver calls would be recorded reachable before anything could reach it.
+    Each expression is asked here, so neither answer depends on :func:`admit`
+    having run. ``wall_admitted`` records what the expression *named*, never
+    that anything was found -- a glob reaching a jack reaches a header too --
+    so it promises no hole; what needs a feature reads ``wall`` itself.
     """
     designators = tuple(
         designator for board in data.boards for designator in board.designators
@@ -156,6 +156,9 @@ def admit_walls(
         )
         for board in data.boards
     ]
+    # A finding and not a usage failure: which designators exist is decidable
+    # only once a board file has been read, and a usage error would have to be
+    # raised before anything was opened.
     return replace(data, boards=tuple(boards)).with_diagnostics(
         *(
             Diagnostic.error(

@@ -730,3 +730,58 @@ def test_a_component_the_wall_filter_never_admitted_carries_no_candidate() -> No
                 ),
             ),
         )
+
+
+def _candidate(designator: str, direction: tuple[float, float, float]) -> WallCandidate:
+    """One candidate, varying only the two things ``Component`` pairs it on."""
+    return WallCandidate(
+        designator=designator,
+        tip_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        direction=direction,
+        profile=Profile(steps=((Nanometre(1_000_000), Nanometre(0), Nanometre(1_000_000)),)),
+    )
+
+
+def test_a_component_carries_no_other_parts_candidate() -> None:
+    """A candidate names the part a hole would be cut for, so the two must agree.
+
+    Not reachable through the reader, which takes both from one solid; the
+    guard is here for the same reason the others are, to keep a wrong state
+    unrepresentable rather than merely unproduced.
+    """
+    with pytest.raises(ValueError, match="candidate measured from"):
+        Component(
+            designator="J1",
+            protrusion=None,
+            wall_admitted=True,
+            wall=(_candidate("J2", (1.0, 0.0, 0.0)),),
+        )
+
+
+def test_a_component_states_each_direction_of_its_axis_once() -> None:
+    """One feature per sign, so a repeated direction is two answers to one question."""
+    with pytest.raises(ValueError, match="states the direction"):
+        Component(
+            designator="J1",
+            protrusion=None,
+            wall_admitted=True,
+            wall=(
+                _candidate("J1", (1.0, 0.0, 0.0)),
+                _candidate("J1", (1.0, 0.0, 0.0)),
+            ),
+        )
+
+
+def test_the_two_signs_of_one_axis_are_not_a_repeat() -> None:
+    """The control: what the reader really returns must still be admitted."""
+    component = Component(
+        designator="J1",
+        protrusion=None,
+        wall_admitted=True,
+        wall=(
+            _candidate("J1", (-1.0, 0.0, 0.0)),
+            _candidate("J1", (1.0, 0.0, 0.0)),
+        ),
+    )
+
+    assert len(component.wall) == 2

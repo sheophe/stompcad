@@ -140,7 +140,10 @@ class BoardSource:
                 continue
             for substrate, parts in group(document, found):
                 measured.append(
-                    _board(substrate, parts, path, probes, self.wall_reference)
+                    _board(
+                        substrate, parts, path, probes,
+                        wall_reference=self.wall_reference,
+                    )
                 )
                 geometry.append(BoardGeometry(document, (substrate, *parts)))
         next(slots, None)
@@ -259,7 +262,8 @@ def _board(
     parts: Sequence[StepSolid],
     path: Path,
     probes_nm: Sequence[Nanometre] = (),
-    wall_reference: Filter = NOTHING,
+    *,
+    wall_reference: Filter,
 ) -> RawBoard:
     """One substrate and its parts, measured about the way those parts protrude.
 
@@ -302,13 +306,16 @@ def _component(
     part: StepSolid,
     outward: Direction,
     probes_nm: Sequence[Nanometre],
-    wall_admitted: bool = False,
+    wall_admitted: bool,
 ) -> RawComponent:
     """``part``'s protrusion and its wall feature, or the same part with neither.
 
     ``wall_admitted`` gates the second read and not its result: probing a
     part the expression never named would run one exact boolean per stocked
-    radius for a part that can never be a wall feature.
+    radius for a part that can never be a wall feature. Required rather than
+    defaulting, here and on :func:`_board`: a gate that defaults to closed is
+    bypassed by forgetting it, and probing nothing is the one answer this
+    read has no way to report.
     """
     found = protrusion_of(part, outward, probes_nm)
     wall = wall_features_of(part, outward, probes_nm) if wall_admitted else ()

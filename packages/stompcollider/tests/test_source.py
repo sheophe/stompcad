@@ -11,6 +11,7 @@ measurement below is the kernel's own.
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 from pathlib import Path
@@ -621,3 +622,39 @@ def test_both_signs_of_one_part_s_axis_come_back(tmp_path, monkeypatch) -> None:
     features = [f for b in raw.boards for c in b.components for f in c.wall]
     assert len(features) == 4
     assert {f.direction for f in features} == {(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0)}
+
+
+def test_a_named_part_with_no_in_plane_axis_is_probed_and_yields_nothing(
+    tmp_path, monkeypatch
+) -> None:
+    """Naming a part with nothing sideways costs nothing and finds nothing.
+
+    ``RV1`` protrudes along the carrier normal, so it has no in-plane
+    cylinder for the second read to measure. An expression that names it is
+    ordinary use -- a glob reaching a jack reaches a header too -- so the
+    answer is an empty tuple rather than a refusal.
+    """
+    raw = _read_with(
+        tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+        wall_reference=parse_filter("RV*"),
+    )
+    components = [c for b in raw.boards for c in b.components]
+
+    assert [c.designator for c in components] == ["RV1"]
+    assert components[0].axis_xy_mm is not None
+    assert components[0].wall == ()
+
+
+def test_the_wall_gate_cannot_be_bypassed_by_omission() -> None:
+    """Both reads state their gate; neither defaults to probing nothing.
+
+    Structural, because omission is what it guards: a caller that forgot the
+    argument would get "measure nothing" with no error, which is the one
+    answer a wall filter has no way to report.
+    """
+    empty = inspect.Parameter.empty
+    signatures = (
+        inspect.signature(source_step._component).parameters["wall_admitted"],
+        inspect.signature(source_step._board).parameters["wall_reference"],
+    )
+    assert [parameter.default for parameter in signatures] == [empty, empty]

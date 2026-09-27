@@ -106,3 +106,20 @@ def test_one_finding_per_claimed_designator_and_in_a_fixed_order() -> None:
     assert [d.data for d in claimed] == [
         (("designator", "J1"),), (("designator", "J4"),), (("designator", "RV1"),)
     ]
+
+
+def test_a_named_part_with_no_candidate_is_admitted_and_carries_nothing() -> None:
+    """The state the reader and this function answer differently, pinned.
+
+    A glob that names a jack also names a header with no sideways feature,
+    so this is ordinary use and not an error. ``wall_admitted`` records what
+    the expression named; it is never a promise that anything was found, and
+    nothing downstream may read it as one.
+    """
+    data = _dock_data_with(("J1",))
+    found = admit_walls(data, parse_filter("J*"), NOTHING)
+    component = found.boards[0].components[0]
+
+    assert component.wall_admitted is True
+    assert component.wall == ()
+    assert found.diagnostics == ()

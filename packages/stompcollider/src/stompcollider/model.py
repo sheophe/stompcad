@@ -155,6 +155,18 @@ class Component:
                 f"{self.designator} carries a wall candidate the filter never admitted; "
                 f"a candidate exists because the filter asked for one"
             )
+        foreign = [c.designator for c in self.wall if c.designator != self.designator]
+        if foreign:
+            raise ValueError(
+                f"{self.designator} carries a candidate measured from {foreign[0]}; "
+                f"a hole is cut for the part the candidate names"
+            )
+        directions = [candidate.direction for candidate in self.wall]
+        if len(set(directions)) != len(directions):
+            raise ValueError(
+                f"{self.designator} states the direction {directions[0]} of its axis "
+                f"more than once; a feature is measured once per sign"
+            )
 
 
 #: The one legal value of ``Board.panel_face``: a sign along the board's own
