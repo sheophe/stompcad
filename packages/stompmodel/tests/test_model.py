@@ -7,7 +7,7 @@ import dataclasses
 import pytest
 
 from stompmodel.diagnostics import Diagnostic, Severity
-from stompmodel.errors import EmitterError
+from stompmodel.errors import EmitterError, StompError
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import (
     SURFACE_FACE,
@@ -1230,6 +1230,64 @@ def test_a_surface_with_no_material_behind_it_is_refused():
         )
 
 
+def test_a_wall_whose_region_is_not_centred_on_its_datum_is_refused():
+    """``extent`` carries a size and no offset, so an off-centre wall would be
+    drilled and drawn as if its datum were the middle of its region."""
+    with pytest.raises(ValueError, match="middle"):
+        DrilledSurface(
+            key="left",
+            frame=a_frame(),
+            thickness_nm=Nanometre(2_000_000),
+            bounds_nm=(
+                Nanometre(-10_000_000),
+                Nanometre(-5_000_000),
+                Nanometre(20_000_000),
+                Nanometre(5_000_000),
+            ),
+        )
+
+
+def test_a_wall_off_centre_in_the_other_axis_alone_is_refused():
+    """Both axes are checked, so a guard reading only X cannot pass this."""
+    with pytest.raises(ValueError, match="middle"):
+        DrilledSurface(
+            key="left",
+            frame=a_frame(),
+            thickness_nm=Nanometre(2_000_000),
+            bounds_nm=(
+                Nanometre(-15_000_000),
+                Nanometre(-5_000_000),
+                Nanometre(15_000_000),
+                Nanometre(10_000_000),
+            ),
+        )
+
+
+def test_a_wall_centred_on_its_datum_still_constructs():
+    """The control for the refusal above: the rule admits what it should."""
+    surface = a_surface("left", 30_000_000, 20_000_000)
+
+    assert surface.bounds_nm == (-15_000_000, -10_000_000, 15_000_000, 10_000_000)
+
+
+def test_the_drilled_plate_keeps_its_off_centre_region():
+    """The plate's boundary is a measurement off the supplied model's play
+    area, which no frame origin is obliged to sit in the middle of."""
+    plate = DrilledSurface(
+        key=SURFACE_FACE,
+        frame=a_frame(),
+        thickness_nm=Nanometre(2_000_000),
+        bounds_nm=(
+            Nanometre(-10_000_000),
+            Nanometre(-5_000_000),
+            Nanometre(20_000_000),
+            Nanometre(5_000_000),
+        ),
+    )
+
+    assert plate.bounds_nm[2] == 20_000_000
+
+
 def test_a_surface_whose_bounds_are_inverted_is_refused():
     with pytest.raises(ValueError, match="bounds"):
         DrilledSurface(
@@ -1309,5 +1367,10 @@ def test_a_projection_of_an_empty_registration_stays_empty():
 
 
 def test_projecting_onto_a_wall_the_document_never_registered_is_refused():
-    with pytest.raises(ValueError, match="left"):
+    """A ``StompError``, which is what both command lines catch: the codec and
+    the cutter already raise one for this invariant, and a bare ``ValueError``
+    would reach a builder as a traceback instead of a sentence."""
+    with pytest.raises(StompError, match="left") as failure:
         DrillData(holes=(_hole_on("left"),)).for_surface("left")
+
+    assert isinstance(failure.value, EmitterError)

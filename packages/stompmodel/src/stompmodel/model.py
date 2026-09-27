@@ -356,8 +356,9 @@ class DrilledSurface:
     so the plane the bit enters is ``origin + thickness_nm · w`` for every
     surface and no consumer branches on the key. ``bounds_nm`` is
     ``(x0, y0, x1, y1)`` in this surface's own canonical frame: the drillable
-    region's extent, which is not centred on the origin for the drilled plate
-    and is for a wall.
+    region's extent. A wall's must be centred on that origin, because
+    ``extent`` states a size and no offset; the drilled plate's boundary is a
+    measurement off the artwork and is exempt.
     """
 
     key: str
@@ -391,6 +392,14 @@ class DrilledSurface:
             raise ValueError(
                 f"DrilledSurface.bounds_nm must run low to high in both axes, "
                 f"not {self.bounds_nm}"
+            )
+        if self.key != SURFACE_FACE and (x0 + x1 != 0 or y0 + y1 != 0):
+            raise ValueError(
+                f"the {self.key} surface's datum is not in the middle of its "
+                f"drillable region {self.bounds_nm}: a wall's drill file and its "
+                f"sheet are framed by that region's size alone, so an off-centre "
+                f"datum would place every hole on it wrongly — state the region "
+                f"about its own centre"
             )
 
     @property
@@ -596,7 +605,7 @@ class DrillData:
         """
         surface = self.surface_of(key)
         if key != SURFACE_FACE and surface is None:
-            raise ValueError(
+            raise EmitterError(
                 f"surface {key!r} frames holes this document never registered; "
                 f"record it with with_surfaces before projecting onto it"
             )
