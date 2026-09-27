@@ -4,7 +4,7 @@
 [ADR-0009](0009-shared-model-package-and-dependency-order.md). The kernel is now
 `stompgeom`'s unconditional dependency and reaches `stompdrill` through it. A
 later amendment adds a second cutting pass, over the walls the same model lets
-a run discover.
+a run discover, and pairs a wall's inner surface without a companion step.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -224,11 +224,18 @@ no second pass cuts exactly what it cuts now.
 A **wall** is discovered, never declared. Keep the plate levels that are *lateral* — whose
 outward normal lies nearer the plane perpendicular to the drill axis than the axis itself —
 group those by the nearest signed kernel axis, and the extreme level along that axis is the
-wall's outer surface. Its inner surface and any companion step are then found as `find_faces`
-finds the panel's, over the population of levels parallel to that outer surface's own
-direction: a wall's inner surface arrives in a *different* direction bin, because the draft
-tilts the two oppositely, so `_facing` over the whole lateral population would pair a wall with
-the opposite wall's outer face instead.
+wall's outer surface. Its inner surface is then found by `_inner_level`, over the population of
+levels parallel to that outer surface's own direction: a wall's inner surface arrives in a
+*different* direction bin, because the draft tilts the two oppositely, so `_facing` over the
+whole lateral population would pair a wall with the opposite wall's outer face instead.
+
+**No companion step joins it**, which is where a wall parts company with the panel.
+`_nearest_companion_level` is a flat plate's device: its only filter is that a face points the
+same way, which a plate's whole-span population makes safe and a wall's narrower lateral one
+does not. Measured over the seven cached models, it attaches unrelated recessed geometry to a
+wall's inner surface on six of them. A wall's inner surface therefore carries only its own
+coplanar patches, which can tighten the containment check a later stage runs against it but
+never loosen it.
 
 Projection rather than draft, because draft is a property of casting and not of the definition
 of a wall: an undrafted enclosure still resolves under this rule. The 45° boundary is where
