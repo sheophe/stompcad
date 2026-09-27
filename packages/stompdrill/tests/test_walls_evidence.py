@@ -17,6 +17,8 @@ from stompdrill.cad.case import _plates, build_frame, find_faces, select_solid
 from stompdrill.cad.region import build_region
 from stompdrill.cad.walls import (
     Wall,
+    _normalised,
+    _projected_box,
     build_wall_frame,
     draft_degrees,
     drilled_surface,
@@ -26,9 +28,9 @@ from stompdrill.cad.walls import (
     surface_key,
     wall_bounds_nm,
 )
-from stompgeom.levels import direction_bin, levels
+from stompgeom.levels import Direction, direction_bin, levels
 from stompgeom.step import StepSolid, assembly_spans, read_step
-from stompmodel.frames import dot
+from stompmodel.frames import CoordinateFrame, cross, dot
 from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
@@ -324,7 +326,12 @@ def test_the_centroid_and_the_box_centre_differ_by_what_was_measured(part: str) 
 @pytest.mark.hammond
 @pytest.mark.parametrize("part", sorted(SPANS))
 def test_every_wall_states_a_surface_the_document_accepts(part: str) -> None:
-    """``DrilledSurface`` refuses an off-centre wall, so this is the centring check too."""
+    """Confirms construction succeeds.
+
+    ``wall_bounds_nm`` states bounds symmetrically (decision 2), so this can
+    never be the datum's own guard -- see
+    ``test_the_datum_is_the_outer_box_s_own_centre_not_a_looser_pin``.
+    """
     solid, axis = _box(part)
     drilled = find_faces(solid, axis)
     face_frame = build_frame(drilled, axis)
@@ -339,3 +346,43 @@ def test_every_wall_states_a_surface_the_document_accepts(part: str) -> None:
         keys.append(key)
         assert region is not None
     assert sorted(keys) == ["bottom", "left", "right", "top"]
+
+
+def _outer_box_centre_mm(wall: Wall, drilled_outward: Direction) -> tuple[float, float, float]:
+    """The outer region's own bounding-box centre, in model millimetres.
+
+    Redone from scratch -- the ``u``/``v``/``w`` construction and the box
+    projection, not ``build_wall_frame``'s own origin arithmetic -- so the
+    guard this feeds cannot pass by checking the frame against itself.
+    """
+    w = wall.outward
+    u = _normalised(cross(drilled_outward, w))
+    v = cross(w, u)
+    provisional = CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)), u=u, v=v, w=w
+    )
+    box = _projected_box(wall.outer_faces, provisional)
+    return provisional.to_model(
+        nm_from_mm((box[0] + box[3]) / 2.0),
+        nm_from_mm((box[1] + box[4]) / 2.0),
+        nm_from_mm((box[2] + box[5]) / 2.0),
+    )
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", sorted(SPANS))
+def test_the_datum_is_the_outer_box_s_own_centre_not_a_looser_pin(part: str) -> None:
+    """A hole at frame ``(0, 0)`` is where a marker finds it on the box.
+
+    ``wall_bounds_nm`` cannot see the datum move (a wall's bounds are always
+    stated symmetrically), so this checks the frame's own mapping against a
+    centre computed afresh, not against ``build_wall_frame``'s own output --
+    the guard concern 3 found missing.
+    """
+    solid, axis = _box(part)
+    drilled = find_faces(solid, axis)
+    for wall in find_walls(solid, axis):
+        frame = build_wall_frame(wall, drilled.outward)
+        mapped = frame.basis.to_model(Nanometre(0), Nanometre(0), wall.plate_nm)
+        expected = _outer_box_centre_mm(wall, drilled.outward)
+        assert mapped == pytest.approx(expected, abs=1e-5)
