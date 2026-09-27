@@ -567,3 +567,88 @@ def test_the_stage_records_the_standard_and_the_feature_count_it_ran_with() -> N
     assert run.name == "drill-walls"
     assert dict(run.parameters)["standard"] == "metric"
     assert dict(run.parameters)["features"] == 1
+
+
+def test_a_part_whose_span_holds_nothing_of_it_is_refused_and_not_drilled() -> None:
+    """A required radius of zero is no hole: every stocked size admits nothing.
+
+    The axis reaches the wall's own region, so nothing above refuses it, and
+    the smallest size in the standard satisfies a requirement of zero -- which
+    would cut the wall for a part standing twenty millimetres clear of it.
+    """
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    short = replace(
+        _seated(),
+        origin_nm=(Nanometre(8_000_000), Nanometre(0), Nanometre(0)),
+        profile=Profile(
+            steps=((Nanometre(5_000_000), Nanometre(0), Nanometre(10_000_000)),)
+        ),
+    )
+    found = _stage(model, short).apply(_data())
+    assert found.holes == ()
+    assert [d.code for d in found.diagnostics] == ["wall-feature-unreachable"]
+    assert found.diagnostics[0].severity is Severity.ERROR
+    assert "right" in found.diagnostics[0].message
+
+
+def test_a_bore_with_no_material_in_the_span_still_asks_for_its_hole() -> None:
+    """The recessed part decision 9's bore exists for: absent material, real hole.
+
+    The companion of the refusal above, so narrowing it to the both-absent
+    case cannot quietly take the bore's own hole with it.
+    """
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+    recessed = replace(
+        _seated(),
+        origin_nm=(Nanometre(27_000_000), Nanometre(0), Nanometre(0)),
+        bore_nm=Nanometre(3_175_000),
+    )
+    found = _stage(model, recessed).apply(_data())
+    assert found.diagnostics == ()
+    assert [hole.diameter_nm for hole in found.holes] == [6_400_000]
+
+
+def test_a_hole_obstructed_by_what_stands_behind_the_wall_is_refused() -> None:
+    """The third refusal the ``WallModel`` contract can give, which today's loader cannot.
+
+    Reachable through the protocol regardless, so the clause it renders is
+    exercised rather than left to a reader's word.
+    """
+    model = _FakeWalls(
+        walls=(_wall(key="right"),),
+        admitting=frozenset({"right"}),
+        rejecting={"right": Rejection.OBSTRUCTED},
+    )
+    found = _stage(model, _seated()).apply(_data())
+    assert [d.code for d in found.diagnostics] == ["hole-obstructed"]
+    assert found.holes == ()
+
+
+@pytest.mark.parametrize(
+    ("rejection", "clause"),
+    [
+        (Rejection.OFF_FACE, "lies outside the drillable part of the left wall"),
+        (Rejection.THROUGH_BOSS, "meets a boss or rib in the left wall"),
+        (Rejection.OBSTRUCTED, "is obstructed by what stands behind the left wall"),
+    ],
+)
+def test_a_wall_refusal_names_a_surface_and_never_the_drilled_plate(
+    rejection: Rejection, clause: str
+) -> None:
+    """The glossary keeps "face" and "surface" apart, so these clauses must too.
+
+    A wall hole told it left the drilled face sends a builder to the wrong
+    surface, and the plate's own clause reads as nonsense with a wall appended
+    to it. Each of the three is asserted whole, because the thing being checked
+    is the sentence.
+    """
+    model = _FakeWalls(
+        walls=(_wall(key="left"),),
+        admitting=frozenset({"left"}),
+        rejecting={"left": rejection},
+    )
+    found = _stage(model, _seated()).apply(_data())
+    assert found.diagnostics[0].message == (
+        f"⌀11.400 mm hole for board 1's J1 at (0.000, 0.000) {clause}"
+    )
+    assert "drilled face" not in found.diagnostics[0].message

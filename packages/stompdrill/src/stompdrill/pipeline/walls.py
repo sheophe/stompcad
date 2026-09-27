@@ -18,10 +18,10 @@ from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from ..cad import Rejection, WallModel
 from ..errors import StompdrillError
-from .clearance import REASON
 from .diameters import DrillStandard
 
 __all__ = [
+    "WALL_REASON",
     "Crossing",
     "DrillWalls",
     "crossing",
@@ -29,6 +29,18 @@ __all__ = [
     "required_radius_nm",
     "stocked_diameter_nm",
 ]
+
+#: What each refusal means on a wall, in the clause a finding reads. A sibling
+#: of ``clearance.REASON`` rather than a reuse of it: every clause there names
+#: the drilled plate, and ``docs/GLOSSARY.md`` keeps "face" and "surface"
+#: apart, so a builder told a wall hole left the drilled face would go and
+#: look at the wrong surface. Each clause here takes the surface that follows
+#: it, so one sentence serves all four walls.
+WALL_REASON: dict[Rejection, str] = {
+    Rejection.OFF_FACE: "lies outside the drillable part of",
+    Rejection.THROUGH_BOSS: "meets a boss or rib in",
+    Rejection.OBSTRUCTED: "is obstructed by what stands behind",
+}
 
 #: The furthest a ray may run to reach a wall and still be running *at* it.
 #: Two measured figures fix it and it sits between them: the widest catalogued
@@ -259,10 +271,30 @@ class DrillWalls:
             slot.label(f"board {board} {designator}")
             hit = self._hit(rays, face)
             if hit is None:
-                diagnostics.append(_unreachable(board, designator))
+                diagnostics.append(
+                    _unreachable(
+                        board,
+                        designator,
+                        "its axis reaches no drillable part of any wall of this "
+                        "enclosure",
+                    )
+                )
                 continue
             feature, found, surface = hit
             radius_nm = required_radius_nm(feature, found.span_nm)
+            if radius_nm == 0:
+                # Asked before the standard is: every stocked size admits a
+                # requirement of nothing, so the smallest one would be cut for
+                # a part that stands clear of the wall its axis crosses.
+                diagnostics.append(
+                    _unreachable(
+                        board,
+                        designator,
+                        f"no material or bore of it lies inside the {found.key} wall "
+                        f"its axis reaches",
+                    )
+                )
+                continue
             diameter_nm = stocked_diameter_nm(radius_nm, self.standard)
             if diameter_nm is None:
                 diagnostics.append(self._unstocked(board, designator, radius_nm))
@@ -355,18 +387,21 @@ def _by_component(
     return {key: tuple(grouped[key]) for key in sorted(grouped)}
 
 
-def _unreachable(board: int, designator: str) -> Diagnostic:
+def _unreachable(board: int, designator: str, because: str) -> Diagnostic:
     """A hole was asked for and none can be made, so this is an error.
 
     An error and not a warning: decision 12 has already stopped ``clash``
     from mentioning this component, so a warning would let the fact that
-    nothing was cut for it go entirely unseen.
+    nothing was cut for it go entirely unseen. One code for two causes --
+    an axis reaching no wall, and an axis reaching one with nothing of the
+    part inside it -- because the remedy is the same seating or the same
+    named part either way, and a finding is matched by its code rather than
+    its clause.
     """
     return Diagnostic.error(
         "wall-feature-unreachable",
-        f"board {board}'s {designator} was named as a wall reference, but its axis "
-        f"reaches no drillable part of any wall of this enclosure in the seating that "
-        f"was chosen, so no hole can be cut for it",
+        f"board {board}'s {designator} was named as a wall reference, but {because} "
+        f"in the seating that was chosen, so no hole can be cut for it",
         data=(("board", board), ("designator", designator)),
     )
 
@@ -383,7 +418,7 @@ def _refused(
         rejection.value,
         f"⌀{format_nm(diameter_nm)} mm hole for board {board}'s {designator} at "
         f"({format_nm(found.outer_nm[0])}, {format_nm(found.outer_nm[1])}) "
-        f"{REASON[rejection]} of the {found.key} wall",
+        f"{WALL_REASON[rejection]} the {found.key} wall",
         location_nm=found.outer_nm,
         data=(
             ("diameter_nm", diameter_nm),
