@@ -59,6 +59,11 @@ class RawComponent:
     axis_xy_mm: tuple[float, float] | None
     stack: tuple[RawCylinder, ...] = ()
     tip_mm: float | None = None
+    #: Its in-plane wall features, one per sign of the axis. Empty unless the
+    #: wall-reference filter admitted the part: measuring an envelope costs one
+    #: exact boolean per stocked size per sign, and an unnamed part will never
+    #: be drilled for, so the filter reaches this read rather than its result.
+    wall: tuple[RawWallFeature, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.designator:
