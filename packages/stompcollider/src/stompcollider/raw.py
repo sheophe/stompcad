@@ -10,9 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from stompmodel.diagnostics import Diagnostic, Severity, of_severity
+from stompmodel.frames import check_unit_direction
 from stompmodel.units import check_millimetres
 
-__all__ = ["RawCylinder", "RawComponent", "RawBoard", "RawBoards"]
+__all__ = ["RawCylinder", "RawComponent", "RawBoard", "RawBoards", "RawWallFeature"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,11 @@ class RawComponent:
     axis_xy_mm: tuple[float, float] | None
     stack: tuple[RawCylinder, ...] = ()
     tip_mm: float | None = None
+    #: Its in-plane wall features, one per sign of the axis. Empty unless the
+    #: wall-reference filter admitted the part: measuring an envelope costs one
+    #: exact boolean per stocked size per sign, and an unnamed part will never
+    #: be drilled for, so the filter reaches this read rather than its result.
+    wall: tuple[RawWallFeature, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.designator:
@@ -130,3 +136,44 @@ class RawBoards:
     def __post_init__(self) -> None:
         if not self.boards and not of_severity(self.diagnostics, Severity.ERROR):
             raise ValueError("a raw scan needs at least one board, or the error explaining none")
+
+
+@dataclass(frozen=True, slots=True)
+class RawWallFeature:
+    """One in-plane cylindrical feature, measured in its board file's own frame.
+
+    ``tip_mm`` is the far end of the feature along ``direction``, and every
+    depth in ``stack`` is measured back from it -- the same convention
+    ``RawComponent`` states for a protrusion, so one profile rule serves
+    both. The board file's own coordinates and not the carrier frame's,
+    because ``solids.placement_transform`` carries a point from exactly
+    these into the assembly's. ``bore_mm`` is the largest concave coaxial
+    radius, absent where the part has none.
+    """
+
+    designator: str
+    tip_mm: tuple[float, float, float]
+    direction: tuple[float, float, float]
+    stack: tuple[RawCylinder, ...]
+    bore_mm: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.designator:
+            raise ValueError(
+                "a raw wall feature needs the designator of the solid it was read from"
+            )
+        if not self.stack:
+            raise ValueError(
+                "a raw wall feature needs at least one cylinder: its axis came from one"
+            )
+        check_millimetres(
+            "RawWallFeature",
+            **{f"tip_mm[{i}]": v for i, v in enumerate(self.tip_mm)},
+        )
+        check_unit_direction("RawWallFeature.direction", self.direction)
+        if self.bore_mm is not None:
+            check_millimetres("RawWallFeature", bore_mm=self.bore_mm)
+            if self.bore_mm <= 0.0:
+                raise ValueError(
+                    f"a bore a plug passes through has a positive radius, not {self.bore_mm!r}"
+                )

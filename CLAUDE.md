@@ -9,14 +9,15 @@ for automated work in this repository.
 
 `stompdrill` reads Adobe Illustrator artwork and creates drill files, drawings,
 a JSON drill document and, when given an enclosure model, a drilled STEP model.
-It drills the surfaces a document registers and discovers none of its own.
+It drills the panel's own holes and, given a seating's measured features, the
+walls it discovers in the supplied model; it discovers no feature of its own.
 `DrillData` is its library integration contract. KiCad data and component
 semantics are outside this package's scope.
 
 `stompcollider` reads the drill document, a drilled case model and board models.
 It seats boards using the holes matched to their panel-reference components,
-then reports clashes. It does not drill the case or modify geometry to eliminate
-clashes.
+measures the wall features of components a builder named, then reports
+clashes. It does not drill the case or modify geometry to eliminate clashes.
 
 `stompcad` is the orchestrator over both. It composes them as libraries into
 one run: nine named steps, one position, one status, and artefacts that match
@@ -103,6 +104,13 @@ Keep these `stompcollider` behaviours when changing the CLI:
 
 - `--panel-reference` is required and has no default. It identifies components
   chosen for the particular pedal.
+- `--wall-reference` takes the same expression grammar as `--panel-reference` and defaults to
+  empty. A hole in an enclosure wall is irreversible and the panel says nothing about it, so
+  nothing is cut into a wall unless a builder named the part. Unlike `--panel-reference`, this
+  filter reaches the reader rather than withholding its result: measuring a feature's envelope
+  costs one exact boolean per stocked size per sign of its axis, and an unnamed part will never
+  be drilled for. A designator both filters admit is `component-claimed-twice`, a finding and
+  not a usage error, because it is decidable only once designators are known.
 - `--match-tolerance` defaults to half the recorded drill grid pitch. A supplied
   value overrides it. If the document has no usable pitch, report a usage error
   naming the flag. Do not invent a pitch or make the flag universally required.
@@ -175,6 +183,12 @@ depends only on the `Stage` protocol.
   registers none. Numbering is surface-major; a tool's block is contiguous
   within a surface, never across two, because changing surface is a setup change
   (ADR-0006, amendment 7).
+- A wall is discovered, not declared: lateral plate levels grouped by the signed kernel axis
+  they lean on, and each group's extreme level is a wall's outer surface (ADR-0007). A wall hole
+  is cut along its component's own axis, not normal to the wall, and its diameter admits the
+  material inside that wall's own span — a modelled nut outside the wall does not widen it.
+- A wall's frame has its `u`/`v` datum at the centre of the outer region's bounding box and
+  depth zero on the inner plane, and its `bounds_nm` state that region about that datum.
 - Raw lengths are finite float millimetres. Canonical lengths are integer
   nanometres, selected by exact decimal scaling before representation rounding.
 - Use `Millimetre` for measurements, `Nanometre` for canonical lengths and

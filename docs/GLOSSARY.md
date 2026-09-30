@@ -84,6 +84,12 @@ one block in the drill sequence.
 
 ## Enclosure
 
+**Bore**:
+A wall feature's floor on the radius a hole must admit — the largest coaxial
+concave cylinder on the feature's own axis — because a plug enters it however
+little material surrounds it there
+([wall-drilling spec](specs/stompcad-wall-drilling.md)).
+
 **Boss**:
 A thickened corner column that carries a screw. The enclosure walls away from
 these corners are thinner. A standoff is a separate physical part.
@@ -97,6 +103,12 @@ tools do not synthesise an enclosure from catalogue dimensions.
 The record of the case model used to decide a drill document's holes. It combines
 the resolved part, drilled face, model filename and face frame in one value,
 `CaseRegistration` in `stompmodel`.
+
+**Clad length**:
+How much of a candidate axis a component's material actually covers, rather
+than the raw extent between its outermost points, and the measure that selects
+a wall feature's own axis
+([wall-drilling spec](specs/stompcad-wall-drilling.md)).
 
 **Drilled face**:
 The face of the enclosure through which the holes are cut. A caller that knows
@@ -119,12 +131,31 @@ and do not classify it as an obstruction.
 The flat, drillable region of the drilled face, inside the draft-angle taper
 and clear of the corner bosses.
 
+**Span**:
+The depth interval, along a wall feature's axis, from where it crosses a
+wall's inner surface to where it leaves the outer one; a wall hole's diameter
+counts only the material within this interval
+([wall-drilling spec](specs/stompcad-wall-drilling.md)).
+
 **Surface**:
 One plane of an enclosure that holes are cut in, named from the viewer at the
 pedal's face: `face`, `back`, `left`, `right`, `top`, `bottom`. `face` is the
 drilled plate whichever solid it is. A **face** in the `CaseFace` sense is
 which *solid* is drilled, `box` or `lid`; the two words are not
 interchangeable.
+
+**Wall**:
+One of an enclosure's lateral plate levels, discovered — never declared — by
+grouping those levels on the nearest signed kernel axis and taking each
+group's extreme level as that wall's outer surface
+([ADR-0007](adr/0007-case-model-and-clearance.md)).
+
+**Wall feature**:
+One seated component's cylindrical feature, expressed as a ray with a profile
+and an optional bore in the case's face frame — `WallFeature` in
+`stompmodel` — which the drill side resolves against the walls it discovered
+to size and cut a hole
+([wall-drilling spec](specs/stompcad-wall-drilling.md)).
 
 ## Boards and docking
 

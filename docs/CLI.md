@@ -119,6 +119,7 @@ with one or more board STEP files. Each file may contain several boards.
 | --- | --- | --- |
 | `--case-model PATH` | Drilled enclosure STEP model | Required |
 | `--panel-reference EXPR` | Designators of components that mount through the panel | Required |
+| `--wall-reference EXPR` | Designators of components that may meet a wall, in the grammar below | Nothing may meet a wall |
 | `--match-tolerance MM` | Tolerance for matching components to holes | Half the grid pitch recorded in the drill document |
 | `--seat-pitch-max MM` | Coarse insertion-search step | `2.0` mm |
 | `--seat-pitch-min MM` | Fine insertion-search step | `0.05` mm |
@@ -154,6 +155,34 @@ nothing selected:
 
 A later term can add a designator back. Empty terms, malformed or descending
 ranges, and ranges larger than 10,000 values are usage errors.
+
+### Select components that may meet a wall
+
+`--wall-reference` reads the same grammar as `--panel-reference` above, and has
+no default. A hole in an enclosure wall is irreversible and the panel drawing
+says nothing about one, so nothing is cut into a wall unless you name the part.
+A malformed expression is a usage error, reported before any input is opened.
+
+```bash
+--wall-reference 'J*,!J3'
+```
+
+A designator both expressions name raises `component-claimed-twice`, an error:
+which hole the part is for cannot be told from two expressions that both name
+it. It is a finding rather than a usage error because it is decidable only once
+a board file has been read and its designators are known.
+
+A run whose expression admits a component with an in-plane feature adds a
+`WALL FEATURES` block to the terminal report, naming each part's ray and its
+widest radius. A component the expression names but that yields no such
+feature is listed there too, without a position; this is ordinary use, not a
+diagnostic, and does not change the exit code. The block also names the
+components excused from case clashes, because a hole is about to be cut for
+them: any interference they have with the case leaves the ranking and the
+findings, and this line is the only account of that a standalone run has. A
+named component that stands clear of the wall it points at is listed there
+too — it is exempt whether or not it had anything to be exempt from. The block is absent
+entirely when `--wall-reference` is not given.
 
 ### Placement and clashes
 

@@ -16,17 +16,29 @@ from types import MappingProxyType
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.diagnostics import of_severity as _of_severity
 from stompmodel.diagnostics import worst_severity as _worst_severity
-from stompmodel.frames import CoordinateFrame
-from stompmodel.model import CaseRegistration, Hole, StageRun
+from stompmodel.frames import CoordinateFrame, check_unit_direction
+from stompmodel.model import (
+    CaseRegistration,
+    Hole,
+    Profile,
+    StageRun,
+    WallFeature,
+    admitting_radius,
+)
 from stompmodel.units import Nanometre, check_nanometres
 
 __all__ = [
     "BOARD_KIND",
     "CASE_KIND",
     "CLOSURE_KIND",
+    # Re-exported from ``stompmodel``, which owns them: ``stompdrill`` reads a
+    # profile too, and a value two tools read is the shared package's
+    # (ADR-0009). Kept in this list so every existing importer is unaffected.
     "admitting_radius",
     "Profile",
+    "WallFeature",
     "Protrusion",
+    "WallCandidate",
     "Component",
     "Board",
     "Correspondence",
@@ -43,78 +55,6 @@ __all__ = [
 CASE_KIND: str = "case"
 CLOSURE_KIND: str = "closure"
 BOARD_KIND: str = "board"
-
-
-def admitting_radius(diameter_nm: Nanometre) -> Nanometre:
-    """The radius a hole of ``diameter_nm`` admits.
-
-    Stated once because two callers need the same number: the reader probes
-    a solid at it and ``Match`` queries a profile with it, and two spellings
-    of one rule would let a part be measured against one radius and judged
-    against another. The hole's own radius exactly -- how much wider than a
-    part its hole must be is not a number this tool is told any more, and
-    what really arrests a board is the enclosure it is searched against.
-    """
-    check_nanometres("admitting_radius", diameter_nm=diameter_nm)
-    if diameter_nm <= 0:
-        raise ValueError(f"a hole has a positive diameter, not {diameter_nm}")
-    return Nanometre(diameter_nm // 2)
-
-
-@dataclass(frozen=True, slots=True)
-class Profile:
-    """A component's radius-versus-depth stack: how wide it is, and where.
-
-    Each step is ``(radius_nm, depth_from_tip_min_nm, depth_from_tip_max_nm)``
-    and states material *at least* that wide over those depths -- steps
-    overlap freely, and the widest covering one is what a hole must admit
-    there. A profile with no admissible cylinder has no representable
-    profile at all -- see ``stompcollider-technical.md``'s "Protrusions".
-    """
-
-    steps: tuple[tuple[Nanometre, Nanometre, Nanometre], ...]
-
-    def __post_init__(self) -> None:
-        if not self.steps:
-            raise ValueError("a profile needs at least one step")
-        for index, (radius_nm, low_nm, high_nm) in enumerate(self.steps):
-            check_nanometres(
-                f"Profile.steps[{index}]",
-                radius_nm=radius_nm,
-                low_nm=low_nm,
-                high_nm=high_nm,
-            )
-
-    def radius_at(self, depth_nm: Nanometre) -> Nanometre:
-        """The greatest radius of any step covering ``depth_nm``.
-
-        Greatest rather than last: a stack's steps may overlap in depth, and
-        the widest feature at a depth is what a hole must admit there.
-        """
-        covering = [
-            radius for radius, low, high in self.steps if low <= depth_nm <= high
-        ]
-        return Nanometre(max(covering)) if covering else Nanometre(0)
-
-    def insertion_through(self, radius_nm: Nanometre) -> Nanometre | None:
-        """The least depth at which this profile exceeds ``radius_nm``.
-
-        ``None`` when it never does: the part passes fully. Evaluated on the
-        step boundaries alone, because the profile is piecewise constant.
-        """
-        beyond = sorted(low for radius, low, _high in self.steps if radius > radius_nm)
-        return Nanometre(beyond[0]) if beyond else None
-
-    def meets(self, radius_nm: Nanometre) -> bool:
-        """Whether some step states material at exactly ``radius_nm``.
-
-        The interference fit the report names ``zero-clearance``: a bush
-        measuring 12.000 mm into a 12.000 mm hole passes, because
-        :meth:`insertion_through` is strict, and passes with nothing to
-        spare. Exact equality of whole nanometres, never a tolerance --
-        anything the canonical representation cannot state is not a fact.
-        """
-        return any(radius == radius_nm for radius, _low, _high in self.steps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +91,36 @@ class Protrusion:
 
 
 @dataclass(frozen=True, slots=True)
+class WallCandidate:
+    """One in-plane feature of a component, in its board file's own coordinates.
+
+    Not yet a ``WallFeature``: that one is a ray in the case's face frame, and
+    reaching it needs the placement nobody has chosen when a board is read.
+    ``tip_nm`` is the feature's far end along ``direction``, and every depth in
+    ``profile`` is measured back from it. ``bore_nm`` is a floor on the radius
+    a hole must admit, not a step of the profile -- a plug enters the bore
+    however little material surrounds it there.
+    """
+
+    designator: str
+    tip_nm: tuple[Nanometre, Nanometre, Nanometre]
+    direction: tuple[float, float, float]
+    profile: Profile
+    bore_nm: Nanometre | None = None
+
+    def __post_init__(self) -> None:
+        if not self.designator:
+            raise ValueError("a wall candidate needs the designator of the part it came from")
+        lengths = {f"tip_nm[{i}]": v for i, v in enumerate(self.tip_nm)}
+        if self.bore_nm is not None:
+            lengths["bore_nm"] = self.bore_nm
+        check_nanometres("WallCandidate", **lengths)
+        check_unit_direction("WallCandidate.direction", self.direction)
+        if self.bore_nm is not None and self.bore_nm <= 0:
+            raise ValueError(f"a bore has a positive radius, not {self.bore_nm}")
+
+
+@dataclass(frozen=True, slots=True)
 class Component:
     """One named solid: its designator, its protrusion, and whether it counts.
 
@@ -165,6 +135,15 @@ class Component:
     designator: str
     protrusion: Protrusion | None
     admitted: bool = True
+    #: Whether the *wall*-reference filter kept this part. Separate from
+    #: ``admitted`` and defaulting the other way: a panel reference is what
+    #: most parts are, and a wall reference is what none is until a builder
+    #: names it (decision 11).
+    wall_admitted: bool = False
+    #: Its in-plane feature, once per sign of the axis, or none. Empty for
+    #: every part the wall filter did not admit, and for one it admitted that
+    #: has no in-plane cylinder.
+    wall: tuple[WallCandidate, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.designator:
@@ -173,6 +152,28 @@ class Component:
             raise TypeError(
                 f"Component.admitted states whether the panel-reference filter "
                 f"kept this part, not {self.admitted!r}"
+            )
+        if type(self.wall_admitted) is not bool:
+            raise TypeError(
+                f"Component.wall_admitted states whether the wall-reference filter "
+                f"kept this part, not {self.wall_admitted!r}"
+            )
+        if self.wall and not self.wall_admitted:
+            raise ValueError(
+                f"{self.designator} carries a wall candidate the filter never admitted; "
+                f"a candidate exists because the filter asked for one"
+            )
+        foreign = [c.designator for c in self.wall if c.designator != self.designator]
+        if foreign:
+            raise ValueError(
+                f"{self.designator} carries a candidate measured from {foreign[0]}; "
+                f"a hole is cut for the part the candidate names"
+            )
+        directions = [candidate.direction for candidate in self.wall]
+        if len(set(directions)) != len(directions):
+            raise ValueError(
+                f"{self.designator} states the direction {directions[0]} of its axis "
+                f"more than once; a feature is measured once per sign"
             )
 
 
@@ -281,8 +282,9 @@ class Clash:
     is its least extent and ``axis`` that axis. ``bbox_volume_nm3`` is the box's
     own volume and ``common_volume_nm3`` the region's -- the box answers
     how far to move, the region how much is in the way. ``part`` names this
-    board's own solid where two solids met, ``None`` where the whole board
-    was checked at once. See "Clashes" in the spec.
+    board's own solid where two solids met, ``None`` where several of them
+    were checked at once -- the whole board, or every one of its solids a
+    wall is not about to be drilled for. See "Clashes" in the spec.
     """
 
     with_: str
@@ -385,6 +387,11 @@ class DockData:
     unmatched_holes: tuple[int, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     processing: tuple[StageRun, ...] = ()
+    #: Every admitted component's feature as a ray in the case's face frame,
+    #: filled by ``Clashes`` once the ranking has settled. Empty for a run
+    #: with no wall expression, which is what keeps that run's outputs
+    #: byte-identical (decision 18).
+    wall_features: tuple[WallFeature, ...] = ()
 
     def __post_init__(self) -> None:
         # A copy, not a wrapped alias: a caller's dict mutated after

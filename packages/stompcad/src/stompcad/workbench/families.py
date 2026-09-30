@@ -110,10 +110,11 @@ FAMILIES: dict[Family, Prose] = {
             "artwork can be the cause instead, and where it can, the line says so."
         ),
         codes=frozenset({
-            "ambiguous-pairing", "case-model-unavailable", "grid-ambiguous",
-            "grid-too-fine", "nesting-truncated", "reference-size-mismatch",
-            "under-constrained-board", "unmatched-enclosure", "wrong-case-model",
-            "wrong-enclosure",
+            "ambiguous-pairing", "case-model-unavailable",
+            "component-claimed-twice", "grid-ambiguous", "grid-too-fine",
+            "nesting-truncated", "reference-size-mismatch",
+            "under-constrained-board", "unmatched-enclosure",
+            "wall-feature-unreachable", "wrong-case-model", "wrong-enclosure",
         }),
     ),
     Family.CANDIDATES: Prose(

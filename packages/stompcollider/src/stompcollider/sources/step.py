@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stompgeom.levels import Direction
@@ -29,9 +29,10 @@ from stompmodel.progress import NO_PROGRESS, Scope
 from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from ..boards import basis_about, carrier_frame, group, negated, substrates
+from ..designators import NOTHING, Filter
 from ..errors import NoSubstrateError, StompcolliderError
 from ..model import admitting_radius
-from ..protrude import admissible, protrusion_of, reach_along
+from ..protrude import admissible, protrusion_of, reach_along, wall_features_of
 from ..raw import RawBoard, RawBoards, RawComponent
 
 __all__ = ["BoardGeometry", "BoardScan", "BoardSource"]
@@ -79,6 +80,11 @@ class BoardSource:
     drill: Path
     boards: Sequence[Path]
     case_model: Path
+    #: Which designators may meet a wall. It gates the *probing* and not its
+    #: result: measuring an envelope costs one exact boolean per stocked size
+    #: per sign of the axis, and a part no expression named can never be
+    #: drilled for, so the filter reaches this read rather than what it returns.
+    wall_reference: Filter = NOTHING
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "boards", tuple(self.boards))
@@ -133,7 +139,12 @@ class BoardSource:
                 diagnostics.append(_no_substrate(path, failure))
                 continue
             for substrate, parts in group(document, found):
-                measured.append(_board(substrate, parts, path, probes))
+                measured.append(
+                    _board(
+                        substrate, parts, path, probes,
+                        wall_reference=self.wall_reference,
+                    )
+                )
                 geometry.append(BoardGeometry(document, (substrate, *parts)))
         next(slots, None)
 
@@ -251,6 +262,8 @@ def _board(
     parts: Sequence[StepSolid],
     path: Path,
     probes_nm: Sequence[Nanometre] = (),
+    *,
+    wall_reference: Filter,
 ) -> RawBoard:
     """One substrate and its parts, measured about the way those parts protrude.
 
@@ -271,6 +284,10 @@ def _board(
         raise NoSubstrateError("a grouped solid measures no slab")
     outward = _outward(frame.w, substrate, parts)
     u, v = basis_about(outward)
+    # Once per board rather than once per part: the expression is answered
+    # against the names the board holds, which is the set the filter's
+    # left-to-right fold is defined over.
+    admitted = wall_reference.admit(part.name for part in parts)
     box = substrate.box_mm
     return RawBoard(
         corner_a_mm=(box[0], box[1], box[2]),
@@ -279,16 +296,32 @@ def _board(
         carrier_u=u,
         carrier_v=v,
         carrier_w=outward,
-        components=tuple(_component(part, outward, probes_nm) for part in parts),
+        components=tuple(
+            _component(part, outward, probes_nm, part.name in admitted) for part in parts
+        ),
     )
 
 
 def _component(
-    part: StepSolid, outward: Direction, probes_nm: Sequence[Nanometre]
+    part: StepSolid,
+    outward: Direction,
+    probes_nm: Sequence[Nanometre],
+    wall_admitted: bool,
 ) -> RawComponent:
-    """``part``'s protrusion, or the same part stated as having no axis."""
+    """``part``'s protrusion and its wall feature, or the same part with neither.
+
+    ``wall_admitted`` gates the second read and not its result: probing a
+    part the expression never named would run one exact boolean per stocked
+    radius for a part that can never be a wall feature. Required rather than
+    defaulting, here and on :func:`_board`: a gate that defaults to closed is
+    bypassed by forgetting it, and probing nothing is the one answer this
+    read has no way to report.
+    """
     found = protrusion_of(part, outward, probes_nm)
-    return found if found is not None else RawComponent(designator=part.name, axis_xy_mm=None)
+    wall = wall_features_of(part, outward, probes_nm) if wall_admitted else ()
+    if found is None:
+        return RawComponent(designator=part.name, axis_xy_mm=None, wall=wall)
+    return replace(found, wall=wall)
 
 
 def _outward(normal: Direction, substrate: StepSolid, parts: Sequence[StepSolid]) -> Direction:

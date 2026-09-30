@@ -22,10 +22,10 @@ from typing import Any, ClassVar
 from stompgeom.shapes import common, compound, interferes, placed, volume_mm3
 from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic
-from stompmodel.frames import CoordinateFrame
-from stompmodel.model import StageRun
+from stompmodel.frames import CoordinateFrame, dot
+from stompmodel.model import StageRun, WallFeature
 from stompmodel.progress import NO_PROGRESS, Scope
-from stompmodel.units import Nanometre, format_nm, nm_from_mm
+from stompmodel.units import Nanometre, format_nm, mm_from_nm, nm_from_mm
 
 from .errors import StompcolliderError
 from .insert import CavitySplit, _drain
@@ -34,8 +34,10 @@ from .seat import rank_key, shortfall_nm
 from .solids import (
     MODEL_FRAME,
     Body,
+    board_designator,
     bodies,
     boxes_overlap,
+    placement_transform,
     solid_name,
 )
 
@@ -241,7 +243,57 @@ class Clashes:
         return replace(
             data,
             placements=seated,
+            wall_features=self._wall_features(seated, boards, basis),
             diagnostics=data.diagnostics + _findings(seated) + notes,
+        )
+
+    def _wall_features(
+        self,
+        placements: Mapping[int, tuple[Placement, ...]],
+        boards: Mapping[int, Board],
+        basis: CoordinateFrame,
+    ) -> tuple[WallFeature, ...]:
+        """Each admitted component's candidate, restated in the case's face frame.
+
+        Read from the ranking this stage has just settled, at rank 1: a
+        feature emitted against a seating the run then re-ranked would name a
+        position nothing chose. One ``RigidTransform`` per board carries both
+        the tip and the direction, so a point and the ray through it cannot
+        disagree about where the board ended up.
+        """
+        found = []
+        for ordinal in sorted(placements):
+            seating = placements[ordinal]
+            if not seating:
+                continue
+            chosen = min(seating, key=lambda placement: placement.rank)
+            board = boards[ordinal]
+            motion = placement_transform(board, chosen, basis)
+            for component in board.components:
+                for candidate in component.wall:
+                    tip = motion.apply_point(
+                        tuple(mm_from_nm(value) for value in candidate.tip_nm)  # type: ignore[arg-type]
+                    )
+                    ray = motion.apply_direction(candidate.direction)
+                    placed = basis.to_canonical(tip)
+                    found.append(
+                        WallFeature(
+                            designator=candidate.designator,
+                            board=ordinal,
+                            origin_nm=(
+                                nm_from_mm(placed[0]),
+                                nm_from_mm(placed[1]),
+                                nm_from_mm(placed[2]),
+                            ),
+                            direction=(
+                                dot(ray, basis.u), dot(ray, basis.v), dot(ray, basis.w)
+                            ),
+                            profile=candidate.profile,
+                            bore_nm=candidate.bore_nm,
+                        )
+                    )
+        return tuple(
+            sorted(found, key=lambda f: (f.board, f.designator, f.direction))
         )
 
     def _board_for(self, ordinal: int, boards: Mapping[int, Board]) -> Board:
@@ -272,33 +324,67 @@ class Clashes:
             self._placed[key] = cached
         return cached
 
+    def _excluded(self, board: Board) -> frozenset[str]:
+        """Designators whose interference is about to become a hole.
+
+        Keyed on ``wall`` itself, never on ``wall_admitted``: the flag only
+        records what a builder's expression named, and a named part with no
+        candidate found is not about to be drilled for -- excluding it on
+        the flag alone would drop a clash nothing downstream could ever
+        report again, for the one part still needing it.
+        """
+        return frozenset(
+            component.designator for component in board.components if component.wall
+        )
+
     def _against_case(
         self, board: Board, placement: Placement, basis: CoordinateFrame
     ) -> tuple[Clash, ...]:
         """Every case solid this placement meets. None is privileged or exempt.
 
-        Stated per case solid rather than per pair: a wall is one thing to
-        move the board away from, however many of its parts reach into it.
-        Only the parts whose boxes reach that solid are compounded for the
-        boolean -- rule 2's own filter, changing no answer, since a solid
-        whose box misses cannot contribute to the shared region. Each
-        finding notes whether it is against the cavity or what closes over
-        it, deciding nothing reported but everything about ranking a seating.
+        Only ``CASE_KIND`` may exclude a designator: a wall is lateral and a
+        closure is axial by definition, so no hole is ever cut in what closes
+        over the cavity, and dropping that clash would excuse interference no
+        hole explains. Across several case solids the exclusion stays per
+        designator rather than per solid -- which wall a ray crosses is the
+        drill half's question -- and it takes bodies out of one intersection
+        rather than splitting that intersection per body.
         """
+        excluded = self._excluded(board)
         inside, beyond = self._split.of(basis, board.extent_nm)
         bodies = self._bodies(board, placement, basis)
         found = []
+        # Per case solid rather than per pair: a wall is one thing to move
+        # a board away from, however many of its parts reach into it, and
+        # only the parts whose boxes reach that solid are ever compounded
+        # or walked -- rule 2's own filter, changing no answer.
         for solid, kind in [(one, CASE_KIND) for one in inside] + [
             (one, CLOSURE_KIND) for one in beyond
         ]:
             box = solid.box_mm
-            meeting = [body.shape for body in bodies if boxes_overlap(body.box, box)]
+            meeting = [body for body in bodies if boxes_overlap(body.box, box)]
             if not meeting:
                 continue
-            region = common(compound(meeting), solid.shape)
+            name = solid_name(solid, box, "case")
+            if excluded and kind == CASE_KIND:
+                # The walk is per body only to *filter*: what a hole will
+                # explain leaves the accounting, and the rest is intersected
+                # once, exactly as an unexcused board's is. Reporting a clash
+                # per surviving body instead would change how many clashes a
+                # placement carries, and ``rank_key`` compares that count
+                # before it compares volume -- so naming one part would move
+                # the seating of every other.
+                meeting = [
+                    body
+                    for body in meeting
+                    if board_designator(body.name, board.ordinal) not in excluded
+                ]
+                if not meeting:
+                    continue
+            region = common(compound([body.shape for body in meeting]), solid.shape)
             if region is None:
                 continue
-            clash = _clash_from(region, basis, solid_name(solid, box, "case"), kind)
+            clash = _clash_from(region, basis, name, kind)
             if clash is not None:
                 found.append(clash)
         return tuple(sorted(found, key=_clash_key))

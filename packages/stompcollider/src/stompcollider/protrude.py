@@ -12,19 +12,28 @@ is the one place they become canonical lengths. See ADR-0003 and ADR-0008.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from stompgeom.cylinders import Cylinder, cylindrical_faces
-from stompgeom.levels import Direction
-from stompgeom.radial import axial_extent, radial_reach
+from stompgeom.levels import Direction, direction_bin
+from stompgeom.radial import axial_extent, radial_bands, radial_reach
 from stompgeom.step import StepSolid
 from stompmodel.frames import dot
 from stompmodel.units import Nanometre, mm_from_nm
 
-from .boards import basis_about
-from .raw import RawComponent, RawCylinder
+from .boards import basis_about, negated
+from .raw import RawComponent, RawCylinder, RawWallFeature
 
-__all__ = ["admissible", "protrusion_of", "reach_along"]
+__all__ = [
+    "admissible",
+    "bore_of",
+    "clad_length",
+    "in_plane",
+    "protrusion_of",
+    "reach_along",
+    "wall_axis",
+    "wall_features_of",
+]
 
 
 def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, ...]:
@@ -34,15 +43,130 @@ def admissible(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, .
     so admitting one risks an axis that means nothing. Parallelism is
     sign-agnostic; only :func:`protrusion_of` reads the direction's sign.
     """
+    return _about(solid, lambda cylinder: cylinder.is_parallel_to(carrier_normal))
+
+
+def _about(
+    solid: StepSolid, keep: Callable[[Cylinder], bool]
+) -> tuple[Cylinder, ...]:
+    """``solid``'s cylindrical faces that ``keep`` admits.
+
+    One walk and one predicate, because :func:`admissible` and
+    :func:`in_plane` are the same filter in two modes -- through the panel and
+    along the board -- and writing the walk twice would let them drift apart.
+    """
     return tuple(
-        cylinder
-        for cylinder in cylindrical_faces(solid.shape)
-        if cylinder.is_parallel_to(carrier_normal)
+        cylinder for cylinder in cylindrical_faces(solid.shape) if keep(cylinder)
     )
 
 
+def in_plane(solid: StepSolid, carrier_normal: Direction) -> tuple[Cylinder, ...]:
+    """``solid``'s cylindrical faces whose axis lies in the carrier plane.
+
+    :func:`admissible` inverted: that one keeps what could pass *through* a
+    flat panel, this one what runs *along* the board, at a wall. Not its
+    complement -- a face oblique to both is neither, and neither question
+    admits one. Perpendicularity is the kernel's own, as parallelism is there.
+    """
+    return _about(solid, lambda cylinder: cylinder.is_normal_to(carrier_normal))
+
+
+def clad_length(faces: Sequence[Cylinder], direction: Direction) -> float:
+    """How much of ``direction`` these faces' own surfaces actually cover, in mm.
+
+    The union of their axial extents, not the span between the extremes and
+    not their sum: a gap between two features is not material, and one
+    surface an exporter split into patches is still that surface -- which
+    ``cylindrical_faces`` states is not a fact about the part. Both are why
+    this and not reach decides an axis.
+    """
+    spans = sorted(reach_along(face, direction) for face in faces)
+    total, covered_to = 0.0, None
+    for low, high in spans:
+        if covered_to is None or low > covered_to:
+            total += high - low
+            covered_to = high
+        elif high > covered_to:
+            total += high - covered_to
+            covered_to = high
+    return total
+
+
+def wall_axis(solid: StepSolid, carrier_normal: Direction) -> Direction | None:
+    """The in-plane direction ``solid``'s material clads the most of, or ``None``.
+
+    Grouped on ``direction_bin`` so a bore's two half-faces agree on one axis,
+    and sign-folded to the lesser of the two because neither is known to point
+    at a wall -- the caller measures both. Folded rather than handed back as
+    the walk found it: ``basis_about`` flips with the sign, so a tie-break read
+    in that basis would turn on the walk. Ties break on the bin itself, which
+    is geometry, so two spellings of one part agree (ADR-0006).
+    """
+    faces = in_plane(solid, carrier_normal)
+    if not faces:
+        return None
+    bins: dict[tuple[int, int, int], list[Cylinder]] = {}
+    for face in faces:
+        key = direction_bin(face.axis_direction)
+        bins.setdefault(max(key, (-key[0], -key[1], -key[2])), []).append(face)
+    best = max(
+        bins.items(),
+        key=lambda item: (clad_length(item[1], item[1][0].axis_direction), item[0]),
+    )
+    axis = best[1][0].axis_direction
+    return min(axis, negated(axis))
+
+
+def bore_of(faces: Sequence[Cylinder], direction: Direction) -> float | None:
+    """The largest concave radius in the deepest-clad class along ``direction``.
+
+    ``None`` when no face is parallel to ``direction`` or the winning class
+    is wholly convex. A hole is cut on one ray -- the feature's own axis --
+    so a bore on a different, merely parallel line belongs to a different
+    feature and cannot size this one's hole (decision 7's restriction).
+    """
+    parallel = [face for face in faces if face.is_parallel_to(direction)]
+    if not parallel:
+        return None
+    u, v = basis_about(direction)
+    best = max(
+        _coaxial_classes(parallel),
+        key=lambda cls: (
+            clad_length(cls, direction),
+            min(_projected(f, u) for f in cls),
+            min(_projected(f, v) for f in cls),
+        ),
+    )
+    concave = [face.radius_mm for face in best if face.concave]
+    return max(concave) if concave else None
+
+
+def _coaxial_classes(faces: Sequence[Cylinder]) -> tuple[tuple[Cylinder, ...], ...]:
+    """``faces``, all mutually parallel, split into their own coaxial lines.
+
+    First-fit against each class's own first member. Real coaxial faces
+    share one line at the kernel's own precision and a distinct line sits
+    far outside it, so which face a class happens to test first never moves
+    a face to a different class -- membership is a fact about the geometry,
+    not the walk that built ``faces`` (ADR-0006).
+    """
+    classes: list[list[Cylinder]] = []
+    for face in faces:
+        for members in classes:
+            if members[0].is_coaxial_with(face):
+                members.append(face)
+                break
+        else:
+            classes.append([face])
+    return tuple(tuple(members) for members in classes)
+
+
 def protrusion_of(
-    solid: StepSolid, carrier_normal: Direction, probes_nm: Sequence[Nanometre] = ()
+    solid: StepSolid,
+    carrier_normal: Direction,
+    probes_nm: Sequence[Nanometre] = (),
+    *,
+    bounded: bool = False,
 ) -> RawComponent | None:
     """``solid``'s measured protrusion, or ``None`` when it has no axis.
 
@@ -50,8 +174,9 @@ def protrusion_of(
     panel, and the admitted cylinder reaching furthest along it fixes the
     axis. ``probes_nm`` are the radii the panel's holes admit; the solid is
     cut against each, which is what states the width of a can or a body no
-    cylinder describes. A component yielding no admissible cylinder has no
-    axis and cannot pair.
+    cylinder describes, and ``bounded`` is which question those cuts answer
+    (see ``_cut``). A component yielding no admissible cylinder has no axis
+    and cannot pair.
     """
     admitted = admissible(solid, carrier_normal)
     if not admitted:
@@ -74,7 +199,7 @@ def protrusion_of(
             for cylinder in admitted
             if tipmost.is_coaxial_with(cylinder)
         )
-        + _cut(solid, tipmost, carrier_normal, tip_mm, probes_nm),
+        + _cut(solid, tipmost, carrier_normal, tip_mm, probes_nm, bounded),
     )
 
 
@@ -84,35 +209,37 @@ def _cut(
     outward: Direction,
     tip_mm: float,
     probes_nm: Sequence[Nanometre],
+    bounded: bool = False,
 ) -> tuple[RawCylinder, ...]:
-    """One band per probe radius the solid is wider than somewhere.
+    """A band per probe radius the solid is wider than somewhere.
 
-    *Strictly* wider than the probe is, in whole nanometres, at least one
-    nanometre wider, and ``probe_nm + 1`` is both the radius the cut is
-    measured at and the radius the band records -- one number, not two.
-    The radius a profile is asked about is a radius it was probed at:
-    ``model.admitting_radius`` states it once, for this module's caller and
-    for ``Match``. Each band runs to the part's far end, the deepest depth.
+    *Strictly* wider, in whole nanometres, and ``probe_nm + 1`` is both the
+    radius the cut is measured at and the radius the band records -- one
+    number, as ``model.admitting_radius`` states for this module's caller and
+    for ``Match``. ``bounded`` picks the question: a panel asks an insertion
+    depth, so a band runs to the part's far end because nothing behind the
+    first obstruction is reachable; a wall asks a span, where material outside
+    it is not in the hole, so a band covers the material that made it.
     """
     ends_mm = tip_mm - axial_extent(solid.shape, outward)[0]
-    bands = []
+    found: list[RawCylinder] = []
     for probe_nm in sorted(set(probes_nm)):
-        reach_mm = radial_reach(
-            solid.shape,
-            tipmost.axis_location_mm,
-            outward,
-            mm_from_nm(Nanometre(probe_nm + 1)),
-        )
-        if reach_mm is None:
-            continue
-        bands.append(
+        radius_mm = mm_from_nm(Nanometre(probe_nm + 1))
+        where = (solid.shape, tipmost.axis_location_mm, outward, radius_mm)
+        if bounded:
+            spans = [(tip_mm - high, tip_mm - low) for low, high in radial_bands(*where)]
+        else:
+            reach_mm = radial_reach(*where)
+            spans = [] if reach_mm is None else [(tip_mm - reach_mm, ends_mm)]
+        found.extend(
             RawCylinder(
-                radius_mm=mm_from_nm(Nanometre(probe_nm + 1)),
-                depth_from_tip_min_mm=tip_mm - reach_mm,
-                depth_from_tip_max_mm=ends_mm,
+                radius_mm=radius_mm,
+                depth_from_tip_min_mm=shallow,
+                depth_from_tip_max_mm=deep,
             )
+            for shallow, deep in spans
         )
-    return tuple(bands)
+    return tuple(found)
 
 
 def _measured(cylinder: Cylinder, outward: Direction, tip_mm: float) -> RawCylinder:
@@ -164,3 +291,47 @@ def _projected(cylinder: Cylinder, axis: Direction) -> float:
     stands for the whole line.
     """
     return dot(cylinder.axis_location_mm, axis)
+
+
+def wall_features_of(
+    solid: StepSolid,
+    carrier_normal: Direction,
+    probes_nm: Sequence[Nanometre] = (),
+) -> tuple[RawWallFeature, ...]:
+    """``solid``'s in-plane feature, measured along both signs of its axis.
+
+    Neither sign is known to point at a wall, so neither is chosen here:
+    resolving that is the drill side's, which alone knows where the walls
+    are. ``protrusion_of`` does the measuring -- which is what brings ``_cut``,
+    and with it the width of a shell no cylindrical face of its own describes
+    -- and it is asked for bounded bands, because a wall holds only what
+    crosses it. Ordered on the direction itself, so the pair's order is
+    geometry and not this loop's (ADR-0006).
+    """
+    axis = wall_axis(solid, carrier_normal)
+    if axis is None:
+        return ()
+    faces = in_plane(solid, carrier_normal)
+    bore_mm = bore_of(faces, axis)
+    found = []
+    for direction in sorted((axis, negated(axis))):
+        measured = protrusion_of(solid, direction, probes_nm, bounded=True)
+        if measured is None or measured.axis_xy_mm is None or measured.tip_mm is None:
+            continue
+        u, v = basis_about(direction)
+        tip = tuple(
+            u[i] * measured.axis_xy_mm[0]
+            + v[i] * measured.axis_xy_mm[1]
+            + direction[i] * measured.tip_mm
+            for i in range(3)
+        )
+        found.append(
+            RawWallFeature(
+                designator=solid.name,
+                tip_mm=(tip[0], tip[1], tip[2]),
+                direction=direction,
+                stack=measured.stack,
+                bore_mm=bore_mm,
+            )
+        )
+    return tuple(found)

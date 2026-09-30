@@ -16,7 +16,7 @@ from stompmodel.frames import CoordinateFrame
 from stompmodel.model import CaseRegistration
 from stompmodel.units import Nanometre, nm_from_mm
 
-from .model import Board, Component, DockData, Profile, Protrusion
+from .model import Board, Component, DockData, Profile, Protrusion, WallCandidate
 from .raw import RawBoard, RawBoards, RawComponent, RawCylinder
 
 __all__ = ["board_order", "canonicalise"]
@@ -101,6 +101,30 @@ def _canonical_steps(
     return tuple(sorted(scaled, key=lambda step: (step[1], step[2], step[0])))
 
 
+def _wall_candidates(raw: RawComponent) -> tuple[WallCandidate, ...]:
+    """Scale each measured wall feature; select nothing about any of them.
+
+    Ordered on the direction, as the reader states them: a pair's order must
+    be geometry and not a loop's (ADR-0006). ``wall_admitted`` is set by the
+    caller from the candidates' own presence, because the reader measured
+    them only for a part the filter admitted -- one fact, read once.
+    """
+    return tuple(
+        WallCandidate(
+            designator=feature.designator,
+            tip_nm=(
+                nm_from_mm(feature.tip_mm[0]),
+                nm_from_mm(feature.tip_mm[1]),
+                nm_from_mm(feature.tip_mm[2]),
+            ),
+            direction=feature.direction,
+            profile=Profile(steps=_canonical_steps(feature.stack)),
+            bore_nm=None if feature.bore_mm is None else nm_from_mm(feature.bore_mm),
+        )
+        for feature in sorted(raw.wall, key=lambda f: f.direction)
+    )
+
+
 def _canonicalise_component(raw: RawComponent) -> Component:
     """Scale one component's axis and stack; select nothing about either.
 
@@ -108,8 +132,14 @@ def _canonicalise_component(raw: RawComponent) -> Component:
     but a repeat -- two cylinders that scale to one step were one feature
     stated twice. :func:`_canonical_steps` holds that rule and the order.
     """
+    wall = _wall_candidates(raw)
     if raw.axis_xy_mm is None or raw.tip_mm is None:
-        return Component(designator=raw.designator, protrusion=None)
+        return Component(
+            designator=raw.designator,
+            protrusion=None,
+            wall_admitted=bool(wall),
+            wall=wall,
+        )
     axis_nm = (nm_from_mm(raw.axis_xy_mm[0]), nm_from_mm(raw.axis_xy_mm[1]))
     steps = _canonical_steps(raw.stack)
     protrusion = Protrusion(
@@ -118,7 +148,12 @@ def _canonicalise_component(raw: RawComponent) -> Component:
         profile=Profile(steps=steps),
         tip_nm=nm_from_mm(raw.tip_mm),
     )
-    return Component(designator=raw.designator, protrusion=protrusion)
+    return Component(
+        designator=raw.designator,
+        protrusion=protrusion,
+        wall_admitted=bool(wall),
+        wall=wall,
+    )
 
 
 def _canonicalise_board(raw: RawBoard, ordinal: int) -> Board:

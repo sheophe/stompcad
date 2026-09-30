@@ -25,9 +25,11 @@ from stompcollider.match import _apply
 from stompcollider.model import (
     Board,
     Clash,
+    Component,
     Correspondence,
     DockData,
     Placement,
+    WallCandidate,
 )
 from stompcollider.seat import Seat, rank_key
 from stompcollider.solids import placement_transform
@@ -35,9 +37,9 @@ from stompgeom.shapes import placed
 from stompgeom.step import StepSolid, bounding_box_mm
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, StageRun
+from stompmodel.model import CaseFace, CaseRegistration, Profile, StageRun
 from stompmodel.protocols import Stage
-from stompmodel.units import Nanometre, nm_from_mm
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 # --------------------------------------------------------------------------
 # Kernel solids. Nothing here is a cube, and nothing is centred on the
@@ -140,13 +142,14 @@ def _board(
     ordinal: int = 1,
     carrier: CoordinateFrame | None = None,
     panel_face: str | None = "+w",
+    components: tuple[Component, ...] = (),
 ) -> Board:
     return Board(
         ordinal=ordinal,
         designators=(f"J{ordinal}",),
         extent_nm=(_nm(10.0), _nm(10.0), _nm(2.0)),
         carrier=carrier or _identity_frame(),
-        components=(),
+        components=components,
         panel_face=panel_face,
     )
 
@@ -1395,3 +1398,406 @@ def test_an_ordinary_clash_volume_is_still_stated_at_three_decimals() -> None:
     ]
 
     assert "by 80.000 mm³" in detail[0].message
+
+
+# --------------------------------------------------------------------------
+# ``wall_features``: each admitted candidate, restated in the case's frame.
+# --------------------------------------------------------------------------
+
+
+def _wall_component(designator: str) -> Component:
+    """One admitted component with a candidate for each sign of its axis."""
+    profile = Profile(steps=((Nanometre(3_000_000), Nanometre(0), Nanometre(5_000_000)),))
+    return Component(
+        designator=designator,
+        protrusion=None,
+        wall_admitted=True,
+        wall=(
+            WallCandidate(
+                designator=designator,
+                tip_nm=(_nm(5.0), Nanometre(0), Nanometre(0)),
+                direction=(1.0, 0.0, 0.0),
+                profile=profile,
+            ),
+            WallCandidate(
+                designator=designator,
+                tip_nm=(_nm(-5.0), Nanometre(0), Nanometre(0)),
+                direction=(-1.0, 0.0, 0.0),
+                profile=profile,
+            ),
+        ),
+    )
+
+
+def _case_solids() -> tuple[StepSolid, ...]:
+    return _enclosure()
+
+
+def _board_solids() -> dict[int, tuple[StepSolid, ...]]:
+    """This section's own four boards, independent of ``_two_stage_scene``'s.
+
+    Board 1 carries two named solids, ``J1`` and ``RV1``, side by side
+    along ``x``, so a placement shift can bring either or both into
+    ``WALL`` without disturbing the other's own local position. Boards 3
+    and 4 are what the ordering test needs to name two boards the case and
+    every other board leave untouched, without a clash of their own.
+    """
+    return {
+        1: (
+            _solid("J1", _box((0, 0, 0), 4, 4, 4)),
+            _solid("RV1", _box((6, 0, 0), 4, 4, 4)),
+        ),
+        2: (_solid("C", _box((30, 0, 0), 10, 10, 4)),),
+        3: (_solid("D", _box((60, 0, 0), 6, 6, 6)),),
+        4: (_solid("E", _box((80, 20, 0), 6, 6, 6)),),
+    }
+
+
+def _staged_dock_data(
+    wall: tuple[str, ...] = (), clashing: tuple[str, ...] = ()
+) -> DockData:
+    """``_two_stage_scene``'s board 1 and 2, plus two case-clean boards, with
+    the named designators carrying one wall candidate per sign.
+
+    Board 1 keeps its re-ranking dynamics -- ``x = 25`` clean of the case
+    but fouling board 2, ``x = 100`` clean of both -- unless ``clashing``
+    asks board 1's solids to meet ``WALL`` instead, at a shift chosen so
+    only the requested one or two of ``J1``/``RV1`` (:func:`_board_solids`)
+    reach it.
+    """
+
+    def _components(ordinal: int) -> tuple[Component, ...]:
+        designator = f"J{ordinal}"
+        return (_wall_component(designator),) if designator in wall else ()
+
+    rank1_x = 25.0
+    if clashing:
+        rank1_x = 17.0 if "RV1" in clashing else 19.0
+
+    boards = (
+        _board(1, components=_components(1)),
+        _board(2, components=_components(2)),
+        _board(3, components=_components(3)),
+        _board(4, components=_components(4)),
+    )
+    placements = {
+        1: (_placement(rank=1, x_mm=rank1_x), _placement(rank=2, x_mm=100.0)),
+        2: (_placement(),),
+        3: (_placement(),),
+        4: (_placement(),),
+    }
+    return _dock(boards, placements)
+
+
+def test_no_admitted_component_means_no_wall_feature() -> None:
+    """A run with no wall expression emits nothing, which is decision 18's promise."""
+    data = _staged_dock_data()
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert found.wall_features == ()
+
+
+def test_an_admitted_component_s_candidate_arrives_in_the_case_s_frame() -> None:
+    """The ray is restated, not recomputed: one transform, applied to point and direction."""
+    data = _staged_dock_data(wall=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert [f.designator for f in found.wall_features] == ["J1", "J1"]
+    assert {f.board for f in found.wall_features} == {1}
+    for feature in found.wall_features:
+        assert sum(c * c for c in feature.direction) == pytest.approx(1.0)
+
+
+def test_the_two_signs_stay_two_features_because_neither_is_chosen_here() -> None:
+    data = _staged_dock_data(wall=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    first, second = found.wall_features
+    assert first.direction == pytest.approx(tuple(-c for c in second.direction))
+
+
+def test_features_come_back_in_an_order_the_geometry_fixes() -> None:
+    """Board, then designator, then direction: no mapping's iteration order (ADR-0006)."""
+    data = _staged_dock_data(wall=("J4", "J1"))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    keys = [(f.board, f.designator, f.direction) for f in found.wall_features]
+    assert keys == sorted(keys)
+
+
+def test_the_feature_is_emitted_for_the_seating_the_ranking_settled_on() -> None:
+    """Rank 1 after re-ranking, never the placement Seat happened to list first.
+
+    The expected ray is recomputed here through the published transform rather
+    than typed: what is under test is that the stage used the chosen seating,
+    and a typed coordinate would also be asserting the transform's arithmetic.
+    """
+    data = _staged_dock_data(wall=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    chosen = min(found.placements[1], key=lambda placement: placement.rank)
+    assert chosen.rank == 1
+    basis = found.case.frame.basis
+    motion = placement_transform(found.boards[0], chosen, basis)
+    expected = set()
+    for component in found.boards[0].components:
+        for candidate in component.wall:
+            placed = basis.to_canonical(
+                motion.apply_point(
+                    tuple(mm_from_nm(value) for value in candidate.tip_nm)  # type: ignore[arg-type]
+                )
+            )
+            expected.add(tuple(nm_from_mm(value) for value in placed))
+    assert {feature.origin_nm for feature in found.wall_features} == expected
+
+
+def test_reversing_the_placements_tuple_emits_the_same_ray() -> None:
+    """Rank decides, not position: the mapping's own order must reach no artefact."""
+    data = _staged_dock_data(wall=("J1",))
+    stage = Clashes(_case_solids(), _board_solids())
+    forward = stage.apply(data)
+    reversed_ = Clashes(_case_solids(), _board_solids()).apply(
+        replace(
+            data,
+            placements={
+                ordinal: tuple(reversed(placements))
+                for ordinal, placements in data.placements.items()
+            },
+        )
+    )
+    assert forward.wall_features == reversed_.wall_features
+
+
+def _permuted_frame() -> CoordinateFrame:
+    """A board carrier that swaps and negates axes rather than merely turning one.
+
+    Composed with ``_turned_frame`` as the case basis, every one of a ray's
+    three projected components comes out non-zero -- an axis-aligned fixture
+    cannot tell a swapped or negated projection from a correct one, because
+    two of its three components are already zero regardless of the bug.
+    """
+    return CoordinateFrame(
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        u=(0.0, 0.0, 1.0),
+        v=(0.0, 1.0, 0.0),
+        w=(-1.0, 0.0, 0.0),
+    )
+
+
+def test_the_ray_survives_a_non_trivial_carrier_and_case_frame() -> None:
+    """Origin and direction, checked against values worked out by hand.
+
+    ``sum(c * c for c in direction) == 1`` and "opposite of its twin" both
+    survive a swapped or negated projection; only a literal expected tuple,
+    from a frame where every projection is non-zero, does not. The board's
+    carrier permutes and negates axes and the case frame turns a quarter, so
+    ``u``, ``v`` and ``w`` are each exercised away from zero -- the expected
+    numbers below are worked out once by hand and typed literally, not read
+    back from ``_wall_features`` itself.
+    """
+    designator = "J1"
+    profile = Profile(steps=((Nanometre(3_000_000), Nanometre(0), Nanometre(5_000_000)),))
+    candidate = WallCandidate(
+        designator=designator,
+        tip_nm=(Nanometre(5_000_000), Nanometre(0), Nanometre(0)),
+        direction=(0.6, 0.48, 0.64),
+        profile=profile,
+    )
+    component = Component(
+        designator=designator,
+        protrusion=None,
+        wall_admitted=True,
+        wall=(candidate,),
+    )
+    board = _board(1, carrier=_permuted_frame(), components=(component,))
+    data = _dock(
+        (board,),
+        {1: (_placement(x_mm=10.0),)},
+        frame=_turned_frame(),
+    )
+    solids = {1: (_solid("P", _box((0, 0, 0), 1, 1, 1)),)}
+    found = Clashes(_enclosure(), solids).apply(data)
+
+    (feature,) = found.wall_features
+    assert feature.direction == pytest.approx((0.64, 0.48, -0.6))
+    assert feature.origin_nm == (_nm(10.0), Nanometre(0), _nm(-5.0))
+
+
+# --------------------------------------------------------------------------
+# A clash leaves the accounting only for a part a wall will be drilled for
+# (decision 12). Keyed on ``Component.wall``, never on ``wall_admitted``:
+# the flag records what a builder's expression named, not what it found.
+# --------------------------------------------------------------------------
+
+
+def test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported() -> None:
+    """It is going to be drilled for, so the metal in the way is the point.
+
+    Asserted on the finding's absence rather than on its ``part``: nothing in
+    ``_against_case`` names a part, so a claim about that field would hold with
+    the exclusion taken out altogether. ``J1`` is the only one of board 1's
+    solids reaching ``WALL`` at this placement, so excusing it must leave the
+    board no case finding at all.
+    """
+    data = _staged_dock_data(wall=("J1",), clashing=("J1",))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert [
+        clash
+        for placement in found.placements[1]
+        for clash in placement.clashes
+        if clash.kind == "case"
+    ] == []
+
+
+def test_a_part_the_wall_filter_did_not_admit_still_clashes() -> None:
+    """The exclusion is per component, never per board.
+
+    Stated on the material rather than on ``Clash.part``: what survives the
+    filter is intersected once per case solid, exactly as an unexcused board's
+    is, so the finding carries the volume of what is still in the way and not
+    the name of the solid that put it there. Excusing a second designator
+    takes its share out of that volume; excusing all three leaves no finding.
+    """
+    one = _wall_clashes((_wall_component("J1"),))
+    two = _wall_clashes((_wall_component("J1"), _wall_component("RV1")))
+    assert len(one) == 1
+    assert len(two) == 1
+    assert two[0].common_volume_nm3 < one[0].common_volume_nm3
+    every = tuple(_wall_component(part) for part in ("J1", "RV1", "RV2"))
+    assert _wall_clashes(every) == []
+
+
+def test_a_board_with_a_wall_admitted_part_is_walked_per_solid_only_to_filter() -> None:
+    """``part`` stays ``None``, because the accounting must not change shape.
+
+    The per-body walk is what tells an excused designator from the rest, and
+    it is all it is for: naming each survivor in its own finding would let a
+    placement carry more clashes than the same seating carries with no wall
+    expression, and ``rank_key`` reads that count before it reads volume.
+    """
+    data = _staged_dock_data(wall=("J1",), clashing=("J1", "RV1"))
+    found = Clashes(_case_solids(), _board_solids()).apply(data)
+    parts = [
+        clash.part
+        for placement in found.placements[1]
+        for clash in placement.clashes
+        if clash.kind in ("case", "closure")
+    ]
+    assert parts and all(part is None for part in parts)
+
+
+def test_a_board_with_no_wall_admitted_part_is_checked_exactly_as_before() -> None:
+    """The byte-identity decision 18 promises: no wall expression, no change at all."""
+    data = _staged_dock_data(clashing=("J1", "RV1"))
+    before = Clashes(_case_solids(), _board_solids()).apply(data)
+    assert any(
+        clash.part is None
+        for placements in before.placements.values()
+        for placement in placements
+        for clash in placement.clashes
+    )
+
+
+def test_the_cavity_predicate_is_unchanged_by_the_exclusion() -> None:
+    """Seating is not a findings question: a part being drilled for still stops a board.
+
+    A self-comparison of two freshly built stages on the same data would
+    hold regardless of whether the exclusion touched ``_clears_the_cavity``
+    -- it is true by construction. The real discriminator is the arrested
+    seating itself: ``J1`` reaches ``WALL`` here exactly as it does in
+    ``test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported``, so
+    the board must still fail to clear the cavity even though that same
+    interference is dropped from ``clashes`` (decision 15's ordering).
+    """
+    data = _staged_dock_data(wall=("J1",), clashing=("J1",))
+    stage = Clashes(_case_solids(), _board_solids())
+    board = data.boards[0]
+    placement = data.placements[1][0]
+    basis = data.case.frame.basis
+    assert stage._clears_the_cavity(board, placement, basis) is False
+
+
+def test_a_wall_admitted_but_empty_part_s_clash_still_reports() -> None:
+    """``wall_admitted`` records what the expression named, never that it
+    found anything; a header a glob happens to match this way gets no ray
+    and no hole, so keying the exclusion on the flag would drop a real
+    clash nothing downstream could ever report again. Only ``wall`` itself
+    -- the candidate the filter actually measured -- may excuse one.
+    """
+    component = Component(designator="J1", protrusion=None, wall_admitted=True, wall=())
+    board = _board(1, components=(component,))
+    data = _dock((board,), {1: (_placement(x_mm=19.0),)})
+    solids = {1: (_solid("J1", _box((0, 0, 0), 4, 4, 4)),)}
+    found = Clashes(_enclosure(), solids).apply(data)
+    clashes = found.placements[1][0].clashes
+    assert any(clash.with_ == "WALL" for clash in clashes)
+
+
+def test_a_wall_admitted_part_s_closure_clash_still_reports() -> None:
+    """No hole is ever cut in what closes over the cavity -- a wall is
+    lateral, a closure is axial -- so a clash kinded ``closure`` is never
+    one a hole explains, whatever its ``part`` names elsewhere.
+
+    One board solid, named ``J1``, reaches through ``_closed_enclosure``'s
+    own wall shell (``BOX``, ``case``) and on into its backplate (``PLATE``,
+    ``closure``) at once, so a kind-agnostic exclusion and a correctly
+    scoped one disagree only on the second finding.
+    """
+    component = _wall_component("J1")
+    board = _board(1, components=(component,))
+    data = _dock((board,), {1: (_placement(),)})
+    solids = {1: (_solid("J1", _box((39, -5, -29), 10, 10, 15)),)}
+    found = Clashes(_closed_enclosure(), solids).apply(data)
+    kinds_with = {(clash.kind, clash.with_) for clash in found.placements[1][0].clashes}
+    assert ("case", "BOX") not in kinds_with
+    assert ("closure", "PLATE") in kinds_with
+
+
+def _three_solids_in_one_wall() -> dict[int, tuple[StepSolid, ...]]:
+    """``J1``, ``RV1`` and ``RV2`` side by side, all three reaching into ``WALL``.
+
+    Three and not two, so the count under test differs between one clash per
+    case solid and one per surviving body even after a designator is excluded.
+    """
+    return {
+        1: (
+            _solid("J1", _box((0, 0, 0), 4, 4, 4)),
+            _solid("RV1", _box((0, 6, 0), 4, 4, 4)),
+            _solid("RV2", _box((0, 12, 0), 4, 4, 4)),
+        )
+    }
+
+
+def _wall_clashes(components: tuple[Component, ...]) -> list[Clash]:
+    data = _dock((_board(1, components=components),), {1: (_placement(x_mm=19.0),)})
+    found = Clashes(_enclosure(), _three_solids_in_one_wall()).apply(data)
+    return [
+        clash for clash in found.placements[1][0].clashes if clash.with_ == "WALL"
+    ]
+
+
+def test_naming_one_part_leaves_the_others_counted_as_one_clash() -> None:
+    """Decision 12's promise: every other clash is ranked exactly as today.
+
+    ``rank_key`` compares how many clashes a placement carries before it
+    compares their volume, so a board reported one clash per body where it was
+    reported one per case solid ranks differently -- and a seating would turn
+    on a builder having named an unrelated part. The per-body walk survives
+    for the filtering; the intersection is taken once over what it kept.
+    """
+    plain = _wall_clashes(())
+    named = _wall_clashes((_wall_component("J1"),))
+    assert len(plain) == 1
+    assert len(named) == 1
+    assert named[0].part is None
+
+
+def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
+    """Dropped from the accounting as well as the findings, per decision 12.
+
+    ``rank_key`` reads how many clashes a placement carries and then their
+    volume, so those two numbers *are* the accounting: the count above stays
+    one, and the volume here loses the excused part's own share. Two seatings
+    identical but for a wall-admitted part's interference therefore rank on
+    something else, because that interference is about to become a hole.
+    Compared against the same scene with nothing excused, since one
+    placement's figures alone would not say what the exclusion changed.
+    """
+    plain = _wall_clashes(())
+    named = _wall_clashes((_wall_component("J1"),))
+    assert named[0].common_volume_nm3 < plain[0].common_volume_nm3

@@ -72,6 +72,16 @@ class Deduplicate:
         )
 
     def _same_hole(self, a: Hole, b: Hole) -> bool:
+        """One hole, not two: the same circle cut in the same plane.
+
+        The surface is part of the identity because a document may state
+        several: a wall hole at the plate's own origin is a different hole
+        from the plate's, and collapsing the two would leave one of them
+        undrilled.
+        """
         return (
-            a.diameter_nm == b.diameter_nm and a.x_nm == b.x_nm and a.y_nm == b.y_nm
+            a.surface == b.surface
+            and a.diameter_nm == b.diameter_nm
+            and a.x_nm == b.x_nm
+            and a.y_nm == b.y_nm
         )

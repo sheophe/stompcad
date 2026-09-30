@@ -54,6 +54,14 @@ option; STEP output cuts the supplied model.
 `Stage` protocol and works independently; a stage does not assert that a
 previous stage has run. `Pipeline` applies the stages in the supplied order.
 
+A supplied enclosure model discovers its own walls at load: `cad.walls`
+groups lateral plate levels by the kernel axis they lean nearest to and
+builds each one's frame and drillable region. `pipeline.walls` resolves a
+supplied `WallFeature`'s ray against those walls, sizes the hole from the
+material within the wall's own span, and cuts it as the `DrillWalls` stage.
+`build_pipeline` does not compose that stage, so no command line drills a
+wall yet.
+
 ## Board placement
 
 ```mermaid
@@ -76,6 +84,14 @@ lengths to integer nanometres, producing `DockData`.
 inserting boards through the open back until they contact the enclosure.
 `Clashes` measures interference and ranks the resulting placements. Report and
 assembly emitters read the finished data.
+
+When `--wall-reference` admits a component, `BoardSource` also measures its
+wall feature — the ray and profile of its own sideways cylindrical stack, one
+per in-plane axis sign — through `protrude.wall_features_of`, carried on
+`DockData.wall_features`. Once seated, `Clashes` excludes a wall-admitted
+component's clash with the case, checked per case solid, because that
+penetration is the wall hole's job and not a defect; its clash with the lid
+still reports.
 
 The tools exchange ordinary JSON and STEP files. This allows `stompcollider` to
 read the drill document through `stompmodel` without importing `stompdrill`.

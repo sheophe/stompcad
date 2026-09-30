@@ -194,3 +194,8 @@ The document's own claim is narrower and is checked by a test rather than a
 digest: `packages/stompmodel/tests/test_document_version_7.py` compares version 7
 against a captured version-6 document over identical input and requires the
 difference to be the version, one key per hole and one section at the top.
+
+A wall is a further instance of the same claim. A run that drills no wall is
+part of what this lock covers, including its negative: no sibling artefact
+appears and no surface record is added. `tools/verify-lock.sh DIR` is the
+check, and the nine artefacts it compares are the same nine.

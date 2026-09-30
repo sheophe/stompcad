@@ -9,14 +9,17 @@ area -- it is provenance for that one face, not the combined check.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from stompmodel.frames import FaceFrame
-from stompmodel.model import CaseFace
+from stompmodel.model import CaseFace, DrilledSurface
 from stompmodel.units import Nanometre, nm_from_mm
 
+from ..errors import StompdrillError
 from .base import Rejection
 
 __all__ = ["OcpCaseModel", "load_case_model"]
@@ -53,6 +56,18 @@ class OcpCaseModel:
     # same label-tree walk the code under test uses to make that change.
     target_shape: Any
     document_timestamp: str
+    #: Every wall this model discovered, each as the record a document carries.
+    #: A tuple and not a mapping, so the order discovery fixed is the order a
+    #: consumer sees (ADR-0006). Empty for a model whose walls could not be
+    #: discovered or framed (a lid with nothing behind its lateral levels to
+    #: face, say) as well as for one built without wall support at all -- both
+    #: are "no walls" to a consumer, and neither can express anything a
+    #: default would lose.
+    walls: tuple[DrilledSurface, ...] = ()
+    #: Each wall's outer and inner drillable region, keyed by surface. Two,
+    #: because a hole coaxial with its component crosses the two planes at
+    #: different places and must clear the region at each (decision 8).
+    wall_regions: Mapping[str, tuple[Any, Any]] = MappingProxyType({})
 
     def classify(
         self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre
@@ -84,6 +99,61 @@ class OcpCaseModel:
             return Rejection.OBSTRUCTED
         return None
 
+    def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
+        """Whether this point lies in that wall's outer drillable region at all.
+
+        A point and not a circle: picking which wall a ray reaches comes before
+        the hole has a radius, because the radius depends on the wall's own
+        span. ``classify_wall`` is what asks the sized question.
+        """
+        from .region import contains_at_depth
+
+        surface = self._wall(key)
+        outer, _inner = self.wall_regions[key]
+        return contains_at_depth(
+            outer, surface.frame, x_nm, y_nm, surface.thickness_nm,
+            Nanometre(0), Nanometre(0),
+        )
+
+    def classify_wall(
+        self,
+        key: str,
+        outer_nm: tuple[Nanometre, Nanometre],
+        inner_nm: tuple[Nanometre, Nanometre],
+        radius_nm: Nanometre,
+    ) -> Rejection | None:
+        """Refuse a sized wall hole, naming which rule refused it.
+
+        The outer region first, since that is the surface a builder marks and
+        the one the document's bounds state; then the inner, at the place the
+        same axis crosses *it* -- the outer face is the larger of the two on
+        every wall of every catalogued model, so the outer alone would accept a
+        hole that leaves the inner. A failure against what stands behind the
+        wall reads as ``THROUGH_BOSS``, as it does on the plate.
+        """
+        from .region import contains_at_depth
+
+        surface = self._wall(key)
+        outer, inner = self.wall_regions[key]
+        if not contains_at_depth(
+            outer, surface.frame, outer_nm[0], outer_nm[1],
+            surface.thickness_nm, radius_nm, self.margin_nm,
+        ):
+            return Rejection.OFF_FACE
+        if not contains_at_depth(
+            inner, surface.frame, inner_nm[0], inner_nm[1],
+            Nanometre(0), radius_nm, self.margin_nm,
+        ):
+            return Rejection.THROUGH_BOSS
+        return None
+
+    def _wall(self, key: str) -> DrilledSurface:
+        """The record for one wall, or a refusal naming what was asked for."""
+        for surface in self.walls:
+            if surface.key == key:
+                return surface
+        raise StompdrillError(f"this model discovered no {key} wall")
+
 
 def load_case_model(
     path: Path, *, face: CaseFace, margin_nm: Nanometre, part: str | None = None
@@ -94,6 +164,7 @@ def load_case_model(
 
     from .case import build_frame, find_faces, select_solid
     from .region import build_region, region_bbox_nm
+    from .walls import build_wall_frame, drilled_surface, find_walls, nearest_axis, surface_key
 
     kernel.require_kernel()
     document = read_step(path)
@@ -109,6 +180,37 @@ def load_case_model(
         box_faces = find_faces(select_solid(document, CaseFace.BOX), axis)
         box_region = build_region(box_faces.inner, axis, box_faces.outward[axis])
         box_frame = build_frame(box_faces, axis)
+
+    walls: list[DrilledSurface] = []
+    regions: dict[str, tuple[Any, Any]] = {}
+    try:
+        # The whole answer, not just its first step: framing a wall, keying it,
+        # building its two regions and stating its record can each refuse, and
+        # a model that reached one of those is as much "no walls" as one whose
+        # walls were never found. A lid is the ordinary case -- a flat closure
+        # plate with nothing behind its lateral levels to face, which is a fact
+        # about the lid and not a load failure. Wall drilling is opt-in, and a
+        # feature naming an unreachable wall is refused by ``DrillWalls``
+        # itself (``wall-feature-unreachable``), which is where that diagnostic
+        # belongs -- not here, blocking a load the panel's face never needed.
+        for wall in find_walls(solid, axis):
+            lateral = nearest_axis(wall.outward)
+            wall_axis_index = max(range(3), key=lambda index: abs(lateral[index]))
+            frame = build_wall_frame(wall, faces.outward)
+            key = surface_key(wall, own_frame)
+            outer = build_region(
+                wall.outer_faces, wall_axis_index, wall.outward[wall_axis_index]
+            )
+            inner = build_region(
+                wall.inner, wall_axis_index, wall.outward[wall_axis_index]
+            )
+            walls.append(drilled_surface(wall, key, frame, outer))
+            regions[key] = (outer, inner)
+    except StompdrillError:
+        # Partly built walls are discarded rather than kept: a model reporting
+        # three of its four walls would let a ray resolve to whichever of them
+        # survived, and a hole would be cut from an incomplete enclosure.
+        walls, regions = [], {}
 
     return OcpCaseModel(
         part=part or _part_of(solid.name),
@@ -129,6 +231,8 @@ def load_case_model(
         document=document.document,
         target_shape=solid.shape,
         document_timestamp=document.timestamp,
+        walls=tuple(walls),
+        wall_regions=MappingProxyType(regions),
     )
 
 

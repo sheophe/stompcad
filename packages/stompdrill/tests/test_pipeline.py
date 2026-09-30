@@ -318,6 +318,32 @@ class TestDeduplicate:
         assert len(out.holes) == 1
         assert codes(out) == ["duplicate-hole"]
 
+    def test_two_holes_at_one_point_on_two_surfaces_are_two_holes(self):
+        """Plan 1 made such a document constructible, so exact coincidence gained a term.
+
+        Without the surface in the comparison, a wall hole at the plate's own
+        origin would silently collapse into the plate's hole and one of them
+        would never be drilled.
+        """
+        raw = RawHole(0.0, 0.0, 6.0)
+        plate = Hole(Nanometre(0), Nanometre(0), Nanometre(6_000_000), raw)
+        wall = Hole(Nanometre(0), Nanometre(0), Nanometre(6_000_000), raw, surface="right")
+
+        found = Deduplicate().apply(make_data(plate, wall))
+
+        assert len(found.holes) == 2
+        assert found.diagnostics == ()
+
+    def test_two_coincident_holes_on_one_surface_are_still_one(self):
+        raw = RawHole(0.0, 0.0, 6.0)
+        first = Hole(Nanometre(0), Nanometre(0), Nanometre(6_000_000), raw, surface="right")
+        second = Hole(Nanometre(0), Nanometre(0), Nanometre(6_000_000), raw, surface="right")
+
+        found = Deduplicate().apply(make_data(first, second))
+
+        assert len(found.holes) == 1
+        assert codes(found) == ["duplicate-hole"]
+
     def test_unquantised_diameters_are_not_treated_as_equal(self):
         """Dedupe does not do the drill table's job (SRP)."""
         data = make_data(

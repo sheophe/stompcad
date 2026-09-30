@@ -332,3 +332,49 @@ def test_the_real_partition_satisfies_its_own_value_checks() -> None:
         assert math.isclose(math.sqrt(sum(c * c for c in level.direction)), 1.0)
         assert level.area_mm2 > 0.0
         assert level.faces
+
+
+def test_the_published_bin_is_the_one_the_partition_groups_on() -> None:
+    """Published, not restated: a second granularity would split a real wall.
+
+    Read off a real partition rather than compared with the constant: what a
+    consumer needs is that its own key matches the key a level was grouped
+    under, which is the claim that stops the two drifting.
+    """
+    from stompgeom.levels import _unit, direction_bin
+
+    found = levels(_cylinder(radius=3.0, height=8.0))
+    assert found
+    for level in found:
+        rebuilt = _unit(direction_bin(level.direction), 1e6)
+        assert rebuilt == pytest.approx(level.direction, abs=0.0)
+
+
+def test_two_directions_a_millionth_apart_can_land_in_one_bin_or_two() -> None:
+    """A bin, not a merge tolerance: the same-sized gap lands two directions
+    together or apart depending only on where the rounding boundary falls
+    between them, never on how far apart they are. Both pairs are derived
+    from ``_DIRECTION_SCALE`` itself, so this fails if the granularity ever
+    moves rather than quietly keeping a stale literal.
+
+    Raw component pairs, not unit vectors: ``direction_bin`` neither reads
+    nor needs a direction's length, only each component's own
+    scaled-and-rounded value, so a bare float pair exercises it directly.
+    """
+    from stompgeom.levels import _DIRECTION_SCALE, direction_bin
+
+    step = 1.0 / _DIRECTION_SCALE
+    gap = 0.6 * step
+
+    # Centred inside one bin: the gap stays clear of every boundary.
+    centre = 3 * step
+    together = (centre - gap / 2, 0.0, 0.0)
+    still_together = (centre + gap / 2, 0.0, 0.0)
+    assert direction_bin(together) == direction_bin(still_together)
+
+    # Straddling the boundary between two bins: the identical-sized gap now
+    # crosses it.
+    boundary = 3.5 * step
+    apart = (boundary - gap / 2, 0.0, 0.0)
+    now_apart = (boundary + gap / 2, 0.0, 0.0)
+    assert direction_bin(apart) != direction_bin(now_apart)

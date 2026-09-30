@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from stompdrill.cad import Rejection
 from stompdrill.cad.loader import OcpCaseModel
-from stompdrill.cad.region import build_region, classify_bounds, contains
+from stompdrill.cad.region import build_region, classify_bounds, contains, contains_at_depth
 from stompmodel.frames import CoordinateFrame, FaceFrame
 from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre
@@ -269,3 +269,55 @@ def test_add_reports_done_for_every_hostile_wire():
 
     assert before == dict.fromkeys(hostile, False)
     assert after == dict.fromkeys(hostile, True)
+
+
+def _square_face(half_mm: float, at_z_mm: float):
+    """A square face in the XY plane at the given Z, for a tilt-free frame."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+
+    wire = _polyline([
+        (-half_mm, -half_mm, at_z_mm), (half_mm, -half_mm, at_z_mm),
+        (half_mm, half_mm, at_z_mm), (-half_mm, half_mm, at_z_mm),
+    ])
+    return BRepBuilderAPI_MakeFace(wire).Face()
+
+
+def test_containment_at_a_depth_reads_the_region_on_the_frame_s_own_plane() -> None:
+    """A wall's region is tilted, so overwriting one kernel coordinate is meaningless.
+
+    The panel's ``contains`` does exactly that, correctly, because its region
+    is normal to a kernel axis. This is the same question asked of a plane the
+    frame itself names.
+    """
+    region = _square_face(half_mm=20.0, at_z_mm=5.0)
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 1.0, 0.0), w=(0.0, 0.0, 1.0),
+        )
+    )
+    inside = contains_at_depth(
+        region, frame, Nanometre(0), Nanometre(0),
+        Nanometre(5_000_000), Nanometre(1_000_000), Nanometre(0),
+    )
+    assert inside is True
+    outside = contains_at_depth(
+        region, frame, Nanometre(19_500_000), Nanometre(0),
+        Nanometre(5_000_000), Nanometre(1_000_000), Nanometre(0),
+    )
+    assert outside is False
+
+
+def test_a_depth_on_the_wrong_plane_finds_the_point_outside_the_region() -> None:
+    """A guard against a caller passing the inner depth for the outer region."""
+    region = _square_face(half_mm=20.0, at_z_mm=5.0)
+    frame = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 1.0, 0.0), w=(0.0, 0.0, 1.0),
+        )
+    )
+    assert contains_at_depth(
+        region, frame, Nanometre(0), Nanometre(0),
+        Nanometre(0), Nanometre(1_000_000), Nanometre(0),
+    ) is False

@@ -17,7 +17,7 @@ from stompmodel.units import Nanometre, check_nanometres, nm_from_mm
 from .kernel import require_kernel
 from .step import StepSolid
 
-__all__ = ["Direction", "Level", "levels"]
+__all__ = ["Direction", "Level", "direction_bin", "levels"]
 
 #: A unit vector in kernel coordinates.
 Direction = tuple[float, float, float]
@@ -112,6 +112,25 @@ def levels(solid: StepSolid, axis: Direction | None = None) -> tuple[Level, ...]
     )
 
 
+def direction_bin(
+    direction: Direction, scale: float = _DIRECTION_SCALE
+) -> tuple[int, int, int]:
+    """``direction`` as the integer-millionths key levels are grouped under.
+
+    Published because a second consumer must bin on this granularity and not
+    on its own: the measured gap that chose it is recorded on
+    ``_DIRECTION_SCALE`` above, and two spellings of one granularity are two
+    chances to split a real surface in half. ``scale`` is a parameter for the
+    same reason ``_partition``'s is -- the rejected value's own probe drives
+    it; production callers take the default.
+    """
+    return (
+        round(direction[0] * scale),
+        round(direction[1] * scale),
+        round(direction[2] * scale),
+    )
+
+
 def _partition(shape: Any, scale: float = _DIRECTION_SCALE) -> tuple[Level, ...]:
     """Every planar face of ``shape``, grouped by outward direction and offset.
 
@@ -138,22 +157,15 @@ def _partition(shape: Any, scale: float = _DIRECTION_SCALE) -> tuple[Level, ...]
         if adaptor.GetType() == GeomAbs_SurfaceType.GeomAbs_Plane:
             plane = adaptor.Plane()
             normal, location = plane.Axis().Direction(), plane.Location()
-            outward = [normal.X(), normal.Y(), normal.Z()]
+            outward: Direction = (normal.X(), normal.Y(), normal.Z())
             if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED:
-                outward = [-component for component in outward]
+                outward = (-outward[0], -outward[1], -outward[2])
             offset = (
                 location.X() * outward[0]
                 + location.Y() * outward[1]
                 + location.Z() * outward[2]
             )
-            key = (
-                (
-                    round(outward[0] * scale),
-                    round(outward[1] * scale),
-                    round(outward[2] * scale),
-                ),
-                int(nm_from_mm(offset)),
-            )
+            key = (direction_bin(outward, scale), int(nm_from_mm(offset)))
             properties = GProp_GProps()
             BRepGProp.SurfaceProperties_s(face, properties)
             groups[key].append((properties.Mass(), face))

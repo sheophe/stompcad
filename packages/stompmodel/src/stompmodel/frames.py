@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from .units import Millimetre, Nanometre, check_nanometres, mm_from_nm, nm_from_mm
 
-__all__ = ["dot", "cross", "CoordinateFrame", "FaceFrame", "RigidTransform"]
+__all__ = ["dot", "cross", "check_unit_direction", "CoordinateFrame", "FaceFrame", "RigidTransform"]
 
 #: One coordinate frame's origin plus each of its three basis vectors.
 _COMPONENTS = 3
@@ -59,6 +59,28 @@ def cross(
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     )
+
+
+def check_unit_direction(label: str, direction: tuple[float, float, float]) -> None:
+    """Refuse a direction that is not three finite components of unit length.
+
+    Published beside :func:`dot` and for its reason: every value stating a
+    direction owes the same check, and a copy of the figure per value is a
+    copy that can drift from this one. It refuses a malformed hand-built
+    vector rather than absorbing kernel drift -- see ``_BASIS_TOLERANCE``,
+    which records what fixes its value.
+    """
+    if len(direction) != _COMPONENTS:
+        raise ValueError(
+            f"{label} must have exactly three components, not {len(direction)}"
+        )
+    if not all(math.isfinite(component) for component in direction):
+        raise ValueError(f"{label} must be finite, not {direction!r}")
+    length = math.sqrt(dot(direction, direction))
+    if abs(length - 1.0) > _BASIS_TOLERANCE:
+        raise ValueError(
+            f"{label} must be unit length, not {direction!r} (length {length!r})"
+        )
 
 
 @dataclass(frozen=True, slots=True)

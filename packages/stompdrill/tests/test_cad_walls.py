@@ -1,0 +1,487 @@
+"""Telling a wall from the floor, and from a rib.
+
+Synthetic levels where the rule is the subject and kernel-built solids where
+the geometry is: a hand-built ``Level`` can state an angle no casting has,
+which is the only way to reach the boundary the definition draws.
+"""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import pytest
+
+from stompdrill.cad import Rejection, WallModel, load_case_model
+from stompdrill.cad.walls import (
+    LATERAL_LIMIT,
+    Wall,
+    build_wall_frame,
+    draft_degrees,
+    is_lateral,
+    nearest_axis,
+    surface_key,
+    wall_bounds_nm,
+)
+from stompdrill.errors import StompdrillError
+from stompdrill.pipeline.diameters import DEFAULT_STANDARD, DRILL_STANDARDS
+from stompdrill.pipeline.route import RouteHoles
+from stompdrill.pipeline.walls import DrillWalls
+from stompgeom.levels import Direction, Level
+from stompgeom.shapes import compound
+from stompgeom.step import bounding_box_mm
+from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, Profile, WallFeature
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
+
+__all__: list[str] = []
+
+_Y = (0.0, 1.0, 0.0)
+
+
+def _perpendicular_pair(normal: Direction) -> tuple[Direction, Direction]:
+    """Two unit directions completing ``normal`` into a right-handed basis.
+
+    Picked by Gram-Schmidt against a reference not parallel to ``normal``,
+    so this works for any wall's outward direction, not only an axis-aligned
+    one -- the only way to build a rectangle whose plane is ``normal``'s own.
+    """
+    reference = (1.0, 0.0, 0.0) if abs(normal[0]) < 0.9 else (0.0, 1.0, 0.0)
+    raw = cross(reference, normal)
+    length = math.sqrt(dot(raw, raw))
+    a = (raw[0] / length, raw[1] / length, raw[2] / length)
+    b = cross(normal, a)
+    return a, b
+
+
+def _synthetic_wall(outward: Direction, plate_mm: float = 1.0) -> Wall:
+    """A ``Wall`` from two parallel kernel rectangles, for a rule no casting states.
+
+    The outer rectangle is centred on the kernel origin so its bounding box's
+    own centre is a point on its face, which is what ``_outer_point`` reads
+    back; the inner one sits ``plate_mm`` behind it along ``outward``.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+
+    axis_u, axis_v = _perpendicular_pair(outward)
+    half_u, half_v = 40.0, 10.0
+
+    def _face(offset_mm: float):
+        centre = tuple(offset_mm * outward[i] for i in range(3))
+        polygon = BRepBuilderAPI_MakePolygon()
+        for su, sv in ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)):
+            point = tuple(
+                centre[i] + su * half_u * axis_u[i] + sv * half_v * axis_v[i]
+                for i in range(3)
+            )
+            polygon.Add(gp_Pnt(*point))
+        polygon.Close()
+        return BRepBuilderAPI_MakeFace(polygon.Wire()).Face()
+
+    outer_face = _face(0.0)
+    inner_face = _face(-plate_mm)
+    outer_level = Level(
+        direction=outward,
+        offset_nm=Nanometre(0),
+        area_mm2=(2 * half_u) * (2 * half_v),
+        faces=(outer_face,),
+    )
+    return Wall(
+        outer=outer_level,
+        outer_faces=compound([outer_face]),
+        inner=compound([inner_face]),
+        plate_nm=Nanometre(round(plate_mm * 1_000_000)),
+        outward=outward,
+    )
+
+
+def _outer_point(wall: Wall) -> tuple[float, float, float]:
+    """A point on ``wall``'s own outer face, read from its bounding box centre."""
+    box = bounding_box_mm(wall.outer_faces)
+    return ((box[0] + box[3]) / 2.0, (box[1] + box[4]) / 2.0, (box[2] + box[5]) / 2.0)
+
+
+def _level(direction: tuple[float, float, float], offset_mm: float = 10.0) -> Level:
+    """One level stating a plane, with an area and a face a partition would give it."""
+    return Level(
+        direction=direction,
+        offset_nm=Nanometre(int(offset_mm * 1_000_000)),
+        area_mm2=100.0,
+        faces=(object(),),
+    )
+
+
+def test_a_plane_perpendicular_to_the_drill_axis_is_drafted_by_nothing() -> None:
+    assert draft_degrees((0.0, 0.0, 1.0), _Y) == pytest.approx(0.0)
+
+
+def test_a_plane_normal_to_the_footprint_is_at_a_right_angle_to_it() -> None:
+    assert draft_degrees(_Y, _Y) == pytest.approx(90.0)
+
+
+def test_a_drafted_wall_measures_its_own_draft() -> None:
+    """1590B's own figure, stated as a direction rather than read off a model."""
+    tilt = math.radians(1.25)
+    assert draft_degrees((0.0, -math.sin(tilt), -math.cos(tilt)), _Y) == pytest.approx(1.25)
+
+
+def test_the_two_populations_are_lateral_and_axial_and_nothing_else() -> None:
+    for degrees in (0.0, 1.15, 2.5, 44.999):
+        tilt = math.radians(degrees)
+        assert is_lateral(_level((0.0, math.sin(tilt), math.cos(tilt))), _Y) is True
+    for degrees in (45.001, 60.0, 90.0):
+        tilt = math.radians(degrees)
+        assert is_lateral(_level((0.0, math.sin(tilt), math.cos(tilt))), _Y) is False
+
+
+def test_the_boundary_is_where_the_two_meanings_meet_and_not_a_tuned_figure() -> None:
+    assert LATERAL_LIMIT == pytest.approx(math.sin(math.radians(45.0)))
+
+
+def test_a_direction_leans_on_the_axis_it_leans_on_most_with_its_own_sign() -> None:
+    assert nearest_axis((0.0, -0.0218, -0.9998)) == (0.0, 0.0, -1.0)
+    assert nearest_axis((0.9998, -0.0218, 0.0)) == (1.0, 0.0, 0.0)
+    assert nearest_axis((-0.9998, 0.0218, 0.0)) == (-1.0, 0.0, 0.0)
+
+
+def test_an_exact_tie_between_two_axes_breaks_on_the_lower_index() -> None:
+    """Arbitrary but total: a level at exactly 45 degrees in plan has no lean."""
+    root = 1.0 / math.sqrt(2.0)
+    assert nearest_axis((root, 0.0, root)) == (1.0, 0.0, 0.0)
+
+
+def test_the_axis_a_direction_leans_on_is_answered_and_never_refused() -> None:
+    """Ruling 8's rule has one spelling, and it is the grouping's own.
+
+    ``nearest_axis`` answers which axis, not whether a wall may lean on it: the
+    drill axis is a fact about the grouping, which refuses that case by name
+    below, and two spellings of one rule would be two rules to keep in step.
+    """
+    assert nearest_axis((0.01, 0.01, 0.9999)) == (0.0, 0.0, 1.0)
+
+
+def _grouped(levels_: list[Level], axis: int) -> object:
+    """Drive the grouping without a solid, so a synthetic level can reach it."""
+    from stompdrill.cad.walls import _grouped_by_axis
+
+    return _grouped_by_axis(levels_, axis)
+
+
+def test_a_lateral_level_leaning_on_the_drill_axis_is_refused_and_not_grouped() -> None:
+    """Ruling 8: lateral by the definition, yet it would bin to the axis itself.
+
+    Unreachable on every catalogued model -- nothing measures between 2.500°
+    and 90.000° -- and here so a custom model cannot pass through it unseen.
+    """
+    root = 0.6
+    rest = math.sqrt((1.0 - root * root) / 2.0)
+    with pytest.raises(StompdrillError, match="leans on the drill axis"):
+        _grouped([_level((rest, root, rest))], axis=1)
+
+
+def test_four_groups_or_it_is_not_an_enclosure_this_drills() -> None:
+    with pytest.raises(StompdrillError, match="four walls"):
+        _grouped([_level((0.0, 0.0, 1.0)), _level((0.0, 0.0, -1.0))], axis=1)
+
+
+def test_the_frame_s_third_axis_is_the_wall_s_own_outward_normal() -> None:
+    wall = _synthetic_wall(outward=(0.0, 0.0, -1.0))
+    frame = build_wall_frame(wall, drilled_outward=(0.0, 1.0, 0.0))
+    assert frame.basis.w == (0.0, 0.0, -1.0)
+
+
+def test_up_on_a_wall_s_sheet_leads_towards_the_drilled_face() -> None:
+    """Which is how a builder holds the pedal while marking its side."""
+    wall = _synthetic_wall(outward=(0.0, 0.0, -1.0))
+    frame = build_wall_frame(wall, drilled_outward=(0.0, 1.0, 0.0))
+    assert dot(frame.basis.v, (0.0, 1.0, 0.0)) > 0.99
+
+
+def test_the_frame_is_right_handed_about_the_outward_normal() -> None:
+    wall = _synthetic_wall(outward=(0.0, 0.0, -1.0))
+    basis = build_wall_frame(wall, drilled_outward=(0.0, 1.0, 0.0)).basis
+    assert cross(basis.u, basis.v) == pytest.approx(basis.w, abs=1e-12)
+
+
+def test_the_datum_sits_on_the_inner_plane_as_every_face_frame_s_does() -> None:
+    """``FaceFrame``'s own contract, which the STEP emitter's wall branch relies on."""
+    wall = _synthetic_wall(outward=(0.0, 0.0, -1.0), plate_mm=2.0)
+    frame = build_wall_frame(wall, drilled_outward=(0.0, 1.0, 0.0))
+    outer = frame.basis.to_canonical(_outer_point(wall))
+    assert outer[2] == pytest.approx(2.0, abs=1e-6)
+
+
+def test_a_wall_s_bounds_are_stated_about_its_own_datum() -> None:
+    """Which is what ``DrilledSurface`` refuses a wall for not doing."""
+    wall = _synthetic_wall(outward=(0.0, 0.0, -1.0))
+    frame = build_wall_frame(wall, drilled_outward=(0.0, 1.0, 0.0))
+    x0, y0, x1, y1 = wall_bounds_nm(wall.outer_faces, frame)
+    assert x0 + x1 == 0
+    assert y0 + y1 == 0
+
+
+def test_the_surface_key_is_read_from_the_projection_and_not_from_a_list() -> None:
+    """Six names, and which one is geometry: no ordering may decide it."""
+    # w = u x v = (0, -1, 0), the only right-handed third axis for these
+    # u/v; surface_key never reads w, so this keeps the frame valid without
+    # touching what the test exercises.
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 0.0, 1.0),
+            w=(0.0, -1.0, 0.0),
+        )
+    )
+    assert surface_key(_synthetic_wall(outward=(1.0, 0.0, 0.0)), face) == "right"
+    assert surface_key(_synthetic_wall(outward=(-1.0, 0.0, 0.0)), face) == "left"
+    assert surface_key(_synthetic_wall(outward=(0.0, 0.0, 1.0)), face) == "top"
+    assert surface_key(_synthetic_wall(outward=(0.0, 0.0, -1.0)), face) == "bottom"
+
+
+def test_a_slightly_drafted_wall_keys_the_same_as_an_undrafted_one() -> None:
+    """The draft tilts out of the face plane, which the projection ignores."""
+    face = FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 0.0, 1.0),
+            w=(0.0, -1.0, 0.0),
+        )
+    )
+    tilt = math.radians(2.5)
+    drafted = (0.0, -math.sin(tilt), -math.cos(tilt))
+    assert surface_key(_synthetic_wall(outward=drafted), face) == "bottom"
+
+
+# ---------------------------------------------------------------------------
+# A real supplied model discovers and answers for its own walls (Task 16)
+# ---------------------------------------------------------------------------
+
+
+def _face_frame_of(model: object) -> FaceFrame:
+    """``model``'s own drilled-face registration, named so a test reads the
+    two frames it converts between."""
+    return model.frame  # type: ignore[attr-defined]
+
+
+def _solid_named(payload: bytes, keyword: str) -> object:
+    """One named solid read back from an emitted STEP ``payload``.
+
+    Round-tripped through a scratch file because ``read_step`` reads a path,
+    never bytes directly -- the same route ``test_step_cut.py`` uses to
+    verify a cut, so this checks what a consumer of the file would see.
+    """
+    import tempfile
+
+    from stompgeom.step import read_step
+
+    with tempfile.TemporaryDirectory() as scratch:
+        target = Path(scratch) / "cut.stp"
+        target.write_bytes(payload)
+        return read_step(target).named(keyword)[0].shape
+
+
+def _drilled_right_wall(hammond_path: Path):
+    """Cut one hole into the real casting's right wall: the whole of phase B.
+
+    Factored out so the cutting test below drills the same hole without
+    restating the ray or the feature that produces it.
+    """
+    model = load_case_model(hammond_path, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    wall = next(surface for surface in model.walls if surface.key == "right")
+    outside = wall.frame.basis.to_model(
+        Nanometre(0), Nanometre(0), Nanometre(wall.thickness_nm + 5_000_000)
+    )
+    face = _face_frame_of(model)
+    origin = face.basis.to_canonical(outside)
+    feature = WallFeature(
+        designator="J1",
+        board=1,
+        origin_nm=tuple(nm_from_mm(value) for value in origin),  # type: ignore[arg-type]
+        direction=(
+            dot(wall.frame.basis.w, face.basis.u),
+            dot(wall.frame.basis.w, face.basis.v),
+            dot(wall.frame.basis.w, face.basis.w),
+        ),
+        profile=Profile(
+            steps=((Nanometre(4_750_000), Nanometre(0), Nanometre(10_000_000)),)
+        ),
+    )
+    data = DrillData(
+        case=CaseRegistration("1590B", CaseFace.BOX, hammond_path.name, face),
+        surfaces=(),
+    )
+    found = DrillWalls(model, (feature,), DRILL_STANDARDS[DEFAULT_STANDARD]).apply(data)
+    return model, found
+
+
+@pytest.mark.hammond
+def test_a_loaded_model_satisfies_the_wall_contract(hammond_b: Path) -> None:
+    model = load_case_model(
+        hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000)
+    )
+    assert isinstance(model, WallModel)
+    assert sorted(surface.key for surface in model.walls) == [
+        "bottom", "left", "right", "top"
+    ]
+
+
+@pytest.mark.hammond
+def test_the_middle_of_every_wall_is_drillable(hammond_b: Path) -> None:
+    """A wall's datum is the centre of its own region, so it had better be inside it."""
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    for surface in model.walls:
+        assert model.admits(surface.key, Nanometre(0), Nanometre(0)) is True
+
+
+@pytest.mark.hammond
+def test_a_point_past_a_wall_s_own_bounds_is_not_drillable(hammond_b: Path) -> None:
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    for surface in model.walls:
+        _x0, _y0, x1, _y1 = surface.bounds_nm
+        assert model.admits(surface.key, Nanometre(x1 + 1_000_000), Nanometre(0)) is False
+
+
+@pytest.mark.hammond
+def test_a_hole_in_the_middle_of_a_wall_is_accepted_at_a_sane_diameter(
+    hammond_b: Path,
+) -> None:
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    centre = (Nanometre(0), Nanometre(0))
+    for surface in model.walls:
+        assert model.classify_wall(surface.key, centre, centre, Nanometre(4_000_000)) is None
+
+
+@pytest.mark.hammond
+def test_a_hole_wider_than_the_wall_is_refused_as_off_face(hammond_b: Path) -> None:
+    """A ⌀60 hole in a 26 mm wall leaves it on both sides, whatever else is behind."""
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    centre = (Nanometre(0), Nanometre(0))
+    for surface in model.walls:
+        assert model.classify_wall(
+            surface.key, centre, centre, Nanometre(30_000_000)
+        ) is Rejection.OFF_FACE
+
+
+@pytest.mark.hammond
+def test_a_wall_hole_is_cut_end_to_end_from_a_hand_built_feature(hammond_b: Path) -> None:
+    """The whole of phase B, on a real casting, with the dock half stood in for.
+
+    The ray is derived from the discovered wall's own frame rather than typed:
+    a coordinate typed here would be a second statement of where that wall is.
+    """
+    _model, found = _drilled_right_wall(hammond_b)
+    assert [d.code for d in found.diagnostics] == []
+    assert len(found.holes) == 1
+    assert found.holes[0].surface == "right"
+    assert found.holes[0].diameter_nm == 9_500_000
+    assert [surface.key for surface in found.surfaces or ()] == ["right"]
+
+
+@pytest.mark.hammond
+def test_the_wall_hole_this_stage_placed_is_cut_into_the_model(
+    tmp_path: Path, hammond_b: Path
+) -> None:
+    """Plan 1 taught the cutter a wall's own axis; this is the first real wall to cut.
+
+    Measured on the emitted solid's volume rather than on its bytes: what is
+    being checked is that metal left, and by roughly the cylinder's worth.
+    """
+    from stompdrill.emitters.step import StepEmitter, StepOptions
+    from stompgeom.shapes import volume_mm3
+
+    model, data = _drilled_right_wall(hammond_b)
+    routed = RouteHoles().apply(data)
+    before = volume_mm3(model.target_shape)
+    payload = StepEmitter(StepOptions(model=model)).emit(routed)
+    after = volume_mm3(_solid_named(payload, "BOX"))
+    assert routed.surfaces is not None
+    bore = math.pi * 4.75**2 * mm_from_nm(routed.surfaces[0].thickness_nm)
+    assert before - after == pytest.approx(bore, rel=0.02)
+
+
+@pytest.mark.hammond
+def test_a_hole_over_the_floor_fillet_behind_a_wall_is_through_boss(hammond_b: Path) -> None:
+    """Ruling 2's own discriminator: the wall's own lower edge, where the
+    inner face ends at the floor fillet before the outer face does.
+
+    Every test above still passes with the inner check deleted -- none of
+    them reaches a point where the two regions disagree. This one does: a
+    point just inside the outer region's own bound, derived from
+    ``bounds_nm`` rather than typed, sits past where the inner region's
+    fillet has already retreated.
+    """
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    surface = next(surface for surface in model.walls if surface.key == "right")
+    _x0, y0, _x1, _y1 = surface.bounds_nm
+    # Measured directly against the real regions at radius/margin zero: outer
+    # accepts and inner rejects from y0+200,000 through y0+2,900,000 nm. Both
+    # offsets below sit inside that band, with room either side of them.
+    edge = (Nanometre(0), Nanometre(y0 + 1_000_000))
+    assert (
+        model.classify_wall(surface.key, edge, edge, Nanometre(50_000))
+        is Rejection.THROUGH_BOSS
+    )
+
+
+@pytest.mark.hammond
+def test_a_lid_with_no_facing_wall_plate_loads_with_no_walls(hammond_a: Path) -> None:
+    """1590A's lid is a flat closure plate: none of its four lateral levels
+    has a facing companion, because there is nothing behind them to face.
+    That is a fact about this lid, not a load failure -- wall drilling is
+    opt-in, and a feature naming an unreachable wall is refused downstream,
+    by name, as ``wall-feature-unreachable``.
+    """
+    model = load_case_model(hammond_a, face=CaseFace.LID, margin_nm=Nanometre(500_000))
+    assert model.walls == ()
+
+
+@pytest.mark.hammond
+def test_the_same_enclosure_s_box_still_finds_its_four_walls(hammond_a: Path) -> None:
+    """The tolerant path must not swallow the ordinary case: 1590A's own box
+    finds its four walls exactly as any other catalogued enclosure's does.
+    """
+    model = load_case_model(hammond_a, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert sorted(surface.key for surface in model.walls) == [
+        "bottom", "left", "right", "top"
+    ]
+
+
+@pytest.mark.hammond
+def test_a_key_naming_no_discovered_wall_is_refused_through_both_questions(
+    hammond_b: Path,
+) -> None:
+    """``_wall``'s own lookup failure, reached through the two public
+    questions that share it -- an untested raise is a raise whose message
+    nobody has read.
+    """
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    centre = (Nanometre(0), Nanometre(0))
+    with pytest.raises(StompdrillError, match="no diagonal wall"):
+        model.admits("diagonal", Nanometre(0), Nanometre(0))
+    with pytest.raises(StompdrillError, match="no diagonal wall"):
+        model.classify_wall("diagonal", centre, centre, Nanometre(4_000_000))
+
+
+@pytest.mark.hammond
+def test_a_wall_that_cannot_be_framed_leaves_no_walls_and_not_a_failed_load(
+    hammond_b: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard covers discovery *and* everything discovery's answer is put through.
+
+    Framing a wall, keying it, building its two regions and stating its record
+    can each refuse, and a load the panel's own face never needed must not turn
+    into a hard error because one of them did. ``build_wall_frame`` stands for
+    the four: patched to refuse, the model loads with no walls at all.
+    """
+    from stompdrill.cad import walls as walls_module
+
+    def refuse(*_args: object, **_kwargs: object) -> FaceFrame:
+        raise StompdrillError("degenerate wall frame")
+
+    monkeypatch.setattr(walls_module, "build_wall_frame", refuse)
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert model.walls == ()
+    assert dict(model.wall_regions) == {}

@@ -39,8 +39,16 @@ from stompmodel.protocols import (
 )
 from stompmodel.units import Nanometre, format_nm, nm_from_mm
 
-from .compose import admit, board_geometry, build_pipeline, derived_tolerance, docked, registration
-from .designators import parse_filter
+from .compose import (
+    admit,
+    admit_walls,
+    board_geometry,
+    build_pipeline,
+    derived_tolerance,
+    docked,
+    registration,
+)
+from .designators import NOTHING, parse_filter
 from .emitters import AssemblyEmitter, ReportEmitter
 from .emitters.assembly import Solids
 from .errors import UsageError
@@ -58,7 +66,9 @@ __all__ = [
     "parse_place",
     "parse_pin",
     "admit",
+    "admit_walls",
     "board_geometry",
+    "format_wall_features",
 ]
 
 #: The two fixed artefacts, named where the flags that request them are.
@@ -108,6 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="which designators are panel references, e.g. 'RV*,SW*,D(3..4),!RV5'; "
         "required, because a default would be a pedal-specific fact",
+    )
+    parser.add_argument(
+        "--wall-reference",
+        metavar="EXPR",
+        default=None,
+        help="which designators may meet a wall, e.g. 'J*,!J3'; the same grammar "
+        "as --panel-reference and no default, because nothing is cut into a wall "
+        "unless you name the part",
     )
     parser.add_argument(
         "--match-tolerance",
@@ -436,8 +454,81 @@ def format_summary(data: DockData) -> list[str]:
     return ["", ", ".join(parts)]
 
 
+def format_wall_features(data: DockData) -> list[str]:
+    """What this run measured, what it found nothing of, and what it excused.
+
+    Absent, not empty, when nothing was asked: a builder who passed no wall
+    expression asked no question, and a heading over nothing reads like a
+    failure. The widest radius the profile states, not a diameter: which wall
+    a ray meets, and so the span that sizes the hole, is not known here. A
+    named part with no in-plane feature is not a diagnostic -- a glob naming
+    a jack may also name a header -- but a silent report would let a builder
+    believe the expression found something.
+    """
+    unmeasured = sorted(
+        (board.ordinal, component.designator)
+        for board in data.boards
+        for component in board.components
+        if component.wall_admitted and not component.wall
+    )
+    # Keyed on ``wall`` itself, as ``Clashes._excluded`` is: a part the
+    # expression named and measured nothing of is still held to its
+    # interference, so listing it here would be a false account of a finding
+    # the report still carries. Excused rather than excused *a clash*: the
+    # exclusion is what a part is exempt from, and a part standing clear of
+    # the wall it points at had no clash to lose.
+    excused = sorted(
+        (board.ordinal, component.designator)
+        for board in data.boards
+        for component in board.components
+        if component.wall
+    )
+    if not data.wall_features and not unmeasured:
+        return []
+    lines = ["", f"WALL FEATURES ({len(data.wall_features)})"]
+    for feature in data.wall_features:
+        widest = max(radius for radius, _low, _high in feature.profile.steps)
+        bore = (
+            ""
+            if feature.bore_nm is None
+            else f"  bore radius {format_nm(feature.bore_nm)} mm"
+        )
+        lines.append(
+            _field(
+                f"#{feature.board} {feature.designator}",
+                f"at ({format_nm(feature.origin_nm[0])}, {format_nm(feature.origin_nm[1])}, "
+                f"{format_nm(feature.origin_nm[2])}) mm  "
+                f"along ({feature.direction[0]:+.3f}, {feature.direction[1]:+.3f}, "
+                f"{feature.direction[2]:+.3f})  "
+                f"widest radius {format_nm(Nanometre(widest))} mm{bore}",
+            )
+        )
+    if excused:
+        # Interference is this tool's deliverable, so a clash decision 12
+        # dropped from the ranking cannot simply be absent: a composed run
+        # answers for it with the drill half's own refusals, and standalone
+        # this line is the whole account there is.
+        lines.append(
+            "  excused from case clashes: "
+            + ", ".join(f"#{ordinal} {part}" for ordinal, part in excused)
+        )
+    if unmeasured:
+        lines.append(f"  named, no feature ({len(unmeasured)})")
+        lines.extend(
+            f"    #{ordinal} {designator}  named by --wall-reference; "
+            f"no in-plane feature was measured"
+            for ordinal, designator in unmeasured
+        )
+    return lines
+
+
 def format_report(data: DockData) -> str:
-    return "\n".join(format_case(data) + format_boards(data) + format_diagnostics(data))
+    return "\n".join(
+        format_case(data)
+        + format_boards(data)
+        + format_wall_features(data)
+        + format_diagnostics(data)
+    )
 
 
 def format_stage(stage: Stage[DockData], before: DockData, after: DockData) -> str:
@@ -508,6 +599,9 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
     # comes from has to be read first; it is still a usage failure, so the
     # distinction costs no exit code.
     panel_reference = parse_filter(args.panel_reference)
+    wall_reference = (
+        NOTHING if args.wall_reference is None else parse_filter(args.wall_reference)
+    )
     tolerance_nm = (
         None
         if args.match_tolerance is None
@@ -518,14 +612,19 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     drill = Path(args.drill)
     source = BoardSource(
-        drill, [Path(board) for board in args.boards], Path(args.case_model)
+        drill,
+        [Path(board) for board in args.boards],
+        Path(args.case_model),
+        wall_reference=wall_reference,
     )
     try:
         scan = source.scan()
         if tolerance_nm is None:
             tolerance_nm = derived_tolerance(scan.drill, drill)
         case = registration(scan, drill)
-        data = admit(docked(scan, case), panel_reference)
+        data = admit_walls(
+            admit(docked(scan, case), panel_reference), wall_reference, panel_reference
+        )
         geometry = board_geometry(scan, case)
         pipeline = build_pipeline(
             tolerance_nm,

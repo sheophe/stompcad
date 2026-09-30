@@ -26,6 +26,12 @@ from ..cad import CaseModel, Rejection
 
 __all__ = ["CheckCaseClearance"]
 
+#: What each refusal means, in the clause a finding reads. Private, because
+#: this stage is its only reader: every clause names the drilled plate, which
+#: is what this stage checks, and a wall is a surface and not a face
+#: (``docs/GLOSSARY.md``), so ``pipeline.walls`` states the same three
+#: refusals in its own surface-neutral clauses rather than borrowing these --
+#: neither set reads correctly in the other's sentence.
 _REASON: dict[Rejection, str] = {
     Rejection.OFF_FACE: "lies outside the drilled face",
     Rejection.THROUGH_BOSS: "meets a boss or rib in the plate",

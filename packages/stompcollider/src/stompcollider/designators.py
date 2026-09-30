@@ -15,7 +15,7 @@ from fnmatch import translate
 
 from stompcollider.errors import UsageError
 
-__all__ = ["Term", "Filter", "parse_filter"]
+__all__ = ["Term", "Filter", "NOTHING", "parse_filter"]
 
 _RANGE = re.compile(r"^(?P<prefix>[^()]+)\((?P<lo>-?\d+)\.\.(?P<hi>-?\d+)\)$")
 
@@ -48,6 +48,10 @@ class Filter:
     """An ordered sequence of terms, applied left to right by ``admit``."""
 
     terms: tuple[Term, ...]
+    #: The expression this was parsed from, for a diagnostic that has to name
+    #: it. Last and defaulting, so a hand-built filter stays a one-argument
+    #: construction; ``parse_filter`` is the only thing that fills it.
+    source: str = ""
 
     def admit(self, designators: Iterable[str]) -> frozenset[str]:
         present = tuple(designators)
@@ -59,6 +63,13 @@ class Filter:
             else:
                 kept |= matched
         return frozenset(kept)
+
+
+#: The filter that admits nothing, which is what a wall reference is until a
+#: builder names a part. Stated here rather than as ``Filter(())`` at each
+#: caller: ``parse_filter`` refuses an empty expression, so the absence of
+#: one has to be a value and not a parse.
+NOTHING: Filter = Filter(())
 
 
 def _compile_range(prefix: str, lo_text: str, hi_text: str) -> re.Pattern[str]:
@@ -106,4 +117,4 @@ def parse_filter(expression: str) -> Filter:
             raise UsageError(f"negation with no pattern in designator filter: {text!r}")
         terms.append(Term(_compile_term(pattern), negated))
 
-    return Filter(tuple(terms))
+    return Filter(tuple(terms), source=expression)

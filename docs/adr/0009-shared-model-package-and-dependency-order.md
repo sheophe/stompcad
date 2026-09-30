@@ -20,6 +20,8 @@ This ADR adds `stompmodel` to the four packages decided in
 - Record `stompcad` as a built member rather than a planned one. Its own
   decisions are
   [ADR-0013](0013-the-orchestrator-s-presentation-and-composed-run.md).
+- Move `Profile` and `admitting_radius` into `stompmodel`, because `stompdrill`
+  now reads a component's radial profile too.
 
 The decisions and their reasons are set out below.
 
@@ -88,6 +90,8 @@ It holds:
 - `StompError`, with `EmitterError` and `DocumentError` beneath it. Each tool's
   error base, including `StompdrillError`, descends from `StompError`. Callers can
   catch all workspace errors together while retaining tool-specific types.
+- `Profile` and the `admitting_radius` it is queried with, stating a component's
+  radius-versus-depth stack and the radius a hole of a given diameter admits.
 
 Only the following four admission rules permit additions to `stompmodel`.
 
@@ -342,3 +346,18 @@ come from a typed document member or recorded provenance. The human-facing
 report must be reproducible from the document alone, without values held only
 by a live pipeline run. `CaseRegistration` prompted this requirement, but it
 applies to every future member.
+
+### Amendment: `Profile` and `admitting_radius` belong to the shared package
+
+**Accepted.** `stompdrill` now reads a component's radial profile: a wall hole's diameter is
+the material within the wall's span, and the span is answered by `Profile.radius_at`. A value
+`stompcollider` writes and `stompdrill` reads is the shared model's, by this ADR's own rule,
+so `Profile` and the `admitting_radius` that states what a hole of a given diameter admits
+move to `stompmodel.model`. `stompcollider.model` re-exports both, so no caller changes.
+
+`Protrusion` does not move. It is read by `Match` and `Seat` alone, both inside
+`stompcollider`, and a value only one package names does not belong in the leaf -- putting it
+there would make the leaf the place values go rather than the place shared values go.
+
+The dependency order is unchanged: nothing new depends on anything, and the edge
+`stompcollider -> stompmodel` this uses already existed.

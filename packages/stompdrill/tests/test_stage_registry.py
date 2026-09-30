@@ -18,12 +18,15 @@ __all__: list[str] = []
 
 SOURCE = Path(__file__).resolve().parent.parent / "src" / "stompdrill"
 
-#: The six stages this package defines. Update deliberately, with a weight.
+#: The seven stages this package defines. Update deliberately, with a weight.
+#: ``DrillWalls`` is among them and is composed by nobody here: only the
+#: orchestrator has a seating to drill a wall from.
 EXPECTED = {
     "CheckCaseClearance",
     "CheckOutlineContainment",
     "CheckReferenceSize",
     "Deduplicate",
+    "DrillWalls",
     "ReviewGridTies",
     "RouteHoles",
 }

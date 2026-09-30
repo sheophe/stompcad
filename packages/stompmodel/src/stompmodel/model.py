@@ -17,7 +17,7 @@ from .diagnostics import Diagnostic, ParameterValue, Severity, _check_payload_le
 from .diagnostics import of_severity as _of_severity
 from .diagnostics import worst_severity as _worst_severity
 from .errors import EmitterError
-from .frames import FaceFrame
+from .frames import FaceFrame, check_unit_direction
 from .units import (
     Millimetre,
     Nanometre,
@@ -38,6 +38,9 @@ __all__ = [
     "EnclosureMatch",
     "CaseFace",
     "CaseRegistration",
+    "admitting_radius",
+    "Profile",
+    "WallFeature",
     "DrilledSurface",
     "SourceInfo",
     "StageRun",
@@ -342,6 +345,114 @@ class CaseRegistration:
             raise ValueError(
                 "a case registration names a part, a face and the model file it came from"
             )
+
+
+def admitting_radius(diameter_nm: Nanometre) -> Nanometre:
+    """The radius a hole of ``diameter_nm`` admits.
+
+    Stated once because two callers need the same number: the reader probes
+    a solid at it and ``Match`` queries a profile with it, and two spellings
+    of one rule would let a part be measured against one radius and judged
+    against another. The hole's own radius exactly -- how much wider than a
+    part its hole must be is not a number this tool is told any more, and
+    what really arrests a board is the enclosure it is searched against.
+    """
+    check_nanometres("admitting_radius", diameter_nm=diameter_nm)
+    if diameter_nm <= 0:
+        raise ValueError(f"a hole has a positive diameter, not {diameter_nm}")
+    return Nanometre(diameter_nm // 2)
+
+
+@dataclass(frozen=True, slots=True)
+class Profile:
+    """A component's radius-versus-depth stack: how wide it is, and where.
+
+    Each step is ``(radius_nm, depth_from_tip_min_nm, depth_from_tip_max_nm)``
+    and states material *at least* that wide over those depths -- steps
+    overlap freely, and the widest covering one is what a hole must admit
+    there. A profile with no admissible cylinder has no representable
+    profile at all -- see ``stompcollider-technical.md``'s "Protrusions".
+    """
+
+    steps: tuple[tuple[Nanometre, Nanometre, Nanometre], ...]
+
+    def __post_init__(self) -> None:
+        if not self.steps:
+            raise ValueError("a profile needs at least one step")
+        for index, (radius_nm, low_nm, high_nm) in enumerate(self.steps):
+            check_nanometres(
+                f"Profile.steps[{index}]",
+                radius_nm=radius_nm,
+                low_nm=low_nm,
+                high_nm=high_nm,
+            )
+
+    def radius_at(self, depth_nm: Nanometre) -> Nanometre:
+        """The greatest radius of any step covering ``depth_nm``.
+
+        Greatest rather than last: a stack's steps may overlap in depth, and
+        the widest feature at a depth is what a hole must admit there.
+        """
+        covering = [
+            radius for radius, low, high in self.steps if low <= depth_nm <= high
+        ]
+        return Nanometre(max(covering)) if covering else Nanometre(0)
+
+    def insertion_through(self, radius_nm: Nanometre) -> Nanometre | None:
+        """The least depth at which this profile exceeds ``radius_nm``.
+
+        ``None`` when it never does: the part passes fully. Evaluated on the
+        step boundaries alone, because the profile is piecewise constant.
+        """
+        beyond = sorted(low for radius, low, _high in self.steps if radius > radius_nm)
+        return Nanometre(beyond[0]) if beyond else None
+
+    def meets(self, radius_nm: Nanometre) -> bool:
+        """Whether some step states material at exactly ``radius_nm``.
+
+        The interference fit the report names ``zero-clearance``: a bush
+        measuring 12.000 mm into a 12.000 mm hole passes, because
+        :meth:`insertion_through` is strict, and passes with nothing to
+        spare. Exact equality of whole nanometres, never a tolerance --
+        anything the canonical representation cannot state is not a fact.
+        """
+        return any(radius == radius_nm for radius, _low, _high in self.steps)
+
+
+@dataclass(frozen=True, slots=True)
+class WallFeature:
+    """One seated component's cylindrical feature, as a ray in the case's face frame.
+
+    ``origin_nm`` is the feature's tip and ``direction`` the unit ray leading
+    away from its board, so a depth in ``profile`` sits at
+    ``origin_nm - depth · direction``. Neither sign of an in-plane axis is
+    known to point at a wall, so a component states one of these per sign and
+    the drill side resolves them against the walls it found. ``bore_nm`` is a
+    floor on the radius a hole must admit rather than a step of the profile: a
+    plug enters the bore however little material surrounds it there.
+    """
+
+    designator: str
+    board: int
+    origin_nm: tuple[Nanometre, Nanometre, Nanometre]
+    direction: tuple[float, float, float]
+    profile: Profile
+    bore_nm: Nanometre | None = None
+
+    def __post_init__(self) -> None:
+        if not self.designator:
+            raise ValueError(
+                "a wall feature needs the designator of the component it was measured from"
+            )
+        if self.board < 1:
+            raise ValueError(f"boards are numbered from 1, not {self.board}")
+        lengths = {f"origin_nm[{i}]": v for i, v in enumerate(self.origin_nm)}
+        if self.bore_nm is not None:
+            lengths["bore_nm"] = self.bore_nm
+        check_nanometres("WallFeature", **lengths)
+        check_unit_direction("WallFeature.direction", self.direction)
+        if self.bore_nm is not None and self.bore_nm <= 0:
+            raise ValueError(f"a bore a plug passes through has a positive radius, not {self.bore_nm}")
 
 
 #: A surface's extent is a rectangle, so it is exactly four values.

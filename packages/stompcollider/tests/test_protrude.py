@@ -16,13 +16,23 @@ from typing import Any
 
 import pytest
 
+from stompcollider.boards import carrier_frame, group, substrates
 from stompcollider.canonicalise import _canonicalise_component
 from stompcollider.model import Profile
-from stompcollider.protrude import admissible, protrusion_of
+from stompcollider.protrude import (
+    admissible,
+    bore_of,
+    clad_length,
+    in_plane,
+    protrusion_of,
+    wall_axis,
+    wall_features_of,
+)
 from stompcollider.raw import RawComponent
 from stompgeom.cylinders import Cylinder, cylindrical_faces
 from stompgeom.step import StepDocument, StepSolid, read_step
-from stompmodel.units import Nanometre, mm_from_nm
+from stompmodel.frames import dot
+from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
 
@@ -567,3 +577,364 @@ def test_a_probe_exactly_on_a_tangent_face_finds_no_more_than_a_narrower_one(
     tangent_band = bands[mm_from_nm(Nanometre(tangent + 1))]
 
     assert tangent_band.depth_from_tip_min_mm >= narrower_band.depth_from_tip_min_mm
+
+
+# --------------------------------------------------------------------------
+# A wall feature's axis is the one its material clads the most of
+# --------------------------------------------------------------------------
+
+
+def _a_face(
+    radius: float,
+    direction: tuple[float, float, float],
+    extent: tuple[float, float],
+    at: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    concave: bool = False,
+) -> Cylinder:
+    """One cylindrical face stated directly, for a measure that reads only fields."""
+    return Cylinder(
+        axis_location_mm=at,
+        axis_direction=direction,
+        radius_mm=radius,
+        extent_mm=extent,
+        concave=concave,
+    )
+
+
+def test_a_part_with_no_in_plane_cylinder_has_no_wall_axis() -> None:
+    """A part that only protrudes through the panel reaches no wall."""
+    solid = StepSolid(name="RV1", shape=_pin(3.0, 8.0))
+    assert wall_axis(solid, (0.0, 0.0, 1.0)) is None
+
+
+def test_the_axis_with_the_most_material_along_it_wins() -> None:
+    """Two in-plane axes, one clad 20 mm and one clad 1 mm: the long one is the feature.
+
+    Built rather than measured so the margin is stated, not inherited: the
+    committed board's own separation is asserted separately below.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+
+    barrel = _pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    pin = _pin(0.5, 1.0, at=(5.0, 0.0, 0.0), along=(0.0, 1.0, 0.0))
+    fused = BRepAlgoAPI_Fuse(barrel, pin)
+    assert fused.IsDone()
+    solid = StepSolid(name="J1", shape=fused.Shape())
+
+    found = wall_axis(solid, (0.0, 0.0, 1.0))
+    assert found is not None
+    assert abs(dot(found, (1.0, 0.0, 0.0))) == pytest.approx(1.0)
+
+
+def test_two_short_features_far_apart_on_one_line_do_not_outrank_a_long_one() -> None:
+    """The measure the plan corrects the spec on, stated as a fixture.
+
+    Two 0.5 mm rings 16 mm apart span 17 mm and clad 1 mm. A span measure
+    prefers them to a 10 mm barrel; a clad measure does not, and it is the
+    clad length a hole has to admit.
+    """
+    ring_low = _pin(0.5, 0.5, at=(0.0, 0.0, 0.0), along=(0.0, 1.0, 0.0))
+    ring_high = _pin(0.5, 0.5, at=(0.0, 16.0, 0.0), along=(0.0, 1.0, 0.0))
+    faces = cylindrical_faces(ring_low) + cylindrical_faces(ring_high)
+    assert clad_length(faces, (0.0, 1.0, 0.0)) == pytest.approx(1.0)
+
+
+def test_a_seam_s_two_halves_clad_the_same_length_as_one_whole_face() -> None:
+    """Invariance to tessellation, which is the reason for this measure.
+
+    One surface reported as two patches covering the same extent must not
+    count double -- ``cylindrical_faces`` reports per face and says a
+    consumer owes that its own answer.
+    """
+    whole = _a_face(radius=2.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 10.0))
+    halves = (
+        _a_face(radius=2.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 6.0)),
+        _a_face(radius=2.0, direction=(1.0, 0.0, 0.0), extent=(4.0, 10.0)),
+    )
+    assert clad_length((whole,), (1.0, 0.0, 0.0)) == pytest.approx(10.0)
+    assert clad_length(halves, (1.0, 0.0, 0.0)) == pytest.approx(10.0)
+
+
+@pytest.mark.boards
+def test_the_committed_board_s_jacks_measure_what_the_plan_recorded(
+    document: StepDocument,
+) -> None:
+    """Decision 7's Evidence, as assertions. A drift here fails a suite.
+
+    Both jacks, not one: they are mirrored on the board and a rule reading
+    the kernel's walk order would answer differently for the pair.
+    """
+    for substrate, parts in group(document, substrates(document)):
+        normal = carrier_frame(substrate).w  # type: ignore[union-attr]
+        for part in parts:
+            if part.name not in {"J1", "J4"}:
+                continue
+            faces = in_plane(part, normal)
+            assert len(faces) == 12
+            assert admissible(part, normal) == ()
+            axis = wall_axis(part, normal)
+            assert axis is not None
+            assert clad_length(
+                [f for f in faces if f.is_parallel_to(axis)], axis
+            ) == pytest.approx(24.484, abs=1e-3)
+            pins = [f for f in faces if not f.is_parallel_to(axis)]
+            assert len(pins) == 4
+            assert {round(f.radius_mm, 3) for f in pins} == {0.550}
+            assert clad_length(pins, pins[0].axis_direction) == pytest.approx(1.0)
+
+
+@pytest.mark.boards
+def test_the_committed_board_s_bore_is_never_wider_than_its_own_material(
+    document: StepDocument,
+) -> None:
+    """Why Task 5 has to build a fixture: this one cannot exercise the bore branch."""
+    for substrate, parts in group(document, substrates(document)):
+        normal = carrier_frame(substrate).w  # type: ignore[union-attr]
+        for part in parts:
+            if part.name != "J1":
+                continue
+            faces = in_plane(part, normal)
+            axis = wall_axis(part, normal)
+            assert axis is not None
+            assert bore_of(faces, axis) == pytest.approx(4.150)
+            widest = max(f.radius_mm for f in faces if f.is_parallel_to(axis))
+            assert widest == pytest.approx(7.530)
+
+
+# --------------------------------------------------------------------------
+# bore_of reads the deepest-clad coaxial class, not every parallel face
+# --------------------------------------------------------------------------
+
+
+def _a_bore_fixture() -> tuple[Cylinder, ...]:
+    """A winning coaxial class and a shorter, wider, off-axis concave face.
+
+    The winning class clads 10 mm on one line and carries a 2 mm bore; a
+    second, parallel line 8 mm away clads only 1 mm but carries a wider,
+    5 mm bore. A rule reading every parallel face would report the wider
+    bore; a rule reading only the winning line's own material would not.
+    """
+    return (
+        _a_face(radius=6.0, direction=(0.0, 0.0, 1.0), extent=(0.0, 10.0)),
+        _a_face(
+            radius=2.0,
+            direction=(0.0, 0.0, 1.0),
+            extent=(0.0, 10.0),
+            concave=True,
+        ),
+        _a_face(
+            radius=5.0,
+            direction=(0.0, 0.0, 1.0),
+            extent=(0.0, 1.0),
+            at=(8.0, 0.0, 0.0),
+            concave=True,
+        ),
+    )
+
+
+def test_bore_of_reads_the_winning_lines_own_bore_not_a_wider_offset_one() -> None:
+    """Decision: coaxial, not merely parallel -- a hole is cut on one ray."""
+    faces = _a_bore_fixture()
+
+    assert bore_of(faces, (0.0, 0.0, 1.0)) == pytest.approx(2.0)
+
+
+def test_reordering_the_faces_does_not_change_which_bore_wins() -> None:
+    """ADR-0006's own control: two spellings of one face list agree."""
+    faces = _a_bore_fixture()
+
+    assert bore_of(faces, (0.0, 0.0, 1.0)) == bore_of(
+        tuple(reversed(faces)), (0.0, 0.0, 1.0)
+    )
+
+
+def test_bore_of_is_none_when_nothing_is_concave() -> None:
+    """The documented ``None`` branch, exercised directly rather than by
+    absence: a face set that is parallel and coaxial but wholly convex."""
+    faces = (
+        _a_face(radius=3.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 5.0)),
+        _a_face(radius=1.0, direction=(1.0, 0.0, 0.0), extent=(0.0, 5.0)),
+    )
+
+    assert bore_of(faces, (1.0, 0.0, 0.0)) is None
+
+
+# --------------------------------------------------------------------------
+# wall_features_of: both signs of the in-plane axis, in the board's own frame
+# --------------------------------------------------------------------------
+
+
+def test_a_part_with_no_in_plane_cylinder_yields_no_wall_feature() -> None:
+    solid = StepSolid(name="RV1", shape=_pin(3.0, 8.0))
+    assert wall_features_of(solid, (0.0, 0.0, 1.0)) == ()
+
+
+def test_a_wall_feature_is_measured_both_ways_along_its_axis() -> None:
+    """Neither sign is known to point at a wall, so neither is chosen here."""
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    found = wall_features_of(solid, (0.0, 0.0, 1.0))
+    assert len(found) == 2
+    first, second = found
+    assert first.direction == tuple(-c for c in second.direction)
+    assert first.tip_mm != second.tip_mm
+
+
+def test_the_pair_comes_back_in_an_order_the_geometry_fixes() -> None:
+    """Ordered on the direction itself: a loop's order must reach no artefact."""
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    found = wall_features_of(solid, (0.0, 0.0, 1.0))
+    assert [f.direction for f in found] == sorted(f.direction for f in found)
+
+
+def test_the_tip_is_the_far_end_of_the_part_along_its_own_direction() -> None:
+    """A 20 mm rod from the origin: one sign tips at 20, the other at 0."""
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    tips = {
+        round(f.direction[0]): pytest.approx(f.tip_mm[0], abs=1e-9)
+        for f in wall_features_of(solid, (0.0, 0.0, 1.0))
+    }
+    assert tips[1] == 20.0
+    assert tips[-1] == 0.0
+
+
+def test_a_tube_s_bore_is_measured_off_the_solid_and_not_assumed() -> None:
+    """The read the committed board cannot make govern -- ruling 7.
+
+    A tube, not a jack: what is under test is that a concave coaxial face
+    reaches ``bore_mm`` at all. Whether a bore *governs* a diameter is
+    arithmetic over a profile, and the drill side drives that.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    outer = _pin(5.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    bore = _pin(3.0, 30.0, at=(-5.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    cut = BRepAlgoAPI_Cut(outer, bore)
+    assert cut.IsDone()
+    solid = StepSolid(name="J9", shape=cut.Shape())
+
+    found = wall_features_of(solid, (0.0, 0.0, 1.0))
+    assert len(found) == 2
+    for feature in found:
+        assert feature.bore_mm == pytest.approx(3.0)
+
+
+def test_a_solid_part_states_no_bore_rather_than_a_zero_one() -> None:
+    solid = StepSolid(
+        name="J1",
+        shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0)),
+    )
+    assert all(f.bore_mm is None for f in wall_features_of(solid, (0.0, 0.0, 1.0)))
+
+
+@pytest.mark.boards
+def test_the_committed_board_s_jack_measures_the_stack_the_plan_recorded(
+    document: StepDocument,
+) -> None:
+    """The profile the span rule is asserted against, in whole nanometres.
+
+    Stated in nanometres and not millimetres because these are the numbers
+    ``canonicalise`` will scale to, and a float assertion here would not
+    notice the day the scaling changed.
+    """
+    for substrate, parts in group(document, substrates(document)):
+        normal = carrier_frame(substrate).w  # type: ignore[union-attr]
+        for part in parts:
+            if part.name != "J1":
+                continue
+            outward = next(
+                f for f in wall_features_of(part, normal) if f.direction[0] < 0.0
+            )
+            steps = {
+                (
+                    nm_from_mm(c.radius_mm),
+                    nm_from_mm(c.depth_from_tip_min_mm),
+                    nm_from_mm(c.depth_from_tip_max_mm),
+                )
+                for c in outward.stack
+            }
+            assert steps == {
+                (4_150_000, 0, 3_000_000),
+                (5_700_000, 0, 3_000_000),
+                (3_250_000, 3_000_000, 24_483_612),
+                (7_530_000, 3_000_000, 23_610_000),
+            }
+            assert outward.bore_mm == pytest.approx(4.150)
+
+
+def _collared_jack() -> StepSolid:
+    """A 3 mm barrel 20 mm long with an 8 mm collar on its outermost 2 mm.
+
+    The shape a wall span meets: the collar stands *outside* the wall, which
+    the barrel passes through, so the wide material is shallower than the span
+    rather than deeper. The committed board's jack is the other way round --
+    its 7.530 mm flange sits behind the wall -- so nothing measured reaches
+    this arrangement.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+
+    barrel = _pin(3.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    collar = _pin(8.0, 2.0, at=(18.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    fused = BRepAlgoAPI_Fuse(barrel, collar)
+    assert fused.IsDone()
+    return StepSolid(name="J1", shape=fused.Shape())
+
+
+def _outward(features: tuple[Any, ...]) -> Any:
+    return next(f for f in features if f.direction[0] > 0.0)
+
+
+def _widest_at(feature: Any, depth_mm: float) -> float:
+    """The widest radius the stack claims at one depth from the tip."""
+    return max(
+        band.radius_mm
+        for band in feature.stack
+        if band.depth_from_tip_min_mm <= depth_mm <= band.depth_from_tip_max_mm
+    )
+
+
+def test_a_probed_band_claims_no_material_the_part_does_not_have_at_that_depth() -> None:
+    """The wall's question is a span, not an insertion depth.
+
+    Through a panel, everything behind the first obstruction is unreachable, so
+    a band running to the part's far end is the truth about how deep it can go.
+    Across a wall's span only the material *in* the span is in the hole, and a
+    band open to the far end reports a collar standing clear of the wall as
+    though it were inside it -- which sizes the hole to the collar.
+    """
+    solid = _collared_jack()
+    found = wall_features_of(solid, _UP, probes_nm=(Nanometre(4_000_000),))
+    assert len(found) == 2
+    # 5 mm from the tip is three millimetres behind the collar, where the part
+    # is the bare barrel.
+    assert _widest_at(_outward(found), 5.0) == pytest.approx(3.0, abs=1e-6)
+
+
+def test_a_probed_band_still_states_material_that_is_in_the_span() -> None:
+    """The control: bounding a band must not stop it reporting the collar itself."""
+    found = wall_features_of(_collared_jack(), _UP, probes_nm=(Nanometre(4_000_000),))
+    assert _widest_at(_outward(found), 1.0) > 4.0
+
+
+def test_the_axis_comes_back_on_the_sign_the_direction_fixes_not_the_walk() -> None:
+    """Sign-folded, as this answer has always said it was.
+
+    ``basis_about`` flips with the sign, and ``bore_of`` separates two parallel
+    coaxial classes on where their axes sit in that basis -- so handed the sign
+    the kernel's walk happened to give, an exact clad-length tie between two
+    classes of different bore would resolve on walk order (ADR-0006). The pair
+    the caller measures is sorted either way, so folding costs it nothing.
+    """
+    solid = StepSolid(
+        name="J1", shape=_pin(4.0, 20.0, at=(0.0, 0.0, 0.0), along=(1.0, 0.0, 0.0))
+    )
+    # The part's axis is +/-X; the lesser of the two signed spellings is -X.
+    assert wall_axis(solid, _UP) == (-1.0, 0.0, 0.0)

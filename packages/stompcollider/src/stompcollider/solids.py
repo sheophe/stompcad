@@ -32,6 +32,7 @@ __all__ = [
     "boxes_overlap",
     "solid_name",
     "board_solid_name",
+    "board_designator",
     "bodies",
 ]
 
@@ -185,6 +186,18 @@ def board_solid_name(solid: StepSolid, box: BoxMm, group: str) -> str:
     name the report states is the name the model was written under.
     """
     return f"{group}:{solid.name}" if solid.name else solid_name(solid, box, group)
+
+
+def board_designator(name: str, ordinal: int) -> str:
+    """The bare component name inside one board's qualified solid name.
+
+    The inverse of :func:`board_solid_name`'s own prefix, kept beside it
+    so a reader comparing a ``Body.name`` against a ``Component.designator``
+    has one spelling of the convention to call, not a second copy of the
+    format string kept in step with this one by hand.
+    """
+    prefix = f"board:{ordinal}:"
+    return name[len(prefix):] if name.startswith(prefix) else name
 
 
 def bodies(

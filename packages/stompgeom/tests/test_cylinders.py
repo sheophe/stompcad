@@ -39,7 +39,10 @@ def _box_shape() -> Any:
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
 
-    return BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 3.0, 4.0, 5.0).Shape()
+    # Wide enough that a 2 mm-radius bore drilled through its centre clears
+    # every side face; a narrower box would let the tool graze a wall and
+    # split the bore's own face into unrelated corner remnants.
+    return BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 8.0, 8.0, 5.0).Shape()
 
 
 def _moved_along_z(shape: Any, by: float) -> Any:
@@ -56,12 +59,14 @@ def _a_cylinder(
     direction: tuple[float, float, float] = (0.0, 0.0, 1.0),
     radius: float = 1.0,
     extent: tuple[float, float] = (0.0, 4.0),
+    concave: bool = False,
 ) -> Cylinder:
     return Cylinder(
         axis_location_mm=location,
         axis_direction=direction,
         radius_mm=radius,
         extent_mm=extent,
+        concave=concave,
     )
 
 
@@ -266,3 +271,85 @@ def test_a_cylinder_across_the_line_is_not_coaxial_even_through_its_point() -> N
 def _unit(vector: tuple[float, float, float]) -> tuple[float, float, float]:
     length = math.sqrt(sum(component * component for component in vector))
     return (vector[0] / length, vector[1] / length, vector[2] / length)
+
+
+# --------------------------------------------------------------------------
+# Concavity
+# --------------------------------------------------------------------------
+
+
+def test_a_shaft_s_own_surface_is_not_concave() -> None:
+    """A solid cylinder's lateral face has its material inside the radius."""
+    found = cylindrical_faces(_cylinder_shape(radius=2.0, height=5.0))
+    assert len(found) == 1
+    assert found[0].concave is False
+
+
+def test_a_bore_through_a_solid_is_concave() -> None:
+    """The same radius read off a hole, not a shaft: the material is outside it.
+
+    Told apart by the kernel's own face orientation, never by comparing the
+    radius with anything: a 2 mm shaft and a 2 mm bore are the same surface
+    and only the side the solid is on distinguishes them.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    tool = _cylinder_shape(radius=2.0, height=20.0, at=(4.0, 4.0, -5.0))
+    cut = BRepAlgoAPI_Cut(_box_shape(), tool)
+    assert cut.IsDone()
+    bores = [found for found in cylindrical_faces(cut.Shape()) if found.concave]
+    assert len(bores) == 1
+    assert bores[0].radius_mm == pytest.approx(2.0)
+
+
+def test_concavity_defaults_to_convex_so_every_hand_built_cylinder_stays_valid() -> None:
+    """The field is last and defaults, which is what keeps positional callers working."""
+    assert _a_cylinder().concave is False
+    assert Cylinder((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0, (0.0, 4.0)).concave is False
+
+
+def test_concavity_is_a_bool_and_not_a_number_that_looks_like_one() -> None:
+    """``1`` is not a side of a surface, and an int here would read as one."""
+    with pytest.raises(TypeError, match="which side its material"):
+        _a_cylinder(concave=1)  # type: ignore[arg-type]
+
+
+def test_an_axis_in_the_plane_is_normal_to_that_plane_s_own_normal() -> None:
+    lying_along_z = _a_cylinder(direction=(0.0, 0.0, 1.0))
+    assert lying_along_z.is_normal_to((1.0, 0.0, 0.0)) is True
+    assert lying_along_z.is_normal_to((0.0, 1.0, 0.0)) is True
+
+
+def test_an_axis_along_the_normal_is_not_in_the_plane() -> None:
+    assert _a_cylinder(direction=(0.0, 0.0, 1.0)).is_normal_to((0.0, 0.0, 1.0)) is False
+
+
+def test_perpendicularity_does_not_care_which_way_either_points() -> None:
+    """A cylindrical surface's axis sign is the exporter's convention, not the part's."""
+    for direction in ((0.0, 0.0, 1.0), (0.0, 0.0, -1.0)):
+        for normal in ((1.0, 0.0, 0.0), (-1.0, 0.0, 0.0)):
+            assert _a_cylinder(direction=direction).is_normal_to(normal) is True
+
+
+def test_an_axis_a_degree_off_the_plane_is_not_in_it() -> None:
+    """The kernel's angular precision, not a tolerance chosen here."""
+    import math
+
+    tilt = math.radians(1.0)
+    off = _a_cylinder(direction=(0.0, math.sin(tilt), math.cos(tilt)))
+    assert off.is_normal_to((0.0, 1.0, 0.0)) is False
+
+
+def test_an_oblique_axis_answers_false_to_both_questions() -> None:
+    """The two predicates are opposite modes of one filter, not each other's
+    complement: an axis can lie along neither a direction nor the plane it
+    is normal to. Leaning exactly 45 degrees between x and z answers both
+    questions False against each -- proof that a caller reading "not
+    parallel" as "in the plane" would wrongly admit a part's oblique
+    feature as though it pointed somewhere it does not.
+    """
+    leaning = _a_cylinder(direction=_unit((1.0, 0.0, 1.0)))
+
+    for reference in ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)):
+        assert leaning.is_parallel_to(reference) is False
+        assert leaning.is_normal_to(reference) is False

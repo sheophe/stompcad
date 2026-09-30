@@ -11,6 +11,7 @@ measurement below is the kernel's own.
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any
 import pytest
 
 from stompcollider.boards import basis_about
+from stompcollider.designators import Filter, parse_filter
 from stompcollider.errors import StompcolliderError
 from stompcollider.raw import RawBoards
 from stompcollider.sources import BoardSource
@@ -62,6 +64,16 @@ def _cylinder(radius: float, height: float, at: tuple[float, float, float]) -> A
 
     return BRepPrimAPI_MakeCylinder(
         gp_Ax2(gp_Pnt(*at), gp_Dir(0.0, 0.0, 1.0)), radius, height
+    ).Shape()
+
+
+def _sideways(radius: float, height: float, at: tuple[float, float, float]) -> Any:
+    """A cylinder lying along the model's x axis: in the carrier plane, not through it."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    return BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(*at), gp_Dir(1.0, 0.0, 0.0)), radius, height
     ).Shape()
 
 
@@ -114,6 +126,24 @@ def _two_board_document() -> StepDocument:
     )
 
 
+def _wall_board_document() -> StepDocument:
+    """One slab and two sideways jacks, each an in-plane cylinder along x.
+
+    Two of them, so a filter that admits one has something to leave out: a
+    reader that probed everything and one that probed what was named differ
+    only where more than one part could have been named.
+    """
+    return _document(
+        [
+            _substrate(),
+            PlacedSolid(shape=_sideways(2.0, 8.0, (2.0, 5.0, 3.0)), name="J1",
+                        colour=None, placement=None),
+            PlacedSolid(shape=_sideways(2.0, 8.0, (2.0, 14.0, 3.0)), name="J2",
+                        colour=None, placement=None),
+        ]
+    )
+
+
 # --------------------------------------------------------------------------
 # Harness.
 # --------------------------------------------------------------------------
@@ -154,6 +184,7 @@ def _read_with(
     enclosure: tuple[Nanometre, Nanometre] | None,
     model_spans: tuple[float, float, float],
     board: StepDocument | None = None,
+    wall_reference: Filter | None = None,
 ) -> RawBoards:
     drill = _write_drill(tmp_path / "drill.json", enclosure)
     case, board_path = tmp_path / "case.stp", tmp_path / "board.stp"
@@ -162,7 +193,12 @@ def _read_with(
         {case: _case_spanning(*model_spans),
          board_path: board if board is not None else _board_document()},
     )
-    return BoardSource(drill, [board_path], case).read()
+    # Omitted rather than defaulted here, so a caller asking for no wall
+    # expression exercises ``BoardSource``'s own default and not a second
+    # copy of it.
+    if wall_reference is None:
+        return BoardSource(drill, [board_path], case).read()
+    return BoardSource(drill, [board_path], case, wall_reference=wall_reference).read()
 
 
 def test_a_run_with_no_board_model_to_read_is_refused(tmp_path) -> None:
@@ -535,3 +571,90 @@ def _written_case(dx: float, dy: float, dz: float) -> bytes:
         timestamp="1970-01-01T00:00:00+00:00",
         originating_system="stompcollider tests",
     )
+
+
+# --------------------------------------------------------------------------
+# The wall-reference filter, which gates the probing rather than its result.
+# --------------------------------------------------------------------------
+
+
+def _wall_features(raw: RawBoards) -> set[str]:
+    return {
+        feature.designator
+        for board in raw.boards
+        for component in board.components
+        for feature in component.wall
+    }
+
+
+def test_the_reader_measures_a_wall_feature_only_for_a_part_the_filter_admits(
+    tmp_path, monkeypatch
+) -> None:
+    """The filter reaches the reader, so an unnamed part is never probed.
+
+    Asserted on what came back, not on a call count: a count would pass on a
+    reader that probed everything and discarded the answer, which is the one
+    behaviour this is here to stop.
+    """
+    raw = _read_with(
+        tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+        board=_wall_board_document(), wall_reference=parse_filter("J1"),
+    )
+    assert _wall_features(raw) == {"J1"}
+
+
+def test_no_wall_expression_measures_no_wall_feature(tmp_path, monkeypatch) -> None:
+    """The default admits nothing, on the same board the test above probes."""
+    raw = _read_with(
+        tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+        board=_wall_board_document(),
+    )
+    assert _wall_features(raw) == set()
+    assert all(not c.wall for b in raw.boards for c in b.components)
+
+
+def test_both_signs_of_one_part_s_axis_come_back(tmp_path, monkeypatch) -> None:
+    """The reader states the pair; which sign points at a wall is not its question."""
+    raw = _read_with(
+        tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+        board=_wall_board_document(), wall_reference=parse_filter("J*"),
+    )
+    features = [f for b in raw.boards for c in b.components for f in c.wall]
+    assert len(features) == 4
+    assert {f.direction for f in features} == {(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0)}
+
+
+def test_a_named_part_with_no_in_plane_axis_is_probed_and_yields_nothing(
+    tmp_path, monkeypatch
+) -> None:
+    """Naming a part with nothing sideways costs nothing and finds nothing.
+
+    ``RV1`` protrudes along the carrier normal, so it has no in-plane
+    cylinder for the second read to measure. An expression that names it is
+    ordinary use -- a glob reaching a jack reaches a header too -- so the
+    answer is an empty tuple rather than a refusal.
+    """
+    raw = _read_with(
+        tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+        wall_reference=parse_filter("RV*"),
+    )
+    components = [c for b in raw.boards for c in b.components]
+
+    assert [c.designator for c in components] == ["RV1"]
+    assert components[0].axis_xy_mm is not None
+    assert components[0].wall == ()
+
+
+def test_the_wall_gate_cannot_be_bypassed_by_omission() -> None:
+    """Both reads state their gate; neither defaults to probing nothing.
+
+    Structural, because omission is what it guards: a caller that forgot the
+    argument would get "measure nothing" with no error, which is the one
+    answer a wall filter has no way to report.
+    """
+    empty = inspect.Parameter.empty
+    signatures = (
+        inspect.signature(source_step._component).parameters["wall_admitted"],
+        inspect.signature(source_step._board).parameters["wall_reference"],
+    )
+    assert [parameter.default for parameter in signatures] == [empty, empty]

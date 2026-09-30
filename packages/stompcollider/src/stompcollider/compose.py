@@ -34,6 +34,7 @@ __all__ = [
     "docked",
     "derived_tolerance",
     "admit",
+    "admit_walls",
     "board_geometry",
     "build_pipeline",
 ]
@@ -123,6 +124,56 @@ def admit(data: DockData, panel_reference: Filter) -> DockData:
                 )
             )
     return replace(data, boards=tuple(boards)).with_diagnostics(*diagnostics)
+
+
+def admit_walls(
+    data: DockData, wall_reference: Filter, panel_reference: Filter
+) -> DockData:
+    """Mark every component the wall filter admits, and refuse the ones both claim.
+
+    Its own function rather than a second half of :func:`admit`: ``stompcad``
+    resolves no wall expression yet, so a code raised inside a function the
+    driver calls would be recorded reachable before anything could reach it.
+    Each expression is asked here, so neither answer depends on :func:`admit`
+    having run. ``wall_admitted`` records what the expression *named*, never
+    that anything was found -- a glob reaching a jack reaches a header too --
+    so it promises no hole; what needs a feature reads ``wall`` itself.
+    """
+    designators = tuple(
+        designator for board in data.boards for designator in board.designators
+    )
+    admitted = wall_reference.admit(designators)
+    claimed = admitted & panel_reference.admit(designators)
+    boards = [
+        replace(
+            board,
+            components=tuple(
+                replace(component, wall_admitted=True)
+                if component.designator in admitted
+                else component
+                for component in board.components
+            ),
+        )
+        for board in data.boards
+    ]
+    # A finding and not a usage failure: which designators exist is decidable
+    # only once a board file has been read, and a usage error would have to be
+    # raised before anything was opened.
+    return replace(data, boards=tuple(boards)).with_diagnostics(
+        *(
+            Diagnostic.error(
+                "component-claimed-twice",
+                f"{designator} is claimed by both the panel-reference expression "
+                f"{panel_reference.source!r} and the wall-reference expression "
+                f"{wall_reference.source!r}; which hole the part is for cannot be told "
+                f"from two expressions that both name it",
+                data=(("designator", designator),),
+            )
+            # Sorted, because a set's iteration order must reach no artefact
+            # (ADR-0006).
+            for designator in sorted(claimed)
+        )
+    )
 
 
 def board_geometry(scan: BoardScan, case: CaseRegistration) -> dict[int, BoardGeometry]:
