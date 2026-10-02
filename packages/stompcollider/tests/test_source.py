@@ -29,8 +29,8 @@ from stompgeom.build import PlacedSolid, build_document
 from stompgeom.step import StepDocument, read_step, read_step_document
 from stompmodel.codec import to_document
 from stompmodel.diagnostics import Severity
-from stompmodel.model import DrillData, EnclosureMatch
-from stompmodel.units import Nanometre
+from stompmodel.model import DrillData, EnclosureMatch, Hole, RawHole
+from stompmodel.units import Millimetre, Nanometre
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "tar-pcb.stp"
 
@@ -149,7 +149,11 @@ def _wall_board_document() -> StepDocument:
 # --------------------------------------------------------------------------
 
 
-def _write_drill(path: Path, enclosure: tuple[Nanometre, Nanometre] | None) -> Path:
+def _write_drill(
+    path: Path,
+    enclosure: tuple[Nanometre, Nanometre] | None,
+    holes: tuple[Hole, ...] = (),
+) -> Path:
     """A real drill document, written through stompmodel's own codec."""
     match = (
         None
@@ -159,7 +163,7 @@ def _write_drill(path: Path, enclosure: tuple[Nanometre, Nanometre] | None) -> P
             candidates=("1590B",), selected_part="1590B",
         )
     )
-    path.write_text(json.dumps(to_document(DrillData(enclosure=match))), encoding="utf-8")
+    path.write_text(json.dumps(to_document(DrillData(enclosure=match, holes=holes))), encoding="utf-8")
     return path
 
 
@@ -185,8 +189,10 @@ def _read_with(
     model_spans: tuple[float, float, float],
     board: StepDocument | None = None,
     wall_reference: Filter | None = None,
+    wall_probes_nm: tuple[Nanometre, ...] = (),
+    holes: tuple[Hole, ...] = (),
 ) -> RawBoards:
-    drill = _write_drill(tmp_path / "drill.json", enclosure)
+    drill = _write_drill(tmp_path / "drill.json", enclosure, holes)
     case, board_path = tmp_path / "case.stp", tmp_path / "board.stp"
     _stub_reader(
         monkeypatch,
@@ -198,7 +204,10 @@ def _read_with(
     # copy of it.
     if wall_reference is None:
         return BoardSource(drill, [board_path], case).read()
-    return BoardSource(drill, [board_path], case, wall_reference=wall_reference).read()
+    return BoardSource(
+        drill, [board_path], case,
+        wall_reference=wall_reference, wall_probes_nm=wall_probes_nm,
+    ).read()
 
 
 def test_a_run_with_no_board_model_to_read_is_refused(tmp_path) -> None:
@@ -658,3 +667,58 @@ def test_the_wall_gate_cannot_be_bypassed_by_omission() -> None:
         inspect.signature(source_step._board).parameters["wall_reference"],
     )
     assert [parameter.default for parameter in signatures] == [empty, empty]
+
+
+def _narrowest_wall_radius(raw: RawBoards, designator: str) -> float:
+    """The narrowest band of that component's wall features, in millimetres."""
+    return min(
+        band.radius_mm
+        for board in raw.boards
+        for component in board.components
+        if component.designator == designator
+        for feature in component.wall
+        for band in feature.stack
+    )
+
+
+def test_a_wall_feature_is_measured_at_the_radii_it_was_given(tmp_path, monkeypatch) -> None:
+    """A wall has no holes, so its probe set is an input.
+
+    J1 is a 2.000 mm cylinder. Each probe narrower than it adds a band whose
+    radius is drawn from the probe set rather than measured off the face, so
+    probed at 1.000 the narrowest band reads 1.000 and at 1.500 it reads 1.500.
+    Neither is a radius the panel's own holes would have supplied.
+    """
+    def narrowest(probe: Nanometre) -> float:
+        raw = _read_with(
+            tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+            board=_wall_board_document(), wall_reference=parse_filter("J1"),
+            wall_probes_nm=(probe,),
+        )
+        return _narrowest_wall_radius(raw, "J1")
+
+    assert narrowest(Nanometre(1_000_000)) == pytest.approx(1.000, abs=1e-5)
+    assert narrowest(Nanometre(1_500_000)) == pytest.approx(1.500, abs=1e-5)
+
+
+def test_no_probe_set_means_the_panel_s_own(tmp_path, monkeypatch) -> None:
+    """The standalone command line passes nothing, so it must be unchanged."""
+    hole = Hole(
+        x_nm=Nanometre(0), y_nm=Nanometre(0), diameter_nm=Nanometre(3_000_000),
+        raw=RawHole(Millimetre(0.0), Millimetre(0.0), Millimetre(3.0)), index=1,
+    )
+    raw = _read_with(
+        tmp_path, monkeypatch, enclosure=None, model_spans=(1.0, 2.0, 3.0),
+        board=_wall_board_document(), wall_reference=parse_filter("J1"),
+        holes=(hole,),
+    )
+    assert _narrowest_wall_radius(raw, "J1") == pytest.approx(1.500, abs=1e-5)
+
+
+def test_a_probe_set_given_as_a_list_is_held_as_a_tuple() -> None:
+    """Frozen and hashable, and a caller's list cannot move under a scan."""
+    probes = [Nanometre(2_500_000)]
+    source = BoardSource(Path("d.json"), [Path("b.stp")], Path("c.stp"), wall_probes_nm=probes)
+    probes.append(Nanometre(9_000_000))
+    assert source.wall_probes_nm == (Nanometre(2_500_000),)
+    hash(source)
