@@ -6,10 +6,10 @@ boolean between solids) or plain (arithmetic), a kernel leaf worth
 ``stompcad.plan.KERNEL_LEAF_WEIGHT`` plain ones. Every phase that accepts a
 ``Scope`` is given one here and its leaves are counted as it reports them --
 none of this file reimplements a phase's own division. ``read-panel``,
-``write-case`` and ``write-assembly`` are the exception: ``Source.read``
-(``packages/stompdrill/src/stompdrill/protocols.py``) and ``Emitter.emit``
-(``packages/stompmodel/src/stompmodel/protocols.py``) take no scope at all,
-so those three are declared, not measured -- see ``count_leaves``'s
+``write-case``, ``write-model`` and ``write-assembly`` are the exception:
+``Source.read`` (``packages/stompdrill/src/stompdrill/protocols.py``) and
+``Emitter.emit`` (``packages/stompmodel/src/stompmodel/protocols.py``) take
+no scope at all, so those four are declared, not measured -- see ``count_leaves``'s
 docstring for exactly what and why.
 
 Run with:
@@ -18,8 +18,7 @@ Run with:
         packages/stompdrill/tests/fixtures/tar.ai \\
         packages/stompcollider/tests/fixtures/tar-pcb.stp \\
         ~/.cache/stompcad/cases/1590B.stp \\
-        'RV*,SW*,D(3..4),!RV5' \\
-        'J1,J4'
+        'RV*,SW*,D(3..4),!RV5' 'J1,J4'
 """
 
 from __future__ import annotations
@@ -211,12 +210,12 @@ def count_leaves(
 ) -> dict[str, LeafTally]:
     """Run both tools' phases over one fixture and tally each step's leaves.
 
-    Six steps -- ``quantise``, ``drill``, ``read-boards``, ``match``,
-    ``seat``, ``clash`` -- pass a ``_CountingScope`` into the real call
+    Seven steps -- ``quantise``, ``drill``, ``read-boards``, ``match``,
+    ``seat``, ``clash``, ``drill-walls`` -- pass a ``_CountingScope`` into the real call
     (``quantise()``, each pipeline stage's ``apply``, ``BoardSource.scan``,
-    ``Match.apply``, ``Seat.apply``, ``Clashes.apply``) and read back what
-    that call itself divided into and touched. The other three take no
-    scope at all and are declared just below, each citing the signature
+    ``Match.apply``, ``Seat.apply``, ``Clashes.apply``, ``DrillWalls.apply``)
+    and read back what that call itself divided into and touched. The other
+    four take no scope at all and are declared just below, each citing the signature
     that makes it unmeasurable.
     """
     counter = _Counter()
