@@ -282,7 +282,7 @@ outer face**, not across the wall's own thickness. A part is assembled through a
 everything between its tip and the far side of the wall must pass the hole; measuring the
 thickness alone sizes a jack seated a few millimetres short from its bore instead of its
 sleeve, and asks for a hole the sleeve cannot enter. A modelled nut is still excluded, because
-a nut sits beyond the outer face and so beyond the run. The bore remains a floor, never a
+a nut sits beyond the tip and so beyond the run. The bore remains a floor, never a
 ceiling.
 
 Both multi-wall refusals are **findings, not raises**. `DrillWalls` is appended after the

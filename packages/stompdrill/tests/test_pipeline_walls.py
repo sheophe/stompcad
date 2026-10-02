@@ -96,7 +96,9 @@ def _feature(
         board=1,
         origin_nm=tuple(Nanometre(int(value * 1_000_000)) for value in origin_mm),  # type: ignore[arg-type]
         direction=direction,
-        profile=_BARE_TIP,
+        profile=Profile(
+            steps=((Nanometre(5_000_000), Nanometre(0), Nanometre(10_000_000)),)
+        ),
         bore_nm=bore_nm,
     )
 
@@ -221,7 +223,7 @@ def test_a_part_seated_short_of_the_wall_is_still_measured_to_its_tip() -> None:
     assert short == 5_700_000
 
 
-def test_the_run_stops_at_the_outer_face_so_a_nut_still_does_not_widen_it() -> None:
+def test_the_run_ends_at_the_tip_so_a_nut_beyond_it_does_not_widen_the_hole() -> None:
     """The guarantee the amendment must not cost: the flange behind the bushing
     is 7.530 mm, and a rule reading the whole part would ask for it."""
     short = required_radius_nm(_jack(), (Nanometre(-3_500_000), Nanometre(-1_500_000)))
@@ -245,7 +247,7 @@ def test_a_part_reaching_past_the_inner_face_measures_only_to_that_face() -> Non
 
 
 def test_a_span_holding_no_material_needs_no_hole_for_material() -> None:
-    """A recessed part: the envelope is nothing there, which is what the bore is for."""
+    """A bare tip: no material lies in the run, which is what the bore is for."""
     bare = _jack(profile=_BARE_TIP)
     assert required_radius_nm(bare, (Nanometre(-3_000_000), Nanometre(-1_000_000))) == 0
 
@@ -254,7 +256,7 @@ def test_a_bore_is_a_floor_on_the_radius_however_little_material_surrounds_it() 
     """Ruling 6, and the case the committed board cannot make govern."""
     recessed = (Nanometre(-3_000_000), Nanometre(-1_000_000))
     bore = Nanometre(3_175_000)
-    assert required_radius_nm(_jack(bore, _BARE_TIP), recessed) == 3_175_000
+    assert required_radius_nm(_jack(bore_nm=bore, profile=_BARE_TIP), recessed) == 3_175_000
 
 
 def test_material_wider_than_the_bore_governs_over_it() -> None:
@@ -660,8 +662,8 @@ def test_a_part_whose_span_holds_nothing_of_it_is_refused_and_not_drilled() -> N
     """A required radius of zero is no hole: every stocked size admits nothing.
 
     The axis reaches the wall's own region, so nothing above refuses it, and
-    the smallest size in the standard satisfies a requirement of zero -- which
-    would cut the wall for a part standing twenty millimetres clear of it.
+    the smallest size in the standard satisfies a requirement of zero. The
+    part's material begins behind its tip, so none of it lies in the run.
     """
     model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
     short = replace(
@@ -677,7 +679,7 @@ def test_a_part_whose_span_holds_nothing_of_it_is_refused_and_not_drilled() -> N
 
 
 def test_a_bore_with_no_material_in_the_span_still_asks_for_its_hole() -> None:
-    """The recessed part decision 9's bore exists for: absent material, real hole.
+    """A bare tip has no material in the run, and the bore still asks for a hole.
 
     The companion of the refusal above, so narrowing it to the both-absent
     case cannot quietly take the bore's own hole with it.
