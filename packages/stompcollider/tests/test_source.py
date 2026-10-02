@@ -722,3 +722,12 @@ def test_a_probe_set_given_as_a_list_is_held_as_a_tuple() -> None:
     probes.append(Nanometre(9_000_000))
     assert source.wall_probes_nm == (Nanometre(2_500_000),)
     hash(source)
+
+
+def test_a_probe_set_is_held_in_value_order_without_repeats() -> None:
+    """Two spellings of one set must reach the same artefact (ADR-0006)."""
+    source = BoardSource(
+        Path("d.json"), [Path("b.stp")], Path("c.stp"),
+        wall_probes_nm=[Nanometre(2_500_000), Nanometre(1_000_000), Nanometre(2_500_000)],
+    )
+    assert source.wall_probes_nm == (Nanometre(1_000_000), Nanometre(2_500_000))
