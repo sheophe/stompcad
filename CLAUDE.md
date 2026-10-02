@@ -20,7 +20,7 @@ measures the wall features of components a builder named, then reports
 clashes. It does not drill the case or modify geometry to eliminate clashes.
 
 `stompcad` is the orchestrator over both. It composes them as libraries into
-one run: nine named steps, one position, one status, and artefacts that match
+one run: eleven named steps, one position, one status, and artefacts that match
 what either tool writes from its own command line, byte for byte. It computes no
 geometry and imports neither the kernel nor `stompgeom`. On a terminal it opens
 a full-screen workbench and the user stays inside it; a run is an event the
@@ -186,7 +186,9 @@ depends only on the `Stage` protocol.
 - A wall is discovered, not declared: lateral plate levels grouped by the signed kernel axis
   they lean on, and each group's extreme level is a wall's outer surface (ADR-0007). A wall hole
   is cut along its component's own axis, not normal to the wall, and its diameter admits the
-  material inside that wall's own span — a modelled nut outside the wall does not widen it.
+  material between its tip and that wall's outer face — a modelled nut, which sits beyond
+  that face, does not widen it. Where both signs of an axis reach a wall, the hole goes in
+  the nearer one (ADR-0007).
 - A wall's frame has its `u`/`v` datum at the centre of the outer region's bounding box and
   depth zero on the inner plane, and its `bounds_nm` state that region about that datum.
 - Raw lengths are finite float millimetres. Canonical lengths are integer

@@ -266,6 +266,36 @@ thread once `app.run()` returns, so `main`'s one exception-to-exit-code
 mapping still serves the terminal path as well as the headless one instead
 of drifting into two.
 
+### Amendment: eleven steps, and the drill half's document and model commit last
+
+**Accepted.** A run is eleven named steps — `read panel`, `quantise`, `drill`,
+`write case`, `read boards`, `match`, `seat`, `clash`, **`drill walls`**, **`write model`**,
+`write assembly`. A run naming no board still takes the first four: both new steps lie
+inside the region `plan_for` prunes, so a drill-only run is untouched rather than merely
+equivalent to what it was. A run with boards divides its span among all eleven.
+
+`drill walls` sits after `clash` because it works from the ranking that survived re-ranking,
+which is the only ranking that will not change under it. It is an ordinary `Stage` appended
+only here; `stompdrill`'s own `build_pipeline` is untouched, so no stage asserts that another
+ran and the standalone command line cannot reach it.
+
+The drill half's commit divides. `write case` keeps its name, its position and — in a run
+with no boards — its behaviour, committing every drill-half target byte for byte as it does
+now. With boards it commits only what is already complete without the walls: the panel's
+Excellon and its two drawings, whose hole numbers are independent of wall drilling. The JSON
+document and the drilled model describe the whole job, so they belong to `write model`, after
+the walls are cut.
+
+This amends the deliberate limit recorded above. Its purpose survives: a dock-half failure
+still leaves a builder the files to go drill the panel with, because the Excellon and the
+drawings are committed before a board is read. What changes is that the two artefacts which
+would be *wrong* if written early are no longer written early. The cost is unchanged — drill
+artefacts are still no evidence the run succeeded, and the exit code is still the only status.
+
+The manifest declaration joins the **last** drill-half commit: `write model` where the run
+has one, `write case` otherwise. A project file never sits beside an artefact that was never
+written, which is ADR-0014's decision holding under a split.
+
 ## Rationale
 
 **A protocol rather than printing.** Two audiences read a run: a person watching
