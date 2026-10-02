@@ -22,7 +22,13 @@ worker still crosses to the app, but now pumps events across a process boundary
 instead of doing the run's own work; `ask` blocks in that process on its own
 command pipe rather than a worker's `Event`; and a fault crosses as a value
 re-raised on the far side rather than as the exception object carried to the
-main thread. This ADR's other decisions stand.
+main thread. A further amendment, for wall drilling, makes the run eleven
+steps rather than the nine its first decision lists: `drill walls` and `write
+model` join after `clash`, and the drill half's JSON document and drilled model
+commit at `write model`, after the walls are cut, while the Excellon and the
+drawings still commit at `write case`. The decision's body below keeps the nine
+as the record of what was first decided; the amendment placed before the
+Rationale governs. This ADR's other decisions stand.
 
 ## Context
 

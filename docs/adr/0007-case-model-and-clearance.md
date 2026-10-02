@@ -4,7 +4,11 @@
 [ADR-0009](0009-shared-model-package-and-dependency-order.md). The kernel is now
 `stompgeom`'s unconditional dependency and reaches `stompdrill` through it. A
 later amendment adds a second cutting pass, over the walls the same model lets
-a run discover, and pairs a wall's inner surface without a companion step.
+a run discover, and pairs a wall's inner surface without a companion step. A
+further amendment decides which wall a component's hole goes in: where both
+signs of its axis reach a wall, the sign nearer its own tip carries the hole; the
+diameter is measured from the feature's tip to the wall's outer face; and both
+multi-wall refusals are findings rather than raises.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -264,7 +268,7 @@ that wall, while the extremity facing the other way is most of the enclosure's w
 the wall behind it. An exact tie is refused rather than broken, because nothing geometric
 separates the two and a tie-break on anything else would be this file's invention.
 
-That is the fact earlier reasoning here lacked. Picking the sign that carries material fails
+The property that settles it is where the part *is*, not what it is made of. Picking the sign that carries material fails
 on a flush-mounted jack, whose sleeve may stop at the inner face and leave both spans
 material-free; the bore cannot separate them because it is one value shared by both signs;
 and a profile states no sentinel, since `radius_at` answers zero both past a stack's last

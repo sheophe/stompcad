@@ -261,9 +261,9 @@ consumes what a stale step produced; resuming re-runs exactly that set
 against the intermediates the driver still holds. Propagation follows what a
 later step actually consumes of an earlier one's output, not a step's
 position in the plan's ordered list. `targets` is read by `write case` at
-position four and again by `write assembly` at position nine; a frontier
-keyed to position rather than to consumption would mark `read boards`,
-`match`, `seat` and `clash` stale too, and re-run all four — minutes of
+position four and again by `write model` at position ten and `write assembly`
+at position eleven; a frontier keyed to position rather than to consumption
+would mark `read boards`, `match`, `seat`, `clash` and `drill walls` stale too, and re-run all four — minutes of
 kernel work — for a changed output filename that none of them reads. A write
 step produces no intermediate any later step consumes, so marking one stale
 propagates nowhere.
@@ -333,9 +333,10 @@ its tests must account for it separately.
 
 A single frontier — marking every step after the earliest one a change
 touches, by position rather than by consumption — was rejected. `targets` is
-read at position four (`write case`) and again at position nine (`write
-assembly`), so a frontier keyed to position would re-run every kernel step
-between them — `read boards`, `match`, `seat`, `clash` — for a changed output
+read at position four (`write case`) and again at positions ten and eleven
+(`write model`, `write assembly`), so a frontier keyed to position would re-run
+every kernel step between them — `read boards`, `match`, `seat`, `clash`,
+`drill walls` — for a changed output
 filename alone, none of which those steps read. That is minutes of kernel
 work to answer a question no step downstream of the write steps ever asked,
 and it costs exactly what the data-dependency table above exists to avoid.
