@@ -378,10 +378,11 @@ class DrillWalls:
         if len(found) == 1:
             return found[0]
         reached = ", ".join(sorted(met.key for _f, met, _s in found))
-        if len({feature.direction for feature, _met, _s in found}) == 1:
+        directions = [feature.direction for feature, _met, _s in found]
+        if len(set(directions)) < len(directions):
             return _Undecided(
                 f"one ray of its axis lands inside more than one wall's drillable "
-                f"region ({reached}), which is not an enclosure this version drills"
+                f"region ({reached})"
             )
         # ADR-0007's amendment: a part is mounted at the wall it passes through,
         # so the nearer crossing is its own. Measured to the inner plane, which
@@ -392,8 +393,7 @@ class DrillWalls:
         ranked = sorted(found, key=lambda hit: -hit[1].span_nm[1])
         if ranked[0][1].span_nm[1] == ranked[1][1].span_nm[1]:
             return _Undecided(
-                f"two walls are equally near it ({reached}), so which of them "
-                f"carries the hole cannot be told from the seating"
+                f"two walls ({reached}) are equally near it"
             )
         return ranked[0]
 
@@ -428,7 +428,7 @@ def _unreachable(board: int, designator: str, because: str) -> Diagnostic:
 
     An error and not a warning: decision 12 has already stopped ``clash``
     from mentioning this component, so a warning would let the fact that
-    nothing was cut for it go entirely unseen. One code for two causes --
+    nothing was cut for it go entirely unseen. One code for several causes --
     an axis reaching no wall, and an axis reaching one with nothing of the
     part inside it -- because the remedy is the same seating or the same
     named part either way, and a finding is matched by its code rather than

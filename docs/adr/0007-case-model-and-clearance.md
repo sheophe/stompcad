@@ -8,7 +8,9 @@ a run discover, and pairs a wall's inner surface without a companion step. A
 further amendment decides which wall a component's hole goes in: where both
 signs of its axis reach a wall, the sign nearer its own tip carries the hole; the
 diameter is measured from the feature's tip to the wall's outer face; and both
-multi-wall refusals are findings rather than raises.
+multi-wall refusals are findings rather than raises. A wall that already takes a
+hole for one component at a place refuses a second component's hole there as a
+finding, because no earlier stage can see two wall holes at once.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall

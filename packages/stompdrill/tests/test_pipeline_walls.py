@@ -724,3 +724,39 @@ def test_two_parts_at_different_places_on_one_wall_both_get_holes() -> None:
 
     assert len(cut.holes) == 2
     assert not [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+
+
+def test_parts_at_the_same_place_in_two_walls_frames_both_get_holes() -> None:
+    """Each wall states its crossings in its own frame, so two walls can share
+    ``(0, 0)``: a place is a coordinate *and* the surface it is measured in."""
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall_facing_back(key="left")),
+        admitting=frozenset({"right", "left"}),
+    )
+    left_part = replace(
+        _seated(designator="J2"),
+        origin_nm=(Nanometre(-30_500_000), Nanometre(0), Nanometre(0)),
+        direction=(-1.0, 0.0, 0.0),
+    )
+
+    cut = _stage(model, _seated(), left_part).apply(_data())
+
+    assert sorted(hole.surface for hole in cut.holes) == ["left", "right"]
+    assert not [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+
+
+def test_one_sign_in_two_regions_is_refused_even_when_the_other_sign_reaches_one() -> None:
+    """The refusal means what its clause says: one ray, two regions, whatever
+    the other sign does. Three hits are not a ranking between two."""
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall(key="top"), _wall_facing_back(key="left")),
+        admitting=frozenset({"right", "top", "left"}),
+    )
+    forward = _seated()
+
+    cut = _stage(model, forward, replace(forward, direction=(-1.0, 0.0, 0.0))).apply(_data())
+
+    assert not cut.holes
+    refusals = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+    assert len(refusals) == 1
+    assert "more than one wall" in refusals[0].message
