@@ -459,20 +459,6 @@ def test_a_requirement_past_the_standard_s_stock_is_the_unstocked_refusal() -> N
     assert found.holes == ()
 
 
-def test_a_ray_landing_in_two_regions_is_refused_rather_than_tie_broken() -> None:
-    """Decision 13's ambiguity, which Task 11 measures to be unreachable.
-
-    Refused and not tie-broken: nothing argued for a preference, and an
-    enclosure whose walls overlap in projection is outside this version.
-    """
-    model = _FakeWalls(
-        walls=(_wall(key="right"), _wall(key="top")),
-        admitting=frozenset({"right", "top"}),
-    )
-    with pytest.raises(StompdrillError, match="more than one wall"):
-        _stage(model, _seated()).apply(_data())
-
-
 def _wall_facing_back(key: str = "left", at_mm: float = -30.0) -> DrilledSurface:
     """A 2 mm wall at ``at_mm`` along -X, facing -X, the mirror of ``_wall()``.
 
@@ -497,40 +483,99 @@ def _wall_facing_back(key: str = "left", at_mm: float = -30.0) -> DrilledSurface
     )
 
 
-def test_two_signs_of_one_axis_reaching_two_walls_is_refused_as_undecided() -> None:
-    """The marker for a rule this version does not have.
+def test_the_sign_whose_wall_is_nearer_its_own_tip_carries_the_hole() -> None:
+    """ADR-0007's amendment: a part is mounted at the wall it passes through.
 
-    A part anywhere inside a box points at one wall forwards and the opposite
-    wall backwards, so both measured signs resolve and nothing here says which
-    carries the hole. The refusal is that limit stated, and it is told apart
-    from the one-ray-in-two-regions refusal by the directions of the hits.
+    ``_seated()``'s tip sits half a millimetre outside ``_wall()``, so the
+    forward ray's wall is 2.5 mm behind that tip and the wall facing back at
+    -30 is 58.5 mm ahead of it. Nothing about the part changes between this
+    test and its mirror below; only which wall it is standing at does.
     """
     model = _FakeWalls(
         walls=(_wall(key="right"), _wall_facing_back(key="left")),
         admitting=frozenset({"right", "left"}),
     )
-    outward = _seated()
-    backward = replace(outward, direction=(-1.0, 0.0, 0.0))
-    with pytest.raises(StompdrillError, match="both measured signs") as refusal:
-        _stage(model, outward, backward).apply(_data())
-    # Both named, so the raise is two genuine hits and not one counted twice.
-    assert "left, right" in str(refusal.value)
+    forward = _seated()
+    backward = replace(forward, direction=(-1.0, 0.0, 0.0))
+
+    cut = _stage(model, forward, backward).apply(_data())
+
+    assert [hole.surface for hole in cut.holes] == ["right"]
+    assert not [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
 
 
-def test_the_two_multi_wall_refusals_are_not_one_message() -> None:
-    """A message true of the unreachable case is false of the routine one."""
-    corner = _FakeWalls(
-        walls=(_wall(key="right"), _wall(key="top")),
-        admitting=frozenset({"right", "top"}),
-    )
-    signs = _FakeWalls(
+def test_the_mirrored_part_is_drilled_through_the_mirrored_wall() -> None:
+    """The control a nearest-wins rule must pass and a farthest-wins rule cannot.
+
+    The same two walls and the same jack, its tip moved to the other side of
+    the enclosure. A rule reading the sign rather than the distance would
+    answer ``right`` both times.
+    """
+    model = _FakeWalls(
         walls=(_wall(key="right"), _wall_facing_back(key="left")),
         admitting=frozenset({"right", "left"}),
     )
-    with pytest.raises(StompdrillError, match="one ray of"):
-        _stage(corner, _seated()).apply(_data())
-    with pytest.raises(StompdrillError, match="not a choice this version makes"):
-        _stage(signs, _seated(), replace(_seated(), direction=(-1.0, 0.0, 0.0))).apply(_data())
+    forward = replace(
+        _seated(), origin_nm=(Nanometre(-30_500_000), Nanometre(0), Nanometre(0))
+    )
+    backward = replace(forward, direction=(-1.0, 0.0, 0.0))
+
+    cut = _stage(model, forward, backward).apply(_data())
+
+    assert [hole.surface for hole in cut.holes] == ["left"]
+
+
+def test_two_walls_equally_near_are_refused_rather_than_broken() -> None:
+    """Nothing geometric separates them, so a tie-break would be invented here."""
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall_facing_back(key="left")),
+        admitting=frozenset({"right", "left"}),
+    )
+    # Midway: 28 mm from each wall's inner plane, which is the only way two
+    # walls are equally near when the part is not touching either.
+    forward = replace(_seated(), origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)))
+    backward = replace(forward, direction=(-1.0, 0.0, 0.0))
+
+    cut = _stage(model, forward, backward).apply(_data())
+
+    assert not cut.holes
+    refusals = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+    assert len(refusals) == 1
+    assert "equally near" in refusals[0].message
+    assert "left, right" in refusals[0].message
+
+
+def test_one_ray_in_two_regions_is_refused_without_ending_the_run() -> None:
+    """Decision 13's ambiguity is argued and measured unreachable; a raise here
+    would still abandon every other component's hole, because this stage runs
+    after the drill half has committed."""
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall(key="top")),
+        admitting=frozenset({"right", "top"}),
+    )
+
+    cut = _stage(model, _seated()).apply(_data())
+
+    assert not cut.holes
+    refusals = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+    assert len(refusals) == 1
+    assert "more than one wall" in refusals[0].message
+
+
+def test_another_component_is_still_drilled_when_one_is_refused() -> None:
+    """The whole reason neither refusal raises."""
+    model = _FakeWalls(
+        walls=(_wall(key="right"), _wall_facing_back(key="left")),
+        admitting=frozenset({"right", "left"}),
+    )
+    tied = replace(_seated(), origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)))
+    tied_back = replace(tied, direction=(-1.0, 0.0, 0.0))
+    other = _seated(designator="J2")
+
+    cut = _stage(model, tied, tied_back, other).apply(_data())
+
+    assert [hole.surface for hole in cut.holes] == ["right"]
+    assert len([d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]) == 1
 
 
 def test_a_document_registering_no_case_has_no_frame_to_resolve_against() -> None:
@@ -652,3 +697,30 @@ def test_a_wall_refusal_names_a_surface_and_never_the_drilled_plate(
         f"⌀11.400 mm hole for board 1's J1 at (0.000, 0.000) {clause}"
     )
     assert "drilled face" not in found.diagnostics[0].message
+
+
+def test_a_second_part_wanting_the_hole_a_wall_already_has_is_refused() -> None:
+    """Decision 14's overlap review runs inside ``drill``, five steps earlier,
+    so this stage is the only thing that can see two wall holes at once. Cut
+    twice, the second pass runs a bit down a hole that is already there."""
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+
+    cut = _stage(model, _seated(), _seated(designator="J2")).apply(_data())
+
+    assert len(cut.holes) == 1
+    refusals = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+    assert len(refusals) == 1
+    assert "already" in refusals[0].message
+
+
+def test_two_parts_at_different_places_on_one_wall_both_get_holes() -> None:
+    """The control. ``across_mm`` slides the tip along the wall, which is what
+    that parameter is for, so this is two holes and not one repeated."""
+    model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
+
+    cut = _stage(
+        model, _seated(), _seated(across_mm=8.0, designator="J2")
+    ).apply(_data())
+
+    assert len(cut.holes) == 2
+    assert not [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]

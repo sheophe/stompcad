@@ -70,6 +70,18 @@ class Crossing:
     span_nm: tuple[Nanometre, Nanometre]
 
 
+@dataclass(frozen=True, slots=True)
+class _Undecided:
+    """Why a component's rays named no single wall, in the clause a finding reads.
+
+    A value and not a raise: this stage runs after the drill half has
+    committed, so an exception here abandons artefacts already on disk and
+    every other component's hole with them.
+    """
+
+    because: str
+
+
 def crossing(
     surface: DrilledSurface, feature: WallFeature, case_frame: FaceFrame
 ) -> Crossing | None:
@@ -263,6 +275,7 @@ class DrillWalls:
         holes: list[Hole] = []
         diagnostics: list[Diagnostic] = []
         drilled: dict[str, DrilledSurface] = {}
+        taken: dict[tuple[str, Nanometre, Nanometre], str] = {}
         by_component = _by_component(self._features)
         slots = scope.steps(len(by_component))
         for ((board, designator), rays), slot in zip(
@@ -270,6 +283,9 @@ class DrillWalls:
         ):
             slot.label(f"board {board} {designator}")
             hit = self._hit(rays, face)
+            if isinstance(hit, _Undecided):
+                diagnostics.append(_unreachable(board, designator, hit.because))
+                continue
             if hit is None:
                 diagnostics.append(
                     _unreachable(
@@ -309,6 +325,18 @@ class DrillWalls:
             if rejection is not None:
                 diagnostics.append(_refused(board, designator, found, diameter_nm, rejection))
                 continue
+            at = (found.key, found.outer_nm[0], found.outer_nm[1])
+            if at in taken:
+                diagnostics.append(
+                    _unreachable(
+                        board,
+                        designator,
+                        f"the {found.key} wall already takes a hole for "
+                        f"{taken[at]} at that place",
+                    )
+                )
+                continue
+            taken[at] = designator
             drilled.setdefault(surface.key, surface)
             holes.append(
                 Hole.from_measurement(
@@ -325,16 +353,15 @@ class DrillWalls:
 
     def _hit(
         self, rays: Sequence[WallFeature], face: FaceFrame
-    ) -> tuple[WallFeature, Crossing, DrilledSurface] | None:
-        """The one wall this component's axis reaches, or ``None`` for none.
+    ) -> tuple[WallFeature, Crossing, DrilledSurface] | _Undecided | None:
+        """The wall that carries this component's hole, ``None`` for none.
 
-        Two refusals, told apart by whether the hits share a direction. One ray
-        in two regions is decision 13's ambiguity, unreachable while
-        perpendicular wall levels stay millimetres apart, so an enclosure where
-        it happens is outside this version. Two *signs* each reaching a wall is
-        routine, because a part inside a box points at one wall forwards and
-        another backwards; which sign carries the hole is undecided, so it says
-        so rather than preferring one.
+        A part is mounted at the wall it passes through, so of two signs each
+        reaching a wall the one whose inner plane is nearer its tip wins. It is
+        strict: an exact tie is ``_Undecided``, because nothing separates the
+        pair and a tolerance would invent a preference. So is one ray inside
+        two regions, which perpendicular wall levels keep out of any catalogued
+        enclosure.
         """
         found = []
         for feature in rays:
@@ -346,20 +373,29 @@ class DrillWalls:
                     continue
                 if self.model.admits(met.key, met.outer_nm[0], met.outer_nm[1]):
                     found.append((feature, met, surface))
-        if len(found) > 1:
-            reached = ", ".join(sorted(met.key for _f, met, _s in found))
-            if len({feature.direction for feature, _met, _s in found}) == 1:
-                raise StompdrillError(
-                    f"one ray of board {rays[0].board}'s {rays[0].designator} axis lands "
-                    f"inside more than one wall's drillable region ({reached}); this "
-                    f"enclosure is not one this version drills"
-                )
-            raise StompdrillError(
-                f"both measured signs of board {rays[0].board}'s {rays[0].designator} "
-                f"axis reach a wall ({reached}), and which of the two carries the hole "
-                f"is not a choice this version makes"
+        if not found:
+            return None
+        if len(found) == 1:
+            return found[0]
+        reached = ", ".join(sorted(met.key for _f, met, _s in found))
+        if len({feature.direction for feature, _met, _s in found}) == 1:
+            return _Undecided(
+                f"one ray of its axis lands inside more than one wall's drillable "
+                f"region ({reached}), which is not an enclosure this version drills"
             )
-        return found[0] if found else None
+        # ADR-0007's amendment: a part is mounted at the wall it passes through,
+        # so the nearer crossing is its own. Measured to the inner plane, which
+        # is the face the part actually arrives at; strict, because an equal pair
+        # is separated by nothing and a tie-break would be invented here.
+        # A depth is the negated distance (``_at``), so the greatest inner
+        # depth is the nearest plane.
+        ranked = sorted(found, key=lambda hit: -hit[1].span_nm[1])
+        if ranked[0][1].span_nm[1] == ranked[1][1].span_nm[1]:
+            return _Undecided(
+                f"two walls are equally near it ({reached}), so which of them "
+                f"carries the hole cannot be told from the seating"
+            )
+        return ranked[0]
 
     def _unstocked(self, board: int, designator: str, radius_nm: Nanometre) -> Diagnostic:
         """The existing unstocked refusal, on a requirement rather than a measurement."""
