@@ -38,6 +38,7 @@ import stompcollider.insert as insert_module
 import stompcollider.sources.step as board_source_module
 import stompdrill.cad.region as region_module
 import stompgeom.step as step_module
+from stompcad.manifest import MODEL_TARGET_NAMES
 from stompcad.plan import KERNEL_LEAF_WEIGHT
 from stompcollider.clash import Clashes
 from stompcollider.compose import admit, admit_walls, board_geometry, derived_tolerance, docked, registration
@@ -71,10 +72,6 @@ from stompmodel.protocols import Pipeline
 from stompmodel.units import nm_from_mm
 
 __all__ = ["LeafTally", "count_leaves", "main"]
-
-# Mirrors stompcad.manifest.MODEL_TARGET_NAMES, which is the statement that
-# binds: the formats that describe the whole job and so commit after the walls.
-MODEL_TARGET_NAMES = frozenset({"json", "step"})
 
 
 @dataclass(frozen=True, slots=True)

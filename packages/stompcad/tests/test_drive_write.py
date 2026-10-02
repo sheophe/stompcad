@@ -10,19 +10,24 @@ already-replaced target back as it was, and every pending write discarded.
 from __future__ import annotations
 
 import errno
+import json
 import os
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from stompcad.drive import Driver, RunOptions
+from stompcad.drive import Driver, Project, RunOptions
+from stompcad.manifest import Manifest, manifest_path
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
+from stompcad.settings import Origin, Provenance, Resolved, Settings
 from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
-from stompmodel.model import CaseFace, DrillData
+from stompmodel.model import CaseFace, DrillData, ReferenceOutline
 from stompmodel.progress import track
-from tests.conftest import PANEL_REFERENCE, TAR_AI, NullSink
+from stompmodel.units import Nanometre
+from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink
 
 __all__: list[str] = []
 
@@ -48,7 +53,9 @@ class _SilentPresentation:
         return None
 
 
-def _options(targets: tuple[tuple[str, Path], ...]) -> RunOptions:
+def _options(
+    targets: tuple[tuple[str, Path], ...], boards: tuple[Path, ...] = ()
+) -> RunOptions:
     return RunOptions(
         panel=TAR_AI,
         drill_layer="Drill",
@@ -64,7 +71,7 @@ def _options(targets: tuple[tuple[str, Path], ...]) -> RunOptions:
         drill_sizes=None,
         no_drill_sizes=None,
         title="",
-        boards=(),
+        boards=boards,
         panel_reference=PANEL_REFERENCE,
         match_tolerance_mm=None,
         seat_pitch_max_mm=2.0,
@@ -113,3 +120,106 @@ def test_a_failed_commit_restores_the_first_target_and_discards_the_rest(
     assert not second.exists()
     assert not third.exists()
     assert [path.name for path in tmp_path.iterdir()] == ["a.json"]
+
+
+def _data() -> DrillData:
+    """A document every drill format accepts: the Excellon needs an outline."""
+    return DrillData(
+        reference=ReferenceOutline(Nanometre(30_000_000), Nanometre(20_000_000))
+    )
+
+
+def _driver_with(
+    tmp_path: Path, *, boards: tuple[Path, ...], targets: tuple[tuple[str, Path], ...]
+) -> tuple[Driver, DrillData]:
+    """A driver holding a project, and drill data a write step will accept.
+
+    The data is constructed rather than driven through the artwork: these
+    tests are about which commit owns which format, and reading a panel to
+    find out would make them the slowest tests in the file.
+    """
+    panel = tmp_path / "tar.ai"
+    panel.write_bytes(b"")
+    defaults = Settings.of_defaults(panel)
+    settings = replace(
+        defaults,
+        output=replace(
+            defaults.output, targets=Resolved(targets, Provenance(Origin.USER))
+        ),
+    )
+    options = replace(_options(targets, boards=boards), panel=panel)
+    project = Project(panel=panel, settings=settings, held=Manifest())
+    return Driver(DRILL_AND_DOCK, _SilentPresentation(), options, project), _data()
+
+
+def test_write_case_defers_the_document_and_the_model_when_there_are_boards(
+    tmp_path: Path,
+) -> None:
+    """Decision 16. The Excellon and the drawings are complete without the
+    walls; the document and the model describe the whole job and are not."""
+    driver, data = _driver_with(
+        tmp_path,
+        boards=(TAR_PCB,),
+        targets=(
+            ("excellon", tmp_path / "p.drl"),
+            ("json", tmp_path / "p.json"),
+            ("step", tmp_path / "p.stp"),
+        ),
+    )
+    with track(NullSink()) as scope:
+        written = driver._write_case(data, scope)
+
+    assert [Path(name).name for name in written] == ["p.drl"]
+    assert not (tmp_path / "p.json").exists()
+    assert not (tmp_path / "p.stp").exists()
+
+
+def test_write_case_still_writes_everything_when_there_are_no_boards(
+    tmp_path: Path,
+) -> None:
+    """The control. A drill-only run has no model commit to defer to."""
+    driver, data = _driver_with(
+        tmp_path,
+        boards=(),
+        targets=(
+            ("excellon", tmp_path / "p.drl"),
+            ("json", tmp_path / "p.json"),
+        ),
+    )
+    with track(NullSink()) as scope:
+        written = driver._write_case(data, scope)
+
+    assert sorted(Path(name).name for name in written) == ["p.drl", "p.json"]
+
+
+def test_the_model_commit_writes_only_the_two_formats_that_describe_the_job(
+    tmp_path: Path,
+) -> None:
+    driver, data = _driver_with(
+        tmp_path,
+        boards=(TAR_PCB,),
+        targets=(
+            ("excellon", tmp_path / "p.drl"),
+            ("json", tmp_path / "p.json"),
+        ),
+    )
+    with track(NullSink()) as scope:
+        written = driver._write_model(data, scope)
+
+    assert [Path(name).name for name in written] == ["p.json"]
+
+
+def test_the_model_commit_lands_even_when_it_writes_no_artefact(tmp_path: Path) -> None:
+    """A boards run asking for neither json nor step. The declaration is still
+    the last drill-half commit, or a project file sits beside artefacts it
+    does not describe."""
+    driver, data = _driver_with(
+        tmp_path, boards=(TAR_PCB,), targets=(("excellon", tmp_path / "p.drl"),)
+    )
+    with track(NullSink()) as scope:
+        driver._write_case(data, scope)
+        assert not manifest_path(driver._options.panel).exists()
+        driver._write_model(data, scope)
+
+    stored = json.loads(manifest_path(driver._options.panel).read_text())
+    assert set(stored["output"]["targets"]) == {"excellon"}

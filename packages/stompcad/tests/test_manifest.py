@@ -96,7 +96,7 @@ def test_a_gap_is_filled_by_the_half_that_owns_it(tmp_path: Path) -> None:
 
     panel = tmp_path / "tar.ai"
     settings = Settings.of_defaults(panel)
-    written = json.loads(payload_for(panel, settings, Half.DRILL, manifest.Manifest()) or "{}")
+    written = json.loads(payload_for(panel, settings, Half.MODEL, manifest.Manifest()) or "{}")
     assert set(written) == {"version", "artwork", "enclosure", "drilling", "output"}
     assert "boards" not in written, "the dock half's place is not the drill half's to write"
 
@@ -120,7 +120,7 @@ def test_a_value_the_project_already_holds_is_left_alone(tmp_path: Path) -> None
     held = manifest.Manifest(
         values={"drilling": {"grid_mm": 0.5}}, stored={"drilling": {"grid_mm": 0.5}}
     )
-    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
+    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.MODEL, held) or "{}")
     assert written["drilling"]["grid_mm"] == 0.5, "a declaration is never overwritten by a run"
 
 
@@ -131,10 +131,10 @@ def test_nothing_to_fill_stages_nothing(tmp_path: Path) -> None:
 
     panel = tmp_path / "tar.ai"
     settings = Settings.of_defaults(panel)
-    first = payload_for(panel, settings, Half.DRILL, manifest.Manifest())
+    first = payload_for(panel, settings, Half.MODEL, manifest.Manifest())
     assert first is not None
     (tmp_path / "tar.stompcad.json").write_text(first, encoding="utf-8")
-    assert payload_for(panel, settings, Half.DRILL, manifest.read(panel)) is None
+    assert payload_for(panel, settings, Half.MODEL, manifest.read(panel)) is None
 
 
 def test_a_path_is_stored_relative_to_the_project(tmp_path: Path) -> None:
@@ -174,7 +174,7 @@ def test_every_length_survives_the_round_trip(tmp_path: Path) -> None:
                 grid_mm=Resolved(millimetres, Provenance(Origin.USER)),
             ),
         )
-        text = payload_for(panel, settings, Half.DRILL, manifest.Manifest())
+        text = payload_for(panel, settings, Half.MODEL, manifest.Manifest())
         assert text is not None
         (tmp_path / "tar.stompcad.json").write_text(text, encoding="utf-8")
         back = manifest.read(panel).values["drilling"]["grid_mm"]
@@ -220,7 +220,7 @@ def test_a_carried_over_path_reaches_the_next_half_as_the_string_it_was(tmp_path
     )
     held = manifest.read(panel)
     settings = Settings.of_defaults(panel)
-    written = json.loads(payload_for(panel, settings, Half.DRILL, held) or "{}")
+    written = json.loads(payload_for(panel, settings, Half.MODEL, held) or "{}")
     assert written["boards"]["boards"] == ["tar-pcb.stp"], "a carried-over path must not be re-derived"
 
 
@@ -242,7 +242,7 @@ def test_targets_merge_by_format_across_halves(tmp_path: Path) -> None:
             targets=Resolved((("gerber", tmp_path / "tar.drl"),), Provenance(Origin.USER)),
         ),
     )
-    first = payload_for(panel, drill_settings, Half.DRILL, manifest.Manifest())
+    first = payload_for(panel, drill_settings, Half.MODEL, manifest.Manifest())
     assert first is not None
     manifest_file.write_text(first, encoding="utf-8")
 
@@ -302,7 +302,7 @@ def test_an_unknown_key_survives_being_read_and_written_back(tmp_path: Path) -> 
     held = manifest.read(panel)
     assert held.values["drilling"] == {"grid_mm": 0.5}, "the run must not resolve from an unknown key"
 
-    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
+    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.MODEL, held) or "{}")
     assert written["drilling"]["wobble"] == 3
     assert written["drilling"]["grid_mm"] == 0.5
 
@@ -316,7 +316,7 @@ def test_an_unknown_section_survives_being_read_and_written_back(tmp_path: Path)
     held = manifest.read(panel)
     assert "sparkle" not in held.values
 
-    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.DRILL, held) or "{}")
+    written = json.loads(payload_for(panel, Settings.of_defaults(panel), Half.MODEL, held) or "{}")
     assert written["sparkle"] == {"x": 1}
 
 
@@ -414,7 +414,7 @@ def test_every_schema_key_declares_a_shape() -> None:
     )
 
 
-@pytest.mark.parametrize("half_name", ["DRILL", "DOCK"])
+@pytest.mark.parametrize("half_name", ["MODEL", "DOCK"])
 def test_what_a_half_writes_is_what_the_reader_accepts(tmp_path: Path, half_name: str) -> None:
     """The shapes are the file's own: a payload this tool wrote must read back."""
     from stompcad.manifest import Half, payload_for
@@ -443,13 +443,13 @@ def test_a_run_with_no_boards_records_the_empty_list_that_decided_it(tmp_path: P
     assert "artwork" in written and "enclosure" in written
 
 
-def test_the_drill_half_of_a_docking_run_still_declares_no_board(tmp_path: Path) -> None:
+def test_the_model_commit_of_a_docking_run_still_declares_no_board(tmp_path: Path) -> None:
     """The control: the dock half owns `boards` whenever there is a dock half."""
     from stompcad.manifest import Half, payload_for
 
     panel = tmp_path / "tar.ai"
     written = json.loads(
-        payload_for(panel, Settings.of_defaults(panel), Half.DRILL, manifest.Manifest()) or "{}"
+        payload_for(panel, Settings.of_defaults(panel), Half.MODEL, manifest.Manifest()) or "{}"
     )
     assert "boards" not in written
 
@@ -478,13 +478,13 @@ def _settings_with_targets(panel: Path, *names: str) -> Settings:
     )
 
 
-def test_a_drill_half_declares_only_its_own_target_formats(tmp_path: Path) -> None:
+def test_the_model_commit_declares_only_its_own_target_formats(tmp_path: Path) -> None:
     """Decision 8: ``write case`` must not name a file only ``write assembly`` commits."""
     from stompcad.manifest import Half, payload_for
 
     panel = tmp_path / "tar.ai"
     settings = _settings_with_targets(panel, "json", "report", "assembly")
-    written = json.loads(payload_for(panel, settings, Half.DRILL, manifest.Manifest()) or "{}")
+    written = json.loads(payload_for(panel, settings, Half.MODEL, manifest.Manifest()) or "{}")
     assert set(written["output"]["targets"]) == {"json"}
 
 
@@ -547,3 +547,40 @@ def test_a_wall_reference_survives_a_run_with_no_boards(tmp_path: Path, expressi
     stored = manifest.read(panel).values["boards"]["wall_reference"]
     assert stored == expression
     assert pick(None, stored, None, "default").provenance.origin is Origin.PROJECT
+
+
+def test_the_drill_half_s_panel_commit_declares_nothing(tmp_path: Path) -> None:
+    """Decision 16: the declaration joins the *last* drill-half commit, and with
+    boards that is the model's. Declaring here would name a file the model
+    commit has not reached yet."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "p.ai"
+    settings = _settings_with_targets(panel, "excellon")
+    assert payload_for(panel, settings, Half.DRILL, manifest.Manifest()) is None
+
+
+def test_the_model_commit_declares_every_drill_half_format(tmp_path: Path) -> None:
+    """By the time it runs, the panel's own files are on disk too, so it is the
+    only commit that can name all of them."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "p.ai"
+    settings = _settings_with_targets(panel, "excellon", "json", "report")
+    stored = json.loads(payload_for(panel, settings, Half.MODEL, manifest.Manifest()) or "{}")
+    assert set(stored["output"]["targets"]) == {"excellon", "json"}
+    assert "drilling" in stored and "boards" not in stored
+
+
+def test_a_drill_only_run_still_declares_everything_in_one_commit(tmp_path: Path) -> None:
+    """The regression guard: with no boards there is no model commit, so the
+    panel commit is the last one and keeps the behaviour it has today."""
+    from stompcad.manifest import Half, payload_for
+
+    panel = tmp_path / "p.ai"
+    settings = _settings_with_targets(panel, "excellon")
+    stored = json.loads(
+        payload_for(panel, settings, Half.DRILL_ONLY, manifest.Manifest()) or "{}"
+    )
+    assert set(stored["output"]["targets"]) == {"excellon"}
+    assert {"artwork", "enclosure", "drilling", "boards"} <= set(stored)

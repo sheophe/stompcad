@@ -66,7 +66,7 @@ from stompmodel.units import Nanometre, nm_from_mm
 
 from . import cases
 from .cancel import CancellingSink
-from .manifest import DOCK_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
+from .manifest import DOCK_TARGET_NAMES, MODEL_TARGET_NAMES, Half, Manifest, manifest_path, payload_for, read
 from .plan import DRILL_AND_DOCK, RunPlan, Step
 from .present import Choice, Presentation
 from .resolve import RESOLVABLE, question_for, revision_for
@@ -74,7 +74,7 @@ from .settings import Origin, Provenance, Resolved, Settings
 from .stale import PLACE_OF_FIELD, PLACE_ORDER, stale_steps
 
 __all__ = [
-    "DOCK_TARGET_NAMES", "RunOptions", "Driver", "Project", "compose",
+    "DOCK_TARGET_NAMES", "MODEL_TARGET_NAMES", "RunOptions", "Driver", "Project", "compose",
     "plan_for", "invalidated", "steps_of_place", "readers_of",
 ]
 
@@ -368,7 +368,7 @@ class Driver:
         if not docking:
             return drilled, None
         if drilled.worst_severity is Severity.ERROR:
-            self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES)))
+            self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES)))
             return drilled, None
         return drilled, self._dock_steps(drilled, slots)
 
@@ -422,7 +422,7 @@ class Driver:
                 and self._drilled is not None
                 and self._drilled.worst_severity is Severity.ERROR
             ):
-                self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES)))
+                self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES)))
                 break
             slot = next(slots)
             slot.label(step.label)
@@ -956,18 +956,46 @@ class Driver:
         return manifest_path(self._project.panel), payload
 
     def _write_case(self, data: DrillData, scope: Scope) -> list[str]:
-        """Render, stage and commit the drill half's own targets."""
-        targets = self._targets_for(frozenset(available()))
-        settings = OutputSettings(title=self._options.title, case_model=self._case_model)
-        # Spec decision 17: with no boards, the dock half never runs, so this
-        # is the only commit that can record the confirmed empty board list.
+        """Render, stage and commit the panel's own targets.
+
+        With boards, the document and the drilled model describe a job whose
+        walls are not cut yet, so they go to ``write model`` instead: the
+        Excellon and the drawings are complete without them, because a wall
+        hole changes no panel hole's number (decision 3). With none, there is
+        no later commit and this one writes everything, as it always has.
+        """
+        owned = frozenset(available())
         half = Half.DRILL_ONLY if not self._options.boards else Half.DRILL
+        if self._options.boards:
+            owned -= MODEL_TARGET_NAMES
+        targets = self._targets_for(owned)
+        settings = OutputSettings(title=self._options.title, case_model=self._case_model)
         return self._write(
             data,
             targets,
             lambda: [(make_emitter(name, settings), path) for name, path in targets],
             scope,
             half,
+        )
+
+    def _write_model(self, data: DrillData, scope: Scope) -> list[str]:
+        """Render, stage and commit the two artefacts that describe the whole job.
+
+        The drill half's last commit, and so the one the manifest declaration
+        joins (decision 16). ``data`` is the drill document the walls were cut
+        into, never the panel-only one the dock half was seated against.
+        This and ``_write_case`` differ only in which formats they own and
+        which half they declare as; a shared helper taking both would read as
+        one function with two unrelated callers.
+        """
+        targets = self._targets_for(MODEL_TARGET_NAMES)
+        settings = OutputSettings(title=self._options.title, case_model=self._case_model)
+        return self._write(
+            data,
+            targets,
+            lambda: [(make_emitter(name, settings), path) for name, path in targets],
+            scope,
+            Half.MODEL,
         )
 
     def _write_dock(
@@ -1151,11 +1179,12 @@ def _withheld(targets: Sequence[tuple[str, Path]]) -> list[str]:
 def _undocked(targets: Sequence[tuple[str, Path]]) -> list[str]:
     """Say why no board was read: the drill half's errors bind the whole run.
 
-    Each write step already withholds its own targets, but a dock run over
-    refused drill data would still read every board and seat it -- work
-    whose only product is output this run may not write.
+    The drill half's own write step named its own targets; this names what the
+    two halves after it would have written. A dock run over refused drill
+    data would still read every board and seat it -- work whose only product
+    is output this run may not write.
     """
-    return ["docked nothing: this run's drill half has errors, so no board was read:"] + [
+    return ["read no board: this run's drill half has errors, so these were not written:"] + [
         f"  {path}  ({name})" for name, path in targets
     ]
 

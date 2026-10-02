@@ -255,4 +255,4 @@ def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> N
         "read-panel", "quantise", "drill", "write-case",
     ]
     assert not target.exists()
-    assert any("docked nothing" in line for lines in presentation.reported for line in lines)
+    assert any("read no board" in line for lines in presentation.reported for line in lines)
