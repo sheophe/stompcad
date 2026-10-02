@@ -1,4 +1,4 @@
-"""The run's nine steps, in spec order, weighted so the dock dominates."""
+"""The run's eleven steps, in spec order, weighted so the dock dominates."""
 
 from __future__ import annotations
 
@@ -30,10 +30,27 @@ def test_importing_the_plan_loads_no_kernel() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_the_plan_is_the_nine_steps_in_order() -> None:
+def test_the_plan_is_the_eleven_steps_in_order() -> None:
     assert [step.key for step in DRILL_AND_DOCK.steps] == [
         "read-panel", "quantise", "drill", "write-case",
-        "read-boards", "match", "seat", "clash", "write-assembly",
+        "read-boards", "match", "seat", "clash",
+        "drill-walls", "write-model", "write-assembly",
+    ]
+
+
+def test_the_walls_are_cut_after_the_clash_and_before_the_model_is_written() -> None:
+    """Decision 15: the ranking that survived re-ranking is the only one that
+    will not change under drilling, and the model must describe the walls."""
+    keys = [step.key for step in DRILL_AND_DOCK.steps]
+    assert keys.index("clash") < keys.index("drill-walls") < keys.index("write-model")
+
+
+def test_both_new_steps_fall_inside_the_region_a_boardless_run_prunes() -> None:
+    """Decision 15: a drill-only run is untouched rather than equivalent."""
+    from stompcad.drive import plan_for
+
+    assert [step.key for step in plan_for(()).steps] == [
+        "read-panel", "quantise", "drill", "write-case",
     ]
 
 
