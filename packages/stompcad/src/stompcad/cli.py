@@ -704,6 +704,8 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     # No flag: CLAUDE.md states this command line's whole surface, and this
     # value is reached through the project file and the Boards row instead.
     # ``pick`` is still asked, so the ranks below ARGUMENT resolve as usual.
+    # ARGUMENT is passed ``None`` by design, so the ``--wall-reference``
+    # spelling below can never print; it waits beside its row for a flag.
     wall_reference_resolved = pick(
         None, _project(project, "boards", "wall_reference"), None,
         DEFAULTS.boards.wall_reference.value,

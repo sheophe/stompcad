@@ -521,3 +521,29 @@ def test_a_project_declaring_a_case_model_is_told_it_is_no_longer_read(tmp_path:
     assert read_back.values["enclosure"] == {"case": "1590B"}
     assert any("case_model" in note for note in read_back.notes)
     assert read_back.stored["enclosure"]["case_model"] == "1590B.stp"
+
+
+@pytest.mark.parametrize("expression", ["J1", ""])
+def test_a_wall_reference_survives_a_run_with_no_boards(tmp_path: Path, expression: str) -> None:
+    """Every step that reads it is pruned on such a run, so only the file carries it.
+
+    Empty is the decided value, not an absent one: it must come back as ``""``
+    and resolve from the project rank rather than fall through to the default.
+    """
+    from stompcad.manifest import Half, payload_for
+    from stompcad.settings import pick
+
+    panel = tmp_path / "tar.ai"
+    base = _settings_with_no_boards(panel)
+    settings = replace(
+        base,
+        boards=replace(
+            base.boards, wall_reference=Resolved(expression, Provenance(Origin.USER))
+        ),
+    )
+    written = payload_for(panel, settings, Half.DOCK, manifest.Manifest())
+    assert written is not None
+    manifest.manifest_path(panel).write_text(written, encoding="utf-8")
+    stored = manifest.read(panel).values["boards"]["wall_reference"]
+    assert stored == expression
+    assert pick(None, stored, None, "default").provenance.origin is Origin.PROJECT
