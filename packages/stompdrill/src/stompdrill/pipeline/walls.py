@@ -185,17 +185,17 @@ def _at(
 def required_radius_nm(
     feature: WallFeature, span_nm: tuple[Nanometre, Nanometre]
 ) -> Nanometre:
-    """The radius a hole must admit: the material in the wall, or the bore.
+    """The radius a hole must admit: the run from the wall's outer face to the tip.
 
-    Over the wall's own span and not the whole part, because a part is
-    assembled *through* a wall rather than pushed through it: a modelled nut
-    sits outside and is fitted afterwards, and sizing a hole to admit it would
-    drill half again as wide as the bushing needs. The profile is piecewise
-    constant, so the span's ends and every step boundary inside it are the
-    only depths worth asking about. The bore is a floor rather than a step: a
+    A part is assembled *through* a wall, so what lies between its tip and the
+    wall's far face must pass, whether it sits flush or short of the inner face.
+    The run ends at the tip where the part stops short, and at the inner face
+    where it reaches past: a modelled nut lies beyond the tip and is fitted
+    afterwards, so it never widens the hole. The bore is a floor, because a
     plug enters it however little material surrounds it there.
     """
-    low, high = span_nm
+    low, inner = span_nm
+    high = Nanometre(max(inner, 0))
     depths = {low, high} | {
         boundary
         for _radius, first, last in feature.profile.steps

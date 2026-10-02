@@ -96,9 +96,7 @@ def _feature(
         board=1,
         origin_nm=tuple(Nanometre(int(value * 1_000_000)) for value in origin_mm),  # type: ignore[arg-type]
         direction=direction,
-        profile=Profile(
-            steps=((Nanometre(5_000_000), Nanometre(0), Nanometre(10_000_000)),)
-        ),
+        profile=_BARE_TIP,
         bore_nm=bore_nm,
     )
 
@@ -167,13 +165,22 @@ _J1 = Profile(
 )
 
 
-def _jack(bore_nm: Nanometre | None = None) -> WallFeature:
+#: A part whose material begins three millimetres behind its tip, so a run that
+#: ends at the tip holds none of it.
+_BARE_TIP = Profile(
+    steps=((Nanometre(5_700_000), Nanometre(3_000_000), Nanometre(10_000_000)),)
+)
+
+
+def _jack(
+    bore_nm: Nanometre | None = None, profile: Profile = _J1
+) -> WallFeature:
     return WallFeature(
         designator="J1",
         board=1,
         origin_nm=(Nanometre(32_000_000), Nanometre(0), Nanometre(0)),
         direction=(1.0, 0.0, 0.0),
-        profile=_J1,
+        profile=profile,
         bore_nm=bore_nm,
     )
 
@@ -204,15 +211,50 @@ def test_a_step_boundary_inside_the_span_is_evaluated_and_not_skipped() -> None:
     assert across == 7_530_000
 
 
+def test_a_part_seated_short_of_the_wall_is_still_measured_to_its_tip() -> None:
+    """ADR-0007's amendment. A jack's sleeve must pass the hole whether it is
+    flush with the inner face or a few millimetres inside it, so the run
+    measured is the one the part travels, not the wall's own thickness."""
+    flush = required_radius_nm(_jack(), (Nanometre(500_000), Nanometre(2_500_000)))
+    short = required_radius_nm(_jack(), (Nanometre(-3_500_000), Nanometre(-1_500_000)))
+    assert flush == 5_700_000
+    assert short == 5_700_000
+
+
+def test_the_run_stops_at_the_outer_face_so_a_nut_still_does_not_widen_it() -> None:
+    """The guarantee the amendment must not cost: the flange behind the bushing
+    is 7.530 mm, and a rule reading the whole part would ask for it."""
+    short = required_radius_nm(_jack(), (Nanometre(-3_500_000), Nanometre(-1_500_000)))
+    assert short < 7_530_000
+
+
+def test_a_gap_no_longer_costs_the_sleeve_its_hole() -> None:
+    """What the correction is worth, in the only units a builder buys in: the
+    bore alone stocks at 8.300, which the 11.400 sleeve cannot pass."""
+    standard = DRILL_STANDARDS[DEFAULT_STANDARD]
+    short = required_radius_nm(_jack(), (Nanometre(-3_500_000), Nanometre(-1_500_000)))
+    assert stocked_diameter_nm(short, standard) == 11_400_000
+    assert stocked_diameter_nm(Nanometre(4_150_000), standard) == 8_300_000
+
+
+def test_a_part_reaching_past_the_inner_face_measures_only_to_that_face() -> None:
+    """The other direction: a part already inside the wall is not measured
+    further back than the wall, or the flange behind it would widen the hole."""
+    deep = required_radius_nm(_jack(), (Nanometre(2_000_000), Nanometre(23_000_000)))
+    assert deep == 7_530_000
+
+
 def test_a_span_holding_no_material_needs_no_hole_for_material() -> None:
     """A recessed part: the envelope is nothing there, which is what the bore is for."""
-    assert required_radius_nm(_jack(), (Nanometre(-3_000_000), Nanometre(-1_000_000))) == 0
+    bare = _jack(profile=_BARE_TIP)
+    assert required_radius_nm(bare, (Nanometre(-3_000_000), Nanometre(-1_000_000))) == 0
 
 
 def test_a_bore_is_a_floor_on_the_radius_however_little_material_surrounds_it() -> None:
     """Ruling 6, and the case the committed board cannot make govern."""
     recessed = (Nanometre(-3_000_000), Nanometre(-1_000_000))
-    assert required_radius_nm(_jack(bore_nm=Nanometre(3_175_000)), recessed) == 3_175_000
+    bore = Nanometre(3_175_000)
+    assert required_radius_nm(_jack(bore, _BARE_TIP), recessed) == 3_175_000
 
 
 def test_material_wider_than_the_bore_governs_over_it() -> None:
@@ -625,9 +667,7 @@ def test_a_part_whose_span_holds_nothing_of_it_is_refused_and_not_drilled() -> N
     short = replace(
         _seated(),
         origin_nm=(Nanometre(8_000_000), Nanometre(0), Nanometre(0)),
-        profile=Profile(
-            steps=((Nanometre(5_000_000), Nanometre(0), Nanometre(10_000_000)),)
-        ),
+        profile=_BARE_TIP,
     )
     found = _stage(model, short).apply(_data())
     assert found.holes == ()
@@ -646,6 +686,7 @@ def test_a_bore_with_no_material_in_the_span_still_asks_for_its_hole() -> None:
     recessed = replace(
         _seated(),
         origin_nm=(Nanometre(27_000_000), Nanometre(0), Nanometre(0)),
+        profile=_BARE_TIP,
         bore_nm=Nanometre(3_175_000),
     )
     found = _stage(model, recessed).apply(_data())
