@@ -52,7 +52,7 @@ PLACES: dict[str, frozenset[str]] = {
         "no_drill_sizes", "title",
     }),
     "boards": frozenset({
-        "boards", "panel_reference", "match_tolerance_mm",
+        "boards", "panel_reference", "wall_reference", "match_tolerance_mm",
         "seat_pitch_max_mm", "seat_pitch_min_mm",
     }),
     "output": frozenset({"targets"}),
@@ -96,6 +96,7 @@ _SHAPES: dict[str, _Shape] = {
     "title": _Shape.TEXT,
     "boards": _Shape.PATHS,
     "panel_reference": _Shape.TEXT,
+    "wall_reference": _Shape.TEXT,
     "match_tolerance_mm": _Shape.NUMBER_OR_NULL,
     "seat_pitch_max_mm": _Shape.NUMBER,
     "seat_pitch_min_mm": _Shape.NUMBER,

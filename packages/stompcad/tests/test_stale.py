@@ -87,3 +87,8 @@ def test_the_enclosure_settings_re_run_from_the_step_that_opens_the_model() -> N
     assert "quantise" in _stale("case_face")
     assert "read-panel" not in _stale("case_face")
     assert "read-panel" not in _stale("case_model")
+
+
+def test_a_wall_reference_change_belongs_to_the_boards_place() -> None:
+    assert stale.PLACE_OF_FIELD["wall_reference"] == "boards"
+    assert stale.earliest_place(frozenset({"wall_reference"})) == "boards"

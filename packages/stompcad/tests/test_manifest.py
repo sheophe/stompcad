@@ -329,6 +329,7 @@ def test_an_unknown_section_survives_being_read_and_written_back(tmp_path: Path)
         ("boards", "boards", "tar-pcb.stp"),
         ("boards", "boards", [1, 2]),
         ("boards", "panel_reference", ["RV*"]),
+        ("boards", "wall_reference", ["J1"]),
         ("drilling", "grid_mm", "abc"),
         ("drilling", "grid_mm", None),
         ("drilling", "title", 7),

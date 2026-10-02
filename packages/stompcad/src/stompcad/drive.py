@@ -259,6 +259,10 @@ class RunOptions:
     seat_pitch_max_mm: float
     seat_pitch_min_mm: float
     targets: tuple[tuple[str, Path], ...]
+    #: Which designators may be drilled through a wall. Last and defaulted, the
+    #: only field here that is: empty is the decided value rather than an absent
+    #: one, and a caller stating no wall reference has stated it.
+    wall_reference: str = ""
 
     @staticmethod
     def of(settings: Settings) -> RunOptions:
@@ -292,6 +296,7 @@ class RunOptions:
             seat_pitch_max_mm=settings.boards.seat_pitch_max_mm.value,
             seat_pitch_min_mm=settings.boards.seat_pitch_min_mm.value,
             targets=settings.output.targets.value,
+            wall_reference=settings.boards.wall_reference.value,
         )
 
 

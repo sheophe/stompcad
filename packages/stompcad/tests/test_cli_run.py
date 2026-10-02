@@ -774,3 +774,26 @@ async def test_the_workbench_s_exit_lines_are_the_pipe_s_bytes(tmp_path: Path) -
     assert app.session.phase is Phase.DONE
     assert "\n".join(app.settled) + "\n" == piped.getvalue()
     assert app.session.exit_code == code, "one run, two presentations, two statuses"
+
+
+def test_an_unreadable_wall_reference_in_the_project_is_a_usage_error(
+    tmp_path: Path,
+) -> None:
+    """The grammar is stompcollider's and is first asked over boards already
+    read -- on the far side of the drill half's commit -- so it is checked
+    here, naming the row that holds it."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    panel = _declaring(tmp_path, {"boards": {"wall_reference": "J((("}})
+    with pytest.raises(UsageError, match=r"boards\.wall_reference"):
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+
+
+def test_a_wall_reference_naming_nothing_is_not_a_usage_error(tmp_path: Path) -> None:
+    """The control: a valid expression that matches no part is a finding at
+    run time, never a refusal before anything is opened."""
+    from stompcad.cli import build_parser, resolve
+
+    panel = _declaring(tmp_path, {"boards": {"wall_reference": "NOPE*"}})
+    resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert resolved.settings.boards.wall_reference.value == "NOPE*"
