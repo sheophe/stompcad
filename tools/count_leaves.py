@@ -155,15 +155,10 @@ class _CountingScope:
 def _counted_kernel(counter: _Counter) -> Iterator[None]:
     """Wrap every kernel entry point a measured step can reach.
 
-    ``interferes``/``common`` cover ``seat``/``clash``'s search and clash
-    checks; ``read_step`` covers ``read-boards``' case-model and board-file
-    reads (patched on both the defining module and ``stompcollider``'s own
-    bound name, since a module-level ``from ... import`` copies the
-    reference rather than following it); ``contains`` covers ``drill``'s
-    per-hole clearance query, and ``contains_at_depth`` the wall
-    queries ``drill-walls`` makes through the case model. ``quantise`` and
-    ``match`` reach none of these, so their leaves classify as plain without
-    needing a patch.
+    A leaf is classed kernel only if the counter advanced inside it, and a
+    kernel leaf weighs ten. An entry point left unwrapped makes its leaves
+    count as plain: the case model's wall queries reach the kernel only
+    through ``contains_at_depth``, so ``drill-walls`` depends on it.
     """
     targets = [
         (insert_module, "interferes"),
