@@ -11,6 +11,7 @@ past ``_STRUCTURE_HEIGHT_MM``; a receding companion removes material, never stru
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from stompmodel.frames import FaceFrame
@@ -219,12 +220,11 @@ def contains_at_depth(
 
     # Unlike a kernel axis, nothing else confirms ``depth_nm`` names
     # ``region``'s own plane, and the classifier below takes any depth on
-    # its footprint as inside it; one nanometre in millimetres is the
-    # finest distance a canonical depth can even state.
+    # its footprint as inside it.
     on_plane = BRepExtrema_DistShapeShape(vertex, region)
     if not on_plane.IsDone():
         raise StompdrillError("could not measure the point's own distance to the region")
-    if on_plane.Value() > mm_from_nm(Nanometre(1)):
+    if on_plane.Value() > _plane_tolerance_mm(region):
         return False
 
     state = BRepClass_FaceClassifier(region, point, _CLASSIFIER_TOLERANCE_MM).State()
@@ -304,6 +304,30 @@ def clearance_reason(
         wires.Next()
 
     return min(groups, key=lambda key: nearest_mm(vertex, groups[key]))
+
+
+def _plane_tolerance_mm(region: Any) -> float:
+    """How far off ``region``'s own plane a correctly placed point may measure.
+
+    A wall frame's ``w`` is a ``Level.direction``, keyed to whole millionths
+    and renormalised, so the plane the frame states leans by up to
+    ``direction_tilt`` from the one the kernel's faces lie on. The two planes
+    cross near the model origin, so the distance between them grows with a
+    point's own distance from it, which ``region``'s farthest corner bounds.
+    Floored at the classifier's tolerance, inside which the classifier itself
+    calls a point coincident, so the two questions cannot disagree.
+    """
+    from stompgeom.levels import direction_tilt
+    from stompgeom.step import bounding_box_mm
+
+    box = bounding_box_mm(region)
+    radius_mm = max(
+        math.sqrt(x * x + y * y + z * z)
+        for x in (box[0], box[3])
+        for y in (box[1], box[4])
+        for z in (box[2], box[5])
+    )
+    return max(direction_tilt() * radius_mm, _CLASSIFIER_TOLERANCE_MM)
 
 
 def _floor_face(face: Any) -> Any:

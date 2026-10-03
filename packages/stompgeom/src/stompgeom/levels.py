@@ -17,7 +17,7 @@ from stompmodel.units import Nanometre, check_nanometres, nm_from_mm
 from .kernel import require_kernel
 from .step import StepSolid
 
-__all__ = ["Direction", "Level", "direction_bin", "levels"]
+__all__ = ["Direction", "Level", "direction_bin", "direction_tilt", "levels"]
 
 #: A unit vector in kernel coordinates.
 Direction = tuple[float, float, float]
@@ -129,6 +129,20 @@ def direction_bin(
         round(direction[1] * scale),
         round(direction[2] * scale),
     )
+
+
+def direction_tilt(scale: float = _DIRECTION_SCALE) -> float:
+    """How far a binned direction may lean from the one it was keyed from, in radians.
+
+    Published for the same reason the bin is: a consumer measuring a point
+    against the plane a ``Level`` states owes its tolerance to this rounding
+    rather than to a figure of its own. Each component moves by at most half
+    a bin, so the keyed vector sits within ``sqrt(3) / (2 * scale)`` of the
+    unit one it came from and the angle between them is under that length --
+    the sine of it, in fact, which is the quantity an off-plane distance
+    wants. ``scale`` is a parameter for the same reason the bin's is.
+    """
+    return math.sqrt(_COMPONENTS) / (2.0 * scale)
 
 
 def _partition(shape: Any, scale: float = _DIRECTION_SCALE) -> tuple[Level, ...]:
