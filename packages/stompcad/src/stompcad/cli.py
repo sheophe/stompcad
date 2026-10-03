@@ -430,24 +430,20 @@ def _declared_case(raw: Any, label: str) -> str | None:
         raise UsageError(str(failure).replace("--case", label, 1)) from failure
 
 
-def _validate_panel_reference(panel_reference: Resolved[str]) -> None:
-    """The dock half's own filter parser, asked of whichever rank answered.
+def _validate_filter(resolved: Resolved[str], flag: str, row: str) -> None:
+    """One filter expression's grammar, asked of whichever rank answered.
 
     ``stompcollider`` states what a term may be, and states it for a caller
-    that has opened nothing; left to the run it would first be asked over
-    boards already read, on the far side of the drill half's commit. An
-    unanswered filter is passed over rather than parsed: the empty default
-    is the state ``readiness`` reports as a blocker, not a bad expression.
+    that has opened nothing; left to the run, an expression would first be
+    parsed over boards already read, on the far side of the drill half's
+    commit. An unanswered filter is passed over rather than parsed: an empty
+    expression is a state, not a bad one, and ``parse_filter`` refuses it.
     """
-    if not panel_reference.value:
+    if not resolved.value:
         return
-    where = (
-        "--panel-reference"
-        if panel_reference.provenance.origin is Origin.ARGUMENT
-        else "boards.panel_reference"
-    )
+    where = flag if resolved.provenance.origin is Origin.ARGUMENT else row
     try:
-        parse_filter(panel_reference.value)
+        parse_filter(resolved.value)
     except DockUsageError as failure:
         raise UsageError(f"{where}: {failure}") from failure
 
@@ -569,7 +565,12 @@ def validate_place(settings: Settings, place: str, panel: Path) -> None:
         _validate_drilling(settings.drilling)
         _validate_grid(settings.drilling)
     elif place == "boards":
-        _validate_panel_reference(settings.boards.panel_reference)
+        _validate_filter(
+            settings.boards.panel_reference, "--panel-reference", "boards.panel_reference"
+        )
+        _validate_filter(
+            settings.boards.wall_reference, "--wall-reference", "boards.wall_reference"
+        )
         _validate_dock_lengths(
             settings.boards.match_tolerance_mm,
             settings.boards.seat_pitch_max_mm,
@@ -699,7 +700,17 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
         args.panel_reference, _project(project, "boards", "panel_reference"), None,
         DEFAULTS.boards.panel_reference.value,
     )
-    _validate_panel_reference(panel_reference_resolved)
+    _validate_filter(panel_reference_resolved, "--panel-reference", "boards.panel_reference")
+    # No flag: CLAUDE.md states this command line's whole surface, and this
+    # value is reached through the project file and the Boards row instead.
+    # ``pick`` is still asked, so the ranks below ARGUMENT resolve as usual.
+    # ARGUMENT is passed ``None`` by design, so the ``--wall-reference``
+    # spelling below can never print; it waits beside its row for a flag.
+    wall_reference_resolved = pick(
+        None, _project(project, "boards", "wall_reference"), None,
+        DEFAULTS.boards.wall_reference.value,
+    )
+    _validate_filter(wall_reference_resolved, "--wall-reference", "boards.wall_reference")
 
     drill_layer_resolved = _pick_noting(
         None, _project(project, "artwork", "drill_layer"),
@@ -732,6 +743,7 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     boards_settings = BoardSettings(
         boards=boards_resolved,
         panel_reference=panel_reference_resolved,
+        wall_reference=wall_reference_resolved,
         match_tolerance_mm=match_tolerance_resolved,
         seat_pitch_max_mm=seat_pitch_max_resolved,
         seat_pitch_min_mm=seat_pitch_min_resolved,

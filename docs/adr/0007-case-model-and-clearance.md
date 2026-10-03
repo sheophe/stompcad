@@ -4,7 +4,13 @@
 [ADR-0009](0009-shared-model-package-and-dependency-order.md). The kernel is now
 `stompgeom`'s unconditional dependency and reaches `stompdrill` through it. A
 later amendment adds a second cutting pass, over the walls the same model lets
-a run discover, and pairs a wall's inner surface without a companion step.
+a run discover, and pairs a wall's inner surface without a companion step. A
+further amendment decides which wall a component's hole goes in: where both
+signs of its axis reach a wall, the sign nearer its own tip carries the hole; the
+diameter is measured from the feature's tip to the wall's outer face; and both
+multi-wall refusals are findings rather than raises. A wall that already takes a
+hole for one component at a place refuses a second component's hole there as a
+finding, because no earlier stage can see two wall holes at once.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -252,6 +258,36 @@ added to any diameter.
 The clearance rules are unchanged, applied per wall: a hole whose circle leaves the wall's
 drillable region is `hole-off-face`, and one fouling what stands behind that wall is
 `hole-through-boss`.
+
+### Amendment: a component's hole goes in the wall it is mounted at, sized from its tip
+
+**Accepted.** An in-plane axis has two signs and both are measured, because neither is
+known to point at a wall. Where both reach one, **the sign whose crossing is nearer its own
+tip carries the hole** — distance along the ray, from the feature's tip to that wall's inner
+plane. A through-wall component is mounted *at* the wall it passes through: a jack's sleeve
+sits flush with or a few millimetres inside the inner face, so its own extremity is nearest
+that wall, while the extremity facing the other way is most of the enclosure's width from
+the wall behind it. An exact tie is refused rather than broken, because nothing geometric
+separates the two and a tie-break on anything else would be this file's invention.
+
+Picking the sign that carries material fails on a flush-mounted jack, whose sleeve may stop
+at the inner face and leave both spans material-free; the bore cannot separate them because
+it is one value shared by both signs; and a profile states no sentinel, since `radius_at`
+answers zero both past a stack's last step and before its first. Proximity needs none of
+those: it is a property of where the part *is*, not of what it is made of.
+
+The required radius is measured over the whole run **from the feature's tip to the wall's
+outer face**, not across the wall's own thickness. A part is assembled through a wall, so
+everything between its tip and the far side of the wall must pass the hole; measuring the
+thickness alone sizes a jack seated a few millimetres short from its bore instead of its
+sleeve, and asks for a hole the sleeve cannot enter. A modelled nut is still excluded, because
+a nut sits beyond the tip and so beyond the run. The bore remains a floor, never a
+ceiling.
+
+Both multi-wall refusals are **findings, not raises**. `DrillWalls` is appended after the
+drill half's own commit, so an exception there abandons every other component's hole and
+leaves artefacts already on disk. The corner ambiguity of one ray in two regions stays
+outside what this version drills — the clause says so — but it says it as a finding.
 
 ## Rationale
 

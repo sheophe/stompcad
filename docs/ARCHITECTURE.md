@@ -58,9 +58,9 @@ A supplied enclosure model discovers its own walls at load: `cad.walls`
 groups lateral plate levels by the kernel axis they lean nearest to and
 builds each one's frame and drillable region. `pipeline.walls` resolves a
 supplied `WallFeature`'s ray against those walls, sizes the hole from the
-material within the wall's own span, and cuts it as the `DrillWalls` stage.
-`build_pipeline` does not compose that stage, so no command line drills a
-wall yet.
+material between the feature's tip and the wall's outer face, and cuts it as
+the `DrillWalls` stage. `build_pipeline` does not compose that stage, so no
+command line drills a wall yet.
 
 ## Board placement
 
@@ -98,7 +98,7 @@ read the drill document through `stompmodel` without importing `stompdrill`.
 
 `stompcad` calls each phase of both tools directly, in the order their own
 command lines call them, and holds each result between the steps. It reports
-the run as nine named steps, writes through the same staged-write transaction
+the run as eleven named steps, writes through the same staged-write transaction
 both tools use, and produces artefacts byte-identical to theirs. The
 enclosure step identifies the panel and then opens the model the identified
 part names, so the model is acquired where the part is decided. See

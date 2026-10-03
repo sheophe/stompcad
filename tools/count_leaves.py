@@ -6,10 +6,10 @@ boolean between solids) or plain (arithmetic), a kernel leaf worth
 ``stompcad.plan.KERNEL_LEAF_WEIGHT`` plain ones. Every phase that accepts a
 ``Scope`` is given one here and its leaves are counted as it reports them --
 none of this file reimplements a phase's own division. ``read-panel``,
-``write-case`` and ``write-assembly`` are the exception: ``Source.read``
-(``packages/stompdrill/src/stompdrill/protocols.py``) and ``Emitter.emit``
-(``packages/stompmodel/src/stompmodel/protocols.py``) take no scope at all,
-so those three are declared, not measured -- see ``count_leaves``'s
+``write-case``, ``write-model`` and ``write-assembly`` are the exception:
+``Source.read`` (``packages/stompdrill/src/stompdrill/protocols.py``) and
+``Emitter.emit`` (``packages/stompmodel/src/stompmodel/protocols.py``) take
+no scope at all, so those four are declared, not measured -- see ``count_leaves``'s
 docstring for exactly what and why.
 
 Run with:
@@ -18,7 +18,7 @@ Run with:
         packages/stompdrill/tests/fixtures/tar.ai \\
         packages/stompcollider/tests/fixtures/tar-pcb.stp \\
         ~/.cache/stompcad/cases/1590B.stp \\
-        'RV*,SW*,D(3..4),!RV5'
+        'RV*,SW*,D(3..4),!RV5' 'J1,J4'
 """
 
 from __future__ import annotations
@@ -38,10 +38,11 @@ import stompcollider.insert as insert_module
 import stompcollider.sources.step as board_source_module
 import stompdrill.cad.region as region_module
 import stompgeom.step as step_module
+from stompcad.manifest import MODEL_TARGET_NAMES
 from stompcad.plan import KERNEL_LEAF_WEIGHT
 from stompcollider.clash import Clashes
-from stompcollider.compose import admit, board_geometry, derived_tolerance, docked, registration
-from stompcollider.designators import parse_filter
+from stompcollider.compose import admit, admit_walls, board_geometry, derived_tolerance, docked, registration
+from stompcollider.designators import NOTHING, parse_filter
 from stompcollider.emitters.assembly import AssemblyEmitter, Solids
 from stompcollider.insert import CaseCavity
 from stompcollider.match import Match
@@ -62,10 +63,11 @@ from stompdrill.pipeline import (
     SnapDiametersToDrillTable,
     SnapPositions,
 )
+from stompdrill.pipeline.walls import DrillWalls
 from stompdrill.quantise import quantise
 from stompdrill.sources import DEFAULT_FORM_DEPTH, AiPdfSource
 from stompmodel.codec import to_document
-from stompmodel.model import CaseFace, DrillData
+from stompmodel.model import CaseFace, DrillData, admitting_radius
 from stompmodel.protocols import Pipeline
 from stompmodel.units import nm_from_mm
 
@@ -150,13 +152,10 @@ class _CountingScope:
 def _counted_kernel(counter: _Counter) -> Iterator[None]:
     """Wrap every kernel entry point a measured step can reach.
 
-    ``interferes``/``common`` cover ``seat``/``clash``'s search and clash
-    checks; ``read_step`` covers ``read-boards``' case-model and board-file
-    reads (patched on both the defining module and ``stompcollider``'s own
-    bound name, since a module-level ``from ... import`` copies the
-    reference rather than following it); ``contains`` covers ``drill``'s
-    per-hole clearance query. ``quantise`` and ``match`` reach none of
-    these, so their leaves classify as plain without needing a patch.
+    A leaf is classed kernel only if the counter advanced inside it, and a
+    kernel leaf weighs ten. An entry point left unwrapped makes its leaves
+    count as plain: the case model's wall queries reach the kernel only
+    through ``contains_at_depth``, so ``drill-walls`` depends on it.
     """
     targets = [
         (insert_module, "interferes"),
@@ -166,6 +165,7 @@ def _counted_kernel(counter: _Counter) -> Iterator[None]:
         (step_module, "read_step"),
         (board_source_module, "read_step"),
         (region_module, "contains"),
+        (region_module, "contains_at_depth"),
     ]
     originals: list[tuple[Any, str, Any]] = [
         (module, name, getattr(module, name)) for module, name in targets
@@ -198,15 +198,16 @@ def count_leaves(
     case_margin_mm: float = 1.0,
     seat_pitch_max_mm: float = 2.0,
     seat_pitch_min_mm: float = 0.05,
+    wall_reference: str = "",
 ) -> dict[str, LeafTally]:
     """Run both tools' phases over one fixture and tally each step's leaves.
 
-    Six steps -- ``quantise``, ``drill``, ``read-boards``, ``match``,
-    ``seat``, ``clash`` -- pass a ``_CountingScope`` into the real call
+    Seven steps -- ``quantise``, ``drill``, ``read-boards``, ``match``,
+    ``seat``, ``clash``, ``drill-walls`` -- pass a ``_CountingScope`` into the real call
     (``quantise()``, each pipeline stage's ``apply``, ``BoardSource.scan``,
-    ``Match.apply``, ``Seat.apply``, ``Clashes.apply``) and read back what
-    that call itself divided into and touched. The other three take no
-    scope at all and are declared just below, each citing the signature
+    ``Match.apply``, ``Seat.apply``, ``Clashes.apply``, ``DrillWalls.apply``)
+    and read back what that call itself divided into and touched. The other
+    four take no scope at all and are declared just below, each citing the signature
     that makes it unmeasurable.
     """
     counter = _Counter()
@@ -250,27 +251,40 @@ def count_leaves(
         tallies["drill"] = LeafTally(*counter.tallies["drill"])
 
         settings = OutputSettings(title="", case_model=model)
-        formats = sorted(available())
-        # Declared: Emitter.emit(self, data) -> Payload takes no scope
-        # (packages/stompmodel/src/stompmodel/protocols.py:295). Only the
-        # step format cuts the model (a boolean, unconditional); the other
-        # four only format numbers already computed.
+        # Declared, as before: Emitter.emit takes no scope. The split is
+        # decision 16's -- the panel's own formats commit before a board is
+        # read, and the two that describe the whole job commit after the walls
+        # are cut -- so each step declares the formats it actually renders.
+        panel_formats = sorted(name for name in available() if name not in MODEL_TARGET_NAMES)
+        model_formats = sorted(name for name in available() if name in MODEL_TARGET_NAMES)
         tallies["write-case"] = LeafTally(
-            plain=sum(1 for name in formats if name != "step"),
-            kernel=sum(1 for name in formats if name == "step"),
+            plain=sum(1 for name in panel_formats if name != "step"),
+            kernel=sum(1 for name in panel_formats if name == "step"),
         )
-        for name in formats:
+        tallies["write-model"] = LeafTally(
+            plain=sum(1 for name in model_formats if name != "step"),
+            kernel=sum(1 for name in model_formats if name == "step"),
+        )
+        for name in sorted(available()):
             make_emitter(name, settings).emit(data)
 
         with tempfile.TemporaryDirectory() as tmp:
             drill_path = Path(tmp) / "drill.json"
             drill_path.write_text(json.dumps(to_document(data)), encoding="utf-8")
-            source = BoardSource(drill_path, [board], case_model)
+            wall = NOTHING if not wall_reference else parse_filter(wall_reference)
+            source = BoardSource(
+                drill_path, [board], case_model,
+                wall_reference=wall,
+                wall_probes_nm=tuple(
+                    sorted({admitting_radius(size) for size in standard.sizes_nm})
+                ),
+            )
             scan = source.scan(_CountingScope(counter, "read-boards"))
             tallies["read-boards"] = LeafTally(*counter.tallies["read-boards"])
 
             case = registration(scan, drill_path)
-            dock_data = admit(docked(scan, case), parse_filter(panel_reference))
+            panel = parse_filter(panel_reference)
+            dock_data = admit_walls(admit(docked(scan, case), panel), wall, panel)
             geometry = board_geometry(scan, case)
             board_solids = {ordinal: geom.solids for ordinal, geom in geometry.items()}
 
@@ -292,6 +306,13 @@ def count_leaves(
             clashes = Clashes(scan.case.solids, board_solids)
             dock_data = clashes.apply(dock_data, _CountingScope(counter, "clash"))
             tallies["clash"] = LeafTally(*counter.tallies["clash"])
+
+            # Both stages the driver composes for this step: the wall holes
+            # leave DrillWalls unnumbered, so a second routing pass belongs to
+            # the step's own work and to its weight (decision 3).
+            walls = Pipeline([DrillWalls(model, dock_data.wall_features, standard), RouteHoles()])
+            data = walls.run(data, _CountingScope(counter, "drill-walls"))
+            tallies["drill-walls"] = LeafTally(*counter.tallies["drill-walls"])
 
             # Declared: AssemblyEmitter.emit satisfies Emitter.emit(self, data)
             # -> Payload, which takes no scope (see write-case, same line).
@@ -318,12 +339,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("board", type=Path)
     parser.add_argument("case_model", type=Path)
     parser.add_argument("panel_reference")
+    parser.add_argument(
+        "wall_reference",
+        help="which designators may be drilled through a wall, e.g. 'J1,J4'; a weight "
+        "measured with none named would be a weight for a step that did nothing",
+    )
     args = parser.parse_args(argv)
 
-    tallies = count_leaves(args.panel, args.board, args.case_model, args.panel_reference)
+    tallies = count_leaves(
+        args.panel, args.board, args.case_model, args.panel_reference,
+        wall_reference=args.wall_reference,
+    )
     order = [
         "read-panel", "quantise", "drill", "write-case",
-        "read-boards", "match", "seat", "clash", "write-assembly",
+        "read-boards", "match", "seat", "clash", "drill-walls", "write-model", "write-assembly",
     ]
     for key in order:
         tally = tallies[key]

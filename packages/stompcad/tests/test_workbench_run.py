@@ -1039,7 +1039,9 @@ async def test_a_second_ctrl_r_after_a_change_resumes_rather_than_starting_over(
         app.session.set(Place.OUTPUT, "targets", ())
         await pilot.press("ctrl+r")
         await settle(pilot, app)
-    assert _recorded(recording).resumed == [frozenset({"write-case", "write-assembly"})]
+    assert _recorded(recording).resumed == [
+        frozenset({"write-case", "write-model", "write-assembly"})
+    ]
 
 
 @pytest.mark.asyncio

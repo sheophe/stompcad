@@ -25,12 +25,13 @@ from stompcad.present import Choice, PlainWriter, Presentation, Question
 from stompcad.settings import Origin, Provenance, Resolved, Settings
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
+from stompdrill.cad import OcpCaseModel
 from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.quantise import RawDrillData
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, ReferenceOutline, StageRun
 from stompmodel.progress import NO_PROGRESS, Scope, track
 from stompmodel.protocols import Pipeline
 from stompmodel.units import Nanometre
@@ -474,7 +475,7 @@ def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> Non
     """An unrun driver refuses a retry, naming the work that has not happened.
 
     Each of ``_rerun``'s preconditions guards an intermediate a later step
-    reads, so a driver that has already run satisfies all five and cannot
+    reads, so a driver that has already run satisfies all seven and cannot
     exercise any of them; only a freshly constructed one can. Each message
     names the missing work -- "the panel is read", "quantisation" -- rather
     than the attribute it would have set, so a person reading it knows what
@@ -490,6 +491,10 @@ def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> Non
         driver.retry("write-case", _options(), NO_PROGRESS)
     with pytest.raises(ValueError, match="panel is drilled"):
         driver.retry("read-boards", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="boards are docked"):
+        driver.retry("drill-walls", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="walls are cut"):
+        driver.retry("write-model", _options(), NO_PROGRESS)
     with pytest.raises(ValueError, match="boards are docked"):
         driver.retry("write-assembly", _options(), NO_PROGRESS)
 
@@ -893,12 +898,12 @@ def _driver_and_presentation_with_held_intermediates(
     options = replace(
         _options(),
         boards=(Path("stand-in-board.stp"),),
-        targets=(("json", tmp_path / "case.json"),),
+        targets=(("excellon", tmp_path / "case.drl"), ("json", tmp_path / "case.json")),
     )
     driver = Driver(DRILL_AND_DOCK, presentation, options)
     driver._raw = cast(RawDrillData, object())
     driver._quantised = DrillData()
-    driver._drilled = DrillData()
+    driver._drilled = _outlined_document()
     driver._scan = cast(BoardScan, object())
     driver._geometry = cast(dict[int, BoardGeometry], {})
     driver._docked = _stand_in_dock_data()
@@ -915,6 +920,11 @@ def _driver_with_held_intermediates(tmp_path: Path) -> Driver:
 def _errored_dock_data() -> DockData:
     """A dock result carrying an error, for the write step's own withhold guard."""
     return _stand_in_dock_data().with_diagnostics(Diagnostic.error("stand-in-error", "stand-in"))
+
+
+def _outlined_document() -> DrillData:
+    """A document the Excellon emitter accepts: it refuses one with no outline."""
+    return DrillData(reference=ReferenceOutline(Nanometre(30_000_000), Nanometre(20_000_000)))
 
 
 def _driver_writing_into(
@@ -948,6 +958,17 @@ def _driver_writing_into(
         )
     driver._project = Project(panel=panel, settings=settings, held=manifest.Manifest())
     return driver, panel
+
+
+def _commit_the_model(driver: Driver) -> None:
+    """The drill half's later commit, which carries its declaration when there are boards.
+
+    ``write case`` no longer declares on a run with boards: decision 16 puts
+    the declaration on the commit that follows the walls.
+    """
+    assert driver._drilled is not None
+    with track(NullSink()) as scope:
+        driver._write_model(driver._drilled, scope)
 
 
 class _Recorder:
@@ -1058,6 +1079,7 @@ def test_the_driver_names_every_artefact_it_committed(tmp_path: Path) -> None:
     """The `Output` place labels a file it wrote differently from one it found."""
     driver, _presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
     assert driver.written
 
 
@@ -1076,13 +1098,18 @@ def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
     would then disagree with the case this very resume just rewrote.
     """
     driver = _driver_with_held_intermediates(tmp_path)
+    # The stale set reaches ``drill-walls``, whose premise is that a board was
+    # seated inside a model, and the stub below replaces the step that opens
+    # one. Only its name is read: the stand-in dock data measured no wall
+    # feature, so ``DrillWalls`` returns before it asks the model anything.
+    driver._case_model = cast(OcpCaseModel, SimpleNamespace(model_name="stand-in"))
     calls = {"read_boards": 0}
 
     def _stub_quantise(scope: Scope) -> DrillData:
-        return DrillData()
+        return _outlined_document()
 
     def _stub_drill(data: DrillData, scope: Scope) -> DrillData:
-        return DrillData()
+        return _outlined_document()
 
     def _stub_read_boards(drill: DrillData, scope: Scope) -> None:
         calls["read_boards"] += 1
@@ -1143,7 +1170,10 @@ def test_a_resume_reports_undocked_and_skips_dock_steps_when_drilled_has_errors(
     driver.resume(frozenset({"write-case", "write-assembly"}), driver._options, NO_PROGRESS)
 
     assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
-    assert any("docked nothing" in line for lines in presentation.reported for line in lines)
+    assert any("read no board" in line for lines in presentation.reported for line in lines)
+    assert any("case.json" in line for lines in presentation.reported for line in lines), (
+        "the model's deferred targets are named beside the dock half's"
+    )
 
 
 def test_a_resume_drops_the_dock_half_when_there_are_no_boards(tmp_path: Path) -> None:
@@ -1199,6 +1229,7 @@ def test_a_half_commits_its_declarations_with_its_own_artefacts(tmp_path: Path) 
     """Decision 8: an artefact never sits beside a project file that misses it."""
     driver, panel = _driver_writing_into(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
     recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
     assert recorded["drilling"]["grid_mm"] == driver._options.grid_mm
     assert "boards" not in recorded, "the control: boards is the dock half's place with any boards"
@@ -1228,6 +1259,7 @@ def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> N
     """
     driver, panel = _driver_writing_into(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
     first = manifest.manifest_path(panel).read_text(encoding="utf-8")
 
     assert driver._project is not None
@@ -1242,6 +1274,7 @@ def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> N
         ),
     )
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
 
     assert manifest.manifest_path(panel).read_text(encoding="utf-8") == first
 
@@ -1255,6 +1288,7 @@ def test_a_failed_dock_half_leaves_the_drill_declarations_and_not_its_own(tmp_pa
     """
     driver, panel = _driver_writing_into(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
     driver._dock_data = _errored_dock_data()
     driver.resume(frozenset({"write-assembly"}), driver._options, NO_PROGRESS)
 
@@ -1289,6 +1323,7 @@ def test_a_drill_half_never_declares_a_target_only_the_dock_half_could_commit(
     )
 
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
 
     recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
     assert "assembly" not in recorded["output"]["targets"]
@@ -1299,6 +1334,7 @@ def test_a_run_that_writes_nothing_still_records_what_it_ran_under(tmp_path: Pat
     """A check-only run is a run; decision 17 permits one and decision 8 remembers it."""
     driver, panel = _driver_writing_into(tmp_path, targets=())
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
+    _commit_the_model(driver)
     assert manifest.manifest_path(panel).exists()
 
 

@@ -85,9 +85,15 @@ class BoardSource:
     #: per sign of the axis, and a part no expression named can never be
     #: drilled for, so the filter reaches this read rather than what it returns.
     wall_reference: Filter = NOTHING
+    #: The radii a *wall* feature is measured at. Empty means the panel's own,
+    #: which is this reader's only answer set when nobody supplies one; a wall
+    #: has no holes, so an orchestrator that knows the selected drill standard
+    #: knows the only diameters that could be cut and passes those instead.
+    wall_probes_nm: Sequence[Nanometre] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "boards", tuple(self.boards))
+        object.__setattr__(self, "wall_probes_nm", tuple(sorted(set(self.wall_probes_nm))))
         if not self.boards:
             raise StompcolliderError("a docking run needs at least one board model to read")
 
@@ -143,6 +149,7 @@ class BoardSource:
                     _board(
                         substrate, parts, path, probes,
                         wall_reference=self.wall_reference,
+                        wall_probes_nm=self.wall_probes_nm,
                     )
                 )
                 geometry.append(BoardGeometry(document, (substrate, *parts)))
@@ -264,6 +271,7 @@ def _board(
     probes_nm: Sequence[Nanometre] = (),
     *,
     wall_reference: Filter,
+    wall_probes_nm: Sequence[Nanometre] = (),
 ) -> RawBoard:
     """One substrate and its parts, measured about the way those parts protrude.
 
@@ -297,7 +305,10 @@ def _board(
         carrier_v=v,
         carrier_w=outward,
         components=tuple(
-            _component(part, outward, probes_nm, part.name in admitted) for part in parts
+            _component(
+                part, outward, probes_nm, part.name in admitted, wall_probes_nm
+            )
+            for part in parts
         ),
     )
 
@@ -307,6 +318,7 @@ def _component(
     outward: Direction,
     probes_nm: Sequence[Nanometre],
     wall_admitted: bool,
+    wall_probes_nm: Sequence[Nanometre] = (),
 ) -> RawComponent:
     """``part``'s protrusion and its wall feature, or the same part with neither.
 
@@ -318,7 +330,11 @@ def _component(
     read has no way to report.
     """
     found = protrusion_of(part, outward, probes_nm)
-    wall = wall_features_of(part, outward, probes_nm) if wall_admitted else ()
+    wall = (
+        wall_features_of(part, outward, wall_probes_nm or probes_nm)
+        if wall_admitted
+        else ()
+    )
     if found is None:
         return RawComponent(designator=part.name, axis_xy_mm=None, wall=wall)
     return replace(found, wall=wall)

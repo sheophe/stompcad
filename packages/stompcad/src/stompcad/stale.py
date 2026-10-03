@@ -37,6 +37,7 @@ PLACE_OF_FIELD: dict[str, str] = {
     "title": "drilling",
     "boards": "boards",
     "panel_reference": "boards",
+    "wall_reference": "boards",
     "match_tolerance_mm": "boards",
     "seat_pitch_max_mm": "boards",
     "seat_pitch_min_mm": "boards",

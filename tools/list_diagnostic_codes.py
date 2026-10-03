@@ -47,19 +47,6 @@ UNREACHABLE: dict[str, str] = {
         "raised only in stompcollider.cli._degenerate, wrapping a kernel failure; "
         "stompcad calls the library phases, so it arrives as a StompError instead"
     ),
-    # TODO(stompcad): the workbench resolves a wall-reference expression in the
-    # next wall-drilling plan, which makes this reachable; remove this entry and
-    # add its remedy row then.
-    "component-claimed-twice": (
-        "raised only in stompcollider.compose.admit_walls, which the driver does not "
-        "call until stompcad resolves a wall-reference expression"
-    ),
-    # TODO(stompcad): plan 3 appends DrillWalls to the composed run, which makes
-    # this reachable; remove this entry and add its remedy row then.
-    "wall-feature-unreachable": (
-        "raised only in stompdrill's DrillWalls, a library stage the driver does not "
-        "compose until stompcad resolves a wall-reference expression"
-    ),
     # TODO(stompcad): compose CheckReferenceSize into the drill half with a
     # workbench row for its expected size, or drop both of its family rows.
     "no-reference-outline": (

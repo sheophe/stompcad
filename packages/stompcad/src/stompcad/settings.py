@@ -247,6 +247,7 @@ class BoardSettings:
 
     boards: Resolved[tuple[Path, ...]]
     panel_reference: Resolved[str]
+    wall_reference: Resolved[str]
     match_tolerance_mm: Resolved[float | None]
     seat_pitch_max_mm: Resolved[float]
     seat_pitch_min_mm: Resolved[float]
@@ -255,6 +256,7 @@ class BoardSettings:
         """Each field, its row's name and what it states, as ``Artwork.rows``."""
         yield "boards", "boards", self.boards.describe()
         yield "panel_reference", "panel references", self.panel_reference.describe()
+        yield "wall_reference", "wall references", self.wall_reference.describe()
         yield "match_tolerance_mm", "match tolerance", self.match_tolerance_mm.describe()
         yield "seat_pitch_max_mm", "seat step, coarse", self.seat_pitch_max_mm.describe()
         yield "seat_pitch_min_mm", "seat step, fine", self.seat_pitch_min_mm.describe()
@@ -346,6 +348,11 @@ DEFAULTS = Settings(
     boards=BoardSettings(
         boards=_at_default(()),
         panel_reference=_at_default(""),
+        # Empty is the decided value, not a placeholder. A hole in an enclosure
+        # wall is irreversible and the panel -- the one drawing read here --
+        # says nothing about it, so the part is named by a builder or nothing
+        # is cut. ``readiness`` therefore asks nothing about this value.
+        wall_reference=_at_default(""),
         match_tolerance_mm=_at_default(None),
         seat_pitch_max_mm=_at_default(2.0),
         seat_pitch_min_mm=_at_default(0.05),

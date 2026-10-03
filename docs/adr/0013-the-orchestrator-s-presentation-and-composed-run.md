@@ -22,7 +22,15 @@ worker still crosses to the app, but now pumps events across a process boundary
 instead of doing the run's own work; `ask` blocks in that process on its own
 command pipe rather than a worker's `Event`; and a fault crosses as a value
 re-raised on the far side rather than as the exception object carried to the
-main thread. This ADR's other decisions stand.
+main thread. A further amendment, for wall drilling, makes the run eleven
+steps rather than the nine its first decision lists: `drill walls` and `write
+model` join after `clash`, and the drill half's JSON document and drilled model
+commit at `write model`, after the walls are cut, while the Excellon and the
+drawings still commit at `write case`. That commit is withheld on *either*
+half's error, because it runs after docking and is derived from it, which the
+per-half limit recorded below no longer covers. The decision's body below keeps
+the nine as the record of what was first decided; the amendment placed before
+the Rationale governs. This ADR's other decisions stand.
 
 ## Context
 
@@ -265,6 +273,86 @@ to the app, which keeps it as `app.failure` and re-raises it on the main
 thread once `app.run()` returns, so `main`'s one exception-to-exit-code
 mapping still serves the terminal path as well as the headless one instead
 of drifting into two.
+
+### Amendment: eleven steps, and the drill half's document and model commit last
+
+**Accepted.** A run is eleven named steps — `read panel`, `quantise`, `drill`,
+`write case`, `read boards`, `match`, `seat`, `clash`, **`drill walls`**, **`write model`**,
+`write assembly`. A run naming no board still takes the first four: both new steps lie
+inside the region `plan_for` prunes, so a drill-only run is untouched rather than merely
+equivalent to what it was. A run with boards divides its span among all eleven.
+
+`drill walls` sits after `clash` because it works from the ranking that survived re-ranking,
+which is the only ranking that will not change under it. It is an ordinary `Stage` appended
+only here; `stompdrill`'s own `build_pipeline` is untouched, so no stage asserts that another
+ran and the standalone command line cannot reach it.
+
+The drill half's commit divides. `write case` keeps its name, its position and — in a run
+with no boards — its behaviour, committing every drill-half target byte for byte as it does
+now. With boards it commits only what is already complete without the walls: the panel's
+Excellon and its two drawings, whose hole numbers are independent of wall drilling. The JSON
+document and the drilled model describe the whole job, so they belong to `write model`, after
+the walls are cut.
+
+This amends the deliberate limit recorded above. Its purpose survives: a dock-half failure
+still leaves a builder the files to go drill the panel with, because the Excellon and the
+drawings are committed before a board is read. What changes is that the two artefacts which
+would be *wrong* if written early are no longer written early. The cost is unchanged — drill
+artefacts are still no evidence the run succeeded, and the exit code is still the only status.
+
+The manifest declaration joins the **last** drill-half commit: `write model` where the run
+has one, `write case` otherwise. A project file never sits beside an artefact that was never
+written, which is ADR-0014's decision holding under a split.
+
+**The per-half partition does not reach `write model`.** The limit recorded above divides the
+run by half and lets each half's completed commit stand, and that was sound while every
+drill-half commit happened *before* a board was read. `write model` happens after, and its
+bytes are derived from the dock half: a wall hole's position, its surface and its diameter
+all come from the features the clash settled. So an error in the dock half withholds `write
+model`'s **artefacts** as well as `write assembly`'s, and a builder told a designator is
+claimed by two expressions is not handed a document whose wall holes were resolved from
+features that run just declared undecidable. `write case` is unaffected, which is what keeps
+the limit's purpose: the Excellon and the drawings are already on disk, and nothing about them
+depends on a board. The cost is that a dock-half error now withholds two artefacts a run
+before this amendment would have written — which is the point, because those two would have
+been wrong.
+
+Its **declaration** still commits, and names only the formats that produced a file. It
+commits because, in a run with boards, this is the drill half's *only* carrier — `write case`
+declares no format there — so withholding it would leave exactly what ADR-0014's decision 8
+forbids: committed files beside no project file, or beside defaults that did not make them.
+It is narrowed because `output.targets` is a per-format map, and naming a format this very
+commit withheld would point a row at a file nobody wrote. That is not a new rule but the one
+`payload_for` already applies to a format another commit owns, read here for a format no
+commit will reach. The run's other places — artwork, enclosure, drilling — declare values
+rather than files, and those values are exactly the ones that produced the Excellon and the
+drawings now on disk, so they are recorded in full.
+
+An error on the **cut document itself** takes the very same path, and for the same reason.
+The one error that document can carry which the panel-drilled one cannot is a wall refusal,
+and a refusal indicts the part a builder named — `boards.wall_reference`, a value this
+commit never declares — not the artwork, the enclosure or the drilling, which did produce
+the Excellon now on disk. So the artefacts are withheld and the narrowed declaration still
+commits. Withholding it too would leave that Excellon beside no project file at all, which
+is the state ADR-0014's decision 8 forbids and which no run before this amendment could
+reach, because its drill declaration landed at `write case`.
+
+**A second deliberate limit: a wall surface gets no sibling artefact.** The per-surface
+Excellon and the per-surface drawing sheets are rendered at `write case`, from the
+panel-drilled document, *before* any wall is cut; only the drill document and the drilled
+model defer to `write model`. So a composed run writes an accepted wall hole into those two
+artefacts and into nothing else — a builder who names a part gets no wall drill file and no
+wall drawing sheet to mark it from. Lifting it means deferring or re-rendering the three
+per-surface formats `write case` owns, with `_write` adopting the per-surface artefact set
+rather than one emitter per target, which is work no plan behind this amendment specifies, so it is recorded here beside the limit above and for the same reason:
+a recorded limit is honest, and a hidden one is not.
+
+**And a known disagreement between two outputs of one run.** `write assembly` builds from
+the case solid scanned out of the document the boards were seated against, which is the
+panel-only drill data, so an assembly written for a run with an accepted wall hole carries
+a case lacking a hole the drilled model has. CLAUDE.md's rule that all outputs from one
+invocation agree on the geometry they describe is therefore not met for that run. The hole
+is right in both artefacts that describe it; it is the assembly's case that is stale.
 
 ## Rationale
 

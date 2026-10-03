@@ -131,9 +131,9 @@ def admit_walls(
 ) -> DockData:
     """Mark every component the wall filter admits, and refuse the ones both claim.
 
-    Its own function rather than a second half of :func:`admit`: ``stompcad``
-    resolves no wall expression yet, so a code raised inside a function the
-    driver calls would be recorded reachable before anything could reach it.
+    Its own function rather than a second half of :func:`admit`: a panel
+    reference is required and a wall reference defaults to naming nobody, so
+    one call taking both would read as though the two were asked alike.
     Each expression is asked here, so neither answer depends on :func:`admit`
     having run. ``wall_admitted`` records what the expression *named*, never
     that anything was found -- a glob reaching a jack reaches a header too --

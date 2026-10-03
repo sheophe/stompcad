@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from stompcad import cli, manifest
+from stompcad import cli, drive, manifest
 from stompcad.cli import Resolution
 from stompcad.present import Choice
 from stompcad.readiness import Blocker, Readiness, readiness
@@ -119,7 +119,7 @@ def test_an_output_change_makes_only_the_write_steps_stale() -> None:
     """Decision 10: propagation follows data, and a filename costs no kernel work."""
     session = _session()
     session.set(Place.OUTPUT, "targets", (("excellon", Path("/project/other.drl")),))
-    assert session.stale() == {"write-case", "write-assembly"}
+    assert session.stale() == {"write-case", "write-model", "write-assembly"}
     assert session.roadmap() is Place.OUTPUT
 
 
@@ -190,6 +190,7 @@ def test_a_resume_adds_to_what_the_project_has_reached() -> None:
     session.set(Place.OUTPUT, "targets", ())
     session.begin_run(session.stale(), fresh=False)
     session.credit("write-case")
+    session.credit("write-model")
     session.credit("write-assembly")
     session.finish_run(0)
 
@@ -279,9 +280,10 @@ def test_a_project_with_a_board_still_plans_its_dock_half() -> None:
     session.finish_run(0)
 
     session.set(Place.OUTPUT, "targets", ())
-    assert session.stale() == frozenset({"write-case", "write-assembly"})
+    assert session.stale() == frozenset({"write-case", "write-model", "write-assembly"})
     session.start_run(resuming=True)
     session.credit("write-case")
+    session.credit("write-model")
     assert not session.reached(Place.OUTPUT), "the dock half's write step has not run"
 
     session.credit("write-assembly")
@@ -579,3 +581,35 @@ def test_a_fit_landing_mid_run_does_not_raise() -> None:
     session.begin_run(_PLAN)
     session.record_fit(("1590B",))
     assert session.settings.enclosure.case.value is None
+
+
+def test_the_boards_place_waits_until_the_walls_are_cut() -> None:
+    """Decision 17: the place's work is not done until the walls are cut, and
+    the walls are cut at ``drill-walls`` rather than in the write step after."""
+    assert drive.steps_of_place("boards") == {"read-boards", "drill-walls"}
+
+
+def test_a_wall_reference_edit_marks_the_boards_place() -> None:
+    session = _session()
+    session.set(Place.BOARDS, "wall_reference", "J1")
+    assert session.roadmap() is Place.BOARDS
+    assert "drill-walls" in drive.readers_of("wall_reference")
+    assert "drill-walls" in session.stale()
+
+
+def test_a_boardless_project_never_waits_for_a_step_it_will_not_run() -> None:
+    """Review focus. ``wall_reference`` resolves and is remembered on a run with
+    no boards, and every step that reads it is pruned -- so a roadmap waiting on
+    one would report it stale for ever."""
+    session = _session(_boardless())
+    session.set(Place.BOARDS, "wall_reference", "J1")
+    assert session.settings.boards.wall_reference.value == "J1"
+    assert session.stale() == frozenset()
+    assert session.roadmap() is None
+
+
+def test_a_boarded_wall_reference_edit_leaves_a_step_to_resume() -> None:
+    """The control for the boardless case: the same edit with boards is not empty."""
+    session = _session()
+    session.set(Place.BOARDS, "wall_reference", "J1")
+    assert "drill-walls" in session.stale()

@@ -774,3 +774,93 @@ async def test_the_workbench_s_exit_lines_are_the_pipe_s_bytes(tmp_path: Path) -
     assert app.session.phase is Phase.DONE
     assert "\n".join(app.settled) + "\n" == piped.getvalue()
     assert app.session.exit_code == code, "one run, two presentations, two statuses"
+
+
+def test_an_unreadable_wall_reference_in_the_project_is_a_usage_error(
+    tmp_path: Path,
+) -> None:
+    """The grammar is stompcollider's and is first asked over boards already
+    read -- on the far side of the drill half's commit -- so it is checked
+    here, naming the row that holds it."""
+    from stompcad.cli import UsageError, build_parser, resolve
+
+    panel = _declaring(tmp_path, {"boards": {"wall_reference": "J((("}})
+    with pytest.raises(UsageError, match=r"boards\.wall_reference"):
+        resolve(build_parser().parse_args([str(panel)]), tmp_path)
+
+
+def test_a_wall_reference_naming_nothing_is_not_a_usage_error(tmp_path: Path) -> None:
+    """The control: a valid expression that matches no part is a finding at
+    run time, never a refusal before anything is opened."""
+    from stompcad.cli import build_parser, resolve
+
+    panel = _declaring(tmp_path, {"boards": {"wall_reference": "NOPE*"}})
+    resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
+    assert resolved.settings.boards.wall_reference.value == "NOPE*"
+
+
+#: The tar panel drills no hole wide enough for SW2, so admitting both switches
+#: leaves a board with no correspondence, an error that withholds the model
+#: artefacts. Leaving SW2 out reduces that to a warning, so a run reaches them.
+_WARNING_ONLY_PANEL_REFERENCE = f"{PANEL_REFERENCE},!SW2"
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_a_run_that_names_no_wall_part_adds_no_wall_surface_and_no_sibling_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default wall expression is empty, so a run that asks for no wall
+    describes only the face. No composed run writes a per-surface sibling for a
+    wall whatever it names -- decision 16's recorded limit -- so what the exact
+    artefact set pins is that no *unexpected* file appears, not that a sibling
+    was suppressed. Bytes are not compared here; that lock lives in
+    test_drive_dock.py's test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    panel = _tar_project(tmp_path, model)
+    code = cli.main([
+        str(panel), str(panel.with_name("tar-pcb.stp")), "--case", "1590B",
+        "--case-model", str(panel.with_name("1590B.stp")),
+        "--panel-reference", _WARNING_ONLY_PANEL_REFERENCE,
+        "--emit", f"json={tmp_path / 'p.json'}",
+        "--emit", f"step={tmp_path / 'p.stp'}",
+        "--emit", f"excellon={tmp_path / 'p.drl'}",
+    ])
+
+    assert code in (0, 1), capsys.readouterr().out
+    document = json.loads((tmp_path / "p.json").read_text())
+    assert [surface["key"] for surface in document["surfaces"]] == ["face"]
+    # Named exactly, so a new artefact has to be accounted for.
+    assert sorted(path.name for path in tmp_path.iterdir() if path.is_file()) == [
+        "1590B.stp", "p.drl", "p.json", "p.stp", "tar-pcb.stp", "tar.ai",
+        "tar.stompcad.json",
+    ]
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_the_commit_lines_print_in_the_order_the_run_takes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reads the order the run reports its two commits and its steps, not files
+    on disk: the panel's artefacts are reported before the model's, and the
+    walls are cut between writing the case and writing the model."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    panel = _tar_project(tmp_path, model)
+    code = cli.main([
+        str(panel), str(panel.with_name("tar-pcb.stp")), "--case", "1590B",
+        "--case-model", str(panel.with_name("1590B.stp")),
+        "--panel-reference", _WARNING_ONLY_PANEL_REFERENCE,
+        "--emit", f"excellon={tmp_path / 'p.drl'}",
+        "--emit", f"json={tmp_path / 'p.json'}",
+    ])
+    printed = capsys.readouterr().out
+    # Without this the withheld and undocked lines satisfy the order below too,
+    # so a run that wrote neither file would pass for one that wrote both.
+    assert code in (0, 1), printed
+    assert printed.index("p.drl") < printed.index("p.json")
+    assert printed.index("write case") < printed.index("drill walls") < printed.index("write model")

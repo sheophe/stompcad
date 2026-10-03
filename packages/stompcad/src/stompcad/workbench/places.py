@@ -124,6 +124,7 @@ FIELDS: dict[Place, tuple[Field, ...]] = {
     Place.BOARDS: (
         Field("boards", Kind.MANY),
         Field("panel_reference", Kind.MANY),
+        Field("wall_reference", Kind.MANY),
         Field("match_tolerance_mm", Kind.NUMBER),
         Field("seat_pitch_max_mm", Kind.NUMBER),
         Field("seat_pitch_min_mm", Kind.NUMBER),
@@ -176,7 +177,7 @@ def choices_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
                 panel.parent, panel, session.settings.enclosure.case_model.value
             )
         )
-    if field == "panel_reference":
+    if field in ("panel_reference", "wall_reference"):
         return session.designators
     if field == "targets":
         return tuple(sorted(frozenset(available()) | DOCK_TARGET_NAMES))
@@ -190,7 +191,7 @@ def chosen_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
         return tuple(name for name, _path in value)
     if field == "boards":
         return tuple(str(path) for path in value)
-    if field == "panel_reference":
+    if field in ("panel_reference", "wall_reference"):
         return tuple(term.strip() for term in str(value).split(",") if term.strip())
     return () if value is None else (str(as_flag_string(value)),)
 

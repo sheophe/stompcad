@@ -133,8 +133,9 @@ and clear of the corner bosses.
 
 **Span**:
 The depth interval, along a wall feature's axis, from where it crosses a
-wall's inner surface to where it leaves the outer one; a wall hole's diameter
-counts only the material within this interval
+wall's inner surface to where it leaves the outer one. A wall hole's diameter
+counts the material from the feature's tip to the wall's outer face, a run
+that begins at the tip rather than at the inner surface
 ([wall-drilling spec](specs/stompcad-wall-drilling.md)).
 
 **Surface**:

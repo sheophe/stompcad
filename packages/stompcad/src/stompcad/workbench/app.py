@@ -403,14 +403,15 @@ class Workbench(App[int], inherit_bindings=False):
     def _picks(self, field: Field) -> bool:
         """Whether `enter` here opens a list rather than a field. Decision 3.
 
-        Two rows carry answers only sometimes, so neither is decided by its
+        Some rows carry answers only sometimes, so they are not decided by
         kind: the panel is a typed path until the directory offers
-        candidates, and a board's designators arrive with the run that reads
-        it. Everything else is a list wherever the tool that owns it has one.
+        candidates, and both references are typed expressions until a run has
+        read a board's designators. Everything else is a list wherever the
+        tool that owns it has one.
         """
         if field.name == "panel":
             return bool(self.session.panel_candidates)
-        if field.name == "panel_reference":
+        if field.name in ("panel_reference", "wall_reference"):
             return bool(self.session.designators)
         return field.kind in (Kind.CHOICE, Kind.MANY)
 

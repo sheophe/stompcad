@@ -250,6 +250,11 @@ enclosure the boards are seated in; naming a board without either is a usage
 error rather than a guess. `--case-model` overrides that model with a file
 named directly.
 
+`stompcad` has no `--wall-reference` flag. Which components may meet a wall is
+set in the workbench's Boards place and remembered in the project file below,
+with the same grammar as `--panel-reference`; `stompcollider`'s own flag is
+unchanged.
+
 When the footprint matches more than one part, no `--case` is declared and a
 `--case-model` is supplied, the part may be inferred from the model's filename:
 a model named `1590B.stp` settles a tie the artwork alone leaves open, provided
@@ -435,10 +440,12 @@ bytes, and newly created targets are removed. Temporary files are cleaned up.
 same run under `stompcad` fail the same way.
 
 Under `stompcad`, exit `2` binds each half's own outputs. The drill half commits
-its targets when its write step completes, before a board is read, so a run
-whose dock half errors exits `2` having written the drill artefacts and none of
-the dock ones. Those artefacts describe what the drill half computed; the exit
-code, not the contents of the output directory, is the run's status. See
+its Excellon and drawing targets when its write step completes, before a board
+is read, so a run whose dock half errors exits `2` having written those and
+none of the dock ones. The JSON document and the drilled model describe the
+walls too, so a run with boards writes them only once the walls are cut. Those
+artefacts describe what the drill half computed; the exit code, not the
+contents of the output directory, is the run's status. See
 [ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md).
 
 Recovery can fail if another process changes a target during the run or if a

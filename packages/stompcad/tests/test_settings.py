@@ -162,3 +162,19 @@ def test_every_row_names_the_field_it_states() -> None:
         "grid_mm", "grid_warn_mm", "drill_standard",
         "drill_sizes", "no_drill_sizes", "title",
     }
+
+
+def test_the_wall_reference_defaults_to_naming_nothing() -> None:
+    """Decision 11: a hole in a wall is irreversible and the panel says nothing
+    about it, so the default is the empty expression rather than a glob."""
+    from stompcad.settings import DEFAULTS
+
+    assert DEFAULTS.boards.wall_reference.value == ""
+    assert DEFAULTS.boards.wall_reference.provenance.origin is Origin.DEFAULT
+
+
+def test_the_boards_place_states_the_wall_reference_row() -> None:
+    from stompcad.settings import DEFAULTS
+
+    rows = {name: shown for name, shown, _stated in DEFAULTS.boards.rows()}
+    assert rows["wall_reference"] == "wall references"
