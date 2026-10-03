@@ -8,6 +8,7 @@ import pytest
 
 from stompcad.settings import Settings
 from stompcad.workbench.families import (
+    _WALL_ROW,
     CODES,
     FAMILIES,
     NEAR_MISS,
@@ -137,19 +138,35 @@ def _wall(code: str) -> Diagnostic:
 
 
 def _panel(code: str) -> Diagnostic:
-    """The same code as the panel path raises it: it names the drilled face."""
+    """The same code as the panel path raises it, with the payload it really has.
+
+    Off-face and through-boss name the drilled face; the unstocked-diameter
+    refusal names the measurement and the standard, and neither a face nor a
+    component.
+    """
+    if code == "unknown-diameter":
+        return Diagnostic.error(
+            code, "x", data=(("diameter_nm", 3_000_000), ("standard", "metric")),
+        )
     return Diagnostic.error(code, "x", data=(("face", "box"),))
 
 
-@pytest.mark.parametrize("code", ["hole-off-face", "hole-through-boss", "unknown-diameter"])
-def test_a_wall_refusal_sends_a_builder_to_the_part_it_named(code: str) -> None:
-    """The artwork never mentions a wall hole, so "change the artwork" is false
-    for one. The component it was named for is what a builder can change."""
+_SHARED = ["hole-off-face", "hole-through-boss", "unknown-diameter"]
+
+
+@pytest.mark.parametrize("code", _SHARED)
+def test_a_wall_refusal_belongs_to_the_settings(code: str) -> None:
+    """The artwork never mentions a wall hole, so "change the artwork" is false."""
     assert family_of(_wall(code)) is Family.SETTING
+
+
+@pytest.mark.parametrize("code", _SHARED)
+def test_a_wall_refusal_jumps_to_the_part_it_named(code: str) -> None:
+    """The component it was named for is what a builder can change."""
     assert remedy_of(_wall(code)) == Remedy(Place.BOARDS, "wall_reference")
 
 
-@pytest.mark.parametrize("code", ["hole-off-face", "hole-through-boss", "unknown-diameter"])
+@pytest.mark.parametrize("code", _SHARED)
 def test_the_same_code_on_the_panel_still_sends_them_to_the_drawing(code: str) -> None:
     """The control. One code, two surfaces, two honest remedies -- told apart by
     the payload, as ``unmatched-part`` already is."""
@@ -157,9 +174,11 @@ def test_the_same_code_on_the_panel_still_sends_them_to_the_drawing(code: str) -
     assert remedy_of(_panel(code)) is None
 
 
-def test_the_two_wall_codes_answer_at_the_row_that_named_the_part() -> None:
-    assert REMEDIES["wall-feature-unreachable"] == Remedy(Place.BOARDS, "wall_reference")
-    assert REMEDIES["component-claimed-twice"] == Remedy(Place.BOARDS, "wall_reference")
+def test_the_wall_row_is_stated_once() -> None:
+    """Every wall answer is the one object, so correcting it corrects all."""
+    assert REMEDIES["wall-feature-unreachable"] is _WALL_ROW
+    assert REMEDIES["component-claimed-twice"] is _WALL_ROW
+    assert remedy_of(_wall("hole-off-face")) is _WALL_ROW
 
 
 def test_a_designator_both_filters_claim_offers_the_other_expression_too() -> None:
