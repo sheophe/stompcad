@@ -68,6 +68,10 @@ class OcpCaseModel:
     #: because a hole coaxial with its component crosses the two planes at
     #: different places and must clear the region at each (decision 8).
     wall_regions: Mapping[str, tuple[Any, Any]] = MappingProxyType({})
+    #: Why ``walls`` is empty, when discovery was attempted and refused; ``None``
+    #: when it found its walls. Kept because a consumer must tell an enclosure
+    #: whose walls could not be determined from a seating that missed them.
+    walls_unavailable: str | None = None
 
     def classify(
         self, x_nm: Nanometre, y_nm: Nanometre, radius_nm: Nanometre
@@ -183,6 +187,7 @@ def load_case_model(
 
     walls: list[DrilledSurface] = []
     regions: dict[str, tuple[Any, Any]] = {}
+    unavailable: str | None = None
     try:
         # The whole answer, not just its first step: framing a wall, keying it,
         # building its two regions and stating its record can each refuse, and
@@ -206,7 +211,8 @@ def load_case_model(
             )
             walls.append(drilled_surface(wall, key, frame, outer))
             regions[key] = (outer, inner)
-    except StompdrillError:
+    except StompdrillError as refusal:
+        unavailable = str(refusal)
         # Partly built walls are discarded rather than kept: a model reporting
         # three of its four walls would let a ray resolve to whichever of them
         # survived, and a hole would be cut from an incomplete enclosure.
@@ -233,6 +239,7 @@ def load_case_model(
         document_timestamp=document.timestamp,
         walls=tuple(walls),
         wall_regions=MappingProxyType(regions),
+        walls_unavailable=unavailable,
     )
 
 

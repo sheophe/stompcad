@@ -303,6 +303,7 @@ class _FakeWalls:
     walls: tuple[DrilledSurface, ...]
     admitting: frozenset[str] = frozenset()
     rejecting: Mapping[str, Rejection] = field(default_factory=dict)
+    walls_unavailable: str | None = None
 
     def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
         return key in self.admitting
@@ -439,6 +440,34 @@ def test_a_feature_reaching_no_wall_is_an_error_naming_the_component() -> None:
     assert refused[0].severity is Severity.ERROR
     assert "J1" in refused[0].message
     assert found.holes == ()
+
+
+def test_a_model_that_found_no_walls_blames_the_enclosure_and_names_why() -> None:
+    reason = "no flat face backs the drilled face"
+    model = _FakeWalls(walls=(), walls_unavailable=reason)
+    found = _stage(model, _seated()).apply(_data())
+    (refused,) = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]
+    assert "walls of this enclosure could not be determined" in refused.message
+    assert reason in refused.message
+    assert "its axis reaches" not in refused.message
+    assert "J1" in refused.message
+    assert found.holes == ()
+
+
+def test_a_feature_missing_the_walls_a_model_has_still_blames_its_axis() -> None:
+    model = _FakeWalls(walls=(_wall(key="right"),))
+    found = _stage(model, _seated()).apply(_data())
+    (refused,) = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]
+    assert "its axis reaches no drillable part of any wall" in refused.message
+    assert "could not be determined" not in refused.message
+
+
+def test_a_model_with_walls_is_never_blamed_whatever_it_says_it_lacks() -> None:
+    """The reason is read only where there are no walls to reach."""
+    model = _FakeWalls(walls=(_wall(key="right"),), walls_unavailable="stale")
+    found = _stage(model, _seated()).apply(_data())
+    (refused,) = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]
+    assert "stale" not in refused.message
 
 
 def test_both_signs_of_one_axis_earn_one_finding_and_not_two() -> None:

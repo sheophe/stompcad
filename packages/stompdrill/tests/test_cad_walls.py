@@ -16,6 +16,7 @@ from stompdrill.cad import Rejection, WallModel, load_case_model
 from stompdrill.cad.walls import (
     LATERAL_LIMIT,
     Wall,
+    _wall_inner_level,
     build_wall_frame,
     draft_degrees,
     is_lateral,
@@ -33,6 +34,8 @@ from stompgeom.step import bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
 from stompmodel.model import CaseFace, CaseRegistration, DrillData, Profile, WallFeature
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
+
+from . import hammond
 
 __all__: list[str] = []
 
@@ -426,16 +429,57 @@ def test_a_hole_over_the_floor_fillet_behind_a_wall_is_through_boss(hammond_b: P
     )
 
 
+def _cached(part: str) -> Path:
+    """A cached model, skipping rather than fetching: ``hammond.MODELS`` is four parts."""
+    path = hammond.cache_dir() / f"{part}.stp"
+    if not path.is_file():
+        pytest.skip(f"{part} is not cached")
+    return path
+
+
 @pytest.mark.hammond
-def test_a_lid_with_no_facing_wall_plate_loads_with_no_walls(hammond_a: Path) -> None:
-    """1590A's lid is a flat closure plate: none of its four lateral levels
-    has a facing companion, because there is nothing behind them to face.
+def test_a_lid_with_no_wall_plate_behind_its_levels_loads_with_no_walls_and_says_why() -> None:
+    """1590F's lid has no thin plate behind any lateral level to pair it with.
+
     That is a fact about this lid, not a load failure -- wall drilling is
     opt-in, and a feature naming an unreachable wall is refused downstream,
-    by name, as ``wall-feature-unreachable``.
+    by name, as ``wall-feature-unreachable``, with the reason the model kept.
     """
-    model = load_case_model(hammond_a, face=CaseFace.LID, margin_nm=Nanometre(500_000))
+    model = load_case_model(
+        _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
+    )
     assert model.walls == ()
+    assert model.walls_unavailable is not None
+    assert "no flat face backs the drilled face" in model.walls_unavailable
+
+
+@pytest.mark.hammond
+def test_a_model_that_found_its_walls_has_no_reason_to_give(hammond_b: Path) -> None:
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert len(model.walls) == 4
+    assert model.walls_unavailable is None
+
+
+@pytest.mark.hammond
+def test_a_wall_drilling_run_on_a_lid_blames_the_enclosure_not_the_axis() -> None:
+    model = load_case_model(
+        _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
+    )
+    feature = WallFeature(
+        designator="J1",
+        board=1,
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        direction=(1.0, 0.0, 0.0),
+        profile=Profile(steps=((Nanometre(4_750_000), Nanometre(0), Nanometre(10_000_000)),)),
+    )
+    data = DrillData(
+        case=CaseRegistration("1590F", CaseFace.LID, "1590F.stp", model.frame),
+        surfaces=(),
+    )
+    cut = DrillWalls(model, (feature,), DRILL_STANDARDS[DEFAULT_STANDARD]).apply(data)
+    (refused,) = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+    assert "could not be determined" in refused.message
+    assert "no flat face backs the drilled face" in refused.message
 
 
 @pytest.mark.hammond
@@ -485,3 +529,64 @@ def test_a_wall_that_cannot_be_framed_leaves_no_walls_and_not_a_failed_load(
     model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
     assert model.walls == ()
     assert dict(model.wall_regions) == {}
+
+
+def _tilted(degrees: float, *, back: bool = False) -> tuple[float, float, float]:
+    """A unit direction ``degrees`` out of the X axis, facing back when asked."""
+    angle = math.radians(degrees)
+    sign = -1.0 if back else 1.0
+    return (sign * math.cos(angle), sign * math.sin(angle), 0.0)
+
+
+def _area_level(
+    direction: tuple[float, float, float], offset_mm: float, area_mm2: float = 100.0
+) -> Level:
+    return Level(
+        direction=direction,
+        offset_nm=Nanometre(round(offset_mm * 1_000_000)),
+        area_mm2=area_mm2,
+        faces=(object(),),
+    )
+
+
+def test_a_wall_s_inner_face_may_be_drafted_unlike_its_outer_one() -> None:
+    """1590BS drafts its two faces 1.400 and 1.250 degrees, a 0.15 degree gap."""
+    outer = _area_level(_tilted(1.40), 30.0)
+    inner = _area_level(_tilted(1.25, back=True), -28.0)
+    assert _wall_inner_level([outer, inner], outer) is inner
+
+
+def test_the_opposite_wall_s_exactly_parallel_face_is_no_inner_face() -> None:
+    """Angle cannot tell the two apart, so the plate's own thickness has to."""
+    outer = _area_level(_tilted(1.40), 30.0)
+    opposite = _area_level(_tilted(1.40, back=True), 20.0, area_mm2=5_000.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, opposite], outer)
+
+
+def test_the_nearer_face_wins_over_a_larger_one_behind_it() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    near = _area_level(_tilted(1.40, back=True), -28.0, area_mm2=100.0)
+    behind = _area_level(_tilted(1.40, back=True), -25.0, area_mm2=1_000.0)
+    assert _wall_inner_level([outer, behind, near], outer) is near
+
+
+def test_one_plane_split_in_two_levels_takes_the_larger_area() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    small = _area_level(_tilted(1.25, back=True), -28.0, area_mm2=10.0)
+    large = _area_level(_tilted(1.35, back=True), -28.0, area_mm2=500.0)
+    assert _wall_inner_level([outer, small, large], outer) is large
+
+
+def test_a_face_tilted_further_than_a_drafted_pair_ever_is_refused() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    askew = _area_level(_tilted(1.40 + 2.0, back=True), -28.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, askew], outer)
+
+
+def test_a_face_coincident_with_the_outer_one_is_no_inner_face() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    flush = _area_level(_tilted(1.40, back=True), -30.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, flush], outer)

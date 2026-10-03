@@ -80,6 +80,16 @@ class WallModel(Protocol):
         """Every wall this model discovered, each as the record a document carries."""
         ...
 
+    @property
+    def walls_unavailable(self) -> str | None:
+        """Why ``walls`` is empty, if discovery was attempted and refused.
+
+        ``None`` for a model that found its walls. It is read only where no wall
+        was reached, to tell an enclosure that yielded none from a seating that
+        missed the ones it has.
+        """
+        ...
+
     def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
         """Whether this point lies in that wall's drillable region at all."""
         ...

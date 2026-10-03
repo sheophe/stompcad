@@ -23,7 +23,10 @@ from stompmodel.units import mm_from_nm
 __all__ = ["cache_dir", "main"]
 
 #: Every part the Evidence covers, in catalogue order.
-PARTS = ("1590A", "1590B", "1590BB", "1590BB2", "1590BBS", "1590LB", "1590Y")
+PARTS = (
+    "1590A", "1590B", "1590B2", "1590BB", "1590BB2", "1590BBS", "1590BS", "1590LB",
+    "1590Y",
+)
 
 
 def cache_dir() -> Path:

@@ -389,3 +389,17 @@ def test_the_datum_is_the_outer_box_s_own_centre_not_a_looser_pin(part: str) -> 
         mapped = frame.basis.to_model(Nanometre(0), Nanometre(0), wall.plate_nm)
         expected = _outer_box_centre_mm(wall, drilled.outward)
         assert mapped == pytest.approx(expected, abs=1e-5)
+
+
+@pytest.mark.hammond
+def test_a_casting_drafting_its_two_faces_alike_or_not_still_has_four_walls() -> None:
+    """1590BS drafts a wall's outer face 1.400 degrees and its inner 1.250.
+
+    Planes 0.15 degrees apart share no direction bin, so a pairing on exact
+    parallelism finds nothing; this is the one catalogued model that shows it.
+    """
+    solid, axis = _box("1590BS")
+    walls = find_walls(solid, axis)
+    assert sorted(round(mm_from_nm(wall.plate_nm), 3) for wall in walls) == [
+        1.996, 1.996, 1.998, 1.998
+    ]

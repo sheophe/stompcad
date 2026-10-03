@@ -447,6 +447,7 @@ class _FakeWalls:
 
     walls: tuple[DrilledSurface, ...]
     admitting: frozenset[str] = frozenset()
+    walls_unavailable: str | None = None
 
     def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
         return key in self.admitting

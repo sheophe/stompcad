@@ -38,6 +38,7 @@ class WallStub:
     """Minimal structural implementation of the wall contract, and only that."""
 
     walls: tuple[DrilledSurface, ...] = ()
+    walls_unavailable: str | None = None
 
     def admits(self, key, x_nm, y_nm):
         return True
@@ -88,11 +89,25 @@ def test_a_structural_implementation_satisfies_the_wall_protocol():
 def test_an_object_missing_classify_wall_does_not_satisfy_the_wall_protocol():
     class Incomplete:
         walls: tuple[DrilledSurface, ...] = ()
+        walls_unavailable: str | None = None
 
         def admits(self, key, x_nm, y_nm):
             return True
 
     assert not isinstance(Incomplete(), WallModel)
+
+
+def test_an_object_missing_the_reason_it_has_no_walls_does_not_satisfy_the_wall_protocol():
+    class Silent:
+        walls: tuple[DrilledSurface, ...] = ()
+
+        def admits(self, key, x_nm, y_nm):
+            return True
+
+        def classify_wall(self, key, outer_nm, inner_nm, radius_nm):
+            return None
+
+    assert not isinstance(Silent(), WallModel)
 
 
 def test_the_two_model_contracts_are_separate_and_neither_implies_the_other():
