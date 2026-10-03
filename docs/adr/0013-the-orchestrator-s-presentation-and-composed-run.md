@@ -326,8 +326,33 @@ commit withheld would point a row at a file nobody wrote. That is not a new rule
 `payload_for` already applies to a format another commit owns, read here for a format no
 commit will reach. The run's other places — artwork, enclosure, drilling — declare values
 rather than files, and those values are exactly the ones that produced the Excellon and the
-drawings now on disk, so they are recorded in full. An error on the cut document itself is a
-different matter and withholds the whole commit, because then the values are what is in doubt.
+drawings now on disk, so they are recorded in full.
+
+An error on the **cut document itself** takes the very same path, and for the same reason.
+The one error that document can carry which the panel-drilled one cannot is a wall refusal,
+and a refusal indicts the part a builder named — `boards.wall_reference`, a value this
+commit never declares — not the artwork, the enclosure or the drilling, which did produce
+the Excellon now on disk. So the artefacts are withheld and the narrowed declaration still
+commits. Withholding it too would leave that Excellon beside no project file at all, which
+is the state ADR-0014's decision 8 forbids and which no run before this amendment could
+reach, because its drill declaration landed at `write case`.
+
+**A second deliberate limit: a wall surface gets no sibling artefact.** The per-surface
+Excellon and the per-surface drawing sheets are rendered at `write case`, from the
+panel-drilled document, *before* any wall is cut; only the drill document and the drilled
+model defer to `write model`. So a composed run writes an accepted wall hole into those two
+artefacts and into nothing else — a builder who names a part gets no wall drill file and no
+wall drawing sheet to mark it from. Lifting it means `write model` rendering through the
+per-surface set rather than one emitter per target, which is work no plan behind this
+amendment specifies, so it is recorded here beside the limit above and for the same reason:
+a recorded limit is honest, and a hidden one is not.
+
+**And a known disagreement between two outputs of one run.** `write assembly` builds from
+the case solid scanned out of the document the boards were seated against, which is the
+panel-only drill data, so an assembly written for a run with an accepted wall hole carries
+a case lacking a hole the drilled model has. CLAUDE.md's rule that all outputs from one
+invocation agree on the geometry they describe is therefore not met for that run. The hole
+is right in both artefacts that describe it; it is the assembly's case that is stale.
 
 ## Rationale
 

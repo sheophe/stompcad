@@ -1182,13 +1182,17 @@ class Driver:
         The drill half's last commit, and so the one the manifest declaration
         joins (decision 16 of the wall-drilling spec). ``data`` is the drill
         document the walls were cut into, never the panel-only one the dock
-        half was seated against. Its artefacts are withheld on *either* half's
-        error, because unlike ``write case`` this commit runs after docking and
-        is derived from it (ADR-0013's wall-drilling amendment).
+        half was seated against. Its artefacts are withheld on an error from
+        *either* half, because unlike ``write case`` this commit runs after
+        docking and is derived from it, and the declaration lands on both of
+        those paths (ADR-0013's wall-drilling amendment).
         """
         targets = self._targets_for(MODEL_TARGET_NAMES)
         dock = self._dock_data
-        if dock is not None and dock.worst_severity is Severity.ERROR:
+        errored = data.worst_severity is Severity.ERROR or (
+            dock is not None and dock.worst_severity is Severity.ERROR
+        )
+        if errored:
             if targets:
                 self._presentation.report(_withheld(targets))
             # The declaration still goes: with boards this commit is the drill
@@ -1254,21 +1258,23 @@ class Driver:
 
         Withholds every target on an error severity, before ``emitters`` runs:
         CLAUDE.md's "any error prevents every requested output" holds, and an
-        emitter may refuse data this broken, so nothing is rendered rather than
-        rendered and discarded. Decision 8: the declaration joins the same
-        transaction as the artefacts, so a committed file never sits beside a
-        project file that fails to describe it. Staging and the commit stay
-        ``stompmodel``'s (ADR-0001, ADR-0005); no second write path exists.
+        emitter may refuse data this broken. The declaration joins the same
+        transaction (decision 8), so no committed file sits beside a project
+        file failing to describe it -- and ``declaring``, marking the one
+        commit whose artefacts are withheld deliberately, lands however this
+        half errored. Staging stays ``stompmodel``'s; no second path exists.
         """
         declaration = self._declaration(half, declaring)
         if not targets and declaration is None:
             return []
-        if data.worst_severity is Severity.ERROR:
+        errored = data.worst_severity is Severity.ERROR
+        if errored:
             if targets:
                 self._presentation.report(_withheld(targets))
-            return []
+            if declaring is None:
+                return []
         rendered: list[tuple[Emitter[_DataT], Path, Payload]] = []
-        built = emitters() if targets else []
+        built = emitters() if targets and not errored else []
         for (emitter, path), slot in zip(built, scope.steps(len(built)), strict=True):
             slot.label(emitter.name)
             rendered.append((emitter, path, emitter.emit(data)))

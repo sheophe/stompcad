@@ -299,3 +299,41 @@ def test_a_dock_half_error_still_records_the_drill_half_s_declaration(
     # commit withheld -- the rule ``payload_for`` already applies to a format
     # it does not own.
     assert set(stored["output"]["targets"]) == {"excellon"}
+
+
+def test_a_wall_refusal_still_records_the_drill_half_s_declaration(
+    tmp_path: Path,
+) -> None:
+    """The error the walls themselves raise reaches this commit the same way.
+
+    A refused wall hole indicts the part a builder named, not the artwork or
+    the standard that produced the Excellon already on disk. So the artefacts
+    this commit owns are withheld and its declaration still lands, naming the
+    one format that produced a file -- otherwise the Excellon sits beside no
+    project file, which decision 8 forbids.
+    """
+    driver, data = _driver_with(
+        tmp_path,
+        boards=(TAR_PCB,),
+        targets=(("excellon", tmp_path / "p.drl"), ("json", tmp_path / "p.json")),
+    )
+    with track(NullSink()) as scope:
+        driver._write_case(data, scope)
+    assert not manifest_path(driver._options.panel).exists(), (
+        "the control: write case defers the declaration on a boards run"
+    )
+    refused = data.with_diagnostics(
+        Diagnostic.error(
+            "wall-feature-unreachable",
+            "J1 resolved to a hole no wall admits",
+            data=(("designator", "J1"),),
+        )
+    )
+
+    with track(NullSink()) as scope:
+        written = driver._write_model(refused, scope)
+
+    assert written == []
+    assert not (tmp_path / "p.json").exists()
+    stored = json.loads(manifest_path(driver._options.panel).read_text(encoding="utf-8"))
+    assert set(stored["output"]["targets"]) == {"excellon"}
