@@ -797,3 +797,63 @@ def test_a_wall_reference_naming_nothing_is_not_a_usage_error(tmp_path: Path) ->
     panel = _declaring(tmp_path, {"boards": {"wall_reference": "NOPE*"}})
     resolved = resolve(build_parser().parse_args([str(panel)]), tmp_path)
     assert resolved.settings.boards.wall_reference.value == "NOPE*"
+
+
+#: The tar panel drills no hole wide enough for SW2, so admitting both switches
+#: leaves a board with no correspondence, an error that withholds the model
+#: artefacts. Leaving SW2 out reduces that to a warning, so a run reaches them.
+_WARNING_ONLY_PANEL_REFERENCE = f"{PANEL_REFERENCE},!SW2"
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_a_run_that_names_no_wall_part_writes_what_it_always_wrote(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default wall expression is empty, so a run that asks for no wall
+    describes only the face and leaves no sibling file for a surface nothing
+    was cut in."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    panel = _tar_project(tmp_path, model)
+    code = cli.main([
+        str(panel), str(panel.with_name("tar-pcb.stp")), "--case", "1590B",
+        "--case-model", str(panel.with_name("1590B.stp")),
+        "--panel-reference", _WARNING_ONLY_PANEL_REFERENCE,
+        "--emit", f"json={tmp_path / 'p.json'}",
+        "--emit", f"step={tmp_path / 'p.stp'}",
+        "--emit", f"excellon={tmp_path / 'p.drl'}",
+    ])
+
+    assert code in (0, 1), capsys.readouterr().out
+    document = json.loads((tmp_path / "p.json").read_text())
+    assert [surface["key"] for surface in document["surfaces"]] == ["face"]
+    # Named exactly, so a new artefact has to be accounted for.
+    assert sorted(path.name for path in tmp_path.iterdir() if path.is_file()) == [
+        "1590B.stp", "p.drl", "p.json", "p.stp", "tar-pcb.stp", "tar.ai",
+        "tar.stompcad.json",
+    ]
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_the_panel_s_own_artefacts_land_before_the_walls_are_cut(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dock-half failure still leaves a builder the files to drill the panel
+    with, checked by the order the two commits report."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    panel = _tar_project(tmp_path, model)
+    cli.main([
+        str(panel), str(panel.with_name("tar-pcb.stp")), "--case", "1590B",
+        "--case-model", str(panel.with_name("1590B.stp")),
+        "--panel-reference", _WARNING_ONLY_PANEL_REFERENCE,
+        "--emit", f"excellon={tmp_path / 'p.drl'}",
+        "--emit", f"json={tmp_path / 'p.json'}",
+    ])
+    printed = capsys.readouterr().out
+    assert printed.index("p.drl") < printed.index("p.json")
+    assert printed.index("write case") < printed.index("drill walls") < printed.index("write model")

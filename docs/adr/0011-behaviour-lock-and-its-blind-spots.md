@@ -98,6 +98,13 @@ behaviour outside its reach:
 5. **Stages outside `cli.build_pipeline`.** A stage available only to library
    callers cannot be reached through these CLI runs.
 
+The harness drives `stompdrill`'s own command line over panels with no boards, so it
+certifies the drill half alone. The orchestrator's composed run (its step list, the division
+of the drill half's commit, and the wall stage only it appends) is outside the lock entirely,
+and is held instead by the byte comparisons in `packages/stompcad/tests`, each against what
+the wrapped tool writes from its own command line. A green lock is therefore no evidence
+about a run with boards, which is the shape of run those comparisons exist for.
+
 Re-measure these limits when relying on them. Run the script's two invocations
 under `coverage run --branch --source=stompdrill,stompmodel,stompgeom` and inspect
 `coverage report -m`.
