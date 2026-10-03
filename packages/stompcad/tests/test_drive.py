@@ -475,7 +475,7 @@ def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> Non
     """An unrun driver refuses a retry, naming the work that has not happened.
 
     Each of ``_rerun``'s preconditions guards an intermediate a later step
-    reads, so a driver that has already run satisfies all five and cannot
+    reads, so a driver that has already run satisfies all seven and cannot
     exercise any of them; only a freshly constructed one can. Each message
     names the missing work -- "the panel is read", "quantisation" -- rather
     than the attribute it would have set, so a person reading it knows what
@@ -491,6 +491,10 @@ def test_retrying_a_step_before_its_input_exists_names_the_missing_work() -> Non
         driver.retry("write-case", _options(), NO_PROGRESS)
     with pytest.raises(ValueError, match="panel is drilled"):
         driver.retry("read-boards", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="boards are docked"):
+        driver.retry("drill-walls", _options(), NO_PROGRESS)
+    with pytest.raises(ValueError, match="walls are cut"):
+        driver.retry("write-model", _options(), NO_PROGRESS)
     with pytest.raises(ValueError, match="boards are docked"):
         driver.retry("write-assembly", _options(), NO_PROGRESS)
 

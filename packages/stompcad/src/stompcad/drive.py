@@ -122,6 +122,13 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
 #: expression is the same case -- that filter reaches the reader, so a changed
 #: expression needs the parse the step no longer holds. Everything else reads
 #: its inputs as it runs, so honouring and re-running are one call.
+#:
+#: ``drill-walls`` is the one row that overstates: a changed ``wall_reference``
+#: also invalidates the features it consumes, which no retry can rebuild. The
+#: table has no way to say "an earlier step's hold is stale", and an empty row
+#: would be no truer, so the limit is stated rather than encoded -- it is
+#: unreachable in practice, because every field reaching ``drill-walls`` also
+#: reaches ``read boards``, which is therefore always the earlier stale step.
 _RETRY_INPUTS: dict[str, frozenset[str]] = {
     "read-panel": frozenset(),
     "quantise": _STEP_INPUTS["quantise"],
@@ -521,7 +528,9 @@ class Driver:
             raise ValueError("write case cannot run again before the panel is drilled")
         if key == "read-boards" and self._drilled is None:
             raise ValueError("read boards cannot run again before the panel is drilled")
-        if key == "drill-walls" and (self._drilled is None or self._dock_data is None):
+        if key == "drill-walls" and (
+            self._drilled is None or self._dock_data is None or self._case_model is None
+        ):
             raise ValueError("the walls cannot be cut again before the boards are docked")
         if key == "write-model" and self._cut is None:
             raise ValueError("write model cannot run again before the walls are cut")
@@ -1053,33 +1062,70 @@ class Driver:
         Composed here and only here: ``DrillWalls`` is an ordinary ``Stage``
         that reads what a document already carries, and appending it inside
         ``stompdrill``'s own ``build_pipeline`` would put it on a command line
-        that has no boards to measure for (decision 15).
+        that has no boards to measure for (decision 15). The second routing
+        pass is decision 3's: a wall hole leaves the stage unnumbered, and
+        every emitter reads ``numbered()``.
         """
-        assert self._case_model is not None  # a board was seated inside it
         features = self._dock_data.wall_features if self._dock_data is not None else ()
-        cut = Pipeline([DrillWalls(self._case_model, features, self._standard())]).run(
-            data, scope
-        )
-        unmatched = self._unnamed()
-        return cut if unmatched is None else cut.with_diagnostics(unmatched)
+        if not features:
+            # Not an empty pipeline: ``Pipeline.run`` records every stage it
+            # folds, so running one over nothing would write a processing row
+            # no ``stompdrill`` command line writes, and decision 18 promises a
+            # run that drills no wall the artefacts it produced before.
+            unmatched = self._unnamed()
+            return data if unmatched is None else data.with_diagnostics(unmatched)
+        assert self._case_model is not None  # a board was seated inside it
+        # Routing again is safe because it reads geometry and surface alone and
+        # groups surface-major, so the face numbers the committed Excellon
+        # already carries come back exactly and the walls' holes follow them.
+        stages: list[Stage[DrillData]] = [
+            DrillWalls(self._case_model, features, self._standard()), RouteHoles()
+        ]
+        return Pipeline(stages).run(data, scope)
 
     def _unnamed(self) -> Diagnostic | None:
-        """An expression that named no component, which cuts in silence otherwise.
+        """Nothing measured for an expression, which cuts in silence otherwise.
 
         A warning rather than an error: nothing was cut, so this run's document
-        and model still describe exactly what was drilled, and withholding them
-        over a stale expression would cost a builder the whole run. The code is
-        the stage's own, because the remedy is the same row either way.
+        and model still describe exactly what was drilled. Two clauses under
+        one code, because ``wall_admitted`` records what the expression *named*
+        and never that anything was found: an expression naming nobody is a
+        typo to retype, and one naming a part no feature was measured for is
+        not, so telling the second it named nothing sends it to the wrong fix.
         """
         expression = self._options.wall_reference
         if not expression or self._dock_data is None or self._dock_data.wall_features:
             return None
+        named = self._wall_named()
+        because = (
+            "named no component of any board that was read"
+            if not named
+            else f"named {', '.join(named)}, but no wall feature was measured for any "
+            f"of them"
+        )
         return Diagnostic.warning(
             "wall-feature-unreachable",
-            f"the wall-reference expression {expression!r} named no component of any "
-            f"board that was read, so no hole was cut for it",
+            f"the wall-reference expression {expression!r} {because}, so no hole "
+            f"was cut for it",
             data=(("expression", expression),),
         )
+
+    def _wall_named(self) -> tuple[str, ...]:
+        """Every designator this run's wall expression named, in designator order.
+
+        What the expression reached, which is not what was found: ``admit_walls``
+        marks a component the expression named whether or not the reader could
+        measure a feature on it, and those are the two cases a builder told
+        nothing was cut has to be able to tell apart.
+        """
+        if self._dock_data is None:
+            return ()
+        return tuple(sorted({
+            component.designator
+            for board in self._dock_data.boards
+            for component in board.components
+            if component.wall_admitted
+        }))
 
     def _targets_for(self, names: frozenset[str]) -> list[tuple[str, Path]]:
         """This run's targets whose format one half owns, in the order requested."""
@@ -1123,13 +1169,22 @@ class Driver:
         """Render, stage and commit the two artefacts that describe the whole job.
 
         The drill half's last commit, and so the one the manifest declaration
-        joins (decision 16 of the wall-drilling spec). ``data`` is the drill document the walls were cut
-        into, never the panel-only one the dock half was seated against.
-        This and ``_write_case`` differ only in which formats they own and
-        which half they declare as; a shared helper taking both would read as
-        one function with two unrelated callers.
+        joins (decision 16 of the wall-drilling spec). ``data`` is the drill
+        document the walls were cut into, never the panel-only one the dock
+        half was seated against. Its artefacts are withheld on *either* half's
+        error, because unlike ``write case`` this commit runs after docking and
+        is derived from it (ADR-0013's wall-drilling amendment).
         """
         targets = self._targets_for(MODEL_TARGET_NAMES)
+        dock = self._dock_data
+        if dock is not None and dock.worst_severity is Severity.ERROR:
+            if targets:
+                self._presentation.report(_withheld(targets))
+            # The declaration still goes. It records the values that produced
+            # this half's artefacts, and the Excellon and the drawings are on
+            # disk from ``write case``: no dock finding puts those in doubt, and
+            # leaving them beside no project file is what decision 8 forbids.
+            return self._write(data, (), lambda: [], scope, Half.MODEL)
         settings = OutputSettings(title=self._options.title, case_model=self._case_model)
         return self._write(
             data,

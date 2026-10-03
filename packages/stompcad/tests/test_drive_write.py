@@ -22,9 +22,12 @@ from stompcad.drive import Driver, Project, RunOptions
 from stompcad.manifest import Manifest, manifest_path
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.settings import Origin, Provenance, Resolved, Settings
+from stompcollider.model import DockData
 from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
-from stompmodel.model import CaseFace, DrillData, ReferenceOutline
+from stompmodel.diagnostics import Diagnostic
+from stompmodel.frames import CoordinateFrame, FaceFrame
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, ReferenceOutline
 from stompmodel.progress import track
 from stompmodel.units import Nanometre
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink
@@ -223,3 +226,71 @@ def test_the_model_commit_lands_even_when_it_writes_no_artefact(tmp_path: Path) 
 
     stored = json.loads(manifest_path(driver._options.panel).read_text())
     assert set(stored["output"]["targets"]) == {"excellon"}
+
+
+def _errored_dock() -> DockData:
+    """A dock result carrying an error, for the model commit's own withhold gate."""
+    frame = FaceFrame(
+        CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            w=(0.0, 0.0, 1.0),
+        )
+    )
+    return DockData(
+        case=CaseRegistration("1590B", CaseFace.BOX, "case.stp", frame)
+    ).with_diagnostics(Diagnostic.error("stand-in-error", "forced for the withhold gate"))
+
+
+def test_the_model_commit_withholds_its_artefacts_on_a_dock_half_error(
+    tmp_path: Path,
+) -> None:
+    """ADR-0013's per-half limit does not reach this commit.
+
+    It runs after docking and its wall holes are resolved from the features
+    the dock half settled, so bytes written over a dock error would describe
+    holes that run called undecidable.
+    """
+    driver, data = _driver_with(
+        tmp_path,
+        boards=(TAR_PCB,),
+        targets=(("excellon", tmp_path / "p.drl"), ("json", tmp_path / "p.json")),
+    )
+    driver._dock_data = _errored_dock()
+
+    with track(NullSink()) as scope:
+        written = driver._write_model(data, scope)
+
+    assert written == []
+    assert not (tmp_path / "p.json").exists()
+
+
+def test_a_dock_half_error_still_records_the_drill_half_s_declaration(
+    tmp_path: Path,
+) -> None:
+    """The control, and decision 8's own rule.
+
+    A declaration records the values that produced a half's artefacts, not the
+    artefacts; the Excellon those values produced is on disk and no dock
+    finding puts it in doubt. This commit carries the drill half's declaration
+    in a run with boards, so withholding it too would leave that file beside no
+    project file at all.
+    """
+    driver, data = _driver_with(
+        tmp_path,
+        boards=(TAR_PCB,),
+        targets=(("excellon", tmp_path / "p.drl"), ("json", tmp_path / "p.json")),
+    )
+    with track(NullSink()) as scope:
+        driver._write_case(data, scope)
+    assert not manifest_path(driver._options.panel).exists(), (
+        "the control: write case defers the declaration on a boards run"
+    )
+    driver._dock_data = _errored_dock()
+
+    with track(NullSink()) as scope:
+        driver._write_model(data, scope)
+
+    stored = json.loads(manifest_path(driver._options.panel).read_text(encoding="utf-8"))
+    assert set(stored["output"]["targets"]) == {"excellon", "json"}

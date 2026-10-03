@@ -52,7 +52,9 @@ class RunPlan:
 #
 # quantise, drill, read-boards, match, seat, clash and drill-walls are
 # measured: each phase took a real counting Scope and reported its own
-# division; see tools/count_leaves.py. read-panel, write-case, write-model
+# division; see tools/count_leaves.py. drill-walls counts both stages the
+# driver composes for that step -- the wall holes leave DrillWalls unnumbered,
+# so the second routing pass is part of the step's work. read-panel, write-case, write-model
 # and write-assembly are declared, because Source.read and Emitter.emit
 # take no scope at all
 # (packages/stompdrill/src/stompdrill/protocols.py:25 and
@@ -68,7 +70,7 @@ class RunPlan:
 # match               2       0       2
 # seat               88      98    1068
 # clash               0       2      20
-# drill-walls         0       2      20
+# drill-walls         2       2      22
 # write-model         1       1      11
 # write-assembly      0       1      10
 DRILL_AND_DOCK = RunPlan(
@@ -81,7 +83,7 @@ DRILL_AND_DOCK = RunPlan(
         Step("match", "match", 2),
         Step("seat", "seat", 88 + 98 * KERNEL_LEAF_WEIGHT),
         Step("clash", "clash", 0 + 2 * KERNEL_LEAF_WEIGHT),
-        Step("drill-walls", "drill walls", 0 + 2 * KERNEL_LEAF_WEIGHT),
+        Step("drill-walls", "drill walls", 2 + 2 * KERNEL_LEAF_WEIGHT),
         Step("write-model", "write model", 1 + 1 * KERNEL_LEAF_WEIGHT),
         Step("write-assembly", "write assembly", 0 + 1 * KERNEL_LEAF_WEIGHT),
     )

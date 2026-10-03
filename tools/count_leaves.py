@@ -307,8 +307,11 @@ def count_leaves(
             dock_data = clashes.apply(dock_data, _CountingScope(counter, "clash"))
             tallies["clash"] = LeafTally(*counter.tallies["clash"])
 
-            walls = DrillWalls(model, dock_data.wall_features, standard)
-            data = walls.apply(data, _CountingScope(counter, "drill-walls"))
+            # Both stages the driver composes for this step: the wall holes
+            # leave DrillWalls unnumbered, so a second routing pass belongs to
+            # the step's own work and to its weight (decision 3).
+            walls = Pipeline([DrillWalls(model, dock_data.wall_features, standard), RouteHoles()])
+            data = walls.run(data, _CountingScope(counter, "drill-walls"))
             tallies["drill-walls"] = LeafTally(*counter.tallies["drill-walls"])
 
             # Declared: AssemblyEmitter.emit satisfies Emitter.emit(self, data)
