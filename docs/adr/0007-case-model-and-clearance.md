@@ -10,9 +10,11 @@ signs of its axis reach a wall, the sign nearer its own tip carries the hole; th
 diameter is measured from the feature's tip to the wall's outer face; and both
 multi-wall refusals are findings rather than raises. A wall that already takes a
 hole for one component at a place refuses a second component's hole there as a
-finding, because no earlier stage can see two wall holes at once. A final
+finding, because no earlier stage can see two wall holes at once. A further
 amendment gives a wall its own rule for finding the surface behind it, and has
-the model say why it holds no walls.
+the model say why it holds no walls. A final amendment derives the tolerance of
+the guard that confirms a stated depth names a wall region's own plane from the
+rounding its direction carries, rather than fixing it.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -429,3 +431,39 @@ the loader keeps swallowing the refusal, since a lid has no walls and wall drill
 `DrillWalls` reads it where no wall was reached: a model with no walls and a reason reports that
 the enclosure's walls could not be determined, and why; otherwise the finding blames the axis, as
 before. The code stays `wall-feature-unreachable`.
+
+### Amendment: a wall's on-plane guard is derived from its direction's own rounding
+
+**Accepted.** `contains_at_depth` asks whether a point lies on the region it was handed before
+classifying it against that region, because nothing else tells it that the depth a caller named is
+that region's own plane, and the classifier takes any depth over the footprint as inside. The
+tolerance for that question is derived from the frame rather than chosen. A wall frame's `w` is a
+`Level.direction`, keyed to whole millionths and renormalised ([ADR-0008](0008-workspace-and-shared-geometry-core.md)),
+so the plane the frame states leans by up to `stompgeom.levels.direction_tilt` — `sqrt(3) / (2 x
+10^6)`, 8.66e-7 rad — from the plane the kernel's own faces lie on. The two planes cross near the
+model origin, so the distance between them grows with a point's own distance from it, which the
+region's farthest corner bounds.
+
+The bound is therefore `direction_tilt() * radius`, floored at the classifier's own coincidence
+tolerance so that the two questions `cad.region` asks about one point cannot disagree. Over the 37
+catalogued parts it measures 33–124 nm, against a worst gap of 12.5 nm for a point the classifier
+calls inside with millimetres of boundary clearance; a caller naming the wrong plane is out by a
+plate, 1.500–9.597 mm, which is eighteen thousand times the bound and up. The two scales are four
+orders apart, so the guard keeps its whole value. `direction_tilt` is published beside
+`direction_bin` for the reason that one is: a consumer measuring against a plane a level states
+owes its tolerance to this rounding, and a second spelling of it would be a second chance to
+disagree with the partition that created it.
+
+A fixed tolerance cannot state this. One nanometre is finer than the lean a correct point shows a
+few millimetres out from a wall's datum, which refuses most of every drafted wall; one chosen
+loose enough for the largest catalogued wall would be loose on the smallest.
+
+A wall's two faces are still placed by the one `plate_nm` along `w`, and that stands: over every
+catalogued wall the frame's depth-zero plane lies on the inner region's own plane to within 3 nm,
+because `_wall_inner_level` pairs faces within 0.5° of parallel. Where a wall's inner region does
+differ from its outer is in extent — the lid's seating lip interrupts it about 2 mm inside the
+outer face's own bound — and refusing a hole there is what `THROUGH_BOSS` is for.
+
+No panel artefact moves. `CheckCaseClearance` uses `contains`, which reads its plane off a kernel
+axis and asks no on-plane question at all; `tools/verify-lock.sh` is the check, under
+[ADR-0011](0011-behaviour-lock-and-its-blind-spots.md).
