@@ -1131,12 +1131,23 @@ class Driver:
         """This run's targets whose format one half owns, in the order requested."""
         return [(name, path) for name, path in self._options.targets if name in names]
 
-    def _declaration(self, half: Half) -> tuple[Path, Payload] | None:
-        """This half's project file, or ``None`` where it adds nothing new."""
+    def _declaration(
+        self, half: Half, declaring: Settings | None = None
+    ) -> tuple[Path, Payload] | None:
+        """This half's project file, or ``None`` where it adds nothing new.
+
+        ``declaring`` replaces what is recorded, for the one commit that lands
+        with its own artefacts withheld. ``output.targets`` is a per-format map
+        and ``payload_for`` already skips a format another commit owns, so a
+        format this commit did not write must not be named here either.
+        """
         if self._project is None:
             return None
         payload = payload_for(
-            self._project.panel, self._project.settings, half, self._project.held
+            self._project.panel,
+            self._project.settings if declaring is None else declaring,
+            half,
+            self._project.held,
         )
         if payload is None:
             return None
@@ -1180,11 +1191,14 @@ class Driver:
         if dock is not None and dock.worst_severity is Severity.ERROR:
             if targets:
                 self._presentation.report(_withheld(targets))
-            # The declaration still goes. It records the values that produced
-            # this half's artefacts, and the Excellon and the drawings are on
-            # disk from ``write case``: no dock finding puts those in doubt, and
-            # leaving them beside no project file is what decision 8 forbids.
-            return self._write(data, (), lambda: [], scope, Half.MODEL)
+            # The declaration still goes: with boards this commit is the drill
+            # half's only carrier, so withholding it would leave the Excellon
+            # and the drawings beside no project file, which decision 8 forbids.
+            # It names only the formats that produced a file, by the per-format
+            # rule ``payload_for`` already applies to a format it does not own.
+            return self._write(
+                data, (), lambda: [], scope, Half.MODEL, self._declaring_written()
+            )
         settings = OutputSettings(title=self._options.title, case_model=self._case_model)
         return self._write(
             data,
@@ -1192,6 +1206,26 @@ class Driver:
             lambda: [(make_emitter(name, settings), path) for name, path in targets],
             scope,
             Half.MODEL,
+        )
+
+    def _declaring_written(self) -> Settings | None:
+        """This run's settings with ``output.targets`` cut to the files on disk.
+
+        Every other place declares values, and those values did produce the
+        artefacts that are there; ``output.targets`` is the one per-format key,
+        so a format named in it with nothing behind it would be a row pointing
+        at a file nobody wrote.
+        """
+        project = self._project
+        if project is None:
+            return None
+        settings = project.settings
+        committed = frozenset(self._written)
+        targets = settings.output.targets
+        kept = tuple(pair for pair in targets.value if pair[1] in committed)
+        return replace(
+            settings,
+            output=replace(settings.output, targets=replace(targets, value=kept)),
         )
 
     def _write_dock(
@@ -1214,6 +1248,7 @@ class Driver:
         emitters: Callable[[], Sequence[tuple[Emitter[_DataT], Path]]],
         scope: Scope,
         half: Half,
+        declaring: Settings | None = None,
     ) -> list[str]:
         """Render this half's targets, then stage and commit them with its declaration.
 
@@ -1225,7 +1260,7 @@ class Driver:
         project file that fails to describe it. Staging and the commit stay
         ``stompmodel``'s (ADR-0001, ADR-0005); no second write path exists.
         """
-        declaration = self._declaration(half)
+        declaration = self._declaration(half, declaring)
         if not targets and declaration is None:
             return []
         if data.worst_severity is Severity.ERROR:

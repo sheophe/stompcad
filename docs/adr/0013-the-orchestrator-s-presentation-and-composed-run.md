@@ -317,14 +317,17 @@ depends on a board. The cost is that a dock-half error now withholds two artefac
 before this amendment would have written — which is the point, because those two would have
 been wrong.
 
-Its **declaration** still commits, and that is not an exception to the withhold rule but the
-same reading of it. A declaration records the values that produced a half's artefacts, not the
-artefacts themselves, and the Excellon and the drawings those values produced are on disk. A
-dock finding says nothing about them. Withholding the declaration too would leave exactly what
-ADR-0014's decision 8 forbids — committed files beside no project file, or beside defaults
-that did not make them — and it is this commit that carries the drill half's declaration in a
-run with boards, so there is no later one to carry it instead. An error on the cut document
-itself is a different matter and withholds both, because then the values are what is in doubt.
+Its **declaration** still commits, and names only the formats that produced a file. It
+commits because, in a run with boards, this is the drill half's *only* carrier — `write case`
+declares no format there — so withholding it would leave exactly what ADR-0014's decision 8
+forbids: committed files beside no project file, or beside defaults that did not make them.
+It is narrowed because `output.targets` is a per-format map, and naming a format this very
+commit withheld would point a row at a file nobody wrote. That is not a new rule but the one
+`payload_for` already applies to a format another commit owns, read here for a format no
+commit will reach. The run's other places — artwork, enclosure, drilling — declare values
+rather than files, and those values are exactly the ones that produced the Excellon and the
+drawings now on disk, so they are recorded in full. An error on the cut document itself is a
+different matter and withholds the whole commit, because then the values are what is in doubt.
 
 ## Rationale
 

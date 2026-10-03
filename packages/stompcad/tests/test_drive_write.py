@@ -293,4 +293,9 @@ def test_a_dock_half_error_still_records_the_drill_half_s_declaration(
         driver._write_model(data, scope)
 
     stored = json.loads(manifest_path(driver._options.panel).read_text(encoding="utf-8"))
-    assert set(stored["output"]["targets"]) == {"excellon", "json"}
+    assert "drilling" in stored, "the values that produced the Excellon are declared"
+    # And only the format that produced a file: ``output.targets`` is a
+    # per-format map, so naming ``json`` here would point at a file this very
+    # commit withheld -- the rule ``payload_for`` already applies to a format
+    # it does not own.
+    assert set(stored["output"]["targets"]) == {"excellon"}
