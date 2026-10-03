@@ -10,7 +10,9 @@ signs of its axis reach a wall, the sign nearer its own tip carries the hole; th
 diameter is measured from the feature's tip to the wall's outer face; and both
 multi-wall refusals are findings rather than raises. A wall that already takes a
 hole for one component at a place refuses a second component's hole there as a
-finding, because no earlier stage can see two wall holes at once.
+finding, because no earlier stage can see two wall holes at once. A final
+amendment gives a wall its own rule for finding the surface behind it, and has
+the model say why it holds no walls.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -230,8 +232,8 @@ no second pass cuts exactly what it cuts now.
 A **wall** is discovered, never declared. Keep the plate levels that are *lateral* — whose
 outward normal lies nearer the plane perpendicular to the drill axis than the axis itself —
 group those by the nearest signed kernel axis, and the extreme level along that axis is the
-wall's outer surface. Its inner surface is then found by `_inner_level`, over the population of
-levels parallel to that outer surface's own direction: a wall's inner surface arrives in a
+wall's outer surface. Its inner surface is then found by `_wall_inner_level` (see the wall-pairing
+amendment below, which replaced the first form of this rule): a wall's inner surface arrives in a
 *different* direction bin, because the draft tilts the two oppositely, so `_facing` over the
 whole lateral population would pair a wall with the opposite wall's outer face instead.
 
@@ -405,3 +407,25 @@ Without a case model, the panel is still checked against its reference outline
 and can produce `hole-outside-outline`, a warning under
 [ADR-0002](0002-domain-quantisers.md). The model adds an error-level check against
 the actual drilled face, beyond the published top view.
+
+### Amendment: a wall pairs with its inner face by plate thickness, and a model says why it has no walls
+
+**Accepted.** `_inner_level` is correct for the drilled face, whose two faces are parallel, and
+stays so. A wall needs its own rule because its two faces need not be drafted alike: 1590BS
+drafts a wall's outer face 1.400° and its inner 1.250°, planes 0.15° apart that share no direction
+bin, so pairing on exact bin equality found no inner face and discovery found no walls. A
+casting that drafts its faces differently is real, and the rule may not assume otherwise.
+
+`_wall_inner_level` takes the back-facing levels within 0.5° of the outer plane (a true inner face
+measures 0.000°–0.200° over all 37 catalogued parts) whose plate is no thicker than 12 mm, then
+the nearest plane, then the largest area. Angle alone cannot discriminate: a box drafted alike on
+both sides makes the opposite wall's outer face exactly parallel to this wall's. Plate thickness
+can: a true inner face stands 1.500–9.597 mm behind its outer, and the opposite wall's outer face
+starts at 14.819 mm. Over the 148 box walls, 144 choose the face they chose before, none differ,
+and 1590BS's four are newly found.
+
+The model also carries `walls_unavailable`, the reason wall discovery was attempted and refused;
+the loader keeps swallowing the refusal, since a lid has no walls and wall drilling is opt-in.
+`DrillWalls` reads it where no wall was reached: a model with no walls and a reason reports that
+the enclosure's walls could not be determined, and why; otherwise the finding blames the axis, as
+before. The code stays `wall-feature-unreachable`.
