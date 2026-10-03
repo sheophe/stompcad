@@ -35,6 +35,7 @@ from stompcad.workbench.keys import (
 )
 from stompcad.workbench.places import (
     FIELDS,
+    Field,
     FindingRow,
     FocusRow,
     PickerScreen,
@@ -1366,3 +1367,29 @@ def test_the_wall_reference_row_states_what_is_set_as_the_picker_s_own_answers()
     session = _session()
     session.set(Place.BOARDS, "wall_reference", "J1, J4")
     assert chosen_for(session, Place.BOARDS, "wall_reference") == ("J1", "J4")
+
+
+_REFERENCE_ROWS = tuple(
+    field for field in FIELDS[Place.BOARDS] if field.name.endswith("_reference")
+)
+
+
+def test_both_reference_rows_are_found_for_the_parity_checks() -> None:
+    assert {field.name for field in _REFERENCE_ROWS} == {"panel_reference", "wall_reference"}
+
+
+@pytest.mark.parametrize("field", _REFERENCE_ROWS, ids=lambda field: field.name)
+def test_a_reference_row_is_typed_until_designators_exist_and_picked_after(field: Field) -> None:
+    """Every reference row is held to one rule, so a row added later cannot diverge."""
+    app = Workbench(_session())
+    assert not app._picks(field)
+    app.session.record_designators({1: ("SW1", "J1")})
+    assert app._picks(field)
+
+
+def test_the_reference_rows_share_one_kind_and_one_answer_source() -> None:
+    session = _session()
+    session.record_designators({1: ("SW1", "J1")})
+    assert len({field.kind for field in _REFERENCE_ROWS}) == 1
+    offered = {choices_for(session, Place.BOARDS, field.name) for field in _REFERENCE_ROWS}
+    assert offered == {("J1", "SW1")}
