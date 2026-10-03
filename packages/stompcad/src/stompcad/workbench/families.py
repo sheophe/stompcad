@@ -177,11 +177,17 @@ _CANNOT_ASSEMBLE = frozenset({"enclosure-too-shallow", "every-seating-clashes"})
 REMEDIES: dict[str, Remedy] = {
     "ambiguous-pairing": Remedy(Place.BOARDS, "panel_reference"),
     "case-model-unavailable": Remedy(Place.ENCLOSURE, "case"),
+    # The wall expression and not the panel one: a designator both claim is
+    # answered by the one that may be narrowed without losing a hole.
+    "component-claimed-twice": Remedy(Place.BOARDS, "wall_reference"),
     "grid-ambiguous": Remedy(Place.DRILLING, "grid_mm"),
     "grid-too-fine": Remedy(Place.DRILLING, "grid_mm"),
     "nesting-truncated": Remedy(Place.ARTWORK, "form_depth"),
     "under-constrained-board": Remedy(Place.BOARDS, "panel_reference"),
     "unmatched-enclosure": Remedy(Place.ENCLOSURE, "case"),
+    # A part named for a wall whose feature reached none: the expression that
+    # named it is the row to correct, since nothing was cut for it.
+    "wall-feature-unreachable": Remedy(Place.BOARDS, "wall_reference"),
     "wrong-case-model": Remedy(Place.ENCLOSURE, "case"),
     "wrong-enclosure": Remedy(Place.ENCLOSURE, "case"),
     "ambiguous-enclosure": Remedy(Place.ENCLOSURE, "case"),
