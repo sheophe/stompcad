@@ -586,14 +586,14 @@ def test_a_fit_landing_mid_run_does_not_raise() -> None:
 def test_the_boards_place_waits_until_the_walls_are_cut() -> None:
     """Decision 17: the place's work is not done until the walls are cut, and
     the walls are cut at ``drill-walls`` rather than in the write step after."""
-    assert "drill-walls" in drive.steps_of_place("boards")
-    assert "read-boards" in drive.steps_of_place("boards")
+    assert drive.steps_of_place("boards") == {"read-boards", "drill-walls"}
 
 
 def test_a_wall_reference_edit_marks_the_boards_place() -> None:
     session = _session()
     session.set(Place.BOARDS, "wall_reference", "J1")
     assert session.roadmap() is Place.BOARDS
+    assert "drill-walls" in drive.readers_of("wall_reference")
     assert "drill-walls" in session.stale()
 
 
@@ -603,16 +603,13 @@ def test_a_boardless_project_never_waits_for_a_step_it_will_not_run() -> None:
     one would report it stale for ever."""
     session = _session(_boardless())
     session.set(Place.BOARDS, "wall_reference", "J1")
-    assert not session.stale() & {"drill-walls", "write-model", "read-boards"}
     assert session.settings.boards.wall_reference.value == "J1"
+    assert session.stale() == frozenset()
+    assert session.roadmap() is None
 
 
-def test_a_boardless_wall_reference_edit_leaves_nothing_to_resume() -> None:
-    """The set the roadmap waits on is empty, not merely free of three names,
-    while the same edit on a project with boards does leave a step to run."""
-    boarded = _session()
-    boarded.set(Place.BOARDS, "wall_reference", "J1")
-    boardless = _session(_boardless())
-    boardless.set(Place.BOARDS, "wall_reference", "J1")
-    assert "drill-walls" in boarded.stale()
-    assert boardless.stale() == frozenset()
+def test_a_boarded_wall_reference_edit_leaves_a_step_to_resume() -> None:
+    """The control for the boardless case: the same edit with boards is not empty."""
+    session = _session()
+    session.set(Place.BOARDS, "wall_reference", "J1")
+    assert "drill-walls" in session.stale()

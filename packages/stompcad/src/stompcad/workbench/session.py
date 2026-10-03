@@ -382,8 +382,16 @@ class Session:
         return drive.plan_for(self._settings.boards.boards.value)
 
     def roadmap(self) -> Place | None:
-        """The earliest place owning a change, or ``None`` when nothing changed."""
-        name = stale.earliest_place(self._changed)
+        """The earliest place owning a change this run can act on, else ``None``.
+
+        Asked of the same plan as ``stale``, so a change whose every reader
+        was pruned names no place a resume would never visit.
+        """
+        plan = self._plan()
+        acted_on = frozenset(
+            field for field in self._changed if drive.invalidated(frozenset({field}), plan)
+        )
+        name = stale.earliest_place(acted_on)
         return None if name is None else Place(name)
 
     def reached(self, place: Place) -> bool:
