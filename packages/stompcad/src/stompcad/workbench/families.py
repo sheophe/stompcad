@@ -172,6 +172,11 @@ FAMILIES: dict[Family, Prose] = {
 #: unless it is an ERROR, which withheld an artefact.
 _CANNOT_ASSEMBLE = frozenset({"enclosure-too-shallow", "every-seating-clashes"})
 
+#: Where every wall refusal is answered. The expression that named the part is
+#: the one thing a builder can change about a hole the artwork never asked for:
+#: drop the designator and no hole is cut, or re-seat the board that carries it.
+_WALL_ROW = Remedy(Place.BOARDS, "wall_reference")
+
 #: The row each finding a row can answer goes to. Absent codes have none: a
 #: refusal names a change to the drawing, and information marks no place.
 REMEDIES: dict[str, Remedy] = {
@@ -179,7 +184,7 @@ REMEDIES: dict[str, Remedy] = {
     "case-model-unavailable": Remedy(Place.ENCLOSURE, "case"),
     # The wall expression and not the panel one: a designator both claim is
     # answered by the one that may be narrowed without losing a hole.
-    "component-claimed-twice": Remedy(Place.BOARDS, "wall_reference"),
+    "component-claimed-twice": _WALL_ROW,
     "grid-ambiguous": Remedy(Place.DRILLING, "grid_mm"),
     "grid-too-fine": Remedy(Place.DRILLING, "grid_mm"),
     "nesting-truncated": Remedy(Place.ARTWORK, "form_depth"),
@@ -187,7 +192,7 @@ REMEDIES: dict[str, Remedy] = {
     "unmatched-enclosure": Remedy(Place.ENCLOSURE, "case"),
     # A part named for a wall whose feature reached none: the expression that
     # named it is the row to correct, since nothing was cut for it.
-    "wall-feature-unreachable": Remedy(Place.BOARDS, "wall_reference"),
+    "wall-feature-unreachable": _WALL_ROW,
     "wrong-case-model": Remedy(Place.ENCLOSURE, "case"),
     "wrong-enclosure": Remedy(Place.ENCLOSURE, "case"),
     "ambiguous-enclosure": Remedy(Place.ENCLOSURE, "case"),
@@ -207,6 +212,8 @@ _SECONDARY: dict[str, str] = {
     "unknown-enclosure": "or draw a catalogue case, if one was meant",
     "unmatched-enclosure": "or redraw the outline, if a catalogue case was meant",
     "ambiguous-pairing": "or narrow the match tolerance, if both parts belong",
+    "component-claimed-twice": "or narrow the panel-reference expression, if the part "
+    "mounts through the panel after all",
 }
 
 _NEAR_MISS_SECONDARY = "or move the footprint in the artwork, if the tolerance is right"
@@ -224,6 +231,26 @@ def _near_miss(diagnostic: Diagnostic) -> bool:
     )
 
 
+#: The three codes raised on both a panel hole and a wall hole, with different
+#: answers. On the panel the artwork asked for the hole; on a wall it did not
+#: mention it, so "change the artwork" would send a builder to a drawing that
+#: says nothing about the part.
+_SHARED_WITH_WALLS = frozenset({"hole-off-face", "hole-through-boss", "unknown-diameter"})
+
+
+def _wall_raised(diagnostic: Diagnostic) -> bool:
+    """Whether this is a wall refusal rather than its panel namesake.
+
+    Read off the payload, as ``_near_miss`` is: the wall stage names the
+    component it refused and the panel path never does, so the key that is
+    present is the fact that tells them apart. Matching on the message
+    would be matching on a sentence written for a person.
+    """
+    return diagnostic.code in _SHARED_WITH_WALLS and any(
+        key == "designator" for key, _value in diagnostic.data
+    )
+
+
 def family_of(diagnostic: Diagnostic) -> Family:
     """The one family this finding belongs to, reading its payload where needed.
 
@@ -235,6 +262,8 @@ def family_of(diagnostic: Diagnostic) -> Family:
     """
     if diagnostic.code == "unmatched-part":
         return Family.SETTING if _near_miss(diagnostic) else Family.BOARD
+    if _wall_raised(diagnostic):
+        return Family.SETTING
     for family, prose in FAMILIES.items():
         if diagnostic.code in prose.codes:
             return family
@@ -256,6 +285,8 @@ def remedy_of(diagnostic: Diagnostic) -> Remedy | None:
     """The row that answers this finding, where one does."""
     if _near_miss(diagnostic):
         return NEAR_MISS
+    if _wall_raised(diagnostic):
+        return _WALL_ROW
     return REMEDIES.get(diagnostic.code)
 
 
