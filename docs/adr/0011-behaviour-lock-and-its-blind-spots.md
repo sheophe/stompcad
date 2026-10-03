@@ -101,8 +101,8 @@ behaviour outside its reach:
 The harness drives `stompdrill`'s own command line over panels with no boards, so it
 certifies the drill half alone. The orchestrator's composed run (its step list, the division
 of the drill half's commit, and the wall stage only it appends) is outside the lock entirely,
-and is held instead by the byte comparisons in `packages/stompcad/tests`, each against what
-the wrapped tool writes from its own command line. A green lock is therefore no evidence
+and is held instead by tests in `packages/stompcad/tests`: byte comparisons against what
+the wrapped tool writes from its own command line, and checks of the artefact set a run leaves. A green lock is therefore no evidence
 about a run with boards, which is the shape of run those comparisons exist for.
 
 Re-measure these limits when relying on them. Run the script's two invocations

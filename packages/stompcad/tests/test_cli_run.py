@@ -807,12 +807,13 @@ _WARNING_ONLY_PANEL_REFERENCE = f"{PANEL_REFERENCE},!SW2"
 
 @pytest.mark.hammond
 @pytest.mark.boards
-def test_a_run_that_names_no_wall_part_writes_what_it_always_wrote(
+def test_a_run_that_names_no_wall_part_adds_no_wall_surface_and_no_sibling_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The default wall expression is empty, so a run that asks for no wall
     describes only the face and leaves no sibling file for a surface nothing
-    was cut in."""
+    was cut in. Bytes are not compared here; that lock lives in
+    test_drive_dock.py's test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes."""
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")
@@ -838,11 +839,12 @@ def test_a_run_that_names_no_wall_part_writes_what_it_always_wrote(
 
 @pytest.mark.hammond
 @pytest.mark.boards
-def test_the_panel_s_own_artefacts_land_before_the_walls_are_cut(
+def test_the_commit_lines_print_in_the_order_the_run_takes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A dock-half failure still leaves a builder the files to drill the panel
-    with, checked by the order the two commits report."""
+    """Reads the order the run reports its two commits and its steps, not files
+    on disk: the panel's artefacts are reported before the model's, and the
+    walls are cut between writing the case and writing the model."""
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")
