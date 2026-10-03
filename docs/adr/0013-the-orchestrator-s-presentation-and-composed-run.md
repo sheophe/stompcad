@@ -26,9 +26,11 @@ main thread. A further amendment, for wall drilling, makes the run eleven
 steps rather than the nine its first decision lists: `drill walls` and `write
 model` join after `clash`, and the drill half's JSON document and drilled model
 commit at `write model`, after the walls are cut, while the Excellon and the
-drawings still commit at `write case`. The decision's body below keeps the nine
-as the record of what was first decided; the amendment placed before the
-Rationale governs. This ADR's other decisions stand.
+drawings still commit at `write case`. That commit is withheld on *either*
+half's error, because it runs after docking and is derived from it, which the
+per-half limit recorded below no longer covers. The decision's body below keeps
+the nine as the record of what was first decided; the amendment placed before
+the Rationale governs. This ADR's other decisions stand.
 
 ## Context
 
@@ -301,6 +303,28 @@ artefacts are still no evidence the run succeeded, and the exit code is still th
 The manifest declaration joins the **last** drill-half commit: `write model` where the run
 has one, `write case` otherwise. A project file never sits beside an artefact that was never
 written, which is ADR-0014's decision holding under a split.
+
+**The per-half partition does not reach `write model`.** The limit recorded above divides the
+run by half and lets each half's completed commit stand, and that was sound while every
+drill-half commit happened *before* a board was read. `write model` happens after, and its
+bytes are derived from the dock half: a wall hole's position, its surface and its diameter
+all come from the features the clash settled. So an error in the dock half withholds `write
+model`'s **artefacts** as well as `write assembly`'s, and a builder told a designator is
+claimed by two expressions is not handed a document whose wall holes were resolved from
+features that run just declared undecidable. `write case` is unaffected, which is what keeps
+the limit's purpose: the Excellon and the drawings are already on disk, and nothing about them
+depends on a board. The cost is that a dock-half error now withholds two artefacts a run
+before this amendment would have written — which is the point, because those two would have
+been wrong.
+
+Its **declaration** still commits, and that is not an exception to the withhold rule but the
+same reading of it. A declaration records the values that produced a half's artefacts, not the
+artefacts themselves, and the Excellon and the drawings those values produced are on disk. A
+dock finding says nothing about them. Withholding the declaration too would leave exactly what
+ADR-0014's decision 8 forbids — committed files beside no project file, or beside defaults
+that did not make them — and it is this commit that carries the drill half's declaration in a
+run with boards, so there is no later one to carry it instead. An error on the cut document
+itself is a different matter and withholds both, because then the values are what is in doubt.
 
 ## Rationale
 
