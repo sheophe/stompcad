@@ -263,7 +263,7 @@ later step actually consumes of an earlier one's output, not a step's
 position in the plan's ordered list. `targets` is read by `write case` at
 position four and again by `write model` at position ten and `write assembly`
 at position eleven; a frontier keyed to position rather than to consumption
-would mark `read boards`, `match`, `seat`, `clash` and `drill walls` stale too, and re-run all four — minutes of
+would mark `read boards`, `match`, `seat`, `clash` and `drill walls` stale too, and re-run all five — minutes of
 kernel work — for a changed output filename that none of them reads. A write
 step produces no intermediate any later step consumes, so marking one stale
 propagates nowhere.

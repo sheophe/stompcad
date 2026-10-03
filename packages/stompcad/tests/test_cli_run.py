@@ -811,8 +811,10 @@ def test_a_run_that_names_no_wall_part_adds_no_wall_surface_and_no_sibling_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The default wall expression is empty, so a run that asks for no wall
-    describes only the face and leaves no sibling file for a surface nothing
-    was cut in. Bytes are not compared here; that lock lives in
+    describes only the face. No composed run writes a per-surface sibling for a
+    wall whatever it names -- decision 16's recorded limit -- so what the exact
+    artefact set pins is that no *unexpected* file appears, not that a sibling
+    was suppressed. Bytes are not compared here; that lock lives in
     test_drive_dock.py's test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes."""
     model = case_model()
     if model is None:
@@ -849,7 +851,7 @@ def test_the_commit_lines_print_in_the_order_the_run_takes(
     if model is None:
         pytest.skip("no cached 1590B model")
     panel = _tar_project(tmp_path, model)
-    cli.main([
+    code = cli.main([
         str(panel), str(panel.with_name("tar-pcb.stp")), "--case", "1590B",
         "--case-model", str(panel.with_name("1590B.stp")),
         "--panel-reference", _WARNING_ONLY_PANEL_REFERENCE,
@@ -857,5 +859,8 @@ def test_the_commit_lines_print_in_the_order_the_run_takes(
         "--emit", f"json={tmp_path / 'p.json'}",
     ])
     printed = capsys.readouterr().out
+    # Without this the withheld and undocked lines satisfy the order below too,
+    # so a run that wrote neither file would pass for one that wrote both.
+    assert code in (0, 1), printed
     assert printed.index("p.drl") < printed.index("p.json")
     assert printed.index("write case") < printed.index("drill walls") < printed.index("write model")

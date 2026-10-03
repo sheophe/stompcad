@@ -270,12 +270,11 @@ that wall, while the extremity facing the other way is most of the enclosure's w
 the wall behind it. An exact tie is refused rather than broken, because nothing geometric
 separates the two and a tie-break on anything else would be this file's invention.
 
-The property that settles it is where the part *is*, not what it is made of. Picking the sign that carries material fails
-on a flush-mounted jack, whose sleeve may stop at the inner face and leave both spans
-material-free; the bore cannot separate them because it is one value shared by both signs;
-and a profile states no sentinel, since `radius_at` answers zero both past a stack's last
-step and before its first. Proximity needs none of those: it is a property of where the part
-*is*, not of what it is made of.
+Picking the sign that carries material fails on a flush-mounted jack, whose sleeve may stop
+at the inner face and leave both spans material-free; the bore cannot separate them because
+it is one value shared by both signs; and a profile states no sentinel, since `radius_at`
+answers zero both past a stack's last step and before its first. Proximity needs none of
+those: it is a property of where the part *is*, not of what it is made of.
 
 The required radius is measured over the whole run **from the feature's tip to the wall's
 outer face**, not across the wall's own thickness. A part is assembled through a wall, so

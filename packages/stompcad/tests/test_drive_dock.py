@@ -320,30 +320,6 @@ def test_a_named_part_is_resolved_against_the_wall_it_is_mounted_at(
 
 @pytest.mark.hammond
 @pytest.mark.boards
-def test_naming_no_part_cuts_nothing_and_changes_no_byte(tmp_path: Path) -> None:
-    """Decision 18's lock, through the composed run: the default is empty, so
-    the artefacts of a run that names nothing are the ones it wrote before."""
-    model = case_model()
-    if model is None:
-        pytest.skip("no cached 1590B model")
-    first, second = tmp_path / "a.json", tmp_path / "b.json"
-    for target, expression in ((first, ""), (second, "")):
-        options = replace(
-            _options("json", target),
-            case_model=model,
-            panel_reference=_PAIRING_PANEL_REFERENCE,
-            wall_reference=expression,
-        )
-        driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
-        with track(NullSink()) as scope:
-            driver.run(scope)
-
-    assert first.read_bytes() == second.read_bytes()
-    assert b'"surface": "right"' not in first.read_bytes()
-
-
-@pytest.mark.hammond
-@pytest.mark.boards
 def test_an_expression_naming_nothing_says_so_rather_than_cutting_in_silence(
     tmp_path: Path,
 ) -> None:
