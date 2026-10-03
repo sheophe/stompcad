@@ -368,7 +368,9 @@ class Driver:
         if not docking:
             return drilled, None
         if drilled.worst_severity is Severity.ERROR:
-            self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES)))
+            self._presentation.report(
+                _undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES))
+            )
             return drilled, None
         return drilled, self._dock_steps(drilled, slots)
 
@@ -422,7 +424,9 @@ class Driver:
                 and self._drilled is not None
                 and self._drilled.worst_severity is Severity.ERROR
             ):
-                self._presentation.report(_undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES)))
+                self._presentation.report(
+                    _undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES))
+                )
                 break
             slot = next(slots)
             slot.label(step.label)
@@ -961,7 +965,7 @@ class Driver:
         With boards, the document and the drilled model describe a job whose
         walls are not cut yet, so they go to ``write model`` instead: the
         Excellon and the drawings are complete without them, because a wall
-        hole changes no panel hole's number (decision 3). With none, there is
+        hole changes no panel hole's number (decision 3 of the wall-drilling spec). With none, there is
         no later commit and this one writes everything, as it always has.
         """
         owned = frozenset(available())
@@ -982,7 +986,7 @@ class Driver:
         """Render, stage and commit the two artefacts that describe the whole job.
 
         The drill half's last commit, and so the one the manifest declaration
-        joins (decision 16). ``data`` is the drill document the walls were cut
+        joins (decision 16 of the wall-drilling spec). ``data`` is the drill document the walls were cut
         into, never the panel-only one the dock half was seated against.
         This and ``_write_case`` differ only in which formats they own and
         which half they declare as; a shared helper taking both would read as

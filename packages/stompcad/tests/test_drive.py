@@ -30,7 +30,7 @@ from stompdrill.quantise import RawDrillData
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData, StageRun
+from stompmodel.model import CaseFace, CaseRegistration, DrillData, ReferenceOutline, StageRun
 from stompmodel.progress import NO_PROGRESS, Scope, track
 from stompmodel.protocols import Pipeline
 from stompmodel.units import Nanometre
@@ -893,12 +893,12 @@ def _driver_and_presentation_with_held_intermediates(
     options = replace(
         _options(),
         boards=(Path("stand-in-board.stp"),),
-        targets=(("json", tmp_path / "case.json"),),
+        targets=(("excellon", tmp_path / "case.drl"), ("json", tmp_path / "case.json")),
     )
     driver = Driver(DRILL_AND_DOCK, presentation, options)
     driver._raw = cast(RawDrillData, object())
     driver._quantised = DrillData()
-    driver._drilled = DrillData()
+    driver._drilled = _outlined_document()
     driver._scan = cast(BoardScan, object())
     driver._geometry = cast(dict[int, BoardGeometry], {})
     driver._docked = _stand_in_dock_data()
@@ -915,6 +915,11 @@ def _driver_with_held_intermediates(tmp_path: Path) -> Driver:
 def _errored_dock_data() -> DockData:
     """A dock result carrying an error, for the write step's own withhold guard."""
     return _stand_in_dock_data().with_diagnostics(Diagnostic.error("stand-in-error", "stand-in"))
+
+
+def _outlined_document() -> DrillData:
+    """A document the Excellon emitter accepts: it refuses one with no outline."""
+    return DrillData(reference=ReferenceOutline(Nanometre(30_000_000), Nanometre(20_000_000)))
 
 
 def _driver_writing_into(
@@ -1091,10 +1096,10 @@ def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
     calls = {"read_boards": 0}
 
     def _stub_quantise(scope: Scope) -> DrillData:
-        return DrillData()
+        return _outlined_document()
 
     def _stub_drill(data: DrillData, scope: Scope) -> DrillData:
-        return DrillData()
+        return _outlined_document()
 
     def _stub_read_boards(drill: DrillData, scope: Scope) -> None:
         calls["read_boards"] += 1
@@ -1156,6 +1161,9 @@ def test_a_resume_reports_undocked_and_skips_dock_steps_when_drilled_has_errors(
 
     assert [step.key for step, _outcome in presentation.finished] == ["write-case"]
     assert any("read no board" in line for lines in presentation.reported for line in lines)
+    assert any("case.json" in line for lines in presentation.reported for line in lines), (
+        "the model's deferred targets are named beside the dock half's"
+    )
 
 
 def test_a_resume_drops_the_dock_half_when_there_are_no_boards(tmp_path: Path) -> None:

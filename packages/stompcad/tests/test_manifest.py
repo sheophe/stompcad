@@ -10,6 +10,7 @@ import pytest
 
 from stompcad import manifest
 from stompcad.settings import Origin, Provenance, Resolved, Settings
+from stompdrill.emitters import available
 
 
 def _write(tmp_path: Path, payload: dict[str, object]) -> Path:
@@ -509,6 +510,16 @@ def test_no_format_name_belongs_to_both_halves() -> None:
     from stompdrill.emitters import available
 
     assert not frozenset(available()) & manifest.DOCK_TARGET_NAMES
+
+
+def test_the_model_formats_are_real_emitters_and_never_the_dock_halfs() -> None:
+    """The premise ``write case`` and ``write model`` rest on: a name here is a
+    format that exists. A renamed emitter would turn the drill half's
+    ``owned -= MODEL_TARGET_NAMES`` and ``_targets_for`` into silent no-ops,
+    and a boards run would again write the document before the walls are cut.
+    """
+    assert manifest.MODEL_TARGET_NAMES <= frozenset(available())
+    assert not manifest.MODEL_TARGET_NAMES & manifest.DOCK_TARGET_NAMES
 
 
 def test_a_project_declaring_a_case_model_is_told_it_is_no_longer_read(tmp_path: Path) -> None:
