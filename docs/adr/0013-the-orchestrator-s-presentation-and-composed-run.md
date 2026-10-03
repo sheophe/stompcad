@@ -342,9 +342,9 @@ Excellon and the per-surface drawing sheets are rendered at `write case`, from t
 panel-drilled document, *before* any wall is cut; only the drill document and the drilled
 model defer to `write model`. So a composed run writes an accepted wall hole into those two
 artefacts and into nothing else — a builder who names a part gets no wall drill file and no
-wall drawing sheet to mark it from. Lifting it means `write model` rendering through the
-per-surface set rather than one emitter per target, which is work no plan behind this
-amendment specifies, so it is recorded here beside the limit above and for the same reason:
+wall drawing sheet to mark it from. Lifting it means deferring or re-rendering the three
+per-surface formats `write case` owns, with `_write` adopting the per-surface artefact set
+rather than one emitter per target, which is work no plan behind this amendment specifies, so it is recorded here beside the limit above and for the same reason:
 a recorded limit is honest, and a hidden one is not.
 
 **And a known disagreement between two outputs of one run.** `write assembly` builds from
