@@ -15,7 +15,7 @@ def _stale(*changed: str) -> frozenset[str]:
 
 def test_an_output_change_touches_only_the_write_steps() -> None:
     """The finding that forced this design: a filename must not cost kernel work."""
-    assert _stale("targets") == {"write-case", "write-assembly"}
+    assert _stale("targets") == {"write-case", "write-model", "write-assembly"}
 
 
 def test_a_position_rule_would_have_been_wrong() -> None:
@@ -92,3 +92,30 @@ def test_the_enclosure_settings_re_run_from_the_step_that_opens_the_model() -> N
 def test_a_wall_reference_change_belongs_to_the_boards_place() -> None:
     assert stale.PLACE_OF_FIELD["wall_reference"] == "boards"
     assert stale.earliest_place(frozenset({"wall_reference"})) == "boards"
+
+
+def test_a_wall_reference_change_re_reads_the_boards_and_re_cuts_the_walls() -> None:
+    """Ruling 4. The expression gates the *probing*, so a feature that was never
+    measured cannot be resolved: the scan is stale and the seating goes with it.
+    Decision 17's resume-at-drill-walls is what every other change gets."""
+    invalidated = _stale("wall_reference")
+    assert {"read-boards", "match", "seat", "clash", "drill-walls"} <= invalidated
+    assert "write-model" in invalidated
+    assert not invalidated & {"read-panel", "quantise", "drill", "write-case"}
+
+
+def test_an_output_change_re_writes_the_model_without_re_cutting_anything() -> None:
+    """The control for the row above: a field only the write steps read reaches
+    ``write model`` and nothing before it. A position rule would re-seat the
+    boards for a filename. ``title`` cannot play this part: ``read boards``
+    reads it too, for the temporary document the scan is made from."""
+    invalidated = _stale("targets")
+    assert "write-model" in invalidated
+    assert not invalidated & {"seat", "clash", "drill-walls"}
+
+
+def test_the_walls_are_cut_again_when_the_boards_are_seated_again() -> None:
+    """The features come from the ranking the clash settled, so a re-seat
+    invalidates them by consumption rather than by naming a field."""
+    assert "drill-walls" in _stale("seat_pitch_max_mm")
+    assert not _STEP_INPUTS["drill-walls"] & {"seat_pitch_max_mm"}

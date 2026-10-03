@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -20,6 +21,8 @@ from stompcad.drive import Driver, RunOptions
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import PlainWriter
 from stompcollider import cli as stompcollider_cli
+from stompcollider.designators import NOTHING, parse_filter
+from stompcollider.errors import UsageError
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill import cli as stompdrill_cli
@@ -27,9 +30,15 @@ from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.frames import CoordinateFrame, FaceFrame
-from stompmodel.model import CaseFace, CaseRegistration, DrillData
+from stompmodel.model import (
+    SURFACE_FACE,
+    CaseFace,
+    CaseRegistration,
+    DrillData,
+    admitting_radius,
+)
 from stompmodel.progress import track
-from stompmodel.units import Nanometre
+from stompmodel.units import Nanometre, nm_from_mm
 from tests.conftest import PANEL_REFERENCE, TAR_AI, TAR_PCB, NullSink, case_model
 
 __all__: list[str] = []
@@ -256,3 +265,174 @@ def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> N
     ]
     assert not target.exists()
     assert any("read no board" in line for lines in presentation.reported for line in lines)
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_a_named_part_is_resolved_against_the_wall_it_is_mounted_at(
+    tmp_path: Path,
+) -> None:
+    """The whole plan, end to end: a builder names J1, the sleeve is measured
+    at this run's own radii, and the hole it needs is resolved in the right
+    wall's frame at a stocked size.
+
+    Refused there, and that is this fixture's geometry: a 1590B will not
+    close over the tar board, so the seating sits 14.089 mm deeper than the
+    panel's holes fix, putting J1's axis where ⌀11.400 leaves the drillable
+    region. Every link before it still holds, and the refusal abandons
+    neither the panel's own holes nor the commit that preceded docking.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    out = tmp_path / "p.json"
+    options = replace(
+        _options("json", out),
+        case_model=model,
+        panel_reference=_PAIRING_PANEL_REFERENCE,
+        wall_reference="J1",
+        targets=(("excellon", tmp_path / "p.drl"), ("json", out)),
+    )
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+    with track(NullSink()) as scope:
+        drill, _dock = driver.run(scope)
+
+    refused = [finding for finding in drill.diagnostics if finding.code == "hole-off-face"]
+    assert len(refused) == 1
+    stated = dict(refused[0].data)
+    assert stated["designator"] == "J1"
+    assert stated["surface"] == "right"
+    # J1's sleeve is 5.700 mm in radius and the metric standard stocks 11.400
+    # exactly, so this is the size with no rounding in it at all.
+    assert stated["diameter_nm"] == 11_400_000
+    assert all(hole.surface == SURFACE_FACE for hole in drill.holes)
+    # ADR-0013's deliberate limit: the panel's own commit happened before
+    # docking began and stands, while the commit describing the whole job is
+    # withheld, because the document it would write records a refused hole.
+    assert (tmp_path / "p.drl").is_file()
+    assert not out.exists()
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_naming_no_part_cuts_nothing_and_changes_no_byte(tmp_path: Path) -> None:
+    """Decision 18's lock, through the composed run: the default is empty, so
+    the artefacts of a run that names nothing are the ones it wrote before."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    first, second = tmp_path / "a.json", tmp_path / "b.json"
+    for target, expression in ((first, ""), (second, "")):
+        options = replace(
+            _options("json", target),
+            case_model=model,
+            panel_reference=_PAIRING_PANEL_REFERENCE,
+            wall_reference=expression,
+        )
+        driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+        with track(NullSink()) as scope:
+            driver.run(scope)
+
+    assert first.read_bytes() == second.read_bytes()
+    assert b'"surface": "right"' not in first.read_bytes()
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_an_expression_naming_nothing_says_so_rather_than_cutting_in_silence(
+    tmp_path: Path,
+) -> None:
+    """Review focus. A typo admits no component, so nothing is measured and no
+    refusal is raised: without this the run reports success and cuts nothing."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    options = replace(
+        _options("json", tmp_path / "p.json"),
+        case_model=model,
+        panel_reference=_PAIRING_PANEL_REFERENCE,
+        wall_reference="NOPE*",
+    )
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+    with track(NullSink()) as scope:
+        driver.run(scope)
+
+    named = [d for d in driver.findings if d.code == "wall-feature-unreachable"]
+    assert len(named) == 1
+    assert "NOPE*" in named[0].message
+    assert named[0].severity is Severity.WARNING
+    # A warning and not an error: nothing was cut, so the document and the
+    # model are still a true description of what was drilled, and withholding
+    # them over a stale expression would cost a builder the whole run.
+    assert (tmp_path / "p.json").is_file()
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_a_designator_both_expressions_claim_is_a_finding(tmp_path: Path) -> None:
+    """Decision 11's error, through the composed run: it is the second of the
+    two codes this plan makes reachable, and a run is the only thing that can
+    reach it, because which designators exist is known only once a board is
+    read."""
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    options = replace(
+        _options("json", tmp_path / "p.json"),
+        case_model=model,
+        panel_reference=_PAIRING_PANEL_REFERENCE,
+        # RV1 is a panel reference in that expression, so claiming it here too
+        # leaves nothing to say which hole the part is for.
+        wall_reference="RV1",
+    )
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+    with track(NullSink()) as scope:
+        driver.run(scope)
+
+    claimed = [d for d in driver.findings if d.code == "component-claimed-twice"]
+    assert len(claimed) == 1
+    assert "RV1" in claimed[0].message
+    assert claimed[0].severity is Severity.ERROR
+
+
+def _driver(tmp_path: Path, **overrides: object) -> Driver:
+    """A driver over the tar options, for a question no run has to be made to ask."""
+    options = replace(_options("json", tmp_path / "p.json"), **overrides)  # type: ignore[arg-type]
+    return Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+
+
+def test_an_empty_wall_expression_becomes_the_filter_that_admits_nothing(
+    tmp_path: Path,
+) -> None:
+    """``parse_filter("")`` refuses rather than admitting nothing, and empty is
+    this field's default, so the driver is what tells the two apart. Without
+    that, every run naming no wall part would fail as a usage error."""
+    with pytest.raises(UsageError, match="empty designator filter expression"):
+        parse_filter("")
+
+    driver = _driver(tmp_path)
+    assert driver._options.wall_reference == ""
+    assert driver._wall_filter() is NOTHING
+    assert driver._wall_filter().admit(("J1", "J4")) == frozenset()
+    assert _driver(tmp_path, wall_reference="J1")._wall_filter().admit(
+        ("J1", "J4")
+    ) == frozenset({"J1"})
+
+
+def test_a_wall_feature_is_measured_at_the_radii_this_run_could_drill(
+    tmp_path: Path,
+) -> None:
+    """Decision 7: a wall carries no holes to take an answer set from, so the
+    selected standard is the whole set a wall hole can come from. Narrowing
+    the standard must narrow what a sleeve is probed at, or a part is measured
+    against a diameter nobody here can cut."""
+    driver = _driver(tmp_path)
+    whole = driver._standard()
+    assert driver._wall_probes_nm() == tuple(
+        sorted({admitting_radius(size) for size in whole.sizes_nm})
+    )
+
+    narrowed = _driver(tmp_path, drill_sizes="3,11.4")
+    assert narrowed._standard().sizes_nm == (nm_from_mm(3.0), nm_from_mm(11.4))
+    assert narrowed._wall_probes_nm() == (Nanometre(1_500_000), Nanometre(5_700_000))
+    assert len(driver._wall_probes_nm()) > len(narrowed._wall_probes_nm())

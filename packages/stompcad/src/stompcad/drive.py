@@ -29,6 +29,8 @@ from stompcollider import (
     parse_filter,
     registration,
 )
+from stompcollider.compose import admit_walls
+from stompcollider.designators import NOTHING, Filter
 from stompcollider.emitters.assembly import Solids
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
@@ -40,6 +42,8 @@ from stompdrill.pipeline import (
     CheckCaseClearance,
     CheckOutlineContainment,
     Deduplicate,
+    DrillStandard,
+    DrillWalls,
     IdentifyHammondFootprint,
     ReviewGridTies,
     RouteHoles,
@@ -50,7 +54,7 @@ from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import StompError
-from stompmodel.model import CaseFace, DrillData
+from stompmodel.model import CaseFace, DrillData, admitting_radius
 from stompmodel.progress import Scope, Sink, track
 from stompmodel.protocols import (
     Diagnosable,
@@ -97,26 +101,35 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
     "drill": frozenset(),
     "write-case": frozenset({"targets", "title"}),
     "read-boards": frozenset({
-        "boards", "panel_reference", "title",
+        "boards", "panel_reference", "wall_reference", "title",
         "match_tolerance_mm", "seat_pitch_max_mm", "seat_pitch_min_mm",
     }),
     "match": frozenset(),
     "seat": frozenset(),
     "clash": frozenset(),
+    # The expression gates the probing a wall feature needs, so it reaches
+    # ``read boards`` as well; here it decides which measured features are
+    # resolved against the walls this model has.
+    "drill-walls": frozenset({"wall_reference"}),
+    "write-model": frozenset({"targets", "title"}),
     "write-assembly": frozenset({"targets"}),
 }
 
 #: What each step can honour *without discarding what it holds*. Narrower than
 #: ``_STEP_INPUTS`` only where a step's own intermediate would have to be
 #: rebuilt: ``read boards`` re-runs its filter over boards already scanned, so
-#: a revised board list needs the parse it no longer performs. Everything else
-#: reads its inputs as it runs, so honouring and re-running are one call.
+#: a revised board list needs the parse it no longer performs. The wall
+#: expression is the same case -- that filter reaches the reader, so a changed
+#: expression needs the parse the step no longer holds. Everything else reads
+#: its inputs as it runs, so honouring and re-running are one call.
 _RETRY_INPUTS: dict[str, frozenset[str]] = {
     "read-panel": frozenset(),
     "quantise": _STEP_INPUTS["quantise"],
     "drill": _STEP_INPUTS["drill"],
     "write-case": _STEP_INPUTS["write-case"],
     "read-boards": frozenset({"panel_reference"}),
+    "drill-walls": _STEP_INPUTS["drill-walls"],
+    "write-model": _STEP_INPUTS["write-model"],
     "write-assembly": _STEP_INPUTS["write-assembly"],
 }
 
@@ -147,6 +160,12 @@ _STEP_HOLDS: dict[str, tuple[str, ...]] = {
     "match": ("_dock_data",),
     "seat": ("_dock_data",),
     "clash": ("_dock_data",),
+    # Its own attribute and not ``_drilled``: ``_discard_after`` clears every
+    # later step's holds, so a second producer of ``_drilled`` would have a
+    # ``write case`` retry null the value that step then reads. The two are
+    # also different documents -- the boards were seated against the one
+    # without wall holes.
+    "drill-walls": ("_cut",),
 }
 
 #: What each step reads of what an earlier step left. With ``_STEP_HOLDS`` this
@@ -163,6 +182,8 @@ _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
     "match": ("_dock_data", "_dock_pipeline"),
     "seat": ("_dock_data", "_dock_pipeline"),
     "clash": ("_dock_data", "_dock_pipeline"),
+    "drill-walls": ("_drilled", "_case_model", "_dock_data"),
+    "write-model": ("_cut", "_case_model"),
     "write-assembly": ("_dock_data", "_scan", "_geometry"),
 }
 
@@ -343,6 +364,7 @@ class Driver:
         self._raw: RawDrillData | None = None
         self._quantised: DrillData | None = None
         self._drilled: DrillData | None = None
+        self._cut: DrillData | None = None
         self._scan: BoardScan | None = None
         self._geometry: dict[int, BoardGeometry] | None = None
         self._docked: DockData | None = None
@@ -372,7 +394,11 @@ class Driver:
                 _undocked(self._targets_for(DOCK_TARGET_NAMES | MODEL_TARGET_NAMES))
             )
             return drilled, None
-        return drilled, self._dock_steps(drilled, slots)
+        dock = self._dock_steps(drilled, slots)
+        # The cut document carries the drill half's findings and the walls';
+        # ``drilled`` is the one the boards were seated against, so returning
+        # that would hand back an exit code blind to every wall refusal.
+        return self._cut if self._cut is not None else drilled, dock
 
     def run_drill(self, scope: Scope) -> DrillData:
         """Read, quantise and drill the panel, then write its case artefacts."""
@@ -495,6 +521,10 @@ class Driver:
             raise ValueError("write case cannot run again before the panel is drilled")
         if key == "read-boards" and self._drilled is None:
             raise ValueError("read boards cannot run again before the panel is drilled")
+        if key == "drill-walls" and (self._drilled is None or self._dock_data is None):
+            raise ValueError("the walls cannot be cut again before the boards are docked")
+        if key == "write-model" and self._cut is None:
+            raise ValueError("write model cannot run again before the walls are cut")
         if key == "write-assembly" and (
             self._dock_data is None or self._scan is None or self._geometry is None
         ):
@@ -551,6 +581,14 @@ class Driver:
             assert self._geometry is not None
             written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
             return self._dock_data, ", ".join(written) or "nothing written", ()
+        if key == "drill-walls":
+            assert self._drilled is not None
+            self._cut = self._drill_walls(self._drilled, scope)
+            return self._cut, _walls_outcome(self._drilled, self._cut), ()
+        if key == "write-model":
+            assert self._cut is not None
+            written = self._write_model(self._cut, scope)
+            return self._cut, ", ".join(written) or "nothing written", ()
         raise ValueError(f"{key!r} is not a step this driver can run again")
 
     def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
@@ -741,8 +779,15 @@ class Driver:
         return self._drilled
 
     def _dock_steps(self, drill: DrillData, slots: Iterator[Scope]) -> DockData:
-        """The dock half's five steps, drawn from the same division the drill half was."""
-        read_step = self._plan.steps[4]
+        """The seven steps after the panel's own commit, from one division.
+
+        Two of them are the drill half's -- the walls are cut and the document
+        and model written here -- because each needs the ranking the clash
+        settled, which is the only ranking that will not change under them.
+        Steps are looked up by key rather than by index: a step inserted into
+        the plan would silently shift a position written out here.
+        """
+        read_step = self._step("read-boards")
         read_slot = next(slots)
         read_slot.label(read_step.label)
         self._read_boards(drill, read_slot)
@@ -753,14 +798,29 @@ class Driver:
         )
 
         assert self._dock_pipeline is not None
-        for step, stage in zip(self._plan.steps[5:8], self._dock_pipeline, strict=True):
+        for step, stage in zip(
+            self._plan.steps[_DOCK_FROM + 1 : _DOCK_FROM + 4], self._dock_pipeline, strict=True
+        ):
             slot = next(slots)
             slot.label(step.label)
             before = self._dock_data
             self._dock_data = Pipeline([stage]).run(before, slot)
             self._presentation.finish_step(step, _stage_outcome(before, self._dock_data))
 
-        write_step = self._plan.steps[8]
+        walls_step = self._step("drill-walls")
+        walls_slot = next(slots)
+        walls_slot.label(walls_step.label)
+        assert self._drilled is not None
+        self._cut = self._drill_walls(self._drilled, walls_slot)
+        self._presentation.finish_step(walls_step, _walls_outcome(self._drilled, self._cut))
+
+        model_step = self._step("write-model")
+        model_slot = next(slots)
+        model_slot.label(model_step.label)
+        written = self._write_model(self._cut, model_slot)
+        self._presentation.finish_step(model_step, ", ".join(written) or "nothing written")
+
+        write_step = self._step("write-assembly")
         write_slot = next(slots)
         write_slot.label(write_step.label)
         assert self._geometry is not None
@@ -789,7 +849,13 @@ class Driver:
             case_path = tmp_path / "case.stp"
             case_path.write_bytes(_as_bytes(make_emitter("step", settings).emit(drill)))
 
-            source = BoardSource(drill_path, list(options.boards), case_path)
+            source = BoardSource(
+                drill_path,
+                list(options.boards),
+                case_path,
+                wall_reference=self._wall_filter(),
+                wall_probes_nm=self._wall_probes_nm(),
+            )
             scan = source.scan(scope)
             tolerance_nm = (
                 derived_tolerance(scan.drill, drill_path)
@@ -814,10 +880,25 @@ class Driver:
         Decision 8: the gap this raises is found by a filter over boards
         already read, so running it again re-runs the filter and not the
         parse -- which is why the temporary the parse needed may be gone.
+        Both expressions are asked here, so neither answer depends on the
+        other having run, and the designator both claim is the finding
+        ``admit_walls`` raises rather than a usage error -- which designators
+        exist is decidable only once a board has been read.
         """
         if self._docked is None:
             raise ValueError("the boards must be read before the filter runs")
-        return admit(self._docked, parse_filter(self._options.panel_reference))
+        panel = parse_filter(self._options.panel_reference)
+        return admit_walls(admit(self._docked, panel), self._wall_filter(), panel)
+
+    def _wall_filter(self) -> Filter:
+        """This run's wall expression as a filter, or the one admitting nothing.
+
+        ``parse_filter("")`` refuses an empty expression rather than returning
+        a filter that admits nothing, and empty is this value's default
+        (decision 11), so the two are told apart here and nowhere else.
+        """
+        expression = self._options.wall_reference
+        return parse_filter(expression) if expression else NOTHING
 
     def _read_panel(self, scope: Scope) -> None:
         """Load the artwork -- the read step's one leaf.
@@ -842,14 +923,36 @@ class Driver:
     def _read_outcome(self) -> str:
         return self._options.panel.name
 
-    def _quantise(self, scope: Scope) -> DrillData:
-        assert self._raw is not None  # _read_panel always runs first
+    def _standard(self) -> DrillStandard:
+        """The answer set this run's diameters are drawn from.
+
+        One construction, because three readers need the same drawer: the
+        quantiser snaps a measurement to it, the reader probes a part at its
+        radii, and the wall stage rounds a requirement up to it. Two spellings
+        would let a hole be measured against one drawer and cut from another.
+        """
         options = self._options
         standard = DRILL_STANDARDS[options.drill_standard]
         include = _selected_sizes(options.drill_sizes)
         exclude = _selected_sizes(options.no_drill_sizes)
         if include is not None or exclude is not None:
             standard = standard.select(include=include, exclude=exclude)
+        return standard
+
+    def _wall_probes_nm(self) -> tuple[Nanometre, ...]:
+        """The radii a wall feature is measured at: what this run could drill.
+
+        A wall carries no holes to take them from, and the selected standard is
+        the whole answer set a wall hole can come from (decision 7), so a part
+        measured against anything else is measured against a diameter nobody
+        can cut.
+        """
+        return tuple(sorted({admitting_radius(size) for size in self._standard().sizes_nm}))
+
+    def _quantise(self, scope: Scope) -> DrillData:
+        assert self._raw is not None  # _read_panel always runs first
+        options = self._options
+        standard = self._standard()
         warn_over_nm = None if options.grid_warn_mm is None else nm_from_mm(options.grid_warn_mm)
         # Every attempt opens its own model, so every attempt starts without
         # one. An attempt that identifies nothing returns below without
@@ -943,6 +1046,40 @@ class Driver:
         if self._case_model is not None:
             stages.append(CheckCaseClearance(self._case_model))
         return Pipeline(stages).run(data, scope)
+
+    def _drill_walls(self, data: DrillData, scope: Scope) -> DrillData:
+        """Resolve each measured feature against the walls, and cut what can be.
+
+        Composed here and only here: ``DrillWalls`` is an ordinary ``Stage``
+        that reads what a document already carries, and appending it inside
+        ``stompdrill``'s own ``build_pipeline`` would put it on a command line
+        that has no boards to measure for (decision 15).
+        """
+        assert self._case_model is not None  # a board was seated inside it
+        features = self._dock_data.wall_features if self._dock_data is not None else ()
+        cut = Pipeline([DrillWalls(self._case_model, features, self._standard())]).run(
+            data, scope
+        )
+        unmatched = self._unnamed()
+        return cut if unmatched is None else cut.with_diagnostics(unmatched)
+
+    def _unnamed(self) -> Diagnostic | None:
+        """An expression that named no component, which cuts in silence otherwise.
+
+        A warning rather than an error: nothing was cut, so this run's document
+        and model still describe exactly what was drilled, and withholding them
+        over a stale expression would cost a builder the whole run. The code is
+        the stage's own, because the remedy is the same row either way.
+        """
+        expression = self._options.wall_reference
+        if not expression or self._dock_data is None or self._dock_data.wall_features:
+            return None
+        return Diagnostic.warning(
+            "wall-feature-unreachable",
+            f"the wall-reference expression {expression!r} named no component of any "
+            f"board that was read, so no hole was cut for it",
+            data=(("expression", expression),),
+        )
 
     def _targets_for(self, names: frozenset[str]) -> list[tuple[str, Path]]:
         """This run's targets whose format one half owns, in the order requested."""
@@ -1084,8 +1221,12 @@ class Driver:
         run before it did.
         """
         found: list[Diagnostic] = []
-        if self._drilled is not None:
-            found.extend(self._drilled.diagnostics)
+        # One of the two and never both: ``DrillWalls`` returns the document it
+        # was given plus its own diagnostics, so a union would count every
+        # drill finding twice.
+        drill = self._cut if self._cut is not None else self._drilled
+        if drill is not None:
+            found.extend(drill.diagnostics)
         if self._dock_data is not None:
             found.extend(self._dock_data.diagnostics)
         return tuple(found)
@@ -1253,6 +1394,13 @@ def _quantise_outcome(data: DrillData, model: OcpCaseModel | None = None) -> str
 def _drill_outcome(data: DrillData) -> str:
     """What the drill pipeline left: the holes that survived every stage."""
     return f"{len(data.holes)} holes"
+
+
+def _walls_outcome(before: DrillData, after: DrillData) -> str:
+    """What the wall stage cut, and on how many surfaces."""
+    cut = len(after.holes) - len(before.holes)
+    surfaces = len(after.surfaces or ()) - len(before.surfaces or ())
+    return f"{cut} hole(s) on {surfaces} wall(s)" if cut else "no wall holes"
 
 
 def _stage_outcome(before: DockData, after: DockData) -> str:

@@ -119,7 +119,7 @@ def test_an_output_change_makes_only_the_write_steps_stale() -> None:
     """Decision 10: propagation follows data, and a filename costs no kernel work."""
     session = _session()
     session.set(Place.OUTPUT, "targets", (("excellon", Path("/project/other.drl")),))
-    assert session.stale() == {"write-case", "write-assembly"}
+    assert session.stale() == {"write-case", "write-model", "write-assembly"}
     assert session.roadmap() is Place.OUTPUT
 
 
@@ -190,6 +190,7 @@ def test_a_resume_adds_to_what_the_project_has_reached() -> None:
     session.set(Place.OUTPUT, "targets", ())
     session.begin_run(session.stale(), fresh=False)
     session.credit("write-case")
+    session.credit("write-model")
     session.credit("write-assembly")
     session.finish_run(0)
 
@@ -279,9 +280,10 @@ def test_a_project_with_a_board_still_plans_its_dock_half() -> None:
     session.finish_run(0)
 
     session.set(Place.OUTPUT, "targets", ())
-    assert session.stale() == frozenset({"write-case", "write-assembly"})
+    assert session.stale() == frozenset({"write-case", "write-model", "write-assembly"})
     session.start_run(resuming=True)
     session.credit("write-case")
+    session.credit("write-model")
     assert not session.reached(Place.OUTPUT), "the dock half's write step has not run"
 
     session.credit("write-assembly")

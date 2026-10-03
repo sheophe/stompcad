@@ -25,6 +25,7 @@ from stompcad.present import Choice, PlainWriter, Presentation, Question
 from stompcad.settings import Origin, Provenance, Resolved, Settings
 from stompcollider.model import DockData
 from stompcollider.sources import BoardGeometry, BoardScan
+from stompdrill.cad import OcpCaseModel
 from stompdrill.pipeline import DEFAULT_STANDARD
 from stompdrill.quantise import RawDrillData
 from stompdrill.sources.ai_pdf import DEFAULT_FORM_DEPTH
@@ -1093,6 +1094,11 @@ def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
     would then disagree with the case this very resume just rewrote.
     """
     driver = _driver_with_held_intermediates(tmp_path)
+    # The stale set reaches ``drill-walls``, whose premise is that a board was
+    # seated inside a model, and the stub below replaces the step that opens
+    # one. Only its name is read: the stand-in dock data measured no wall
+    # feature, so ``DrillWalls`` returns before it asks the model anything.
+    driver._case_model = cast(OcpCaseModel, SimpleNamespace(model_name="stand-in"))
     calls = {"read_boards": 0}
 
     def _stub_quantise(scope: Scope) -> DrillData:
