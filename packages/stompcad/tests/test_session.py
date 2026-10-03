@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from stompcad import cli, manifest
+from stompcad import cli, drive, manifest
 from stompcad.cli import Resolution
 from stompcad.present import Choice
 from stompcad.readiness import Blocker, Readiness, readiness
@@ -581,3 +581,38 @@ def test_a_fit_landing_mid_run_does_not_raise() -> None:
     session.begin_run(_PLAN)
     session.record_fit(("1590B",))
     assert session.settings.enclosure.case.value is None
+
+
+def test_the_boards_place_waits_until_the_walls_are_cut() -> None:
+    """Decision 17: the place's work is not done until the walls are cut, and
+    the walls are cut at ``drill-walls`` rather than in the write step after."""
+    assert "drill-walls" in drive.steps_of_place("boards")
+    assert "read-boards" in drive.steps_of_place("boards")
+
+
+def test_a_wall_reference_edit_marks_the_boards_place() -> None:
+    session = _session()
+    session.set(Place.BOARDS, "wall_reference", "J1")
+    assert session.roadmap() is Place.BOARDS
+    assert "drill-walls" in session.stale()
+
+
+def test_a_boardless_project_never_waits_for_a_step_it_will_not_run() -> None:
+    """Review focus. ``wall_reference`` resolves and is remembered on a run with
+    no boards, and every step that reads it is pruned -- so a roadmap waiting on
+    one would report it stale for ever."""
+    session = _session(_boardless())
+    session.set(Place.BOARDS, "wall_reference", "J1")
+    assert not session.stale() & {"drill-walls", "write-model", "read-boards"}
+    assert session.settings.boards.wall_reference.value == "J1"
+
+
+def test_a_boardless_wall_reference_edit_leaves_nothing_to_resume() -> None:
+    """The set the roadmap waits on is empty, not merely free of three names,
+    while the same edit on a project with boards does leave a step to run."""
+    boarded = _session()
+    boarded.set(Place.BOARDS, "wall_reference", "J1")
+    boardless = _session(_boardless())
+    boardless.set(Place.BOARDS, "wall_reference", "J1")
+    assert "drill-walls" in boarded.stale()
+    assert boardless.stale() == frozenset()
