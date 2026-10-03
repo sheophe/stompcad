@@ -596,6 +596,55 @@ def test_an_accepted_wall_hole_reaches_the_document_it_is_written_into(
     assert b'"surface": "right"' in target.read_bytes()
 
 
+def _second_jack() -> WallFeature:
+    """The same jack five millimetres along the wall, under a second designator.
+
+    Far enough that it takes a place of its own, so which of the two was cut
+    is readable from the hole's own coordinates and needs no provenance row.
+    """
+    return replace(
+        _seated_jack(),
+        designator="J4",
+        origin_nm=(Nanometre(30_500_000), Nanometre(5_000_000), Nanometre(0)),
+    )
+
+
+def test_a_narrowed_retry_cuts_no_hole_for_a_name_it_no_longer_holds(
+    tmp_path: Path,
+) -> None:
+    """A revision that un-names a part must not still drill for it.
+
+    ``wall_reference`` reaches the board reader, so the features this step
+    consumes were measured under the expression being replaced. A widened
+    retry therefore still misses a part never measured for -- recoverable,
+    and the retry table records it -- but a narrowed one would cut the hole
+    a builder had just withdrawn, and a cut wall cannot be undone.
+    """
+    driver = _driver(tmp_path, wall_reference="J1,J4")
+    driver._case_model = cast(
+        OcpCaseModel, _FakeWalls(walls=(_right_wall(),), admitting=frozenset({"right"}))
+    )
+    driver._drilled = _panel_document()
+    driver._dock_data = DockData(
+        case=_dummy_case_registration(),
+        wall_features=(_seated_jack(), _second_jack()),
+    )
+
+    with track(NullSink()) as scope:
+        both = driver._drill_walls(driver._drilled, scope)
+        cut = driver.retry(
+            "drill-walls", replace(driver._options, wall_reference="J1"), scope
+        )
+
+    assert sorted(
+        hole.x_nm for hole in both.holes if hole.surface == "right"
+    ) == [0, 5_000_000], "the control: the wider expression cuts for both"
+    assert isinstance(cut, DrillData)
+    walls = [hole for hole in cut.holes if hole.surface != SURFACE_FACE]
+    assert [hole.x_nm for hole in walls] == [0], (
+        "J4 was un-named by the revision and must not be drilled for"
+    )
+
 class _StubEmitter:
     """An emitter whose payload is a parseable nothing, for a staged temporary."""
 

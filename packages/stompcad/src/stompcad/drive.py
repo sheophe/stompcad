@@ -54,7 +54,7 @@ from stompdrill.quantise import RawDrillData, quantise
 from stompdrill.sources import AiPdfSource
 from stompmodel.diagnostics import Diagnostic, Severity
 from stompmodel.errors import StompError
-from stompmodel.model import CaseFace, DrillData, admitting_radius
+from stompmodel.model import CaseFace, DrillData, WallFeature, admitting_radius
 from stompmodel.progress import Scope, Sink, track
 from stompmodel.protocols import (
     Diagnosable,
@@ -129,6 +129,10 @@ _STEP_INPUTS: dict[str, frozenset[str]] = {
 #: would be no truer, so the limit is stated rather than encoded -- it is
 #: unreachable in practice, because every field reaching ``drill-walls`` also
 #: reaches ``read boards``, which is therefore always the earlier stale step.
+#: Only the widening direction overstates: ``_named`` asks the expression now in
+#: force which held features are still named, so a narrowed retry cuts for none
+#: of the names it dropped. A widened one still misses a part never measured
+#: for, which refuses and can be run again; the other direction cuts a wall.
 _RETRY_INPUTS: dict[str, frozenset[str]] = {
     "read-panel": frozenset(),
     "quantise": _STEP_INPUTS["quantise"],
@@ -1066,7 +1070,9 @@ class Driver:
         pass is decision 3's: a wall hole leaves the stage unnumbered, and
         every emitter reads ``numbered()``.
         """
-        features = self._dock_data.wall_features if self._dock_data is not None else ()
+        features = self._named(
+            self._dock_data.wall_features if self._dock_data is not None else ()
+        )
         if not features:
             # Not an empty pipeline: ``Pipeline.run`` records every stage it
             # folds, so running one over nothing would write a processing row
@@ -1082,6 +1088,24 @@ class Driver:
             DrillWalls(self._case_model, features, self._standard()), RouteHoles()
         ]
         return Pipeline(stages).run(data, scope)
+
+    def _named(self, features: tuple[WallFeature, ...]) -> tuple[WallFeature, ...]:
+        """Those features the expression *now* in force names, in the given order.
+
+        The reader measured these under the expression it was given, and a
+        retry of this step may since have narrowed it -- the filter is a
+        retry input, while the measurements it changes belong to an earlier
+        step no retry rebuilds. Asked again here because the two directions
+        are not alike: a widened expression misses a part never measured
+        for, which refuses and can be run again, while a narrowed one would
+        otherwise cut a wall for a name the builder has just withdrawn.
+        """
+        admitted = self._wall_filter().admit(
+            feature.designator for feature in features
+        )
+        return tuple(
+            feature for feature in features if feature.designator in admitted
+        )
 
     def _unnamed(self) -> Diagnostic | None:
         """Nothing measured for an expression, which cuts in silence otherwise.
