@@ -887,12 +887,14 @@ def _driver_and_presentation_with_held_intermediates(
 ) -> tuple[Driver, _RecordingPresentation]:
     """A driver whose held intermediates are stand-ins, so a resume needs no kernel.
 
-    ``_scan``/``_geometry`` are cast placeholders: no test built from this
-    helper requests a ``report``/``assembly`` target, so ``_write_dock``
-    returns before either is read, the early exit ``test_drive_dock.py``'s
-    own withhold test already justifies. ``boards`` is a never-opened path,
-    only truthy so a resume keeps the dock half. ``targets`` names an
-    absolute path under ``tmp_path`` so a write step commits nowhere else.
+    ``_scan``/``_geometry``/``_case_model`` are cast placeholders: no test
+    built from this helper requests a ``report``/``assembly`` target, so
+    ``_write_dock`` returns before any of them is read, the early exit
+    ``test_drive_dock.py``'s own withhold test already justifies. ``_cut`` is
+    the panel document unchanged, which is what ``drill walls`` leaves a run
+    naming no wall. ``boards`` is a never-opened path, only truthy so a
+    resume keeps the dock half. ``targets`` names an absolute path under
+    ``tmp_path`` so a write step commits nowhere else.
     """
     presentation = _RecordingPresentation()
     options = replace(
@@ -904,6 +906,8 @@ def _driver_and_presentation_with_held_intermediates(
     driver._raw = cast(RawDrillData, object())
     driver._quantised = DrillData()
     driver._drilled = _outlined_document()
+    driver._cut = driver._drilled
+    driver._case_model = cast(OcpCaseModel, object())
     driver._scan = cast(BoardScan, object())
     driver._geometry = cast(dict[int, BoardGeometry], {})
     driver._docked = _stand_in_dock_data()

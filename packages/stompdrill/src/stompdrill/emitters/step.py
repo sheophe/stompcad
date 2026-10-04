@@ -10,12 +10,14 @@ stays free of it.
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 from stompgeom import kernel
-from stompgeom.step import StepLabel, leaf_labels
+from stompgeom.step import StepDocument, StepLabel, leaf_labels, read_step
 from stompgeom.writer import render_step
 from stompmodel.errors import EmitterError
 from stompmodel.frames import FaceFrame
@@ -25,7 +27,7 @@ from stompmodel.units import Millimetre, mm_from_nm, nm_from_mm
 from ..cad import OcpCaseModel, step_keyword
 from .base import register_emitter
 
-__all__ = ["StepOptions", "StepEmitter", "cut_shape"]
+__all__ = ["StepOptions", "StepEmitter", "cut_shape", "drilled_case"]
 
 #: Recorded in the header so a reader can tell which release cut the holes.
 _VERSION = "0.1.0"
@@ -88,6 +90,25 @@ class StepEmitter:
             )
         finally:
             undo()
+
+
+def drilled_case(
+    model: OcpCaseModel, data: DrillData, title: str = ""
+) -> StepDocument:
+    """The cut enclosure as a reader of the written file sees it.
+
+    For a second artefact that must show the same enclosure the ``step``
+    target does: a kernel boolean's result and its own STEP round trip are
+    not the same shape, so handing the cut over in memory would leave two
+    artefacts of one run disagreeing about geometry they share. The render
+    is ``StepEmitter``'s, which cuts and restores the model itself, so no
+    caller owns an undo. The file is gone before this returns; the document
+    it was read into holds the shapes.
+    """
+    with tempfile.TemporaryDirectory(prefix="stompdrill-case-") as tmp:
+        path = Path(tmp) / "case.stp"
+        path.write_bytes(StepEmitter(StepOptions(model=model, title=title)).emit(data))
+        return read_step(path)
 
 
 def cut_shape(

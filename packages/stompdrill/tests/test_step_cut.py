@@ -727,3 +727,92 @@ def test_two_emissions_describe_the_same_model(tmp_path):
     first_colours = set(_colours_by_product(first.document).items())
     second_colours = set(_colours_by_product(second.document).items())
     assert first_colours == second_colours
+
+
+def _cylinder_radii(shape) -> list[float]:
+    """Every cylindrical face's radius in ``shape``, so a bore can be counted."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    found = []
+    explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_FACE)
+    while explorer.More():
+        adaptor = BRepAdaptor_Surface(TopoDS.Face_s(explorer.Current()))
+        if adaptor.GetType() == GeomAbs_SurfaceType.GeomAbs_Cylinder:
+            found.append(round(adaptor.Cylinder().Radius(), 4))
+        explorer.Next()
+    return found
+
+
+def test_the_drilled_case_reads_back_the_holes_this_document_names(tmp_path: Path):
+    """``drilled_case`` hands a caller the cut model as a reader of the file sees it.
+
+    A composed run shows the drilled case in two artefacts, and the one that
+    is not the ``step`` target has to agree with it. The control is the
+    pristine model, which carries no bore of this radius at all.
+    """
+    from stompdrill.emitters.step import drilled_case
+    from tests.conftest import at, make_data, registration_for
+
+    model = _model()
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
+
+    # ``target_shape`` is the supplied model's own drilled solid, kept for
+    # exactly this: a control that does not walk the label tree.
+    before = _cylinder_radii(model.target_shape)
+    document = drilled_case(model, data)
+    box = next(solid for solid in document.solids if "BOX" in solid.name.upper())
+
+    assert before.count(3.0) == 0, "the pristine model already bores this radius"
+    assert _cylinder_radii(box.shape).count(3.0) == 1
+
+
+def _as_bytes(solids) -> bytes:
+    """These solids re-rendered, so two readings of one cut can be compared exactly."""
+    from stompgeom.build import PlacedSolid, build_document
+    from stompgeom.writer import render_step
+
+    return render_step(
+        build_document([PlacedSolid(s.shape, s.name, None, None) for s in solids]),
+        title="t",
+        timestamp="1970-01-01T00:00:00+00:00",
+        originating_system="test",
+    )
+
+
+def test_the_drilled_case_is_the_bytes_the_step_target_would_carry(tmp_path: Path):
+    """Read back from this emitter's own render, never from the kernel's cut.
+
+    A boolean's result and its STEP round trip are not the same shape, which
+    the control here measures: an artefact built from the cut in memory would
+    disagree with the written file it is supposed to describe.
+    """
+    from stompdrill.emitters.step import StepEmitter, StepOptions, cut_shape, drilled_case
+    from stompgeom.step import read_step, read_step_document
+    from tests.conftest import at, make_data, registration_for
+
+    model = _model()
+    data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(model))
+
+    document = drilled_case(model, data)
+    # Rendered after, which also proves the model was restored: a leaked cut
+    # would bore this payload twice.
+    target = tmp_path / "target.stp"
+    target.write_bytes(StepEmitter(StepOptions(model=model)).emit(data))
+    reference = read_step(target)
+
+    assert _as_bytes(document.solids) == _as_bytes(reference.solids)
+    assert document.timestamp == reference.timestamp == model.document_timestamp
+
+    cut, undo, _touched = cut_shape(model, data)
+    try:
+        in_memory = read_step_document(cut)
+        assert _as_bytes(in_memory.solids) != _as_bytes(reference.solids), (
+            "the control: were the round trip transparent, this function could "
+            "hand the cut over in memory and save a render"
+        )
+    finally:
+        undo()
