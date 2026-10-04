@@ -20,7 +20,7 @@ from stompmodel.model import SURFACES, DrilledSurface
 from stompmodel.units import Nanometre, nm_from_mm
 
 from ..errors import StompdrillError
-from .case import _inner_level, _plates
+from .case import _facing, _plates
 
 __all__ = [
     "LATERAL_LIMIT",
@@ -49,6 +49,18 @@ _COMPONENTS = 3
 #: How many walls an enclosure this drills has. Four, and a fifth or a third
 #: is refused rather than guessed at -- see ``find_walls``.
 _WALLS = 4
+
+
+#: The most a wall's inner face may lie from its outer one's plane and still be
+#: that wall's. Measured over every catalogued wall: a true inner face is
+#: 0.000-0.200 degrees off (1590BS drafts its faces 1.400 and 1.250); the
+#: bound is wider than that and far under the 1.150-2.500 degree draft itself.
+_NEAR_PARALLEL_DEGREES = 0.5
+
+#: The thickest plate a wall may be. Measured: a true inner face stands
+#: 1.500-9.597 mm behind its outer, the opposite wall's outer face starts at
+#: 14.819 mm, so 12 mm sits in the empty band between. Millimetres as nanometres.
+_PLATE_MAX_NM = nm_from_mm(12.0)
 
 
 def draft_degrees(direction: Direction, axis: Direction) -> float:
@@ -132,8 +144,7 @@ def find_walls(solid: StepSolid, axis: int) -> tuple[Wall, ...]:
         outer = max(
             groups[along], key=lambda level: level.offset_nm * dot(level.direction, along)
         )
-        parallel = _parallel_to(plates, outer)
-        inner = _inner_level(parallel, outer)
+        inner = _wall_inner_level(plates, outer)
         found.append(
             Wall(
                 outer=outer,
@@ -175,6 +186,39 @@ def _grouped_by_axis(found: list[Level], axis: int) -> dict[Direction, list[Leve
             f"an enclosure whose walls cannot be told apart is not one this drills"
         )
     return groups
+
+
+def _wall_inner_level(found: list[Level], outer: Level) -> Level:
+    """The level behind ``outer``: the nearest back-facing plane that is a thin plate.
+
+    A wall needs its own rule where the drilled face does not: a wall's two
+    faces need not be drafted alike, and a casting that drafts them
+    differently is real, so they share no direction bin and exact parallelism
+    would find nothing. Near-parallel admits them, which also admits the
+    opposite wall's outer face, parallel exactly on a box drafted alike; only
+    the plate's thickness tells them apart. Nearest wins, then larger area.
+    """
+    candidates = [
+        level for level in found
+        if _facing(level, outer) < 0
+        and 0 < level.offset_nm + outer.offset_nm <= _PLATE_MAX_NM
+        and _tilt_degrees(level, outer) <= _NEAR_PARALLEL_DEGREES
+    ]
+    if not candidates:
+        raise StompdrillError("no flat face backs the drilled face")
+    return min(
+        candidates,
+        key=lambda level: (
+            level.offset_nm + outer.offset_nm,
+            -level.area_mm2,
+            abs(level.offset_nm + outer.offset_nm),
+        ),
+    )
+
+
+def _tilt_degrees(one: Level, other: Level) -> float:
+    """How far two levels' planes are from parallel, in degrees."""
+    return math.degrees(math.acos(min(1.0, abs(dot(one.direction, other.direction)))))
 
 
 def _parallel_to(found: list[Level], outer: Level) -> list[Level]:

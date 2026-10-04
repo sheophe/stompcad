@@ -13,15 +13,18 @@ import io
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+from stompcad import drive
 from stompcad.drive import Driver, RunOptions, _walls_outcome
 from stompcad.plan import DRILL_AND_DOCK, RunPlan, Step
 from stompcad.present import PlainWriter
 from stompcollider import cli as stompcollider_cli
 from stompcollider.designators import NOTHING, Filter, parse_filter
+from stompcollider.emitters.assembly import Solids
 from stompcollider.errors import UsageError
 from stompcollider.model import Board, Component, DockData
 from stompcollider.sources import BoardGeometry, BoardScan
@@ -216,7 +219,9 @@ def test_write_dock_withholds_every_target_on_an_error_severity(tmp_path: Path) 
     geometry: dict[int, BoardGeometry] = {}
 
     with track(NullSink()) as scope:
-        written = driver._write_dock(data, cast(BoardScan, None), geometry, scope)
+        written = driver._write_dock(
+            data, cast(BoardScan, None), geometry, cast(DrillData, None), scope
+        )
 
     assert written == []
     assert not target.exists()
@@ -447,6 +452,7 @@ class _FakeWalls:
 
     walls: tuple[DrilledSurface, ...]
     admitting: frozenset[str] = frozenset()
+    walls_unavailable: str | None = None
 
     def admits(self, key: str, x_nm: Nanometre, y_nm: Nanometre) -> bool:
         return key in self.admitting
@@ -799,4 +805,143 @@ def test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes(
         driver.run(scope)
 
     assert mine.is_file(), "the model commit wrote nothing; narrow the fixture further"
+    assert mine.read_bytes() == theirs.read_bytes()
+
+
+# -- the assembly shows the case this run drilled -----------------------------
+
+
+class _FakeDrilledCase:
+    """What ``drilled_case`` hands back, without a kernel to read one with."""
+
+    document = object()
+    solids = (object(),)
+    timestamp = "2001-02-03T04:05:06+00:00"
+
+
+def test_the_assembly_shows_the_case_the_walls_were_cut_into(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A builder whose only target is the assembly must see the holes it cut.
+
+    The case the boards were scanned from is the panel-drilled one, written
+    before any wall was resolved, so the assembly is given the document the
+    wall holes went into instead. Nothing is seated again: the holes were
+    derived from the seating that stands, and removing material cannot
+    invalidate a seat found without it.
+    """
+    recorded: dict[str, object] = {}
+
+    def fake_drilled_case(model: object, data: object, title: str = "") -> _FakeDrilledCase:
+        recorded["model"], recorded["data"], recorded["title"] = model, data, title
+        return _FakeDrilledCase()
+
+    class FakeAssembly:
+        name = "assembly"
+
+        def __init__(self, case: object, boards: object, *, timestamp: str = "") -> None:
+            recorded["case"], recorded["timestamp"] = case, timestamp
+
+        def emit(self, data: object) -> bytes:
+            return b"ISO-10303-21;\n"
+
+    monkeypatch.setattr(drive, "drilled_case", fake_drilled_case)
+    monkeypatch.setattr(drive, "AssemblyEmitter", FakeAssembly)
+
+    model = cast(OcpCaseModel, object())
+    target = tmp_path / "a.stp"
+    driver = _driver(tmp_path, title="t", targets=(("assembly", target),))
+    driver._case_model = model
+    cut = _panel_document()
+    scan = cast(BoardScan, SimpleNamespace(case=SimpleNamespace(timestamp="ts")))
+
+    with track(NullSink()) as scope:
+        written = driver._write_dock(_dock_with(), scan, {}, cut, scope)
+
+    assert written == [str(target)]
+    assert recorded["model"] is model
+    assert recorded["data"] is cut, "the assembly was given a document no wall was cut into"
+    assert recorded["title"] == "t"
+    assert cast(Solids, recorded["case"]).solids == _FakeDrilledCase.solids
+    # The case model's own timestamp, never a clock: two runs over one input
+    # must agree byte for byte (ADR-0006).
+    assert recorded["timestamp"] == "ts"
+
+
+def test_a_report_only_run_never_reads_the_drilled_case_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control on the cost: reading the case back is kernel work, and the
+    report describes placements rather than geometry, so a run asking for only
+    the report must not pay for it."""
+
+    def refuse(model: object, data: object, title: str = "") -> object:
+        raise AssertionError("the report does not describe the case's geometry")
+
+    monkeypatch.setattr(drive, "drilled_case", refuse)
+
+    target = tmp_path / "r.json"
+    driver = _driver(tmp_path, targets=(("report", target),))
+    driver._case_model = cast(OcpCaseModel, object())
+    scan = cast(BoardScan, SimpleNamespace(case=SimpleNamespace(timestamp="ts")))
+
+    with track(NullSink()) as scope:
+        written = driver._write_dock(_dock_with(), scan, {}, _panel_document(), scope)
+
+    assert written == [str(target)]
+
+
+def test_write_assembly_cannot_run_again_before_the_walls_are_cut(tmp_path: Path) -> None:
+    """The guard the new read needs: the assembly shows the drilled case, so a
+    resume or a retry of it cannot run before ``drill walls`` left one."""
+    driver = _driver(tmp_path)
+    driver._dock_data = _dock_with()
+    driver._scan = cast(BoardScan, object())
+    driver._geometry = {}
+
+    with pytest.raises(ValueError, match="before the walls are cut"):
+        driver._precondition("write-assembly")
+
+    driver._cut = _panel_document()
+    driver._case_model = cast(OcpCaseModel, object())
+    driver._precondition("write-assembly")
+
+
+@pytest.mark.hammond
+@pytest.mark.boards
+def test_a_boards_run_naming_no_wall_writes_the_assembly_stompcollider_writes(
+    tmp_path: Path,
+) -> None:
+    """The lock on lifting ADR-0013's stale-case limit, against a real baseline.
+
+    The assembly's case now comes from the fully-drilled model rather than
+    from the panel-drilled one the boards were scanned from. A run cutting no
+    wall renders identical bytes for the two, so this comparison against
+    ``stompcollider``'s own command line stays exact; a run cutting one is the
+    intended difference.
+    """
+    model = case_model()
+    if model is None:
+        pytest.skip("no cached 1590B model")
+    document, case = _drilled(tmp_path, model)
+
+    theirs = tmp_path / "theirs.stp"
+    stompcollider_cli.main([
+        str(document), str(TAR_PCB), "--case-model", str(case),
+        "--panel-reference", _PAIRING_PANEL_REFERENCE, "--assembly", str(theirs),
+    ])
+
+    mine = tmp_path / "mine.stp"
+    options = replace(
+        _options("assembly", mine),
+        case_model=model,
+        panel_reference=_PAIRING_PANEL_REFERENCE,
+    )
+    driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), options)
+    with track(NullSink()) as scope:
+        driver.run(scope)
+
+    assert driver._options.wall_reference == "", "this lock is the no-wall run"
+    assert theirs.is_file(), "the reference run wrote nothing; narrow the fixture further"
+    assert mine.is_file(), "the driver wrote nothing; narrow the fixture further"
     assert mine.read_bytes() == theirs.read_bytes()

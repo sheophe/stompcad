@@ -378,3 +378,48 @@ def test_two_directions_a_millionth_apart_can_land_in_one_bin_or_two() -> None:
     apart = (boundary - gap / 2, 0.0, 0.0)
     now_apart = (boundary + gap / 2, 0.0, 0.0)
     assert direction_bin(apart) != direction_bin(now_apart)
+
+
+def test_the_published_tilt_bounds_what_the_bin_can_lean() -> None:
+    """Over a lattice of directions, not only the ones a casting has.
+
+    A consumer measuring a point against the plane a level states multiplies
+    this angle by a lever arm, so a bound that held only for axis-aligned
+    normals would hold for nothing it is used on. The lattice is deliberately
+    off every whole degree, so no direction lands exactly on a bin.
+    """
+    from stompgeom.levels import _unit, direction_bin, direction_tilt
+
+    bound = direction_tilt()
+    worst = 0.0
+    for polar in range(1, 180):
+        for azimuth in range(0, 360, 7):
+            theta, phi = math.radians(polar + 0.137), math.radians(azimuth + 0.311)
+            direction = (
+                math.sin(theta) * math.cos(phi),
+                math.sin(theta) * math.sin(phi),
+                math.cos(theta),
+            )
+            binned = _unit(direction_bin(direction), 1e6)
+            leaned = sum(a * b for a, b in zip(binned, direction, strict=True))
+            worst = max(worst, math.acos(min(1.0, leaned)))
+
+    assert worst <= bound
+    assert worst > bound / 10.0
+
+
+def test_a_bound_from_a_finer_granularity_would_not_hold() -> None:
+    """Guilty probe: the bound tracks the scale rather than naming a small number.
+
+    Read at a billionth, the figure is a thousandth of the millionth-keyed
+    lean a direction really carries, so it must be exceeded.
+    """
+    from stompgeom.levels import _unit, direction_bin, direction_tilt
+
+    direction = (0.9997620270799091, -0.021814885034561204, 0.0)
+    binned = _unit(direction_bin(direction), 1e6)
+    leaned = sum(a * b for a, b in zip(binned, direction, strict=True))
+    tilt = math.acos(min(1.0, leaned))
+
+    assert tilt <= direction_tilt()
+    assert tilt > direction_tilt(1e9)

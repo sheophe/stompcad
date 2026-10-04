@@ -37,6 +37,7 @@ from stompcollider.sources import BoardGeometry, BoardScan
 from stompdrill.cad import OcpCaseModel, load_case_model
 from stompdrill.emitters import available
 from stompdrill.emitters.build import OutputSettings, make_emitter
+from stompdrill.emitters.step import drilled_case
 from stompdrill.pipeline import (
     DRILL_STANDARDS,
     CheckCaseClearance,
@@ -196,7 +197,11 @@ _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
     "clash": ("_dock_data", "_dock_pipeline"),
     "drill-walls": ("_drilled", "_case_model", "_dock_data"),
     "write-model": ("_cut", "_case_model"),
-    "write-assembly": ("_dock_data", "_scan", "_geometry"),
+    # ``_cut`` and the model it was cut into: the assembly shows the case
+    # this run drilled, walls and all, which is not the panel-drilled one
+    # ``read boards`` scanned. Naming them is what makes a re-cut wall
+    # invalidate a written assembly -- the one edge this row was missing.
+    "write-assembly": ("_dock_data", "_scan", "_geometry", "_cut", "_case_model"),
 }
 
 
@@ -543,6 +548,11 @@ class Driver:
             self._dock_data is None or self._scan is None or self._geometry is None
         ):
             raise ValueError("write assembly cannot run again before the boards are docked")
+        # Its own clause, and after that one: the assembly shows the drilled
+        # case, so it needs what ``drill walls`` left as well as what docking
+        # did, and a builder told the wrong one is sent to the wrong step.
+        if key == "write-assembly" and (self._cut is None or self._case_model is None):
+            raise ValueError("write assembly cannot run again before the walls are cut")
 
     def _run_step(
         self, key: str, scope: Scope
@@ -593,7 +603,10 @@ class Driver:
             assert self._dock_data is not None
             assert self._scan is not None
             assert self._geometry is not None
-            written = self._write_dock(self._dock_data, self._scan, self._geometry, scope)
+            assert self._cut is not None
+            written = self._write_dock(
+                self._dock_data, self._scan, self._geometry, self._cut, scope
+            )
             return self._dock_data, ", ".join(written) or "nothing written", ()
         if key == "drill-walls":
             assert self._drilled is not None
@@ -838,7 +851,9 @@ class Driver:
         write_slot = next(slots)
         write_slot.label(write_step.label)
         assert self._geometry is not None
-        written = self._write_dock(self._dock_data, self._scan, self._geometry, write_slot)
+        written = self._write_dock(
+            self._dock_data, self._scan, self._geometry, self._cut, write_slot
+        )
         self._presentation.finish_step(write_step, ", ".join(written) or "nothing written")
 
         return self._dock_data
@@ -1261,13 +1276,40 @@ class Driver:
         data: DockData,
         scan: BoardScan,
         geometry: dict[int, BoardGeometry],
+        cut: DrillData,
         scope: Scope,
     ) -> list[str]:
-        """Render, stage and commit the dock half's own targets."""
+        """Render, stage and commit the dock half's own targets.
+
+        ``cut`` is the document the walls were cut into, which the assembly's
+        case comes from: a builder whose only target is the assembly has to
+        see the holes this run cut, and the case ``read boards`` scanned was
+        drilled before any wall was resolved.
+        """
         targets = self._targets_for(DOCK_TARGET_NAMES)
         return self._write(
-            data, targets, lambda: _dock_emitters(targets, scan, geometry), scope, Half.DOCK
+            data,
+            targets,
+            lambda: _dock_emitters(
+                targets, geometry, scan.case.timestamp, lambda: self._case_solids(cut)
+            ),
+            scope,
+            Half.DOCK,
         )
+
+    def _case_solids(self, cut: DrillData) -> Solids:
+        """The fully-drilled case, as the assembly has to show it.
+
+        No board is seated again and none may be: the wall holes were derived
+        from the seating that stands, and removing material cannot invalidate
+        a seat found without it. So this replaces one solid rather than
+        re-running anything. Read back through ``stompdrill``'s own render, so
+        the assembly and the ``step`` target describe one enclosure and a run
+        cutting no wall writes the assembly it wrote before.
+        """
+        assert self._case_model is not None  # a board was seated inside it
+        document = drilled_case(self._case_model, cut, title=self._options.title)
+        return Solids(document.document, document.solids)
 
     def _write(
         self,
@@ -1406,15 +1448,20 @@ def _kept(held: Settings, fresh: Settings) -> Settings:
 
 
 def _dock_emitters(
-    targets: Sequence[tuple[str, Path]], scan: BoardScan, geometry: dict[int, BoardGeometry]
+    targets: Sequence[tuple[str, Path]],
+    geometry: dict[int, BoardGeometry],
+    timestamp: str,
+    case: Callable[[], Solids],
 ) -> list[tuple[Emitter[DockData], Path]]:
     """One emitter per dock target, each given the geometry it writes.
 
-    Mirrors ``stompcollider.cli._emitters``, including the assembly's
-    timestamp: the case model's own, never a clock reading, because two
-    runs over one input must agree byte for byte (ADR-0006).
+    ``case`` is called rather than passed: reading the drilled case back is
+    kernel work, and the report describes placements rather than geometry,
+    so a run asking for only the report must not pay for it. Mirrors
+    ``stompcollider.cli._emitters``, including the assembly's timestamp: the
+    case model's own, never a clock reading, because two runs over one input
+    must agree byte for byte (ADR-0006).
     """
-    case = Solids(scan.case.document, scan.case.solids)
     boards = {
         ordinal: Solids(board.document.document, board.solids)
         for ordinal, board in geometry.items()
@@ -1424,7 +1471,7 @@ def _dock_emitters(
         if name == "report":
             built.append((ReportEmitter(), path))
         else:
-            built.append((AssemblyEmitter(case, boards, timestamp=scan.case.timestamp), path))
+            built.append((AssemblyEmitter(case(), boards, timestamp=timestamp), path))
     return built
 
 

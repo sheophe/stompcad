@@ -10,7 +10,13 @@ signs of its axis reach a wall, the sign nearer its own tip carries the hole; th
 diameter is measured from the feature's tip to the wall's outer face; and both
 multi-wall refusals are findings rather than raises. A wall that already takes a
 hole for one component at a place refuses a second component's hole there as a
-finding, because no earlier stage can see two wall holes at once.
+finding, because no earlier stage can see two wall holes at once. A further
+amendment gives a wall its own rule for finding the surface behind it, and has
+the model say why it holds no walls. A final amendment derives the tolerance of
+the guard that confirms a stated depth names a wall region's own plane from two
+roundings the frame carries -- its direction's, which is a lever arm about the
+wall's own datum, and its canonical lengths', which is a constant -- rather
+than fixing it.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -230,8 +236,8 @@ no second pass cuts exactly what it cuts now.
 A **wall** is discovered, never declared. Keep the plate levels that are *lateral* — whose
 outward normal lies nearer the plane perpendicular to the drill axis than the axis itself —
 group those by the nearest signed kernel axis, and the extreme level along that axis is the
-wall's outer surface. Its inner surface is then found by `_inner_level`, over the population of
-levels parallel to that outer surface's own direction: a wall's inner surface arrives in a
+wall's outer surface. Its inner surface is then found by `_wall_inner_level` (see the wall-pairing
+amendment below, which replaced the first form of this rule): a wall's inner surface arrives in a
 *different* direction bin, because the draft tilts the two oppositely, so `_facing` over the
 whole lateral population would pair a wall with the opposite wall's outer face instead.
 
@@ -405,3 +411,93 @@ Without a case model, the panel is still checked against its reference outline
 and can produce `hole-outside-outline`, a warning under
 [ADR-0002](0002-domain-quantisers.md). The model adds an error-level check against
 the actual drilled face, beyond the published top view.
+
+### Amendment: a wall pairs with its inner face by plate thickness, and a model says why it has no walls
+
+**Accepted.** `_inner_level` is correct for the drilled face, whose two faces are parallel, and
+stays so. A wall needs its own rule because its two faces need not be drafted alike: 1590BS
+drafts a wall's outer face 1.400° and its inner 1.250°, planes 0.15° apart that share no direction
+bin, so pairing on exact bin equality found no inner face and discovery found no walls. A
+casting that drafts its faces differently is real, and the rule may not assume otherwise.
+
+`_wall_inner_level` takes the back-facing levels within 0.5° of the outer plane (a true inner face
+measures 0.000°–0.200° over all 37 catalogued parts) whose plate is no thicker than 12 mm, then
+the nearest plane, then the largest area. Angle alone cannot discriminate: a box drafted alike on
+both sides makes the opposite wall's outer face exactly parallel to this wall's. Plate thickness
+can: a true inner face stands 1.500–9.597 mm behind its outer, and the opposite wall's outer face
+starts at 14.819 mm. Over the 148 box walls, 144 choose the face they chose before, none differ,
+and 1590BS's four are newly found.
+
+The model also carries `walls_unavailable`, the reason wall discovery was attempted and refused;
+the loader keeps swallowing the refusal, since a lid has no walls and wall drilling is opt-in.
+`DrillWalls` reads it where no wall was reached: a model with no walls and a reason reports that
+the enclosure's walls could not be determined, and why; otherwise the finding blames the axis, as
+before. The code stays `wall-feature-unreachable`.
+
+### Amendment: a wall's on-plane guard is derived from the two roundings its frame carries
+
+**Accepted.** `contains_at_depth` asks whether a point lies on the region it was handed before
+classifying it against that region, because nothing else tells it that the depth a caller named is
+that region's own plane, and the classifier takes any depth over the footprint as inside. The
+tolerance for that question is derived from the frame rather than chosen, and it has two terms,
+because two roundings separate the plane the frame states from the plane the kernel's faces lie on.
+
+**A lever arm, from the direction's rounding.** A wall frame's `w` is a `Level.direction`, keyed to
+whole millionths and renormalised ([ADR-0008](0008-workspace-and-shared-geometry-core.md)), so the
+stated plane leans by up to `stompgeom.levels.direction_tilt` — `sqrt(3) / (2 x 10^6)`, 8.66e-7 rad.
+The two planes cross at the wall's **own datum**, not near the model origin: `_wall_frame` puts
+depth zero on the plane through the *midpoint* of the outer faces' projected `w`-range, so the plane
+is centred on the face and the model-origin term cancels exactly. The law is therefore `off-plane =
+c0 + sin(theta) x (v - v_datum)`, and the lever arm is a point's **in-plane** distance from the
+region's own projected centre. Measured on the 1590B2 right wall: 0.729 nm at the datum, unchanged
+at 0.729 nm across the whole `u` axis out to ±18.19 mm — while that point's distance from the model
+origin moves from 58.16 to 60.94 mm — and 0.210 and 1.669 nm at `v = ±8.13 mm`, a lean of 8.97e-8
+rad, a tenth of the bound. An origin-distance law predicts 50.37 nm at that datum, seventy times the
+truth, and predicts a change along `u` that is not there.
+
+`radius`, the farthest corner's norm, bounds that in-plane half-extent **unconditionally**: two
+opposite corners satisfy `||c|| + ||c'|| >= ||c - c'||`, so the greater of them is at least half the
+box diagonal, and a set's extent along any one direction never exceeds its own diameter. The bound
+is therefore conservative for any model at any position — nothing about it assumes the geometry is
+centred on the origin, and translating a model does not degrade it.
+
+**A constant, from the canonical lengths' rounding.** `origin_nm`, `plate_nm` and `thickness_nm` are
+whole nanometres ([ADR-0003](0003-quantisation-boundary-and-ordering.md)), so a correctly placed
+point sits off the plane by up to `sqrt(3)/2 + 1/2`, 1.366 nm, **wherever it is**: up to half a
+nanometre per axis in the origin, and half a nanometre in the offset along `w`. That is what the
+0.729 nm measured at the 1590B2's datum is, where the lever arm is exactly zero. Across the 148
+walls of the 37 catalogued parts the worst datum gap is 0.840 nm (1590N1), all of them under the
+1.366 nm the rounding allows, and the quiet castings are dominated by it: the 1590A's worst gap is
+0.615 nm in total.
+
+The bound is therefore `direction_tilt() * radius + 1.366 nm`, still floored at the classifier's own
+coincidence tolerance so that the two questions `cad.region` asks about one point cannot disagree —
+a floor the constant now always clears, so it states that invariant rather than doing work. Over the
+37 catalogued parts the sum measures 34–125 nm, against a worst gap of 12.5 nm for a point the
+classifier calls inside with millimetres of boundary clearance; a caller naming the wrong plane is
+out by a plate, 1.500–9.597 mm, which is eighteen thousand times the bound and up. The two scales
+are four orders apart, so the guard keeps its whole value. `direction_tilt` is published beside
+`direction_bin` for the reason that one is: a consumer measuring against a plane a level states owes
+its tolerance to this rounding, and a second spelling of it would be a second chance to disagree
+with the partition that created it.
+
+The two terms are summed rather than collapsed into one floor. Neither alone states the error: a
+fixed 2 nm is tighter than the 12.5 nm a correct point already measures on a large wall, and the arm
+alone vanishes with the region — a wall region under roughly 1.6 mm across earns an arm below
+1.366 nm and, under the old 0.1 nm floor, would have refused a hole for the very quantisation that
+placed it. No catalogued wall is that small, the least being 37.81 mm of radius for 32.74 nm of arm,
+so this is latent rather than live; it is fixed because the floor sat fourteen times under a
+constant that is always present, and a refused wall hole is a builder told their part will not fit.
+
+A wall's two faces are still placed by the one `plate_nm` along `w`, and that stands: over every
+catalogued wall the frame's depth-zero plane lies on the inner region's own plane to within 3 nm,
+because `_wall_inner_level` pairs faces within 0.5° of parallel. The inner region is the one place
+the lever arm is not measured from a centre of its own — the datum is the *outer* region's
+projected centre, and the lip offsets the two by about 2 mm — which that 3 nm measurement is what
+covers. Where a wall's inner region does
+differ from its outer is in extent — the lid's seating lip interrupts it about 2 mm inside the
+outer face's own bound — and refusing a hole there is what `THROUGH_BOSS` is for.
+
+No panel artefact moves. `CheckCaseClearance` uses `contains`, which reads its plane off a kernel
+axis and asks no on-plane question at all; `tools/verify-lock.sh` is the check, under
+[ADR-0011](0011-behaviour-lock-and-its-blind-spots.md).

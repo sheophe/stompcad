@@ -8,14 +8,16 @@ which is the only way to reach the boundary the definition draws.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from stompdrill.cad import Rejection, WallModel, load_case_model
+from stompdrill.cad import OcpCaseModel, Rejection, WallModel, load_case_model
 from stompdrill.cad.walls import (
     LATERAL_LIMIT,
     Wall,
+    _wall_inner_level,
     build_wall_frame,
     draft_degrees,
     is_lateral,
@@ -33,6 +35,8 @@ from stompgeom.step import bounding_box_mm
 from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
 from stompmodel.model import CaseFace, CaseRegistration, DrillData, Profile, WallFeature
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
+
+from . import hammond
 
 __all__: list[str] = []
 
@@ -403,39 +407,80 @@ def test_the_wall_hole_this_stage_placed_is_cut_into_the_model(
 
 
 @pytest.mark.hammond
-def test_a_hole_over_the_floor_fillet_behind_a_wall_is_through_boss(hammond_b: Path) -> None:
-    """Ruling 2's own discriminator: the wall's own lower edge, where the
-    inner face ends at the floor fillet before the outer face does.
+def test_a_hole_over_the_lid_lip_behind_a_wall_is_through_boss(hammond_b: Path) -> None:
+    """Ruling 2's own discriminator: the wall's edge nearest the drilled face,
+    where the lid's seating lip interrupts the inner face well inside the outer.
 
     Every test above still passes with the inner check deleted -- none of
     them reaches a point where the two regions disagree. This one does: a
     point just inside the outer region's own bound, derived from
-    ``bounds_nm`` rather than typed, sits past where the inner region's
-    fillet has already retreated.
+    ``bounds_nm`` rather than typed, sits past where the inner region ends.
     """
     model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
     surface = next(surface for surface in model.walls if surface.key == "right")
-    _x0, y0, _x1, _y1 = surface.bounds_nm
-    # Measured directly against the real regions at radius/margin zero: outer
-    # accepts and inner rejects from y0+200,000 through y0+2,900,000 nm. Both
-    # offsets below sit inside that band, with room either side of them.
-    edge = (Nanometre(0), Nanometre(y0 + 1_000_000))
+    _x0, _y0, _x1, y1 = surface.bounds_nm
+    # Measured directly against the real regions: the inner one stops 1.954 mm
+    # inside this bound, and the outer admits a 0.55 mm clearance from
+    # 0.550 mm in, so the two disagree from y1-1.954 to y1-0.550 nm. The
+    # offset below sits inside that band with room either side of it.
+    edge = (Nanometre(0), Nanometre(y1 - 1_000_000))
     assert (
         model.classify_wall(surface.key, edge, edge, Nanometre(50_000))
         is Rejection.THROUGH_BOSS
     )
 
 
+def _cached(part: str) -> Path:
+    """A cached model, skipping rather than fetching: ``hammond.MODELS`` is four parts."""
+    path = hammond.cache_dir() / f"{part}.stp"
+    if not path.is_file():
+        pytest.skip(f"{part} is not cached")
+    return path
+
+
 @pytest.mark.hammond
-def test_a_lid_with_no_facing_wall_plate_loads_with_no_walls(hammond_a: Path) -> None:
-    """1590A's lid is a flat closure plate: none of its four lateral levels
-    has a facing companion, because there is nothing behind them to face.
+def test_a_lid_with_no_wall_plate_behind_its_levels_loads_with_no_walls_and_says_why() -> None:
+    """1590F's lid has no thin plate behind any lateral level to pair it with.
+
     That is a fact about this lid, not a load failure -- wall drilling is
     opt-in, and a feature naming an unreachable wall is refused downstream,
-    by name, as ``wall-feature-unreachable``.
+    by name, as ``wall-feature-unreachable``, with the reason the model kept.
     """
-    model = load_case_model(hammond_a, face=CaseFace.LID, margin_nm=Nanometre(500_000))
+    model = load_case_model(
+        _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
+    )
     assert model.walls == ()
+    assert model.walls_unavailable is not None
+    assert "no flat face backs the drilled face" in model.walls_unavailable
+
+
+@pytest.mark.hammond
+def test_a_model_that_found_its_walls_has_no_reason_to_give(hammond_b: Path) -> None:
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    assert len(model.walls) == 4
+    assert model.walls_unavailable is None
+
+
+@pytest.mark.hammond
+def test_a_wall_drilling_run_on_a_lid_blames_the_enclosure_not_the_axis() -> None:
+    model = load_case_model(
+        _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
+    )
+    feature = WallFeature(
+        designator="J1",
+        board=1,
+        origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+        direction=(1.0, 0.0, 0.0),
+        profile=Profile(steps=((Nanometre(4_750_000), Nanometre(0), Nanometre(10_000_000)),)),
+    )
+    data = DrillData(
+        case=CaseRegistration("1590F", CaseFace.LID, "1590F.stp", model.frame),
+        surfaces=(),
+    )
+    cut = DrillWalls(model, (feature,), DRILL_STANDARDS[DEFAULT_STANDARD]).apply(data)
+    (refused,) = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
+    assert "could not be determined" in refused.message
+    assert "no flat face backs the drilled face" in refused.message
 
 
 @pytest.mark.hammond
@@ -485,3 +530,192 @@ def test_a_wall_that_cannot_be_framed_leaves_no_walls_and_not_a_failed_load(
     model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
     assert model.walls == ()
     assert dict(model.wall_regions) == {}
+
+
+def _tilted(degrees: float, *, back: bool = False) -> tuple[float, float, float]:
+    """A unit direction ``degrees`` out of the X axis, facing back when asked."""
+    angle = math.radians(degrees)
+    sign = -1.0 if back else 1.0
+    return (sign * math.cos(angle), sign * math.sin(angle), 0.0)
+
+
+def _area_level(
+    direction: tuple[float, float, float], offset_mm: float, area_mm2: float = 100.0
+) -> Level:
+    return Level(
+        direction=direction,
+        offset_nm=Nanometre(round(offset_mm * 1_000_000)),
+        area_mm2=area_mm2,
+        faces=(object(),),
+    )
+
+
+def test_a_wall_s_inner_face_may_be_drafted_unlike_its_outer_one() -> None:
+    """1590BS drafts its two faces 1.400 and 1.250 degrees, a 0.15 degree gap."""
+    outer = _area_level(_tilted(1.40), 30.0)
+    inner = _area_level(_tilted(1.25, back=True), -28.0)
+    assert _wall_inner_level([outer, inner], outer) is inner
+
+
+def test_the_opposite_wall_s_exactly_parallel_face_is_no_inner_face() -> None:
+    """Angle cannot tell the two apart, so the plate's own thickness has to."""
+    outer = _area_level(_tilted(1.40), 30.0)
+    opposite = _area_level(_tilted(1.40, back=True), 20.0, area_mm2=5_000.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, opposite], outer)
+
+
+def test_the_nearer_face_wins_over_a_larger_one_behind_it() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    near = _area_level(_tilted(1.40, back=True), -28.0, area_mm2=100.0)
+    behind = _area_level(_tilted(1.40, back=True), -25.0, area_mm2=1_000.0)
+    assert _wall_inner_level([outer, behind, near], outer) is near
+
+
+def test_one_plane_split_in_two_levels_takes_the_larger_area() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    small = _area_level(_tilted(1.25, back=True), -28.0, area_mm2=10.0)
+    large = _area_level(_tilted(1.35, back=True), -28.0, area_mm2=500.0)
+    assert _wall_inner_level([outer, small, large], outer) is large
+
+
+def test_a_face_tilted_further_than_a_drafted_pair_ever_is_refused() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    askew = _area_level(_tilted(1.40 + 2.0, back=True), -28.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, askew], outer)
+
+
+def test_a_face_coincident_with_the_outer_one_is_no_inner_face() -> None:
+    outer = _area_level(_tilted(1.40), 30.0)
+    flush = _area_level(_tilted(1.40, back=True), -30.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, flush], outer)
+
+
+# ---------------------------------------------------------------------------
+# A wall frame's stated plane is the plane its region lies on
+# ---------------------------------------------------------------------------
+
+
+def _well_inside(
+    model: OcpCaseModel, key: str, lattice: int = 7
+) -> Iterator[tuple[Nanometre, Nanometre, float]]:
+    """Lattice points of one wall's bounds whose hole is unquestionably its own.
+
+    Yields ``(u_nm, v_nm, gap_mm)``: a point the wall's own frame builds at
+    its thickness, and that point's distance to the region itself. A corner
+    of the published rectangle falls off a rounded wall, where the distance
+    measured is lateral, so only points the kernel classifies inside with
+    2 mm of boundary clearance are kept.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_State
+
+    from stompdrill.cad.region import _CLASSIFIER_TOLERANCE_MM, _boundary
+
+    surface = next(found for found in model.walls if found.key == key)
+    region, _inner = model.wall_regions[key]
+    boundary = _boundary(region)
+    x0, y0, x1, y1 = surface.bounds_nm
+    for across in range(lattice):
+        for along in range(lattice):
+            u = Nanometre(int(x0 + (x1 - x0) * across / (lattice - 1)))
+            v = Nanometre(int(y0 + (y1 - y0) * along / (lattice - 1)))
+            point = gp_Pnt(*surface.frame.basis.to_model(u, v, surface.thickness_nm))
+            classifier = BRepClass_FaceClassifier(
+                region, point, _CLASSIFIER_TOLERANCE_MM
+            )
+            if classifier.State() != TopAbs_State.TopAbs_IN:
+                continue
+            vertex = BRepBuilderAPI_MakeVertex(point).Vertex()
+            if BRepExtrema_DistShapeShape(vertex, boundary).Value() < 2.0:
+                continue
+            yield u, v, BRepExtrema_DistShapeShape(vertex, region).Value()
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("fixture", ["hammond_b", "hammond_bb"])
+def test_every_point_the_kernel_calls_inside_a_wall_is_drillable(
+    fixture: str, request: pytest.FixtureRequest
+) -> None:
+    """Most of a wall, not only its datum.
+
+    A wall frame's ``w`` is a quantised direction, so the plane it states
+    leans on the one the kernel's faces lie on; the on-plane guard must
+    absorb that lean across the wall's whole extent or the half of every
+    wall the lean runs away from cannot be drilled at all.
+    """
+    model = load_case_model(
+        request.getfixturevalue(fixture),
+        face=CaseFace.BOX,
+        margin_nm=Nanometre(500_000),
+    )
+    refused = []
+    for surface in model.walls:
+        points = list(_well_inside(model, surface.key))
+        assert len(points) >= 9
+        refused += [
+            (surface.key, round(mm_from_nm(u), 3), round(mm_from_nm(v), 3),
+             round(gap * 1e6, 3))
+            for u, v, gap in points
+            if not model.admits(surface.key, u, v)
+        ]
+    assert refused == []
+
+
+@pytest.mark.hammond
+def test_the_on_plane_guard_still_refuses_a_depth_a_whole_plate_away(
+    hammond_b: Path,
+) -> None:
+    """The guard's own worth, which a widened tolerance must not spend.
+
+    Nothing but this tells ``contains_at_depth`` that the depth it was handed
+    names the region it was handed, and the inner plane's own depth -- zero
+    -- is a whole plate from the outer region. Both calls are made, so a
+    tolerance that accepted everything would fail on the second.
+    """
+    from stompdrill.cad.region import contains_at_depth
+
+    model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
+    for surface in model.walls:
+        outer, _inner = model.wall_regions[surface.key]
+        assert contains_at_depth(
+            outer, surface.frame, Nanometre(0), Nanometre(0),
+            surface.thickness_nm, Nanometre(0), Nanometre(0),
+        ) is True
+        assert contains_at_depth(
+            outer, surface.frame, Nanometre(0), Nanometre(0),
+            Nanometre(0), Nanometre(0), Nanometre(0),
+        ) is False
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("fixture", ["hammond_b", "hammond_bb"])
+def test_the_plane_tolerance_sits_between_the_rounding_and_a_plate(
+    fixture: str, request: pytest.FixtureRequest
+) -> None:
+    """Derived, not chosen: both scales it must separate, measured.
+
+    Above every gap a correctly placed point really shows on this casting,
+    and three orders under the plate a caller naming the wrong plane would be
+    out by. Asserted per wall rather than once, because the bound is read
+    from each region's own extent.
+    """
+    from stompdrill.cad.region import _plane_tolerance_mm
+
+    model = load_case_model(
+        request.getfixturevalue(fixture),
+        face=CaseFace.BOX,
+        margin_nm=Nanometre(500_000),
+    )
+    for surface in model.walls:
+        region, _inner = model.wall_regions[surface.key]
+        tolerance_mm = _plane_tolerance_mm(region)
+        worst_mm = max(gap for _u, _v, gap in _well_inside(model, surface.key))
+
+        assert worst_mm < tolerance_mm
+        assert tolerance_mm < mm_from_nm(surface.thickness_nm) / 1000.0

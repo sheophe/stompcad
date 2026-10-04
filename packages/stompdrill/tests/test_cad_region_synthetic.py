@@ -321,3 +321,62 @@ def test_a_depth_on_the_wrong_plane_finds_the_point_outside_the_region() -> None
         region, frame, Nanometre(0), Nanometre(0),
         Nanometre(0), Nanometre(1_000_000), Nanometre(0),
     ) is False
+
+
+def _flat_frame() -> FaceFrame:
+    """A frame on the kernel's own axes, with depth zero at the origin."""
+    return FaceFrame(
+        basis=CoordinateFrame(
+            origin_nm=(Nanometre(0), Nanometre(0), Nanometre(0)),
+            u=(1.0, 0.0, 0.0), v=(0.0, 1.0, 0.0), w=(0.0, 0.0, 1.0),
+        )
+    )
+
+
+def test_a_point_one_nanometre_off_a_small_region_is_still_on_its_plane() -> None:
+    """The on-plane guard has a floor the derived term cannot go under.
+
+    ``origin_nm``, ``plate_nm`` and ``thickness_nm`` are whole nanometres, so a
+    correctly placed point sits off the plane by up to ``sqrt(3)/2 + 1/2`` nm
+    wherever it is -- a term the lever arm ``direction_tilt() * radius`` does
+    not contain. On a region small enough for that arm to vanish, the guard
+    would otherwise refuse a hole for the quantisation that placed it.
+    """
+    region = _square_face(half_mm=0.5, at_z_mm=0.0)
+
+    assert contains_at_depth(
+        region, _flat_frame(), Nanometre(0), Nanometre(0),
+        Nanometre(1), Nanometre(0), Nanometre(0),
+    ) is True
+
+
+def test_that_floor_does_not_admit_a_point_off_the_plane_by_more_than_rounding() -> None:
+    """The control: the guard still refuses a depth that names another plane.
+
+    Five nanometres is past what whole-nanometre placement can explain and
+    past the lever arm this region's own size allows, so a floor wide enough
+    to take it would have stopped being a guard.
+    """
+    region = _square_face(half_mm=0.5, at_z_mm=0.0)
+
+    assert contains_at_depth(
+        region, _flat_frame(), Nanometre(0), Nanometre(0),
+        Nanometre(5), Nanometre(0), Nanometre(0),
+    ) is False
+
+
+def test_the_on_plane_bound_holds_the_rounding_term_at_every_region_size() -> None:
+    """Stated on the bound itself, because the two tests above pin one size.
+
+    The derived arm shrinks with the region and the rounding does not, so the
+    bound is their sum: a 0.707 mm radius earns 0.61 nm of arm and a 123 mm one
+    123 nm, and both carry the same 1.366 nm.
+    """
+    from stompdrill.cad.region import _PLACEMENT_ROUNDING_MM, _plane_tolerance_mm
+
+    small = _plane_tolerance_mm(_square_face(half_mm=0.5, at_z_mm=0.0))
+    large = _plane_tolerance_mm(_square_face(half_mm=50.0, at_z_mm=50.0))
+
+    assert small >= _PLACEMENT_ROUNDING_MM
+    assert large >= _PLACEMENT_ROUNDING_MM
+    assert large > small, "the lever arm still grows with the region"

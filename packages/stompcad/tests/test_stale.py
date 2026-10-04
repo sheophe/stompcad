@@ -119,3 +119,18 @@ def test_the_walls_are_cut_again_when_the_boards_are_seated_again() -> None:
     invalidates them by consumption rather than by naming a field."""
     assert "drill-walls" in _stale("seat_pitch_max_mm")
     assert not _STEP_INPUTS["drill-walls"] & {"seat_pitch_max_mm"}
+
+
+def test_the_assembly_reads_the_document_the_walls_were_cut_into() -> None:
+    """``drill walls`` is upstream of the assembly, because the assembly shows
+    the case it cut. The derived half is what matters: a private field reaching
+    only that step must now invalidate both write steps after it, where before
+    it left a written assembly standing with a stale case in it."""
+    assert "_cut" in _STEP_CONSUMES["write-assembly"]
+    assert "_case_model" in _STEP_CONSUMES["write-assembly"]
+
+    inputs = {**_STEP_INPUTS, "drill-walls": frozenset({"only_walls"})}
+    invalidated = stale.stale_steps(
+        ORDER, frozenset({"only_walls"}), inputs, _STEP_HOLDS, _STEP_CONSUMES
+    )
+    assert invalidated == {"drill-walls", "write-model", "write-assembly"}

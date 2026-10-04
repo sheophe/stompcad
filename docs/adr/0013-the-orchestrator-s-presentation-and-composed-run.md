@@ -28,9 +28,13 @@ model` join after `clash`, and the drill half's JSON document and drilled model
 commit at `write model`, after the walls are cut, while the Excellon and the
 drawings still commit at `write case`. That commit is withheld on *either*
 half's error, because it runs after docking and is derived from it, which the
-per-half limit recorded below no longer covers. The decision's body below keeps
-the nine as the record of what was first decided; the amendment placed before
-the Rationale governs. This ADR's other decisions stand.
+per-half limit recorded below no longer covers. A further amendment lifts the
+limit that one recorded in turn: `write assembly` now shows the case this run
+drilled, walls and all, so CLAUDE.md's rule that all outputs from one
+invocation agree on the geometry they describe holds for a run that cuts a
+wall. The decision's body below keeps the nine as the record of what was first
+decided; the amendments placed before the Rationale govern. This ADR's other
+decisions stand.
 
 ## Context
 
@@ -347,12 +351,56 @@ per-surface formats `write case` owns, with `_write` adopting the per-surface ar
 rather than one emitter per target, which is work no plan behind this amendment specifies, so it is recorded here beside the limit above and for the same reason:
 a recorded limit is honest, and a hidden one is not.
 
-**And a known disagreement between two outputs of one run.** `write assembly` builds from
-the case solid scanned out of the document the boards were seated against, which is the
-panel-only drill data, so an assembly written for a run with an accepted wall hole carries
-a case lacking a hole the drilled model has. CLAUDE.md's rule that all outputs from one
-invocation agree on the geometry they describe is therefore not met for that run. The hole
-is right in both artefacts that describe it; it is the assembly's case that is stale.
+**A third limit, since lifted.** This amendment left `write assembly` building from the
+case solid scanned out of the panel-only document the boards were seated against, so an
+assembly written for a run with an accepted wall hole carried a case lacking a hole the
+drilled model had. That is the one limit recorded here which has since been decided
+rather than accepted; the amendment below governs it.
+
+### Amendment: the assembly shows the case this run drilled
+
+**Accepted.** `write assembly` reads the document the walls were cut into, and its case
+solid is that document's drilled model rather than the panel-only one `read boards`
+scanned. All outputs from one invocation therefore agree on the geometry they describe,
+which CLAUDE.md requires and which the limit above did not meet: a builder whose only
+target is the assembly sees every hole this run cut.
+
+**Nothing is seated again, and nothing may be.** The wall holes were derived *from* the
+seating that stands, and the boards were seated against a case without them. Removing
+material cannot invalidate a seat computed without that material: every contact the
+insertion search found is still there, and a bore can only have withdrawn one. So this
+replaces one solid and re-runs no stage — a re-seat would also re-rank, and `Clashes`
+re-ranking after the holes it produced were cut has no fixed point to reach.
+
+**The case is read back from the emitter's own bytes**, through
+`stompdrill.emitters.step.drilled_case`, and never handed over as the kernel's cut. A
+boolean's result and its own STEP round trip are not the same shape — on the 1590B2 the
+same six solids re-render to 785,867 bytes from the cut in memory and to 786,896 from the
+written file — so an assembly built from the cut in memory would disagree with the `step`
+target it is supposed to match, and would no longer match what `stompcollider` writes from
+the same file.
+Reading the written bytes back is what makes a run cutting **no** wall write the assembly
+it wrote before, byte for byte: the render is the same emitter over the same document with
+the same options, so the file is the one `read boards` already wrote. That identity is
+locked against `stompcollider`'s own command line rather than against itself.
+
+The cut and its undo stay inside `StepEmitter.emit`, which already performs them, so no
+caller owns an undo and the staged-write transaction is untouched: the bytes are finished
+before `stage_all` sees them, as ADR-0005 requires. The composition belongs to `stompcad`
+because `stompcollider` stays independent of `stompdrill` and of the kernel, so
+`emitters.assembly` could not reach a cut of its own.
+
+`_STEP_CONSUMES["write-assembly"]` now names `_cut` and `_case_model` beside `_dock_data`,
+`_scan` and `_geometry`. That is the edge the row was missing: a re-cut wall invalidates a
+written assembly, where before a changed `boards.wall_reference` left one standing with a
+stale case in it. `_precondition` gains the matching clause, in its own sentence, so a
+resume or a retry refused for want of the walls is not told the boards are undocked.
+
+The cost is one more render of the case and one more read of it: 4.8–5.4 s on a 155–169 s
+run over the acceptance project, measured both with and without a wall named. A run asking
+for only the report pays none of it, because the case is read behind a call `_dock_emitters`
+makes only for the assembly. **The second limit above stands**: a wall surface still gets no
+per-surface Excellon and no drawing sheet.
 
 ## Rationale
 

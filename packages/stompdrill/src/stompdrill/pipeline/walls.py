@@ -288,14 +288,7 @@ class DrillWalls:
                 diagnostics.append(_unreachable(board, designator, hit.because))
                 continue
             if hit is None:
-                diagnostics.append(
-                    _unreachable(
-                        board,
-                        designator,
-                        "its axis reaches no drillable part of any wall of this "
-                        "enclosure",
-                    )
-                )
+                diagnostics.append(self._missed(board, designator))
                 continue
             feature, found, surface = hit
             radius_nm = required_radius_nm(feature, found.span_nm)
@@ -398,6 +391,27 @@ class DrillWalls:
             )
         return ranked[0]
 
+    def _missed(self, board: int, designator: str) -> Diagnostic:
+        """No wall carries this component's hole, and which of two things is why.
+
+        The enclosure when its model holds no walls and says so, because then
+        nothing about the component or the seating was ever tested; otherwise
+        the axis, which met the walls there are and none of their drillable parts.
+        """
+        reason = self.model.walls_unavailable
+        if not self.model.walls and reason is not None:
+            return _unreachable(
+                board,
+                designator,
+                f"the walls of this enclosure could not be determined ({reason})",
+                seating=False,
+            )
+        return _unreachable(
+            board,
+            designator,
+            "its axis reaches no drillable part of any wall of this enclosure",
+        )
+
     def _unstocked(self, board: int, designator: str, radius_nm: Nanometre) -> Diagnostic:
         """The existing unstocked refusal, on a requirement rather than a measurement."""
         return Diagnostic.error(
@@ -424,21 +438,22 @@ def _by_component(
     return {key: tuple(grouped[key]) for key in sorted(grouped)}
 
 
-def _unreachable(board: int, designator: str, because: str) -> Diagnostic:
+def _unreachable(
+    board: int, designator: str, because: str, *, seating: bool = True
+) -> Diagnostic:
     """A hole was asked for and none can be made, so this is an error.
 
-    An error and not a warning: decision 12 has already stopped ``clash``
-    from mentioning this component, so a warning would let the fact that
-    nothing was cut for it go entirely unseen. One code for several causes --
-    an axis reaching no wall, and an axis reaching one with nothing of the
-    part inside it -- because the remedy is the same seating or the same
-    named part either way, and a finding is matched by its code rather than
-    its clause.
+    An error and not a warning: ``clash`` no longer mentions this component, so
+    a warning would let the fact that nothing was cut for it go unseen. One code
+    for several causes, because the remedy is the same seating or named part
+    and a finding is matched by its code. ``seating`` is false where the cause
+    is the enclosure's own, which no seating could have changed.
     """
+    where = " in the seating that was chosen" if seating else ""
     return Diagnostic.error(
         "wall-feature-unreachable",
-        f"board {board}'s {designator} was named as a wall reference, but {because} "
-        f"in the seating that was chosen, so no hole can be cut for it",
+        f"board {board}'s {designator} was named as a wall reference, but {because}"
+        f"{where}, so no hole can be cut for it",
         data=(("board", board), ("designator", designator)),
     )
 
