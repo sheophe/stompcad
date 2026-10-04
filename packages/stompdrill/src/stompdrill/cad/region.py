@@ -31,6 +31,15 @@ __all__ = [
 #: disagree about whether one point is inside one region.
 _CLASSIFIER_TOLERANCE_MM = 1e-7
 
+#: How far off a plane a *correctly placed* point sits, wherever it is.
+#: ``origin_nm``, ``plate_nm`` and ``thickness_nm`` are whole nanometres, so the
+#: origin is out by up to half of one per axis and the offset along ``w`` by up
+#: to half of one: ``sqrt(3)/2 + 1/2`` nanometres together. Position-independent,
+#: which is why it is a term of ``_plane_tolerance_mm`` and not its floor -- the
+#: lever arm beside it vanishes with the region, and on a quiet casting this is
+#: the whole of the gap (the 1590A measures 0.615 nm in total).
+_PLACEMENT_ROUNDING_MM = (math.sqrt(3) / 2 + 0.5) * 1e-6
+
 #: How close a companion's in-plane footprint must sit to a hole's own to
 #: count as its match. Measured gaps top out at ~4e-7 mm across every cached
 #: model (kernel-float noise); 0.01 mm is four orders of magnitude looser
@@ -309,13 +318,13 @@ def clearance_reason(
 def _plane_tolerance_mm(region: Any) -> float:
     """How far off ``region``'s own plane a correctly placed point may measure.
 
-    A wall frame's ``w`` is a ``Level.direction``, keyed to whole millionths
-    and renormalised, so the plane the frame states leans by up to
-    ``direction_tilt`` from the one the kernel's faces lie on. The two planes
-    cross near the model origin, so the distance between them grows with a
-    point's own distance from it, which ``region``'s farthest corner bounds.
-    Floored at the classifier's tolerance, inside which the classifier itself
-    calls a point coincident, so the two questions cannot disagree.
+    Two terms, for two roundings (ADR-0007). A ``Level.direction`` is keyed to
+    whole millionths, so a wall's stated plane leans by up to ``direction_tilt``
+    about the wall's own datum; the arm is a point's in-plane distance from that
+    datum, which ``radius`` bounds at any position, the farthest corner's norm
+    being at least half the diagonal. Whole-nanometre placement then puts a
+    correct point off plane wherever it is. The floor says neither term may go
+    under the classifier's own coincidence tolerance, which the constant clears.
     """
     from stompgeom.levels import direction_tilt
     from stompgeom.step import bounding_box_mm
@@ -327,7 +336,9 @@ def _plane_tolerance_mm(region: Any) -> float:
         for y in (box[1], box[4])
         for z in (box[2], box[5])
     )
-    return max(direction_tilt() * radius_mm, _CLASSIFIER_TOLERANCE_MM)
+    return max(
+        direction_tilt() * radius_mm + _PLACEMENT_ROUNDING_MM, _CLASSIFIER_TOLERANCE_MM
+    )
 
 
 def _floor_face(face: Any) -> Any:
