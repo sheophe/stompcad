@@ -138,11 +138,11 @@ def test_parse_emit_rejects_a_spec_with_an_empty_path() -> None:
 
 
 def test_a_keyboard_interrupt_exits_130(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Spec decision 9: an interrupt stops the run exactly as ``q`` does.
+    """A ``KeyboardInterrupt`` raised under ``_run`` leaves ``main`` as exit 130.
 
-    Docs/CLI.md documents 130 as reachable by a signal; nothing under
-    ``main`` used to catch ``KeyboardInterrupt``, so a headless Ctrl-C
-    escaped as a traceback instead.
+    130 is the code of a cancelled run, reserved for a stop the user asked
+    for (ADR-0013), and docs/CLI.md documents it as reachable by a signal.
+    Caught in ``main``, a headless Ctrl-C returns it rather than a traceback.
     """
 
     def raises_interrupt(args: object, out: object) -> int:
@@ -278,7 +278,11 @@ def test_every_place_accepts_its_defaults(place: str) -> None:
 
 
 def test_ci_counts_as_no_terminal_even_with_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Decision 15: a runner that allocates a pty must not get a full-screen app."""
+    """``CI`` in the environment means no terminal even on a tty (ADR-0014).
+
+    A runner that allocates a pty then gets the plain writer rather than a
+    full-screen application it cannot answer.
+    """
     monkeypatch.setenv("CI", "true")
     monkeypatch.setenv("TERM", "xterm")
     assert not cli.has_terminal(_AlwaysATerminal())  # type: ignore[arg-type]
@@ -298,14 +302,23 @@ def test_a_real_terminal_gets_the_workbench(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_the_parser_carries_only_what_identifies_the_work() -> None:
-    """Decision 6: no flag is added for any value the workbench exposes."""
+    """The parser carries only what identifies the work: the panel, its boards, the case,
+    its model, the panel reference and ``--emit``.
+
+    A value the workbench exposes is reached through the project file, so the
+    exact set of destinations is pinned and a new flag shows up here.
+    """
     parser = cli.build_parser()
     flags = {action.dest for action in parser._actions} - {"help"}
     assert flags == {"panel", "boards", "case", "case_model", "panel_reference", "emit"}
 
 
 def test_the_retired_flags_are_gone() -> None:
-    """Decision 16: `--progress` had no remaining job, and `--promote-warnings` none at all."""
+    """``--progress`` and ``--promote-warnings`` are rejected by the parser.
+
+    The stream decides the presentation (``has_terminal``), so no flag
+    chooses it, and promoting warnings is the default behaviour (ADR-0014).
+    """
     parser = cli.build_parser()
     for flag in ("--progress", "--promote-warnings"):
         with pytest.raises(SystemExit):
@@ -313,7 +326,11 @@ def test_the_retired_flags_are_gone() -> None:
 
 
 def test_no_panel_blocks_rather_than_refusing(tmp_path: Path) -> None:
-    """Decision 6: the workbench opens on the Artwork place, stating that none is selected."""
+    """With no panel named, ``blocked`` returns a not-ready state rather than raising.
+
+    The obstacle names the artwork, so the workbench has something to state
+    on the place that owns the panel.
+    """
     resolved = cli.blocked(cli.build_parser().parse_args([]), tmp_path)
     assert resolved.settings.artwork.panel.value is None
     assert not resolved.blockers.ready
@@ -329,7 +346,11 @@ def test_several_panels_offer_a_pick(tmp_path: Path) -> None:
 
 
 def test_a_malformed_project_blocks_the_run_and_names_the_file(tmp_path: Path) -> None:
-    """Decision 9: never silent defaults, and never a run under values that look like the user's."""
+    """An unreadable project file blocks the run and its obstacle names the file.
+
+    A default stays readable, but never as the basis of a run
+    that would look like the user's own values (ADR-0014).
+    """
     panel = tmp_path / "tar.ai"
     panel.write_bytes(b"%PDF-1.4\n")
     (tmp_path / "tar.stompcad.json").write_text("{not json", encoding="utf-8")
@@ -338,7 +359,7 @@ def test_a_malformed_project_blocks_the_run_and_names_the_file(tmp_path: Path) -
     assert resolved.obstacle is not None
     assert "tar.stompcad.json" in resolved.obstacle
     assert resolved.settings.drilling.grid_mm.value == 0.25, "every place must stay readable"
-    # Decision 9's own case keeps its own blocker: the file, not a value in it.
+    # An unreadable project is its own blocker, on the project: the file, not a value in it.
     assert [(blocker, place) for blocker, place, _s in resolved.blockers.blockers] == [
         (Blocker.UNREADABLE_PROJECT, "project")
     ]
@@ -347,9 +368,10 @@ def test_a_malformed_project_blocks_the_run_and_names_the_file(tmp_path: Path) -
 def test_each_blocked_state_still_exits_three_without_a_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Decision 6: without a terminal the same three cases keep the usage code.
+    """No panel, several panels and an unreadable project each exit 3 without a terminal.
 
-    All three, because each reaches the code by its own route: two of them
+    A genuine gap exits 3 naming what was missing (ADR-0014). All three are
+    asserted, because each reaches the code by its own route: two of them
     through the panel nobody named, and the third through a project file
     that cannot be read. ``CI`` is what makes this the headless path with a
     terminal attached or without one.
@@ -372,7 +394,10 @@ def test_each_blocked_state_still_exits_three_without_a_terminal(
 
 
 def test_an_argument_beyond_the_panel_starts_the_run() -> None:
-    """Decision 1: an argument is an act of intent in this invocation."""
+    """An argument beyond the panel counts as starting the run: it is an act of intent.
+
+    ``--case`` and a board file are each enough on their own.
+    """
     parser = cli.build_parser()
     assert cli.started_by_argument(parser.parse_args(["tar.ai", "--case", "1590B"]))
     assert cli.started_by_argument(parser.parse_args(["tar.ai", "tar-pcb.stp"]))
@@ -414,7 +439,8 @@ def _a_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def test_the_workbench_s_lines_and_code_leave_through_the_command_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Decision 15: the app writes its record as it exits, and 14: the code is the run's.
+    """The app's settled lines reach the terminal as it exits (ADR-0013), and the process
+    returns the session's exit code, the last run's.
 
     The workbench keeps both on itself, so the process only has them if this
     branch takes them off it: a byte comparison against ``settled`` inside
@@ -452,10 +478,11 @@ def test_a_fault_the_app_kept_is_raised_where_main_can_map_it(
 
 
 def test_a_refused_flag_blocks_the_place_that_owns_the_value(tmp_path: Path) -> None:
-    """Decision 6: a blocker names the place that can answer it, not the landing.
+    """A value the consuming tool refuses blocks the place that owns it.
 
-    ``Project`` cannot answer a part number the catalogue does not hold, and
-    a marker there sends the builder somewhere with nothing to change.
+    ``--case bogus`` marks ``enclosure``: ``Project`` cannot answer a part
+    number the catalogue does not hold, and a marker there sends the builder
+    somewhere with nothing to change.
     """
     panel = tmp_path / "tar.ai"
     panel.write_bytes(b"")

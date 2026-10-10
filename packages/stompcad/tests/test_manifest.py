@@ -429,7 +429,7 @@ def test_what_a_half_writes_is_what_the_reader_accepts(tmp_path: Path, half_name
 
 
 def test_a_run_with_no_boards_records_the_empty_list_that_decided_it(tmp_path: Path) -> None:
-    """Decision 17: the confirmed empty list is declared intent and must be remembered.
+    """A confirmed empty board list is declared intent, so it is written down (ADR-0014).
 
     A drill-only run has no dock half, so the drill half's commit is the
     only commit it has. Recording nothing would ask the question again
@@ -480,7 +480,11 @@ def _settings_with_targets(panel: Path, *names: str) -> Settings:
 
 
 def test_the_model_commit_declares_only_its_own_target_formats(tmp_path: Path) -> None:
-    """Decision 8: ``write case`` must not name a file only ``write assembly`` commits."""
+    """The model commit declares ``json`` and leaves ``report`` and ``assembly`` alone.
+
+    A declaration names only the formats its own commit produced (ADR-0013),
+    so a file only ``write assembly`` commits is never named before it exists.
+    """
     from stompcad.manifest import Half, payload_for
 
     panel = tmp_path / "tar.ai"
@@ -505,7 +509,7 @@ def test_no_format_name_belongs_to_both_halves() -> None:
     ``payload_for`` attributes a target by asking whether the dock half
     names it, which is only an attribution while the two sets are disjoint.
     An overlap would let the drill half declare a file ``write assembly``
-    has not committed yet, which is the one thing decision 8 forbids.
+    has not committed yet, naming a file that does not exist.
     """
     from stompdrill.emitters import available
 
@@ -561,9 +565,11 @@ def test_a_wall_reference_survives_a_run_with_no_boards(tmp_path: Path, expressi
 
 
 def test_the_drill_half_s_panel_commit_declares_nothing(tmp_path: Path) -> None:
-    """Decision 16: the declaration joins the *last* drill-half commit, and with
-    boards that is the model's. Declaring here would name a file the model
-    commit has not reached yet."""
+    """The panel commit yields no payload, even with an ``excellon`` target set.
+
+    The declaration joins the last drill-half commit (ADR-0013), which on a
+    run with boards is ``write model``, so ``write case`` defers it.
+    """
     from stompcad.manifest import Half, payload_for
 
     panel = tmp_path / "p.ai"

@@ -60,7 +60,10 @@ def test_no_family_row_names_a_code_that_no_longer_exists() -> None:
 
 
 def test_the_driver_reaches_every_row_but_the_recorded_ones() -> None:
-    """Decision 11's second half, per class or function rather than per file.
+    """A code counts as reached when any raise site lies in a unit the driver reaches.
+
+    Units are a class, a function or a module-level statement, not a file. The codes with no such
+    site must be exactly those recorded in ``UNREACHABLE``.
 
     A guard, not a proof: a new entry in ``UNREACHABLE`` is confirmed by
     reading the driver before it is accepted, never because this passed.

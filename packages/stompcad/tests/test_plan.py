@@ -39,14 +39,22 @@ def test_the_plan_is_the_eleven_steps_in_order() -> None:
 
 
 def test_the_walls_are_cut_after_the_clash_and_before_the_model_is_written() -> None:
-    """Decision 15: the ranking that survived re-ranking is the only one that
-    will not change under drilling, and the model must describe the walls."""
+    """``clash`` precedes ``drill-walls``, which precedes ``write-model``.
+
+    Walls are cut from the ranking that survived re-ranking, the only one
+    that will not change under drilling, and the model is written after so
+    that it describes the cut walls (ADR-0013).
+    """
     keys = [step.key for step in DRILL_AND_DOCK.steps]
     assert keys.index("clash") < keys.index("drill-walls") < keys.index("write-model")
 
 
 def test_both_new_steps_fall_inside_the_region_a_boardless_run_prunes() -> None:
-    """Decision 15: a drill-only run is untouched rather than equivalent."""
+    """A run naming no board takes only the four drill-half steps.
+
+    ``drill-walls`` and ``write-model`` both lie in the region ``plan_for``
+    prunes, so a drill-only run is untouched by them (ADR-0013).
+    """
     from stompcad.drive import plan_for
 
     assert [step.key for step in plan_for(()).steps] == [
@@ -55,7 +63,12 @@ def test_both_new_steps_fall_inside_the_region_a_boardless_run_prunes() -> None:
 
 
 def test_seat_and_clash_carry_most_of_the_bar() -> None:
-    """Spec decision 5: kernel leaves dominate, so the dock dominates."""
+    """``seat`` carries over 0.4 of the bar, ``seat`` and ``clash`` together over 0.6,
+    and ``quantise`` under 0.05.
+
+    A weight counts a kernel leaf ten times a plain one (ADR-0013), and
+    nearly every kernel leaf the run has falls in ``seat`` and ``clash``.
+    """
     by_key = {step.key: step.weight for step in DRILL_AND_DOCK.steps}
     total = sum(by_key.values())
     assert by_key["seat"] / total > 0.4

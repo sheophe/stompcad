@@ -143,7 +143,8 @@ def burning(
     project: Project | None = None,
     stop: Callable[[], bool] | None = None,
 ) -> tuple[Driver, _Data, None]:
-    """Pure Python work, which is the thing decision 18 is about.
+    """Pure Python work, which is what running the composed run in a process of
+    its own answers (ADR-0013).
 
     Not ``sleep`` and not a kernel call: both release the interpreter, and
     releasing it is what a thread already did well enough. What made the
