@@ -52,18 +52,6 @@ _COMPONENTS = 3
 _WALLS = 4
 
 
-#: The most a wall's inner face may lie from its outer one's plane and still be
-#: that wall's. Measured over every catalogued wall: a true inner face is
-#: 0.000-0.200 degrees off (1590BS drafts its faces 1.400 and 1.250); the
-#: bound is wider than that and far under the 1.150-2.500 degree draft itself.
-_NEAR_PARALLEL_DEGREES = 0.5
-
-#: The thickest plate a wall may be. Measured: a true inner face stands
-#: 1.500-9.597 mm behind its outer, the opposite wall's outer face starts at
-#: 14.819 mm, so 12 mm sits in the empty band between. Millimetres as nanometres.
-_PLATE_MAX_NM = nm_from_mm(12.0)
-
-
 def draft_degrees(direction: Direction, axis: Direction) -> float:
     """How far ``direction`` tilts out of the plane perpendicular to ``axis``.
 
@@ -192,37 +180,36 @@ def _grouped_by_axis(found: list[Level], axis: int) -> dict[Direction, list[Leve
     return groups
 
 
-def _wall_inner_level(found: list[Level], outer: Level) -> Level:
-    """The level behind ``outer``: the nearest back-facing plane that is a thin plate.
+def _opposed_axis(direction: Direction) -> Direction:
+    """The signed kernel axis facing back along the one ``direction`` leans on."""
+    axis = nearest_axis(direction)
+    return (-axis[0], -axis[1], -axis[2])
 
-    A wall needs its own rule where the drilled face does not: a wall's two
-    faces need not be drafted alike, and a casting that drafts them
-    differently is real, so they share no direction bin and exact parallelism
-    would find nothing. Near-parallel admits them, which also admits the
-    opposite wall's outer face, parallel exactly on a box drafted alike; only
-    the plate's thickness tells them apart. Nearest wins, then larger area.
+
+def _wall_inner_level(found: list[Level], outer: Level) -> Level:
+    """The nearest level behind ``outer`` leaning on the exactly opposite signed axis.
+
+    The equality is the one ``_grouped_by_axis`` tells one wall from another
+    by, read again from the other side of one wall: a level leaning elsewhere
+    backs no part of this wall however near it comes, and the levels that do
+    lean back at it are its own inner face and whatever stands beyond that,
+    which *nearest* settles. No magnitude enters any clause, so no catalogue
+    can move the answer -- and none of them bounds how nearly the two planes
+    are parallel, which is left to the on-plane guard a frame is checked by.
     """
+    opposed = _opposed_axis(outer.direction)
     candidates = [
         level for level in found
         if _facing(level, outer) < 0
-        and 0 < level.offset_nm + outer.offset_nm <= _PLATE_MAX_NM
-        and _tilt_degrees(level, outer) <= _NEAR_PARALLEL_DEGREES
+        and level.offset_nm + outer.offset_nm > 0
+        and nearest_axis(level.direction) == opposed
     ]
     if not candidates:
         raise StompdrillError("no flat face backs the drilled face")
     return min(
         candidates,
-        key=lambda level: (
-            level.offset_nm + outer.offset_nm,
-            -level.area_mm2,
-            abs(level.offset_nm + outer.offset_nm),
-        ),
+        key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
     )
-
-
-def _tilt_degrees(one: Level, other: Level) -> float:
-    """How far two levels' planes are from parallel, in degrees."""
-    return math.degrees(math.acos(min(1.0, abs(dot(one.direction, other.direction)))))
 
 
 def _parallel_to(found: list[Level], outer: Level) -> list[Level]:

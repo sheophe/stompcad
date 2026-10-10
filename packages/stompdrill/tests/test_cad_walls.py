@@ -8,12 +8,14 @@ which is the only way to reach the boundary the definition draws.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from stompdrill.cad import OcpCaseModel, Rejection, WallModel, load_case_model
+from stompdrill.cad import walls as walls_module
 from stompdrill.cad.walls import (
     LATERAL_LIMIT,
     Wall,
@@ -443,19 +445,22 @@ def _cached(part: str) -> Path:
 
 
 @pytest.mark.hammond
-def test_a_lid_with_no_wall_plate_behind_its_levels_loads_with_no_walls_and_says_why() -> None:
-    """1590F's lid has no thin plate behind any lateral level to pair it with.
+def test_a_lid_whose_rim_drafts_one_face_only_still_finds_its_four_walls() -> None:
+    """1590F's lid rim is machined flat outside and drafted 1.000 degrees inside.
 
-    That is a fact about this lid, not a load failure -- wall drilling is
-    opt-in, and a feature naming an unreachable wall is refused downstream,
-    by name, as ``wall-feature-unreachable``, with the reason the model kept.
+    Two planes a whole degree apart, which is the 1590BS's defect turned the
+    other way up: a lid drafts its inner face the more of the two, so an
+    inequality in the outer face's favour refuses the only inner face the rim
+    has and reaches 188 mm across the lid for one it will accept. The axis
+    the face leans on is what pairs them, and the rim measures 4.5374 mm.
     """
     model = load_case_model(
         _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
     )
-    assert model.walls == ()
-    assert model.walls_unavailable is not None
-    assert "no flat face backs the drilled face" in model.walls_unavailable
+    assert model.walls_unavailable is None
+    assert sorted(
+        round(mm_from_nm(surface.thickness_nm), 4) for surface in model.walls
+    ) == [4.5374] * 4
 
 
 @pytest.mark.hammond
@@ -466,10 +471,24 @@ def test_a_model_that_found_its_walls_has_no_reason_to_give(hammond_b: Path) -> 
 
 
 @pytest.mark.hammond
-def test_a_wall_drilling_run_on_a_lid_blames_the_enclosure_not_the_axis() -> None:
+def test_a_wall_drilling_run_on_an_undetermined_enclosure_blames_the_enclosure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reason a model kept reaches the builder instead of a blamed axis.
+
+    Reached by refusing the pairing rather than by naming a casting that
+    refuses it: every cached enclosure now pairs all four of its walls, and a
+    diagnostic about an undetermined enclosure must not rest on that staying
+    true of whatever the cache happens to hold.
+    """
+    def refuse(*_args: object, **_kwargs: object) -> Level:
+        raise StompdrillError("no flat face backs the drilled face")
+
+    monkeypatch.setattr(walls_module, "_wall_inner_level", refuse)
     model = load_case_model(
         _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
     )
+    assert model.walls == ()
     feature = WallFeature(
         designator="J1",
         board=1,
@@ -523,10 +542,9 @@ def test_a_wall_that_cannot_be_framed_leaves_no_walls_and_not_a_failed_load(
     Framing a wall, keying it, building its two regions and stating its record
     can each refuse, and a load the panel's own face never needed must not turn
     into a hard error because one of them did. ``build_wall_frame`` stands for
-    the four: patched to refuse, the model loads with no walls at all.
+    the four: patched to refuse, the model loads with no walls and keeps the
+    reason, which is what a feature naming a wall is refused with downstream.
     """
-    from stompdrill.cad import walls as walls_module
-
     def refuse(*_args: object, **_kwargs: object) -> FaceFrame:
         raise StompdrillError("degenerate wall frame")
 
@@ -534,6 +552,7 @@ def test_a_wall_that_cannot_be_framed_leaves_no_walls_and_not_a_failed_load(
     model = load_case_model(hammond_b, face=CaseFace.BOX, margin_nm=Nanometre(500_000))
     assert model.walls == ()
     assert dict(model.wall_regions) == {}
+    assert model.walls_unavailable == "degenerate wall frame"
 
 
 def _tilted(degrees: float, *, back: bool = False) -> tuple[float, float, float]:
@@ -554,6 +573,24 @@ def _area_level(
     )
 
 
+def test_no_tuned_constant_decides_which_face_backs_a_wall() -> None:
+    """A wall is discovered by geometry, so no number fitted to the catalogue we
+    happen to hold may decide what a wall is.
+
+    A convention check on the source text, because no measurement can be one:
+    a bound wide enough to admit every cached casting leaves every answer in
+    this suite unchanged, so a cap or an angle standing beside the pairing
+    would pass the whole of it. The magnitude scan is what catches one that
+    comes back unnamed -- the clauses compare the geometry against itself, so
+    the only number the rule needs is the zero that says "behind".
+    """
+    source = Path(walls_module.__file__).read_text(encoding="utf-8")
+    assert "_NEAR_PARALLEL_DEGREES" not in source
+    assert "_PLATE_MAX_NM" not in source
+    rule = source.split("def _wall_inner_level")[1].split("\ndef ")[0]
+    assert set(re.findall(r"(?<![\w.])\d[\d_.]*", rule)) == {"0"}
+
+
 def test_a_wall_s_inner_face_may_be_drafted_unlike_its_outer_one() -> None:
     """1590BS drafts its two faces 1.400 and 1.250 degrees, a 0.15 degree gap."""
     outer = _area_level(_tilted(1.40), 30.0)
@@ -562,11 +599,17 @@ def test_a_wall_s_inner_face_may_be_drafted_unlike_its_outer_one() -> None:
 
 
 def test_the_opposite_wall_s_exactly_parallel_face_is_no_inner_face() -> None:
-    """Angle cannot tell the two apart, so the plate's own thickness has to."""
+    """On a box drafted alike it is exactly parallel, so only nearest keeps it out.
+
+    It leans on the same axis this wall's inner face does, so the equality
+    admits it and it loses on depth alone, by the width of the box. It is
+    given four times the area of the face that beats it, so a tie-break on
+    area cannot be what decides.
+    """
     outer = _area_level(_tilted(1.40), 30.0)
+    inner = _area_level(_tilted(1.25, back=True), -28.0, area_mm2=1_250.0)
     opposite = _area_level(_tilted(1.40, back=True), 20.0, area_mm2=5_000.0)
-    with pytest.raises(StompdrillError):
-        _wall_inner_level([outer, opposite], outer)
+    assert _wall_inner_level([outer, inner, opposite], outer) is inner
 
 
 def test_the_nearer_face_wins_over_a_larger_one_behind_it() -> None:
@@ -583,11 +626,21 @@ def test_one_plane_split_in_two_levels_takes_the_larger_area() -> None:
     assert _wall_inner_level([outer, small, large], outer) is large
 
 
-def test_a_face_tilted_further_than_a_drafted_pair_ever_is_refused() -> None:
+def test_a_level_leaning_on_another_axis_is_no_inner_face_however_near_it_comes() -> None:
+    """1590H stands a rib 0.956 mm behind a wall whose own plate is 1.4998 mm.
+
+    The rib drafts 1.000 degrees, exactly as much as that wall's outer face,
+    so no comparison of angles can refuse it and the axis it leans on is all
+    that can. Here it faces back at the outer level and stands nearer than
+    any inner face would, which is every reason but the axis to take it.
+    """
     outer = _area_level(_tilted(1.40), 30.0)
-    askew = _area_level(_tilted(1.40 + 2.0, back=True), -28.0)
+    length = math.sqrt(0.2**2 + 0.98**2)
+    sideways = _area_level((-0.2 / length, 0.0, -0.98 / length), -29.5)
     with pytest.raises(StompdrillError):
-        _wall_inner_level([outer, askew], outer)
+        _wall_inner_level([outer, sideways], outer)
+    inner = _area_level(_tilted(1.25, back=True), -28.0)
+    assert _wall_inner_level([outer, sideways, inner], outer) is inner
 
 
 def test_a_face_coincident_with_the_outer_one_is_no_inner_face() -> None:

@@ -243,12 +243,12 @@ no second pass cuts exactly what it cuts now.
 A **wall** is discovered, never declared. Keep the plate levels that are *lateral* — whose
 outward normal lies nearer the plane perpendicular to the drill axis than the axis itself —
 group those by the nearest signed kernel axis, and the extreme level along that axis is the
-wall's outer surface. Its inner surface is then found by `_wall_inner_level` (see the axis
-amendment at the end of this file, which governs that pairing; the plate-thickness amendment
-between them replaced the first form of the rule and is superseded in its turn): a wall's inner
-surface arrives in a *different* direction bin, because the draft tilts the two oppositely, so
-`_facing` over the whole lateral population would pair a wall with the opposite wall's outer
-face instead.
+wall's outer surface. Its inner surface is then found by `_wall_inner_level` (see the lid
+amendment at the end of this file, which governs that pairing; the plate-thickness and axis
+amendments between them each replaced an earlier form of the rule and are superseded in their
+turn): a wall's inner surface arrives in a *different* direction bin, because the draft tilts
+the two oppositely, so `_facing` over the whole lateral population would pair a wall with the
+opposite wall's outer face instead.
 
 **No companion step joins it**, which is where a wall parts company with the panel.
 `_nearest_companion_level` is a flat plate's device: its only filter is that a face points the
@@ -584,10 +584,11 @@ already found. A wall is drafted, so the plate's bounds would not describe a hol
 
 ### Amendment: a wall pairs with its inner face on the axis it leans on and the draft it carries
 
-**Accepted.** This supersedes the pairing rule in the plate-thickness amendment above. The rule
-deletes `_NEAR_PARALLEL_DEGREES` and `_PLATE_MAX_NM`, and no number replaces either: what a
-wall's inner face is turns out to be stated by the grouping that found the wall, and the one
-bound a reader still needs is one the casting states about itself.
+**Accepted**, and its draft clause is withdrawn by the lid amendment at the end of this file —
+read that one for the rule the code states. The rule deletes `_NEAR_PARALLEL_DEGREES` and
+`_PLATE_MAX_NM`, and no number replaces either: what a wall's inner face is turns out to be
+stated by the grouping that found the wall. The bound this amendment adds on top of that
+grouping is the part a lid disproves.
 
 **A wall's inner face is the nearest plate level behind its outer face that leans on the exactly
 opposite signed kernel axis and drafts no more than the outer face does.** `nearest_axis` already
@@ -692,3 +693,55 @@ carry mirrored keys and their drafts come out of identical arithmetic. Over the 
 inner face's draft exceeds the outer's by exactly zero on every wall, so a bare `<=` refuses nothing
 a tolerance would have admitted, and a casting whose keys are *not* exact negations refuses the wall
 with `_wall_inner_level`'s own reason rather than drilling it somewhere else.
+
+### Amendment: the draft inequality is withdrawn, because a lid drafts its rim the other way
+
+**Accepted.** This supersedes the second clause of the axis amendment above. **A wall's inner
+face is the nearest plate level behind its outer face that leans on the exactly opposite signed
+kernel axis.** Three clauses, every one of them exact: *behind*, a positive plate distance along
+the outer normal; the equality on `nearest_axis`, which is the one `_grouped_by_axis` tells one
+wall from another by, read once more from the other side of one wall; and *nearest*. No
+thickness, no area and no angle of any kind enters the rule, so nothing in it can be fitted to a
+catalogue.
+
+The clause withdrawn asked a candidate to draft no more than the outer face does. That holds of
+a box, where both faces of a wall are drawn out of the one footprint plane and the inner face
+drafts the same or less — the 1590BS drafts 1.400° outside and 1.250° inside. It is false of a
+lid. A lid's rim is flat where it meets the box, so its outer face drafts 0.000° and the rim
+carries its draft of 1.000° on the inside, and the inner face then drafts *more*. An inequality
+in the outer face's favour refuses the only inner face such a rim has, and *nearest* takes the
+nearest level it will still accept, which is the rim opposite: the 1590F's four lid walls read
+188.0000 mm instead of 4.5374 mm, the width of the lid rather than the thickness of its rim, and
+the 1590P1's read 143.3000 and 73.3000 mm instead of 4.2972 and 4.3918 mm. Eight walls in the
+catalogue have an inner face drafting more than their outer, all eight on those two lids, and the
+inequality moves every one of them to a face across the part.
+
+So the bound this file looked for does not exist in the casting's own currency, and the
+consequence recorded above rests where the previous amendment already said it rests: on a
+measured property of how a box is cast. The on-plane guard stays what notices a casting the
+property fails on — a plane further from parallel than the frame's own rounding allows puts a
+correctly placed point off it by more than that guard's tolerance once there is any lever arm, so
+such a casting earns a refused wall hole rather than a hole cut to a depth the document
+misstates.
+
+**The two numbers the axis amendment deleted were doing different work, and the lid is where
+either of them did any.** Neither moves a box answer: every one of the 148 box walls pairs with
+the face it pairs with now, under the old pair of numbers, under the axis equality alone and
+under the axis equality with the inequality. The near-parallel angle refused ten of the 148 lid
+walls outright — the 1590F's four, the 1590P1's four and two of the 1590N1's — because those
+rims draft their two faces unalike, which is the 1590BS's defect on a lid; discovery then
+reported no walls for those parts at all. `_PLATE_MAX_NM` is what kept that refusal from
+becoming a pairing across the lid once the angle admitted one. With the axis equality in place
+neither has anything left to decide: no wall of either face of any cached casting pairs further
+back than 5.4852 mm, the 1590Y's lid rim.
+
+`tools/measure_walls.py --inner-face` is the measurement, and it now sweeps **both** faces of
+every casting the cache holds — 74 blocks, 296 walls — because the rule was chosen on the box
+population alone and the lid is the population that disproved a clause of it. Per wall it prints
+the level the rule pairs with that wall beside the plate `find_walls` records, both faces' own
+drafts, the next level on the wall's own axis, the nearest level behind it leaning on any other
+axis with the gap between the two, and a `drafts more` row for every level that leans back at the
+wall and drafts further than its outer face — marked `chosen` where that level is the wall's inner
+face, which is the lid case and the reason no inequality stands here. A wall the rule cannot
+answer prints `none` in place of a plate, so a loss cannot read as a zero. Over the whole cache,
+both faces: no wall disagrees with the plate recorded, and none is lost.

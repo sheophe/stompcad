@@ -13,12 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from stompdrill.cad.case import _plates, build_frame, find_faces, select_solid
+from stompdrill.cad.case import _facing, _plates, build_frame, find_faces, select_solid
 from stompdrill.cad.region import build_region
 from stompdrill.cad.walls import (
     Wall,
     _normalised,
     _projected_box,
+    _wall_inner_level,
     build_wall_frame,
     draft_degrees,
     drilled_surface,
@@ -28,7 +29,7 @@ from stompdrill.cad.walls import (
     surface_key,
     wall_bounds_nm,
 )
-from stompgeom.levels import Direction, direction_bin, levels
+from stompgeom.levels import Direction, Level, direction_bin, levels
 from stompgeom.step import StepSolid, assembly_spans, read_step
 from stompmodel.frames import CoordinateFrame, cross, dot
 from stompmodel.model import CaseFace
@@ -56,9 +57,11 @@ def _inner_area(wall: Wall) -> float:
 EVIDENCE: dict[str, tuple[tuple[float, ...], int, int]] = {
     "1590A": ((1.500,), 29, 8),
     "1590B": ((1.250,), 29, 8),
+    "1590B2": ((1.250,), 30, 8),
     "1590BB": ((2.500,), 29, 8),
     "1590BB2": ((1.150,), 30, 8),
     "1590BBS": ((1.250,), 31, 8),
+    "1590BS": ((1.250, 1.400), 31, 8),
     "1590LB": ((1.300, 1.400), 28, 12),
     "1590Y": ((1.500,), 33, 8),
 }
@@ -67,10 +70,12 @@ EVIDENCE: dict[str, tuple[tuple[float, ...], int, int]] = {
 def _model_path(part: str) -> Path:
     """The cached model for ``part``, skipping rather than fetching or failing.
 
-    ``hammond.require_model`` gates on ``hammond.MODELS``, a four-part
-    catalogue ``test_hammond_harness.py`` locks; three of the seven parts
-    here (1590BB2, 1590BBS, 1590LB) sit outside it, so that gate would raise
-    rather than skip. This mirrors its cache-hit path without the gate.
+    ``hammond.require_model`` gates on ``hammond.MODELS``, the catalogue
+    ``test_hammond_harness.py`` locks, and raises for any part outside it.
+    The populations below are chosen for what each one measures and not for
+    that gate, so several of them sit outside it and would raise where a
+    missing model should only skip. This mirrors its cache-hit path without
+    the gate.
     """
     path = hammond.cache_dir() / f"{part}.stp"
     if not path.is_file():
@@ -404,3 +409,152 @@ def test_a_casting_drafting_its_two_faces_alike_or_not_still_has_four_walls() ->
     assert sorted(round(mm_from_nm(wall.plate_nm), 3) for wall in walls) == [
         1.996, 1.996, 1.998, 1.998
     ]
+
+
+#: Each casting here discriminates a different wrong answer about which face
+#: backs a wall, and each thickness is that casting's own measured plate rather
+#: than a bound something falls under.
+#: 1590BS drafts a wall's outer face 1.400 degrees and its inner 1.250 -- planes
+#: 0.15 degrees apart, sharing no direction bin -- so a pairing on exact
+#: parallelism finds no inner face at all, and one demanding the inner face
+#: draft at least as much as the outer refuses the only inner face there is.
+#: 1590B stands a 0.203 mm2 level drafted 7.545 degrees 1.489 mm nearer its
+#: (0, 0, 1) wall's outer face than that wall's own inner face, so nearest on
+#: its own takes the sliver; its two pairs of walls also measure 1.9995 and
+#: 2.1495 mm, which is why this is a per-wall population.
+#: 1590H stands a 113.011 mm2 level drafted 1.000 degrees -- exactly its outer
+#: face's own draft -- 0.956 mm behind that face, nearer than the 1.4998 mm
+#: plate, so no comparison of drafts can refuse it and the axis it leans on is
+#: all that can. Its two long walls meet the box floor at 0.746 mm the same way.
+DISCRIMINATING_PLATES: dict[str, tuple[float, ...]] = {
+    "1590B": (2.000, 2.000, 2.149, 2.149),
+    "1590BS": (1.996, 1.996, 1.998, 1.998),
+    "1590H": (1.500, 1.500, 1.500, 1.500),
+}
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", sorted(DISCRIMINATING_PLATES))
+def test_a_wall_pairs_with_the_face_that_backs_it(part: str) -> None:
+    """Each wall of each discriminating casting measures that casting's own plate."""
+    walls = find_walls(*_box(part))
+    assert len(walls) == 4
+    measured = tuple(sorted(round(mm_from_nm(wall.plate_nm), 3) for wall in walls))
+    assert measured == tuple(sorted(DISCRIMINATING_PLATES[part]))
+
+
+def _cached_castings() -> tuple[str, ...]:
+    """Every casting the cache holds, in catalogue order.
+
+    A draft or an area is quoted over the parts the Evidence covers, which is
+    what ``EVIDENCE`` is for. A rule about what a wall *is* has to answer for
+    every casting a workbench may fetch, so the pairing is asserted over
+    whatever has been cached instead. An empty cache still yields one case, so
+    the skip comes from ``_model_path`` rather than from an empty parameter
+    list that would report nothing while checking nothing.
+    """
+    return tuple(sorted(path.stem for path in hammond.cache_dir().glob("*.stp"))) or (
+        "1590B",
+    )
+
+
+def _opposed_axis(direction: Direction) -> Direction:
+    """The signed kernel axis facing back along the one ``direction`` leans on."""
+    axis = nearest_axis(direction)
+    return (-axis[0], -axis[1], -axis[2])
+
+
+def _behind(plates: list[Level], outer: Level) -> list[Level]:
+    """Every plate level standing behind ``outer``: the pool a pairing chooses from.
+
+    Rebuilt here from ``_facing`` and the offset sum rather than taken from
+    the pairing, because the control below has to reach the state before the
+    choice to disagree with it.
+    """
+    return [
+        level
+        for level in plates
+        if _facing(level, outer) < 0 and level.offset_nm + outer.offset_nm > 0
+    ]
+
+
+def _nearest_behind(plates: list[Level], outer: Level) -> Level | None:
+    """The nearest level behind ``outer``, larger area first: no axis clause at all.
+
+    The control for the two assertions above, which both read the pairing's
+    own answer and would become tautologies if the axis equality ever stopped
+    deciding anything. Nothing in the tree pairs this way; it exists to
+    disagree with the pairing that ships.
+    """
+    candidates = _behind(plates, outer)
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
+    )
+
+
+#: How near a rival level has to stand to the face a wall paired with before
+#: depth can no longer tell the two apart. A micron is four orders above the
+#: nanometre the levels are keyed in and four below the millimetre a plate
+#: measures, so it admits the zero-gap and 83 nm coincidences the castings
+#: really present without reaching a second plate.
+_RIVAL_WINDOW_NM = Nanometre(1_000)
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", _cached_castings())
+def test_a_wall_s_inner_face_is_the_level_on_its_own_back_axis(part: str) -> None:
+    """A wall's inner face leans on the axis exactly opposed to its outer face's.
+
+    Exact tuple equality and no tolerance, asserted of every wall of every
+    cached casting: a wall has one inner plane and a plane has one leaning
+    axis, so this is a statement about one wall's own geometry rather than
+    about how many siblings a square box happens to tie. The second assertion
+    is why the axis has to be what decides -- stated as an implication, so it
+    is vacuous where no rival stands within a micron and does the work where
+    one does, which on this catalogue is most of the square-walled castings.
+    """
+    solid, axis = _box(part)
+    plates = _plates(list(levels(solid)))
+    walls = find_walls(solid, axis)
+    assert len(walls) == 4
+    for wall in walls:
+        inner = _wall_inner_level(plates, wall.outer)
+        assert nearest_axis(inner.direction) == _opposed_axis(wall.outward)
+        plate = inner.offset_nm + wall.outer.offset_nm
+        for rival in _behind(plates, wall.outer):
+            gap = abs(rival.offset_nm + wall.outer.offset_nm - plate)
+            if rival is inner or gap > _RIVAL_WINDOW_NM:
+                continue
+            assert nearest_axis(rival.direction) != _opposed_axis(wall.outward), (
+                f"{part} {wall.outward}: a second level {gap} nm from the face it "
+                f"paired with leans on the same axis, so depth cannot tell them apart"
+            )
+
+
+@pytest.mark.hammond
+def test_dropping_the_axis_clause_answers_differently_on_a_cached_casting() -> None:
+    """The control: without the axis equality some cached casting pairs differently.
+
+    Both assertions above read the pairing's own answer, so either could pass
+    by stating nothing. This pairs the same walls by depth and area alone and
+    fails if that agrees everywhere -- which would mean the axis is deciding
+    nothing and the assertions above have gone vacuous. ``any`` rather than a
+    count: how many walls disagree is a fact about the catalogue, and a
+    catalogue that grew would make a count stale without making it wrong.
+    """
+    parts = _cached_castings()
+    assert parts
+    assert any(_the_axis_decides(part) for part in parts)
+
+
+def _the_axis_decides(part: str) -> bool:
+    """Whether any of ``part``'s walls pairs differently with the axis clause dropped."""
+    solid, axis = _box(part)
+    plates = _plates(list(levels(solid)))
+    return any(
+        _nearest_behind(plates, wall.outer) is not _wall_inner_level(plates, wall.outer)
+        for wall in find_walls(solid, axis)
+    )

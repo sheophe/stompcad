@@ -92,9 +92,10 @@ def _inner_face_block(solid: StepSolid, axis: int) -> None:
     The ``elsewhere`` row is the measurement's point: it is the nearest level
     behind the wall leaning on some other axis, and where its gap is zero no
     depth and no area can tell a wall's own inner face from a sibling wall's.
-    A ``draft refused`` row names every level the draft clause turned away, so
-    a clause that never fires cannot pass for one that does, and a wall the
-    rule cannot answer prints ``none`` rather than a plate of zero.
+    A ``drafts more`` row names a level leaning back at the wall that drafts
+    further than its outer face -- a lid's rim, machined flat outside and
+    drafted inside -- because an inequality would refuse the very face such a
+    rim pairs with. A lost wall prints ``none`` rather than a plate of zero.
     """
     plates = _plates(list(levels(solid)))
     recorded = {
@@ -114,14 +115,10 @@ def _inner_face_block(solid: StepSolid, axis: int) -> None:
         )
         on_axis = [level for level in behind if nearest_axis(level.direction) == back]
         other = [level for level in behind if nearest_axis(level.direction) != back]
-        # A bare ``<=``, with no slack: ``direction_bin`` renormalises every
-        # direction from an integer-millionths key, so a wall's two faces --
-        # mirrored keys -- give this arithmetic bit-identical operands and the
-        # two drafts compare exactly equal. A casting whose keys are not exact
-        # negations refuses the wall, which is the safe way to be wrong.
+        # Reported and not applied: the drafts are what a reader compares the
+        # two faces by, and the rule compares neither against the other.
         limit = level_draft(outer.direction)
-        own = [level for level in on_axis if level_draft(level.direction) <= limit]
-        chosen = own[0] if own else None
+        chosen = on_axis[0] if on_axis else None
         answer = f"{chosen.offset_nm + outer.offset_nm:9d} nm" if chosen else "     none"
         # Both drafts, because their difference is what the second clause
         # compares and a reader checking the rule should not have to infer
@@ -133,16 +130,15 @@ def _inner_face_block(solid: StepSolid, axis: int) -> None:
             f"drafts outer {level_draft(outer.direction):6.3f}\u00b0 inner {inner_draft}"
         )
         for level in on_axis:
-            if level is chosen:
-                continue
             if level_draft(level.direction) <= limit:
                 continue
+            mark = "chosen" if level is chosen else "      "
             print(
-                f"      draft refused  {level.offset_nm + outer.offset_nm:9d} nm  "
+                f"      drafts more {mark}  {level.offset_nm + outer.offset_nm:9d} nm  "
                 f"{level.area_mm2:10.3f} mm\u00b2  "
                 f"draft {level_draft(level.direction):6.3f}\u00b0"
             )
-        for label, found in (("next on this axis", own[1:2]), ("nearest elsewhere", other[:1])):
+        for label, found in (("next on this axis", on_axis[1:2]), ("nearest elsewhere", other[:1])):
             for level in found:
                 plate = level.offset_nm + outer.offset_nm
                 gap = plate - (chosen.offset_nm + outer.offset_nm if chosen else 0)
@@ -158,8 +154,10 @@ def _inner_face_main(wanted: Sequence[str]) -> int:
 
     A mode of its own rather than more of the default block: the default
     prints a casting's drafts and areas, and this prints the one comparison
-    the pairing turns on. Names the parts it could not find rather than
-    failing, as the default does.
+    the pairing turns on. Both of an enclosure's faces, because a pairing rule
+    answers for whichever one a panel is drilled in and a lid's rim carries
+    its draft on the inside, which no box in the catalogue does. Names the
+    parts it could not find rather than failing, as the default does.
     """
     missing = [part for part in wanted if not (cache_dir() / f"{part}.stp").is_file()]
     for part in wanted:
@@ -169,8 +167,9 @@ def _inner_face_main(wanted: Sequence[str]) -> int:
         document = read_step(path)
         spans = assembly_spans(document)
         axis = min(range(3), key=lambda index: spans[index])
-        print(f"{part}: drill axis {axis}")
-        _inner_face_block(select_solid(document, CaseFace.BOX), axis)
+        for face in (CaseFace.BOX, CaseFace.LID):
+            print(f"{part} {face.value}: drill axis {axis}")
+            _inner_face_block(select_solid(document, face), axis)
     if missing:
         print(f"not cached: {', '.join(missing)}", file=sys.stderr)
     return 0
