@@ -1,9 +1,9 @@
 """The driver: executes a run's steps, holding each intermediate between them.
 
-Spec decision 7 and ADR-0013: `stompcad` calls each phase separately, the same
-calls and order `stompdrill.cli._run` and `stompcollider.cli._run` make.
-Holding intermediates is what lets `retry` run one step again once an answer
-arrives (decision 4), never retreating a reported position (decision 8).
+`stompcad` calls each phase separately, the same calls and order
+`stompdrill.cli._run` and `stompcollider.cli._run` make (ADR-0013).
+Holding intermediates is what lets `retry` run one step again once an
+answer arrives without retreating a reported position (ADR-0013).
 Importing this module loads `stompgeom`, and through it OCP, by way of
 `stompdrill`'s own emitters -- not a leak: the constraint binds what `stompcad`
 reaches for, and it imports neither. Only `plan.py` stays tool-free.
@@ -83,7 +83,7 @@ __all__ = [
     "plan_for", "invalidated", "steps_of_place", "readers_of",
 ]
 
-#: Where the dock half's steps begin in the nine-step plan. One number,
+#: Where the dock half's steps begin in the whole plan. One number,
 #: because the two halves are drawn from one plan and one division of the
 #: run's span -- see ``Driver._open``.
 _DOCK_FROM = 4
@@ -184,8 +184,9 @@ _STEP_HOLDS: dict[str, tuple[str, ...]] = {
 #: What each step reads of what an earlier step left. With ``_STEP_HOLDS`` this
 #: is the whole dependency: invalidation follows these edges rather than the
 #: plan's order, because a write step produces nothing any later step reads and
-#: must therefore invalidate nothing. See spec decision 10 for the cost of
-#: getting this wrong.
+#: must therefore invalidate nothing. Keyed to position instead, a changed
+#: output filename would re-run every kernel step between the write steps
+#: that read it (ADR-0014).
 _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
     "read-panel": (),
     "quantise": ("_raw",),
@@ -206,11 +207,11 @@ _STEP_CONSUMES: dict[str, tuple[str, ...]] = {
 
 
 def plan_for(boards: Sequence[Path], plan: RunPlan = DRILL_AND_DOCK) -> RunPlan:
-    """The steps a run over these options would actually take. Decision 17.
+    """The steps a run over these options would actually take.
 
     The one statement of where the two halves divide and of what decides
-    it, so the roadmap plans the steps the driver will run rather than the
-    nine a plan lists. ``_DOCK_FROM`` stays private: a caller outside has
+    it, so the roadmap plans the steps the driver will run rather than
+    every step a plan lists. ``_DOCK_FROM`` stays private: a caller outside has
     no business knowing where the division falls, only what it yields.
     """
     return plan if boards else RunPlan(plan.steps[:_DOCK_FROM])
@@ -343,8 +344,8 @@ class Project:
     """Where a half's declarations go, and what they say.
 
     ``held`` is what the file already declares, re-read after each commit so
-    a second commit in one session leaves what the first recorded. Decision
-    8: a value the manifest already holds is used and left untouched.
+    a second commit in one session leaves what the first recorded. A value
+    the manifest already holds is used and left untouched (ADR-0014).
     """
 
     panel: Path
@@ -428,12 +429,12 @@ class Driver:
     def retry(self, key: str, options: RunOptions, scope: Scope) -> DrillData | DockData:
         """Run one step again under revised options, and report it when it succeeds.
 
-        Decision 4's own retry, generalised by decision 10's second half: a
-        revision this step can honour from what it holds runs cheaply, and
+        A revision this step can honour from what it holds runs cheaply, and
         one it cannot discards that step's own holds and runs it as a first
-        run would -- never refused and left accepted-but-ignored. ``match``,
-        ``seat`` and ``clash`` read no field, so no revision ever names one
-        of them; a step added to the plan is a row added to ``_rerun``.
+        run would -- never refused and left accepted-but-ignored (ADR-0014).
+        ``match``, ``seat`` and ``clash`` read no field, so no revision ever
+        names one of them; a step added to the plan is a row added to
+        ``_rerun``.
         """
         retried, outcome, refreshed = self._rerun(key, options, scope)
         self._presentation.finish_step(self._step(key), outcome)
@@ -444,8 +445,8 @@ class Driver:
     def resume(self, stale: frozenset[str], options: RunOptions, scope: Scope) -> None:
         """Run every stale step, in the plan's own order, against what is held.
 
-        Decision 10: changing a value marks steps stale and ``Ctrl+R`` runs
-        that set. A resume takes only the steps a run would take: the dock
+        A changed value marks steps stale and ``Ctrl+R`` runs that set,
+        never automatically (ADR-0014). A resume takes only the steps a run would take: the dock
         half is dropped with no boards, and a dock step is never reached
         once the held drill data has an error, exactly where ``run`` itself
         stops. The span divides over what remains, so the position stays
@@ -621,10 +622,10 @@ class Driver:
     def _settled(self, key: str, data: _D, outcome: str, scope: Scope) -> _D:
         """Resolve what this step can be asked about, then credit it.
 
-        Decision 4: a step that stops to ask has not completed, so nothing
-        is reported until either there was nothing to ask or the answer
-        has been applied. Repeated gaps are answered in turn and the step
-        is credited once, with the outcome the successful run earned.
+        A step that stops to ask has not completed, so nothing is reported
+        until either there was nothing to ask or the answer has been
+        applied. Repeated gaps are answered in turn and the step is credited
+        once, with the outcome the successful run earned (ADR-0013).
         """
         while (gap := self._gap_in(data)) is not None:
             question, diagnostic = gap
@@ -642,7 +643,7 @@ class Driver:
     def _declare(self, options: RunOptions) -> None:
         """Record an answered gap where the manifest reads its declarations.
 
-        Decision 8 records the values that produced the artefacts, and the
+        The manifest records what produced the artefacts (ADR-0014), and the
         payload is derived from ``Project.settings`` rather than from the
         options a revision changed. Recording the answer only in the options
         would leave the field declared as the gap it started as -- and, being
@@ -662,8 +663,8 @@ class Driver:
     def declare(self, settings: Settings) -> None:
         """The values a further commit records, keeping what a gap already answered.
 
-        Decision 8: a half's declarations are the values that produced its
-        artefacts, so a resume under revised values records the revised
+        A half's declarations are the values that produced its artefacts
+        (ADR-0014), so a resume under revised values records the revised
         ones. An answered gap is such a value and is recorded nowhere else,
         so it survives here unless the user has since set that field
         themselves -- and ``held`` still protects everything already written.
@@ -906,9 +907,9 @@ class Driver:
     def _admit(self) -> DockData:
         """Filter the boards already scanned, which needs no file to repeat.
 
-        Decision 8: the gap this raises is found by a filter over boards
-        already read, so running it again re-runs the filter and not the
-        parse -- which is why the temporary the parse needed may be gone.
+        The gap this raises is found by a filter over boards already read,
+        so running it again re-runs the filter and not the parse -- which is
+        why the temporary the parse needed may be gone.
         Both expressions are asked here, so neither answer depends on the
         other having run, and the designator both claim is the finding
         ``admit_walls`` raises rather than a usage error -- which designators
@@ -923,8 +924,9 @@ class Driver:
         """This run's wall expression as a filter, or the one admitting nothing.
 
         ``parse_filter("")`` refuses an empty expression rather than returning
-        a filter that admits nothing, and empty is this value's default
-        (decision 11), so the two are told apart here and nowhere else.
+        a filter that admits nothing, and empty is this value's default: a
+        hole in a wall is irreversible, so nothing is cut unless a builder
+        named the part. The two are told apart here and nowhere else.
         """
         expression = self._options.wall_reference
         return parse_filter(expression) if expression else NOTHING
@@ -971,8 +973,9 @@ class Driver:
     def _wall_probes_nm(self) -> tuple[Nanometre, ...]:
         """The radii a wall feature is measured at: what this run could drill.
 
-        A wall carries no holes to take them from, and the selected standard is
-        the whole answer set a wall hole can come from (decision 7), so a part
+        A wall carries no holes to take them from. Every stocked size of the
+        selected standard, as the operator narrowed it, is the whole answer
+        set a wall hole can come from (ADR-0002), so a part
         measured against anything else is measured against a diameter nobody
         can cut.
         """
@@ -1082,8 +1085,8 @@ class Driver:
         Composed here and only here: ``DrillWalls`` is an ordinary ``Stage``
         that reads what a document already carries, and appending it inside
         ``stompdrill``'s own ``build_pipeline`` would put it on a command line
-        that has no boards to measure for (decision 15). The second routing
-        pass is decision 3's: a wall hole leaves the stage unnumbered, and
+        that has no boards to measure for (ADR-0013). The second routing pass
+        is what numbers them: a wall hole leaves the stage unnumbered, and
         every emitter reads ``numbered()``.
         """
         features = self._named(
@@ -1092,8 +1095,8 @@ class Driver:
         if not features:
             # Not an empty pipeline: ``Pipeline.run`` records every stage it
             # folds, so running one over nothing would write a processing row
-            # no ``stompdrill`` command line writes, and decision 18 promises a
-            # run that drills no wall the artefacts it produced before.
+            # no ``stompdrill`` command line writes, and a run that drills no
+            # wall must write the artefacts it wrote before (ADR-0013).
             unmatched = self._unnamed()
             return data if unmatched is None else data.with_diagnostics(unmatched)
         assert self._case_model is not None  # a board was seated inside it
@@ -1197,9 +1200,10 @@ class Driver:
 
         With boards, the document and the drilled model describe a job whose
         walls are not cut yet, so they go to ``write model`` instead: the
-        Excellon and the drawings are complete without them, because a wall
-        hole changes no panel hole's number (decision 3 of the wall-drilling spec). With none, there is
-        no later commit and this one writes everything, as it always has.
+        Excellon and the drawings are complete without them, because numbering
+        is surface-major and the face comes first, so a wall hole changes no
+        panel hole's number (ADR-0006). With none, there is no later commit
+        and this one writes everything, as it always has.
         """
         owned = frozenset(available())
         half = Half.DRILL_ONLY if not self._options.boards else Half.DRILL
@@ -1219,7 +1223,7 @@ class Driver:
         """Render, stage and commit the two artefacts that describe the whole job.
 
         The drill half's last commit, and so the one the manifest declaration
-        joins (decision 16 of the wall-drilling spec). ``data`` is the drill
+        joins (ADR-0013). ``data`` is the drill
         document the walls were cut into, never the panel-only one the dock
         half was seated against. Its artefacts are withheld on an error from
         *either* half, because unlike ``write case`` this commit runs after
@@ -1236,7 +1240,7 @@ class Driver:
                 self._presentation.report(_withheld(targets))
             # The declaration still goes: with boards this commit is the drill
             # half's only carrier, so withholding it would leave the Excellon
-            # and the drawings beside no project file, which decision 8 forbids.
+            # and the drawings beside no project file (ADR-0013).
             # It names only the formats that produced a file, by the per-format
             # rule ``payload_for`` already applies to a format it does not own.
             return self._write(
@@ -1325,7 +1329,7 @@ class Driver:
         Withholds every target on an error severity, before ``emitters`` runs:
         CLAUDE.md's "any error prevents every requested output" holds, and an
         emitter may refuse data this broken. The declaration joins the same
-        transaction (decision 8), so no committed file sits beside a project
+        transaction (ADR-0014), so no committed file sits beside a project
         file failing to describe it -- and ``declaring``, marking the one
         commit whose artefacts are withheld deliberately, lands however this
         half errored. Staging stays ``stompmodel``'s; no second path exists.
@@ -1369,7 +1373,7 @@ class Driver:
         """Every artefact this driver committed, in the order it committed them.
 
         The `Output` place labels a file it made differently from one it
-        merely found (decision 2), and nothing else in the process knows
+        merely found, and nothing else in the process knows
         which is which.
         """
         return tuple(self._written)
