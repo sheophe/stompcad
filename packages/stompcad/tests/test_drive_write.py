@@ -158,8 +158,11 @@ def _driver_with(
 def test_write_case_defers_the_document_and_the_model_when_there_are_boards(
     tmp_path: Path,
 ) -> None:
-    """Decision 16. The Excellon and the drawings are complete without the
-    walls; the document and the model describe the whole job and are not."""
+    """With boards, ``write case`` commits only what is complete without the walls.
+
+    The Excellon is complete without them; the document and the model describe
+    the whole job and are not, so they wait for ``write model`` (ADR-0013).
+    """
     driver, data = _driver_with(
         tmp_path,
         boards=(TAR_PCB,),
@@ -269,13 +272,13 @@ def test_the_model_commit_withholds_its_artefacts_on_a_dock_half_error(
 def test_a_dock_half_error_still_records_the_drill_half_s_declaration(
     tmp_path: Path,
 ) -> None:
-    """The control, and decision 8's own rule.
+    """The control: a dock-half error leaves the drill half's declaration committed.
 
     A declaration records the values that produced a half's artefacts, not the
     artefacts; the Excellon those values produced is on disk and no dock
     finding puts it in doubt. This commit carries the drill half's declaration
     in a run with boards, so withholding it too would leave that file beside no
-    project file at all.
+    project file at all, which ADR-0014 rules out.
     """
     driver, data = _driver_with(
         tmp_path,
@@ -310,7 +313,7 @@ def test_a_wall_refusal_still_records_the_drill_half_s_declaration(
     the standard that produced the Excellon already on disk. So the artefacts
     this commit owns are withheld and its declaration still lands, naming the
     one format that produced a file -- otherwise the Excellon sits beside no
-    project file, which decision 8 forbids.
+    project file, which ADR-0014 rules out.
     """
     driver, data = _driver_with(
         tmp_path,

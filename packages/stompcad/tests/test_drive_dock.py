@@ -1,10 +1,11 @@
 """The dock half of the driver: composed in memory, matching stompcollider's own CLI.
 
-Spec decision 7: stompcad calls each phase separately. The first test is
-the byte-identity acceptance criterion for the dock half, mirroring
-test_drive_drill.py; the other two pin the withhold rule CLAUDE.md
-requires and both wrapped tools already honour -- an error withholds
-every requested target, on both halves of one run alike.
+stompcad calls each phase separately rather than through one entry point
+per tool (ADR-0013). The first test is the byte-identity acceptance
+criterion for the dock half, mirroring test_drive_drill.py; the next two pin
+the withhold rule CLAUDE.md requires and both wrapped tools already honour
+-- an error withholds every requested target, on both halves of one run
+alike.
 """
 
 from __future__ import annotations
@@ -233,10 +234,10 @@ def test_an_errored_drill_half_stops_before_a_board_is_read(tmp_path: Path) -> N
 
     A genuine ERROR rather than a constructed one: the tar footprint is no
     1590BB, so declaring one raises ``unmatched-enclosure`` out of
-    quantisation. Decision 6 gives that code no picker, so it stays an
-    error the run stops on rather than a gap it could ask about. Docking
-    such a run would read every board and seat it for output it may not
-    write.
+    quantisation. No picker resolves that code (``RESOLVABLE`` lists the
+    two that have one, ADR-0013), so it stays an error the run stops on
+    rather than a gap it could ask about. Docking such a run would read
+    every board and seat it for output it may not write.
     """
     presentation = _RecordingPresentation()
     target = tmp_path / "report.json"
@@ -356,10 +357,11 @@ def test_an_expression_naming_nothing_says_so_rather_than_cutting_in_silence(
 @pytest.mark.hammond
 @pytest.mark.boards
 def test_a_designator_both_expressions_claim_is_a_finding(tmp_path: Path) -> None:
-    """Decision 11's error, through the composed run: it is the second of the
-    two codes this plan makes reachable, and a run is the only thing that can
-    reach it, because which designators exist is known only once a board is
-    read."""
+    """A designator both expressions claim is a finding, not a usage error.
+
+    Which designators exist is known only once a board is read, so only a
+    composed run can reach ``component-claimed-twice``.
+    """
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")
@@ -412,10 +414,12 @@ def test_an_empty_wall_expression_becomes_the_filter_that_admits_nothing(
 def test_a_wall_feature_is_measured_at_the_radii_this_run_could_drill(
     tmp_path: Path,
 ) -> None:
-    """Decision 7: a wall carries no holes to take an answer set from, so the
-    selected standard is the whole set a wall hole can come from. Narrowing
-    the standard must narrow what a sleeve is probed at, or a part is measured
-    against a diameter nobody here can cut."""
+    """A wall carries no holes to take an answer set from, so the standard does.
+
+    The selected standard, as the operator narrowed it, is the whole answer
+    set a wall hole can come from (ADR-0002). Narrowing it must narrow what a
+    sleeve is probed at, or a part is measured against a diameter nobody here
+    can cut."""
     driver = _driver(tmp_path)
     narrowed = _driver(tmp_path, drill_sizes="3,11.4")
     assert narrowed._standard().sizes_nm == (nm_from_mm(3.0), nm_from_mm(11.4))
@@ -755,12 +759,12 @@ def test_the_wall_outcome_states_what_was_cut_and_what_was_not(
 
 
 def test_a_run_naming_no_wall_composes_no_stage_at_all(tmp_path: Path) -> None:
-    """Decision 18, at the value rather than at the bytes.
+    """A run naming no wall composes no stage, checked at the value rather than the bytes.
 
     ``Pipeline.run`` records every stage it folds, so composing one over no
     feature would write a ``drill-walls`` row into ``processing`` that no
-    ``stompdrill`` command line writes -- and a run that drills no wall is
-    promised the artefacts it produced before this plan.
+    ``stompdrill`` command line writes, and a run that drills no wall must
+    leave its document as that command line would.
     """
     panel = _panel_document()
     driver = _driver(tmp_path)
@@ -778,12 +782,12 @@ def test_a_run_naming_no_wall_composes_no_stage_at_all(tmp_path: Path) -> None:
 def test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes(
     tmp_path: Path,
 ) -> None:
-    """Decision 18's lock, against a real baseline rather than against itself.
+    """A boards run naming no wall writes the document ``stompdrill`` writes, byte for byte.
 
-    Every other byte-for-byte test in this suite is boardless, so none of them
-    sees the one thing a wall-drilling run could change for a builder who asked
-    for no wall: a processing row from a stage composed over nothing. Comparing
-    two identical runs cannot see it either.
+    The byte comparisons in ``test_drive_drill.py`` are boardless, so none of
+    them sees the one thing a wall-drilling run could change for a builder who
+    asked for no wall: a processing row from a stage composed over nothing.
+    Comparing two identical runs cannot see it either.
     """
     model = case_model()
     if model is None:

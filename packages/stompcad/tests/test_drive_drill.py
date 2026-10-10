@@ -1,8 +1,8 @@
 """The drill half of the driver: composed in memory, matching stompdrill's own CLI.
 
-Spec decision 7: stompcad calls each phase separately rather than through one
-entry point per tool. This test is the byte-identity acceptance criterion
-that promise rests on -- the orchestrator must add nothing and change
+stompcad calls each phase separately rather than through one entry point per
+tool (ADR-0013). The byte-identity tests here are the acceptance criterion
+that arrangement rests on -- the orchestrator must add nothing and change
 nothing an artefact's bytes could show, in every format stompdrill emits.
 """
 
@@ -268,7 +268,7 @@ def test_a_retry_that_identifies_nothing_holds_no_model(tmp_path: Path) -> None:
 
 
 def test_a_model_that_cannot_be_had_stops_the_run_and_names_the_part(tmp_path: Path) -> None:
-    """Decision 7: an error before any artefact is written, saying why."""
+    """A model that cannot be had is an error that names the part and withholds the artefact."""
 
     def fail(part: str) -> Path:
         raise cases.ModelUnavailable(f"https://example.invalid/{part}.zip could not be fetched")

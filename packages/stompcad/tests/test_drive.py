@@ -1,8 +1,9 @@
 """The driver's own design: intermediates held, steps reported once, options replaceable.
 
-Spec decision 7 says intermediates are what let plan C run a single step
-again; these tests pin that design directly rather than only inferring it
-from the byte-identity acceptance test in ``test_drive_drill.py``.
+The driver holds each phase's result so that one step can run again over
+what the steps before it produced (ADR-0013). These tests pin that holding
+directly rather than only inferring it from the byte-identity acceptance
+test in ``test_drive_drill.py``.
 """
 
 from __future__ import annotations
@@ -41,11 +42,12 @@ __all__: list[str] = []
 
 
 def test_a_run_without_boards_takes_only_the_drill_half() -> None:
-    """Decision 17's division, stated once for the driver and the roadmap alike.
+    """A run naming no boards plans the drill half only; one with boards plans every step.
 
-    The workbench derives its stale set from the plan a run would take, so
-    a second statement of where the halves divide is how the sidebar comes
-    to wait on a step this project has no reason to run.
+    ``plan_for`` is the one statement of where the halves divide. The workbench
+    derives its stale set from the plan a run would take, so a second
+    statement is how the sidebar comes to wait on a step this project has no
+    reason to run.
     """
     assert [step.key for step in drive.plan_for(()).steps] == [
         "read-panel", "quantise", "drill", "write-case",
@@ -207,7 +209,10 @@ class _PositionLog:
 
 
 def test_run_options_survives_replace() -> None:
-    """Plan C's stated mechanism for feeding an answer back: ``dataclasses.replace``."""
+    """``dataclasses.replace`` revises one field and leaves the source and the rest as they were.
+
+    It is how ``revision_for`` feeds an answer back into the options.
+    """
     original = _options()
 
     changed = replace(original, case="1590B2")
@@ -222,11 +227,11 @@ def test_run_options_survives_replace() -> None:
 
 
 def test_presentation_sees_each_drill_step_finish_once_in_plan_order() -> None:
-    """Spec decision 4: a step credits its span only once, on completion.
+    """A drill-only run announces its own steps and sees each finish once, in plan order.
 
-    The plan announced is the one about to run, not the nine-step plan the
-    driver was built with: a drill half divides the span among its own four
-    steps, so the bar is not weighed against five it never intends to take.
+    The plan announced is the one about to run, not the whole plan the driver
+    was built with: the span is divided among the steps a run intends to take
+    (ADR-0013), so the bar is not weighed against steps it never runs.
     """
     presentation = _RecordingPresentation()
     driver = Driver(DRILL_AND_DOCK, presentation, _options())
@@ -259,10 +264,10 @@ def test_the_driver_holds_its_intermediates() -> None:
 def test_retry_runs_one_step_again_over_the_intermediates_already_held(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Decision 4's retry, and the reason the driver holds its intermediates.
+    """A retry runs one step again over the intermediates already held (ADR-0013).
 
-    Plan C feeds an answer back through ``dataclasses.replace`` and asks for
-    the step that stopped. A fresh ``Driver`` over the replaced options would
+    An answer is fed back through ``dataclasses.replace`` and the step that
+    stopped is retried. A fresh ``Driver`` over the replaced options would
     re-parse the artwork and reload the case model instead -- the cost these
     attributes exist to avoid -- so reading the artwork again is made a
     failure here rather than merely unexpected.
@@ -308,11 +313,11 @@ def test_retrying_a_step_discards_what_a_later_step_produced() -> None:
 @pytest.mark.boards
 @pytest.mark.hammond
 def test_the_dock_half_holds_what_a_retry_would_need(drill_and_dock_run: Driver) -> None:
-    """Decision 8: the filter runs again over boards already scanned.
+    """A completed run still holds the boards, the scan, the pipeline and the dock data.
 
     Everything that reads a file is gone with the temporary directory by
-    the time the read step finishes, so what is held must be enough to
-    re-run the filter without one.
+    the time the read step finishes, so the filter can run again over boards
+    already scanned (ADR-0013) only if these survive it.
     """
     driver = drill_and_dock_run
 
@@ -347,7 +352,7 @@ def test_the_filter_is_not_applied_before_it_is_held() -> None:
 def test_the_read_step_runs_again_over_the_boards_already_scanned(
     drill_and_dock_run: Driver,
 ) -> None:
-    """Decision 8: the filter runs again, the parse does not.
+    """A revised filter runs again over the boards already scanned; the parse does not (ADR-0013).
 
     The temporary the boards were read from is long gone, so a retry that
     reached for a file would fail rather than merely be slow.
@@ -572,7 +577,11 @@ def test_a_retry_credits_every_step_whose_hold_it_refreshed(drill_and_dock_run: 
 def test_a_retried_step_reports_once_and_a_rerun_reports_not_at_all(
     drill_and_dock_run: Driver,
 ) -> None:
-    """Decision 4: a step credits its span only when it succeeds."""
+    """A retry reports its step once; the bare re-run beneath it reports nothing.
+
+    A step is credited only once it has succeeded (ADR-0013), so ``_rerun``
+    does the work and ``retry`` alone credits it.
+    """
     driver = drill_and_dock_run
     lines: list[str] = []
     driver._presentation = _Recording(lines)
@@ -595,8 +604,9 @@ def _undeclared() -> RunOptions:
 def test_a_tie_is_asked_about_and_the_answer_runs_quantise_again() -> None:
     """The tar fixture ties three parts when no case is declared.
 
-    Decision 6's first row: the candidates are the tied parts, and the
-    answer declares the case that ends the tie.
+    The tie is asked about once with the answered part among the candidates,
+    and the answer, which declares ``case``, leaves no ``ambiguous-enclosure``
+    behind (ADR-0013).
     """
     asked: list[Choice] = []
     driver = Driver(DRILL_AND_DOCK, _Answering(asked, "1590B"), _undeclared())
@@ -610,7 +620,11 @@ def test_a_tie_is_asked_about_and_the_answer_runs_quantise_again() -> None:
 
 
 def test_a_step_that_stops_to_ask_credits_nothing_until_it_answers() -> None:
-    """Decision 4: one line per step, reported only once it has succeeded."""
+    """A step that stops to ask is reported as one line, carrying the answered run's outcome.
+
+    A step is credited only once it has succeeded (ADR-0013), so the attempt
+    that stopped to ask writes no line of its own.
+    """
     lines: list[str] = []
     driver = Driver(DRILL_AND_DOCK, _AnsweringRecorder(lines, "1590B"), _undeclared())
 
@@ -623,7 +637,7 @@ def test_a_step_that_stops_to_ask_credits_nothing_until_it_answers() -> None:
 
 
 def test_a_gap_is_raised_before_its_step_credits_a_leaf() -> None:
-    """Decision 8: the step that stopped to ask has credited nothing when it does.
+    """The step that stopped to ask has credited nothing when it does (ADR-0013).
 
     A retried step is given the same span a second time, so a leaf counted
     before the question would have to be either counted twice or taken back.
@@ -681,7 +695,7 @@ def _declaring(panel: Path, presentation: Presentation, case: str | None) -> Dri
 
 
 def test_an_answered_tie_is_declared_where_the_manifest_reads_it(tmp_path: Path) -> None:
-    """Decision 8: the manifest records the values that produced the artefacts.
+    """The manifest records the values that produced the artefacts (ADR-0014).
 
     The declarations are read from ``Project.settings``, so an answer that
     revised the options alone would be recorded as the ``null`` it started
@@ -713,7 +727,7 @@ def test_a_run_with_no_gap_records_the_case_it_ran_under(tmp_path: Path) -> None
 
 
 def test_a_resume_under_a_revised_value_keeps_the_gap_the_run_answered(tmp_path: Path) -> None:
-    """Decision 8: both the revision and the answer reach the file that describes them.
+    """Both the revision and the answer reach the manifest that describes them (ADR-0014).
 
     ``declare`` is handed the workbench's own settings, where an answered
     tie was never recorded -- the answer went to the worker. Taking those
@@ -767,12 +781,11 @@ def test_the_case_model_s_filename_ends_the_tie_the_drill_half_alone() -> None:
 def test_a_board_admitting_nothing_is_asked_about_and_the_read_step_credits_once(
     drill_and_dock_run: Driver,
 ) -> None:
-    """Decision 6's second row, and decision 4 over the dock half's own gap.
+    """Each board admitting nothing asks once, and the read step is credited once.
 
-    ``empty-group`` offers the board its own designators, and the answer
-    widens the expression rather than replacing it -- so the filter runs
-    again over boards already scanned, and the step is credited once
-    however many gaps were answered in turn.
+    ``empty-group`` is the dock half's own gap (ADR-0013). However many gaps
+    are answered in turn, the step is credited once, with the outcome the
+    successful run earned, and no ``empty-group`` is left behind.
     """
     driver = drill_and_dock_run
     lines: list[str] = []
@@ -796,9 +809,9 @@ def test_a_board_admitting_nothing_is_asked_about_and_the_read_step_credits_once
 def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once() -> None:
     """The same gap, through the run rather than the loop it is raised in.
 
-    Decision 4 binds where the hook sits, so the dock half's own step must
-    reach it: a run that asks and answers still leaves the read step one
-    line, and no ``empty-group`` behind it.
+    A step is credited only once it has succeeded (ADR-0013), and that binds
+    the dock half's own step too: a run that asks and answers still leaves
+    the read step one line, and no ``empty-group`` behind it.
     """
     model = case_model()
     if model is None:
@@ -818,9 +831,10 @@ def test_a_whole_run_resolves_the_dock_half_s_gap_and_credits_the_read_step_once
 
 
 # --------------------------------------------------------------------------
-# Decision 10: resume runs a whole stale set without discarding what it did
-# not touch. These stand-ins name the driver's own tables rather than real
-# geometry, so a resume can be driven with no kernel and no board fixture.
+# A resume runs a whole stale set against the intermediates the driver still
+# holds, without discarding what it did not touch (ADR-0014). These stand-ins
+# name the driver's own tables rather than real geometry, so a resume can be
+# driven with no kernel and no board fixture.
 # --------------------------------------------------------------------------
 
 
@@ -941,7 +955,7 @@ def _driver_writing_into(
 
     Built on ``_driver_and_presentation_with_held_intermediates`` rather than
     a second set of fakes: the same stand-in intermediates and options, plus
-    the ``Project`` this task's declarations are staged and re-read through.
+    the ``Project`` the write steps' declarations are staged and re-read through.
     ``boards``, when given, overrides both the options and the settings the
     project declares from, so ``Half.DRILL_ONLY`` is reachable with an empty
     list read back as the confirmed answer it is, not an unresolved default.
@@ -966,8 +980,9 @@ def _driver_writing_into(
 def _commit_the_model(driver: Driver) -> None:
     """The drill half's later commit, which carries its declaration when there are boards.
 
-    ``write case`` no longer declares on a run with boards: decision 16 puts
-    the declaration on the commit that follows the walls.
+    ``write case`` does not declare on a run with boards: the declaration
+    joins the last drill-half commit, the one that follows the walls
+    (ADR-0013).
     """
     assert driver._drilled is not None
     with track(NullSink()) as scope:
@@ -985,11 +1000,11 @@ class _Recorder:
 
 
 def test_a_resume_of_the_write_steps_keeps_every_dock_intermediate(tmp_path: Path) -> None:
-    """Decision 10: a filename must not cost the seating search again.
+    """A changed output filename must not cost the seating search again (ADR-0014).
 
-    The finding that forced the design. ``retry`` discards everything after
-    the step it runs, so driving a two-write stale set through it would drop
-    the scan the second write needs.
+    ``retry`` discards everything after the step it runs, so driving a
+    two-write stale set through it would drop the scan the second write
+    needs. A resume keeps the scan, the geometry and the dock data.
     """
     driver = _driver_with_held_intermediates(tmp_path)
     held_scan, held_geometry, held_dock_data = driver._scan, driver._geometry, driver._dock_data
@@ -998,8 +1013,8 @@ def test_a_resume_of_the_write_steps_keeps_every_dock_intermediate(tmp_path: Pat
     driver.resume(frozenset({"write-case", "write-assembly"}), revised, NO_PROGRESS)
 
     # Identity, not equality: a rebuilt-but-equal value would still mean the
-    # scan or the dock data was computed again, which is the cost decision 10
-    # exists to avoid -- see finding 1 of the fix round for the failure mode.
+    # scan or the dock data was computed again, which is the cost this test
+    # exists to catch.
     assert driver._scan is held_scan
     assert driver._geometry is held_geometry
     assert driver._dock_data is held_dock_data
@@ -1044,7 +1059,7 @@ def test_a_resume_reports_no_step_it_was_not_given(tmp_path: Path) -> None:
 
 
 def test_a_resumed_position_never_retreats(tmp_path: Path) -> None:
-    """Decision 8 of ADR-0013 continues to bind across a resume."""
+    """A resumed run's position never decreases, as ADR-0012 requires of every run."""
     driver = _driver_with_held_intermediates(tmp_path)
     seen: list[float] = []
     with track(_Recorder(seen)) as scope:
@@ -1087,18 +1102,19 @@ def test_the_driver_names_every_artefact_it_committed(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# Fix round 1: five findings against the design above.
+# Resume and retry edge cases: consumption, cascades, guards and refusals.
 # --------------------------------------------------------------------------
 
 
 def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Finding 1: ``read-boards`` is stale only by consumption of a re-drilled panel.
+    """``read-boards`` is stale only by consumption of a re-drilled panel.
 
     A grid change invalidates the whole plan but names no field ``read
-    boards`` itself reads, so the old rule kept its scan. The assembly
-    would then disagree with the case this very resume just rewrote.
+    boards`` itself reads, so a rule keyed to fields alone would keep its
+    scan. The assembly would then disagree with the case this very resume
+    just rewrote.
     """
     driver = _driver_with_held_intermediates(tmp_path)
     # The stale set reaches ``drill-walls``, whose premise is that a board was
@@ -1137,7 +1153,7 @@ def test_a_resume_re_parses_boards_stale_only_by_an_earlier_steps_consumption(
 def test_a_resume_of_read_panel_and_quantise_credits_each_step_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Finding 2: a resume must not cascade ``read-panel`` into ``quantise``.
+    """A resume must not cascade ``read-panel`` into ``quantise``.
 
     A retry pays for ``quantise`` from inside ``read-panel`` because it has
     nothing of ``DrillData``'s own shape to report. A resume runs ``quantise``
@@ -1164,7 +1180,7 @@ def test_a_resume_of_read_panel_and_quantise_credits_each_step_once(
 def test_a_resume_reports_undocked_and_skips_dock_steps_when_drilled_has_errors(
     tmp_path: Path,
 ) -> None:
-    """Finding 3: ``run`` never docks against an errored drill half, and neither must resume."""
+    """``run`` never docks against an errored drill half, and neither must resume."""
     driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
     driver._drilled = DrillData().with_diagnostics(
         Diagnostic.error("synthetic-error", "forced for the undocked guard")
@@ -1180,7 +1196,7 @@ def test_a_resume_reports_undocked_and_skips_dock_steps_when_drilled_has_errors(
 
 
 def test_a_resume_drops_the_dock_half_when_there_are_no_boards(tmp_path: Path) -> None:
-    """Finding 4: ``run`` skips the dock half with no boards, and so must resume."""
+    """``run`` skips the dock half with no boards, and so must resume."""
     driver, presentation = _driver_and_presentation_with_held_intermediates(tmp_path)
     driver._options = replace(driver._options, boards=())
 
@@ -1190,7 +1206,7 @@ def test_a_resume_drops_the_dock_half_when_there_are_no_boards(tmp_path: Path) -
 
 
 def test_a_refused_retry_leaves_options_and_holds_untouched() -> None:
-    """Finding 5: a refusal must not run ``_accept`` before its own precondition is checked."""
+    """A refusal must not run ``_accept`` before its own precondition is checked."""
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
     before = driver._options
     revised = replace(before, case="1590BB")
@@ -1202,7 +1218,7 @@ def test_a_refused_retry_leaves_options_and_holds_untouched() -> None:
 
 
 def test_a_retry_of_an_unknown_key_names_it() -> None:
-    """Finding 5: an unknown key must not reach ``_discard_after``'s ``list.index`` instead."""
+    """An unknown key must not reach ``_discard_after``'s ``list.index`` instead."""
     driver = Driver(DRILL_AND_DOCK, PlainWriter(io.StringIO()), _options())
 
     with pytest.raises(ValueError, match="not a step this driver can run again"):
@@ -1210,7 +1226,7 @@ def test_a_retry_of_an_unknown_key_names_it() -> None:
 
 
 def test_a_resume_of_a_step_whose_precondition_fails_names_the_missing_work() -> None:
-    """Fix round 2: ``_run_step``'s one guard path must be reachable from resume too.
+    """``_run_step``'s one guard path must be reachable from resume too.
 
     A retry reaches this guard through ``_rerun``'s own call, ahead of
     ``_accept``; a resume never goes through ``_rerun`` at all, so this is
@@ -1224,12 +1240,16 @@ def test_a_resume_of_a_step_whose_precondition_fails_names_the_missing_work() ->
 
 
 # --------------------------------------------------------------------------
-# Task 5: the manifest inside each half's own transaction.
+# The manifest is declared inside each half's own commit (ADR-0014).
 # --------------------------------------------------------------------------
 
 
 def test_a_half_commits_its_declarations_with_its_own_artefacts(tmp_path: Path) -> None:
-    """Decision 8: an artefact never sits beside a project file that misses it."""
+    """A half declares with its own commit, so no artefact sits beside a project file missing it.
+
+    The drill half declares its own places and leaves ``boards`` to the dock
+    half (ADR-0014).
+    """
     driver, panel = _driver_writing_into(tmp_path)
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
     _commit_the_model(driver)
@@ -1239,7 +1259,7 @@ def test_a_half_commits_its_declarations_with_its_own_artefacts(tmp_path: Path) 
 
 
 def test_a_drill_only_half_declares_the_confirmed_empty_board_list(tmp_path: Path) -> None:
-    """Spec decision 17, through the driver: no boards selects ``Half.DRILL_ONLY``."""
+    """An explicitly confirmed empty board list is declared in the manifest (ADR-0014)."""
     driver, panel = _driver_writing_into(tmp_path, boards=())
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
     recorded = json.loads(manifest.manifest_path(panel).read_text(encoding="utf-8"))
@@ -1254,7 +1274,7 @@ def test_a_withheld_half_records_nothing(tmp_path: Path) -> None:
 
 
 def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> None:
-    """Decision 8: a value the manifest holds is used and left untouched.
+    """A value the manifest already holds is used and left untouched (ADR-0014).
 
     Changed on ``_project.settings``, not ``driver._options``: the payload
     is derived from the former, so only a revised held manifest -- read back
@@ -1283,7 +1303,7 @@ def test_a_second_commit_leaves_what_the_first_one_recorded(tmp_path: Path) -> N
 
 
 def test_a_failed_dock_half_leaves_the_drill_declarations_and_not_its_own(tmp_path: Path) -> None:
-    """Decision 8: gap-filling follows each half's commit, not the whole run.
+    """Gap-filling follows each half's commit, not the whole run (ADR-0014).
 
     The drill half commits real case files before docking begins, so
     recording the declarations only on a whole-run success would leave those
@@ -1303,7 +1323,10 @@ def test_a_failed_dock_half_leaves_the_drill_declarations_and_not_its_own(tmp_pa
 def test_a_drill_half_never_declares_a_target_only_the_dock_half_could_commit(
     tmp_path: Path,
 ) -> None:
-    """Decision 8, through the driver: ``write case`` must not pre-declare a dock format.
+    """The drill half's declaration names only the formats that produced a file (ADR-0013).
+
+    So a dock format in the resolved targets is never pre-declared by the half
+    that cannot commit it.
 
     A dock format in the resolved targets is real ahead of the dock half --
     a run may ask for both in one go -- so the guard has to be the half a
@@ -1334,7 +1357,11 @@ def test_a_drill_half_never_declares_a_target_only_the_dock_half_could_commit(
 
 
 def test_a_run_that_writes_nothing_still_records_what_it_ran_under(tmp_path: Path) -> None:
-    """A check-only run is a run; decision 17 permits one and decision 8 remembers it."""
+    """A run with no artefact selected still records the values it ran under (ADR-0014).
+
+    Such a check-only run is permitted once the builder confirms it writes
+    nothing, and it is a run like any other.
+    """
     driver, panel = _driver_writing_into(tmp_path, targets=())
     driver.resume(frozenset({"write-case"}), driver._options, NO_PROGRESS)
     _commit_the_model(driver)
