@@ -1,8 +1,8 @@
 """Derive ``stompcad.plan.DRILL_AND_DOCK``'s weights from measured leaves.
 
-Spec decision 5: a step's weight is the leaf count it *reports* on the
-reference fixture, each leaf classed as kernel (an insertion query, a
-boolean between solids) or plain (arithmetic), a kernel leaf worth
+A step's weight is the leaf count it *reports* on the reference fixture,
+each leaf classed as kernel (an insertion query, a boolean between solids)
+or plain (arithmetic), a kernel leaf worth
 ``stompcad.plan.KERNEL_LEAF_WEIGHT`` plain ones. Every phase that accepts a
 ``Scope`` is given one here and its leaves are counted as it reports them --
 none of this file reimplements a phase's own division. ``read-panel``,
@@ -251,10 +251,11 @@ def count_leaves(
         tallies["drill"] = LeafTally(*counter.tallies["drill"])
 
         settings = OutputSettings(title="", case_model=model)
-        # Declared, as before: Emitter.emit takes no scope. The split is
-        # decision 16's -- the panel's own formats commit before a board is
-        # read, and the two that describe the whole job commit after the walls
-        # are cut -- so each step declares the formats it actually renders.
+        # Declared, as before: Emitter.emit takes no scope. The split follows
+        # what each format describes: the panel's own formats commit before a
+        # board is read, and the two that describe the whole job
+        # (MODEL_TARGET_NAMES) commit after the walls are cut -- so each step
+        # declares the formats it actually renders.
         panel_formats = sorted(name for name in available() if name not in MODEL_TARGET_NAMES)
         model_formats = sorted(name for name in available() if name in MODEL_TARGET_NAMES)
         tallies["write-case"] = LeafTally(
@@ -308,8 +309,9 @@ def count_leaves(
             tallies["clash"] = LeafTally(*counter.tallies["clash"])
 
             # Both stages the driver composes for this step: the wall holes
-            # leave DrillWalls unnumbered, so a second routing pass belongs to
-            # the step's own work and to its weight (decision 3).
+            # leave DrillWalls unnumbered and an emitter rejects an unnumbered
+            # hole, so a second routing pass belongs to the step's own work
+            # and to its weight.
             walls = Pipeline([DrillWalls(model, dock_data.wall_features, standard), RouteHoles()])
             data = walls.run(data, _CountingScope(counter, "drill-walls"))
             tallies["drill-walls"] = LeafTally(*counter.tallies["drill-walls"])

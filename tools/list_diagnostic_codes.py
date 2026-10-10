@@ -1,6 +1,6 @@
 """Every diagnostic code the two tools raise, and which the driver can reach.
 
-Spec decision 11: completeness is a test, not a promise. A code is read from
+Completeness is a test, not a promise. A code is read from
 a literal, or from a code enum's ``.value`` on a parameter typed as that
 enum, in any call that raises or builds a ``Diagnostic``. Any other call is
 reported, since a scan that quietly knew less would pass by shrinking.
