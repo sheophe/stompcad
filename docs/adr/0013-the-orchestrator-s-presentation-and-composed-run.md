@@ -32,9 +32,14 @@ per-half limit recorded below no longer covers. A further amendment lifts the
 limit that one recorded in turn: `write assembly` now shows the case this run
 drilled, walls and all, so CLAUDE.md's rule that all outputs from one
 invocation agree on the geometry they describe holds for a run that cuts a
-wall. The decision's body below keeps the nine as the record of what was first
-decided; the amendments placed before the Rationale govern. This ADR's other
-decisions stand.
+wall. Two last amendments record what a wall refusal and an excused wall
+candidate do to a run's accounting: `wall-feature-unreachable` is an error
+where a hole was asked for and could not be made and a warning where nothing
+was cut at all, and a wall candidate leaves the clash accounting on having
+been measured rather than on having been named, for the case solid only and
+never for closure. The decision's body below keeps the nine as the record of
+what was first decided; the amendments placed before the Rationale govern.
+This ADR's other decisions stand.
 
 ## Context
 
@@ -401,6 +406,55 @@ run over the acceptance project, measured both with and without a wall named. A 
 for only the report pays none of it, because the case is read behind a call `_dock_emitters`
 makes only for the assembly. **The second limit above stands**: a wall surface still gets no
 per-surface Excellon and no drawing sheet.
+
+### Amendment: `wall-feature-unreachable` splits its severity on whether a hole was asked for
+
+**Accepted.** One code carries two severities, and which one a run reports is settled by
+whether a hole was asked for and could not be made.
+
+It is an **error** where a named designator's axis reaches no drillable wall. `DrillWalls`
+holds a feature measured on a component a builder named and cannot make its hole: the axis
+points at no wall, or at one this version will not drill. A hole was asked for and none can be
+made — and `clash` no longer mentions that component, because its interference was excused on
+the expectation of exactly this hole, so a warning would let the fact that nothing was cut for
+it pass unseen.
+
+It is a **warning** where the wall expression named no component of any board that was read, or
+where nothing was measured for the parts it did name. `stompcad` raises that one, because only
+the orchestrator holds both the expression now in force and the dock half's result. In neither
+case was anything cut, so this run's document and model still describe exactly what was
+drilled: there is no artefact to withhold and no geometry to distrust, only a builder to tell
+that the name they typed reached nobody. Withholding the run's outputs over it would answer a
+typo with a lost drill file.
+
+The two stay under one code because a finding is matched by its code and the remedy is the same
+either way — a different seating, or a different named part. The message is what tells a reader
+which case they are in, and the severity is what the exit status reads.
+
+### Amendment: a wall candidate is excused from the clash accounting on having been measured
+
+**Accepted.** `Clashes` drops a designator's interference with the case solid where that
+component's interference is about to become a hole. The test is the measured candidate itself,
+never the flag that records what a builder's expression named.
+
+The two populations differ, which is why it matters. `wall_admitted` says the expression
+reached a component; it says nothing about whether the reader could measure a feature on it. A
+part the expression named and the reader found nothing for is not about to be drilled for, so
+excusing it would drop a clash that describes a real interference — and drop it where nothing
+downstream will report it again, since no wall hole will ever appear to explain it. Keying on
+the candidate excuses exactly the components a hole is coming for.
+
+**The excusal covers the case solid and never closure.** A wall is lateral and a closure is
+axial by definition, so no hole is ever cut in what closes over the cavity and a clash there is
+explained by nothing. `CLOSURE_KIND` is therefore never excused, however the expression read;
+the filter runs on `CASE_KIND` alone. Across several case solids it stays per designator rather
+than per solid, because which wall a ray crosses is the drill half's question and not this
+stage's.
+
+The excused bodies leave before the intersection rather than after it, and the rest are
+intersected once, exactly as an unexcused board's are. Reporting a clash per surviving body
+instead would change how many clashes a placement carries, and `rank_key` compares that count
+before it compares volume — so naming one part would move the seating of every other.
 
 ## Rationale
 

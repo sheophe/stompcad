@@ -1,6 +1,6 @@
 # ADR-0006: Toolpath ordering and hole numbering
 
-**Status:** Accepted, with seven amendments in place:
+**Status:** Accepted, with eight amendments in place:
 
 1. Remove the `RouteHoles(key=…)` argument.
 2. Require every pipeline selection rule to be total on geometry.
@@ -14,6 +14,8 @@
    canonical spelling for a placement's rotation.
 7. Number surface-major, one contiguous tool block per surface rather than per
    document.
+8. Record that a wall surface's per-setup sibling artefacts exist, that no run
+   reaches one, and the condition under which they become live.
 
 The decisions and their history are recorded below.
 
@@ -311,3 +313,31 @@ A per-surface artefact numbers its *tools* from 1 within its own file, because
 an Excellon file's tool table is that setup's own. The document's tool table
 stays global, one number per diameter across the job. The hole number is the
 identity that crosses artefacts; the tool number is not.
+
+### Amendment 8: a wall surface's sibling artefacts exist and no run reaches them
+
+`emitters.surfaces.artefacts` gives a per-setup format one file per surface, naming
+the non-plate ones as siblings of the requested path — `tar-case-left.drl` beside
+`tar-case.drl`. Three formats declare themselves per-surface: the Excellon and the two
+drawing sheets. No run reaches a second file.
+
+Only `stompdrill`'s own command line calls `artefacts`, and its pipeline has no wall
+stage, so the document it renders from registers one surface and `surface_keys`
+answers the drilled plate alone. The orchestrator, which is the only thing that cuts a
+wall, renders each of its targets directly and so renders each format once over the
+whole document. A builder who names a wall part gets that hole in the drill document
+and in the cut model, and in no drill file and on no drawing sheet.
+
+It is kept rather than pruned because the document it reads already describes more
+than one surface. `DrillData.surfaces` registers a wall with its own frame, thickness
+and bounds; numbering is surface-major by the amendment above; and a projection onto
+one surface is what a per-setup format wants, so the code is right about a document
+that already exists. Its naming rule also lives in one place deliberately: `stompcad`
+owes artefacts byte-identical to `stompdrill`'s, and a second spelling of a file name
+is how that promise breaks. Deleting it would mean writing it again.
+
+It becomes live when the orchestrator's drill-half commit adopts the per-surface
+artefact set in place of one emitter per target — which means deferring or
+re-rendering the three per-surface formats, because they are written before the walls
+are cut — or when `stompdrill`'s own command line gains a way to put a hole in a wall.
+Either reaches the second file with no change to this rule.

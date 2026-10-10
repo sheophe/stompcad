@@ -13,14 +13,20 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from stompdrill.cad.case import _plates, select_solid
-from stompdrill.cad.walls import draft_degrees, find_walls, lateral_plates
-from stompgeom.levels import direction_bin, levels
-from stompgeom.step import assembly_spans, read_step
+from stompdrill.cad.case import _facing, _plates, select_solid
+from stompdrill.cad.walls import (
+    draft_degrees,
+    find_walls,
+    lateral_plates,
+    nearest_axis,
+)
+from stompgeom.levels import Direction, Level, direction_bin, levels
+from stompgeom.step import StepSolid, assembly_spans, read_step
+from stompmodel.frames import dot
 from stompmodel.model import CaseFace
 from stompmodel.units import mm_from_nm
 
-__all__ = ["cache_dir", "main"]
+__all__ = ["cache_dir", "cached_parts", "level_draft", "main"]
 
 #: Every part the Evidence covers, in catalogue order.
 PARTS = (
@@ -36,9 +42,161 @@ def cache_dir() -> Path:
     return base / "stompcad" / "cases"
 
 
+
+def cached_parts() -> tuple[str, ...]:
+    """Every casting the cache holds, in catalogue order.
+
+    ``PARTS`` names the nine the Evidence quotes, which is the right
+    population for a draft or an area. A rule about what a wall *is* has to
+    answer for every casting a workbench may fetch, so the inner-face
+    measurement sweeps whatever has been cached instead.
+    """
+    return tuple(sorted(path.stem for path in cache_dir().glob("*.stp")))
+
+
+def _wall_outers(solid: StepSolid, axis: int) -> list[tuple[Direction, Level]]:
+    """Each wall's outer level, under the signed kernel axis it leans on.
+
+    The same grouping ``find_walls`` does, repeated here rather than exposed
+    from it: this tool prints the candidates a pairing rule chooses *between*,
+    which means it must reach the state before the choice.
+    """
+    groups: dict[Direction, list[Level]] = {}
+    for level in lateral_plates(solid, axis):
+        groups.setdefault(nearest_axis(level.direction), []).append(level)
+    return [
+        (
+            lean,
+            max(groups[lean], key=lambda level: level.offset_nm * dot(level.direction, lean)),
+        )
+        for lean in sorted(groups)
+    ]
+
+
+def level_draft(direction: Direction) -> float:
+    """A level's own draft: how far its plane tilts off the axis it leans on, in degrees.
+
+    The angle a casting is published with, reached without being told which
+    axis is the drill's -- a level is all a pairing rule holds. Named rather
+    than inlined because the arithmetic hides the quantity: ``draft_degrees``
+    measures tilt *out of* the plane perpendicular to the axis it is handed,
+    so against a level's own leaning axis it answers the complement, and a
+    right angle less that complement is the draft.
+    """
+    return 90.0 - draft_degrees(direction, nearest_axis(direction))
+
+
+def _inner_face_block(solid: StepSolid, axis: int) -> None:
+    """Print, per wall, what the pairing rule chooses and what it chose between.
+
+    The ``elsewhere`` row is the measurement's point: it is the nearest level
+    behind the wall leaning on some other axis, and where its gap is zero no
+    depth and no area can tell a wall's own inner face from a sibling wall's.
+    A ``draft refused`` row names every level the draft clause turned away, so
+    a clause that never fires cannot pass for one that does, and a wall the
+    rule cannot answer prints ``none`` rather than a plate of zero.
+    """
+    plates = _plates(list(levels(solid)))
+    recorded = {
+        nearest_axis(wall.outward): wall.plate_nm for wall in find_walls(solid, axis)
+    }
+    for lean, outer in _wall_outers(solid, axis):
+        back = (-lean[0], -lean[1], -lean[2])
+        # Only an opposing level's offset sum is the material between two
+        # planes, so only those are rivals this comparison can even state.
+        behind = sorted(
+            (
+                level
+                for level in plates
+                if _facing(level, outer) < 0 and level.offset_nm + outer.offset_nm > 0
+            ),
+            key=lambda level: level.offset_nm + outer.offset_nm,
+        )
+        on_axis = [level for level in behind if nearest_axis(level.direction) == back]
+        other = [level for level in behind if nearest_axis(level.direction) != back]
+        # A bare ``<=``, with no slack: ``direction_bin`` renormalises every
+        # direction from an integer-millionths key, so a wall's two faces --
+        # mirrored keys -- give this arithmetic bit-identical operands and the
+        # two drafts compare exactly equal. A casting whose keys are not exact
+        # negations refuses the wall, which is the safe way to be wrong.
+        limit = level_draft(outer.direction)
+        own = [level for level in on_axis if level_draft(level.direction) <= limit]
+        chosen = own[0] if own else None
+        answer = f"{chosen.offset_nm + outer.offset_nm:9d} nm" if chosen else "     none"
+        # Both drafts, because their difference is what the second clause
+        # compares and a reader checking the rule should not have to infer
+        # either side of it.
+        inner_draft = f"{level_draft(chosen.direction):6.3f}\u00b0" if chosen else "    --"
+        print(
+            f"    wall {lean}  recorded {recorded[lean]:9d} nm  "
+            f"under the rule {answer}  "
+            f"drafts outer {level_draft(outer.direction):6.3f}\u00b0 inner {inner_draft}"
+        )
+        for level in on_axis:
+            if level is chosen:
+                continue
+            if level_draft(level.direction) <= limit:
+                continue
+            print(
+                f"      draft refused  {level.offset_nm + outer.offset_nm:9d} nm  "
+                f"{level.area_mm2:10.3f} mm\u00b2  "
+                f"draft {level_draft(level.direction):6.3f}\u00b0"
+            )
+        for label, found in (("next on this axis", own[1:2]), ("nearest elsewhere", other[:1])):
+            for level in found:
+                plate = level.offset_nm + outer.offset_nm
+                gap = plate - (chosen.offset_nm + outer.offset_nm if chosen else 0)
+                print(
+                    f"      {label}  {plate:9d} nm  {gap:+10d} nm  "
+                    f"{level.area_mm2:10.3f} mm²  leaning {nearest_axis(level.direction)}  "
+                    f"draft {level_draft(level.direction):6.3f}°"
+                )
+
+
+def _inner_face_main(wanted: Sequence[str]) -> int:
+    """Print, for every named casting, the population the inner-face rule decides on.
+
+    A mode of its own rather than more of the default block: the default
+    prints a casting's drafts and areas, and this prints the one comparison
+    the pairing turns on. Names the parts it could not find rather than
+    failing, as the default does.
+    """
+    missing = [part for part in wanted if not (cache_dir() / f"{part}.stp").is_file()]
+    for part in wanted:
+        path = cache_dir() / f"{part}.stp"
+        if not path.is_file():
+            continue
+        document = read_step(path)
+        spans = assembly_spans(document)
+        axis = min(range(3), key=lambda index: spans[index])
+        print(f"{part}: drill axis {axis}")
+        _inner_face_block(select_solid(document, CaseFace.BOX), axis)
+    if missing:
+        print(f"not cached: {', '.join(missing)}", file=sys.stderr)
+    return 0
+
+
+#: Every flag this tool takes. A mistyped one is refused rather than ignored:
+#: dropping it would run the default block and look like a successful
+#: measurement of something nobody asked for.
+_FLAGS = frozenset({"--inner-face"})
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Print one block per model. Names the parts it could not find rather than failing."""
-    wanted = tuple(argv) if argv else PARTS
+    arguments = list(argv) if argv else []
+    unknown = [value for value in arguments if value.startswith("-") and value not in _FLAGS]
+    if unknown:
+        print(
+            f"unrecognised: {', '.join(unknown)}; this tool takes "
+            f"{', '.join(sorted(_FLAGS))} and part names",
+            file=sys.stderr,
+        )
+        return 2
+    named = tuple(value for value in arguments if not value.startswith("-"))
+    if "--inner-face" in arguments:
+        return _inner_face_main(named or cached_parts())
+    wanted = named or PARTS
     missing = [part for part in wanted if not (cache_dir() / f"{part}.stp").is_file()]
     for part in wanted:
         path = cache_dir() / f"{part}.stp"
