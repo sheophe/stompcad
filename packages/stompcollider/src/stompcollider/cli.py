@@ -504,10 +504,10 @@ def format_wall_features(data: DockData) -> list[str]:
             )
         )
     if excused:
-        # Interference is this tool's deliverable, so a clash decision 12
-        # dropped from the ranking cannot simply be absent: a composed run
-        # answers for it with the drill half's own refusals, and standalone
-        # this line is the whole account there is.
+        # Interference is this tool's deliverable, so a clash left out of the
+        # ranking because a hole is about to explain it cannot simply be
+        # absent: a composed run answers for it with the drill half's own
+        # refusals, and standalone this line is the whole account there is.
         lines.append(
             "  excused from case clashes: "
             + ", ".join(f"#{ordinal} {part}" for ordinal, part in excused)

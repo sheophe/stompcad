@@ -138,7 +138,8 @@ class Component:
     #: Whether the *wall*-reference filter kept this part. Separate from
     #: ``admitted`` and defaulting the other way: a panel reference is what
     #: most parts are, and a wall reference is what none is until a builder
-    #: names it (decision 11).
+    #: names it, because a hole in a wall is irreversible and the panel says
+    #: nothing about which part wants one.
     wall_admitted: bool = False
     #: Its in-plane feature, once per sign of the axis, or none. Empty for
     #: every part the wall filter did not admit, and for one it admitted that
@@ -390,7 +391,9 @@ class DockData:
     #: Every admitted component's feature as a ray in the case's face frame,
     #: filled by ``Clashes`` once the ranking has settled. Empty for a run
     #: with no wall expression, which is what keeps that run's outputs
-    #: byte-identical (decision 18).
+    #: byte-identical: the behaviour lock covers a run that drills no wall,
+    #: including its negative -- no added surface and no sibling file
+    #: (ADR-0011).
     wall_features: tuple[WallFeature, ...] = ()
 
     def __post_init__(self) -> None:

@@ -123,7 +123,7 @@ def bore_of(faces: Sequence[Cylinder], direction: Direction) -> float | None:
     ``None`` when no face is parallel to ``direction`` or the winning class
     is wholly convex. A hole is cut on one ray -- the feature's own axis --
     so a bore on a different, merely parallel line belongs to a different
-    feature and cannot size this one's hole (decision 7's restriction).
+    feature and cannot size this one's hole (ADR-0007).
     """
     parallel = [face for face in faces if face.is_parallel_to(direction)]
     if not parallel:

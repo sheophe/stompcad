@@ -261,8 +261,11 @@ never loosen it.
 Projection rather than draft, because draft is a property of casting and not of the definition
 of a wall: an undrafted enclosure still resolves under this rule. The 45° boundary is where
 "lateral" and "axial" meet rather than a tolerance; `tools/measure_walls.py` prints the measured
-populations, which sit at 1.150°–2.500° and exactly 90.000° on every catalogued model, so
-nothing real comes near it.
+populations, which sit at 1.150°–2.500° and exactly 90.000° over the nine parts its default mode
+runs. Swept over every casting the cache holds, the lateral population reaches 3.000° — on the
+1590CE, 1590DE, 1590EE, 1590X and 1590XX, none of them among those nine — so the claim to hold
+is that the margin to the boundary is tens of degrees and not tenths, rather than that nothing
+exceeds two and a half.
 
 A wall hole is cut **along its component's own axis**, not normal to the wall. A jack's plug must
 not bind, and a drafted wall would put a wall-normal hole up to 2.500° off the part it admits.

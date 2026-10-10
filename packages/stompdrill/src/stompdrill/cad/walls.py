@@ -38,9 +38,10 @@ __all__ = [
 
 #: How much of a level's normal may lie along the drill axis and still be a
 #: wall's. ``sin 45°``: a level is lateral or it is axial, and this is where
-#: the two meanings meet -- not a tolerance fitted to a population. The
-#: measured populations are 1.150°-2.500° against exactly 90.000°, so nothing
-#: real is ever near it; ``tests/test_walls_evidence.py`` holds that gap.
+#: the two meanings meet -- not a tolerance fitted to a population, so no
+#: measurement sets it and none can move it. Cast geometry tilts a lateral
+#: level a few degrees off perpendicular at most, tens of degrees clear of
+#: this boundary (ADR-0007).
 LATERAL_LIMIT = math.sin(math.radians(45.0))
 
 #: Components in a direction.
@@ -161,9 +162,12 @@ def _grouped_by_axis(found: list[Level], axis: int) -> dict[Direction, list[Leve
     """Every lateral level under the signed kernel axis it leans on.
 
     Four groups or a refusal. A level leaning on the *drill* axis is refused
-    rather than grouped: it is lateral by decision 5's definition yet binning
-    it on that axis would silently pair it with the drilled face. Nothing
-    measured comes within 87.5° of that case (ruling 8).
+    rather than grouped: ``is_lateral`` admits a normal over 45° off that
+    axis, while ``nearest_axis`` weighs one component against two, so one
+    whose axial component still outweighs each of its in-plane pair passes
+    that test and leans on the drill axis all the same, where it would pair
+    with the drilled face. That takes tens of degrees off perpendicular;
+    draft tilts a level by a few (ADR-0007).
     """
     unit = [0.0, 0.0, 0.0]
     unit[axis] = 1.0

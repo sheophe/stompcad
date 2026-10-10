@@ -73,9 +73,12 @@ def negated(direction: Direction) -> Direction:
 def is_slab(solid: StepSolid) -> bool:
     """Whether ``solid``'s two largest levels are one slab's two faces.
 
-    Ruling 1's verification, and the whole of it: exactly opposed, of
-    comparable area, and separated by a thickness small against the
-    carrier's own extent.
+    Three measurements and no fourth: exactly opposed, of comparable area,
+    and separated by a thickness small against the carrier's own extent.
+    Shape and never a name, because this is the verification half of a rule
+    whose other half is ``substrates``' name filter -- a document that named
+    nothing leaves that filter admitting every solid it holds, and only
+    these measurements then tell a board from the rest.
     """
     return _carriers(solid) is not None
 

@@ -65,8 +65,9 @@ class OcpCaseModel:
     #: default would lose.
     walls: tuple[DrilledSurface, ...] = ()
     #: Each wall's outer and inner drillable region, keyed by surface. Two,
-    #: because a hole coaxial with its component crosses the two planes at
-    #: different places and must clear the region at each (decision 8).
+    #: because a hole runs along its component's own axis while the wall is
+    #: drafted away from it (ADR-0007), so it crosses the two planes at
+    #: different places and must clear the region at each.
     wall_regions: Mapping[str, tuple[Any, Any]] = MappingProxyType({})
     #: Why ``walls`` is empty, when discovery was attempted and refused; ``None``
     #: when it found its walls. Kept because a consumer must tell an enclosure

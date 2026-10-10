@@ -65,9 +65,11 @@ def normalize_part_name(name: str) -> str:
 def infer_part_name(path: Path) -> str | None:
     """The catalogue part a case model's filename names, if it names one.
 
-    Decision 10: the stem with its delimiters removed and uppercased,
-    accepted only when the catalogue has such a part. A filename is a
-    guess, so a stem naming nothing is no candidate rather than a fault.
+    The stem with its delimiters removed and uppercased, because a file on
+    disk spells a part with whatever separators its source used while the
+    catalogue spells it one way. Accepted only when the catalogue has such a
+    part: a filename is a guess, so a stem naming nothing is no candidate
+    rather than a fault.
     """
     stem = re.sub(r"[\s_\-]+", "", path.stem).upper()
     return stem if stem in _catalogue_parts() else None

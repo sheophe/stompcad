@@ -103,9 +103,10 @@ class WallModel(Protocol):
     ) -> Rejection | None:
         """Refuse a sized hole, naming which rule refused it.
 
-        Both crossings, because a hole coaxial with its component meets the
-        two planes at different places (decision 8) and must clear the
-        drillable region at each.
+        Both crossings, because a hole runs along its component's own axis
+        and not normal to the drafted wall (ADR-0007), so it meets the two
+        planes at different places and must clear the drillable region at
+        each.
         """
         ...
 

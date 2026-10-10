@@ -173,9 +173,12 @@ def track(sink: Sink) -> Iterator[Scope]:
     try:
         yield root
     except BaseException:
-        # Spec decision 4: 1.0 means the output is ready. A run that raised --
-        # a fault, or the cancellation of decision 9 -- produced nothing, and a
-        # finished bar over it would be a lie the renderer cannot detect.
+        # 1.0 states that the output is ready, so the ``else`` below is what
+        # withholds it: a run abandoned by a raised exception must not claim
+        # a span it never finished (ADR-0012). This clause moves no position
+        # and is as broad as it is to state that rule where a reader looks
+        # for it -- a cancellation is no more an output than a fault, and a
+        # finished bar over either would be a lie the renderer cannot detect.
         raise
     else:
         run.advance(1.0, ())

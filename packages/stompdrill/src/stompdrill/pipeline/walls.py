@@ -58,8 +58,8 @@ class Crossing:
     """Where one ray meets one wall, in that wall's own canonical frame.
 
     ``outer_nm`` and ``inner_nm`` differ whenever the ray is not normal to the
-    wall, which decision 8 guarantees it is not: the cut runs along the
-    component's own axis so a plug cannot bind, and the wall is drafted.
+    wall, which it is not: the ray runs along the component's own axis so a
+    plug cannot bind, and the wall is drafted away from it.
     ``span_nm`` is ``(outer, inner)`` as depths from the feature's tip, and the
     outer one is negative for a part whose tip stops short of the wall.
     """
