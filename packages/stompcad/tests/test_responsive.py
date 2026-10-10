@@ -1,4 +1,4 @@
-"""Decision 18's own instrument: the interface's tick, idle against working."""
+"""The interface's tick, idle against a run working in its own process (ADR-0013)."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ async def test_a_process_runner_completes_a_run_inside_a_live_workbench() -> Non
 
 @pytest.mark.asyncio
 async def test_the_interface_answers_while_a_run_works() -> None:
-    """Spec decision 18. The property the process boundary exists for.
+    """The tick stays within a fixed ratio of idle while a run works: what the run's process is for.
 
     Both figures come from one process and one application, seconds
     apart, so what is compared is the run's effect rather than two

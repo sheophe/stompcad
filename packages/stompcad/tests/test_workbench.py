@@ -134,7 +134,7 @@ def _targets(paths: dict[str, Path]) -> Settings:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("key", "place"), sorted(PLACE_KEYS.items()))
 async def test_every_place_letter_reaches_its_place(key: str, place: Place) -> None:
-    """Decision 3: each place owns one unique bare letter, and it works everywhere."""
+    """A place's own bare letter selects that place (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press(key)
@@ -159,7 +159,7 @@ def _place(app: Workbench) -> Place:
 
 @pytest.mark.asyncio
 async def test_a_clean_project_shows_a_clean_sidebar() -> None:
-    """Decision 4: the marker marks the exception, and silence is the reassurance."""
+    """A clean project draws no attention marker: it marks the exception (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -179,7 +179,7 @@ async def test_a_place_that_needs_the_user_is_marked_and_the_others_are_not() ->
 
 @pytest.mark.asyncio
 async def test_a_group_separator_is_one_drawn_line() -> None:
-    """Decision 4: the groups are divided by a rule, not by dashes and air.
+    """Two solid rules divide the sidebar's groups, and each costs one line between places.
 
     Measured as the distance between the places it divides, because that is
     what a reader sees: the widget's own margin is a blank line either side,
@@ -197,7 +197,7 @@ async def test_a_group_separator_is_one_drawn_line() -> None:
 
 @pytest.mark.asyncio
 async def test_the_arrows_wrap_inside_the_pane_that_holds_focus() -> None:
-    """Decision 3: `↑`/`↓` move within a pane; only `←`/`→` change which pane.
+    """`↑`/`↓` wrap within a pane; only `←`/`→` change which pane.
 
     Walking off the end used to hand focus to the next focusable widget,
     which is the list -- so the arrows changed panes by accident, and a
@@ -269,7 +269,7 @@ async def test_the_workbench_opens_inside_a_place_not_the_list() -> None:
 
 @pytest.mark.asyncio
 async def test_left_moves_focus_from_a_place_to_the_sidebar() -> None:
-    """Decision 3: `←` leaves the place for the list, and the place stays put."""
+    """`←` from a place focuses the sidebar and leaves that place selected (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d", "left")
@@ -464,11 +464,11 @@ async def test_the_keys_screen_is_a_window_sized_to_its_text() -> None:
 #: Keys the running application answers that no table holds, each with its reason.
 #: All three are Textual's ``Screen`` defaults: ``super+c`` is the other half of
 #: its one ``ctrl+c,super+c`` copy binding, whose ``ctrl+c`` the run's own stop
-#: now outranks, and ``tab`` belongs to the place under decision 3, as does its
+#: now outranks, and ``tab`` belongs to the place (ADR-0014), as does its
 #: reverse.
 _EXEMPT = {
     "super+c": "the other half of the screen's one `ctrl+c,super+c` copy binding",
-    "tab": "decision 3: tab belongs to the place",
+    "tab": "tab belongs to the place (ADR-0014)",
     "shift+tab": "tab's reverse",
 }
 
@@ -480,7 +480,10 @@ def _spelled(*keys: str) -> set[str]:
 
 @pytest.mark.asyncio
 async def test_the_app_answers_only_the_keys_its_table_holds() -> None:
-    """Decision 3: the table proved distinct is every key a press reaches.
+    """The app and the default screen answer the tabled keys and the exempt ones, no others.
+
+    Every key a press can reach, bar the three exempt, is then one the distinctness
+    check covers (ADR-0014).
 
     The app's and the default screen's maps answer whatever is focused; a
     focused widget's own keys, such as a scroll pane's arrows, are local.
@@ -529,7 +532,7 @@ async def test_ctrl_p_opens_no_command_palette() -> None:
 
 @pytest.mark.asyncio
 async def test_a_local_key_pressed_in_another_place_is_refused_and_says_so() -> None:
-    """Decision 3: `Ctrl`+letter belongs to the place, not to the application."""
+    """A `Ctrl`+letter owned by another place answers with a message naming that place (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d", "ctrl+l")
@@ -538,7 +541,7 @@ async def test_a_local_key_pressed_in_another_place_is_refused_and_says_so() -> 
 
 @pytest.mark.asyncio
 async def test_the_window_verb_away_from_an_artefact_says_where_the_viewer_opens() -> None:
-    """Decision 13 as decided: `w` never picks a file for the builder."""
+    """`w` away from an artefact answers with a message about the viewer, not a file pick (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("w")
@@ -554,7 +557,7 @@ async def _focus_row(pilot: Pilot[int], app: Workbench, field: str) -> None:
 
 @pytest.mark.asyncio
 async def test_an_open_text_field_suppresses_every_bare_letter() -> None:
-    """Decision 3's one hazard, closed. The guard this whole model rests on."""
+    """Letters typed into an open text field stay text: they do not change place (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d")
@@ -632,7 +635,7 @@ async def test_committing_a_text_row_records_the_value_and_who_set_it() -> None:
 
 @pytest.mark.asyncio
 async def test_a_choice_row_opens_a_picker_rather_than_a_field() -> None:
-    """Decision 3: a list keeps the letters working, which is why most rows are lists."""
+    """A choice row opens a picker, so the bare letters keep working (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d")
@@ -658,7 +661,10 @@ async def test_committing_a_picker_records_the_answer_it_chose() -> None:
 
 @pytest.mark.asyncio
 async def test_leaving_a_place_abandons_an_open_picker() -> None:
-    """Decision 12: a picker is a transient widget, so leaving abandons it."""
+    """A picker is transient: a place letter closes it without committing (ADR-0014).
+
+    The picker is gone and the setting keeps its default.
+    """
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d")
@@ -671,7 +677,7 @@ async def test_leaving_a_place_abandons_an_open_picker() -> None:
 
 @pytest.mark.asyncio
 async def test_a_step_key_and_a_verb_still_reach_the_app_through_a_picker() -> None:
-    """Decision 3: every bare letter works everywhere, an open list included."""
+    """The verb `w` and the step key `]` still reach the app while a picker is open."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d")
@@ -715,7 +721,7 @@ async def test_a_refused_value_is_shown_rather_than_taken() -> None:
 
 @pytest.mark.asyncio
 async def test_arrows_move_between_neighbouring_rows() -> None:
-    """Decision 3: navigation is identical everywhere."""
+    """`↓` moves focus between neighbouring rows of a place."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("d", "down", "down")
@@ -754,7 +760,7 @@ async def test_targets_commit_in_the_manifest_s_own_order() -> None:
 
 @pytest.mark.asyncio
 async def test_an_empty_ticked_board_list_is_the_declaration_of_none() -> None:
-    """Decision 17: nothing ticked is an answer, recorded at your rank."""
+    """Confirming a list with nothing ticked records no boards as the user's own answer."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("b")
@@ -770,7 +776,7 @@ async def test_an_empty_ticked_board_list_is_the_declaration_of_none() -> None:
 
 @pytest.mark.asyncio
 async def test_panel_references_are_typed_until_a_run_has_read_designators() -> None:
-    """Decision 6: the designators arrive with the boards, so the list comes later."""
+    """The designators arrive with the boards, so the row is typed until then and a list after."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.press("b")
@@ -803,7 +809,7 @@ async def test_a_picker_whose_answers_cannot_be_read_says_so() -> None:
 
 @pytest.mark.asyncio
 async def test_a_path_typed_into_artwork_starts_the_project(tmp_path: Path) -> None:
-    """Decision 6: a blocked start is usable, and a typed path is what starts it.
+    """A path typed into the Artwork row starts a project that had nothing to run.
 
     Exiting at a builder who ran the tool in the wrong directory is the
     command line's reflex, so the row that states there is no artwork is
@@ -833,7 +839,7 @@ async def test_a_path_typed_into_artwork_starts_the_project(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_several_artworks_offer_the_artwork_row_a_pick(tmp_path: Path) -> None:
-    """Decision 6: several `.ai` files offer a pick, on the row that holds the answer."""
+    """Several `.ai` files make the Artwork row offer exactly those, and a pick starts on it."""
     for name in ("fuzz.ai", "tar.ai"):
         (tmp_path / name).write_bytes(b"")
     app = cli._workbench_for(cli.build_parser().parse_args([]), tmp_path)
@@ -854,7 +860,7 @@ async def test_several_artworks_offer_the_artwork_row_a_pick(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_a_refused_flag_marks_the_place_that_can_answer_it(tmp_path: Path) -> None:
-    """Decision 4: the marker marks the place holding a gap, so it must be that place.
+    """The attention marker goes on the place holding the gap, so it must be that place (ADR-0014).
 
     The sidebar is what a blocked start is read through, and a mark on
     `Project` would send a builder to the one place with nothing to change.
@@ -874,7 +880,7 @@ async def test_a_refused_flag_marks_the_place_that_can_answer_it(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_a_declaration_the_artwork_contradicts_is_drawn(tmp_path: Path) -> None:
-    """Decision 6: a contradicted declaration is news, so somebody has to read it.
+    """A project value the artwork contradicts is a finding, so it is drawn (ADR-0014).
 
     The declaration stands, which is the dangerous half and is already
     right; what this asks is that the run says so where a builder is
@@ -896,7 +902,7 @@ async def test_a_declaration_the_artwork_contradicts_is_drawn(tmp_path: Path) ->
 
 @pytest.mark.asyncio
 async def test_an_unknown_manifest_key_is_drawn_where_it_is_read(tmp_path: Path) -> None:
-    """Decision 9: reported and ignored -- and a report nobody draws is neither."""
+    """An unknown manifest key is reported (ADR-0014), so `Project` names it: an undrawn report is none."""
     panel = tmp_path / "tar.ai"
     panel.write_bytes(b"")
     (tmp_path / "tar.stompcad.json").write_text(
@@ -938,7 +944,7 @@ def test_every_row_a_place_states_is_a_row_a_user_can_edit() -> None:
 
 
 def test_every_value_the_workbench_exposes_is_reachable_through_the_manifest() -> None:
-    """Decision 6: the command line identifies the work, the project how it is done.
+    """Every row bar `panel` can be declared in the project: the command line names the work.
 
     A row the project cannot declare would be re-entered on every open.
     ``panel`` is the one exception, and names itself: the manifest is named
@@ -967,7 +973,7 @@ async def test_the_findings_place_lists_what_the_run_found() -> None:
 
 @pytest.mark.asyncio
 async def test_information_is_listed_but_not_counted() -> None:
-    """Decision 4: a run that inferred an enclosure succeeded, and owes nothing."""
+    """An information finding adds no count and no marker: the run that raised it succeeded (ADR-0014)."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         # The read the project's opening starts draws when it lands, so it is
@@ -1043,7 +1049,7 @@ async def test_the_findings_place_mounts_the_prose_and_the_rows_a_finding_answer
 
 @pytest.mark.asyncio
 async def test_an_artefact_already_on_disk_is_never_called_current(tmp_path: Path) -> None:
-    """Decision 2: the workbench cannot know it matches, and must not imply it."""
+    """A file already on disk is never called made by this run: the manifest holds no hashes to say so."""
     artefact = tmp_path / "tar-case.drl"
     artefact.write_text("M30\n", encoding="utf-8")
     app = Workbench(_session(_targets({"excellon": artefact})))
@@ -1076,7 +1082,9 @@ async def test_ctrl_l_re_reads_the_artwork_s_own_layer_list() -> None:
 
 @pytest.mark.asyncio
 async def test_ctrl_l_refuses_while_a_run_holds_the_place() -> None:
-    """Decision 5: invalidating is the statement an edit makes, so a run refuses it.
+    """While a run holds the place, `Ctrl+L` is refused and the stale set is unchanged.
+
+    Invalidating is the statement an edit makes, and a run takes no edits (ADR-0014).
 
     The control is ``test_ctrl_l_re_reads_the_artwork_s_own_layer_list``:
     with no run the same press does make ``read-panel`` stale.
@@ -1145,7 +1153,7 @@ async def test_a_jump_needs_a_row_to_land_on() -> None:
 
 @pytest.mark.asyncio
 async def test_the_picker_offers_only_the_parts_that_fit() -> None:
-    """Decision 2: a part the outline refuses would only become wrong-enclosure."""
+    """Several fitting parts make the Case picker offer those alone (ADR-0014): the rest would be errors."""
     app = Workbench(_session(), launch=Launch(panel=_PANEL))
     async with app.run_test() as pilot:
         await _settle_fit(app, pilot)
@@ -1173,8 +1181,7 @@ async def test_a_fit_that_narrows_nothing_offers_the_whole_catalogue() -> None:
 async def test_the_case_row_says_it_is_still_working_the_fit_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Decision 1: between opening and the read there is no answer yet, which
-    is not the same as none."""
+    """The case row says it is working until the read lands: no answer yet is not none."""
     monkeypatch.setattr(discover, "fitting_parts", lambda *_args: ())
     app = Workbench(_fitting_session(), launch=Launch(panel=_PANEL))
     async with app.run_test() as pilot:
@@ -1346,8 +1353,9 @@ async def test_the_opening_frame_states_the_read_it_has_begun(
 
 
 def test_the_run_page_lists_the_two_new_steps() -> None:
-    """Decision 17's two new lines. They are not written anywhere: the Run place
-    draws the whole plan, so adding a step adds its line."""
+    """The Run place draws every step of the plan, so `drill walls` and `write model` have lines.
+
+    Neither line is written anywhere: adding a step to the plan adds its line."""
     app = Workbench(_session())
     app.plan = DRILL_AND_DOCK
     drawn = app._run_view().steps

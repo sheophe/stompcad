@@ -9,7 +9,7 @@ __all__: list[str] = []
 
 
 def test_each_place_owns_one_unique_bare_letter() -> None:
-    """Decision 3: the eight initials are distinct without compromise."""
+    """Each of the eight places owns one bare letter, and no two places share one (ADR-0014)."""
     assert len(keys.PLACE_KEYS) == 8
     assert set(keys.PLACE_KEYS.values()) == set(keys.Place)
     assert sorted(keys.PLACE_KEYS) == sorted("aebdfopr")
@@ -45,7 +45,7 @@ def test_stepping_wraps_in_the_sidebar_s_own_order() -> None:
 
 
 def test_a_local_key_names_the_place_that_owns_it() -> None:
-    """Decision 3: `Ctrl`+letter belongs to the place, never to the app."""
+    """A `Ctrl`+letter names the place that owns it: `ctrl+r` Run, `ctrl+l` Artwork (ADR-0014)."""
     assert keys.LOCAL_KEYS["ctrl+r"][0] is keys.Place.RUN
     assert keys.LOCAL_KEYS["ctrl+l"][0] is keys.Place.ARTWORK
 

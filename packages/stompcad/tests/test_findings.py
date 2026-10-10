@@ -17,7 +17,10 @@ _INFO = Diagnostic(Severity.INFO, "inferred-enclosure", "the part came from tar-
 
 
 def test_the_count_covers_errors_and_warnings_only() -> None:
-    """Decision 4: a run that inferred an enclosure succeeded; it owes nothing."""
+    """The count covers errors and warnings, not information: an inferred enclosure owes nothing.
+
+    A run that only inferred one succeeded (ADR-0014).
+    """
     assert findings.counted(findings.classify([_ERROR, _WARNING, _INFO])) == 2
 
 
@@ -81,8 +84,9 @@ def test_a_fit_finding_carries_its_register() -> None:
     "code", ["multiple-boards", "unknown-enclosure", "case-orientation-unverifiable"]
 )
 def test_a_warning_worth_knowing_is_not_counted(code: str) -> None:
-    """Decision 4. Each of these is a WARNING at its raise site, and each is
-    information: a deliberate three-board pedal raises the first every time."""
+    """Each of these is a WARNING at its raise site but worth knowing, so none is counted (ADR-0014).
+
+    A deliberate three-board pedal raises the first every time."""
     assert findings.counted(findings.classify([Diagnostic.warning(code, "…")])) == 0
 
 

@@ -46,7 +46,7 @@ def test_every_family_has_prose_and_a_way_out() -> None:
 
 
 def test_every_classified_code_is_in_exactly_one_family() -> None:
-    """Decision 11: one membership. Checked across the table, not per row."""
+    """No code is listed under two families, checked across the whole table rather than per row."""
     seen: dict[str, Family] = {}
     for family in Family:
         for code in FAMILIES[family].codes:
@@ -122,7 +122,7 @@ def test_worth_knowing_and_the_size_check_have_no_remedy() -> None:
 
 
 def test_no_worth_knowing_code_has_a_remedy() -> None:
-    """Decision 11: a code marking no place cannot also name a row to jump to."""
+    """A worth-knowing code marks no place (ADR-0014), so none also names a row to jump to."""
     assert not FAMILIES[Family.KNOWING].codes & set(REMEDIES)
 
 

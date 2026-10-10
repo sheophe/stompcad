@@ -96,7 +96,7 @@ def test_the_served_presentation_satisfies_the_boundary() -> None:
     """``_Down`` is this side's ``Presentation`` now; ADR-0013 pinned the protocol.
 
     ``WorkbenchPresentation`` implemented it in the interface's process; the
-    run's own process is where decision 18 put the implementation, and
+    run's own process is where the implementation now lives, and
     nothing had checked that this one still satisfies it.
     """
     commands_out, commands_in = multiprocessing.Pipe(duplex=False)
@@ -139,7 +139,7 @@ def test_a_driver_is_announced_before_the_run_is_finished(served: Any) -> None:
 
 
 def test_the_driver_outlives_one_run(served: Any) -> None:
-    """Decision 10: a resume spends what the first run left, so it is still there.
+    """The run's process outlives one run (ADR-0013): a resume spends what the first left.
 
     The nonce is what makes this an assertion rather than an observation:
     a server that quietly composed a fresh driver for the resume would
@@ -194,7 +194,7 @@ def test_a_stale_answer_does_not_close_the_question_now_open(served: Any) -> Non
 
 
 def test_an_answer_the_question_did_not_offer_is_refused(served: Any) -> None:
-    """Decision 11: a picker chooses between answers a tool computed.
+    """A picker chooses between answers a tool computed, and nothing else is accepted.
 
     The boundary must not become the hole in that rule. An answer arriving
     over a pipe is checked against the question that is open, rather than
