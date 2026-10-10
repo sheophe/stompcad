@@ -71,7 +71,7 @@ def test_the_wall_filter_admits_only_what_it_names() -> None:
 
 
 def test_no_wall_filter_admits_nothing_and_raises_nothing() -> None:
-    """Decision 11: nothing is cut into a wall unless a builder named the part."""
+    """Nothing is cut into a wall unless a builder named the part, and nothing is raised."""
     data = _dock_data_with(("J1", "RV1"))
     found = admit_walls(data, NOTHING, parse_filter("RV*"))
     assert not any(c.wall_admitted for b in found.boards for c in b.components)

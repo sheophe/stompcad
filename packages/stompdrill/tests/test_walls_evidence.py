@@ -1,7 +1,7 @@
-"""The wall-drilling spec's Evidence, as assertions over the cached models.
+"""The measured wall populations, as assertions over the cached models.
 
 A figure a design argues from is a figure a suite has to hold: these are the
-measurements decision 5 reasons about, and a drift in any of them makes that
+measurements ADR-0007's wall rules reason from, and a drift in any of them makes that
 reasoning stale rather than merely inaccurate. ``tools/measure_walls.py``
 prints the same numbers for a human. See ``_model_path`` for why this reads
 the cache directly rather than through ``hammond.require_model``.
@@ -178,9 +178,9 @@ PLATES: dict[str, tuple[float, ...]] = {
 }
 
 #: The least distance between two perpendicular walls' outer levels, in
-#: millimetres. Every one positive is decision 13's corner argument: a ray
-#: through a corner lands in no wall's region, so no cross-surface
-#: breakthrough check is needed and the findings vocabulary grows by two.
+#: millimetres. Every one positive is the corner argument: a ray through a
+#: corner lands in no wall's region, so no cross-surface breakthrough check
+#: is needed.
 CORNER_GAPS: dict[str, float] = {
     "1590A": 7.5575, "1590B": 7.6823, "1590BB": 5.9849, "1590BB2": 6.8479,
     "1590BBS": 7.3398, "1590LB": 7.0690, "1590Y": 2.8275,
@@ -219,7 +219,7 @@ def test_a_wall_s_outside_is_larger_than_its_inside_on_every_wall(part: str) -> 
 @pytest.mark.hammond
 @pytest.mark.parametrize("part", sorted(CORNER_GAPS))
 def test_two_perpendicular_walls_never_touch(part: str) -> None:
-    """Decision 13, measured: a corner fillet belongs to no wall's level."""
+    """Perpendicular walls' outer levels stay apart, so a corner fillet belongs to no wall's level."""
     from OCP.BRepExtrema import BRepExtrema_DistShapeShape
 
     solid, axis = _box(part)
@@ -247,7 +247,7 @@ def test_the_order_walls_come_back_in_is_the_geometry_s(part: str) -> None:
 
 
 def _centroid_mm(shape: object) -> tuple[float, float, float]:
-    """``shape``'s own mass centroid, a mechanics quantity ruling 1 sets apart."""
+    """``shape``'s own mass centroid, a mechanics quantity, not the datum (ADR-0007)."""
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
 
@@ -271,8 +271,9 @@ SPANS: dict[str, tuple[tuple[float, float], ...]] = {
 }
 
 #: How far each model's outer wall region's own centroid sits from the centre
-#: of its bounding box, in nanometres. Ruling 1: five models agree to under a
-#: nanometre and two do not, which is why the datum is the box's centre.
+#: of its bounding box, in nanometres. Five models agree to under a nanometre
+#: and two do not, so the datum being the box's centre and not the centroid
+#: (ADR-0007) is observable.
 CENTROID_OFFSETS: dict[str, int] = {
     "1590A": 0, "1590B": 1, "1590BB": 1, "1590BB2": 0,
     "1590BBS": 1, "1590LB": 66_461, "1590Y": 68_771,
@@ -307,10 +308,10 @@ def test_u_is_the_longer_span_on_every_wall(part: str) -> None:
 @pytest.mark.hammond
 @pytest.mark.parametrize("part", sorted(CENTROID_OFFSETS))
 def test_the_centroid_and_the_box_centre_differ_by_what_was_measured(part: str) -> None:
-    """Ruling 1's own evidence: two models make the two datums disagree.
+    """Two models make the centroid and the box centre disagree, by the measured amount.
 
     Asserted rather than merely recorded, because if every model agreed the
-    ruling would be moot and the datum could be either -- and a future model
+    choice of datum would be moot and it could be either -- and a future model
     that disagrees by more than these two is worth failing over.
     """
     solid, axis = _box(part)
@@ -328,7 +329,7 @@ def test_the_centroid_and_the_box_centre_differ_by_what_was_measured(part: str) 
 def test_every_wall_states_a_surface_the_document_accepts(part: str) -> None:
     """Confirms construction succeeds.
 
-    ``wall_bounds_nm`` states bounds symmetrically (decision 2), so this can
+    ``wall_bounds_nm`` states bounds symmetrically about the datum, so this can
     never be the datum's own guard -- see
     ``test_the_datum_is_the_outer_box_s_own_centre_not_a_looser_pin``.
     """

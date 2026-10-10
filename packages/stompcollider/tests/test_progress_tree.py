@@ -159,8 +159,8 @@ def test_a_slot_does_not_race_to_the_runs_own_end(tmp_path, monkeypatch) -> None
     """The control: labelling a slot must not itself close it early.
 
     Every update stays below 1.0 until the run's own exit forces it there --
-    a slot drawn and closed back to back with no work between (Task 2's
-    original defect) would instead jump every position to the end at once.
+    a slot drawn and closed back to back with no work between
+    would instead jump every position to the end at once.
     """
     source, prepared = _prepared(tmp_path, "only.stp")
     _stub(monkeypatch, prepared)
@@ -238,7 +238,7 @@ def test_no_labelled_phase_reopens_after_the_run_reports_done(tmp_path, monkeypa
 
 
 # --------------------------------------------------------------------------
-# ``Match`` divides by board: Task 6.
+# ``Match`` divides by board.
 # --------------------------------------------------------------------------
 
 
@@ -264,14 +264,14 @@ def test_match_reports_one_step_per_board(tar_dock: DockData) -> None:
 
 # --------------------------------------------------------------------------
 # ``Seat`` divides boards, then placements, then the insertion search's own
-# three phases: Task 7.
+# three phases.
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.boards
 def test_seat_reports_boards_then_placements(tar_matched: DockData, tar_cavity) -> None:
     """Both counts are known at entry: boards from the input, placements
-    from ``Match``. Labelled the way a pipeline would, per Decision 3 --
+    from ``Match``. Labelled the way a pipeline would (ADR-0012), because
     ``Seat`` never labels its own top slot."""
     recorder = Recorder()
     with track(recorder) as scope:
@@ -436,7 +436,7 @@ def test_a_short_yielding_scope_cannot_shorten_the_bisection() -> None:
 
 
 # --------------------------------------------------------------------------
-# ``Clashes`` divides both its stages: Task 8. Stage one is boards then
+# ``Clashes`` divides both its stages. Stage one is boards then
 # placements, exactly as ``Seat``'s own division reads; stage two is the
 # subtle one -- the *distinct* board-pair seatings ``candidates`` admits,
 # not the combinations the product tries, because ``_between`` memoises

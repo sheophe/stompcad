@@ -1,11 +1,12 @@
 """Finding the boards in an assembly, and proving each one is a board.
 
-Ruling 1's verification has three criteria, so every one of them carries a
-solid that fails *that* criterion and satisfies the other two -- a solid
-failing all three would leave any of them free to be wrong. The synthetic
-solids are built through OCP directly because that is what a fixture is;
-the package's own source reaches the kernel only through ``stompgeom``,
-which ``test_package_boundary.py`` is what enforces.
+A slab's verification has three criteria -- its two largest levels exactly
+opposed, of comparable area, and a thickness small against the carrier's own
+extent -- so each carries a solid that fails *that* criterion and satisfies
+the other two; one failing all three would leave any of them free to be wrong.
+The synthetic solids are built through OCP directly because that is what a
+fixture is; the package's own source reaches the kernel only through
+``stompgeom``, which ``test_package_boundary.py`` is what enforces.
 """
 
 from __future__ import annotations
@@ -361,8 +362,8 @@ def test_a_solid_that_is_no_slab_registers_no_carrier_frame() -> None:
 
 
 def test_a_document_with_no_unnamed_solid_is_refused() -> None:
-    """``no-substrate`` stays live under Ruling 1: an exporter that names
-    everything gets a refusal rather than a guess."""
+    """``no-substrate`` is raised when an exporter names every solid: a refusal
+    rather than a guess."""
     named = _document_of(("U1", _block(30.0, 20.0, 1.0, (0.0, 0.0, 0.0))))
 
     with pytest.raises(NoSubstrateError, match="every solid in the document is named"):
@@ -379,8 +380,8 @@ def test_a_document_whose_unnamed_solids_are_no_slab_is_refused_too() -> None:
 
 
 def test_an_unnamed_slab_beside_an_unnamed_block_selects_only_the_slab() -> None:
-    """Ruling 1's first failure mode -- an exporter that names nothing -- is
-    what verification exists to survive. Two unnamed solids, one substrate."""
+    """An exporter that names nothing is what the slab verification exists to
+    survive. Two unnamed solids, one substrate."""
     mixed = _document_of(
         ("", _block(30.0, 20.0, 10.0, (0.0, 0.0, 0.0))),
         ("", _block(30.0, 20.0, 1.0, (0.0, 0.0, 40.0))),

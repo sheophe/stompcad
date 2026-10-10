@@ -156,7 +156,7 @@ def test_an_exact_tie_between_two_axes_breaks_on_the_lower_index() -> None:
 
 
 def test_the_axis_a_direction_leans_on_is_answered_and_never_refused() -> None:
-    """Ruling 8's rule has one spelling, and it is the grouping's own.
+    """Which axis a direction leans on has one spelling, and it never refuses.
 
     ``nearest_axis`` answers which axis, not whether a wall may lean on it: the
     drill axis is a fact about the grouping, which refuses that case by name
@@ -173,8 +173,11 @@ def _grouped(levels_: list[Level], axis: int) -> object:
 
 
 def test_a_lateral_level_leaning_on_the_drill_axis_is_refused_and_not_grouped() -> None:
-    """Ruling 8: lateral by the definition, yet it would bin to the axis itself.
+    """A level that is lateral yet bins to the drill axis is refused by name, not grouped.
 
+    Lateral is nearer the plane perpendicular to the drill axis than the axis
+    itself, and a direction 36.87 degrees off that plane still has the drill
+    axis as its nearest kernel axis, so grouping would misplace it silently.
     Unreachable on every catalogued model -- nothing measures between 2.500°
     and 90.000° -- and here so a custom model cannot pass through it unseen.
     """
@@ -260,7 +263,7 @@ def test_a_slightly_drafted_wall_keys_the_same_as_an_undrafted_one() -> None:
 
 
 # ---------------------------------------------------------------------------
-# A real supplied model discovers and answers for its own walls (Task 16)
+# A real supplied model discovers and answers for its own walls
 # ---------------------------------------------------------------------------
 
 
@@ -388,7 +391,7 @@ def test_a_wall_hole_is_cut_end_to_end_from_a_hand_built_feature(hammond_b: Path
 def test_the_wall_hole_this_stage_placed_is_cut_into_the_model(
     tmp_path: Path, hammond_b: Path
 ) -> None:
-    """Plan 1 taught the cutter a wall's own axis; this is the first real wall to cut.
+    """The cutter takes a wall's own axis, and this is the first real wall it cuts.
 
     Measured on the emitted solid's volume rather than on its bytes: what is
     being checked is that metal left, and by roughly the cylinder's worth.
@@ -408,8 +411,9 @@ def test_the_wall_hole_this_stage_placed_is_cut_into_the_model(
 
 @pytest.mark.hammond
 def test_a_hole_over_the_lid_lip_behind_a_wall_is_through_boss(hammond_b: Path) -> None:
-    """Ruling 2's own discriminator: the wall's edge nearest the drilled face,
-    where the lid's seating lip interrupts the inner face well inside the outer.
+    """The inner region refuses what the outer admits: the wall's edge nearest the
+    drilled face, where the lid's seating lip interrupts the inner face well
+    inside the outer.
 
     Every test above still passes with the inner check deleted -- none of
     them reaches a point where the two regions disagree. This one does: a

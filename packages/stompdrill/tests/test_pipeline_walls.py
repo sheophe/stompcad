@@ -59,7 +59,7 @@ def _wall(key: str = "right", thickness_mm: float = 2.0, at_mm: float = 30.0) ->
     """An undrafted wall at ``at_mm`` along +X, facing +X, 40 x 20 mm.
 
     Undrafted so the crossings are numbers a reader can check by hand; the
-    drafted case is what the cached models exercise, in Task 15.
+    drafted case is what the cached models exercise.
     """
     thickness_nm = Nanometre(int(thickness_mm * 1_000_000))
     inner = at_mm - thickness_mm
@@ -128,7 +128,11 @@ def test_the_crossings_land_on_the_wall_s_own_datum_for_an_axial_ray() -> None:
 
 
 def test_an_oblique_ray_crosses_the_two_planes_at_different_places() -> None:
-    """Decision 8's consequence: a hole coaxial with its part is not wall-normal."""
+    """A hole coaxial with its part is not wall-normal, so its ray crosses the planes apart.
+
+    The cut runs along the component's own axis and the wall is drafted
+    (ADR-0007), so the outer and inner crossings differ.
+    """
     import math
 
     tilt = math.radians(30.0)
@@ -154,7 +158,7 @@ def test_the_crossing_names_the_surface_it_was_asked_about() -> None:
     assert crossing(_wall(key="top"), _feature(), FACE).key == "top"  # type: ignore[union-attr]
 
 
-#: J1's measured stack, in whole nanometres -- see the plan's Evidence. The
+#: J1's measured stack on the committed board, in whole nanometres. The
 #: 7.530 mm radius is the material a hole must *not* be sized for when the
 #: wall is crossed inside the outermost three millimetres.
 _J1 = Profile(
@@ -188,7 +192,11 @@ def _jack(
 
 
 def test_a_modelled_nut_outside_the_wall_does_not_inflate_the_hole() -> None:
-    """Decision 9's own counter-example, as arithmetic over the measured stack."""
+    """A modelled nut that starts past the run's end does not inflate the hole.
+
+    The 7.530 mm step begins 3 mm in and the run ends at 2.5 mm, so the
+    sleeve's 5.700 mm radius governs (ADR-0007).
+    """
     inside = required_radius_nm(_jack(), (Nanometre(500_000), Nanometre(2_500_000)))
     assert inside == 5_700_000
 
@@ -253,7 +261,11 @@ def test_a_span_holding_no_material_needs_no_hole_for_material() -> None:
 
 
 def test_a_bore_is_a_floor_on_the_radius_however_little_material_surrounds_it() -> None:
-    """Ruling 6, and the case the committed board cannot make govern."""
+    """A bore is a floor under the radius however little material surrounds it (ADR-0007).
+
+    Here the run holds none, so the bore alone governs: the case the committed
+    board cannot make govern.
+    """
     recessed = (Nanometre(-3_000_000), Nanometre(-1_000_000))
     bore = Nanometre(3_175_000)
     assert required_radius_nm(_jack(bore_nm=bore, profile=_BARE_TIP), recessed) == 3_175_000
@@ -385,7 +397,11 @@ def _drill_pipeline() -> Pipeline[DrillData]:
 
 
 def test_a_stage_with_no_feature_changes_nothing_at_all() -> None:
-    """Decision 18's byte identity, at the stage rather than at the artefact."""
+    """With no feature the stage returns its input's holes, surfaces and diagnostics unchanged.
+
+    That is what keeps a run naming no wall byte-identical, checked at the
+    stage rather than at the artefact.
+    """
     data = _data()
     found = _stage(_FakeWalls(walls=(_wall(),))).apply(data)
     assert found.holes == ()
@@ -619,9 +635,10 @@ def test_two_walls_equally_near_are_refused_rather_than_broken() -> None:
 
 
 def test_one_ray_in_two_regions_is_refused_without_ending_the_run() -> None:
-    """Decision 13's ambiguity is argued and measured unreachable; a raise here
-    would still abandon every other component's hole, because this stage runs
-    after the drill half has committed."""
+    """One ray in two regions is unreachable on every cached model (the corner gaps in
+    ``test_walls_evidence``), but is refused here as a finding all the same: a raise
+    would abandon every other component's hole, because this stage runs after the
+    drill half has committed (ADR-0007)."""
     model = _FakeWalls(
         walls=(_wall(key="right"), _wall(key="top")),
         admitting=frozenset({"right", "top"}),
@@ -668,7 +685,7 @@ def test_holes_come_back_in_an_order_the_geometry_fixes() -> None:
 
 
 def test_the_standalone_pipeline_composes_no_wall_stage() -> None:
-    """Decision 18: ``stompdrill`` drills no wall, because it has no seating.
+    """``stompdrill`` drills no wall, because it has no seating.
 
     Asserted on the composed stages and not on the flags: a stage reachable
     from ``build_pipeline`` would be reachable from the command line, and
@@ -772,8 +789,8 @@ def test_a_wall_refusal_names_a_surface_and_never_the_drilled_plate(
 
 
 def test_a_second_part_wanting_the_hole_a_wall_already_has_is_refused() -> None:
-    """Decision 14's overlap review runs inside ``drill``, five steps earlier,
-    so this stage is the only thing that can see two wall holes at once. Cut
+    """The overlap review runs inside ``drill``, before any wall hole exists, so
+    this stage is the only thing that can see two wall holes at once. Cut
     twice, the second pass runs a bit down a hole that is already there."""
     model = _FakeWalls(walls=(_wall(key="right"),), admitting=frozenset({"right"}))
 

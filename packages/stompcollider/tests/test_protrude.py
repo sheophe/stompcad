@@ -627,9 +627,9 @@ def test_the_axis_with_the_most_material_along_it_wins() -> None:
 
 
 def test_two_short_features_far_apart_on_one_line_do_not_outrank_a_long_one() -> None:
-    """The measure the plan corrects the spec on, stated as a fixture.
+    """Clad length and not span picks the feature's axis, stated as a fixture.
 
-    Two 0.5 mm rings 16 mm apart span 17 mm and clad 1 mm. A span measure
+    Two 0.5 mm rings 16 mm apart span 16.5 mm and clad 1 mm. A span measure
     prefers them to a 10 mm barrel; a clad measure does not, and it is the
     clad length a hole has to admit.
     """
@@ -659,7 +659,9 @@ def test_a_seam_s_two_halves_clad_the_same_length_as_one_whole_face() -> None:
 def test_the_committed_board_s_jacks_measure_what_the_plan_recorded(
     document: StepDocument,
 ) -> None:
-    """Decision 7's Evidence, as assertions. A drift here fails a suite.
+    """Each jack has twelve in-plane faces, a 24.484 mm clad axis and four 0.550 mm pins.
+
+    Measured off the committed board, so a drift in it fails here.
 
     Both jacks, not one: they are mirrored on the board and a rule reading
     the kernel's walk order would answer differently for the pair.
@@ -687,7 +689,7 @@ def test_the_committed_board_s_jacks_measure_what_the_plan_recorded(
 def test_the_committed_board_s_bore_is_never_wider_than_its_own_material(
     document: StepDocument,
 ) -> None:
-    """Why Task 5 has to build a fixture: this one cannot exercise the bore branch."""
+    """The committed board's bore is never wider than its material, so it cannot make the bore govern."""
     for substrate, parts in group(document, substrates(document)):
         normal = carrier_frame(substrate).w  # type: ignore[union-attr]
         for part in parts:
@@ -807,10 +809,10 @@ def test_the_tip_is_the_far_end_of_the_part_along_its_own_direction() -> None:
 
 
 def test_a_tube_s_bore_is_measured_off_the_solid_and_not_assumed() -> None:
-    """The read the committed board cannot make govern -- ruling 7.
+    """A concave coaxial face reaches ``bore_mm``, measured off a tube built in process.
 
-    A tube, not a jack: what is under test is that a concave coaxial face
-    reaches ``bore_mm`` at all. Whether a bore *governs* a diameter is
+    A tube, not a jack, because the committed board cannot make a bore govern.
+    Whether a bore *governs* a diameter is
     arithmetic over a profile, and the drill side drives that.
     """
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut

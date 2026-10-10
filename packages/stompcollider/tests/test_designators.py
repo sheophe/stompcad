@@ -156,6 +156,9 @@ def test_a_parsed_filter_remembers_the_expression_it_came_from() -> None:
 
 
 def test_the_default_filter_admits_nothing() -> None:
-    """Decision 11's default, stated once rather than spelled at each caller."""
+    """The default admits nothing, stated once rather than spelled at each caller.
+
+    A hole in an enclosure wall is irreversible, so none is cut unless named.
+    """
     assert NOTHING.admit(("J1", "RV1", "SW1")) == frozenset()
     assert NOTHING.source == ""

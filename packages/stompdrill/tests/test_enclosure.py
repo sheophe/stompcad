@@ -851,7 +851,7 @@ class TestTheEnclosureQuantiserEmitsNoMovementDiagnostic:
 
 class TestInferPartName:
     def test_a_filename_names_a_catalogue_part(self) -> None:
-        """Decision 10: stem, delimiters removed, uppercased, and in the catalogue."""
+        """The stem with delimiters removed and uppercased, accepted when the catalogue has it."""
         assert infer_part_name(Path("1590BB.stp")) == "1590BB"
         assert infer_part_name(Path("/cache/1590-bb.step")) == "1590BB"
         assert infer_part_name(Path("1590_B2.stp")) == "1590B2"
@@ -888,7 +888,7 @@ class TestInferredEnclosure:
         assert codes(diagnostics) == ["ambiguous-enclosure"]
 
     def test_a_declared_part_is_not_overridden_by_a_filename(self) -> None:
-        """Decision 10 infers only when no case is declared."""
+        """A filename names the part only when no case is declared."""
         stage = IdentifyHammondFootprint(expected_part="1590B2", case_model=Path("1590B.stp"))
 
         _, match, _ = stage.quantise(_tied_outline(), ORIGIN)
@@ -897,7 +897,7 @@ class TestInferredEnclosure:
         assert match.selected_part == "1590B2"
 
     def test_a_run_with_no_model_is_unchanged(self) -> None:
-        """Decision 10: inference has a filename to read only when a model is supplied."""
+        """Inference reads a filename, so a run with no model supplied has nothing to infer from."""
         stage = IdentifyHammondFootprint()
 
         _, match, diagnostics = stage.quantise(_tied_outline(), ORIGIN)

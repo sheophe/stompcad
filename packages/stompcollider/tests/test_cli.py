@@ -614,9 +614,9 @@ def test_a_withheld_part_still_reaches_the_report_and_the_model(
 def test_a_board_file_with_no_board_body_is_an_error_diagnostic_not_an_abort(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    """Decision 1: ``no-substrate`` is a finding, exactly as the spec's table says.
+    """``no-substrate`` is a finding, not an abort.
 
-    Exit 2 rather than 3 is the whole content of the decision: an abort out
+    Exit 2 rather than 3 is the whole content of the distinction: an abort out
     of the source would report the same sentence with the run classified as
     a usage failure, so the exit code is what pins it.
     """
@@ -630,7 +630,7 @@ def test_a_board_file_with_no_board_body_is_an_error_diagnostic_not_an_abort(
 def test_a_board_body_carrying_no_component_is_refused_by_type(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    """Decision 2: named, not a bare ``ValueError`` escaping as a crash.
+    """A board body with no component is refused by a named type, not a bare ``ValueError``.
 
     ``main`` returns rather than raising, and the message names the file
     the input problem is in.
@@ -645,7 +645,7 @@ def test_a_board_body_carrying_no_component_is_refused_by_type(
 def test_an_unreadable_case_model_is_a_usage_failure_and_writes_nothing(
     tmp_path, monkeypatch
 ) -> None:
-    """Decision 3: the run cannot begin, so it is exit 3 and not a diagnostic.
+    """An unreadable case model means the run cannot begin: exit 3, not a diagnostic.
 
     There is nothing to check clearance against and nothing to assemble, so
     unlike an unreadable *board* -- which the source diagnoses and skips --
@@ -672,7 +672,7 @@ def test_an_unreadable_board_is_diagnosed_rather_than_ending_the_run(
 def test_a_kernel_failure_is_reported_as_degenerate_geometry(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    """Decision 4: a boolean that could not be evaluated is a finding, exit 2.
+    """A boolean that could not be evaluated is a finding, exit 2.
 
     Injected at the one seam every kernel-backed step of the run passes
     through. Without the mapping this is exit 3, since a ``StompgeomError``
@@ -710,7 +710,7 @@ def test_a_missing_kernel_stays_a_usage_failure(tmp_path, monkeypatch) -> None:
 
 
 def test_the_assembly_carries_the_case_models_own_timestamp(tmp_path, monkeypatch) -> None:
-    """Decision 5: from the input, never from the clock and never a default."""
+    """The timestamp comes from the input, never from the clock and never a default."""
     run = _prepare(tmp_path, monkeypatch)
     assert main(run.argv) == _BASELINE_EXIT
 
@@ -718,7 +718,7 @@ def test_the_assembly_carries_the_case_models_own_timestamp(tmp_path, monkeypatc
 
 
 def test_two_runs_over_one_input_write_identical_bytes(tmp_path, monkeypatch) -> None:
-    """What the timestamp decision is for: nothing in either artefact varies."""
+    """What taking the timestamp from the input is for: nothing in either artefact varies."""
     first = _prepare(tmp_path, monkeypatch)
     assert main(first.argv) == _BASELINE_EXIT
     report, assembly = first.report.read_bytes(), first.assembly.read_bytes()
@@ -1313,7 +1313,7 @@ def test_a_designator_both_expressions_name_stops_the_run(tmp_path, monkeypatch)
 def test_a_run_with_no_wall_expression_reports_exactly_what_it_did_before(
     tmp_path, monkeypatch
 ) -> None:
-    """Decision 18: the existing artefacts are unchanged when nothing is named.
+    """With no wall expression the existing artefacts are unchanged.
 
     The control for the test above, on the same board and the same panel
     expression: a default admitting anything would claim every one of those
@@ -1453,9 +1453,10 @@ def test_the_components_excused_from_case_clashes_are_named() -> None:
     """Interference is this tool's deliverable, so no exemption from it is silent.
 
     A composed run has the drill half's refusals as the replacement account for
-    a clash decision 12 excused; standalone there is no wall stage, so the only
-    place the exemption can be stated is here. Named, because a builder reading
-    a clean report needs to know which parts were not held to it.
+    a clash excused because a wall will be drilled for that part; standalone
+    there is no wall stage, so the only place the exemption can be stated is
+    here. Named, because a builder reading a clean report needs to know which
+    parts were not held to it.
     """
     data = replace(
         _dock_data_with_component(wall_admitted=True, wall=(_a_wall_candidate(),)),
@@ -1529,7 +1530,7 @@ def test_a_run_naming_a_jack_reports_its_measured_features(
 def test_a_run_with_no_wall_expression_prints_no_wall_features_block(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    """Decision 18 on real printed output, not only on the bare function:
+    """No wall expression, no block, on real printed output, not only on the bare function:
     ``test_a_run_with_no_wall_expression_reports_exactly_what_it_did_before``
     reads the ``--report`` JSON artefact, which never carried this text
     either way, so it cannot see this block appear or vanish. This is the

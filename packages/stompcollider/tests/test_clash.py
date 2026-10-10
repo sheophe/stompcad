@@ -1490,7 +1490,7 @@ def _staged_dock_data(
 
 
 def test_no_admitted_component_means_no_wall_feature() -> None:
-    """A run with no wall expression emits nothing, which is decision 18's promise."""
+    """A run with no wall expression emits no wall feature, so such a run is unchanged."""
     data = _staged_dock_data()
     found = Clashes(_case_solids(), _board_solids()).apply(data)
     assert found.wall_features == ()
@@ -1619,8 +1619,8 @@ def test_the_ray_survives_a_non_trivial_carrier_and_case_frame() -> None:
 
 
 # --------------------------------------------------------------------------
-# A clash leaves the accounting only for a part a wall will be drilled for
-# (decision 12). Keyed on ``Component.wall``, never on ``wall_admitted``:
+# A clash leaves the accounting only for a part a wall will be drilled for.
+# Keyed on ``Component.wall``, never on ``wall_admitted``:
 # the flag records what a builder's expression named, not what it found.
 # --------------------------------------------------------------------------
 
@@ -1682,7 +1682,10 @@ def test_a_board_with_a_wall_admitted_part_is_walked_per_solid_only_to_filter() 
 
 
 def test_a_board_with_no_wall_admitted_part_is_checked_exactly_as_before() -> None:
-    """The byte-identity decision 18 promises: no wall expression, no change at all."""
+    """A board with no wall-admitted part still reports its clash, with ``part`` unset.
+
+    No wall expression means no exclusion, so nothing about the check changes.
+    """
     data = _staged_dock_data(clashing=("J1", "RV1"))
     before = Clashes(_case_solids(), _board_solids()).apply(data)
     assert any(
@@ -1701,8 +1704,8 @@ def test_the_cavity_predicate_is_unchanged_by_the_exclusion() -> None:
     -- it is true by construction. The real discriminator is the arrested
     seating itself: ``J1`` reaches ``WALL`` here exactly as it does in
     ``test_a_wall_admitted_part_s_clash_with_the_case_is_not_reported``, so
-    the board must still fail to clear the cavity even though that same
-    interference is dropped from ``clashes`` (decision 15's ordering).
+    the board must still fail to clear the cavity although that interference
+    is dropped from ``clashes``: the case handed to ``Clashes`` is undrilled, so the wall is metal.
     """
     data = _staged_dock_data(wall=("J1",), clashing=("J1",))
     stage = Clashes(_case_solids(), _board_solids())
@@ -1772,7 +1775,7 @@ def _wall_clashes(components: tuple[Component, ...]) -> list[Clash]:
 
 
 def test_naming_one_part_leaves_the_others_counted_as_one_clash() -> None:
-    """Decision 12's promise: every other clash is ranked exactly as today.
+    """Every other clash is ranked exactly as with no part named.
 
     ``rank_key`` compares how many clashes a placement carries before it
     compares their volume, so a board reported one clash per body where it was
@@ -1788,7 +1791,7 @@ def test_naming_one_part_leaves_the_others_counted_as_one_clash() -> None:
 
 
 def test_a_wall_admitted_part_s_clash_leaves_the_ranking_too() -> None:
-    """Dropped from the accounting as well as the findings, per decision 12.
+    """Dropped from the accounting as well as the findings.
 
     ``rank_key`` reads how many clashes a placement carries and then their
     volume, so those two numbers *are* the accounting: the count above stays

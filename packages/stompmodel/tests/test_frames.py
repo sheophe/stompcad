@@ -278,8 +278,8 @@ def test_to_model_depth_moves_along_w_not_along_a_kernel_axis() -> None:
 
 
 def test_apply_direction_ignores_the_translation() -> None:
-    """A direction has no origin. to_canonical subtracting one is the defect
-    Ruling 4 names; a rotation-only operation is the answer."""
+    """A direction has no origin. ``to_canonical`` would subtract an origin the
+    direction does not have; a rotation-only operation is the answer."""
     moved = _frame().translated_nm(Nanometre(10_000_000), Nanometre(0), Nanometre(0))
     motion = _frame().placement_onto(moved)
     assert motion.apply_direction((1.0, 0.0, 0.0)) == (1.0, 0.0, 0.0)
