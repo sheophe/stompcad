@@ -95,9 +95,9 @@ def test_a_wall_reference_change_belongs_to_the_boards_place() -> None:
 
 
 def test_a_wall_reference_change_re_reads_the_boards_and_re_cuts_the_walls() -> None:
-    """Ruling 4. The expression gates the *probing*, so a feature that was never
-    measured cannot be resolved: the scan is stale and the seating goes with it.
-    Decision 17's resume-at-drill-walls is what every other change gets."""
+    """The expression gates the *probing*, so a feature that was never measured
+    cannot be resolved: the scan is stale and the seating goes with it, rather
+    than the run resuming at ``drill walls`` alone."""
     invalidated = _stale("wall_reference")
     assert {"read-boards", "match", "seat", "clash", "drill-walls"} <= invalidated
     assert "write-model" in invalidated

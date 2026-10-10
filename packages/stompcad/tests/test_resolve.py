@@ -43,7 +43,10 @@ def _options(tmp_path: Path) -> RunOptions:
 
 
 def test_a_warning_is_never_a_question() -> None:
-    """Decision 6: only an ERROR reaches a picker."""
+    """A warning is never a question, even under a resolvable code.
+
+    Severity decides whether a run pauses, and only a paused run can ask (ADR-0014).
+    """
     warning = Diagnostic.warning(
         "ambiguous-enclosure", "tied", data=(("candidates", "1590B, 1590B2"),)
     )
@@ -51,7 +54,10 @@ def test_a_warning_is_never_a_question() -> None:
 
 
 def test_a_refusal_carries_no_resolvable_code() -> None:
-    """Decision 6: ``unknown-diameter`` and its kin can reach no picker."""
+    """An error whose code is not in ``RESOLVABLE`` is not a question.
+
+    ``unknown-diameter`` is the example: a refusal stays a refusal.
+    """
     refusal = Diagnostic.error("unknown-diameter", "no such drill")
     assert question_for(refusal) is None
     assert "unknown-diameter" not in RESOLVABLE
@@ -71,7 +77,7 @@ def test_a_tie_between_parts_offers_the_tied_parts() -> None:
 
 
 def test_a_board_admitting_nothing_offers_its_own_designators() -> None:
-    """Decision 6: ``empty-group``'s candidates are the board's designators.
+    """``empty-group``'s candidates are the board's designators.
 
     The diagnostic carries the board, not the list, so the names are
     handed in by whoever holds the boards.
@@ -177,7 +183,7 @@ def test_a_placement_is_not_a_question_however_severe_it_is() -> None:
 
 
 def test_a_tie_is_a_single_choice_and_an_empty_group_a_multiple_one() -> None:
-    """Decision 12: a panel is drawn for one part; a board is held by several."""
+    """A panel is drawn for one part; a board is held by several components."""
     assert not RESOLVABLE["ambiguous-enclosure"].multiple
     assert RESOLVABLE["empty-group"].multiple
 

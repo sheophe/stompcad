@@ -26,21 +26,21 @@ def _accepts_presentation(presentation: Presentation) -> None:
 
 
 def _accepts_question(question: Question) -> None:
-    """As above, for the question protocol plan C constructs."""
+    """As above, for the protocol ``ask`` takes."""
 
 
 def test_plain_writer_satisfies_presentation() -> None:
-    """Plan B is written against ``Presentation``; mypy must check ``PlainWriter`` here."""
+    """``PlainWriter`` must satisfy ``Presentation``, which a run drives; mypy checks it."""
     _accepts_presentation(PlainWriter(io.StringIO()))
 
 
 def test_choice_satisfies_question() -> None:
-    """Plan C constructs ``Choice`` and passes it where ``Question`` is expected."""
+    """``Choice`` must satisfy ``Question``, which ``ask`` takes; mypy checks it."""
     _accepts_question(Choice(prompt="which enclosure?", candidates=("1590B",)))
 
 
 def test_a_step_prints_when_it_finishes_not_when_it_starts() -> None:
-    """Spec decision 4: a step is reported on completion."""
+    """A step's line is written when it finishes; an update before that writes nothing (ADR-0013)."""
     out = io.StringIO()
     writer = PlainWriter(out)
     writer.begin(DRILL_AND_DOCK)
@@ -71,7 +71,7 @@ def test_report_writes_each_line_terminated_and_nothing_else() -> None:
 
 
 def test_asking_without_a_terminal_is_a_usage_failure() -> None:
-    """Spec decision 11: a gap with no terminal names what was missing."""
+    """Asking with no terminal raises ``NoTerminal`` naming the question's prompt (ADR-0013)."""
     writer = PlainWriter(io.StringIO())
     question = Choice(prompt="which enclosure?", candidates=("1590B",))
 
@@ -94,6 +94,9 @@ def test_textual_is_declared_not_merely_installed() -> None:
 
 
 def test_one_format_serves_both_writers() -> None:
-    """Decision 2: the settled terminal lines and the piped lines are the same."""
+    """``step_line`` pads the label to ``width`` and leaves it unpadded at zero.
+
+    The terminal's settled lines and the pipe's both render through it (ADR-0013).
+    """
     assert step_line("quantise", "8 holes, 2 tools", width=10) == "  quantise    8 holes, 2 tools"
     assert step_line("quantise", "8 holes, 2 tools") == "  quantise  8 holes, 2 tools"

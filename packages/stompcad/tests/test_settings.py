@@ -45,7 +45,7 @@ def test_agreement_says_only_where_the_value_came_from() -> None:
 
 
 def test_a_list_states_its_own_items_rather_than_Python_s_spelling_of_them() -> None:
-    """Decision 7: a row is read by a builder, and ``PosixPath`` is not a path."""
+    """A row is read by a builder, and ``PosixPath`` is not a path."""
     boards = (Path("/project/tar-pcb.stp"), Path("/project/jack.stp"))
     resolved = pick(boards, None, None, ())
     assert resolved.describe() == (
@@ -165,8 +165,8 @@ def test_every_row_names_the_field_it_states() -> None:
 
 
 def test_the_wall_reference_defaults_to_naming_nothing() -> None:
-    """Decision 11: a hole in a wall is irreversible and the panel says nothing
-    about it, so the default is the empty expression rather than a glob."""
+    """A hole in a wall is irreversible and the panel says nothing about it, so the
+    default is the empty expression rather than a glob."""
     from stompcad.settings import DEFAULTS
 
     assert DEFAULTS.boards.wall_reference.value == ""

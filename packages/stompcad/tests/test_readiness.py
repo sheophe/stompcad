@@ -1,4 +1,4 @@
-"""Decision 17's matrix, one row at a time."""
+"""The readiness matrix (ADR-0014), one situation per test."""
 
 from __future__ import annotations
 

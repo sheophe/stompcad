@@ -24,7 +24,7 @@ _PLAN = frozenset({
     "read-panel", "quantise", "drill", "write-case",
     "read-boards", "match", "seat", "clash", "write-assembly",
 })
-#: What a project with no boards runs: decision 17's drill-only row.
+#: What a project with no boards runs: the four drill steps (ADR-0013).
 _DRILL_ONLY = frozenset({"read-panel", "quantise", "drill", "write-case"})
 
 
@@ -68,14 +68,17 @@ def _fitting() -> Session:
 
 
 def test_a_complete_project_may_run_and_says_so() -> None:
-    """Decision 4: the one positive statement belongs on Project."""
+    """A project that may run says so in one positive sentence."""
     session = _session()
     assert session.may_run()
     assert session.statement() == "Everything needed is here. Press Enter to run."
 
 
 def test_an_unresolved_board_list_blocks_the_run_and_marks_its_place() -> None:
-    """Decision 17: not discovered and not declared is unresolved, not drill only."""
+    """A board list nobody has answered blocks the run and marks Boards.
+
+    It is not read as "this pedal has none", which would run drill-only (ADR-0014).
+    """
     session = _session(_settings(boards=DEFAULTS.boards))
     assert not session.may_run()
     assert session.attention(Place.BOARDS)
@@ -83,7 +86,7 @@ def test_an_unresolved_board_list_blocks_the_run_and_marks_its_place() -> None:
 
 
 def test_a_clean_project_shows_a_clean_sidebar() -> None:
-    """Decision 4: the marker marks the exception, never the accomplishment."""
+    """The attention marker marks the exception: a clean project marks no row (ADR-0014)."""
     session = _session()
     assert not any(row.attention for row in session.rows())
 
@@ -100,7 +103,7 @@ def test_findings_carries_a_count_rather_than_a_mark() -> None:
 
 
 def test_an_edit_records_its_origin_and_the_project_it_overrode() -> None:
-    """Decision 7: where two ranks disagree, the row shows both."""
+    """Where two ranks disagree the row shows both: the edit and the project's value (ADR-0014)."""
     session = _session(project=manifest.Manifest(values={"drilling": {"grid_mm": 0.25}}))
     session.set(Place.DRILLING, "grid_mm", 0.5)
     row = session.settings.drilling.grid_mm
@@ -116,7 +119,10 @@ def test_an_edit_agreeing_with_the_project_shows_no_disagreement() -> None:
 
 
 def test_an_output_change_makes_only_the_write_steps_stale() -> None:
-    """Decision 10: propagation follows data, and a filename costs no kernel work."""
+    """A changed filename makes only the write steps stale, so no seating step re-runs (ADR-0014).
+
+    The roadmap then names Output.
+    """
     session = _session()
     session.set(Place.OUTPUT, "targets", (("excellon", Path("/project/other.drl")),))
     assert session.stale() == {"write-case", "write-model", "write-assembly"}
@@ -131,7 +137,10 @@ def test_the_roadmap_falls_back_to_the_earliest_place_a_change_touched() -> None
 
 
 def test_the_left_marker_is_derived_from_the_stale_set() -> None:
-    """Decision 4: the roadmap has no way to disagree with the engine."""
+    """The left marker is the steps the last run credited less those a change invalidated (ADR-0014).
+
+    After a grid change Drilling and Output lose it and Artwork keeps it.
+    """
     session = _session()
     session.begin_run(_PLAN)
     for step in sorted(_PLAN):
@@ -146,14 +155,13 @@ def test_the_left_marker_is_derived_from_the_stale_set() -> None:
 
 
 def test_a_run_marks_a_place_as_its_own_steps_complete() -> None:
-    """Decision 4: credit less invalidation, asked of each step and not each field.
+    """The left marker is credit less invalidation, asked of each step (ADR-0014).
 
     A value set before a run is what that run is about to use, so the steps
-    reading it earn their place's marker as they complete. The artwork's own
-    answer made this the ordinary case rather than a corner of it: every
-    project that opens without a declared enclosure now carries a change
-    into its first run, and holding every marker back until the last step
-    reports one run as five places' work arriving at once.
+    reading it earn their place's marker as they complete. A project whose
+    enclosure the artwork's fit answers carries such a change into its first
+    run, and holding every marker back until the last step would report that
+    run's work as arriving all at once.
     """
     session = _fitting()
     session.record_fit(["1590B"])
@@ -209,7 +217,7 @@ def test_a_fresh_run_forgets_what_an_earlier_one_reached() -> None:
 
 
 def test_an_interrupted_resume_leaves_the_steps_it_never_reached_stale() -> None:
-    """Decision 4: a change clears when every step it invalidated has run, not its readers.
+    """A change clears when every step it invalidated has run, not when its readers have.
 
     ``grid_mm`` is read by ``quantise`` alone but invalidates the drill and
     write steps too, so a resume stopped after quantisation must still
@@ -238,7 +246,7 @@ def _boardless() -> Settings:
 
 
 def test_a_first_run_plans_the_steps_this_project_s_own_plan_holds() -> None:
-    """Decision 17: no boards means no dock half, so no dock step is planned."""
+    """A project naming no boards plans only the four drill steps (ADR-0013)."""
     session = _session(_boardless())
     session.start_run(resuming=False)
     for step in sorted(_DRILL_ONLY):
@@ -248,7 +256,7 @@ def test_a_first_run_plans_the_steps_this_project_s_own_plan_holds() -> None:
 
 
 def test_a_boardless_resume_returns_the_project_to_reached() -> None:
-    """Decision 4: the roadmap cannot claim a step stale that this project never runs.
+    """The roadmap cannot claim a step stale that this project never runs.
 
     With no boards the driver drops the dock half, so planning ``write
     assembly`` would wait on a step no run will credit: ``targets`` would
@@ -292,7 +300,7 @@ def test_a_project_with_a_board_still_plans_its_dock_half() -> None:
 
 
 def test_nothing_is_editable_while_a_run_is_active() -> None:
-    """Decision 5: read-only, never hidden."""
+    """While a run is active no place accepts an edit (ADR-0014)."""
     session = _session()
     session.begin_run(_PLAN)
     for place in Place:
@@ -302,7 +310,7 @@ def test_nothing_is_editable_while_a_run_is_active() -> None:
 
 
 def test_every_place_is_still_reachable_while_a_run_is_active() -> None:
-    """The other half of decision 5: readable everywhere, editable nowhere."""
+    """The other half: a place stays selectable and readable while none is editable (ADR-0014)."""
     session = _session()
     session.begin_run(_PLAN)
     session.go(Place.DRILLING)
@@ -311,7 +319,7 @@ def test_every_place_is_still_reachable_while_a_run_is_active() -> None:
 
 
 def test_only_the_paused_place_accepts_an_edit() -> None:
-    """Decision 12: the app navigates to the place that can answer."""
+    """A paused run goes to the place that answers its gap, and only that place accepts an edit (ADR-0014)."""
     session = _session()
     session.begin_run(_PLAN)
     session.pause(PendingGap(
@@ -326,7 +334,7 @@ def test_only_the_paused_place_accepts_an_edit() -> None:
 
 
 def test_a_second_gap_replaces_the_first_rather_than_queueing() -> None:
-    """Decision 12: the second may not exist once the first is answered."""
+    """A second gap replaces the first, as the second may not exist once the first is answered (ADR-0014)."""
     session = _session()
     session.begin_run(_PLAN)
     session.pause(PendingGap("ambiguous-enclosure", "quantise", Place.ENCLOSURE, None))
@@ -346,7 +354,7 @@ def test_answering_returns_the_run_to_running_with_no_second_action() -> None:
 
 
 def test_a_finished_run_leaves_the_code_it_earned() -> None:
-    """Decision 14: the exit code is the last completed run's."""
+    """A finished run leaves its code as the process's exit code; before any run it is 0."""
     session = _session()
     assert session.exit_code == 0
     session.begin_run(_PLAN)
@@ -356,7 +364,10 @@ def test_a_finished_run_leaves_the_code_it_earned() -> None:
 
 
 def test_an_unreadable_project_blocks_the_run_and_says_why() -> None:
-    """Decision 9: a project whose declarations cannot be read is never run under defaults."""
+    """An unreadable project blocks the run, says why and marks Project.
+
+    It is never run under values that look like the user's own (ADR-0014).
+    """
     resolved = _settings()
     session = Session(Resolution(
         settings=resolved,
@@ -381,11 +392,12 @@ def _blocked(panel: Path, *flags: str) -> Session:
 
 
 def test_a_refused_value_is_asked_again_once_its_place_answers(tmp_path: Path) -> None:
-    """Decision 4: the roadmap has no way to disagree with the engine.
+    """Answering the place that owns a refused value lifts the refusal.
 
-    The marker sends a builder to the place that owns the refused value, so
-    answering it there must lift the refusal. A run still refused over a
-    value nobody holds teaches a builder that the marker means nothing.
+    The marker, the statement and ``may_run`` move together. The marker
+    sends a builder to the place that owns the refused value, so answering
+    it there must lift the refusal. A run still refused over a value nobody
+    holds teaches a builder that the marker means nothing.
     """
     panel = tmp_path / "tar.ai"
     panel.write_bytes(b"")
@@ -404,7 +416,7 @@ def test_a_refused_value_is_asked_again_once_its_place_answers(tmp_path: Path) -
 
 
 def test_a_duplicate_target_marks_the_place_that_owns_it(tmp_path: Path) -> None:
-    """Decision 4: a marker on a place holding no values is no marker at all.
+    """A marker on a place holding no values is no marker at all.
 
     Two artefacts naming one file is ``stompmodel``'s own sentence and names
     no flag of ours, so the refusal has to be labelled on the way past. Filed
@@ -441,11 +453,11 @@ def test_a_duplicate_target_the_project_declares_marks_output_too(tmp_path: Path
 
 
 def test_an_unreadable_project_survives_an_edit_to_something_else(tmp_path: Path) -> None:
-    """Decision 9: the file is still unreadable, whatever else has been said.
+    """The file is still unreadable, whatever else has been said.
 
     The control for the refusal above: an obstacle any edit at all lifted
     would lift this one too, and the project would then run under values
-    that look like the user's own.
+    that look like the user's own (ADR-0014).
     """
     panel = tmp_path / "tar.ai"
     panel.write_bytes(b"")
@@ -461,7 +473,10 @@ def test_an_unreadable_project_survives_an_edit_to_something_else(tmp_path: Path
 
 
 def test_a_file_already_on_disk_is_labelled_found_rather_than_current() -> None:
-    """Decision 2: the manifest holds no hashes, so the app must not imply one."""
+    """The manifest holds no hashes (ADR-0014), so a file on disk is not claimed to be current.
+
+    Only a file this session wrote is labelled made.
+    """
     session = _session()
     path = Path("/project/tar-case.drl")
     assert session.label_for(path, exists=True) == (
@@ -584,8 +599,8 @@ def test_a_fit_landing_mid_run_does_not_raise() -> None:
 
 
 def test_the_boards_place_waits_until_the_walls_are_cut() -> None:
-    """Decision 17: the place's work is not done until the walls are cut, and
-    the walls are cut at ``drill-walls`` rather than in the write step after."""
+    """The place's work is not done until the walls are cut, and the walls are
+    cut at ``drill-walls`` rather than in the write step after."""
     assert drive.steps_of_place("boards") == {"read-boards", "drill-walls"}
 
 
@@ -598,7 +613,7 @@ def test_a_wall_reference_edit_marks_the_boards_place() -> None:
 
 
 def test_a_boardless_project_never_waits_for_a_step_it_will_not_run() -> None:
-    """Review focus. ``wall_reference`` resolves and is remembered on a run with
+    """``wall_reference`` resolves and is remembered on a run with
     no boards, and every step that reads it is pruned -- so a roadmap waiting on
     one would report it stale for ever."""
     session = _session(_boardless())
