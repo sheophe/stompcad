@@ -2,12 +2,12 @@
 
 **Status:** Accepted, amended by
 [ADR-0014](0014-the-workbench-and-its-resolution.md) in five places, beside the
-change to `retry` already recorded here and, with plan 3, its worker-thread
-decision amended to a process, for decision 18's reason: the terminal
-presentation's worker-thread mechanism now serves the workbench rather than
-`InlineApp`, its inline screen and the detail level `v` cycled; a terminal's
-settled step lines are now written as the workbench exits, so the byte
-comparison against the same run piped is against those exit lines; an error
+change to `retry` already recorded here and its worker-thread decision amended
+to a process, because a thread cannot keep the interface answering in time: the
+terminal presentation's worker-thread mechanism now serves the workbench rather
+than `InlineApp`, its inline screen and the detail level `v` cycled; a
+terminal's settled step lines are now written as the workbench exits, so the
+byte comparison against the same run piped is against those exit lines; an error
 pauses a run and asks, a warning does not pause, and `promoted()` is deleted
 rather than left unreachable, which retires `--promote-warnings`; `CI` present
 in the environment, or `TERM=dumb`, now counts as no terminal even with a tty
@@ -17,8 +17,8 @@ held intermediates allow it, and otherwise discards that step's own holds and
 runs it again rather than refusing, because refusing was right while a resolver
 alone called it mid-run and wrong once a builder in the workbench can call it
 after simply changing their mind. Its worker-thread decision is amended to a
-process, for decision 18's reason: only `call_from_thread` is unchanged; a
-worker still crosses to the app, but now pumps events across a process boundary
+process, for that same reason: only `call_from_thread` is unchanged; a worker
+still crosses to the app, but now pumps events across a process boundary
 instead of doing the run's own work; `ask` blocks in that process on its own
 command pipe rather than a worker's `Event`; and a fault crosses as a value
 re-raised on the far side rather than as the exception object carried to the
@@ -59,8 +59,9 @@ The terminal is not always there. A pipe, a CI runner and a dumb terminal get
 the same run, and must get the same record of it.
 
 [docs/specs/stompcad-tui.md](../specs/stompcad-tui.md) argues these decisions in
-full. This ADR records the ones that bind code, because CLAUDE.md requires the
-ADR accepted before the architecture changes.
+full; it is not tracked in this repository, so the decisions below state what
+they settle rather than citing it. This ADR records the ones that bind code,
+because CLAUDE.md requires the ADR accepted before the architecture changes.
 
 ## Decision
 
@@ -96,10 +97,10 @@ happens to take.
 ### The run's span is divided once, among the steps it intends to take
 
 One `begin` and one division per run. A drill-only run divides its span among
-its own four steps, and a run with boards divides among all nine; the two halves
-then draw from the one division. Dividing the same scope twice would leave
-monotonicity resting on that maximum, and would weigh a run against five steps
-it never intended to take.
+its own steps, and a run with boards divides among every step its plan lists;
+the two halves then draw from the one division. Dividing the same scope twice
+would leave monotonicity resting on that maximum, and would weigh a run against
+steps it never intended to take.
 
 ### The driver calls each phase, and holds what each one produced
 
@@ -119,10 +120,10 @@ intermediates was for.
 
 Resolution sits inside the step: it produces its data, `Driver._settled` asks
 about the first finding a picker can answer, the step runs again under that
-answer, and only then is it credited with the outcome the successful run
-earned. Decision 4 requires exactly that — a step that stops to ask credits
-nothing — so a resolution loop outside the step would have to either report the
-step twice or retract a line it had already written.
+answer, and only then is it credited with the outcome the successful run earned.
+A step that stops to ask credits nothing, as *A step credits its span only when
+it succeeds* decides above, so a resolution loop outside the step would have to
+either report the step twice or retract a line it had already written.
 
 Two codes reach a picker: `ambiguous-enclosure`, whose candidates are the tied
 parts and whose answer declares `case`, and `empty-group`, whose candidates are
@@ -213,8 +214,9 @@ as a fault in the application.
 So the run happens in a process started with `spawn`. Never `fork`: a
 forked child inherits the interface's memory, a live Textual application
 included, at whatever moment the fork landed. The process outlives one run,
-because the spec's resume, decision 10, spends intermediates the driver
-still holds, and a process started per run would throw away the thing a
+because a resume spends the intermediates the driver still holds, which
+ADR-0014 decides under *Invalidation propagates by data dependency, not
+position*, and a process started per run would throw away the thing a
 resume exists to reuse.
 
 A quit never signals a run in flight. `_write` stages and then commits with
@@ -274,8 +276,8 @@ keys.
 One further point came out of building this, not out of the spec. The
 pump itself starts with the first run rather than from `on_mount`, because
 `events()` reaches `_serving()`, which spawns the process: a worker started
-at mount would spawn one merely to listen, and decision 1 forbids opening a
-project from costing kernel work. The run's own process catches its fault
+at mount would spawn one merely to listen, and opening a project must not
+cost kernel work nobody asked for. The run's own process catches its fault
 as `BaseException` — `Exception` would miss `Cancelled`, which derives from
 it — and reports it across the pipe as a value; the pump hands that value
 to the app, which keeps it as `app.failure` and re-raises it on the main
@@ -328,22 +330,23 @@ been wrong.
 
 Its **declaration** still commits, and names only the formats that produced a file. It
 commits because, in a run with boards, this is the drill half's *only* carrier — `write case`
-declares no format there — so withholding it would leave exactly what ADR-0014's decision 8
-forbids: committed files beside no project file, or beside defaults that did not make them.
-It is narrowed because `output.targets` is a per-format map, and naming a format this very
-commit withheld would point a row at a file nobody wrote. That is not a new rule but the one
-`payload_for` already applies to a format another commit owns, read here for a format no
-commit will reach. The run's other places — artwork, enclosure, drilling — declare values
-rather than files, and those values are exactly the ones that produced the Excellon and the
-drawings now on disk, so they are recorded in full.
+declares no format there — so withholding it would leave exactly what ADR-0014's gap-filling
+decision forbids: artefacts on disk beside no project file, or beside defaults that did not
+make them. It is narrowed because `output.targets` is a per-format map, and naming a format
+this very commit withheld would point a row at a file nobody wrote. That is not a new rule
+but the one `payload_for` already applies to a format another commit owns, read here for a
+format no commit will reach. The run's other places — artwork, enclosure, drilling — declare
+values rather than files, and those values are exactly the ones that produced the Excellon
+and the drawings now on disk, so they are recorded in full.
 
 An error on the **cut document itself** takes the very same path, and for the same reason.
 The one error that document can carry which the panel-drilled one cannot is a wall refusal,
 and a refusal indicts the part a builder named — `boards.wall_reference`, a value this
-commit never declares — not the artwork, the enclosure or the drilling, which did produce
-the Excellon now on disk. So the artefacts are withheld and the narrowed declaration still
-commits. Withholding it too would leave that Excellon beside no project file at all, which
-is the state ADR-0014's decision 8 forbids and which no run before this amendment could
+commit never declares — not the artwork, the enclosure or the drilling, which did produce the
+Excellon now on disk. So the artefacts are withheld and the narrowed declaration still commits.
+Withholding it too would leave that Excellon beside no project file at all, which is the harm
+ADR-0014 fills a manifest per half to prevent — an artefact on disk with no declaration of what
+made it, or one beside declarations that did not — and which no run before this amendment could
 reach, because its drill declaration landed at `write case`.
 
 **A second deliberate limit: a wall surface gets no sibling artefact.** The per-surface
@@ -506,18 +509,23 @@ The step list is data, so nothing else changes with it.
 replaced `WorkbenchPresentation` once the run moved to its own process.
 `ask` pushes `PickerScreen`, the workbench's own modal, where the inline
 app once pushed `ChoiceScreen`.
-The interactive resolver has landed for both resolvable codes, so the spec's
-decisions 6, 8 and 10 are decided in code. What the resolver drives is `_rerun`,
-which runs one step again and returns its outcome without reporting it, because
-a loop answering gap after gap must not credit the step in between. `retry` is
-the same work with the step credited, kept as the public way to run one step
-alone; it has no caller in production yet, and remains an entry point rather
-than a use.
+The interactive resolver has landed for both resolvable codes, so what a picker
+may ask is decided in code rather than argued: only an error carrying a
+resolvable code is put to one, every gap is raised before its step credits a
+leaf, and an ambiguous footprint asks only where a supplied case model's
+filename settles nothing. What the resolver drives is `_rerun`, which runs one
+step again and returns its outcome without reporting it, because a loop
+answering gap after gap must not credit the step in between. `retry` is the
+same work with the step credited, kept as the public way to run one step alone;
+it has no caller in production yet, and remains an entry point rather than a
+use.
 
-What is left undone is the one gap decision 6 gestured at and this design
-declines: `ambiguous-placement` records a count rather than candidates, and no
-stage applies an explicit placement, so a picker there would ask a question no
-answer could be honoured for. The spec states that limit in its own decision 6.
+What is left undone is the one gap this design declines to ask about:
+`ambiguous-placement` records a count rather than candidates, and no stage
+applies an explicit placement, so a picker there would ask a question no answer
+could be honoured for. The limit is therefore deliberate: `ambiguous-placement`
+reaches no picker, and `--place` and `--pin` stay parsed and then rejected, for
+as long as nothing downstream can honour a placement a builder chooses.
 
 `stompcad`'s suite gates the tests that read the board fixture and the cached
 enclosure model behind `--boards` and `--hammond`, mirroring both tools rather
