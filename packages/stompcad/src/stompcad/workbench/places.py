@@ -1,9 +1,9 @@
 """One pane per place: its rows, what `enter` opens on each, and the picker.
 
-Spec decision 2 names the places for subjects, and decision 7 has every row
-state its value and origin; both come straight from ``Settings.<place>.rows()``,
-so a pane composes strings rather than deciding anything. Decision 3 makes
-every list a picker rather than a field, so a row is typed only where the
+Places are named for subjects. Every row states its value and origin
+(ADR-0014), and both come straight from ``Settings.<place>.rows()``, so a
+pane composes strings rather than deciding anything. Every list is a picker, since
+only an open text field makes letters type; a row is typed only where the
 tool that owns it offers nothing to choose from: the numbers, the paths, the
 drawing title and the two size lists -- and the designators, which are a tick
 list once a run has read a board and an expression until then.
@@ -81,7 +81,7 @@ __all__ = [
 
 
 class Kind(Enum):
-    """What ``enter`` opens on this row. Decision 3: lists wherever possible."""
+    """What ``enter`` opens on this row: a list wherever the owning tool has one."""
 
     TEXT = "text"
     NUMBER = "number"
@@ -155,7 +155,7 @@ def choices_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
     """The answers this row's picker offers, from whoever owns the question."""
     panel = session.settings.artwork.panel.value
     if field == "panel":
-        # Decision 6: several artwork files offer a pick rather than a
+        # Several artwork files offer a pick rather than a
         # refusal, and the row that states which one is open is the row that
         # offers them. With none found there is nothing to offer and the
         # path is typed instead.
@@ -163,8 +163,8 @@ def choices_for(session: Session, place: Place, field: str) -> tuple[str, ...]:
     if field in ("drill_layer", "reference_layer"):
         return () if panel is None else discover.layers(panel)
     if field == "case":
-        # Decision 2: the parts the artwork admits, and the catalogue only
-        # where it admits nothing. Offering a part the outline refuses would
+        # The parts the artwork admits, and the catalogue only where it
+        # admits nothing or has no outline to read (ADR-0014). Offering a part the outline refuses would
         # be offering a wrong-enclosure error one keystroke away.
         return session.fits or discover.catalogue_parts()
     if field == "case_face":
@@ -238,7 +238,7 @@ class RunView:
     """What the `Run` place draws: the whole step list, the reports, the position.
 
     ``steps`` is every step of the plan, finished or not, so the place holds
-    the list live rather than only what is done (decision 2). ``reports`` is
+    the list live rather than only what is done. ``reports`` is
     what a write step said, kept apart because the step lines are built from
     the plan and would otherwise be drawn twice.
     """
@@ -301,7 +301,7 @@ def _block_lines(block: FamilyBlock) -> Iterator[tuple[str, Finding | None]]:
 def finding_lines(session: Session) -> tuple[str, ...]:
     """What the `Findings` place says: the families, their prose, the findings.
 
-    Decision 11 groups by remedy, so the first thing read is what to do
+    Findings are grouped by remedy, so the first thing read is what to do
     rather than who objected.
     """
     blocks = family_blocks(session)
@@ -326,14 +326,14 @@ def output_entries(session: Session) -> tuple[tuple[str, Path, str], ...]:
 def output_lines(session: Session) -> tuple[str, ...]:
     """Each artefact, where it goes, and what is honestly known about it.
 
-    Decision 2: a file found on disk is labelled as found, never as current.
-    The manifest holds no hashes, so this is the strongest true statement
+    A file found on disk is labelled as found, never as current. The
+    manifest holds no hashes (ADR-0014), so this is the strongest true statement
     available -- and it is the session's, never persisted.
     """
     targets = session.settings.output.targets
     if not targets.value:
-        # Decision 17: an empty set somebody answered is a run permitted to
-        # write nothing, which is a legitimate thing to want and so must be
+        # An empty set somebody answered is a run permitted to
+        # write nothing (ADR-0014), which is a legitimate thing to want and so must be
         # said -- a run that quietly writes nothing is indistinguishable
         # from one that failed to. At rank four it is an unanswered
         # question instead, which the editable row above already states.
@@ -349,8 +349,8 @@ def pane_for(session: Session, place: Place, run: RunView = NO_RUN) -> Widget:
     if place is Place.PROJECT:
         pane.compose_add_child(Static(session.statement(), markup=False))
         if session.notes:
-            # Decisions 6 and 9: a declaration discovery contradicts is news,
-            # and so is a key this build does not know. Neither re-picks
+            # A declaration discovery contradicts is news, and so is a key
+            # this build does not know (ADR-0014). Neither re-picks
             # anything, so saying them where the project is read is the whole
             # of what "reported" can mean inside an application.
             pane.compose_add_child(
@@ -477,7 +477,7 @@ class FocusRow(Static):
 
 
 class FindingRow(FocusRow):
-    """A finding a row answers, and `enter` to go there. Decision 11.
+    """A finding a row answers, and `enter` to go there (ADR-0014).
 
     ``field`` stays the empty string it inherits: that attribute names the
     value a row carries, and this row carries none -- it carries where one
@@ -561,9 +561,11 @@ class ValueRow(FocusRow):
 
 
 class RunRow(FocusRow):
-    """`Project`'s own way into a run: decision 3's second route, and no letter.
+    """`Project`'s own way into a run: the second of ADR-0014's two routes.
 
-    Two keys start a run, and this is the other pair. `enter` here means
+    Two keys start a run, and this is the other pair. It claims no bare
+    letter, because one letter committing minutes of kernel work is a hazard
+    (ADR-0014). `enter` here means
     what `enter` means on every other row -- commit what this line is for.
     """
 
@@ -574,7 +576,7 @@ class RunRow(FocusRow):
 
 
 class GapRow(FocusRow):
-    """What the paused run waits for, and `enter` to answer it. Decision 12.
+    """What the paused run waits for, and `enter` to answer it (ADR-0014).
 
     A picker is transient, so abandoning one must be recoverable rather than
     the end of the run; and a gap answered by a free edit has no picker at
@@ -609,7 +611,7 @@ class Editor(Input):
         self.row = row
 
     async def on_key(self, event: events.Key) -> None:
-        """Decision 3: an open field suppresses a place's chords, not just its letters.
+        """An open field suppresses a place's chords, not just its letters (ADR-0014).
 
         Textual consumes a printable key here already, so a bare letter
         never reaches a binding; a ``Ctrl``+letter would, and ``Ctrl+R``
@@ -646,9 +648,9 @@ class PickerScreen(ModalScreen[object]):
     """A list over the place, dismissed with a string for one or a tuple for many.
 
     A modal screen hides the application's bindings, so this one carries
-    the same table plus `escape`: decision 3 needs every bare letter to work
-    while a list is open. Moving place closes it without committing,
-    because a picker is a transient widget rather than a place's state.
+    the same table plus `escape`: only an open text field makes letters type
+    (ADR-0014), so every bare letter must work while a list is open. Moving
+    place closes it without committing, because a picker is a transient widget rather than a place's state.
     """
 
     DEFAULT_CSS = """
@@ -703,5 +705,6 @@ class PickerScreen(ModalScreen[object]):
             self.dismiss(self.choices[event.option_index])
 
     def action_commit(self) -> None:
-        """Every tick, nothing ticked included: that is decision 17's *none*."""
+        """Every tick, nothing ticked included: an empty list somebody
+        committed is a declared answer, not an absent one (ADR-0014)."""
         self.dismiss(tuple(self.query_one("#picker", Ticks).selected))

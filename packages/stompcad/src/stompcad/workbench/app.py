@@ -1,9 +1,9 @@
 """The workbench: eight places on one screen, and the keys that move them.
 
-Spec decisions 1, 3, 4, 5 and 14. Every rule lives in ``Session``; this is
-drawing and dispatch. Bindings are built from ``keys``, so the table proved
-distinct is the table the application answers. A run is an event here rather
-than the app's exit, so starting it, stopping it and quitting are three acts.
+The key model and sidebar states are ADR-0014's; quit-versus-stop, ADR-0013's.
+Every rule lives in ``Session``; this is drawing and dispatch. Bindings come
+from ``keys``, so the table proved distinct is the one answered. A run is an
+event here, not the app's exit: starting, stopping and quitting are three acts.
 
 No bare letter is a priority binding: an open text field consumes a printable
 key before any binding is checked. The stop is, because it must outrank a modal.
@@ -100,7 +100,8 @@ class Workbench(App[int], inherit_bindings=False):
 
     Textual's own chords are not inherited: its priority ``ctrl+q`` would quit
     without the session's exit code, and the palette's ``ctrl+p`` would answer
-    in every place. Neither is in the table decision 3 proves distinct.
+    in every place. Neither is in the key table, which ADR-0014 requires to be
+    provably distinct.
     """
 
     ENABLE_COMMAND_PALETTE = False
@@ -140,15 +141,18 @@ class Workbench(App[int], inherit_bindings=False):
         self.runner: Runner = runner or ProcessRunner()
         self.window: Window = window or NullWindow()
         _prime_multiprocessing()
-        # Decision 1: an invocation carrying something beyond the panel means
-        # "do not ask me", so the app opens with the run already moving -- from
-        # the moment the opening read lands, which is the last question. A
-        # manifest value is a standing declaration and starts nothing, or
-        # opening last week's project to look at it would cost kernel work.
+        # Any argument beyond the panel starts the run, because an argument
+        # is an act of intent in this invocation (ADR-0014: a command line can
+        # mean "do not ask me"), so the app opens with the run already moving
+        # -- from the moment the opening read lands, which is the last
+        # question. A manifest value is a standing declaration and starts
+        # nothing, or opening last week's project to look at it would cost
+        # kernel work.
         self.autostart = autostart
         self._base: Screen[Any] | None = None
         # What the run leaves behind, in the form a pipe would have received
-        # it (decision 15), plus where the run stands while it is working.
+        # it, because the settled lines are written at exit and must match the
+        # piped run's (ADR-0013), plus where the run stands while it works.
         self.plan: RunPlan | None = None
         self.settled: list[str] = []
         self.reports: list[str] = []
@@ -206,7 +210,11 @@ class Workbench(App[int], inherit_bindings=False):
     # -- drawing -----------------------------------------------------------
 
     def mode(self) -> Mode:
-        """Which mode is in force. Decision 3's one hazard, closed."""
+        """Which mode is in force; the footer always states it (ADR-0014).
+
+        Not knowing whether a letter will jump or type is the key model's one
+        hazard, and only an open text field makes letters type.
+        """
         focused = self.focused
         typing = focused is not None and focused.can_focus and _is_text(focused)
         return TYPING if typing else MOVING
@@ -249,7 +257,8 @@ class Workbench(App[int], inherit_bindings=False):
 
         Built from the plan rather than from ``settled``, so a step still to
         come is listed beside the ones already done; ``settled`` stays the
-        record in the order a pipe receives it, which decision 15 compares.
+        record in the order a pipe receives it, which is compared byte for
+        byte with the same run piped (ADR-0013).
         """
         width = self._label_width()
         steps = () if self.plan is None else tuple(
@@ -304,7 +313,7 @@ class Workbench(App[int], inherit_bindings=False):
     # -- moving ------------------------------------------------------------
 
     async def action_address_finding(self) -> None:
-        """Go to the row that answers the focused finding. Decision 11.
+        """Go to the row that answers the focused finding (ADR-0014).
 
         The place and the field travel together, because a place alone lands
         on its first row -- an input file, for most places -- and not on the
@@ -320,7 +329,7 @@ class Workbench(App[int], inherit_bindings=False):
         await self.redraw(row.remedy.field)
 
     def action_view_output(self) -> None:
-        """Open the viewer on the focused artefact, and only when asked. Decision 13.
+        """Open the viewer on the focused artefact, and only when asked (ADR-0014).
 
         Every way it cannot open is said rather than raised: a viewer that
         failed loudly would make itself a dependency of the workbench, which
@@ -354,7 +363,7 @@ class Workbench(App[int], inherit_bindings=False):
         await self.redraw()
 
     def _leave_modal(self) -> None:
-        """Decision 12: a picker is transient, so leaving closes it uncommitted.
+        """A picker is transient, so leaving closes it uncommitted (ADR-0014).
 
         The keys screen closes the same way: a place letter pressed over it
         means what it means anywhere else, and leaving the help open behind
@@ -401,13 +410,15 @@ class Workbench(App[int], inherit_bindings=False):
         editor.focus()
 
     def _picks(self, field: Field) -> bool:
-        """Whether `enter` here opens a list rather than a field. Decision 3.
+        """Whether `enter` here opens a list rather than a field.
 
-        Some rows carry answers only sometimes, so they are not decided by
-        kind: the panel is a typed path until the directory offers
-        candidates, and both references are typed expressions until a run has
-        read a board's designators. Everything else is a list wherever the
-        tool that owns it has one.
+        A field makes the bare letters type, so a row is one only where the
+        tool that owns it offers nothing to choose from. Some rows carry
+        answers only sometimes, so they are not decided by kind: the panel is
+        a typed path until the directory offers candidates, and both
+        references are typed expressions until a run has read a board's
+        designators. Everything else is a list wherever the tool that owns
+        it has one.
         """
         if field.name == "panel":
             return bool(self.session.panel_candidates)
@@ -452,8 +463,9 @@ class Workbench(App[int], inherit_bindings=False):
         """Convert, then hand the value over; a refusal is shown, never taken.
 
         A panel is not one value of a project: it *is* the project, so that
-        row starts one rather than setting a field. Decision 6's blocked
-        start is only usable because of this.
+        row starts one rather than setting a field. A workbench opened with
+        no panel is only usable because of this: a path typed there is what
+        starts the project.
         """
         try:
             value = _as_value(self.session, place, field, answer)
@@ -469,7 +481,7 @@ class Workbench(App[int], inherit_bindings=False):
             self._read_fit()
 
     def _read_fit(self) -> None:
-        """Read which enclosures this artwork's outline admits. Decision 1.
+        """Read which enclosures this artwork's outline admits (ADR-0014).
 
         Off the interface thread: an artwork is a PDF to parse, and a
         workbench that stopped drawing while it parsed would be a workbench
@@ -621,8 +633,8 @@ class Workbench(App[int], inherit_bindings=False):
     def _label_width(self) -> int:
         """The column a step's label is padded into, from the plan the run declared.
 
-        Decision 15: these lines are byte-compared against the same run
-        piped, and ``PlainWriter`` pads from the plan it was given in
+        These lines are byte-compared against the same run piped (ADR-0013),
+        and ``PlainWriter`` pads from the plan it was given in
         ``begin``. Deriving the width any other way is how the two diverge.
         """
         if self.plan is None:
@@ -649,14 +661,15 @@ class Workbench(App[int], inherit_bindings=False):
         self.branch = ""
         self.failure = None
         self.message = ""
-        # Decision 5 binds from the keypress, not from the worker's first
+        # No parameter accepts an edit once a run is active (ADR-0014), and
+        # that holds from the keypress, not from the worker's first
         # crossing: a window in which a place still accepts an edit is a
         # window in which a value can change under work already under way.
         self.session.start_run(self.resuming)
         try:
             start(self)
         except Exception as failure:  # noqa: BLE001 - shown, not raised
-            # Decision 1: a process that will not start is this run's
+            # A process that will not start is this run's
             # failure, not the workbench's. Letting it out of an action
             # tears the application down and costs the user the session
             # they opened to look at a project.
@@ -672,7 +685,7 @@ class Workbench(App[int], inherit_bindings=False):
             self.message = "stopping…"
 
     def enquire(self, asked: int, gap: PendingGap) -> None:
-        """Stop for this gap and go to the place that answers it. Decision 12."""
+        """Stop for this gap and go to the place that answers it (ADR-0014)."""
         self.session.pause(gap)
         # Which question is open, so an answer can name it. An answer that
         # arrives for a question already closed is stale, and a boundary
@@ -700,10 +713,9 @@ class Workbench(App[int], inherit_bindings=False):
         """Committing the answer *is* the continuation -- no second action.
 
         ``None`` is a picker abandoned, and so is a multiple one committed
-        with nothing ticked: the workbench specification's decision 11
-        forbids substituting an answer the tool did not compute, and an
-        empty one revises a field into something no step can read. Both
-        leave the run paused, with the gap's own row to reopen the picker.
+        with nothing ticked: a pause is answered only from what the tool
+        computed, and an empty answer revises a field into something no step
+        can read. Both leave the run paused, with the gap's own row to reopen the picker.
         """
         if answer is None or self.session.gap is None:
             return
@@ -773,7 +785,7 @@ class Workbench(App[int], inherit_bindings=False):
             self._quit()
 
     def _quit(self) -> None:
-        """Decision 14: `q` quits, stopping any run first and confirming during one.
+        """`q` quits, stopping any run first and confirming during one (ADR-0013).
 
         Quitting and stopping are different acts once the app outlives the
         run, so throwing minutes of kernel work away takes an answer rather
@@ -785,7 +797,7 @@ class Workbench(App[int], inherit_bindings=False):
         self.exit(self.session.exit_code)
 
     def _quit_confirmed(self, leave: bool | None) -> None:
-        """Decision 14: the answer decides, not the moment the question was asked.
+        """The answer decides, not the moment the question was asked.
 
         A run can finish while the dialog is open, and one that finished
         earned its own code -- a stop may end a run but never change what a
@@ -801,7 +813,7 @@ class Workbench(App[int], inherit_bindings=False):
         self.exit(self.session.exit_code)
 
     def action_window(self) -> None:
-        """`w`: view the focused artefact. Decision 13 names no other target.
+        """`w`: view the focused artefact, the only target ADR-0014 gives it.
 
         `w` never picks a file for the builder -- it acts only on a row
         already focused in `Output`, so this is exactly what `enter` does
@@ -919,9 +931,10 @@ class KeysScreen(ModalScreen[None]):
     """What `?` shows: the same table the bindings were built from.
 
     A modal screen hides the application's bindings, so this one carries
-    the same table as well as its own two closes: decision 3 needs every
-    bare letter to work while the help is open, exactly as it does over a
-    picker. Its own `escape` and `?` are listed first, so both close it.
+    the same table as well as its own two closes: only an open text field
+    makes letters type (ADR-0014), so every bare letter must work while the
+    help is open, exactly as it does over a picker. Its own `escape` and `?`
+    are listed first, so both close it.
     Drawn as a window over the place, like the picker, so the help never
     hides what it is helping with.
     """
