@@ -75,7 +75,7 @@ def _until(runner: ProcessRunner, kind: type) -> Any:
 
 
 def test_the_run_happens_in_another_interpreter(runner: Any) -> None:
-    """Decision 18's structural requirement, asserted rather than measured.
+    """The run executes in a process of its own (ADR-0013), asserted rather than measured.
 
     ``steady`` reports the process it ran in as each step's outcome, so
     this needs no clock: a run sharing the interface's interpreter would
@@ -104,7 +104,7 @@ _TRACKER_SCRIPT = (
 
 
 def test_making_a_runner_starts_no_process_of_any_kind() -> None:
-    """Decision 1: opening last week's project to look at it costs nothing.
+    """Opening a project only to look at it costs no kernel work, so making a runner spawns nothing.
 
     Every workbench makes a runner, including the many that never run
     anything. Checked against multiprocessing's own tracker rather than a

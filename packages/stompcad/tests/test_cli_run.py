@@ -71,7 +71,7 @@ def test_the_command_line_writes_what_stompdrill_writes_byte_for_byte(
 def test_the_step_log_streams_as_each_step_completes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Spec decisions 2 and 11: the same step lines, streamed, with no terminal."""
+    """With no terminal the plain writer prints the step lines, the first four in plan order (ADR-0013)."""
     panel = _boardless_panel(tmp_path)
     cli.main([str(panel), "--case", "1590B", "--emit", f"excellon={tmp_path / 'out.drl'}"])
 
@@ -84,9 +84,9 @@ def test_the_step_log_streams_as_each_step_completes(
 def test_a_tie_a_pipe_cannot_answer_exits_3_and_writes_nothing(tmp_path: Path) -> None:
     """The tar footprint ties three parts, and a pipe cannot answer the tie.
 
-    Decision 11: the tie is a question now rather than an error, so a run
-    with no terminal to ask on exits with a usage failure naming what was
-    missing -- and writes nothing either way.
+    A tie is a question for a terminal to answer rather than an error, so a
+    run with no terminal to ask on exits with the usage code and writes
+    nothing.
     """
     panel = _boardless_panel(tmp_path)
     target = tmp_path / "out.drl"
@@ -100,7 +100,7 @@ def test_a_tie_a_pipe_cannot_answer_exits_3_and_writes_nothing(tmp_path: Path) -
 def test_a_gap_with_no_terminal_exits_three_and_names_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Decision 11: a pipe cannot answer, so the run says what it needed.
+    """A pipe cannot answer a question, so the run exits 3 naming the parts it was tied between.
 
     The tar fixture ties three parts when no case is declared, which is a
     resolvable gap; piped, it must refuse rather than prompt.
@@ -164,7 +164,7 @@ def test_a_board_without_a_case_part_is_a_usage_error(
 
 
 def test_a_captured_stream_is_not_a_terminal() -> None:
-    """Decision 15: without a terminal the plain writer runs, and nothing prompts."""
+    """A captured stream is no terminal, which sends a run to the plain writer, not the workbench."""
     assert cli.has_terminal(io.StringIO()) is False
 
 
@@ -205,7 +205,7 @@ def test_a_lone_panel_is_discovered(tmp_path: Path) -> None:
 def test_several_panels_without_an_argument_is_an_obstacle_and_still_exits_three(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Decision 6: a state the workbench can show, and the usage code without one."""
+    """Several panels and none named is an obstacle naming each; with no terminal, ``main`` exits 3."""
     from stompcad.cli import blocked, build_parser, main
 
     for name in ("a.ai", "b.ai"):
@@ -746,7 +746,7 @@ async def _settled(pilot: Pilot[int], app: Workbench) -> None:
 @pytest.mark.hammond
 @pytest.mark.asyncio
 async def test_the_workbench_s_exit_lines_are_the_pipe_s_bytes(tmp_path: Path) -> None:
-    """Decision 15: a run leaves its record behind either way.
+    """A run leaves its record behind either way (ADR-0013).
 
     The same invocation, run twice over one project: once through the plain
     writer, once through the workbench, whose settled lines are written out
@@ -812,10 +812,10 @@ def test_a_run_that_names_no_wall_part_adds_no_wall_surface_and_no_sibling_file(
 ) -> None:
     """The default wall expression is empty, so a run that asks for no wall
     describes only the face. No composed run writes a per-surface sibling for a
-    wall whatever it names -- decision 16's recorded limit -- so what the exact
-    artefact set pins is that no *unexpected* file appears, not that a sibling
-    was suppressed. Bytes are not compared here; that lock lives in
-    test_drive_dock.py's test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes."""
+    wall whatever it names (ADR-0013), so what the exact artefact set pins is
+    that no *unexpected* file appears, not that a sibling was suppressed.
+    Bytes are not compared here; that lock lives in test_drive_dock.py's
+    test_a_boards_run_naming_no_wall_writes_the_document_stompdrill_writes."""
     model = case_model()
     if model is None:
         pytest.skip("no cached 1590B model")

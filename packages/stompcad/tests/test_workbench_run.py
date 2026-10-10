@@ -267,7 +267,10 @@ async def _edit_first_row(pilot: Pilot[int], app: Workbench) -> None:
 
 @pytest.mark.asyncio
 async def test_a_run_takes_two_keys_to_start() -> None:
-    """Decision 3: one bare letter committing minutes of kernel work is a hazard."""
+    """``r`` alone leaves the project idle and ``ctrl+r`` starts the run (ADR-0014).
+
+    A single bare letter that commits minutes of kernel work is a hazard.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r")
@@ -288,7 +291,10 @@ async def test_enter_on_the_project_run_row_is_the_other_way_in() -> None:
 
 @pytest.mark.asyncio
 async def test_a_run_is_refused_while_the_project_is_not_ready() -> None:
-    """Decision 17: readiness gates the run, and says which place answers."""
+    """A project whose boards are unresolved cannot start, and the refusal names boards.
+
+    The readiness matrix decides whether a run may start (ADR-0014).
+    """
     app = Workbench(_session(ready=False), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
@@ -302,7 +308,10 @@ async def test_a_run_is_refused_while_the_project_is_not_ready() -> None:
 
 @pytest.mark.asyncio
 async def test_no_place_accepts_an_edit_while_the_run_works() -> None:
-    """Decision 5. The guard: driven into every place, not just one."""
+    """No parameter accepts an edit while the run works (ADR-0014).
+
+    The guard: driven into each of the five configuration places, not just one.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
@@ -316,7 +325,10 @@ async def test_no_place_accepts_an_edit_while_the_run_works() -> None:
 
 @pytest.mark.asyncio
 async def test_every_bare_letter_still_moves_while_the_run_works() -> None:
-    """The other half of decision 5: read-only, never hidden."""
+    """Read-only, never hidden: a bare letter (here ``d``) still moves while the run works.
+
+    ADR-0014 requires every bare letter to keep working; this pins one.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
@@ -327,7 +339,9 @@ async def test_every_bare_letter_still_moves_while_the_run_works() -> None:
 
 @pytest.mark.asyncio
 async def test_an_open_editor_suppresses_the_chord_that_starts_a_run() -> None:
-    """Decision 3: an open text field suppresses every key a place owns, chords too.
+    """An open text field suppresses the chord that starts a run.
+
+    ADR-0014 requires it to suppress every key a place owns; this pins ``ctrl+r``.
 
     The message is the discriminator, not the phase: an unsuppressed
     ``ctrl+r`` here reaches the application and is refused for belonging to
@@ -376,7 +390,7 @@ async def test_an_open_field_keeps_the_chords_no_place_claims() -> None:
 
 @pytest.mark.asyncio
 async def test_esc_on_the_run_place_stops_the_run() -> None:
-    """Decision 14: `esc` is the cancel of the thing that place owns.
+    """On the ``Run`` place ``esc`` stops the run in flight (ADR-0013).
 
     The runner is asked as well as the flag set: only the ask reaches the
     run, and a test reading the flag alone passes with the ask deleted.
@@ -405,7 +419,11 @@ async def test_ctrl_c_stops_a_run_from_anywhere() -> None:
 
 @pytest.mark.asyncio
 async def test_q_quits_rather_than_stopping() -> None:
-    """Decision 14 splits ADR-0013's `q`: quitting and stopping are different acts."""
+    """With nothing in flight ``q`` quits the application (ADR-0013).
+
+    Quitting and stopping are different acts once the app stays open across
+    runs, so ``q`` quits and ``esc`` stops.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("q")
@@ -443,7 +461,10 @@ async def test_the_stop_is_heard_over_a_modal_holding_the_screen() -> None:
 
 @pytest.mark.asyncio
 async def test_confirming_a_quit_during_a_run_earns_the_stop_code() -> None:
-    """Decision 14: a run the user stopped exits 130, whatever it had reached."""
+    """Confirming a quit while a run holds at its second step exits 130 (ADR-0013).
+
+    130 is reserved for a stop the user asked for.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
@@ -494,7 +515,7 @@ async def test_quitting_after_a_completed_run_keeps_the_code_it_earned() -> None
 
 @pytest.mark.asyncio
 async def test_the_app_opening_with_no_run_exits_clean() -> None:
-    """Decision 14: `0` if the app opened and no run happened."""
+    """An application that opened and saw no run exits 0."""
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("q")
@@ -517,7 +538,8 @@ async def test_a_cancelled_run_earns_the_shell_s_own_stop_code() -> None:
 
 @pytest.mark.asyncio
 async def test_a_stopped_run_still_owns_what_it_committed() -> None:
-    """Decision 2: "already on disk" is for a file this session did not make.
+    """A stopped run still owns what it committed: "already on disk" is for a file this
+    session did not make.
 
     A stop is noticed at the next leaf, so a write may have committed
     before it was heard. Labelling that file as merely found would deny
@@ -550,7 +572,7 @@ async def test_each_step_is_credited_as_it_completes() -> None:
 
 @pytest.mark.asyncio
 async def test_the_run_place_keeps_the_line_a_pipe_would_have_received() -> None:
-    """Decision 15: a run leaves its record behind either way."""
+    """The workbench keeps a completed step's line, as a pipe would have received it (ADR-0013)."""
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
@@ -560,7 +582,10 @@ async def test_the_run_place_keeps_the_line_a_pipe_would_have_received() -> None
 
 @pytest.mark.asyncio
 async def test_the_run_place_lists_a_step_that_has_not_finished() -> None:
-    """Decision 2: the `Run` place holds the step list live, not only what is done."""
+    """While the run works the ``Run`` place lists every step of the plan, not only the finished.
+
+    A finished step shows its outcome, a step still to come shows none.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(hold=True))
     async with app.run_test() as pilot:
         await pilot.press("r", "ctrl+r")
@@ -672,7 +697,7 @@ async def test_an_event_no_handler_can_apply_ends_the_run_and_not_the_pump() -> 
 
 @pytest.mark.asyncio
 async def test_the_sidebar_marks_a_place_while_the_run_is_still_working() -> None:
-    """Decision 4: the marker says how far the project has got, as it gets there.
+    """The left marker follows the run: Enclosure is ticked while the run is still working.
 
     A change made before a run is answered by the steps that run under it,
     so each place is marked as its own steps complete. Every marker landing
@@ -703,7 +728,7 @@ async def test_the_sidebar_marks_a_place_while_the_run_is_still_working() -> Non
 
 @pytest.mark.asyncio
 async def test_a_run_that_cannot_be_started_keeps_the_workbench() -> None:
-    """Decision 1: a transient failure must not cost somebody the session they opened.
+    """A transient failure must not cost somebody the session they opened.
 
     Starting a run is where a process is made, and making one can fail for
     reasons that have nothing to do with the project. Out of the action it
@@ -774,10 +799,10 @@ def test_a_defect_keeps_the_traceback_of_the_process_that_made_it() -> None:
 
 
 def test_a_defect_brings_nothing_of_its_own_into_the_interface() -> None:
-    """A kind names a class, and naming one is not leave to import it.
+    """A kind names a class, and naming one is not licence to import it.
 
     A fault raised inside the kernel names a kernel module, and importing
-    that here would load OpenCASCADE into the one interpreter decision 18
+    that here would load OpenCASCADE into the one interpreter ADR-0013
     keeps free of it -- on the thread that draws, at the moment something
     has already gone wrong.
     """
@@ -797,7 +822,10 @@ def test_a_kind_that_names_nothing_at_all_is_still_a_fault() -> None:
 
 @pytest.mark.asyncio
 async def test_the_settled_lines_are_padded_to_the_plan_the_run_declared() -> None:
-    """Decision 15: the workbench's exit lines are byte-compared against the pipe."""
+    """Settled lines are padded to the plan's widest label by the pipe's own ``step_line``.
+
+    That is what lets the workbench's exit lines be byte-compared with a pipe's (ADR-0013).
+    """
     from stompcad.present import step_line
 
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner())
@@ -813,7 +841,10 @@ async def test_the_settled_lines_are_padded_to_the_plan_the_run_declared() -> No
 
 @pytest.mark.asyncio
 async def test_a_gap_pauses_the_run_and_takes_the_user_to_its_place() -> None:
-    """Decision 12: the app navigates, rather than marking and leaving them to hunt."""
+    """A gap pauses the run and the app navigates to the place that answers it (ADR-0014).
+
+    It does not merely mark the place and leave the builder to hunt for it.
+    """
     runner, _asking = _asking_runner("ambiguous-enclosure")
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -837,7 +868,7 @@ async def test_only_the_paused_place_accepts_an_edit() -> None:
 
 @pytest.mark.asyncio
 async def test_committing_the_answer_is_the_continuation() -> None:
-    """Decision 12: no second action to find."""
+    """Committing the answer is the continuation: no second action to find (ADR-0014)."""
     runner, asking = _asking_runner("ambiguous-enclosure")
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -876,7 +907,7 @@ async def test_leaving_the_place_abandons_the_picker_without_stopping_the_run() 
 
 @pytest.mark.asyncio
 async def test_the_gap_s_own_row_reopens_the_picker_that_was_abandoned() -> None:
-    """Decision 12: abandoning a picker is recoverable, not the end of the run."""
+    """Abandoning a picker is recoverable, not the end of the run: the gap's own row reopens it."""
     runner, _asking = _asking_runner("ambiguous-enclosure")
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -895,7 +926,10 @@ async def test_the_gap_s_own_row_reopens_the_picker_that_was_abandoned() -> None
 
 @pytest.mark.asyncio
 async def test_esc_closes_the_picker_before_it_stops_the_run() -> None:
-    """Decision 12: `esc` is a ladder, innermost first."""
+    """The first ``esc`` on a paused run's picker does not stop the run; the second does.
+
+    ``esc`` is a ladder, innermost first (ADR-0014).
+    """
     runner, _asking = _asking_runner("ambiguous-enclosure")
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -978,7 +1012,7 @@ async def test_pressing_continue_answers_and_returns_to_running() -> None:
 
 @pytest.mark.asyncio
 async def test_a_gap_picker_committed_with_nothing_ticked_abandons_it() -> None:
-    """Decision 11: an empty tick list is abandonment, never an answer.
+    """Committing a picker with nothing ticked abandons it rather than answering the run.
 
     ``empty-group``'s answer widens a designator expression, so committing
     nothing would widen it with an empty term -- a filter the next step
@@ -1030,7 +1064,7 @@ async def test_a_ticked_designator_still_answers_and_continues() -> None:
 
 @pytest.mark.asyncio
 async def test_a_second_ctrl_r_after_a_change_resumes_rather_than_starting_over() -> None:
-    """Decision 10: the stale set is what runs, against what the driver holds."""
+    """A change then ``ctrl+r`` resumes exactly the stale set against what the driver holds (ADR-0014)."""
     runner, recording = _recording_runner()
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -1046,7 +1080,10 @@ async def test_a_second_ctrl_r_after_a_change_resumes_rather_than_starting_over(
 
 @pytest.mark.asyncio
 async def test_a_resume_is_never_automatic() -> None:
-    """Decision 10: kernel work takes minutes, and a run that starts on a keystroke is hostile."""
+    """A change after a run does not resume it (ADR-0014).
+
+    Resuming is explicit, because kernel work takes minutes.
+    """
     runner, recording = _recording_runner()
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -1060,7 +1097,10 @@ async def test_a_resume_is_never_automatic() -> None:
 
 @pytest.mark.asyncio
 async def test_the_roadmap_retreats_to_the_place_a_change_touched() -> None:
-    """Decision 4: the marker is the earliest place owning a stale step."""
+    """A changed drilling value retreats the roadmap to Drilling, the earliest place owning a stale step.
+
+    Drilling stops counting as reached while Artwork, before it, still does.
+    """
     runner, _recording = _recording_runner()
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -1076,7 +1116,10 @@ async def test_the_roadmap_retreats_to_the_place_a_change_touched() -> None:
 
 @pytest.mark.asyncio
 async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
-    """Decision 8: the manifest records what made the outputs."""
+    """A resume hands the driver the values it runs under, so a commit records what made the outputs.
+
+    The manifest holds the values that produced the artefacts (ADR-0014).
+    """
     runner, recording = _recording_runner()
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
     async with app.run_test() as pilot:
@@ -1093,7 +1136,10 @@ async def test_a_resume_declares_the_values_it_actually_ran_under() -> None:
 
 @pytest.mark.asyncio
 async def test_an_argument_beyond_the_panel_opens_with_the_run_already_moving() -> None:
-    """Decision 1: there is no batch flag, because there is nothing to batch."""
+    """An invocation that supplies every value starts the run inside the workbench (ADR-0014).
+
+    With ``autostart`` the run completes with no key pressed.
+    """
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=_runner(), autostart=True)
     async with app.run_test() as pilot:
         await settle(pilot, app)
@@ -1162,9 +1208,9 @@ async def test_the_app_going_away_abandons_a_pending_question() -> None:
     Nothing else ends it: the answer is a keypress, and there is no longer
     anybody to press one. ``ThreadRunner.close()`` asserts the served
     thread returns on ``Close``, so a run left waiting on this question
-    would fail loudly here rather than hang the suite -- Task 4's
-    ``test_a_quit_during_a_pause_ends_without_a_signal`` is the same
-    guarantee for a real process.
+    would fail loudly here rather than hang the suite --
+    ``test_runner.py``'s ``test_a_quit_during_a_pause_ends_without_a_signal``
+    is the same guarantee for a real process.
     """
     runner, asking = _asking_runner("ambiguous-enclosure")
     app = Workbench(_session(), launch=Launch(panel=PANEL), runner=runner)
@@ -1227,9 +1273,9 @@ async def test_a_died_finishes_the_session() -> None:
 async def test_an_autostarted_run_waits_for_the_read_and_starts_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Decision 1: `on_mount` asks whether it may run while its own read is
-    outstanding, so the start belongs to the read landing -- and belongs to it
-    once, not once for each route that could have taken it."""
+    """``on_mount`` asks whether it may run while its own read is outstanding, so
+    the start belongs to the read landing -- and belongs to it once, not once
+    for each route that could have taken it."""
     reading = Event()
     starts: list[int] = []
     composed = _Compose(hold=False)

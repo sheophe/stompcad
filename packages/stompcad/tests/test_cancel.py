@@ -1,6 +1,6 @@
 """Cancellation, and the exit contract that unwinds a stopped run.
 
-Spec decision 9: a sink that raises is the whole mechanism. The first test
+A sink that raises is the whole mechanism (ADR-0013). The first test
 is the guard that a cancelled run leaves neither artefact nor temporary,
 which holds because nothing is staged at any moment a sink can raise rather
 than because rollback removes one; the second drives that rollback where it
@@ -46,7 +46,7 @@ class _StopAfter:
 @pytest.mark.boards
 @pytest.mark.hammond
 def test_a_cancelled_run_leaves_neither_artefact_nor_temporary(tmp_path: Path) -> None:
-    """Spec decision 9: a stopped run leaves nothing, because nothing is staged yet.
+    """A stopped run leaves nothing, because nothing is staged yet (ADR-0013).
 
     Both write steps render every target before staging begins, so a sink
     has no moment to raise between a staged temporary and its commit. The
