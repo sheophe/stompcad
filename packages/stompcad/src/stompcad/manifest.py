@@ -1,8 +1,8 @@
 """The project file: declared intent, beside the artwork, named from it.
 
-Spec decisions 8 and 9. One object per configuration place, keyed by the
-place's own name, plus a schema version. The panel itself is absent: its
-name is the manifest's own name, so storing it again would be redundant.
+One object per configuration place, keyed by the place's own name, plus a
+schema version (ADR-0014). The panel itself is absent: its name is the
+manifest's own, so storing it again would be redundant.
 
 Paths are stored relative to this file's directory: an absolute path would
 survive only until the project was moved or shared, and a project that
@@ -174,8 +174,8 @@ class ManifestError(StompError):
 
     A ``StompError`` so ``cli.main`` catches it beside the library faults
     it already handles, rather than growing a second handler for the same
-    outcome. Spec decision 9: a project whose declarations cannot be read
-    must never be run under values that look like the user's own.
+    outcome. A project whose declarations cannot be read must never be run
+    under values that look like the user's own (ADR-0014).
     """
 
 
@@ -284,13 +284,12 @@ DOCK_TARGET_NAMES = frozenset({"report", "assembly"})
 
 #: The two drill-half formats that describe the whole job rather than the panel
 #: alone. A run that cuts wall holes has to write them after the walls are cut,
-#: so they leave ``write case`` for a commit of their own. Decision 16 of the
-#: wall-drilling spec.
+#: so they leave ``write case`` for a commit of their own (ADR-0013).
 MODEL_TARGET_NAMES = frozenset({"json", "step"})
 
 #: Which places each half of the run is entitled to declare. ``drill`` declares
 #: nothing: with boards its commit is no longer the drill half's last, and
-#: decision 16 of the wall-drilling spec puts the declaration on the last one. ``output`` is in both of
+#: the declaration joins the last one (ADR-0013). ``output`` is in both of
 #: the halves that do declare, because a target set spans them.
 _HALF_PLACES: dict[str, tuple[str, ...]] = {
     "drill": (),
@@ -311,8 +310,8 @@ class Half(Enum):
     MODEL = "model"
     #: A run with no boards never reaches the dock half, so the drill half's
     #: commit is the only commit it has -- and the empty board list is the
-    #: declaration that decided there would be no dock half. Decision 17 of the workbench spec
-    #: requires it remembered, or the question is asked on every open.
+    #: declaration that decided there would be no dock half. It has to be
+    #: remembered, or the question is asked on every open (ADR-0014).
     DRILL_ONLY = "drill-only"
 
 
@@ -322,8 +321,8 @@ def _owns(half: Half, name: str) -> bool:
     The dock half owns its own two formats and every other half the rest, but
     the drill half's panel commit declares nothing at all: a format it has not
     rendered must be skipped outright rather than left alone, because the
-    commit that renders it has not run yet (decision 8 of the workbench spec), and with boards that
-    is true of every format it does render too. The ``DRILL`` branch is
+    commit that renders it has not run yet, and with boards that is true of
+    every format it does render too. The ``DRILL`` branch is
     belt-and-braces against a future ``drill`` row in ``_HALF_PLACES``.
     """
     if half is Half.DOCK:
@@ -336,8 +335,8 @@ def _owns(half: Half, name: str) -> bool:
 def payload_for(panel: Path, settings: Settings, half: Half, held: Manifest) -> str | None:
     """The project file this half would leave, or ``None`` when it adds nothing.
 
-    Workbench spec decision 8: gaps only, never a replacement, and written with the
-    half's own commit rather than at the end of the run. Returning text
+    Gaps only, never a replacement, and written with the half's own commit
+    rather than at the end of the run (ADR-0014). Returning text
     instead of writing it is what lets the caller stage this beside the
     artefacts, so a committed artefact can never sit next to a project file
     that fails to describe it.
@@ -355,7 +354,7 @@ def payload_for(panel: Path, settings: Settings, half: Half, held: Manifest) -> 
                 # A format this half did not render is skipped outright --
                 # not merely left alone -- because ``write case`` runs before
                 # ``write assembly``, and declaring a dock format there would
-                # name a file that commit has not reached yet (decision 8 of the workbench spec).
+                # name a file that commit has not reached yet.
                 # Copied rather than mutated in place -- ``held`` is the
                 # caller's, and ``payload_for`` promises not to write.
                 current = dict(into.get(key, {}))

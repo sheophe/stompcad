@@ -1,8 +1,8 @@
 """What a run's values are, where each came from, and what disagrees.
 
-Spec decisions 6 and 7: resolution has four ranks and every value reports
-its origin, because an artefact must never be quietly attributable to the
-wrong settings. A leaf module by design -- it imports nothing from this
+Resolution has four ranks and every value reports its origin, because an
+artefact must never be quietly attributable to the wrong settings
+(ADR-0014). A leaf module by design -- it imports nothing from this
 package, so ``drive`` may import it without a cycle, and nothing here
 knows what a step does with a value.
 """
@@ -162,7 +162,7 @@ def pick(
 
     Only a rank above the project records a disagreement. Discovery that
     differs from the project is not an override but a finding, raised where
-    the run can say which file disagreed -- see spec decision 6.
+    the run can say which file disagreed (ADR-0014).
     """
     if argument is not None:
         return Resolved(

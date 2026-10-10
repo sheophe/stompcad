@@ -2,9 +2,9 @@
 
 Resolves the four ranks a run needs and validates every requested target
 together, then opens the workbench on a terminal or drives the run through
-the plain writer where there is none. Workbench decision 15: that second
-path is the only one without an application, so the flags here are exactly
-the facts that identify one piece of work. The exit convention is the four
+the plain writer where there is none. That second path is the only one
+without an application (ADR-0014), so the flags here are exactly the facts
+that identify one piece of work. The exit convention is the four
 codes both tools share, reduced from the worse of the two halves' findings,
 plus the fifth, 130, for a run the user stopped.
 """
@@ -272,8 +272,8 @@ def _pick_noting(
 ) -> Resolved[_T]:
     """``pick``, plus the one note a declaration's own rank cannot raise itself.
 
-    Spec decision 6: a declaration stands even where discovery found
-    something else, so the disagreement becomes a note naming the file --
+    A declaration stands even where discovery found something else
+    (ADR-0014), so the disagreement becomes a note naming the file --
     never a silent re-pick, and never a note when nothing above the project
     overrode it, since that would just restate what discovery already
     considered and lost to a stronger rank.
@@ -296,10 +296,10 @@ def _resolve_panel(
 ) -> tuple[Path | None, Resolved[Path | None], str | None, tuple[Path, ...]]:
     """The panel, how it was found, why there is none, and what else there was.
 
-    Decision 6: none and several are states rather than failures. The
-    workbench opens on `Artwork` stating what it found, and a path typed
-    there starts the project; without a terminal the same two states become
-    the usage code they always were, named by ``require_ready``.
+    None and several are states rather than failures. The workbench opens
+    on `Artwork` stating what it found, and a path typed there starts the
+    project; without a terminal the same two states become the usage code
+    they always were, named by ``require_ready`` (ADR-0014).
     """
     if args.panel is not None:
         panel = Path(args.panel)
@@ -606,8 +606,8 @@ def resolve(args: argparse.Namespace, directory: Path) -> Resolution:
     try:
         project = manifest.read(panel)
     except manifest.ManifestError as failure:
-        # Decision 9: a project whose declarations cannot be read is never
-        # run under values that look like the user's own. Rank four for this
+        # A project whose declarations cannot be read is never run under
+        # values that look like the user's own (ADR-0014). Rank four for this
         # panel is not those values -- it is what every place states while
         # the file is unreadable, so the workbench stays readable throughout.
         return Resolution(
@@ -791,7 +791,7 @@ def _refusal_labels() -> dict[str, str]:
 
 
 def _refused_place(sentence: str) -> str:
-    """Which place owns the value a refusal names. Decision 6.
+    """Which place owns the value a refusal names.
 
     Every validator prefixes its sentence with the label the value was typed
     into -- a project key, or the flag that carries it -- so the place is
@@ -814,8 +814,8 @@ def blocked(args: argparse.Namespace, directory: Path) -> Resolution:
     becomes an obstacle on the place that owns it rather than a message on a
     terminal about to be redrawn -- and the sidebar's marker is derived from
     that place, so naming the wrong one sends a builder somewhere with
-    nothing to change. An unreadable project is decision 9's own case and
-    keeps its own blocker, raised by ``resolve`` before this sees it.
+    nothing to change. An unreadable project is not a refused value: it keeps
+    its own blocker, raised by ``resolve`` before this sees it.
     """
     try:
         return resolve(args, directory)
@@ -833,7 +833,7 @@ def blocked(args: argparse.Namespace, directory: Path) -> Resolution:
 
 
 def started_by_argument(args: argparse.Namespace) -> bool:
-    """Whether this invocation said "do not ask me". Decision 1.
+    """Whether this invocation said "do not ask me".
 
     An argument is an act of intent in this invocation; a manifest value is
     a standing declaration. Bare ``stompcad tar.ai`` against a complete
@@ -871,8 +871,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 def has_terminal(out: TextIO) -> bool:
     """Whether this stream can carry a workbench rather than streamed lines.
 
-    Decision 15: a pipe, a dumb terminal or a CI runner gets the plain
-    writer. ``CI`` present in the environment counts as no terminal **even
+    A pipe, a dumb terminal or a CI runner gets the plain writer
+    (ADR-0014). ``CI`` present in the environment counts as no terminal **even
     with a tty attached**, because a runner that allocates a pty would
     otherwise be given a full-screen application and hang until it timed
     out -- and no flag should be required to avoid that. Presence rather
@@ -914,8 +914,8 @@ def _run(args: argparse.Namespace, out: TextIO) -> int:
 
     With a terminal the app owns the main thread for as long as the user
     wants it, and a run is an event inside it; the exit code is the last
-    run's. Without one the run happens right here, and decision 15's step
-    lines are the whole record -- which the workbench writes as it exits,
+    run's. Without one the run happens right here, and the plain writer's
+    step lines are the whole record (ADR-0014) -- which the workbench writes as it exits,
     so a run leaves its record behind either way.
     """
     directory = Path.cwd()

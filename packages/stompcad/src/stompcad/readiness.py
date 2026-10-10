@@ -1,11 +1,11 @@
 """Whether a run may start, and which place answers each reason it may not.
 
-Spec decision 17. The distinction this exists to draw is between *no
-boards were found* and *this pedal has no boards to dock*: the driver
-treats both as "skip docking", which is right for a library and wrong for
-a person. Provenance already separates them -- an empty list at rank four
-was never answered, and the same list at any higher rank is an answer --
-so no second flag is introduced to carry what is already carried.
+The distinction this exists to draw is between *no boards were found* and
+*this pedal has no boards to dock* (ADR-0014): the driver treats both as
+"skip docking", which is right for a library and wrong for a person.
+Provenance already separates them -- an empty list at rank four or rank
+three was never answered, and the same list at the project or an argument
+is an answer -- so no second flag is introduced to carry what is already carried.
 """
 
 from __future__ import annotations

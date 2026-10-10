@@ -1,7 +1,7 @@
 """What a change invalidated, and the place the roadmap falls back to.
 
-Spec decision 10. Two derived answers, one change set: the steps to run
-again, and the earliest place the sidebar marks. Deriving both from the
+Two derived answers, one change set: the steps to run again, and the
+earliest place the sidebar marks. Deriving both from the
 same input is what stops the roadmap from disagreeing with the engine --
 there is no second thing to keep in step.
 """

@@ -1,6 +1,6 @@
 """Cancellation: a sink that raises, and the code a stopped run exits with.
 
-Spec decision 9. `Cancelled` derives from `BaseException`, not `Exception`,
+`Cancelled` derives from `BaseException`, not `Exception`,
 for the reason `KeyboardInterrupt` does: a handler written for a fault must
 not absorb it. A cancelled run leaves no temporary because none exists yet
 when one can be cancelled: a scope reports per rendered target, and staging

@@ -1,7 +1,8 @@
 """Which gaps a run can ask about, and what an answer changes.
 
-Decision 6: only an ERROR carrying a known resolvable code reaches a
-picker, and the candidates offered are the tool's own -- nothing here
+Only an ERROR carrying a known resolvable code reaches a picker, because
+severity decides whether a run pauses and only a paused run can ask
+(ADR-0014). The candidates offered are the tool's own -- nothing here
 invents one or reorders them. Pure throughout: it reads a diagnostic and
 what carried it, and returns what to ask, never asking anything itself.
 """
@@ -26,9 +27,9 @@ __all__ = ["Gap", "RESOLVABLE", "question_for", "revision_for"]
 class Gap:
     """What answering one code costs: which step runs again, and where to answer.
 
-    Decision 12: the run stops and the app navigates, so the place travels
-    with the code rather than being looked up by whoever happens to be
-    drawing. ``place`` is spelled as ``stale.PLACE_ORDER`` spells it.
+    The run stops and the app navigates to the place that answers the gap
+    (ADR-0014), so the place travels with the code rather than being looked
+    up by whoever happens to be drawing. ``place`` is spelled as ``stale.PLACE_ORDER`` spells it.
     """
 
     step: str
@@ -37,10 +38,10 @@ class Gap:
 
 
 #: Each resolvable code, the step that runs again once it is answered, the
-#: place that answers it and the arity of that answer. Decision 6: a code
-#: absent from here never becomes a question, which is how a refusal stays a
-#: refusal. Each step must read the field its answer revises, which
-#: ``test_resolve`` checks against ``_STEP_INPUTS``.
+#: place that answers it and the arity of that answer. A code absent from
+#: here never becomes a question, which is how a refusal stays a refusal.
+#: Each step must read the field its answer revises, which ``test_resolve``
+#: checks against ``_STEP_INPUTS``.
 RESOLVABLE: dict[str, Gap] = {
     "ambiguous-enclosure": Gap("quantise", "enclosure", multiple=False),
     "empty-group": Gap("read-boards", "boards", multiple=True),

@@ -1,12 +1,10 @@
 """The presentation boundary: a run reports steps, asks, and writes a report.
 
-Spec decision 2 requires one shared line format between a terminal's
-settled scrollback and a pipe's streamed output, so ``PlainWriter`` keeps
-that format in one place rather than duplicating it per output mode. The
-presentation specification's decision 11 requires a genuine gap with no
-terminal to exit ``3`` naming what was missing, which is why ``ask`` raises
-rather than prompts. Plan B implements ``Presentation`` with a live
-terminal; plan C is ``ask``'s only caller.
+A terminal's settled scrollback and a pipe's streamed output share one
+line format, so ``PlainWriter`` keeps that format in one place rather than
+duplicating it per output mode. A genuine gap with no terminal exits ``3``
+naming what was missing (ADR-0014), which is why ``ask`` raises rather than
+prompts.
 """
 
 from __future__ import annotations
@@ -24,8 +22,8 @@ __all__ = ["step_line", "Question", "Choice", "Presentation", "PlainWriter", "No
 def step_line(label: str, outcome: str, width: int = 0) -> str:
     """The one line a finished step leaves, wherever it is written.
 
-    Decision 2: a terminal's settled scrollback and a pipe's stream are the
-    same lines, so both writers render through this rather than each
+    A terminal's settled scrollback and a pipe's stream are the same
+    lines, so both writers render through this rather than each
     formatting its own. ``width`` pads the label into a column; zero means
     no plan is known yet and the label is simply unpadded.
     """
@@ -75,9 +73,8 @@ class Presentation(Protocol):
 class NoTerminal(StompError):
     """Raised when a run must ask, but has no terminal to ask on.
 
-    The presentation specification's decision 11: a pipe or a dumb terminal
-    exits with a usage error naming the missing question, rather than
-    prompting where no one can answer.
+    A pipe or a dumb terminal exits with a usage error naming the missing
+    question, rather than prompting where no one can answer (ADR-0014).
     """
 
 

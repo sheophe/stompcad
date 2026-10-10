@@ -1,7 +1,7 @@
 """What a run can find out for itself, and the phrase naming how.
 
-Spec decision 6, rank three. Discovery is stronger than a default and
-weaker than a declaration, so nothing here overrides anything -- each
+Rank three of four. Discovery is stronger than a default and weaker than
+a declaration (ADR-0014), so nothing here overrides anything -- each
 function returns what it found and lets ``pick`` decide whether it wins.
 
 The designators a board carries are absent by design: they arrive with
@@ -48,8 +48,8 @@ _OURS = frozenset(ARTEFACT_NAMES.values())
 def panels(directory: Path) -> tuple[Path, ...]:
     """Every Illustrator file beside the working directory, in name order.
 
-    An empty result is a state rather than a failure -- spec decision 6
-    opens the workbench blocked on it -- so nothing is raised here.
+    An empty result is a state rather than a failure -- the
+    workbench opens blocked on it -- so nothing is raised here.
     """
     return tuple(sorted(directory.glob("*.ai")))
 

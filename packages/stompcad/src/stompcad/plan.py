@@ -1,11 +1,12 @@
 """The run's eleven steps, and the share of the bar each one carries.
 
-Spec decision 2 names the steps; decision 5 states how a weight is
-derived, not guessed. ``tools/count_leaves.py`` holds the counting command
-and the counts it produced; this module only declares the plan those counts
-fill in. A pure data structure -- Plan B renders it, a later task drives
-it -- so it imports nothing beyond ``dataclasses``: neither tool it
-orchestrates, and so no CAD kernel.
+The steps and their order are ADR-0013's, and a weight is derived from a
+count, not guessed. ``tools/count_leaves.py``
+holds the counting command and the counts it produced; this module only
+declares the plan those counts fill in. A pure data structure -- the
+presentation renders it and the driver drives it -- so it imports nothing
+beyond ``dataclasses``: neither tool it orchestrates, and so no CAD
+kernel.
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ from dataclasses import dataclass
 
 __all__ = ["KERNEL_LEAF_WEIGHT", "Step", "RunPlan", "DRILL_AND_DOCK"]
 
-#: Spec decision 5's one stated judgement: a kernel leaf's multiplier.
+#: The one judgement in the weights rather than a count: a kernel leaf's
+#: multiplier.
 KERNEL_LEAF_WEIGHT: int = 10
 
 
