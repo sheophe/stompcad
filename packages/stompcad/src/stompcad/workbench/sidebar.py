@@ -1,9 +1,9 @@
 """The sidebar: three independent states per row, and one message out.
 
-Spec decision 4. Where the user is, how far the project has got and whether
-this place needs the user are three channels: a background, a marker on the
-left, a marker on the right. The characters are this implementation's
-choice -- the specification leaves them open -- but the separation is not.
+Where the user is, how far the project has got and whether this place
+needs the user are three channels: a background, a marker on the left, a
+marker on the right (ADR-0014). The characters are this implementation's
+choice, but the separation is not.
 
 One of two panes: `←` focuses it, `↑`/`↓` step between places, `→` goes
 back in; a step, a click and a letter are one change, so none disagrees.

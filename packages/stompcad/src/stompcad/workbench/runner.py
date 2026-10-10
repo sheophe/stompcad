@@ -1,10 +1,10 @@
 """The interface's end of the boundary: a process, and the events it sends.
 
-Spec decision 18. The only module that knows a process exists. It is
-spawned rather than forked -- a forked child would inherit the interface's
-own memory, a live application included, at whatever moment the fork landed
--- and it is spawned once and kept, because the driver it holds is what
-decision 10's resume spends.
+The only module that drives it. The run happens in a process of its own
+(ADR-0013), spawned rather than forked -- a forked child would inherit the
+interface's own memory, a live application included, at whatever moment the
+fork landed -- and spawned once and kept, because the intermediates its
+driver holds are what a resume spends.
 
 Nothing here is built until the first run asks for it; see ``_serving``.
 """
@@ -195,8 +195,8 @@ class ProcessRunner:
     def _serving(self) -> Connection:
         """The process, started on the first command rather than at open.
 
-        Decision 1: opening last week's project to look at its artefacts
-        must not cost kernel work, and this is where the kernel is loaded
+        Opening last week's project to look at its artefacts must not cost
+        kernel work, and this is where the kernel is loaded
         -- in the child, by ``child`` importing the server. Everything is
         built into locals and published only once the process is running,
         so a failed start leaves nothing half-made behind it.

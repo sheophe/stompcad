@@ -1,11 +1,11 @@
 """The run's own process: one driver, held across runs, reporting down a pipe.
 
-Spec decision 18. Everything here happens on the far side of the boundary,
-which is why nothing here knows what a place is, what a sidebar is or that
-a screen exists: it is handed values and it sends values back. The driver
-is kept between runs because decision 10's resume spends intermediates it
-holds, and a process started per run would throw away the thing a resume
-exists to reuse.
+Everything here happens on the far side of the boundary ADR-0013 draws
+around the run's process, which is why nothing here knows what a place is,
+what a sidebar is or that a screen exists: it is handed values and it sends
+values back. The driver is kept between runs because a resume spends the
+intermediates it holds, and a process started per run would throw away the
+thing a resume exists to reuse.
 """
 
 from __future__ import annotations
@@ -312,9 +312,10 @@ def _choice(question: Question) -> Choice:
 
 
 def _offered(choice: Choice, text: str) -> str:
-    """The answer, if it is one this question offered. Decision 11.
+    """The answer, if it is one this question offered.
 
-    A picker chooses between answers a tool computed, and the boundary
+    A picker chooses between answers a tool computed -- an answer outside
+    them would invent one the tool declined to give -- and the boundary
     must not become the hole in that rule: an answer arriving over a pipe
     is checked against the question that is open, not trusted for having
     arrived. The empty string is the free-edit continuation, which answers

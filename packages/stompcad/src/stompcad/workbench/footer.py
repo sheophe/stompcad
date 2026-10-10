@@ -1,8 +1,8 @@
 """The footer: which mode is in force, and what the keys do in it.
 
-Spec decision 3. The model's one hazard is not knowing whether a letter
-jumps or types, so the mode is named first and in a cell of its own, and
-the keys that matter in it follow. Held as data rather than as a sentence,
+The key model's one hazard is not knowing whether a letter jumps or types
+(ADR-0014), so the mode is named first and in a cell of its own, and the
+keys that matter in it follow. Held as data rather than as a sentence,
 because two modes written as two sentences drift into two layouts, and a
 key that changes should change in one place.
 """

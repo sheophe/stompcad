@@ -1,8 +1,8 @@
 """The two shades that say which pane the arrows are answering.
 
-Spec decision 4 gives the sidebar a selection and decision 3 gives a place
-one; both mark where the user is, so marking them two ways would read as
-two kinds of mark rather than one mark in two panes. Stated once and handed
+The sidebar has a selection and so does a place; both mark where the user
+is, so marking them two ways would read as two kinds of mark rather than
+one mark in two panes. Stated once and handed
 to the stylesheet by the application, so no widget names a colour of its own.
 """
 

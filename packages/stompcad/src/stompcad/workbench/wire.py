@@ -1,7 +1,7 @@
 """What crosses between the interface and the run, and nothing else.
 
-Spec decision 18 puts the composed run in a process of its own, so the
-boundary ADR-0013 pinned is now a boundary between processes. A pipe
+ADR-0013 puts the composed run in a process of its own, so the boundary it
+pins is a boundary between processes. A pipe
 carries values rather than objects, so the set of them is closed and
 written here: two unions, no methods, no proxy, no ``Driver``. Something
 that needs to cross and is not here is a design question rather than an

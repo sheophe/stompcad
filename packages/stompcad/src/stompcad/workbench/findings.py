@@ -1,9 +1,9 @@
 """A run's findings, what to do about each, and the count the sidebar carries.
 
-Spec decision 11: one ``Finding`` per diagnostic, classified by
-``families`` into the remedy that owns it, the row that answers it where
-one does, and the register a fit finding is stated in. The count covers
-errors and warnings but never the family that asks nothing of anybody.
+One ``Finding`` per diagnostic, classified by ``families`` into the remedy
+that owns it, the row that answers it where one does, and the register a fit
+finding is stated in. The count covers errors and warnings but never the
+family that asks nothing of anybody (ADR-0014).
 """
 
 from __future__ import annotations

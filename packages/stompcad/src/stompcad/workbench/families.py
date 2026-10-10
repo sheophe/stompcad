@@ -1,11 +1,11 @@
 """What to do about a finding, grouped by remedy rather than by complainer.
 
-Spec decision 11. Seven families, each owning the shared prose -- what its
-findings mean and the routes out of them -- and each code contributing its
-own sentence. A finding belongs to exactly one family; a code usually does,
-which is why the functions below read the payload of the one code raised
-twice with different remedies. The tables are data because the prose is
-revised by people who are not editing logic.
+Each family owns the shared prose -- what its findings mean and the routes
+out of them -- and each code contributes its own sentence. A finding
+belongs to exactly one family; a code usually does, which is why the
+functions below read the payload of the one code raised twice with
+different remedies. The tables are data because the prose is revised by
+people who are not editing logic.
 """
 
 from __future__ import annotations
@@ -46,7 +46,10 @@ class Family(Enum):
 
 
 class Register(Enum):
-    """How gravely a fit finding is stated. Decision 11 names three.
+    """How gravely a fit finding is stated.
+
+    The fit family, flattened into one reassuring tone, would hide a case
+    that will not close.
 
     The code decides before the severity does: ``enclosure-too-shallow`` is
     a WARNING that means the case will not close and

@@ -1,12 +1,12 @@
 """The workbench's whole state, with no Textual in it.
 
 Which place is selected, what has been edited, what that made stale,
-whether a run may start, what it is doing and what it found: every spec
-rule lives here, so it is driven headless and Textual modules stay drawing
-alone. Nothing here touches the filesystem or starts a run -- a caller
+whether a run may start, what it is doing and what it found: every
+workbench rule lives here, so it is driven headless and Textual modules stay
+drawing alone. Nothing here touches the filesystem or starts a run -- a caller
 hands in what it read and ran, and gets back what to draw, which is what
-lets one test file cover decisions 4, 5, 7, 10, 12, 14 and 17 without a
-pilot.
+lets one test file cover the roadmap, edit locking, provenance, invalidation,
+pausing, the exit code and readiness without a pilot.
 """
 
 from __future__ import annotations
@@ -32,9 +32,10 @@ if TYPE_CHECKING:  # ``cli`` imports the application, which imports this module
 
 __all__ = ["Locked", "Refused", "Phase", "PendingGap", "Row", "Session", "FITS"]
 
-#: Decision 2's two labels, and the reason neither is persisted: the manifest
-#: holds no hashes, so the workbench cannot know an existing artefact was made
-#: from the declarations now on screen -- and must not imply it.
+#: The two labels an artefact on disk can carry, and the reason neither is
+#: persisted: the manifest holds no hashes, so the workbench cannot know an
+#: existing artefact was made from the declarations now on screen -- and must
+#: not imply it.
 FOUND = "already on disk; this session has not made or verified it"
 MADE = "made by this run"
 
@@ -54,7 +55,7 @@ FITS = "fits the reference outline"
 
 
 class Locked(Exception):
-    """An edit refused because a run holds the place. Decision 5.
+    """An edit refused because a run holds the place (ADR-0014).
 
     Raised rather than ignored: a refusal nobody can observe is
     indistinguishable from an edit that silently did nothing, and the guard
@@ -82,7 +83,10 @@ class Phase(Enum):
 
 @dataclass(frozen=True, slots=True)
 class PendingGap:
-    """The one gap a paused run is waiting on. Never a queue -- decision 12.
+    """The one gap a paused run is waiting on.
+
+    Never a queue: a second gap replaces the first, because the second may
+    not exist once the first is answered (ADR-0014).
 
     ``choice`` is the picker where the code offers one. ``None`` means the
     answering place carries a focused "Continue run" row instead, which is
@@ -225,7 +229,11 @@ class Session:
     # -- changing ----------------------------------------------------------
 
     def may_edit(self, place: Place) -> bool:
-        """Whether this place accepts an edit right now. Decisions 5 and 12."""
+        """Whether this place accepts an edit right now.
+
+        Every place does unless a run is active, and a paused run accepts
+        edits only in the place that answers its gap.
+        """
         if self._phase is Phase.RUNNING:
             return False
         if self._phase is Phase.PAUSED:
@@ -249,16 +257,16 @@ class Session:
     def adopt(self, place: Place, field: str, found: Discovery[Any]) -> None:
         """Take a value the tool found, recording that it was found rather than set.
 
-        Decision 7: the origin a row states must be the rank that supplied
-        it, and a cached model is discovered however it was asked for.
-        Discovery sits below the project, so it records no disagreement.
+        The origin a row states must be the rank that supplied it (ADR-0014),
+        and a cached model is discovered however it was asked for. Discovery
+        sits below the project, so it records no disagreement.
         """
         self._replace_value(
             place, field, Resolved(found.value, Provenance(Origin.DISCOVERED, found.detail))
         )
 
     def begin_fit(self) -> None:
-        """Say a read of the artwork is outstanding. Decision 1."""
+        """Say a read of the artwork is outstanding, so no run starts before it answers."""
         self._fit_pending = True
 
     def record_fit(self, parts: Sequence[str]) -> None:
@@ -321,8 +329,9 @@ class Session:
         just run them over the value now in force and seen them pass, so the
         refusal is spent. An unreadable project is not: editing a value does
         not make the file readable, and only adopting the project again can.
-        Decision 4 needs the marker, the statement and ``may_run`` to move
-        together, which is why all three read this one set.
+        The marker, the statement and ``may_run`` must move together, which is
+        why all three read this one set: if they diverged, a builder would be
+        told to press Enter on a run that cannot start.
         """
         kept = tuple(
             blocker for blocker in self._standing
@@ -335,7 +344,11 @@ class Session:
         self._blockers = Readiness(kept + readiness(self._settings).blockers)
 
     def adopt_panel(self, path: Path) -> None:
-        """Start the project a typed path names. Decision 6's blocked start."""
+        """Start the project a typed path names.
+
+        A workbench opened with no panel is blocked rather than refused, and
+        this is how a path typed into ``Artwork`` unblocks it.
+        """
         if self._resolver is None:
             raise Locked("this session cannot resolve a different panel")
         self._adopt(self._resolver(path))
@@ -343,7 +356,7 @@ class Session:
     # -- what a change invalidated ----------------------------------------
 
     def invalidate(self, place: Place, *fields: str) -> None:
-        """Mark this place's fields changed without changing them. Decision 10.
+        """Mark this place's fields changed without changing them.
 
         `Ctrl+L` says the artwork on disk is not the artwork the last run
         read. Nothing the project declares has changed, so nothing is set --
@@ -374,7 +387,7 @@ class Session:
     def _plan(self) -> RunPlan:
         """The steps a run of this project would take, which its boards decide.
 
-        Decision 4 derives the marker and the resume from one structure, so
+        The marker and the resume derive from one structure (ADR-0014), so
         both ask the driver what a run over these values covers. A project
         with no boards has no dock half, and a roadmap waiting on a step it
         will never run reports it stale for ever.
@@ -414,11 +427,12 @@ class Session:
         return self._blockers
 
     def may_run(self) -> bool:
-        """Decision 17's matrix, decision 9's unreadable project, and the read.
+        """The readiness matrix (ADR-0014), a standing obstacle, and the read.
 
-        A fit still outstanding is an unanswered question like any other: the
-        part it is about to supply is an input the run would otherwise take
-        without it.
+        An obstacle is no artwork selected, a project file that cannot be
+        read, or a value the consuming tool refused. A fit still outstanding
+        is an unanswered question like any other: the part it is about to
+        supply is an input the run would otherwise take without it.
         """
         return (
             self._obstacle is None
@@ -478,7 +492,7 @@ class Session:
     # -- the run as an event ----------------------------------------------
 
     def start_run(self, resuming: bool) -> None:
-        """Bind the run to the steps it will take. Decisions 5, 10 and 17.
+        """Bind the run to the steps it will take.
 
         A resume runs the stale set and keeps the credit of what it skips; a
         first run takes every step this project's own plan holds. Which of
@@ -524,7 +538,7 @@ class Session:
         )
 
     def pause(self, gap: PendingGap) -> None:
-        """Stop for one gap, and go to the place that answers it. Decision 12."""
+        """Stop for one gap, and go to the place that answers it (ADR-0014)."""
         self._phase = Phase.PAUSED
         self._gap = gap
         self._place = gap.place
@@ -555,11 +569,11 @@ class Session:
         self._designators = dict(designators)
 
     def record_written(self, paths: Sequence[Path]) -> None:
-        """Every artefact this session actually wrote. Never persisted -- decision 2."""
+        """Every artefact this session actually wrote. Never persisted: the manifest keeps no history."""
         self._written = self._written | frozenset(paths)
 
     def label_for(self, path: Path, exists: bool) -> str:
-        """What the `Output` place says about one artefact. Decision 2.
+        """What the `Output` place says about one artefact.
 
         Three states and not two: a file this session wrote, a file that was
         already there, and a file that does not exist. The middle one is the

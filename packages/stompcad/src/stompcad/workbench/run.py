@@ -1,7 +1,8 @@
 """The run as an event in the app: a runner, a pump, and what an event means.
 
-Spec decision 18. The application composes nothing and holds no driver:
-it tells a runner to start or resume, and reacts to what comes back. One
+The application composes nothing and holds no driver, because ADR-0013 puts
+the composed run in a process of its own: it tells a runner to start or
+resume, and reacts to what comes back. One
 worker carries events across for the application's whole life, and a
 thread is right for that where it was not right for the run -- this one
 waits on a pipe, which is not work the interpreter has to be held for.
@@ -68,7 +69,7 @@ def may_resume(app: Workbench) -> bool:
 
 
 def start(app: Workbench) -> None:
-    """Begin a run, or resume what a change invalidated. Decision 10."""
+    """Begin a run, or resume what a change invalidated."""
     app.stopping = False
     app.resuming = may_resume(app)
     if app.resuming:

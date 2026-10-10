@@ -1,10 +1,10 @@
 """The viewer: a written artefact, a path and a mode, and nothing coming back.
 
-Spec decision 13, as the user decided it. A viewer is opened only when
-somebody chooses an artefact in `Output`, on the file a run wrote, and is
-handed a path and a mode and nothing else -- no geometry, no document. It
-returns nothing and nothing waits on it, which is what stops the window
-becoming something a run or a place depends on.
+A viewer is opened only when somebody chooses an artefact in `Output`, on
+the file a run wrote, and is handed a path and a mode and nothing else -- no
+geometry, no document (ADR-0014). It returns nothing and nothing waits on
+it, which is what stops the window becoming something a run or a place
+depends on.
 """
 
 from __future__ import annotations

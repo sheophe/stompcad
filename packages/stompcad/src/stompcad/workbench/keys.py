@@ -1,6 +1,7 @@
 """Every key the workbench answers, as data rather than as bindings.
 
-Spec decision 3: the table proves distinctness, without running the app.
+The table proves distinctness, without running the app: every bare letter,
+``Ctrl``+letter and place letter must be provably distinct (ADR-0014).
 Each ``Place`` value is the name ``readiness`` and ``stale`` already use,
 so nothing translates between two spellings.
 """
@@ -62,8 +63,8 @@ CONFIGURATION: tuple[Place, ...] = (
     Place.OUTPUT,
 )
 
-#: One unique bare letter each. Decision 3: the eight initials are distinct
-#: without compromise, so no place needs a second-choice key.
+#: One unique bare letter each: the eight initials are distinct without
+#: compromise, so no place needs a second-choice key.
 PLACE_KEYS: dict[str, Place] = {
     "p": Place.PROJECT,
     "a": Place.ARTWORK,
@@ -91,10 +92,11 @@ LOCAL_KEYS: dict[str, tuple[Place, str]] = {
     "ctrl+r": (Place.RUN, "start or resume the run"),
 }
 
-#: Decision 14's two keys, each bound to its own action rather than to a verb.
+#: The two stop keys, each bound to its own action rather than to a verb.
 #: Neither is a bare letter, which is why they are not global verbs: `esc` is a
 #: ladder that closes the innermost thing open, and `ctrl+c` stops a run from
-#: anywhere. Quitting and stopping are different acts, so they are different keys.
+#: anywhere. Quitting and stopping are different acts, so they are different
+#: keys (ADR-0013).
 RUN_KEYS: dict[str, tuple[str, str]] = {
     "escape": ("escape", "close, or stop the run"),
     "ctrl+c": ("stop_run", "stop the run"),
