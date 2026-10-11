@@ -575,7 +575,7 @@ def test_drill_data_worst_severity_matches_the_published_function_when_empty() -
     assert data.worst_severity == worst_severity(()) is None
 
 
-# -- AC5: each of the four members is independently load-bearing -----------
+# -- Each of the four members is independently load-bearing ---------------
 
 
 def test_missing_diagnostics_fails_the_protocol_check() -> None:

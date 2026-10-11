@@ -200,7 +200,7 @@ def test_the_scan_reaches_every_workspace_member():
 
 
 def test_no_module_outside_the_owner_restates_the_raw_measurement_tuple():
-    """Criterion 3: the rule has one owner and cannot be restated.
+    """The rule has one owner and cannot be restated.
 
     Binds every member ``member_package_dirs`` names, named neither by stage
     nor by package -- so a fourth field on ``RawHole`` reaches every consumer

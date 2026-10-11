@@ -329,7 +329,7 @@ class TestTheMeasurementIsNeverRoundedBeforeItIsCompared:
         assert size == 5_050_000
         # The larger bit is still selected -- this test is about the tie, not
         # the reporting threshold -- but the near-25 000 nm move past a 50 000 nm
-        # local pitch is loud enough to be reported too (F3-03/T21).
+        # local pitch is loud enough to be reported too.
         assert codes(found) == ["off-size"]
 
     def test_the_same_hair_moves_a_bit_on_the_shipped_metric_series(self):
@@ -465,7 +465,7 @@ class TestSnapDiametersToDrillTable:
         size, found = quantiser.quantise(measured(25.25))
         assert size == 25_000_000
         # Accepted, and now reported: 250 000 nm exceeds the 125 000 nm quarter
-        # of this size's 500 000 nm local pitch (F3-03/T21).
+        # of this size's 500 000 nm local pitch.
         assert codes(found) == ["off-size"]
         assert quantiser.quantise(measured(25.3))[0] is None
 
@@ -507,8 +507,8 @@ class TestSnapDiametersToDrillTable:
         """Every accepted nominal is a table size within tolerance, and never an ERROR.
 
         Membership rejects returning the rounded measurement, which distance permits.
-        Unaligned synthetic measurements routinely clear the reporting threshold
-        added by F3-03/T21 -- that is a WARNING, never a reason to reject a value
+        Unaligned synthetic measurements routinely clear the reporting
+        threshold -- that is a WARNING, never a reason to reject a value
         the acceptance tolerance already let through.
         """
         rng = random.Random(20250815)
@@ -577,7 +577,7 @@ class TestDescribe:
 
 
 # ---------------------------------------------------------------------------
-# F3-03 / T21 -- a reporting threshold beside the acceptance tolerance
+# A reporting threshold beside the acceptance tolerance
 # ---------------------------------------------------------------------------
 
 
@@ -592,12 +592,12 @@ def _independent_local_pitch_nm(sizes: tuple[int, ...], index: int) -> int:
 
 
 class TestTwoThresholdsNotOne:
-    """AC1: acceptance and reporting are different bounds on one hole."""
+    """Acceptance and reporting are different bounds on one hole."""
 
     def test_a_move_between_the_reporting_threshold_and_the_tolerance_is_accepted_and_warned(
         self,
     ):
-        """22.225 mm (7/8") under the default metric standard: the F3-03 recipe.
+        """22.225 mm (7/8") under the default metric standard.
 
         Moved 225 000 nm -- past the 125 000 nm quarter-pitch reporting
         threshold at 22.0 mm's 500 000 nm band, and still inside the
@@ -625,7 +625,7 @@ class TestTwoThresholdsNotOne:
 
 
 class TestTheReportingThresholdIsAQuarterOfTheLocalPitch:
-    """AC2: no size in any registered standard is silent about a departure
+    """No size in any registered standard is silent about a departure
     past a quarter of its own local pitch, while still inside tolerance.
 
     Every band of the metric series, both band boundaries (2.95/3.00 mm and
@@ -690,7 +690,7 @@ class TestTheReportingThresholdIsAQuarterOfTheLocalPitch:
     def test_a_drawer_narrowed_to_one_size_has_no_pitch_and_reports_every_move(self):
         """A single-size drawer cannot derive a quarter of a pitch it does not
         have; falling back to the acceptance tolerance there would silently
-        reproduce F3-03 inside the narrowed case, so every non-zero movement
+        leave the same departure unreported inside the narrowed case, so every non-zero movement
         is reported instead."""
         one_size = DRILL_STANDARDS["metric"].select(include=(7_000_000,))
         quantiser = SnapDiametersToDrillTable(one_size)
@@ -725,7 +725,7 @@ class TestTheReportingThresholdIsAQuarterOfTheLocalPitch:
 
 
 class TestTheSignedMovementIsCarried:
-    """AC3: the diagnostic's own payload states the movement, signed."""
+    """The diagnostic's own payload states the movement, signed."""
 
     def test_undersize_is_negative(self):
         """22.225 mm drilled 22.0 mm: the drilled bit is smaller than drawn."""
@@ -750,8 +750,8 @@ class TestTheSignedMovementIsCarried:
 
 
 class TestTheHoleIsStillDrilled:
-    """AC4 at the quantiser boundary: a reported diameter is still returned,
-    never dropped -- the full-pipeline and exit-code half of this criterion is
+    """At the quantiser boundary: a reported diameter is still returned,
+    never dropped -- the full-pipeline and exit-code half of this rule is
     ``test_cli.py::test_imperial_hardware_under_the_default_metric_standard_is_reported_not_silent``
     and its toolpath companion, which run the real CLI end to end."""
 

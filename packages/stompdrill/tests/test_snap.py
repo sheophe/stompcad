@@ -369,7 +369,7 @@ class TestReviewGridTies:
         assert reviewed(stage, raw(-0.25, 0.5), raw(0.75, -1.0)) == ()
 
     def test_a_measurement_a_fraction_short_of_the_midpoint_is_not_reported_tied(self):
-        """F3-03: the tie decision must come from the exact quotient, never from
+        """The tie decision must come from the exact quotient, never from
         a residual against a measurement already rounded to a whole nanometre.
 
         0.1249995 mm is 0.5 nm *below* the ``--grid 0.25`` midpoint -- its exact

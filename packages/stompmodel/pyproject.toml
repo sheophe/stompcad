@@ -49,7 +49,7 @@ stompmodel = ["py.typed"]
 dev = ["pytest", "hypothesis", "mypy"]
 
 # `pythonpath` reaches the repo root, mirroring stompdrill's own: three of
-# this workspace's four ownership gates (ticket 25) now live here, and each
+# this workspace's four ownership gates now live here, and each
 # reads `tools.workspace_membership` for the one statement of which packages
 # to scan -- a text read across siblings, never an import of one.
 [tool.pytest.ini_options]

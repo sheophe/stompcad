@@ -563,10 +563,8 @@ def test_tool_blocks_stay_ascending_while_the_within_block_order_follows_the_num
 
 
 def test_excellon_drills_in_index_order_not_tuple_order():
-    """Moved from ``.scratch/architecture-review/falsify/tests/
-    test_f2_04_excellon_drills_tuple_order.py`` (ticket 30). Two holes of one
-    diameter, numbered opposite their tuple order: the file must drill the
-    lower number first.
+    """Two holes of one diameter, numbered opposite their tuple order: the
+    file must drill the lower number first.
     """
     data = make_data(
         at(20_000_000, 18_000_000, 7_000_000, index=2),

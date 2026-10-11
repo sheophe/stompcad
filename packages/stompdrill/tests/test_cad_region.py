@@ -358,7 +358,7 @@ def test_the_lid_accepts_a_hole_over_its_own_clear_metal(bb_lid):
 
 
 def test_obstructed_is_unreachable_on_the_cached_1590bb(bb_lid):
-    """Fix round 2: lettering is never structure, so it can never obstruct;
+    """Lettering is never structure, so it can never obstruct;
     the corner notches are always caught by the lid's own face first (see
     ``test_the_lid_corner_relief_is_refused_by_its_own_face_not_the_box``
     above). Every probe this module has clears the box, or is refused by

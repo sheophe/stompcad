@@ -1,4 +1,4 @@
-"""No tracked text file cites a decision by number.
+"""No tracked text file cites a decision, or a record of one, by number.
 
 A specification is a draft: implementing it is what finds the places it was
 wrong, and nothing reconciles it afterwards. So a numbered citation into one
@@ -17,18 +17,35 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[3]
 _SELF = Path(__file__).resolve()
 
+#: Between a word and its number: at most one newline, so a citation wrapped
+#: inside one paragraph or comment block is caught while a heading and the
+#: numbered list under it stay two items; ``\s+`` cannot tell those apart.
+_SEP = r"(?:[ \t\r]*\n[ \t\r]*|[ \t\r]+)"
+
 #: ``decision 8``, ``Decisions 6, 8 and 10``, ``ruling 12a``, ``ruling R1``: a
 #: draft numbers its rulings and sometimes letters them, and a letter where a
-#: digit was expected is how one such citation lived here unseen. These two
-#: words only -- ``ticket 35``, ``AC2`` and the rest name records of the same
-#: drafts, and whether those are citations to remove is not settled here. The
-#: separator carries at most one newline, so a citation wrapped inside one
-#: paragraph or comment block is caught while a heading and the numbered list
-#: under it stay two items; ``\s+`` cannot tell those apart.
-_CITATION = re.compile(
-    r"\b(?:decision|ruling)s?(?:[ \t\r]*\n[ \t\r]*|[ \t\r]+)[a-z]?\d+[a-z]?\b",
+#: digit was expected is how one such citation lived here unseen.
+_CITATION = re.compile(r"\b(?:decision|ruling)s?" + _SEP + r"[a-z]?\d+[a-z]?\b", re.IGNORECASE)
+
+#: ``ticket 48``, ``Criterion 3``, ``criteria 2``, ``fix round 2``, ``F3-01``:
+#: the records a draft's own process keeps. Case is free here because none of
+#: these shapes is one ordinary code takes -- each word needs its number, so
+#: "the ticket" and "acceptance criteria" are spared, and a falsifier's hyphen
+#: is not a character an identifier can carry.
+_PROCESS_WORDS = re.compile(
+    r"\bF\d+-\d+\b|\b(?:ticket|criteri(?:on|a)|fix" + _SEP + r"round)" + _SEP + r"\d+\b",
     re.IGNORECASE,
 )
+
+#: ``AC2`` and ``T15``: the acceptance criteria and tasks written as bare
+#: identifiers. Case matters for exactly these two, because ``ac2`` and
+#: ``t15`` are shapes ordinary code takes and a citation is written the way
+#: the draft wrote it. A quoted ``"T10"`` is spared because an Excellon tool
+#: code is written exactly so, and two digits are required because ``T1`` is
+#: a tool code and never a task.
+_PROCESS_IDS = re.compile(r"\bAC\d+\b|(?<![\"'])\bT\d{2}\b")
+
+_PATTERNS = (_CITATION, _PROCESS_WORDS, _PROCESS_IDS)
 
 #: What is read, by extension and never by sniffing content: a reason lives in
 #: prose or in configuration. Everything else tracked here is an empty typing
@@ -51,6 +68,26 @@ _LEADER = re.compile(r"(?<=\n)([ \t]*)((?:#+:?|>+)[ \t]*)")
 def _searchable(body: str) -> str:
     """The file's text with comment leaders blanked, character for character."""
     return _LEADER.sub(lambda m: m.group(1) + " " * len(m.group(2)), body)
+
+
+def _citations(body: str) -> list[tuple[int, str]]:
+    """Every citation in ``body``, as the line it starts on and what matched.
+
+    One path for the scan and for the pattern tests, so a rule proved here is
+    the rule that runs. A match that is the whole of its line is data and not
+    prose: an Excellon tool change is written ``T10`` alone, where a citation
+    sits in a sentence beside the reason it stands in for.
+    """
+    searchable = _searchable(body)
+    lines = searchable.split("\n")
+    found = []
+    for pattern in _PATTERNS:
+        for match in pattern.finditer(searchable):
+            number = searchable.count("\n", 0, match.start()) + 1
+            if lines[number - 1].strip() == match.group(0):
+                continue
+            found.append((number, match.group(0)))
+    return found
 
 
 def _tracked() -> list[Path]:
@@ -84,6 +121,56 @@ def test_the_citation_pattern_catches_what_it_is_for() -> None:
         "every decision we take",
     ):
         assert not _CITATION.search(spared), spared
+
+
+def test_the_process_pattern_catches_the_records_of_a_draft() -> None:
+    """The vocabularies beside ``decision``: falsifier, ticket, criterion, task.
+
+    Each named a record under ``.scratch/``, which this repository ignores and
+    which holds no tracked file at all, so a reader meets the same dead end a
+    decision number leads to. The spared list is what a guard this broad has
+    to leave alone: a drill file's tool codes, and the words without a number.
+    """
+    for caught in (
+        "see F3-01 for the shape",
+        "the f3-01 falsifier",
+        "per ticket 48",
+        "Ticket 25 moved it",
+        "AC2 asks for this",
+        "Criterion 3: one owner",
+        "criteria 2 and 4",
+        "fix round 2 found it",
+        "the reconciliation (T15) assumes",
+        "F3-03 / T08 reconciled",
+    ):
+        assert _citations(caught), caught
+    for spared in (
+        "the ticket this closes",
+        "acceptance criteria",
+        "ADR-0007",
+        "AC",
+        "T1",
+        "T1C",
+        '"T10"',
+        "T10C0.800",
+        "t15 = compute()",
+        "ac2 = 3",
+        "F3",
+    ):
+        assert not _citations(spared), spared
+
+
+def test_an_excellon_tool_change_alone_on_its_line_is_no_citation() -> None:
+    """``T10`` is a tool change where ``(T15)`` is a citation.
+
+    A payload asserted in a test carries the code on a line of its own, which
+    is the one shape that would fail this suite over a drill file rather than
+    a draft. The rule is positional and not a list of codes, so a tool number
+    this repository has never emitted is spared on the same terms.
+    """
+    payload = "M48\nT10C0.800\n%\nT10\nX0Y0\nM30\n"
+    assert not _citations(payload), payload
+    assert _citations("the task (T10) is done")
 
 
 def test_a_citation_wrapped_onto_the_next_line_is_still_found() -> None:
@@ -136,8 +223,7 @@ def test_no_tracked_text_file_cites_a_decision_by_number() -> None:
         # ``split`` and not ``splitlines``, which also breaks on ``\r`` and
         # ``\f``, so that the text shown comes from the line the number counted.
         lines = body.split("\n")
-        for match in _CITATION.finditer(_searchable(body)):
-            number = body.count("\n", 0, match.start()) + 1
+        for number, _text in _citations(body):
             offenders.append(
                 f"{path.relative_to(_ROOT)}:{number}: {lines[number - 1].strip()}"
             )
@@ -147,7 +233,7 @@ def test_no_tracked_text_file_cites_a_decision_by_number() -> None:
     # One line can carry two citations; a place is reported once.
     offenders = list(dict.fromkeys(offenders))
     assert not offenders, (
-        "a numbered decision cites docs/specs/ or docs/plans/, both git-ignored, "
+        "a number cites docs/specs/, docs/plans/ or .scratch/, all git-ignored, "
         "so no reader of this repository can resolve it. State the reason where "
         "it is needed, or link the ADR that holds it:\n" + "\n".join(offenders)
     )

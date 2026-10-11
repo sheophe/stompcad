@@ -238,7 +238,7 @@ def test_the_scan_reaches_every_workspace_member():
 
 
 def test_no_unsanctioned_definition_states_the_write_mechanism():
-    """Criterion 1 and 6: the mechanism has one home, and its exclusions are named.
+    """The mechanism has one home, and its exclusions are named.
 
     No definition may call ``os.replace`` or build the ``.{...}.{...}.tmp``
     temporary name unless ``_SANCTIONED`` names it: the owner's own

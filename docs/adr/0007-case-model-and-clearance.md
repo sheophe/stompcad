@@ -215,7 +215,7 @@ no evidence for either correspondence. Like `case-model-unverified`, the
 warning reports an unavailable check. Making it an error would refuse square
 enclosures the tool currently supports.
 
-**Amended (T15):** the panel's measured extents decide whether a quarter turn is
+**Amended:** the panel's measured extents decide whether a quarter turn is
 needed. `EnclosureMatch.rotated` only describes a transposition relative to the
 catalogue's printed row, and Hammond does not always print the larger dimension
 first: `1590LB` is listed as 50.55 × 50.60 mm.

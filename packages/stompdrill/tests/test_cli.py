@@ -1014,7 +1014,7 @@ def test_io_failure_is_exit_three(fake_source, tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# one invocation, one transaction (ticket 22): a write-time IO failure at any
+# One invocation, one transaction: a write-time IO failure at any
 # target withholds every artefact of this invocation, not only the ones
 # after the failure -- and never disturbs an artefact a previous, successful
 # invocation already left at one of these same paths.
@@ -1042,7 +1042,7 @@ def _sabotage_write(monkeypatch, target: Path) -> None:
 def test_a_write_failure_at_any_position_leaves_no_artefact_of_this_run(
     fake_source, tmp_path, capsys, monkeypatch, position
 ):
-    """F3-04: the theme's class criterion, not just its reproduction.
+    """The class of failure, not just the one reproduction.
 
     An IO failure writing one target must withhold every target of this
     invocation -- whichever position it happens to be at -- because the
@@ -1122,23 +1122,23 @@ def test_a_failed_run_leaves_a_previous_runs_artefacts_completely_untouched(
 
 
 # ---------------------------------------------------------------------------
-# ticket 29: the requested --emit target set is validated once, as a set,
-# before anything is rendered -- a duplicate target or an existing target
-# that is not a regular file is a usage error caught up front. Ticket 35:
-# every other precondition a target must satisfy is the write mechanism's
-# own (ADR-0005, enforced by stage_payload), not restated here, so it
+# The requested --emit target set is validated once, as a set, before
+# anything is rendered -- a duplicate target or an existing target that
+# is not a regular file is a usage error caught up front. Every other
+# precondition a target must satisfy is the write mechanism's own
+# (ADR-0005, enforced by stage_payload), not restated here, so it
 # surfaces during staging instead -- still a clean usage error with
 # nothing on disk, just after a render rather than before one. A
 # commit-phase failure rolls back every target this same invocation had
-# already replaced, not only the ones still unattempted. Ticket 40: the
-# target set is compared under a case- and normalisation-folded key,
+# already replaced, not only the ones still unattempted. The target set
+# is compared under a case- and normalisation-folded key,
 # because a filesystem may unify two spellings this command line would
 # otherwise report as two artefacts.
 # ---------------------------------------------------------------------------
 
 
 def test_two_emit_specs_naming_one_path_are_a_usage_error(fake_source, tmp_path, capsys):
-    """F2-02(b): two artefacts cannot share one path -- caught before rendering."""
+    """Two artefacts cannot share one path -- caught before rendering."""
     fake_source(read())
     out = tmp_path / "out.x"
 
@@ -1289,7 +1289,7 @@ def test_the_comparison_key_never_becomes_the_written_path(fake_source, tmp_path
 
 
 def test_a_directory_at_one_target_withholds_the_whole_set(fake_source, tmp_path, capsys):
-    """F2-02(a)/F3-03: a directory at one target must not let an earlier,
+    """A directory at one target must not let an earlier,
     otherwise-ordinary target commit first -- the whole set is validated
     before any of it is rendered, so nothing reaches disk at all."""
     fake_source(read())
@@ -1333,7 +1333,7 @@ def test_a_target_whose_parent_is_not_writable_is_rejected_before_committing(
 ):
     """The target-domain decision (ADR-0005): a target whose parent
     directory cannot accept a new file is refused by ``stage_payload``
-    itself, not restated in the pre-flight (ticket 35). The invocation
+    itself, not restated in the pre-flight. The invocation
     still withholds the whole set with a clean usage error and nothing
     on disk -- it now costs a render first, which the pre-flight's own
     docstring states rather than hides."""
@@ -1358,7 +1358,7 @@ def test_a_target_whose_parent_is_not_writable_is_rejected_before_committing(
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes on this platform")
 def test_a_fifo_target_is_refused_by_the_preflight_without_being_opened(tmp_path, capsys):
-    """Ticket 35: an existing target that is not a regular file -- a named
+    """An existing target that is not a regular file -- a named
     pipe here -- is refused by ``check_target_set`` itself, by a raise,
     not a wait. ADR-0005 admits a FIFO to the write mechanism's own
     domain, but this command line's commit loop reads a target's prior
@@ -1398,12 +1398,12 @@ def _dev_is_locked_down() -> bool:
     reason="this account can create files directly in /dev -- narrowing precondition absent",
 )
 def test_dev_null_is_a_clean_usage_error_before_anything_renders(fake_source, capsys):
-    """F3-02's transaction half: /dev's own directory cannot accept a
+    """The transaction half: /dev's own directory cannot accept a
     sibling temporary, so /dev/null is refused by the pre-flight -- a
     clean usage error before rendering, not the mid-transaction
     PermissionError the mechanism silently narrowed to. The ability to
-    write a device or pipe target itself is not restored by this ticket;
-    see the target-domain paragraph this ticket adds to ADR-0005."""
+    write a device or pipe target itself is not restored here; see the
+    target-domain paragraph in ADR-0005."""
     fake_source(read())
 
     exit_code = cli.main([str(FIXTURE), "--emit", f"excellon={_DEV_NULL}"])
@@ -1415,7 +1415,7 @@ def test_dev_null_is_a_clean_usage_error_before_anything_renders(fake_source, ca
 def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
     fake_source, tmp_path, monkeypatch, capsys
 ):
-    """F6-01: a failure part-way through the commit loop -- after an
+    """A failure part-way through the commit loop -- after an
     earlier target has already been swapped to this run's bytes -- must
     restore that earlier target too, not merely discard the ones still
     unattempted. Sabotages the *second* call to ``os.replace`` (the
@@ -1477,11 +1477,12 @@ def test_re_running_over_existing_targets_leaves_no_backup_files_behind(fake_sou
 
 
 # ---------------------------------------------------------------------------
-# ticket 26: the CLI writes an artefact's bytes through the one published
-# mechanism (stompmodel.protocols.stage_payload / StagedWrite.commit /
-# StagedWrite.discard), never by re-implementing it. Naming each function's
-# production caller directly, rather than only its observable effect, is
-# what F1-01/F2-01/F3-04/F5-01 asked for and what criterion 2 demands.
+# The CLI writes an artefact's bytes through the one published mechanism
+# (stompmodel.protocols.stage_payload / StagedWrite.commit /
+# StagedWrite.discard), never by re-implementing it. Each function's
+# production caller is named directly, rather than only its observable
+# effect, because an effect a re-implementation reproduces just as well
+# is no evidence of which mechanism produced it.
 # ---------------------------------------------------------------------------
 
 
@@ -1509,7 +1510,7 @@ def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
 
 
 def test_the_cli_write_path_calls_stage_payload_then_staged_write_commit(fake_source, tmp_path, monkeypatch):
-    """F1-01/F2-01/F3-04/F5-01: a full ``--emit`` run must call the
+    """A full ``--emit`` run must call the
     published mechanism, not re-implement it. Both halves are
     patched in the owner's own module: the CLI reaches staging through
     ``stompmodel.protocols.stage_all``, which resolves ``stage_payload``
@@ -2801,7 +2802,7 @@ def test_a_case_model_without_any_step_emit_still_checks_clearance(tmp_path, cap
 
 
 # ---------------------------------------------------------------------------
-# F3-03 / T21 -- a diameter that moves far is reported, and still drilled
+# A diameter that moves far is reported, and still drilled
 # ---------------------------------------------------------------------------
 
 
@@ -2825,10 +2826,9 @@ def _panel_with_one_hole(tmp_path: Path, name: str, diameter_mm: float) -> Path:
 def test_imperial_hardware_under_the_default_metric_standard_is_reported_not_silent(tmp_path):
     """A 7/8" (22.225 mm) hole drilled 22.0 mm under the default metric standard.
 
-    Before F3-03/T21: exit 0, an empty ``diagnostics`` array, and a hole cut
-    0.225 mm undersize with nothing anywhere stating it moved. That silence
-    was the defect -- see ``.scratch/architecture-review/issues/
-    36-the-tool-says-how-far-it-moved-the-diameter.md``.
+    Without a reporting threshold: exit 0, an empty ``diagnostics`` array,
+    and a hole cut 0.225 mm undersize with nothing anywhere stating it
+    moved. That silence is the defect this pins.
     """
     panel = _panel_with_one_hole(tmp_path, "pedal.ai", 22.225)
     out_json = tmp_path / "out.json"

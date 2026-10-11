@@ -252,7 +252,7 @@ def test_no_permutation_of_any_hole_set_reaches_any_artifact(drawn, seed):
 
 def test_the_bare_dedupe_stage_no_longer_needs_quantise_to_save_it():
     """``Deduplicate`` alone now picks its survivor by measurement, not by
-    arrival -- the mirror image of F3-01's outline fix (ADR-0006): it no
+    arrival -- the mirror image of the outline tie-break (ADR-0006): it no
     longer depends on ``quantise()`` sorting raw holes first to be
     order-independent.
     """
@@ -346,7 +346,7 @@ def test_a_tie_inside_one_block_cannot_reach_the_emitted_bytes():
 
 
 def test_dedupe_keeps_the_hole_routing_visits_first():
-    """Coupling, both directions (ticket 15, AC1): ``Deduplicate``'s survivor
+    """Coupling, both directions: ``Deduplicate``'s survivor
     and ``RouteHoles``'s first visit are the same hole because both now call
     ``Hole.tie_break`` -- not because two independent implementations happen
     to agree. Compared by ``raw``, not by the whole hole: routing assigns an
@@ -376,7 +376,7 @@ def test_dedupe_keeps_the_hole_routing_visits_first():
 
 
 # --------------------------------------------------------------------------
-# F3-01, AC4: the invariance property starts at the content stream itself
+# The invariance property starts at the content stream itself
 # --------------------------------------------------------------------------
 
 #: 1590B's published footprint (112.40 x 60.50 mm), in PDF points. Both
@@ -445,10 +445,10 @@ def _emit_from_chunk_order(tmp_path: Path, order: list[str]) -> dict[str, Payloa
 
 
 def test_content_stream_order_cannot_reach_any_artifact(tmp_path):
-    """AC4: the invariance property starts at the content stream itself, not
+    """The invariance property starts at the content stream itself, not
     at ``RawDrillData``, the source's already-parsed output.
 
-    Per the coordinator's ruling on cost, this is a small fixed set of
+    Deliberately a small fixed set of
     content-stream permutations -- reversal plus two seeded shuffles -- not
     an exhaustive or generated permutation space, compared at the level of
     the emitted artefact bytes rather than any intermediate value.

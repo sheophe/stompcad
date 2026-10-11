@@ -138,7 +138,7 @@ def test_source_timestamp_pattern_has_no_catastrophic_backtracking(
 def test_render_step_timestamp_survives_its_own_round_trip_for_any_value(
     timestamp: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    """Criterion 1's class property: no single hard-coded string can satisfy
+    """The class property: no single hard-coded string can satisfy
     this, only a reader that recovers the field the writer actually set --
     whatever value that field held, including one containing the delimiters
     (``,`` ``(`` ``)``) and the quote character the writer itself escapes.
@@ -490,11 +490,10 @@ def _build_one_leaf_document() -> Any:
 
 
 def test_a_steplabel_reads_correctly_after_the_document_that_produced_it_is_released() -> None:
-    """Criterion 1. The composition the published surface invites: take a
-    document's leaves, drop every other reference to the document, force
-    collection, then read each fact back. Before this ticket ``leaf_labels``
-    returned bare labels and every one of these read back wrong once the
-    document was released (F1-01); wrapped in ``StepLabel``, which holds the
+    """The composition the published surface invites: take a document's
+    leaves, drop every other reference to the document, force collection,
+    then read each fact back. A bare label reads back wrong once the
+    document is released; wrapped in ``StepLabel``, which holds the
     document itself, all three answer correctly because the document is
     still referenced -- through the wrapper, not through caller discipline.
     """
@@ -518,7 +517,7 @@ def test_a_steplabel_reads_correctly_after_the_document_that_produced_it_is_rele
 
 
 def test_anchoring_on_the_shape_tool_or_the_root_label_does_not_keep_a_label_valid() -> None:
-    """Criterion 2. The anchor is the ``TDocStd_Document`` object itself,
+    """The anchor is the ``TDocStd_Document`` object itself,
     nothing drawn from it: a value that instead held the document's own
     ``ShapeTool`` or its own root label (``document.Main()``) would look
     equally sound and still fail this test, because neither keeps the
@@ -572,7 +571,7 @@ def test_anchoring_on_the_shape_tool_or_the_root_label_does_not_keep_a_label_val
 
 
 def test_two_walks_of_one_live_document_disagree_by_identity_agree_by_entry() -> None:
-    """Criterion 3, the anti-regraft test. ``TDF_Label.__eq__`` is CPython
+    """The anti-regraft test. ``TDF_Label.__eq__`` is CPython
     object identity and each walk obtains its own Python label object for
     the same node, so two ``StepLabel``s for one node compare unequal even
     though their entry strings agree and the kernel's own ``IsEqual``
@@ -593,7 +592,7 @@ def test_two_walks_of_one_live_document_disagree_by_identity_agree_by_entry() ->
 
 
 def test_a_shape_measures_identically_whether_or_not_its_document_is_held() -> None:
-    """Criterion 4, the negative half. ``TopoDS_Shape`` is independently
+    """The negative half. ``TopoDS_Shape`` is independently
     reference-counted and owes nothing to its document -- unlike a label, it
     does not dangle by the document being released. Without this test,
     "these are two debts, not one" is an assertion rather than executed

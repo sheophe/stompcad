@@ -281,9 +281,12 @@ ADR before changing architecture in code. When another document disagrees with
 an ADR, investigate the difference and correct the stale document. Keep reasons
 in ADRs and link to them from other guidance.
 
-Do not cite a decision or ruling by number from a draft specification or plan:
-state the reasoning, or cite an ADR by number. `test_no_spec_citations.py` in
-`stompdrill`'s tests fails the suite for any tracked file that does.
+Do not cite a decision or ruling by number from a draft specification or plan,
+nor a record of one -- a falsifier, ticket, acceptance criterion, task or fix
+round. All of them live in git-ignored documents, so a reader of this
+repository meets a dead end at every one. State the reasoning, or cite an ADR
+by number. `test_no_spec_citations.py` in `stompdrill`'s tests fails the suite
+for any tracked file that does.
 
 ## Testing rules
 

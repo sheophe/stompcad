@@ -16,7 +16,7 @@ from stompmodel.units import Nanometre
 
 
 def test_build_frame_puts_u_on_the_larger_of_1590lbs_two_catalogue_dimensions():
-    """ADR-0007's narrowing paragraph (T15): the reconciliation assumes
+    """ADR-0007's narrowing paragraph: the reconciliation assumes
     ``build_frame`` puts ``u`` on the model's larger measured in-plane span.
     Checked here against the catalogue's own asymmetric ``1590LB`` figures
     (50.55 x 50.60 mm) fed directly as ``Faces.footprint_mm`` -- the only

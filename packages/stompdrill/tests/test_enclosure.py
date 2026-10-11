@@ -824,7 +824,7 @@ class TestTheFixturePanelNeedsADeclaredCase:
 
 
 class TestTheEnclosureQuantiserEmitsNoMovementDiagnostic:
-    """AC6 (F3-03/T21): the negative that keeps the diameter amendment honest.
+    """The negative that keeps the diameter amendment honest.
 
     A drawn outline snapping onto a catalogue footprint moves further than any
     diameter reporting threshold ever does, and states nothing about it -- by

@@ -287,7 +287,7 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
 
 
 def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
-    """F2-04: ``cut_shape`` and ``select_solid`` read the same published
+    """``cut_shape`` and ``select_solid`` read the same published
     face lookup, so a face outside the vocabulary is refused alike by both.
     A mapping total over every string that is not ``"box"`` would drill it
     silently as the lid for a library caller who builds a kernel-backed

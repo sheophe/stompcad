@@ -123,7 +123,7 @@ def _named_solid_shapes(document: Any, keyword: str) -> list[Any]:
 
 
 def test_cut_shape_steps_over_a_null_shaped_leaf_and_cuts_the_next_match() -> None:
-    """Criterion 1: two same-keyword leaves, the first with no shape.
+    """Two same-keyword leaves, the first with no shape.
 
     The failure mode this pins is not a crash but a silently undrilled
     enclosure emitted at the clean exit code: a rewrite that stopped at the
@@ -162,7 +162,7 @@ def test_cut_shape_steps_over_a_null_shaped_leaf_and_cuts_the_next_match() -> No
 
 
 def test_cut_shape_refuses_when_no_leaf_matches() -> None:
-    """Criterion 2: refusal is unchanged when no name-matching leaf is cut."""
+    """Refusal is unchanged when no name-matching leaf is cut."""
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
     from OCP.TCollection import TCollection_ExtendedString

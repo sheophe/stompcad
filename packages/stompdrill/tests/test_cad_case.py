@@ -249,7 +249,7 @@ def test_the_plate_thickness_is_correct_for_every_catalogued_model(request, part
 
 @pytest.mark.parametrize("part", sorted(MODELS))
 def test_the_published_frames_normal_points_away_from_the_solid(request, part):
-    """Ticket 27, AC2/AC3: stompmodel.frames.FaceFrame states that its
+    """stompmodel.frames.FaceFrame states that its
     third axis is the outward normal. This checks that stated convention
     against the value ``build_frame`` actually publishes (``frame.basis.w``),
     for every catalogued model and both faces -- not against ``Faces.outward``,
@@ -278,7 +278,7 @@ def test_the_published_frames_normal_points_away_from_the_solid(request, part):
 
 
 def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
-    """ADR-0007's narrowing paragraph (T15): whether ``build_frame``'s axis
+    """ADR-0007's narrowing paragraph: whether ``build_frame``'s axis
     choice for this fix's one reachable part agrees with the catalogue's
     stated 50.55 x 50.60 mm asymmetry cannot be checked against the real
     supplied model. Its own box measures both in-plane spans EQUAL to

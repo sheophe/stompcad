@@ -448,7 +448,7 @@ class TestDeduplicate:
         assert len(survivors) == 2
 
     def test_the_survivor_is_stable_under_every_permutation_of_a_coincident_group(self):
-        """AC3: unsorted input, no prior stage -- the bare stage's own rule,
+        """Unsorted input, no prior stage -- the bare stage's own rule,
         not a sort performed elsewhere, must pick the same survivor whichever
         order a coincident group of more than two arrives in.
         """

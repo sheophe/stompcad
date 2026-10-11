@@ -1028,7 +1028,7 @@ def test_two_holes_half_a_millimetre_apart_are_two_rows() -> None:
 
 
 def test_two_holes_tied_on_nominal_x_come_back_in_the_same_order_either_way() -> None:
-    """Ticket 15, AC2: nominal X alone ties for two holes sharing one point,
+    """Nominal X alone ties for two holes sharing one point,
     grouped into a row by different diameter. ``sorted`` is stable, so
     without ``Hole.tie_break`` the survivor of the tie would be whichever one
     arrived first -- an ADR-0006 violation latent inside the type that

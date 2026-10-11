@@ -159,7 +159,7 @@ def _is_not_the_leaf_walk_gate_failing(result: subprocess.CompletedProcess[str])
     Identity, not exit status: the failure pytest reports must be the node
     id of that gate's own rule-checking test, and its output must name the
     file the probe mutated. A non-zero exit is necessary and is checked
-    last, because on its own it is what ticket 48 found proves nothing.
+    last, because on its own a non-zero exit proves nothing.
     """
     problems = _did_not_examine_stompgeoms_suite(result)
     node_id = f"{_LEAF_WALK_GATE.relative_to(STOMPGEOM).as_posix()}::{_rule_test_of(_LEAF_WALK_GATE)}"
@@ -185,9 +185,9 @@ def test_stompgeoms_own_suite_catches_a_second_leaf_walk_in_its_own_source() -> 
     Appending a second XCAF leaf descent to ``stompgeom``'s own ``writer.py``
     and running exactly the command CLAUDE.md documents for that member must
     fail *as the leaf-walk gate*: over a summary covering the whole suite,
-    naming that gate's own rule test and the mutated file. Ticket 25 moved
-    the gate here; ticket 48 replaced this probe's exit-code-only assertion,
-    which a resolver or collection failure satisfied just as well.
+    naming that gate's own rule test and the mutated file. An exit-code-only
+    assertion would be satisfied just as well by a resolver or a collection
+    failure, which is why identity is what this asserts.
     """
     original = WRITER.read_text(encoding="utf-8")
     try:
@@ -206,7 +206,7 @@ def test_stompgeoms_own_suite_catches_a_second_leaf_walk_in_its_own_source() -> 
 
 
 def test_stompgeoms_own_suite_is_green_with_that_breach_absent() -> None:
-    """The innocent probe matched to the guilty one above (ticket 48).
+    """The innocent probe matched to the guilty one above.
 
     Unmutated, the same command examines the same suite and exits 0. Without
     this, a stompgeom suite left permanently red -- by an unrelated
@@ -226,10 +226,10 @@ def test_stompgeoms_own_suite_is_green_with_that_breach_absent() -> None:
 
 
 def test_a_non_zero_run_that_is_not_the_gate_firing_is_refused() -> None:
-    """The sabotage control: the strengthening is what rejects these (ticket 48).
+    """The sabotage control: identity, not the exit code, rejects these.
 
-    Each fabricated run is non-zero, so the exit-code-only assertion this
-    module carried until ticket 48 accepts all three -- a resolver failure
+    Each fabricated run is non-zero, so an exit-code-only assertion would
+    accept all three -- a resolver failure
     before pytest started, a command that collected nothing, and an
     unrelated test failing over a full suite. Asserting on identity and on
     the size examined refuses all three, which is the whole difference.
@@ -250,7 +250,7 @@ def test_a_non_zero_run_that_is_not_the_gate_firing_is_refused() -> None:
     for label, result in fabricated.items():
         assert result.returncode != 0, f"{label}: this control must satisfy the old assertion"
         assert _is_not_the_leaf_walk_gate_failing(result), (
-            f"{label}: accepted by the strengthened verdict, which is the hole ticket 48 closes"
+            f"{label}: accepted by a verdict that must reject every run but the gate firing"
         )
 
 
@@ -320,7 +320,7 @@ _GUILTY_PROBE_SOURCE = (
     "    os.replace(tmp, path)\n"
     "def temp_name(target):\n"
     '    return f".{target.name}.{id(target)}.tmp"\n'
-    # Ticket 34's gate (stompgeom: no published name returns a bare
+    # The stompgeom gate (no published name returns a bare
     # label): a re-exported, bare-label-returning free function under one
     # of the two deleted names is exactly the shape that gate polices.
     "__all__ = ['label_name']\n"
@@ -339,7 +339,7 @@ def test_a_fourth_package_breaching_every_rule_is_caught_by_every_gate_on_its_ow
     change silently weakening one gate cannot hide behind another's pass.
     The failure must land on the gate's own rule-checking assertion, not
     its reach control -- a gate failing only because a member exists has
-    not been fixed (ticket 32).
+    not been fixed.
     """
     probe_pkg = _make_probe(_GUILTY_PROBE_SOURCE)
     try:
@@ -374,12 +374,12 @@ def test_a_fourth_package_breaching_every_rule_is_caught_by_every_gate_on_its_ow
 
 
 def test_a_fourth_package_breaching_nothing_passes_every_gate() -> None:
-    """The matched pair (ticket 32): an innocent new member trips no gate.
+    """The matched pair: an innocent new member trips no gate.
 
     A probe package that breaches none of the family's rules must pass
     every gate -- otherwise a gate's exit code cannot distinguish "a rule
     was breached" from "the workspace merely grew a member", which is
-    exactly the vacuous-reach-control defect this ticket exists to close.
+    exactly the vacuous-reach-control defect these two tests exist to close.
     """
     probe_pkg = _make_probe(_INNOCENT_PROBE_SOURCE)
     try:
