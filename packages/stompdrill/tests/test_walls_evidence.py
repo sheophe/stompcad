@@ -480,20 +480,24 @@ def _behind(found: list[Level], outer: Level) -> list[Level]:
 
 
 def _nearest_behind(found: list[Level], outer: Level) -> Level | None:
-    """The nearest level behind ``outer``, larger area first: no axis clause at all.
+    """The level the rule reaches with its axis equality dropped and nothing else.
 
-    The control for the two assertions above, which both read the pairing's
-    own answer and would become tautologies if the axis equality ever stopped
-    deciding anything. Nothing in the tree pairs this way; it exists to
-    disagree with the pairing that ships.
+    Select then check, as the rule does: the nearest level behind ``outer``,
+    then the draft comparison asked of that one, refusing as ``None``. The
+    draft clause is kept so this isolates the axis equality -- dropping both
+    makes the control disagree for either reason, and on 1590B the draft
+    alone is enough, so it would stay green with the axis equality deleted.
     """
     candidates = _behind(found, outer)
     if not candidates:
         return None
-    return min(
+    nearest = min(
         candidates,
         key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
     )
+    if _own_draft(nearest.direction) > _own_draft(outer.direction):
+        return None
+    return nearest
 
 
 #: How near a rival level has to stand to the face a wall paired with before
@@ -540,11 +544,11 @@ def test_dropping_the_axis_clause_answers_differently_on_a_cached_casting() -> N
     """The control: without the axis equality some cached casting pairs differently.
 
     Both assertions above read the pairing's own answer, so either could pass
-    by stating nothing. This pairs the same walls by depth and area alone and
-    fails if that agrees everywhere -- which would mean the axis is deciding
-    nothing and the assertions above have gone vacuous. ``any`` rather than a
-    count: how many walls disagree is a fact about the catalogue, and a
-    catalogue that grew would make a count stale without making it wrong.
+    by stating nothing. This pairs the same walls by the rule's other clauses
+    with the axis equality dropped, and fails if that agrees everywhere --
+    which would mean the axis is deciding nothing and the assertions above
+    have gone vacuous. ``any`` rather than a count: how many walls disagree
+    is a fact about the catalogue, and one that grew would stale a count.
     """
     parts = _cached_castings()
     assert parts
@@ -610,18 +614,21 @@ def test_a_lid_is_a_plate_and_a_closure_rim_of_the_measured_height(part: str) ->
 @pytest.mark.hammond
 @pytest.mark.parametrize("part", _cached_castings())
 def test_a_lid_registers_no_wall_and_states_why(part: str) -> None:
-    """Every cached lid: no wall surface, no wall region, and a reason given.
+    """Every cached lid: no wall surface, no wall region, and the lid named as why.
 
-    Asserted over the whole cache because the rim is in every casting's lid
-    and ``find_walls`` answers four for every one of them, so a lid yielding
-    nothing can only be a rule and never a property of the geometry.
+    ``walls_unavailable`` is empty three ways, so truthiness alone cannot
+    tell a discovery the loader declined from one the geometry refused. The
+    reason names the lid, which is the rule (ADR-0007); a sentence about
+    levels or drafts would mean a refusal reached it and the rule never ran.
+    Asserted over the whole cache because the rule is about the face and
+    nothing about any one casting's rim.
     """
     model = load_case_model(
         _model_path(part), face=CaseFace.LID, margin_nm=Nanometre(500_000)
     )
     assert model.walls == ()
     assert dict(model.wall_regions) == {}
-    assert model.walls_unavailable
+    assert "lid" in (model.walls_unavailable or "")
 
 
 def _paired_without_the_draft_clause(found: list[Level], outer: Level) -> Level | None:
