@@ -117,15 +117,14 @@ def test_a_heading_and_the_numbered_list_below_it_are_no_citation() -> None:
     assert not _CITATION.search(_searchable(heading)), heading
 
 
-def test_no_tracked_file_cites_a_decision_by_number() -> None:
+def test_no_tracked_text_file_cites_a_decision_by_number() -> None:
     """Each tracked text file is searched whole, with comment leaders blanked.
 
-    ``\\s+`` already matches a newline, and hard-wrapped text puts one between
-    ``decision`` and its number often enough that two such citations were
-    found by hand and none by reading a line at a time. ``_searchable`` blanks
-    what a wrapped comment puts in the way, length for length, so the pattern
-    spans a wrap and the reported line is still the one the citation starts
-    on, which is where a reader has to go to fix it.
+    Hard wrapping puts a newline between ``decision`` and its number often
+    enough that reading a line at a time misses a citation outright, so the
+    search spans one. ``_searchable`` blanks what a wrapped comment puts in
+    the way, length for length, so the line reported is still the one the
+    citation starts on, which is where a reader has to go to fix it.
     """
     offenders = []
     read = set()
