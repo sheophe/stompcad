@@ -12,10 +12,10 @@ multi-wall refusals are findings rather than raises. A wall that already takes a
 hole for one component at a place refuses a second component's hole there as a
 finding, because no earlier stage can see two wall holes at once. A further
 amendment gives a wall its own rule for finding the surface behind it, and has
-the model say why it holds no walls. A final amendment derives the tolerance of
-the guard that confirms a stated depth names a wall region's own plane from two
-roundings the frame carries -- its direction's, which is a lever arm about the
-wall's own datum, and its canonical lengths', which is a constant -- rather
+the model say why it holds no walls. A further amendment derives the tolerance
+of the guard that confirms a stated depth names a wall region's own plane from
+two roundings the frame carries -- its direction's, which is a lever arm about
+the wall's own datum, and its canonical lengths', which is a constant -- rather
 than fixing it. Three further amendments record what the wall pass actually
 does: that a hole is measured along its component's axis while the cut in the
 emitted model runs along the wall's normal, a divergence left in place; what a
@@ -23,7 +23,17 @@ wall's datum, a wall hole's span and the geometry additions are; and that a
 wall pairs with its inner face on the axis that face leans on and on drafting
 no more than it does, which replaces the near-parallel angle and the thickness
 cap with an exact equality and an inequality whose two sides the casting itself
-supplies.
+supplies. Two amendments then settle that inequality against the population
+that appeared to disprove it, and the second of them carries this work's
+headline decision: **a lid registers no walls**, because what discovery finds
+in a lid is its closure rim, and a hole in a closure flange is a cut nobody
+asks for and nobody can undo. With the rim out of the domain the inequality
+stands, and the rule reaches it by selecting the nearest candidate on the
+opposite signed axis and then **refusing** a wall whose nearest candidate
+drafts further than its outer face, rather than passing over that candidate for
+a face further back. Nine amendments follow the original decision in all; the
+one that withdrew the inequality is superseded, and every heading says where it
+stands.
 
 This ADR retains the original extra decision and its rationale as history. The
 current installation, the later frame and protocol amendments, and the wall
@@ -243,10 +253,14 @@ no second pass cuts exactly what it cuts now.
 A **wall** is discovered, never declared. Keep the plate levels that are *lateral* — whose
 outward normal lies nearer the plane perpendicular to the drill axis than the axis itself —
 group those by the nearest signed kernel axis, and the extreme level along that axis is the
-wall's outer surface. Its inner surface is then found by `_wall_inner_level` (see the lid
-amendment at the end of this file, which governs that pairing; the plate-thickness and axis
-amendments between them each replaced an earlier form of the rule and are superseded in their
-turn): a wall's inner surface arrives in a *different* direction bin, because the draft tilts
+wall's outer surface. Its inner surface is then found by `_wall_inner_level`, and the last
+amendment in this file is the rule it runs. Four amendments reach that rule, and they are only
+readable in order: the plate-thickness amendment, whose pairing is superseded while its second
+half on why a model holds no walls stands; the axis amendment, which replaced that pairing and
+whose axis equality and draft inequality are the clauses the rule is made of; the withdrawal
+amendment, superseded entire, which struck the inequality over a lid rim; and the lid amendment,
+which takes the lid out of the domain, restores the inequality and states the control flow the
+code runs. A wall's inner surface arrives in a *different* direction bin, because the draft tilts
 the two oppositely, so `facing` over the whole lateral population would pair a wall with the
 opposite wall's outer face instead.
 
@@ -637,12 +651,15 @@ each of its walls it prints the level the rule pairs with that wall beside the p
 records, both drafts the second clause compares, the next level on the wall's own axis, the nearest
 level behind it leaning on any other axis with the gap between the two, and a `draft refused` row
 for every level the second clause turns away. A wall the rule cannot answer prints `none` in place
-of a plate, so a loss cannot read as a zero. The draft column comes from a named helper,
-`level_draft`, because the arithmetic hides the quantity: tilt is measured *out of* the plane
-perpendicular to the axis handed in, so against a level's own leaning axis it answers the complement
-and a right angle less that complement is the draft. Run without arguments the mode sweeps the whole
-cache. Every wall of every cached casting pairs with the face the plate-thickness rule chose, and
-none is lost.
+of a plate, so a loss cannot read as a zero. The draft column comes from `walls.level_draft`, the
+rule's own named helper, imported rather than restated so that the instrument cannot drift from
+what it measures; it is named because the arithmetic hides the quantity: tilt is measured *out of*
+the plane perpendicular to the axis handed in, so against a level's own leaning axis it answers the
+complement and a right angle less that complement is the draft. Run without arguments the mode
+sweeps the whole cache. Every wall of every cached casting's **box** pairs with the face the
+plate-thickness rule chose, and none is lost. The lid is swept too and is not covered by that
+claim: its rim is not a wall, and the amendment at the end of this file says what the rule makes of
+one.
 
 Two other candidates were measured and are not adopted. **The inner face drafting at least as much
 as the outer** is false: the 1590BS drafts its inner face the less of the two, so that inequality
@@ -659,31 +676,36 @@ quadrant, which is no statement a reader would defend about what a wall is. The 
 bound back and puts it in the casting's own currency. A candidate drafting no more than the outer
 face does lies within the outer face's draft of the opposite axis, and the outer face lies within
 its own draft of this one, so the two planes cannot diverge by more than those two drafts summed —
-at worst twice the outer face's own, which measures 1.000°–2.500° over every cached casting, for a
-bound of 2.000°–5.000°. (The narrower low end quoted elsewhere in this file is over the parts the
-Evidence covers; this is over every casting the cache holds.) Weaker than half a degree, and not a
-figure anyone chose: that is the trade this amendment makes.
+at worst twice the outer face's own, which measures 1.000°–2.500° over the box of every cached
+casting, for a bound of 2.000°–5.000°. (The narrower low end quoted elsewhere in this file is over
+the parts the Evidence covers; this is over every box the cache holds. A lid rim's outer face
+drafts 0.000°, and a rim is not a wall.) Weaker than half a degree, and not a figure anyone chose:
+that is the trade this amendment makes.
 
 That bound is what the consequence recorded above needs — a wall's two faces both placed by the one
 `plate_nm` along `w`, with the frame's depth-zero plane on the inner region's own plane to within 3
 nm. Every catalogued wall lands far inside it, because a real casting drafts its two faces the same
 way out of the footprint plane and their divergence is then the *difference* of the two drafts
 rather than their sum. That difference is what `--inner-face` prints both sides of, and it is zero
-on every cached wall but the 1590BS's four, whose inner face drafts 0.150° less. The plane tilt the
-earlier amendment quotes as 0.000°–0.200° is `_tilt_degrees` between the two planes, a different and
-slightly looser measure of the same thing. The summed figure is what the clause permits, not what
-any casting does.
+on every cached box wall but the 1590BS's four, whose inner face drafts 0.150° less. The plane tilt
+the earlier amendment quotes as 0.000°–0.200° is the angle between the two planes themselves — the
+outer face's normal against the inner's reversed — a different and slightly looser measure of the
+same thing, and nothing in the tree computes it now, the rule comparing each face's own draft
+instead. The summed figure is what the clause permits, not what any casting does.
 
-**The clause refuses on most castings and decides on none, and that distinction is the whole of its
-value.** `--inner-face` prints a `draft refused` row for every level it turns away, and over the
-cached catalogue it turns away a great many: the levels leaning on a wall's own back axis include
-chamfer flats, fillet lands and drafted pockets from 3.000° up to 44.912°, and one 1590BS wall turns
-away nine of them. Not one refused level anywhere in the catalogue stands nearer the outer face than
-that wall's own inner face does, so on no cached casting does the clause move an answer — the
-`recorded` and `under the rule` columns agree on every wall, and a disagreement between them is what
-a moved answer would look like. That agreement is a property of this catalogue rather than of the
-clause: a casting putting a steeply drafted pocket nearer its outer face than its inner face would
-have the axis equality take the pocket, and the inequality is what refuses it.
+**The clause has something to say on most castings and decides on none, and that distinction is the
+whole of its value.** `--inner-face` prints a `draft refused` row for every level the comparison
+would turn away, and over the cached catalogue there are a great many: the levels leaning on a
+wall's own back axis include chamfer flats, fillet lands and drafted pockets from 3.000° up to
+44.912°, and most walls of most cached boxes present at least one. Not one of them anywhere in the
+catalogue stands nearer the outer face than that wall's own inner face does, so on no cached box
+does the clause move or lose an answer — the `recorded` and `under the rule` columns agree on every
+wall, and a disagreement between them is what a moved answer would look like. That agreement is a
+property of this catalogue rather than of the clause: a casting putting a steeply drafted pocket
+nearer its outer face than its inner face would have the axis equality and *nearest* take the
+pocket, and the inequality is what refuses that wall rather than letting a plate be recorded from
+it. The amendment at the end of this file states that control flow, which is a refusal of the wall
+and not a skip past the pocket.
 
 The on-plane guard stays what notices if the bound is ever not enough — a plane further from
 parallel than the frame's own rounding allows puts a correctly placed point off it by more than the
@@ -691,8 +713,9 @@ guard's tolerance once there is any lever arm, so such a casting earns a refused
 than a hole cut to a depth the document misstates. And the comparison itself needs no slack:
 `direction_bin` renormalises every direction from an integer-millionths key, so a wall's two faces
 carry mirrored keys and their drafts come out of identical arithmetic. Over the cached catalogue the
-inner face's draft exceeds the outer's by exactly zero on every wall, so a bare `<=` refuses nothing
-a tolerance would have admitted, and a casting whose keys are *not* exact negations refuses the wall
+inner face's draft never exceeds the outer's: the difference is exactly zero on every box wall but
+the 1590BS's four, whose inner face drafts 0.149984° *less*. So a bare `<=` refuses nothing a
+tolerance would have admitted, and a casting whose keys are *not* exact negations refuses the wall
 with `_wall_inner_level`'s own reason rather than drilling it somewhere else.
 
 ### Amendment: the draft inequality is withdrawn, because a lid drafts its rim the other way
@@ -784,18 +807,34 @@ solid this program should never have been discovering walls in. The earlier reas
 about the geometry and wrong about the population: it weakened the definition of a wall to
 accommodate a flange that is not one.
 
-**The inequality is a definition, not a tolerance, and what it turns away is not what it moves.**
-It turns away a great deal: the levels leaning back at a wall include chamfer flats, fillet lands
-and drafted pockets measuring 3.000° to 44.912°, the clause refuses every one of them, and most
-walls of most cached castings present at least one. It moves no pairing, and that is a measurement
-rather than a coincidence — not one refused level anywhere in the catalogue stands nearer its
-wall's outer face than that wall's own inner face does, so *nearest* was never going to reach one.
-Which is exactly what the clause is for: on a casting that did stand a steeply drafted pocket that
-near, the axis equality alone would take the pocket, and the inequality is what turns the pocket
-away and leaves *nearest* to reach the wall's own face — a correct plate, not a refusal. A **wall**
-is refused only where the clause excludes every candidate it had, which is the lid rim this
-amendment has taken out of the domain, and that refusal is the safe outcome: a wall left undrilled
-rather than a hole bored to a thickness the document misstates.
+**The rule selects first and checks second, and that is what makes the inequality a refusal.** The
+three exact clauses select one level — behind the outer face, on the opposite signed axis, nearest
+— and the inequality is then asked of *that* level. It is not a sieve over the pool. Sieving first
+is what the code did, and it cannot refuse anything: a candidate that failed the inequality was
+dropped from the pool and *nearest* reached past it to whatever stood further back, which on a real
+casting is always something: a cast box leans ribs, bosses, chamfer lands and the opposite wall's
+own outer face on that same back axis, and `tools/measure_walls.py --inner-face` prints them. A
+dropped inner face was therefore answered with another plate, never with a refusal.
+
+The lid rim this amendment has taken out of the domain is where that was measured. Sieving, the
+1590F's four rims each recorded 188.0000 mm and the 1590P1's 143.3000 and 73.3000 mm — the width of
+the part — while the true 4.5374, 4.2972 and 4.3918 mm faces were dropped for drafting 1.000°
+against an outer face's 0.000°. Not one of those was a refusal. `load_case_model`'s lid rule, and
+not this clause, is what keeps them out of a drill document, and the on-plane guard could not have
+caught them either, because a flat rim and the rim opposite are exactly parallel — 0.000° against
+0.000°. So a **wall** is refused exactly where the level the three clauses select drafts further
+than its outer face does, and that refusal is the safe outcome: a wall left undrilled rather than a
+hole bored to a thickness the document misstates. A steeply drafted pocket standing nearer a wall's
+outer face than that wall's own inner face makes a wall this version does not drill, because
+nothing in the geometry then says which of the two the plate is.
+
+**What the clause has to turn away is not what it moves.** The levels leaning back at a wall
+include chamfer flats, fillet lands and drafted pockets measuring 3.000° to 44.912°, and most walls
+of most cached castings present at least one. None of them is ever the level the three clauses
+select, and that is a measurement rather than a coincidence: not one of them anywhere in the
+catalogue stands nearer its wall's outer face than that wall's own inner face does. So over the
+cached boxes the clause moves no pairing and refuses no wall, and the pocket it is written for is
+the casting this catalogue does not hold.
 
 **No slack, and none needed.** `direction_bin` renormalises every direction from an
 integer-millionths key, so a wall's two faces carry mirrored keys and their drafts come out of
@@ -810,10 +849,12 @@ casting — the box for the walls the program drills, the lid for the rim it dec
 because the lid population is the evidence that a rim is a flange. Per wall it prints the level the
 rule pairs with beside the plate `find_walls` records, both faces' own drafts, the next level on
 the wall's own axis, the nearest level behind it leaning on any other axis with the gap between the
-two, and a `draft refused` row for every level the inequality turns away, marked `nearest` where
-that level is the one depth alone would have taken. A wall the rule cannot answer prints `none` in
-place of a plate, so a loss cannot read as a zero. How many levels it turns away, and over how many
-walls, is that command's output rather than a figure copied here.
+two, and a `draft refused` row for every level the comparison turns away, marked `nearest` where
+that level is the one the three clauses select — which is where the rule refuses the wall, and
+where both plate columns then read `none`, so a loss cannot read as a zero. A solid whose walls the
+rule refuses is printed as refused and the sweep carries on to the next casting, because a
+measurement over a catalogue is worth nothing if one part can end it. How many levels the clause
+turns away, and over how many walls, is that command's output rather than a figure copied here.
 `packages/stompdrill/tests/test_walls_evidence.py` holds the rim figures this amendment argues
 from, and the catalogue property the clause rests on — that the level the other three clauses reach
 already drafts no more than the outer face does — so a casting re-issued against either fails a
