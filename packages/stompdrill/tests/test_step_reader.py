@@ -1,8 +1,8 @@
 """Reading a STEP assembly: names, placement and per-representation units.
 
-The reader itself now lives in ``stompgeom.step``; its own refusals (a
+The reader lives in ``stompgeom.step``, where its own refusals (a
 missing file, a non-STEP file) are pinned in
-``packages/stompgeom/tests/test_step.py`` instead. What is left here is
+``packages/stompgeom/tests/test_step.py``. This module covers
 what only a real Hammond model, fetched through this package's own
 ``--hammond`` machinery, can exercise: assembly expansion, placement,
 product names and stable ordering.

@@ -151,14 +151,11 @@ def test_obstructed_is_reachable_with_a_genuine_raised_boss():
 
 
 def test_the_box_check_still_reframes_through_mirrored_frames():
-    """Fix-round-1 regression, now synthetic: cast lettering used to prove
-    the box-check transforms a lid-canonical point into the box's own
-    orientation before testing it, by flipping structure at a low margin.
-    Lettering can never do that again (fix round 2), so a mirrored frame
-    pair with an off-centre boss -- not lettering -- is what proves the
-    reframe (``CoordinateFrame.reframe``) still runs before the box's own
-    region is consulted, rather than checking the lid's raw coordinate
-    against it.
+    """A mirrored frame pair with an off-centre boss proves the reframe
+    (``CoordinateFrame.reframe``) runs before the box's own region is
+    consulted, rather than the lid's raw coordinate being checked against
+    it. Cast lettering cannot prove it: lettering is always relief, whatever
+    the margin, so it never flips a verdict under a wrong frame.
     """
     own_frame = FaceFrame(
         basis=CoordinateFrame(

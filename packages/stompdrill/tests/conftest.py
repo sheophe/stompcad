@@ -215,7 +215,7 @@ def registration_for(model) -> CaseRegistration:
     """A ``CaseRegistration`` naming ``model`` verbatim.
 
     For a test that drives ``cut_shape``/``StepEmitter.emit`` directly,
-    without first running ``CheckCaseClearance`` -- the cutter now reads its
+    without first running ``CheckCaseClearance`` -- the cutter reads its
     frame and face from ``DrillData.case``, never from the model, so a test
     exercising it must attach one itself.
     """

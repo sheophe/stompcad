@@ -249,7 +249,7 @@ def test_the_plate_thickness_is_correct_for_every_catalogued_model(request, part
 
 @pytest.mark.parametrize("part", sorted(MODELS))
 def test_the_published_frames_normal_points_away_from_the_solid(request, part):
-    """Ticket 27, AC2/AC3: stompmodel.frames.FaceFrame now states that its
+    """Ticket 27, AC2/AC3: stompmodel.frames.FaceFrame states that its
     third axis is the outward normal. This checks that stated convention
     against the value ``build_frame`` actually publishes (``frame.basis.w``),
     for every catalogued model and both faces -- not against ``Faces.outward``,
@@ -313,7 +313,7 @@ def test_the_real_1590lb_box_does_not_resolve_the_catalogues_asymmetry():
 def _level(position: float, area: float, outward: int, name: str) -> Level:
     """One synthetic z-axis level, identified by the single name in its ``faces``.
 
-    Stated as the kernel position both selection rules used to read, and
+    Stated as a kernel position and
     converted here, so the fixtures below still say where each level sits
     rather than restating ``Level``'s signed-offset convention twice.
     """

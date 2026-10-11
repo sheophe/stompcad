@@ -332,7 +332,7 @@ def test_a_rotated_panel_hole_near_the_long_edge_is_not_wrongly_rejected():
 
 
 def test_the_rotated_hole_is_cut_at_the_named_model_point():
-    """Criterion 1: not merely "no longer refused" -- the published frame
+    """Criterion 1: not merely "not refused" -- the published frame
     must place the hole at a specific, named point in model space. Both
     candidate quarter turns satisfy "not refused" against this play area
     (E1's own risk note); only one satisfies this coordinate.
@@ -541,8 +541,7 @@ def _1590lb_match(*, rotated: bool) -> EnclosureMatch:
 
 
 def test_1590lb_drawn_as_printed_is_reconciled_to_the_named_model_point():
-    """Criterion 3, first orientation, migrated from the falsifier's red
-    test: drawn 50.55 mm wide x 50.60 mm tall matches the catalogue's own
+    """Criterion 3, first orientation: drawn 50.55 mm wide x 50.60 mm tall matches the catalogue's own
     printed row exactly, so ``EnclosureMatch.rotated`` is ``False`` -- and
     identity is the wrong answer, because canonical x is the *smaller*
     drawn extent here. Named against a real model point so the untested

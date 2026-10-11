@@ -229,7 +229,7 @@ def test_rows_drilled_to_one_pattern_reserve_one_chain_between_them():
     """The stack reserves per chain, not per row.
 
     Twelve rows drilled alike are one chain, so the drawing keeps the height
-    eleven further bands would have taken from it — and a panel is no longer
+    eleven further bands would have taken from it — and a panel is not
     driven onto larger paper by rows whose dimensions it never draws.
     """
     from stompdrill.emitters.drawing.layout import BOTTOM_BASE, ROW_PITCH, TOP_ALLOWANCE

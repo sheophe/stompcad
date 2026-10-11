@@ -446,7 +446,7 @@ def _unreachable(
 ) -> Diagnostic:
     """A hole was asked for and none can be made, so this is an error.
 
-    An error and not a warning: ``clash`` no longer mentions this component, so
+    An error and not a warning: ``clash`` does not mention this component, so
     a warning would let the fact that nothing was cut for it go unseen. One code
     for several causes, because the remedy is the same seating or named part
     and a finding is matched by its code. ``seating`` is false where the cause

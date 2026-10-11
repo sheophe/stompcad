@@ -267,14 +267,14 @@ def test_the_bare_dedupe_stage_no_longer_needs_quantise_to_save_it():
 
     first, second = hole(0.0001), hole(0.0002)
 
-    # The bare stage: geometric now, whichever order it is handed. The
+    # The bare stage: geometric, whichever order it is handed. The
     # smaller raw x wins regardless.
     assert Deduplicate().apply(DrillData(holes=(first, second))).holes == (first,)
     assert Deduplicate().apply(DrillData(holes=(second, first))).holes == (first,)
 
     # The composed path stays stable too: quantise()'s own entry sort still
     # runs, for the diagnostics it also protects (per-hole findings, grid
-    # ties), but is no longer load-bearing for Deduplicate specifically.
+    # ties), but is not load-bearing for Deduplicate specifically.
     raw = _synthetic_raw()
     reversed_raw = replace(raw, holes=tuple(reversed(raw.holes)))
 

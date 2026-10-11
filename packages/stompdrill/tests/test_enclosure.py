@@ -34,7 +34,7 @@ B_FOOTPRINT = (112_400_000, 60_500_000)
 
 #: A panel drawn for a 1590A, whose 92.60 × 38.50 has no catalogue neighbour
 #: within tolerance in either orientation. Every test that needs a *silent,
-#: undeclared* match uses this one, because the fixture above can no longer
+#: undeclared* match uses this one, because the fixture above cannot
 #: supply it — and the axes differ, so a transposed answer cannot pass.
 UNAMBIGUOUS = RawOutline(Millimetre(93.0), Millimetre(38.0))
 

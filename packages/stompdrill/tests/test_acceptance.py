@@ -206,11 +206,11 @@ def test_a_declared_case_with_no_outline_to_check_it_against_reaches_exit_two(tm
 def _stub_ocp_case_model(*, document=None):
     """An ``OcpCaseModel`` standing in for a real parse, kernel-free geometry.
 
-    ``StepEmitter`` now refuses any model that is not ``isinstance``
+    ``StepEmitter`` refuses any model that is not ``isinstance``
     ``OcpCaseModel`` at construction, so a bare ``FakeCase`` -- which
-    satisfies only the clearance protocol -- can no longer stand in for one
+    satisfies only the clearance protocol -- cannot stand in for one
     here. ``classify`` is overridden to the same plain bounds check
-    ``FakeCase`` used, since no real kernel region is available; the
+    ``FakeCase`` makes, since no real kernel region is available; the
     footprint and play area mirror ``FakeCase``'s so a fixture built
     against it behaves the same way.
     """

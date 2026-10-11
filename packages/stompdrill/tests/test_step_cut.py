@@ -287,13 +287,11 @@ def test_cutting_the_lid_face_only_affects_the_lid(tmp_path):
 
 
 def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
-    """F2-04: ``cut_shape``'s face-to-keyword mapping used to be
-    ``"BOX" if model.face == "box" else "LID"`` -- total over every string
-    that is not exactly ``"box"`` -- where ``select_solid``'s was partial and
-    raised. A library caller who builds a kernel-backed model directly
-    (unreachable from the CLI, which validates first) used to see a face
-    outside the vocabulary silently drilled as the lid. Both consumers now
-    read the same published lookup and refuse it alike.
+    """F2-04: ``cut_shape`` and ``select_solid`` read the same published
+    face lookup, so a face outside the vocabulary is refused alike by both.
+    A mapping total over every string that is not ``"box"`` would drill it
+    silently as the lid for a library caller who builds a kernel-backed
+    model directly (unreachable from the CLI, which validates first).
     """
     import dataclasses
 
@@ -310,7 +308,7 @@ def test_cut_shape_and_select_solid_agree_on_which_faces_are_legal():
 
     # A library caller bypassing the type -- CaseFace's own value is never
     # constructible from "top", so this simulates the one way the vocabulary
-    # can still be violated at runtime. The cutter now reads the face from
+    # can still be violated at runtime. The cutter reads the face from
     # the registration, so that is where the bypassed value must sit.
     top_model = dataclasses.replace(model, face="top")
     data = make_data(at(0, 0, 6 * MM, index=1)).with_case(registration_for(top_model))

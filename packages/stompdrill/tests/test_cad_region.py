@@ -33,9 +33,9 @@ def box(hammond_bb):
 def test_the_cast_lettering_is_always_relief(box):
     """13 letters stand 0.50 mm proud, far under the fixed 2.0 mm structure
     height (``region._STRUCTURE_HEIGHT_MM``) -- lettering is relief because
-    it is lettering, not because of where a threshold sits (fix round 2:
-    pedal builders drill straight through it, and margin is bit clearance
-    now, unrelated to this decision).
+    it is lettering, not because of where a threshold sits (pedal builders
+    drill straight through it, and margin is bit clearance, unrelated to
+    this decision).
     """
     axis, faces, _ = box
 
@@ -46,9 +46,8 @@ def test_the_cast_lettering_is_always_relief(box):
 
 
 def test_a_hole_over_the_cast_lettering_stays_open_at_every_margin(box):
-    """The margin sweep that used to flip lettering to structure is gone --
-    ``classify_bounds`` no longer takes a margin at all, so a hole over a
-    letter stays open (``"relief"``) whatever bit clearance is asked for.
+    """``classify_bounds`` takes no margin at all, so a hole over a letter
+    stays open (``"relief"``) whatever bit clearance is asked for.
     """
     from tests.hammond import BB_PROBES
 

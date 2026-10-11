@@ -71,7 +71,7 @@ MODELS: Mapping[str, HammondModel] = MappingProxyType(
 #:                     cross-part OBSTRUCTED.
 #:   cast lettering    13 inner bounds standing 0.50 mm proud of the box floor,
 #:                     in two columns near x = 41.1 and x = 46.6. Never
-#:                     structure since fix round 2 -- pedal builders drill
+#:                     structure -- pedal builders drill
 #:                     straight through lettering, and its background is
 #:                     often flush or recessed on other castings, so height
 #:                     alone was never a sound relief/structure signal (see
@@ -91,16 +91,15 @@ BB_PROBES: Mapping[str, tuple[float, float]] = MappingProxyType(
         "boss": (51.0, 38.5),
         # Beyond the floor's outline once the margin is taken off.
         "off_face": (55.0, 0.0),
-        # On a cast letter -- always relief, at every margin, since fix
-        # round 2 (this used to fail below a 0.4 mm margin; it no longer can).
+        # On a cast letter -- always relief, at every margin.
         "relief": (41.12, 7.12),
     }
 )
 
 #: How proud the cast lettering stands, in millimetres. Below
 #: ``region._STRUCTURE_HEIGHT_MM`` (2.0 mm) by a wide margin, and never the
-#: relief/structure threshold itself since fix round 2 -- that constant is
-#: fixed, not swept from this value. Kept for the height itself, which the
+#: relief/structure threshold itself -- that constant is fixed, not swept
+#: from this value. Kept for the height itself, which the
 #: docstring above and ``region.py``'s module comment both cite.
 BB_RELIEF_MM = 0.5
 

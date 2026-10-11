@@ -230,7 +230,7 @@ def test_a_registered_emitter_needing_options_this_cli_cannot_supply_exits_three
     Implement ``Emitter``, decorate with ``register_emitter``, skip the CLI
     edit because no flags are needed -- and give the options a required,
     no-default constructor parameter. The CLI cannot supply one, so this is a
-    usage failure (exit 3), not the unhandled ``TypeError`` it used to be.
+    usage failure (exit 3), not an unhandled ``TypeError``.
     """
 
     @dataclasses.dataclass(frozen=True, slots=True)
@@ -1451,9 +1451,9 @@ def test_a_commit_phase_failure_rolls_back_every_already_replaced_target(
 
 
 # The exhaustive {first, middle, last} x {staging, the pre-commit read,
-# the commit} sweep over the set-level transaction now lives with the rule
+# the commit} sweep over the set-level transaction lives with the rule
 # itself, in ``packages/stompmodel/tests/test_write_transaction.py``: this
-# command line composes ``stage_all``/``commit_all`` and no longer states
+# command line composes ``stage_all``/``commit_all`` and does not state
 # either loop. The whole-invocation consequences of that rule are still
 # asserted here, through ``cli.main``, above and below this line.
 
@@ -1509,9 +1509,8 @@ def test_control_spies_detect_a_real_call_to_each_write_function(tmp_path):
 
 
 def test_the_cli_write_path_calls_stage_payload_then_staged_write_commit(fake_source, tmp_path, monkeypatch):
-    """F1-01/F2-01/F3-04/F5-01, migrated: a full ``--emit`` run must call the
-    published mechanism, not re-implement it (``write_payload`` no longer
-    exists; the design verdict deletes it outright). Both halves are
+    """F1-01/F2-01/F3-04/F5-01: a full ``--emit`` run must call the
+    published mechanism, not re-implement it. Both halves are
     patched in the owner's own module: the CLI reaches staging through
     ``stompmodel.protocols.stage_all``, which resolves ``stage_payload``
     there, and reaches the commit verb only through the value staging
@@ -2569,7 +2568,7 @@ def test_format_report_reads_the_case_from_a_registration_alone():
     """A ``DrillData`` carrying only ``.case``, with no clearance provenance at
     all (e.g. hand-built, or a document from a tool that never ran the
     clearance stage), still states identity -- it must not require the live
-    ``CaseModel`` handle ``format_report`` no longer accepts.
+    ``CaseModel`` handle, which ``format_report`` does not accept.
 
     Reproduces .scratch/architecture-review/falsify/tests/test_f2_02_case_report_from_data.py.
     """
