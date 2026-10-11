@@ -195,7 +195,7 @@ on traversal order, violating ADR-0006.
 Binning has a boundary cost: two normals separated by less than a bin's width
 can belong to different levels if they straddle its edge. The measured affected
 window is `5e-7`–`4.47e-5` radians of tilt, clear of every measured fixture.
-`_plates` and `_HOLED_FRACTION_LIMIT` stay in `stompdrill`, because distinguishing
+`plates` and `_HOLED_FRACTION_LIMIT` stay in `stompdrill`, because distinguishing
 a casting plate from a casting ring is enclosure policy.
 
 No enclosure vocabulary crosses this boundary. `select_solid`'s box/lid

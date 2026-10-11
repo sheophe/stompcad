@@ -247,7 +247,7 @@ wall's outer surface. Its inner surface is then found by `_wall_inner_level` (se
 amendment at the end of this file, which governs that pairing; the plate-thickness and axis
 amendments between them each replaced an earlier form of the rule and are superseded in their
 turn): a wall's inner surface arrives in a *different* direction bin, because the draft tilts
-the two oppositely, so `_facing` over the whole lateral population would pair a wall with the
+the two oppositely, so `facing` over the whole lateral population would pair a wall with the
 opposite wall's outer face instead.
 
 **No companion step joins it**, which is where a wall parts company with the panel.

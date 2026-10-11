@@ -129,14 +129,14 @@ def find_walls(solid: StepSolid, axis: int) -> tuple[Wall, ...]:
     refused: a box with three lateral groups is not an enclosure this drills,
     and guessing which wall is missing would be worse than saying so.
     """
-    slabs = plates(list(levels(solid)))
+    solid_plates = plates(list(levels(solid)))
     groups = _grouped_by_axis(list(lateral_plates(solid, axis)), axis)
     found = []
     for along in sorted(groups):
         outer = max(
             groups[along], key=lambda level: level.offset_nm * dot(level.direction, along)
         )
-        inner = _wall_inner_level(slabs, outer)
+        inner = _wall_inner_level(solid_plates, outer)
         found.append(
             Wall(
                 outer=outer,

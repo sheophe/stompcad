@@ -97,7 +97,7 @@ def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
     clause that moved an answer is visible. A group the rule cannot answer
     prints ``none`` rather than a plate of zero.
     """
-    slabs = plates(list(levels(solid)))
+    solid_plates = plates(list(levels(solid)))
     recorded = {
         nearest_axis(wall.outward): wall.plate_nm for wall in find_walls(solid, axis)
     }
@@ -108,7 +108,7 @@ def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
         behind = sorted(
             (
                 level
-                for level in slabs
+                for level in solid_plates
                 if facing(level, outer) < 0 and level.offset_nm + outer.offset_nm > 0
             ),
             key=lambda level: level.offset_nm + outer.offset_nm,
@@ -216,7 +216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         unit[axis] = 1.0
         along = (unit[0], unit[1], unit[2])
         solid = select_solid(document, CaseFace.BOX)
-        slabs = plates(list(levels(solid)))
+        solid_plates = plates(list(levels(solid)))
         lateral = lateral_plates(solid, axis)
         drafts = sorted(
             {
@@ -230,7 +230,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for level in lateral
             if draft_degrees(level.direction, along) > 0.0
         }
-        print(f"{part}: drill axis {axis}, {len(slabs)} plate levels")
+        print(f"{part}: drill axis {axis}, {len(solid_plates)} plate levels")
         print(f"  draft {', '.join(f'{value:.3f}°' for value in drafts) or 'none'}")
         print(
             f"  {len(lateral)} lateral plate levels in "
