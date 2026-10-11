@@ -58,10 +58,10 @@ class OcpCaseModel:
     document_timestamp: str
     #: Every wall this model discovered, each as the record a document carries.
     #: A tuple and not a mapping, so the order discovery fixed is the order a
-    #: consumer sees (ADR-0006). Empty for a model whose walls could not be
-    #: discovered or framed (a lid with nothing behind its lateral levels to
-    #: face, say) as well as for one built without wall support at all -- both
-    #: are "no walls" to a consumer, and neither can express anything a
+    #: consumer sees (ADR-0006). Empty three ways: a lid, which has no walls to
+    #: find and is never asked (ADR-0007); a model whose walls could not be
+    #: discovered or framed; and one built without wall support at all. All
+    #: three are "no walls" to a consumer, and none can express anything a
     #: default would lose.
     walls: tuple[DrilledSurface, ...] = ()
     #: Each wall's outer and inner drillable region, keyed by surface. Two,
@@ -69,9 +69,10 @@ class OcpCaseModel:
     #: drafted away from it (ADR-0007), so it crosses the two planes at
     #: different places and must clear the region at each.
     wall_regions: Mapping[str, tuple[Any, Any]] = MappingProxyType({})
-    #: Why ``walls`` is empty, when discovery was attempted and refused; ``None``
-    #: when it found its walls. Kept because a consumer must tell an enclosure
-    #: whose walls could not be determined from a seating that missed them.
+    #: Why ``walls`` is empty, whether discovery was declined -- a lid -- or
+    #: attempted and refused; ``None`` when it found its walls. Kept because a
+    #: consumer must tell a face with no walls to offer from a seating that
+    #: missed the walls there are.
     walls_unavailable: str | None = None
 
     def classify(

@@ -82,11 +82,13 @@ class WallModel(Protocol):
 
     @property
     def walls_unavailable(self) -> str | None:
-        """Why ``walls`` is empty, if discovery was attempted and refused.
+        """Why ``walls`` is empty: discovery declined, or attempted and refused.
 
-        ``None`` for a model that found its walls. It is read only where no wall
-        was reached, to tell an enclosure that yielded none from a seating that
-        missed the ones it has.
+        Declined is the lid, which has no walls to find (ADR-0007); refused is
+        a casting whose walls could not be discovered or framed. ``None`` for a
+        model that found its walls. It is read only where no wall was reached,
+        to tell a face with none to offer from a seating that missed the ones
+        there are.
         """
         ...
 

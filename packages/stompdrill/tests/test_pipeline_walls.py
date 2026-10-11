@@ -459,7 +459,7 @@ def test_a_feature_reaching_no_wall_is_an_error_naming_the_component() -> None:
 
 
 def test_a_model_that_found_no_walls_blames_the_enclosure_and_names_why() -> None:
-    reason = "no flat face backs the drilled face"
+    reason = "no level behind this wall leans on the opposite axis"
     model = _FakeWalls(walls=(), walls_unavailable=reason)
     found = _stage(model, _seated()).apply(_data())
     (refused,) = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]

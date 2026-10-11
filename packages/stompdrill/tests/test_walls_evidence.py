@@ -624,20 +624,45 @@ def test_a_lid_registers_no_wall_and_states_why(part: str) -> None:
     assert model.walls_unavailable
 
 
+def _paired_without_the_draft_clause(plates: list[Level], outer: Level) -> Level | None:
+    """The level the rule's other three clauses reach: behind, opposed axis, nearest.
+
+    Rebuilt from the pool and not taken from ``_wall_inner_level``, because
+    the assertion below is about the castings and would say nothing if it
+    re-read the draft clause's own answer: the clause filters on exactly the
+    comparison being asserted.
+    """
+    opposed = _opposed_axis(outer.direction)
+    candidates = [
+        level
+        for level in _behind(plates, outer)
+        if nearest_axis(level.direction) == opposed
+    ]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
+    )
+
+
 @pytest.mark.hammond
 @pytest.mark.parametrize("part", _cached_castings())
-def test_a_wall_s_inner_face_drafts_no_more_than_its_outer_face_does(part: str) -> None:
-    """The inequality, over every wall the program discovers.
+def test_the_face_the_other_clauses_reach_drafts_no_more_than_the_outer_one(part: str) -> None:
+    """The catalogue property the inequality rests on, and not the clause itself.
 
-    A bare comparison and no slack: both faces' drafts come out of the same
-    arithmetic over mirrored direction keys, so a casting drafting its two
-    faces alike reads exactly zero excess.
+    A box draws both faces of one wall out of the one footprint plane, so the
+    level the first three clauses reach already drafts the same or less. That
+    is a fact about how these castings are cast, and it can change when a
+    model is re-issued, which is why a suite holds it. The clause's own guard
+    is the hand-built counterexample in ``test_cad_walls.py``.
     """
     solid, axis = _box(part)
     plates = _plates(list(levels(solid)))
     for wall in find_walls(solid, axis):
-        inner = _wall_inner_level(plates, wall.outer)
-        assert _own_draft(inner.direction) <= _own_draft(wall.outward)
+        picked = _paired_without_the_draft_clause(plates, wall.outer)
+        assert picked is not None
+        assert _own_draft(picked.direction) <= _own_draft(wall.outer.direction)
 
 
 @pytest.mark.hammond

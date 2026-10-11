@@ -451,18 +451,22 @@ def test_a_lid_registers_no_wall_though_its_rim_reads_as_four() -> None:
     """A lid has no walls, and that is the loader's rule and not the geometry's.
 
     ``find_walls`` answers four for a 1590F lid, as it does for every cached
-    lid, and calls each of them 188.0000 mm thick -- the width of the lid,
-    because a rim machined flat outside and drafted inside pairs across the
-    part under a rule built for a box. The loader registers none of them: a
-    hole in an enclosure wall is irreversible and nobody drills a 4.5374 mm
-    closure flange (ADR-0007). Both halves are asserted, because a lid
-    yielding nothing must be the rule and not a rim the kernel lost.
+    lid, and the loader registers none of them: a hole in an enclosure wall is
+    irreversible and nobody drills a closure flange (ADR-0007). What it answers
+    is checked against the lid's own depth rather than pinned to a figure,
+    because no rim can be thicker than the lid carrying it -- so whatever a
+    rule built for a box makes of a rim, it is not a rim's thickness, and the
+    assertion survives anyone making ``find_walls`` answer better.
     """
     document = read_step(_cached("1590F"))
     spans = assembly_spans(document)
     axis = min(range(3), key=lambda index: spans[index])
-    rims = find_walls(select_solid(document, CaseFace.LID), axis)
-    assert sorted(round(mm_from_nm(rim.plate_nm), 4) for rim in rims) == [188.0] * 4
+    lid = select_solid(document, CaseFace.LID)
+    box = bounding_box_mm(lid.shape)
+    depth = box[axis + 3] - box[axis]
+    rims = find_walls(lid, axis)
+    assert len(rims) == 4
+    assert min(mm_from_nm(rim.plate_nm) for rim in rims) > depth
 
     model = load_case_model(
         _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
@@ -480,18 +484,18 @@ def test_a_model_that_found_its_walls_has_no_reason_to_give(hammond_b: Path) -> 
 
 
 @pytest.mark.hammond
-def test_a_wall_drilling_run_on_an_undetermined_enclosure_blames_the_enclosure(
+def test_a_wall_drilling_run_on_an_enclosure_that_paired_no_wall_blames_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The reason a model kept reaches the builder instead of a blamed axis.
 
     Reached by refusing the pairing rather than by naming a casting that
-    refuses it: every cached enclosure now pairs all four of its walls, and a
-    diagnostic about an undetermined enclosure must not rest on that staying
-    true of whatever the cache happens to hold.
+    refuses it: every cached enclosure pairs all four of its walls, and a
+    diagnostic that blames the enclosure must not rest on that staying true of
+    whatever the cache happens to hold.
     """
     def refuse(*_args: object, **_kwargs: object) -> Level:
-        raise StompdrillError("no flat face backs the drilled face")
+        raise StompdrillError("no level behind this wall leans on the opposite axis")
 
     monkeypatch.setattr(walls_module, "_wall_inner_level", refuse)
     model = load_case_model(
@@ -512,7 +516,7 @@ def test_a_wall_drilling_run_on_an_undetermined_enclosure_blames_the_enclosure(
     cut = DrillWalls(model, (feature,), DRILL_STANDARDS[DEFAULT_STANDARD]).apply(data)
     (refused,) = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
     assert "this enclosure has no walls to drill" in refused.message
-    assert "no flat face backs the drilled face" in refused.message
+    assert "no level behind this wall leans on the opposite axis" in refused.message
 
 
 @pytest.mark.hammond
@@ -582,22 +586,51 @@ def _area_level(
     )
 
 
+#: Every number the pairing rule and the helpers it calls may name. ``0`` is the
+#: zero that says "behind" and ``90.0`` is a right angle, the unit
+#: ``draft_degrees`` answers in; nobody chose either and no casting can move
+#: one. Any other literal there is a magnitude fitted to the models we hold.
+_GEOMETRIC_LITERALS = frozenset({"0", "90.0"})
+
+#: The pairing rule and the helpers in ``walls`` it calls. Named and not
+#: discovered: a helper added to the rule belongs in this list, and adding it is
+#: the moment to decide what that helper may name.
+_PAIRING_DEFS = ("_wall_inner_level", "_opposed_axis", "_level_draft")
+
+
+def _code_of(source: str, name: str) -> str:
+    """One ``def``'s source text, with everything that is not a quantity removed.
+
+    The docstring goes because it carries ADR numbers and measured figures a
+    scan for magnitudes reads as constants, and citing the ADR a reason lives
+    in is a convention this repository requires. A subscript goes because
+    ``direction[1]`` names a component of a vector and not an amount of
+    anything, so neither can be fitted to a catalogue.
+    """
+    chunk = source.split(f"def {name}")[1].split("\ndef ")[0]
+    return re.sub(r"\[\d+\]", "", re.sub(r'""".*?"""', "", chunk, flags=re.DOTALL))
+
+
 def test_no_tuned_constant_decides_which_face_backs_a_wall() -> None:
-    """A wall is discovered by geometry, so no number fitted to the catalogue we
-    happen to hold may decide what a wall is.
+    """No number fitted to the catalogue we happen to hold may decide what a wall is.
 
     A convention check on the source text, because no measurement can be one:
     a bound wide enough to admit every cached casting leaves every answer in
-    this suite unchanged, so a cap or an angle standing beside the pairing
-    would pass the whole of it. The magnitude scan is what catches one that
-    comes back unnamed -- the clauses compare the geometry against itself, so
-    the only number the rule needs is the zero that says "behind".
+    this suite unchanged, so a cap or an angle beside the pairing would pass
+    the whole of it. The rule and the helpers it calls are scanned together,
+    since a magnitude one ``def`` away decides just as much, and only the two
+    numbers no casting can move are allowed. A constant hidden in a helper the
+    whole module shares is past this guard's reach.
     """
     source = Path(walls_module.__file__).read_text(encoding="utf-8")
     assert "_NEAR_PARALLEL_DEGREES" not in source
     assert "_PLATE_MAX_NM" not in source
-    rule = source.split("def _wall_inner_level")[1].split("\ndef ")[0]
-    assert set(re.findall(r"(?<![\w.])\d[\d_.]*", rule)) == {"0"}
+    for name in _PAIRING_DEFS:
+        named = set(re.findall(r"(?<![\w.])\d[\d_.]*", _code_of(source, name)))
+        assert named <= _GEOMETRIC_LITERALS, (
+            f"{name} names {sorted(named - _GEOMETRIC_LITERALS)}, which no "
+            f"geometry supplies"
+        )
 
 
 def test_a_wall_s_inner_face_may_be_drafted_unlike_its_outer_one() -> None:
@@ -655,12 +688,12 @@ def test_a_level_leaning_on_another_axis_is_no_inner_face_however_near_it_comes(
 def test_a_level_drafted_steeper_than_the_outer_face_is_no_inner_face() -> None:
     """The inequality: a wall's inner face drafts no more than its outer one.
 
-    A drafted pocket leaning back at the wall and standing nearer than its own
-    inner face is every reason but the draft to take it, and the cached
-    catalogue presents no casting where one stands that near -- which is why
-    the clause is stated on hand-built levels here. Refusing is the safe
-    outcome: a casting the rule does not understand earns no wall hole rather
-    than one bored to a thickness the document misstates.
+    This is the clause's own guard, and no cached casting can be it -- none
+    stands a steeper rival nearer than its own inner face. Both outcomes are
+    asserted, because they are different: with the real inner face present the
+    clause turns the pocket away and *nearest* still reaches the face, which is
+    the clause's whole purpose; with the pocket the only candidate there is no
+    inner face to reach and the wall is refused.
     """
     outer = _area_level(_tilted(1.40), 30.0)
     steep = _area_level(_tilted(8.00, back=True), -29.0)

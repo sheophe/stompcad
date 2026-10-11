@@ -140,7 +140,11 @@ def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
                 f"{level.area_mm2:10.3f} mm\u00b2  "
                 f"draft {level_draft(level.direction):6.3f}\u00b0"
             )
-        for label, found in (("next on this axis", on_axis[1:2]), ("nearest elsewhere", other[:1])):
+        # The next level the rule would accept, not the next on the axis: a
+        # refused one already has its own row, and printing it twice -- once as
+        # the chosen level, where the clause moved the answer -- reads as two
+        # findings.
+        for label, found in (("next on this axis", admitted[1:2]), ("nearest elsewhere", other[:1])):
             for level in found:
                 plate = level.offset_nm + outer.offset_nm
                 gap = plate - (chosen.offset_nm + outer.offset_nm if chosen else 0)

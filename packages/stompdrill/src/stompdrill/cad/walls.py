@@ -202,11 +202,11 @@ def _wall_inner_level(found: list[Level], outer: Level) -> Level:
 
     The equality is the one ``_grouped_by_axis`` tells one wall from another
     by, read again from the other side of one wall: a level leaning elsewhere
-    backs no part of this wall however near it comes. The inequality bounds
-    the answer in the casting's own currency -- a box draws both faces of one
-    wall out of the one footprint plane, so the inner drafts the same or less
-    -- and a steeply drafted pocket standing nearer earns a refused wall
-    rather than a thickness this rule cannot vouch for.
+    backs no part of this wall however near it comes. The inequality turns
+    away a nearer rival drafted steeper than the outer face -- a pocket or a
+    chamfer land -- and the wall's own face, drafted the same or less where a
+    box draws both out of the one footprint plane, is then what *nearest*
+    reaches (ADR-0007). Only a wall whose every candidate it excludes refuses.
     """
     opposed = _opposed_axis(outer.direction)
     limit = _level_draft(outer)
@@ -218,7 +218,10 @@ def _wall_inner_level(found: list[Level], outer: Level) -> Level:
         and _level_draft(level) <= limit
     ]
     if not candidates:
-        raise StompdrillError("no flat face backs the drilled face")
+        raise StompdrillError(
+            "no level behind this wall leans on the opposite axis and drafts no "
+            "more than the wall's outer face does"
+        )
     return min(
         candidates,
         key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
