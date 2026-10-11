@@ -186,23 +186,36 @@ def _opposed_axis(direction: Direction) -> Direction:
     return (-axis[0], -axis[1], -axis[2])
 
 
+def _level_draft(level: Level) -> float:
+    """How far ``level`` is drafted off the signed axis it leans on, in degrees.
+
+    ``draft_degrees`` answers the tilt *out of* the plane perpendicular to the
+    axis handed in, so against a level's own leaning axis it returns a right
+    angle less the draft. The complement is the quantity a casting's draft is
+    published as, and the one a wall's two faces are compared by.
+    """
+    return 90.0 - draft_degrees(level.direction, nearest_axis(level.direction))
+
+
 def _wall_inner_level(found: list[Level], outer: Level) -> Level:
-    """The nearest level behind ``outer`` leaning on the exactly opposite signed axis.
+    """The nearest level behind ``outer`` on the opposite signed axis, drafted no further.
 
     The equality is the one ``_grouped_by_axis`` tells one wall from another
     by, read again from the other side of one wall: a level leaning elsewhere
-    backs no part of this wall however near it comes, and the levels that do
-    lean back at it are its own inner face and whatever stands beyond that,
-    which *nearest* settles. No magnitude enters any clause, so no catalogue
-    can move the answer -- and none of them bounds how nearly the two planes
-    are parallel, which is left to the on-plane guard a frame is checked by.
+    backs no part of this wall however near it comes. The inequality bounds
+    the answer in the casting's own currency -- a box draws both faces of one
+    wall out of the one footprint plane, so the inner drafts the same or less
+    -- and a steeply drafted pocket standing nearer earns a refused wall
+    rather than a thickness this rule cannot vouch for.
     """
     opposed = _opposed_axis(outer.direction)
+    limit = _level_draft(outer)
     candidates = [
         level for level in found
         if _facing(level, outer) < 0
         and level.offset_nm + outer.offset_nm > 0
         and nearest_axis(level.direction) == opposed
+        and _level_draft(level) <= limit
     ]
     if not candidates:
         raise StompdrillError("no flat face backs the drilled face")

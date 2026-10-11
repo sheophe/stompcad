@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from stompdrill.cad import load_case_model
 from stompdrill.cad.case import _facing, _plates, build_frame, find_faces, select_solid
 from stompdrill.cad.region import build_region
 from stompdrill.cad.walls import (
@@ -30,7 +31,7 @@ from stompdrill.cad.walls import (
     wall_bounds_nm,
 )
 from stompgeom.levels import Direction, Level, direction_bin, levels
-from stompgeom.step import StepSolid, assembly_spans, read_step
+from stompgeom.step import StepSolid, assembly_spans, bounding_box_mm, read_step
 from stompmodel.frames import CoordinateFrame, cross, dot
 from stompmodel.model import CaseFace
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
@@ -558,3 +559,136 @@ def _the_axis_decides(part: str) -> bool:
         _nearest_behind(plates, wall.outer) is not _wall_inner_level(plates, wall.outer)
         for wall in find_walls(solid, axis)
     )
+
+
+def _lid(part: str) -> tuple[StepSolid, int]:
+    document = read_step(_model_path(part))
+    spans = assembly_spans(document)
+    axis = min(range(3), key=lambda index: spans[index])
+    return select_solid(document, CaseFace.LID), axis
+
+
+def _own_draft(direction: Direction) -> float:
+    """How far ``direction`` is drafted off the axis it leans on, in degrees.
+
+    Computed here rather than imported: ``draft_degrees`` answers the tilt
+    *out of* the plane perpendicular to the axis handed in, so against a
+    level's own leaning axis it returns a right angle less the draft, and the
+    assertions below are about the draft itself.
+    """
+    return 90.0 - draft_degrees(direction, nearest_axis(direction))
+
+
+#: What a cached lid measures along the drill axis, in millimetres: its overall
+#: depth, its own plate, and the closure rim that is the difference of the two.
+#: A lid registers no walls because that rim is a flange nobody drills
+#: (ADR-0007), and the figure that argument rests on is asserted here rather
+#: than left to drift in a document nobody re-measures.
+LID_DEPTH_MM = (5.500, 6.500)
+LID_PLATE_MM = (1.900, 3.200)
+LID_RIM_MM = (2.600, 4.000)
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", _cached_castings())
+def test_a_lid_is_a_plate_and_a_closure_rim_of_the_measured_height(part: str) -> None:
+    """A lid's rim is the few millimetres the no-walls rule rests on.
+
+    Held as an assertion and not merely printed, because ADR-0007 argues from
+    these figures: a drift in them should fail a suite that can say so rather
+    than quietly stale the reasoning in a document.
+    """
+    solid, axis = _lid(part)
+    box = bounding_box_mm(solid.shape)
+    depth = round(box[axis + 3] - box[axis], 3)
+    plate = round(mm_from_nm(find_faces(solid, axis).plate_nm), 3)
+    assert LID_DEPTH_MM[0] <= depth <= LID_DEPTH_MM[1]
+    assert LID_PLATE_MM[0] <= plate <= LID_PLATE_MM[1]
+    assert LID_RIM_MM[0] <= round(depth - plate, 3) <= LID_RIM_MM[1]
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", _cached_castings())
+def test_a_lid_registers_no_wall_and_states_why(part: str) -> None:
+    """Every cached lid: no wall surface, no wall region, and a reason given.
+
+    Asserted over the whole cache because the rim is in every casting's lid
+    and ``find_walls`` answers four for every one of them, so a lid yielding
+    nothing can only be a rule and never a property of the geometry.
+    """
+    model = load_case_model(
+        _model_path(part), face=CaseFace.LID, margin_nm=Nanometre(500_000)
+    )
+    assert model.walls == ()
+    assert dict(model.wall_regions) == {}
+    assert model.walls_unavailable
+
+
+@pytest.mark.hammond
+@pytest.mark.parametrize("part", _cached_castings())
+def test_a_wall_s_inner_face_drafts_no_more_than_its_outer_face_does(part: str) -> None:
+    """The inequality, over every wall the program discovers.
+
+    A bare comparison and no slack: both faces' drafts come out of the same
+    arithmetic over mirrored direction keys, so a casting drafting its two
+    faces alike reads exactly zero excess.
+    """
+    solid, axis = _box(part)
+    plates = _plates(list(levels(solid)))
+    for wall in find_walls(solid, axis):
+        inner = _wall_inner_level(plates, wall.outer)
+        assert _own_draft(inner.direction) <= _own_draft(wall.outward)
+
+
+@pytest.mark.hammond
+def test_the_one_casting_drafting_its_two_faces_unalike_drafts_the_inside_less() -> None:
+    """1590BS reads 1.400 degrees outside and 1.250 inside, on all four walls.
+
+    The known figure the inequality is checked against: it is the only cached
+    casting whose two faces draft at all unalike, and it drafts them in the
+    direction the inequality admits.
+    """
+    solid, axis = _box("1590BS")
+    plates = _plates(list(levels(solid)))
+    assert {
+        (
+            round(_own_draft(wall.outward), 3),
+            round(_own_draft(_wall_inner_level(plates, wall.outer).direction), 3),
+        )
+        for wall in find_walls(solid, axis)
+    } == {(1.400, 1.250)}
+
+
+def _drafts_refused(part: str) -> int:
+    """How many levels behind ``part``'s walls the draft clause turns away.
+
+    Rebuilt from the pool rather than read off the pairing, so the control
+    below reaches the state before the choice: a level leaning back at a wall,
+    standing behind its outer face, and drafting further than it.
+    """
+    solid, axis = _box(part)
+    plates = _plates(list(levels(solid)))
+    refused = 0
+    for wall in find_walls(solid, axis):
+        outer = wall.outer
+        for level in _behind(plates, outer):
+            if nearest_axis(level.direction) != _opposed_axis(outer.direction):
+                continue
+            refused += _own_draft(level.direction) > _own_draft(outer.direction)
+    return refused
+
+
+@pytest.mark.hammond
+def test_the_draft_clause_turns_a_level_away_on_a_cached_casting() -> None:
+    """The control: the inequality above would pass by stating nothing.
+
+    It reads the pairing's own answer, so it goes vacuous if the clause ever
+    stops excluding anything. This counts the levels the clause refuses from
+    the pool directly and fails if no cached casting presents one -- chamfer
+    flats, fillet lands and drafted pockets lean back at a wall and draft far
+    steeper than it does. ``any`` rather than a count: how many a catalogue
+    presents is a fact about the catalogue.
+    """
+    parts = _cached_castings()
+    assert parts
+    assert any(_drafts_refused(part) for part in parts)

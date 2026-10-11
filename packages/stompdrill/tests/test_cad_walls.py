@@ -16,12 +16,14 @@ import pytest
 
 from stompdrill.cad import OcpCaseModel, Rejection, WallModel, load_case_model
 from stompdrill.cad import walls as walls_module
+from stompdrill.cad.case import select_solid
 from stompdrill.cad.walls import (
     LATERAL_LIMIT,
     Wall,
     _wall_inner_level,
     build_wall_frame,
     draft_degrees,
+    find_walls,
     is_lateral,
     nearest_axis,
     surface_key,
@@ -33,7 +35,7 @@ from stompdrill.pipeline.route import RouteHoles
 from stompdrill.pipeline.walls import DrillWalls
 from stompgeom.levels import Direction, Level
 from stompgeom.shapes import compound
-from stompgeom.step import bounding_box_mm
+from stompgeom.step import assembly_spans, bounding_box_mm, read_step
 from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
 from stompmodel.model import CaseFace, CaseRegistration, DrillData, Profile, WallFeature
 from stompmodel.units import Nanometre, mm_from_nm, nm_from_mm
@@ -445,22 +447,29 @@ def _cached(part: str) -> Path:
 
 
 @pytest.mark.hammond
-def test_a_lid_whose_rim_drafts_one_face_only_still_finds_its_four_walls() -> None:
-    """1590F's lid rim is machined flat outside and drafted 1.000 degrees inside.
+def test_a_lid_registers_no_wall_though_its_rim_reads_as_four() -> None:
+    """A lid has no walls, and that is the loader's rule and not the geometry's.
 
-    Two planes a whole degree apart, which is the 1590BS's defect turned the
-    other way up: a lid drafts its inner face the more of the two, so an
-    inequality in the outer face's favour refuses the only inner face the rim
-    has and reaches 188 mm across the lid for one it will accept. The axis
-    the face leans on is what pairs them, and the rim measures 4.5374 mm.
+    ``find_walls`` answers four for a 1590F lid, as it does for every cached
+    lid, and calls each of them 188.0000 mm thick -- the width of the lid,
+    because a rim machined flat outside and drafted inside pairs across the
+    part under a rule built for a box. The loader registers none of them: a
+    hole in an enclosure wall is irreversible and nobody drills a 4.5374 mm
+    closure flange (ADR-0007). Both halves are asserted, because a lid
+    yielding nothing must be the rule and not a rim the kernel lost.
     """
+    document = read_step(_cached("1590F"))
+    spans = assembly_spans(document)
+    axis = min(range(3), key=lambda index: spans[index])
+    rims = find_walls(select_solid(document, CaseFace.LID), axis)
+    assert sorted(round(mm_from_nm(rim.plate_nm), 4) for rim in rims) == [188.0] * 4
+
     model = load_case_model(
         _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
     )
-    assert model.walls_unavailable is None
-    assert sorted(
-        round(mm_from_nm(surface.thickness_nm), 4) for surface in model.walls
-    ) == [4.5374] * 4
+    assert model.walls == ()
+    assert dict(model.wall_regions) == {}
+    assert "lid" in (model.walls_unavailable or "")
 
 
 @pytest.mark.hammond
@@ -486,7 +495,7 @@ def test_a_wall_drilling_run_on_an_undetermined_enclosure_blames_the_enclosure(
 
     monkeypatch.setattr(walls_module, "_wall_inner_level", refuse)
     model = load_case_model(
-        _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
+        _cached("1590F"), face=CaseFace.BOX, margin_nm=Nanometre(500_000)
     )
     assert model.walls == ()
     feature = WallFeature(
@@ -497,12 +506,12 @@ def test_a_wall_drilling_run_on_an_undetermined_enclosure_blames_the_enclosure(
         profile=Profile(steps=((Nanometre(4_750_000), Nanometre(0), Nanometre(10_000_000)),)),
     )
     data = DrillData(
-        case=CaseRegistration("1590F", CaseFace.LID, "1590F.stp", model.frame),
+        case=CaseRegistration("1590F", CaseFace.BOX, "1590F.stp", model.frame),
         surfaces=(),
     )
     cut = DrillWalls(model, (feature,), DRILL_STANDARDS[DEFAULT_STANDARD]).apply(data)
     (refused,) = [d for d in cut.diagnostics if d.code == "wall-feature-unreachable"]
-    assert "could not be determined" in refused.message
+    assert "this enclosure has no walls to drill" in refused.message
     assert "no flat face backs the drilled face" in refused.message
 
 
@@ -641,6 +650,24 @@ def test_a_level_leaning_on_another_axis_is_no_inner_face_however_near_it_comes(
         _wall_inner_level([outer, sideways], outer)
     inner = _area_level(_tilted(1.25, back=True), -28.0)
     assert _wall_inner_level([outer, sideways, inner], outer) is inner
+
+
+def test_a_level_drafted_steeper_than_the_outer_face_is_no_inner_face() -> None:
+    """The inequality: a wall's inner face drafts no more than its outer one.
+
+    A drafted pocket leaning back at the wall and standing nearer than its own
+    inner face is every reason but the draft to take it, and the cached
+    catalogue presents no casting where one stands that near -- which is why
+    the clause is stated on hand-built levels here. Refusing is the safe
+    outcome: a casting the rule does not understand earns no wall hole rather
+    than one bored to a thickness the document misstates.
+    """
+    outer = _area_level(_tilted(1.40), 30.0)
+    steep = _area_level(_tilted(8.00, back=True), -29.0)
+    with pytest.raises(StompdrillError):
+        _wall_inner_level([outer, steep], outer)
+    inner = _area_level(_tilted(1.25, back=True), -28.0)
+    assert _wall_inner_level([outer, steep, inner], outer) is inner
 
 
 def test_a_face_coincident_with_the_outer_one_is_no_inner_face() -> None:

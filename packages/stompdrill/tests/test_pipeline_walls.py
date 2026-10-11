@@ -463,7 +463,7 @@ def test_a_model_that_found_no_walls_blames_the_enclosure_and_names_why() -> Non
     model = _FakeWalls(walls=(), walls_unavailable=reason)
     found = _stage(model, _seated()).apply(_data())
     (refused,) = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]
-    assert "walls of this enclosure could not be determined" in refused.message
+    assert "this enclosure has no walls to drill" in refused.message
     assert reason in refused.message
     assert "its axis reaches" not in refused.message
     assert "J1" in refused.message
@@ -475,7 +475,7 @@ def test_a_feature_missing_the_walls_a_model_has_still_blames_its_axis() -> None
     found = _stage(model, _seated()).apply(_data())
     (refused,) = [d for d in found.diagnostics if d.code == "wall-feature-unreachable"]
     assert "its axis reaches no drillable part of any wall" in refused.message
-    assert "could not be determined" not in refused.message
+    assert "no walls to drill" not in refused.message
 
 
 def test_a_model_with_walls_is_never_blamed_whatever_it_says_it_lacks() -> None:

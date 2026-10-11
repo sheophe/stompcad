@@ -163,6 +163,12 @@ no default. A hole in an enclosure wall is irreversible and the panel drawing
 says nothing about one, so nothing is cut into a wall unless you name the part.
 A malformed expression is a usage error, reported before any input is opened.
 
+Only the box has walls. A lid is a closure plate whose lateral surface is a rim
+of a few millimetres, and nobody drills a rim, so a run on the lid discovers no
+wall and refuses every component the expression names with
+`wall-feature-unreachable`, saying that the enclosure has none to drill
+([ADR-0007](adr/0007-case-model-and-clearance.md)).
+
 ```bash
 --wall-reference 'J*,!J3'
 ```

@@ -396,14 +396,17 @@ class DrillWalls:
 
         The enclosure when its model holds no walls and says so, because then
         nothing about the component or the seating was ever tested; otherwise
-        the axis, which met the walls there are and none of their drillable parts.
+        the axis, which met the walls there are and none of their drillable
+        parts. The first branch says the enclosure has none to drill rather
+        than that they could not be determined, because a face whose walls the
+        program declines to discover has them all the same.
         """
         reason = self.model.walls_unavailable
         if not self.model.walls and reason is not None:
             return _unreachable(
                 board,
                 designator,
-                f"the walls of this enclosure could not be determined ({reason})",
+                f"this enclosure has no walls to drill ({reason})",
                 seating=False,
             )
         return _unreachable(

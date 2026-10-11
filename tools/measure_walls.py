@@ -86,16 +86,16 @@ def level_draft(direction: Direction) -> float:
     return 90.0 - draft_degrees(direction, nearest_axis(direction))
 
 
-def _inner_face_block(solid: StepSolid, axis: int) -> None:
-    """Print, per wall, what the pairing rule chooses and what it chose between.
+def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
+    """Print, per lateral group, what the pairing rule chooses and what between.
 
     The ``elsewhere`` row is the measurement's point: it is the nearest level
-    behind the wall leaning on some other axis, and where its gap is zero no
+    behind the group leaning on some other axis, and where its gap is zero no
     depth and no area can tell a wall's own inner face from a sibling wall's.
-    A ``drafts more`` row names a level leaning back at the wall that drafts
-    further than its outer face -- a lid's rim, machined flat outside and
-    drafted inside -- because an inequality would refuse the very face such a
-    rim pairs with. A lost wall prints ``none`` rather than a plate of zero.
+    A ``draft refused`` row names a level the inequality turns away, marked
+    ``nearest`` where that level is the one depth alone would have taken, so a
+    clause that moved an answer is visible. A group the rule cannot answer
+    prints ``none`` rather than a plate of zero.
     """
     plates = _plates(list(levels(solid)))
     recorded = {
@@ -115,26 +115,28 @@ def _inner_face_block(solid: StepSolid, axis: int) -> None:
         )
         on_axis = [level for level in behind if nearest_axis(level.direction) == back]
         other = [level for level in behind if nearest_axis(level.direction) != back]
-        # Reported and not applied: the drafts are what a reader compares the
-        # two faces by, and the rule compares neither against the other.
+        # Applied, because the rule applies it: a candidate drafting further
+        # than the outer face is no inner face, so the nearest on this axis is
+        # not always the answer.
         limit = level_draft(outer.direction)
-        chosen = on_axis[0] if on_axis else None
+        admitted = [level for level in on_axis if level_draft(level.direction) <= limit]
+        chosen = admitted[0] if admitted else None
         answer = f"{chosen.offset_nm + outer.offset_nm:9d} nm" if chosen else "     none"
-        # Both drafts, because their difference is what the second clause
+        # Both drafts, because their difference is what the inequality
         # compares and a reader checking the rule should not have to infer
         # either side of it.
         inner_draft = f"{level_draft(chosen.direction):6.3f}\u00b0" if chosen else "    --"
         print(
-            f"    wall {lean}  recorded {recorded[lean]:9d} nm  "
+            f"    {group} {lean}  recorded {recorded[lean]:9d} nm  "
             f"under the rule {answer}  "
             f"drafts outer {level_draft(outer.direction):6.3f}\u00b0 inner {inner_draft}"
         )
         for level in on_axis:
             if level_draft(level.direction) <= limit:
                 continue
-            mark = "chosen" if level is chosen else "      "
+            mark = "nearest" if level is on_axis[0] else "       "
             print(
-                f"      drafts more {mark}  {level.offset_nm + outer.offset_nm:9d} nm  "
+                f"      draft refused {mark}  {level.offset_nm + outer.offset_nm:9d} nm  "
                 f"{level.area_mm2:10.3f} mm\u00b2  "
                 f"draft {level_draft(level.direction):6.3f}\u00b0"
             )
@@ -154,10 +156,11 @@ def _inner_face_main(wanted: Sequence[str]) -> int:
 
     A mode of its own rather than more of the default block: the default
     prints a casting's drafts and areas, and this prints the one comparison
-    the pairing turns on. Both of an enclosure's faces, because a pairing rule
-    answers for whichever one a panel is drilled in and a lid's rim carries
-    its draft on the inside, which no box in the catalogue does. Names the
-    parts it could not find rather than failing, as the default does.
+    the pairing turns on. The box is where the program discovers walls. The
+    lid is swept too, and labelled ``rim``, because its lateral groups are a
+    closure flange rather than anything drillable, and seeing what the rule
+    would make of one is the evidence that a lid is given no walls at all
+    (ADR-0007). Names the parts it could not find rather than failing.
     """
     missing = [part for part in wanted if not (cache_dir() / f"{part}.stp").is_file()]
     for part in wanted:
@@ -167,9 +170,10 @@ def _inner_face_main(wanted: Sequence[str]) -> int:
         document = read_step(path)
         spans = assembly_spans(document)
         axis = min(range(3), key=lambda index: spans[index])
-        for face in (CaseFace.BOX, CaseFace.LID):
-            print(f"{part} {face.value}: drill axis {axis}")
-            _inner_face_block(select_solid(document, face), axis)
+        for face, group in ((CaseFace.BOX, "wall"), (CaseFace.LID, "rim")):
+            aside = " (no wall is discovered here)" if group == "rim" else ""
+            print(f"{part} {face.value}: drill axis {axis}{aside}")
+            _inner_face_block(select_solid(document, face), axis, group)
     if missing:
         print(f"not cached: {', '.join(missing)}", file=sys.stderr)
     return 0

@@ -160,6 +160,12 @@ class OcpCaseModel:
         raise StompdrillError(f"this model discovered no {key} wall")
 
 
+#: Why a lid load registers no wall. Stated here rather than built where it is
+#: read, because ``DrillWalls`` prints it verbatim in the finding that refuses a
+#: feature naming a wall, and that sentence has to stand on its own there.
+_LID_HAS_NO_WALLS = "the drilled face is a lid, whose rim is a closure flange and not a wall"
+
+
 def load_case_model(
     path: Path, *, face: CaseFace, margin_nm: Nanometre, part: str | None = None
 ) -> OcpCaseModel:
@@ -189,35 +195,45 @@ def load_case_model(
     walls: list[DrilledSurface] = []
     regions: dict[str, tuple[Any, Any]] = {}
     unavailable: str | None = None
-    try:
-        # The whole answer, not just its first step: framing a wall, keying it,
-        # building its two regions and stating its record can each refuse, and
-        # a model that reached one of those is as much "no walls" as one whose
-        # walls were never found. A lid is the ordinary case -- a flat closure
-        # plate with nothing behind its lateral levels to face, which is a fact
-        # about the lid and not a load failure. Wall drilling is opt-in, and a
-        # feature naming an unreachable wall is refused by ``DrillWalls``
-        # itself (``wall-feature-unreachable``), which is where that diagnostic
-        # belongs -- not here, blocking a load the panel's face never needed.
-        for wall in find_walls(solid, axis):
-            lateral = nearest_axis(wall.outward)
-            wall_axis_index = max(range(3), key=lambda index: abs(lateral[index]))
-            frame = build_wall_frame(wall, faces.outward)
-            key = surface_key(wall, own_frame)
-            outer = build_region(
-                wall.outer_faces, wall_axis_index, wall.outward[wall_axis_index]
-            )
-            inner = build_region(
-                wall.inner, wall_axis_index, wall.outward[wall_axis_index]
-            )
-            walls.append(drilled_surface(wall, key, frame, outer))
-            regions[key] = (outer, inner)
-    except StompdrillError as refusal:
-        unavailable = str(refusal)
-        # Partly built walls are discarded rather than kept: a model reporting
-        # three of its four walls would let a ray resolve to whichever of them
-        # survived, and a hole would be cut from an incomplete enclosure.
-        walls, regions = [], {}
+    if face is CaseFace.LID:
+        # A lid has no walls, so none is looked for. Its lateral levels are the
+        # closure rim, a flange of a few millimetres that ``find_walls`` reads as
+        # four walls on every catalogued casting; a hole in an enclosure wall is
+        # irreversible and nobody drills a rim, so the face is given nothing to
+        # drill rather than four surfaces it must not offer (ADR-0007).
+        # ``find_walls`` is a query over a solid and cannot tell a lid from a
+        # box, which is why the rule is here: the face is what the loader knows.
+        unavailable = _LID_HAS_NO_WALLS
+    else:
+        try:
+            # The whole answer, not just its first step: framing a wall, keying
+            # it, building its two regions and stating its record can each
+            # refuse, and a model that reached one of those is as much "no
+            # walls" as one whose walls were never found. Wall drilling is
+            # opt-in, and a feature naming an unreachable wall is refused by
+            # ``DrillWalls`` itself (``wall-feature-unreachable``), which is
+            # where that diagnostic belongs -- not here, blocking a load the
+            # panel's face never needed.
+            for wall in find_walls(solid, axis):
+                lateral = nearest_axis(wall.outward)
+                wall_axis_index = max(range(3), key=lambda index: abs(lateral[index]))
+                frame = build_wall_frame(wall, faces.outward)
+                key = surface_key(wall, own_frame)
+                outer = build_region(
+                    wall.outer_faces, wall_axis_index, wall.outward[wall_axis_index]
+                )
+                inner = build_region(
+                    wall.inner, wall_axis_index, wall.outward[wall_axis_index]
+                )
+                walls.append(drilled_surface(wall, key, frame, outer))
+                regions[key] = (outer, inner)
+        except StompdrillError as refusal:
+            unavailable = str(refusal)
+            # Partly built walls are discarded rather than kept: a model
+            # reporting three of its four walls would let a ray resolve to
+            # whichever of them survived, and a hole would be cut from an
+            # incomplete enclosure.
+            walls, regions = [], {}
 
     return OcpCaseModel(
         part=part or _part_of(solid.name),
