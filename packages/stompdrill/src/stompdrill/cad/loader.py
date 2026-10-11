@@ -198,12 +198,13 @@ def load_case_model(
     unavailable: str | None = None
     if face is CaseFace.LID:
         # A lid has no walls, so none is looked for. Its lateral levels are the
-        # closure rim, a flange of a few millimetres that ``find_walls`` reads as
-        # four walls on every catalogued casting; a hole in an enclosure wall is
-        # irreversible and nobody drills a rim, so the face is given nothing to
-        # drill rather than four surfaces it must not offer (ADR-0007).
+        # closure rim, a flange of a few millimetres that ``find_walls`` reads
+        # as walls because they are lateral like any others; a hole in an
+        # enclosure wall is irreversible and nobody drills a rim, so the face is
+        # given nothing to drill rather than surfaces it must not offer. And
         # ``find_walls`` is a query over a solid and cannot tell a lid from a
-        # box, which is why the rule is here: the face is what the loader knows.
+        # box, which is why the rule is here: the face is what the loader knows
+        # (ADR-0007).
         unavailable = _LID_HAS_NO_WALLS
     else:
         try:

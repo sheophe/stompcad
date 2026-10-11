@@ -840,7 +840,11 @@ the casting this catalogue does not hold.
 integer-millionths key, so a wall's two faces carry mirrored keys and their drafts come out of
 identical arithmetic: the inner face's draft less the outer's is exactly 0.0 on every cached box
 wall but the 1590BS's, whose inner face drafts 0.149984° *less*. A bare `<=` therefore admits
-everything a slack constant would. Both sides of the comparison come from the casting, so no figure
+everything a slack constant would. That the 1590BS is the lone exception is **measured and not
+guarded**: a suite holds the 1590BS's own two figures and holds the inequality over every cached
+box wall, so a casting re-issued with its faces drafted unalike the other way fails the second of
+those, but one re-issued merely drafting them unalike in the admitted direction joins the 1590BS
+without failing anything. Both sides of the comparison come from the casting, so no figure
 is chosen and no catalogue can move the answer, and the on-plane guard stays what notices a casting
 whose two planes diverge further than the frame's own rounding allows.
 
