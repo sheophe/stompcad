@@ -10,17 +10,22 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from stompgeom.levels import Direction, Level, levels
 from stompgeom.shapes import compound
 from stompgeom.step import StepSolid
 from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
-from stompmodel.model import SURFACES, DrilledSurface
+from stompmodel.model import DrilledSurface, SurfaceKey
 from stompmodel.units import Nanometre, nm_from_mm
 
 from ..errors import StompdrillError
 from .case import facing, plates
+
+if TYPE_CHECKING:
+    # Real OCP names, for readability only: they resolve to Any for mypy
+    # either way. See the block in stompgeom.step, and ADR-0008.
+    from OCP.TopoDS import TopoDS_Compound, TopoDS_Shape
 
 __all__ = [
     "LATERAL_LIMIT",
@@ -115,8 +120,8 @@ class Wall:
     """
 
     outer: Level
-    outer_faces: Any
-    inner: Any
+    outer_faces: TopoDS_Compound
+    inner: TopoDS_Compound
     plate_nm: Nanometre
     outward: Direction
 
@@ -268,7 +273,7 @@ def build_wall_frame(wall: Wall, drilled_outward: Direction) -> FaceFrame:
 
 
 def wall_bounds_nm(
-    region: Any, frame: FaceFrame
+    region: TopoDS_Shape, frame: FaceFrame
 ) -> tuple[Nanometre, Nanometre, Nanometre, Nanometre]:
     """``region``'s extent in ``frame``, stated symmetrically about its datum.
 
@@ -284,7 +289,7 @@ def wall_bounds_nm(
     return (Nanometre(-half_u), Nanometre(-half_v), half_u, half_v)
 
 
-def surface_key(wall: Wall, face_frame: FaceFrame) -> str:
+def surface_key(wall: Wall, face_frame: FaceFrame) -> SurfaceKey:
     """Which of the four wall names this one carries.
 
     Read from the projection of the wall's outward direction onto the drilled
@@ -297,12 +302,12 @@ def surface_key(wall: Wall, face_frame: FaceFrame) -> str:
     along_u = dot(wall.outward, face_frame.basis.u)
     along_v = dot(wall.outward, face_frame.basis.v)
     if abs(along_u) >= abs(along_v):
-        return "right" if along_u > 0.0 else "left"
-    return "top" if along_v > 0.0 else "bottom"
+        return SurfaceKey("right" if along_u > 0.0 else "left")
+    return SurfaceKey("top" if along_v > 0.0 else "bottom")
 
 
 def drilled_surface(
-    wall: Wall, key: str, frame: FaceFrame, region: Any
+    wall: Wall, key: SurfaceKey, frame: FaceFrame, region: TopoDS_Shape
 ) -> DrilledSurface:
     """This wall as the record a document carries, so a hole in it means something.
 
@@ -312,8 +317,6 @@ def drilled_surface(
     still checked against the inner region as well, at the point its own axis
     crosses that plane -- see ``pipeline.walls``.
     """
-    if key not in SURFACES:
-        raise StompdrillError(f"{key!r} is no surface of an enclosure")
     return DrilledSurface(
         key=key,
         frame=frame,
@@ -323,7 +326,7 @@ def drilled_surface(
 
 
 def _projected_box(
-    shape: Any, basis: CoordinateFrame
+    shape: TopoDS_Shape, basis: CoordinateFrame
 ) -> tuple[float, float, float, float, float, float]:
     """``shape``'s extent on ``basis``'s own three axes, least first per axis.
 

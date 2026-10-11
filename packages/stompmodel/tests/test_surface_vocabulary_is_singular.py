@@ -11,8 +11,12 @@ it. This gate lives in the owner's own suite, mirroring
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
+import pytest
+
+from stompmodel.model import SurfaceKey
 from tools.workspace_membership import REPO, member_area_roots, member_package_dirs
 
 PACKAGE = Path(__file__).resolve().parent.parent
@@ -100,6 +104,16 @@ def test_the_scan_reaches_every_workspace_member():
     assert ground_truth, "no member ships a src -- nothing for this control to check"
     missing = ground_truth - discovered
     assert not missing, f"the scan's own roots do not cover: {sorted(missing)}"
+
+
+def test_a_surface_key_is_one_of_the_six_surfaces() -> None:
+    assert SurfaceKey("left") == "left"
+    with pytest.raises(ValueError, match="no surface of an enclosure"):
+        SurfaceKey("sideways")
+
+
+def test_a_surface_key_serialises_as_its_own_string() -> None:
+    assert json.dumps({"key": SurfaceKey("top")}) == '{"key": "top"}'
 
 
 def test_no_module_states_the_surface_vocabulary_a_second_time():

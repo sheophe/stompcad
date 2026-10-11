@@ -29,6 +29,7 @@ from .units import (
 
 __all__ = [
     "SURFACES",
+    "SurfaceKey",
     "SURFACE_FACE",
     "Origin",
     "RawHole",
@@ -67,6 +68,23 @@ SNAP_GRID_PARAMETER: str = "grid_nm"
 #: is a legal name that nothing produces yet: the opposite plate is a
 #: different solid, and cutting two in one model is not decided.
 SURFACES: tuple[str, ...] = ("face", "back", "left", "right", "top", "bottom")
+
+
+class SurfaceKey(str):
+    """One of the six planes a hole may be cut in, validated at its birth.
+
+    A ``str`` subclass and not an ``Enum``: the key is written into the drill
+    document as a bare string, and a subclass keeps that serialisation
+    byte-identical while moving the check from every reader to the one
+    construction. ``SURFACES`` stays the single list of what exists.
+    """
+
+    __slots__ = ()
+
+    def __new__(cls, value: str) -> SurfaceKey:
+        if value not in SURFACES:
+            raise ValueError(f"{value!r} is no surface of an enclosure")
+        return super().__new__(cls, value)
 
 #: The drilled plate -- whichever solid it is. A lid-drilled run's holes are
 #: on ``face`` too, because ``face`` names the plate the bit enters and not
