@@ -18,15 +18,17 @@ from stompdrill.cad.walls import (
     draft_degrees,
     find_walls,
     lateral_plates,
+    level_draft,
     nearest_axis,
 )
+from stompdrill.errors import StompdrillError
 from stompgeom.levels import Direction, Level, direction_bin, levels
 from stompgeom.step import StepSolid, assembly_spans, read_step
 from stompmodel.frames import dot
 from stompmodel.model import CaseFace
 from stompmodel.units import mm_from_nm
 
-__all__ = ["cache_dir", "cached_parts", "level_draft", "main"]
+__all__ = ["cache_dir", "cached_parts", "main"]
 
 #: Every part the Evidence covers, in catalogue order.
 PARTS = (
@@ -73,17 +75,18 @@ def _wall_outers(solid: StepSolid, axis: int) -> list[tuple[Direction, Level]]:
     ]
 
 
-def level_draft(direction: Direction) -> float:
-    """A level's own draft: how far its plane tilts off the axis it leans on, in degrees.
+def _recorded_plates(solid: StepSolid, axis: int) -> dict[Direction, int]:
+    """The plate ``find_walls`` records per wall, empty where it refuses one.
 
-    The angle a casting is published with, reached without being told which
-    axis is the drill's -- a level is all a pairing rule holds. Named rather
-    than inlined because the arithmetic hides the quantity: ``draft_degrees``
-    measures tilt *out of* the plane perpendicular to the axis it is handed,
-    so against a level's own leaning axis it answers the complement, and a
-    right angle less that complement is the draft.
+    A refusal is a finding this mode exists to print, not a reason to abandon
+    the other castings in the sweep, so it is caught here and the row that
+    cannot be filled reads ``none`` like any other loss.
     """
-    return 90.0 - draft_degrees(direction, nearest_axis(direction))
+    try:
+        walls = find_walls(solid, axis)
+    except StompdrillError:
+        return {}
+    return {nearest_axis(wall.outward): wall.plate_nm for wall in walls}
 
 
 def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
@@ -92,15 +95,13 @@ def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
     The ``elsewhere`` row is the measurement's point: it is the nearest level
     behind the group leaning on some other axis, and where its gap is zero no
     depth and no area can tell a wall's own inner face from a sibling wall's.
-    A ``draft refused`` row names a level the inequality turns away, marked
-    ``nearest`` where that level is the one depth alone would have taken, so a
-    clause that moved an answer is visible. A group the rule cannot answer
-    prints ``none`` rather than a plate of zero.
+    A ``draft refused`` row names a level the comparison turns away, marked
+    ``nearest`` where that level is the one the other clauses select -- which
+    is where the rule refuses the wall. A group the rule cannot answer prints
+    ``none`` rather than a plate of zero.
     """
     solid_plates = plates(list(levels(solid)))
-    recorded = {
-        nearest_axis(wall.outward): wall.plate_nm for wall in find_walls(solid, axis)
-    }
+    recorded = _recorded_plates(solid, axis)
     for lean, outer in _wall_outers(solid, axis):
         back = (-lean[0], -lean[1], -lean[2])
         # Only an opposing level's offset sum is the material between two
@@ -111,39 +112,41 @@ def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
                 for level in solid_plates
                 if facing(level, outer) < 0 and level.offset_nm + outer.offset_nm > 0
             ),
-            key=lambda level: level.offset_nm + outer.offset_nm,
+            key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
         )
         on_axis = [level for level in behind if nearest_axis(level.direction) == back]
         other = [level for level in behind if nearest_axis(level.direction) != back]
-        # Applied, because the rule applies it: a candidate drafting further
-        # than the outer face is no inner face, so the nearest on this axis is
-        # not always the answer.
-        limit = level_draft(outer.direction)
-        admitted = [level for level in on_axis if level_draft(level.direction) <= limit]
-        chosen = admitted[0] if admitted else None
+        # Selected and then checked, because that is the rule: the inequality
+        # is asked of the nearest level on this axis alone, and a nearest it
+        # turns away refuses the wall rather than passing to the next one.
+        limit = level_draft(outer)
+        nearest = on_axis[0] if on_axis else None
+        chosen = nearest if nearest is not None and level_draft(nearest) <= limit else None
         answer = f"{chosen.offset_nm + outer.offset_nm:9d} nm" if chosen else "     none"
         # Both drafts, because their difference is what the inequality
         # compares and a reader checking the rule should not have to infer
         # either side of it.
-        inner_draft = f"{level_draft(chosen.direction):6.3f}\u00b0" if chosen else "    --"
+        inner_draft = f"{level_draft(chosen):6.3f}°" if chosen else "    --"
+        kept = recorded.get(lean)
+        plate_nm = f"{kept:9d} nm" if kept is not None else "     none"
         print(
-            f"    {group} {lean}  recorded {recorded[lean]:9d} nm  "
+            f"    {group} {lean}  recorded {plate_nm}  "
             f"under the rule {answer}  "
-            f"drafts outer {level_draft(outer.direction):6.3f}\u00b0 inner {inner_draft}"
+            f"drafts outer {level_draft(outer):6.3f}° inner {inner_draft}"
         )
         for level in on_axis:
-            if level_draft(level.direction) <= limit:
+            if level_draft(level) <= limit:
                 continue
             mark = "nearest" if level is on_axis[0] else "       "
             print(
                 f"      draft refused {mark}  {level.offset_nm + outer.offset_nm:9d} nm  "
-                f"{level.area_mm2:10.3f} mm\u00b2  "
-                f"draft {level_draft(level.direction):6.3f}\u00b0"
+                f"{level.area_mm2:10.3f} mm²  "
+                f"draft {level_draft(level):6.3f}°"
             )
-        # The next level the rule would accept, not the next on the axis: a
-        # refused one already has its own row, and printing it twice -- once as
-        # the chosen level, where the clause moved the answer -- reads as two
-        # findings.
+        # The next level the comparison does not turn away, not the next on the
+        # axis: one it turns away already has its own row above, and printing
+        # it twice would read as two findings.
+        admitted = [level for level in on_axis if level_draft(level) <= limit]
         for label, found in (("next on this axis", admitted[1:2]), ("nearest elsewhere", other[:1])):
             for level in found:
                 plate = level.offset_nm + outer.offset_nm
@@ -151,7 +154,7 @@ def _inner_face_block(solid: StepSolid, axis: int, group: str = "wall") -> None:
                 print(
                     f"      {label}  {plate:9d} nm  {gap:+10d} nm  "
                     f"{level.area_mm2:10.3f} mm²  leaning {nearest_axis(level.direction)}  "
-                    f"draft {level_draft(level.direction):6.3f}°"
+                    f"draft {level_draft(level):6.3f}°"
                 )
 
 
