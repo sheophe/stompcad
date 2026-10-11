@@ -319,7 +319,7 @@ class TestDeduplicate:
         assert codes(out) == ["duplicate-hole"]
 
     def test_two_holes_at_one_point_on_two_surfaces_are_two_holes(self):
-        """Plan 1 made such a document constructible, so exact coincidence gained a term.
+        """Two surfaces can hold a hole at one point, so the key names the surface.
 
         Without the surface in the comparison, a wall hole at the plate's own
         origin would silently collapse into the plate's hole and one of them
@@ -426,13 +426,13 @@ class TestDeduplicate:
     def test_no_two_holes_survive_dedupe_with_the_same_key(self, drawn):
         """What ``Deduplicate`` is for, stated as a property of its output.
 
-        Idempotence was the old form and could not fail: the comparison is
-        exact integer equality, so a second pass has nothing left to find.
-        This one fails if two holes sharing an exact ``(x, y, diameter)``
+        Idempotence cannot fail here and so states nothing: the comparison
+        is exact integer equality, so a second pass has nothing left to
+        find. This fails if two holes sharing an exact ``(x, y, diameter)``
         both survive. A key that drops a field only over-collapses instead
-        (fewer survivors, still distinct) -- that direction is caught by
-        ``test_does_not_collapse_different_diameters_at_the_same_place``,
-        line 189.
+        (fewer survivors, still distinct), which
+        ``test_does_not_collapse_different_diameters_at_the_same_place``
+        catches.
         """
         survivors = Deduplicate().apply(make_data(*drawn)).holes
 

@@ -157,7 +157,8 @@ def wall_surface(
     """One 2 mm wall centred on its own frame, for tests that need no kernel.
 
     The frame's ``w`` is +Z so a hand-built hole's coordinates read as they are
-    written; which way a real wall faces is plan 2's measurement.
+    written; which way a real wall faces is measured off a model, and a test
+    that builds a wall by hand is measuring nothing.
     """
     return DrilledSurface(
         key=key,

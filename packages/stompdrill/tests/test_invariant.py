@@ -293,8 +293,8 @@ def holes_at_one_point() -> tuple[Hole, Hole]:
     """A 3 mm and a 7 mm hole sharing one nominal point.
 
     Grouping by diameter already separates them into different tool blocks,
-    but this locks in the case the old ``(-y, x)`` sort could not order: two
-    holes at one point, distinguishable only by what they measured.
+    but a sort on position alone cannot order them: two holes at one point,
+    distinguishable only by what they measured.
     """
     return (
         Hole.from_measurement(Nanometre(0), Nanometre(0), Nanometre(3_000_000)),
@@ -307,7 +307,7 @@ def routed(data: DrillData) -> DrillData:
 
 
 def test_a_concentric_pair_is_ordered_by_geometry_not_by_arrival():
-    """The tie that defeated the old sort: same point, different diameters."""
+    """Same point, different diameters: the tie position alone cannot break."""
     pair = holes_at_one_point()  # 3 mm and 7 mm at (0, 0)
     outputs = {
         tuple(h.diameter_nm for h in routed(DrillData(holes=p)).holes)

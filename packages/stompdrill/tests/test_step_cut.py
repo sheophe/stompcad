@@ -357,7 +357,8 @@ def test_a_boolean_cut_that_reports_failure_is_an_emitter_error(monkeypatch):
 
 def test_five_emits_in_one_process_are_byte_identical():
     """OCC's process-global product-version and NAUO-id counters must not
-    leak into the payload: this is the invariant Task 13 depends on."""
+    leak into the payload: an emitter whose bytes change with how many ran
+    before it has no byte-identity for a lock to hold (ADR-0011)."""
     from tests.conftest import at
 
     model = _model()

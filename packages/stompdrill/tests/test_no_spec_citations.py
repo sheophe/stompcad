@@ -31,10 +31,11 @@ _CITATION = re.compile(
 )
 
 #: What is read, by extension and never by sniffing content: a reason lives in
-#: prose or in configuration. Tracked and deliberately unread are
-#: ``tools/verify-lock.sh``, ``.gitignore``, ``.gitattributes``, ``LICENSE``
-#: and ``docs/parts/dimensions.tsv`` -- none of them states a reason for
-#: anything, so none of them can cite one.
+#: prose or in configuration. Everything else tracked here is an empty typing
+#: marker, a binary fixture, a lockfile, a licence, a measurement table, two
+#: ignore lists or one shell script, and the only prose among them is that
+#: script's header, which cites an ADR as this repository asks. Extensions and
+#: not content, so a tracked binary is never decoded to search it.
 _TEXT = frozenset({".py", ".md", ".toml", ".cfg", ".txt", ".json", ".yaml", ".yml"})
 
 #: A citation wrapped onto a comment's next line reads ``decision\n# 99``, which

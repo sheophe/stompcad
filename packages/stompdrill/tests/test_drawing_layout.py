@@ -77,7 +77,7 @@ def test_content_past_a0_clamps_to_the_last_candidate():
 
     assert layout.sheet is A0_LANDSCAPE
     assert layout.scale == 1.0
-    assert not layout.fits  # the caller stamps the sheet; see Task 11
+    assert not layout.fits  # the overflow is the caller's to stamp on the sheet
 
 
 def test_a_fixed_scale_is_never_reduced_to_make_content_fit():

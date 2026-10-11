@@ -623,22 +623,71 @@ def _code_of(source: str, name: str) -> str:
     return re.sub(r"\[\d+\]", "", re.sub(r'""".*?"""', "", chunk, flags=re.DOTALL))
 
 
-def test_no_tuned_constant_decides_which_face_backs_a_wall() -> None:
+#: How a module-level constant's name reads where the rule refers to one. Two
+#: characters at least, so a class or an exception is never mistaken for one.
+_CONSTANT = re.compile(r"(?<![\w.])_?[A-Z][A-Z0-9_]+(?![\w])")
+
+
+def _quantities_of(source: str, name: str) -> set[str]:
+    """Every magnitude one ``def`` may be read as naming, constants followed.
+
+    A magnitude written behind a name decides what one written in place
+    decides, so the value of every module constant the body refers to is
+    read in as well. Only an assignment ``source`` itself states: a constant
+    imported from elsewhere is past this, as is one built over several lines.
+    """
+    code = _code_of(source, name)
+    for constant in sorted(set(_CONSTANT.findall(code))):
+        assigned = re.search(
+            rf"^{re.escape(constant)}(?::[^=\n]*)? *= *(.*)$", source, re.MULTILINE
+        )
+        if assigned is not None:
+            code += "\n" + assigned.group(1)
+    return set(re.findall(r"(?<![\w.])\d[\d_.]*", code))
+
+
+#: A rule written against a constant rather than a literal, which decides as
+#: much and reads as nothing. The docstring carries an ADR number and a
+#: measured figure on purpose: following a name must not start admitting the
+#: prose a reason is cited in.
+_A_MAGNITUDE_BEHIND_A_NAME = '''
+_PLATE_MAX_NM = 3_000_000
+
+
+def _wall_inner_level(found, outer):
+    """A plate of at most 3.0000 mm; the reason would be in ADR-0007."""
+    return min(found, key=lambda level: level.offset_nm - _PLATE_MAX_NM)
+'''
+
+
+def test_a_magnitude_moved_behind_a_name_is_still_read_as_a_quantity() -> None:
+    """The scan follows a constant the rule names, because a name hides nothing.
+
+    A cap spelled ``3_000_000`` and a cap spelled ``_PLATE_MAX_NM`` decide
+    the same thing, so the guard below would have missed the second. The
+    docstring in this sample names an ADR and a measured millimetre, neither
+    of which may be read as a quantity, or following names would trade one
+    blind spot for a guard that fails on a cited reason.
+    """
+    assert _quantities_of(_A_MAGNITUDE_BEHIND_A_NAME, "_wall_inner_level") == {
+        "3_000_000"
+    }
+
+
+def test_no_tuned_magnitude_decides_which_face_backs_a_wall() -> None:
     """No number fitted to the catalogue we happen to hold may decide what a wall is.
 
     A convention check on the source text, because no measurement can be one:
     a bound wide enough to admit every cached casting leaves every answer in
     this suite unchanged, so a cap or an angle beside the pairing would pass
     the whole of it. The rule and the helpers it calls are scanned together,
-    since a magnitude one ``def`` away decides just as much, and only the two
-    numbers no casting can move are allowed. A constant hidden in a helper the
-    whole module shares is past this guard's reach.
+    since a magnitude one ``def`` away decides just as much, constants
+    included, and only the two numbers no casting can move are allowed. A
+    magnitude inside a helper the whole module shares is past this reach.
     """
     source = Path(walls_module.__file__).read_text(encoding="utf-8")
-    assert "_NEAR_PARALLEL_DEGREES" not in source
-    assert "_PLATE_MAX_NM" not in source
     for name in _PAIRING_DEFS:
-        named = set(re.findall(r"(?<![\w.])\d[\d_.]*", _code_of(source, name)))
+        named = _quantities_of(source, name)
         assert named <= _GEOMETRIC_LITERALS, (
             f"{name} names {sorted(named - _GEOMETRIC_LITERALS)}, which no "
             f"geometry supplies"

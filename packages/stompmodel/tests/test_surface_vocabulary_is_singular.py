@@ -2,9 +2,8 @@
 
 ``stompmodel.model.SURFACES`` is the vocabulary's one home. A module that
 spells out the set of legal surfaces again -- a container holding all six
-names, or a bare comparison against one of them -- re-spells a name plan 2
-will be writing wall code against, in three packages, with no gate to catch
-it. This gate lives in the owner's own suite, mirroring
+names, or a bare comparison against one of them -- re-spells a name wall
+code is written against, in three packages, with no gate to catch it. This gate lives in the owner's own suite, mirroring
 ``test_case_face_vocabulary_is_singular.py``. See ADR-0008 and ADR-0009.
 """
 
