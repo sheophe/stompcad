@@ -2512,15 +2512,15 @@ def test_report_is_byte_identical_after_a_codec_round_trip_with_a_case():
 
 
 def test_the_report_states_the_rotated_panels_reframed_play_area():
-    """A rotated panel's play area line states the frame ``apply()`` actually
-    checked holes against -- the clearance stage's own reframed provenance
-    (ADR-0007, ticket 19) -- not the live model's permanently unrotated
-    ``play_area_nm``. The two genuinely disagree for a rotated panel; per
-    progress.md Phase 7 ruling R1, a changed line here is ticket 19 finally
-    reaching the report, not this ticket regressing it. Fix-round-1 finding:
-    the byte-identical round-trip test above never exercised a rotated panel
-    (``_case_checked_document`` supplies no enclosure, so ``apply()`` takes
-    the identity fast path), so nothing pinned this number before now.
+    """A rotated panel's play area line states the frame ``apply()`` checked against.
+
+    The clearance stage reframes the enclosure's rectangle for a rotated
+    panel and records that reframed one as its provenance, while the live
+    model's ``play_area_nm`` stays unrotated for good: on this panel the two
+    genuinely disagree, 80 x 100 mm against 100 x 80. Both are asserted --
+    the reframed rectangle present, the live one absent -- because a report
+    that read the live handle would still print a true rectangle, just not
+    the one the holes were judged in (ADR-0007).
     """
     from stompdrill.cli import format_case
     from stompdrill.pipeline import CheckCaseClearance
