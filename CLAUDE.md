@@ -59,9 +59,9 @@ source .venv/bin/activate
 pulls in vtk and matplotlib. The optional extra described in the original
 ADR-0007 decision has been replaced by this required dependency.
 
-`pdfminer.six` belongs to `stompdrill`'s dev group because its PDF read-back tests
-import it. `hypothesis` belongs to the root, `stompmodel`, `stompdrill` and
-`stompcollider` dev groups so each package can run its own tests. These are
+`pdfminer.six` belongs to `stompdrill`'s dev group because its PDF read-back
+tests import it. `hypothesis` belongs to the root, `stompmodel`, `stompdrill`
+and `stompcollider` dev groups so each package can run its own tests. These are
 installed by `uv sync --all-packages`.
 
 Run each suite in a separate process, from the repository root:
@@ -74,17 +74,18 @@ Run each suite in a separate process, from the repository root:
 (cd packages/stompcad && uv run --no-sync pytest -o addopts= --boards --hammond -q)
 ```
 
-Run lint and types as documented in [Contributing](CONTRIBUTING.md#run-the-checks).
-The root pytest configuration covers only `stompdrill`; the root mypy run also
-excludes the other packages' tests. Use each package's own commands to check
-those tests. Coverage and mutation surveys are per package too.
+Run lint and types as documented in
+[Contributing](CONTRIBUTING.md#run-the-checks). The root pytest configuration
+covers only `stompdrill`; the root mypy run also excludes the other packages'
+tests. Use each package's own commands to check those tests. Coverage and
+mutation surveys are per package too.
 
 ## Command-line contract
 
 [docs/CLI.md](docs/CLI.md) documents flags, defaults, formats, diagnostics and
 output handling. Keep it current when the CLI changes. Both tools use exit
-codes `0` for clean, `1` for warnings, `2` for processing errors and `3` for usage
-or input/output failures.
+codes `0` for clean, `1` for warnings, `2` for processing errors and `3` for
+usage or input/output failures.
 
 Validate options before opening the artwork or board input. Bad standards,
 unstocked sizes, unknown part numbers and invalid designator filters are usage
@@ -104,20 +105,22 @@ Keep these `stompcollider` behaviours when changing the CLI:
 
 - `--panel-reference` is required and has no default. It identifies components
   chosen for the particular pedal.
-- `--wall-reference` takes the same expression grammar as `--panel-reference` and defaults to
-  empty. A hole in an enclosure wall is irreversible and the panel says nothing about it, so
-  nothing is cut into a wall unless a builder named the part. Unlike `--panel-reference`, this
-  filter reaches the reader rather than withholding its result: measuring a feature's envelope
-  costs one exact boolean per stocked size per sign of its axis, and an unnamed part will never
-  be drilled for. A designator both filters admit is `component-claimed-twice`, a finding and
-  not a usage error, because it is decidable only once designators are known.
+- `--wall-reference` takes the same expression grammar as `--panel-reference`
+  and defaults to empty. A hole in an enclosure wall is irreversible and the
+  panel says nothing about it, so nothing is cut into a wall unless a builder
+  named the part. Unlike `--panel-reference`, this filter reaches the reader
+  rather than withholding its result: measuring a feature's envelope costs one
+  exact boolean per stocked size per sign of its axis, and an unnamed part will
+  never be drilled for. A designator both filters admit is
+  `component-claimed-twice`, a finding and not a usage error, because it is
+  decidable only once designators are known.
 - `--match-tolerance` defaults to half the recorded drill grid pitch. A supplied
   value overrides it. If the document has no usable pitch, report a usage error
   naming the flag. Do not invent a pitch or make the flag universally required.
   Print the effective tolerance in the terminal report's `CASE` block.
-- `--seat-pitch-max` and `--seat-pitch-min` default to 2.0 and 0.05 mm. Both must
-  be positive, with the coarse step at least as large as the fine one. `Seat`
-  records both in `describe()`.
+- `--seat-pitch-max` and `--seat-pitch-min` default to 2.0 and 0.05 mm. Both
+  must be positive, with the coarse step at least as large as the fine one.
+  `Seat` records both in `describe()`.
 - The enclosure determines the first contact along the insertion path. Do not
   seat a board and then retreat until clear; the fixture disproves that method.
   Bound travel by the last possible contact, allowing a board to go deeper than
@@ -129,16 +132,17 @@ Keep these `stompcollider` behaviours when changing the CLI:
   insertion, ranking and the first-stage filter, but report its clashes as
   `closure`.
 - Keep `--fit-clearance` removed. Profiles are measurements, not the seating
-  decision. The tar footswitch profile gives 20.992 and 9.499 mm through the same
-  ⌀12 hole because of tangency; this is why the enclosure search governs seating.
-- Parse and validate `--place` and `--pin`, then reject them with the reason they
-  are unsupported. No stage implements explicit placement, and `Clashes`
+  decision. The tar footswitch profile gives 20.992 and 9.499 mm through the
+  same ⌀12 hole because of tangency; this is why the enclosure search governs
+  seating.
+- Parse and validate `--place` and `--pin`, then reject them with the reason
+  they are unsupported. No stage implements explicit placement, and `Clashes`
   re-ranks placements. Do not accept either as a no-op.
 
-The `tar.ai` fixture needs `--case 1590B`. Its dimensions also match `1590B2` and
-`1590BS` within tolerance, so `ambiguous-enclosure` without a declared case is
-expected. Do not widen tolerances, special-case the fixture or round footprint
-keys to whole millimetres to suppress the error.
+The `tar.ai` fixture needs `--case 1590B`. Its dimensions also match `1590B2`
+and `1590BS` within tolerance, so `ambiguous-enclosure` without a declared case
+is expected. Do not widen tolerances, special-case the fixture or round
+footprint keys to whole millimetres to suppress the error.
 
 ## Architecture
 
@@ -183,14 +187,16 @@ depends only on the `Stage` protocol.
   registers none. Numbering is surface-major; a tool's block is contiguous
   within a surface, never across two, because changing surface is a setup change
   (ADR-0006, amendment 7).
-- A wall is discovered, not declared: lateral plate levels grouped by the signed kernel axis
-  they lean on, and each group's extreme level is a wall's outer surface (ADR-0007). A wall hole
-  is cut along its component's own axis, not normal to the wall, and its diameter admits the
-  material between its tip and that wall's outer face — a modelled nut, which sits beyond
-  that face, does not widen it. Where both signs of an axis reach a wall, the hole goes in
-  the nearer one (ADR-0007).
-- A wall's frame has its `u`/`v` datum at the centre of the outer region's bounding box and
-  depth zero on the inner plane, and its `bounds_nm` state that region about that datum.
+- A wall is discovered, not declared: lateral plate levels grouped by the signed
+  kernel axis they lean on, and each group's extreme level is a wall's outer
+  surface (ADR-0007). A wall hole is cut along its component's own axis, not
+  normal to the wall, and its diameter admits the material between its tip and
+  that wall's outer face — a modelled nut, which sits beyond that face, does
+  not widen it. Where both signs of an axis reach a wall, the hole goes in the
+  nearer one (ADR-0007).
+- A wall's frame has its `u`/`v` datum at the centre of the outer region's
+  bounding box and depth zero on the inner plane, and its `bounds_nm` state that
+  region about that datum.
 - Raw lengths are finite float millimetres. Canonical lengths are integer
   nanometres, selected by exact decimal scaling before representation rounding.
 - Use `Millimetre` for measurements, `Nanometre` for canonical lengths and
@@ -200,10 +206,11 @@ depends only on the `Stage` protocol.
   and the `Background` outline to the enclosure catalogue. Keep these answer
   sets separate.
 - An enclosure error stops quantisation. A rejected diameter records its
-  diagnostic and omits only that hole. Any error prevents every requested output.
-  `stompcad` composes two tools in one run, so it applies that rule per half and
-  commits the drill artefacts before docking begins; a dock-half error therefore
-  leaves them written. [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md)
+  diagnostic and omits only that hole. Any error prevents every requested
+  output. `stompcad` composes two tools in one run, so it applies that rule per
+  half and commits the drill artefacts before docking begins; a dock-half error
+  therefore leaves them written.
+  [ADR-0013](docs/adr/0013-the-orchestrator-s-presentation-and-composed-run.md)
   records why that is a deliberate limit rather than a necessity.
 - Artwork uses published top-view/backplate dimensions. A footprint may identify
   several parts; the part is then declared with `--case` or, failing that,
@@ -245,8 +252,9 @@ depends only on the `Stage` protocol.
   the clip does not admit a hole whose centre lies outside. Judge other paths,
   including outline candidates, by their extent; retain paths straddling the
   boundary.
-- Recognise circles by four cubic Béziers with equal anchor radii and consistent
-  kappa values around their centroid. Recognition must work under rotation.
+- Recognise circles by four cubic Béziers with equal anchor radii and
+  consistent kappa values around their centroid. Recognition must work under
+  rotation.
 - Apply every `cm` transformation and each Form XObject's `/Matrix`.
 - Follow the requested `--form-depth` levels. Report `nesting-truncated` only
   when a further form exists. Deeper artwork is absent from outputs and reports.
@@ -260,8 +268,8 @@ depends only on the `Stage` protocol.
 Follow the documentation conventions in
 [Contributing](CONTRIBUTING.md#code-and-documentation-conventions). If a local
 `docs/STYLE.md` is available, use its expanded examples too. Use the
-[glossary](docs/GLOSSARY.md) for domain definitions. Ordinary explanatory wording
-is welcome where it preserves the technical distinction.
+[glossary](docs/GLOSSARY.md) for domain definitions. Ordinary explanatory
+wording is welcome where it preserves the technical distinction.
 
 ADRs define accepted architectural decisions. Update and accept the relevant
 ADR before changing architecture in code. When another document disagrees with
@@ -270,16 +278,16 @@ in ADRs and link to them from other guidance.
 
 ## Testing rules
 
-Follow [Contributing](CONTRIBUTING.md#write-tests-that-detect-the-change), including
-TDD for code changes, independent output readers, controls for checks that can
-pass without examining anything, coverage targets and per-package commands.
-Keep mutation findings out of standing count summaries and report exact
-verification commands.
+Follow [Contributing](CONTRIBUTING.md#write-tests-that-detect-the-change),
+including TDD for code changes, independent output readers, controls for checks
+that can pass without examining anything, coverage targets and per-package
+commands. Keep mutation findings out of standing count summaries and report
+exact verification commands.
 
 ## Agent workflows
 
-- [Issue tracker](docs/agents/issue-tracker.md): local Markdown issues, specs and
-  wayfinder maps under `.scratch/`.
+- [Issue tracker](docs/agents/issue-tracker.md): local Markdown issues, specs
+  and wayfinder maps under `.scratch/`.
 - [Triage labels](docs/agents/triage-labels.md): the five status values used by
   issue-triage skills.
 - [Domain documentation](docs/agents/domain.md): how to use the glossary, ADRs

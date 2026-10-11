@@ -72,8 +72,8 @@ the tool reports `ambiguous-enclosure`.
 `--case-model`. `stompcad` fetches and caches Hammond models by part, keeping
 each in `$XDG_CACHE_HOME/stompcad/cases`, or `~/.cache/stompcad/cases` where
 that variable is unset, named `PART.stp`. To supply one yourself, place it
-there under that name — `1590BB.stp` for `1590BB` — or pass any existing STEP
-model to `--case-model` directly.
+there under that name — `1590BB.stp` for `1590BB` — or pass any existing
+STEP model to `--case-model` directly.
 
 ### Output formats
 
@@ -132,8 +132,8 @@ grid pitch, supply `--match-tolerance`; the error message names the option. The
 terminal report's `CASE` block shows the tolerance used.
 
 The drill document carries the drilled face, so `stompcollider` has no
-`--case-face` option. It also has no `--fit-clearance` option: drilling tolerance
-belongs in the artwork and drilled model.
+`--case-face` option. It also has no `--fit-clearance` option: drilling
+tolerance belongs in the artwork and drilled model.
 
 ### Select panel components
 
@@ -190,8 +190,8 @@ components excused from case clashes, because a hole is about to be cut for
 them: any interference they have with the case leaves the ranking and the
 findings, and this line is the only account of that a standalone run has. A
 named component that stands clear of the wall it points at is listed there
-too — it is exempt whether or not it had anything to be exempt from. The block is absent
-entirely when `--wall-reference` is not given.
+too — it is exempt whether or not it had anything to be exempt from. The block
+is absent entirely when `--wall-reference` is not given.
 
 ### Placement and clashes
 
@@ -207,10 +207,10 @@ with the least interference between boards. Boards that never enter the
 enclosure do not influence that choice. The lid does not affect insertion or
 ranking, but interference with it is reported as a `closure` clash.
 
-`--place N=X,Y,THETA` and `--pin N=RANK` appear in the parser but aren't supported
-by this build. Both are validated and then rejected with a usage error. No
-stage implements explicit placement, and clash processing can change placement
-ranks.
+`--place N=X,Y,THETA` and `--pin N=RANK` appear in the parser but aren't
+supported by this build. Both are validated and then rejected with a usage
+error. No stage implements explicit placement, and clash processing can change
+placement ranks.
 
 ## stompcad
 
@@ -225,10 +225,10 @@ drilled and reports the clashes. Naming no board does not run the drill half
 alone: it leaves the run refusing to start, because a question nobody has
 answered is not the same as an answer of none. Models sitting beside the
 panel are never taken for boards — nothing outside a `.stp` says whether it
-holds a board, an enclosure or a finished assembly. A drill-only run is declared, not merely omitted, by recording an
-empty board list in the project file described below. Each of the run's steps
-prints one line as it completes, so a piped run reads as a log of what
-happened.
+holds a board, an enclosure or a finished assembly. A drill-only run is
+declared, not merely omitted, by recording an empty board list in the project
+file described below. Each of the run's steps prints one line as it completes,
+so a piped run reads as a log of what happened.
 
 On a terminal, `stompcad` opens a full-screen workbench and the run happens
 inside it, in a process of its own, so the workbench keeps answering while
@@ -292,8 +292,8 @@ shows the keys. `[` and `]` step to the previous and next place. Two
 
 The arrows reach everything the letters do, for anyone who has not learnt
 them yet. The workbench has two panes: `←` from a place moves to the list of
-places, `↑`/`↓` there step between places, and `→` or `enter` goes back in.
-Inside a place, `↑`/`↓` move between its rows.
+places, `↑`/`↓` there step between places, and `→` or `enter` goes back
+in. Inside a place, `↑`/`↓` move between its rows.
 
 `enter` means something different depending on the row it lands on. On a
 finding in `Findings` that a row can answer, it goes to that row. On an
@@ -325,8 +325,8 @@ Moving the pair together moves the project; there is no other state, and
 nothing outside that directory is consulted.
 
 The file is a JSON object holding a schema `version` and one object per group
-of settings — `artwork`, `enclosure`, `drilling`, `boards` and `output` — each
-naming the same values the options above do:
+of settings — `artwork`, `enclosure`, `drilling`, `boards` and `output` —
+each naming the same values the options above do:
 
 ```json
 {
@@ -437,10 +437,10 @@ produces it. On a terminal that status is also reachable by `esc` on the
 | `2` | Processing errors; no requested outputs are written |
 | `3` | Invalid arguments or an input/output failure |
 
-All three commands validate the requested paths together before rendering. Two outputs
-cannot refer to the same file, including paths that resolve through symlinks or
-match after case and Unicode normalisation. Existing targets must be regular
-files.
+All three commands validate the requested paths together before rendering. Two
+outputs cannot refer to the same file, including paths that resolve through
+symlinks or match after case and Unicode normalisation. Existing targets must be
+regular files.
 
 All requested outputs are rendered and staged before any target is replaced.
 If a later write fails, previously replaced files are restored from their saved
@@ -459,8 +459,9 @@ contents of the output directory, is the run's status. See
 
 Recovery can fail if another process changes a target during the run or if a
 restoring write fails. The tools do not lock the output set or guarantee
-recovery after power loss. See [ADR-0001](adr/0001-pipeline-and-emitter-adapters.md)
-and [ADR-0005](adr/0005-binary-emitter-payloads.md) for the write protocol and its
+recovery after power loss. See
+[ADR-0001](adr/0001-pipeline-and-emitter-adapters.md) and
+[ADR-0005](adr/0005-binary-emitter-payloads.md) for the write protocol and its
 limits.
 
 ### stompdrill diagnostics
