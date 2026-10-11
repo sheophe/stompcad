@@ -253,7 +253,7 @@ def clearance_reason(
     ``region``'s own inner wires are exactly the structure wires
     ``build_region`` subtracted, so wire membership alone names
     ``"structure"``. An outer-wire arc is ``"concave"`` (a boss bitten
-    straight into the boundary -- see ``case._plates``) when its centre
+    straight into the boundary -- see ``case.plates``) when its centre
     lies outside the region, else ``"convex"``. These partition every edge
     ``contains`` measured, so whichever is nearest is the true reason.
     """

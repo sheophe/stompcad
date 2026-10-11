@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from stompgeom.levels import Direction, Level, direction_bin, levels
+from stompgeom.levels import Direction, Level, levels
 from stompgeom.shapes import compound
 from stompgeom.step import StepSolid
 from stompmodel.frames import CoordinateFrame, FaceFrame, cross, dot
@@ -20,7 +20,7 @@ from stompmodel.model import SURFACES, DrilledSurface
 from stompmodel.units import Nanometre, nm_from_mm
 
 from ..errors import StompdrillError
-from .case import _facing, _plates
+from .case import facing, plates
 
 __all__ = [
     "LATERAL_LIMIT",
@@ -67,19 +67,24 @@ def is_lateral(level: Level, axis: Direction) -> bool:
     return abs(dot(level.direction, axis)) < LATERAL_LIMIT
 
 
+def _axis_unit(index: int, sign: float) -> Direction:
+    """The signed unit vector along one kernel axis."""
+    unit = [0.0, 0.0, 0.0]
+    unit[index] = 1.0 if sign > 0.0 else -1.0
+    return (unit[0], unit[1], unit[2])
+
+
 def lateral_plates(solid: StepSolid, axis: int) -> tuple[Level, ...]:
     """``solid``'s plate levels that are lateral to drill ``axis``.
 
-    Unfiltered ``levels`` and then ``_plates``, in that order and not the
+    Unfiltered ``levels`` and then ``plates``, in that order and not the
     reverse: ``levels``' own axis filter keeps what faces *along* an axis,
-    which is the opposite population, and ``_plates`` judges a level by its
+    which is the opposite population, and ``plates`` judges a level by its
     aggregate area, so filtering faces first would split the aggregate.
     """
-    unit = [0.0, 0.0, 0.0]
-    unit[axis] = 1.0
-    along = (unit[0], unit[1], unit[2])
+    along = _axis_unit(axis, 1.0)
     return tuple(
-        level for level in _plates(list(levels(solid))) if is_lateral(level, along)
+        level for level in plates(list(levels(solid))) if is_lateral(level, along)
     )
 
 
@@ -94,12 +99,10 @@ def nearest_axis(direction: Direction) -> Direction:
     owns that rule, and stating it twice would be two rules to keep in step.
     """
     lead = max(range(_COMPONENTS), key=lambda index: (abs(direction[index]), -index))
-    unit = [0.0, 0.0, 0.0]
-    unit[lead] = 1.0 if direction[lead] > 0.0 else -1.0
-    return (unit[0], unit[1], unit[2])
+    return _axis_unit(lead, direction[lead])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Wall:
     """One wall of a drilled solid: its two surfaces, and what stands behind it.
 
@@ -126,14 +129,14 @@ def find_walls(solid: StepSolid, axis: int) -> tuple[Wall, ...]:
     refused: a box with three lateral groups is not an enclosure this drills,
     and guessing which wall is missing would be worse than saying so.
     """
-    plates = _plates(list(levels(solid)))
+    slabs = plates(list(levels(solid)))
     groups = _grouped_by_axis(list(lateral_plates(solid, axis)), axis)
     found = []
     for along in sorted(groups):
         outer = max(
             groups[along], key=lambda level: level.offset_nm * dot(level.direction, along)
         )
-        inner = _wall_inner_level(plates, outer)
+        inner = _wall_inner_level(slabs, outer)
         found.append(
             Wall(
                 outer=outer,
@@ -157,9 +160,7 @@ def _grouped_by_axis(found: list[Level], axis: int) -> dict[Direction, list[Leve
     with the drilled face. That takes tens of degrees off perpendicular;
     draft tilts a level by a few (ADR-0007).
     """
-    unit = [0.0, 0.0, 0.0]
-    unit[axis] = 1.0
-    along = (unit[0], unit[1], unit[2])
+    along = _axis_unit(axis, 1.0)
     # An equality and not a threshold: both are signed unit kernel axes, so
     # "leans on the drill axis" is membership in the two signs of it.
     on_axis = {along, (-along[0], -along[1], -along[2])}
@@ -212,7 +213,7 @@ def _wall_inner_level(found: list[Level], outer: Level) -> Level:
     limit = _level_draft(outer)
     candidates = [
         level for level in found
-        if _facing(level, outer) < 0
+        if facing(level, outer) < 0
         and level.offset_nm + outer.offset_nm > 0
         and nearest_axis(level.direction) == opposed
         and _level_draft(level) <= limit
@@ -226,21 +227,6 @@ def _wall_inner_level(found: list[Level], outer: Level) -> Level:
         candidates,
         key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
     )
-
-
-def _parallel_to(found: list[Level], outer: Level) -> list[Level]:
-    """Every level lying in a plane parallel to ``outer``'s own.
-
-    Tested on the direction bin and not on a dot product: ``_partition``
-    re-normalises every direction from its integer-millionths key, so two
-    levels are parallel exactly when their bins are equal or exact negations.
-    An equality, not a second tolerance to keep in step with the first.
-    """
-    key = direction_bin(outer.direction)
-    opposite = (-key[0], -key[1], -key[2])
-    return [
-        level for level in found if direction_bin(level.direction) in {key, opposite}
-    ]
 
 
 def build_wall_frame(wall: Wall, drilled_outward: Direction) -> FaceFrame:

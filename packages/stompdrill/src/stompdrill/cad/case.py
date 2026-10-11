@@ -112,7 +112,7 @@ def find_faces(solid: StepSolid, axis: int) -> Faces:
 
     unit: list[float] = [0.0, 0.0, 0.0]
     unit[axis] = 1.0
-    found = _plates(list(levels(solid, axis=(unit[0], unit[1], unit[2]))))
+    found = plates(list(levels(solid, axis=(unit[0], unit[1], unit[2]))))
     if len(found) < 2:
         raise StompdrillError(
             f"{solid.name} has fewer than two planar faces normal to the drill axis"
@@ -142,7 +142,7 @@ def _position_nm(level: Level, axis: int) -> Nanometre:
     return Nanometre(-level.offset_nm if level.direction[axis] < 0 else level.offset_nm)
 
 
-def _facing(one: Level, other: Level) -> float:
+def facing(one: Level, other: Level) -> float:
     """Positive when two levels face the same way along their shared axis.
 
     Their directions, not a stored sign: both have already passed the axis
@@ -152,7 +152,7 @@ def _facing(one: Level, other: Level) -> float:
     return sum(a * b for a, b in zip(one.direction, other.direction))
 
 
-def _plates(found: list[Level]) -> list[Level]:
+def plates(found: list[Level]) -> list[Level]:
     """Levels that are mostly solid material, not a ring, flange or skirt.
 
     A level's outer-wire area is rebuilt the way ``build_region`` rebuilds a
@@ -195,7 +195,7 @@ def _drilled_level(
     outward normal -- position matches the bbox minimum facing ``-``, the
     maximum facing ``+``. Not a law of solids: a closed cuboid has a flat
     plate at both ends, and both survive. A Hammond box or lid narrows to
-    one only because ``_plates`` already removed its open end's rim -- a
+    one only because ``plates`` already removed its open end's rim -- a
     second survivor is real and reachable, so it is reported, not picked.
     """
     low, high = solid_bbox[axis], solid_bbox[axis + 3]
@@ -228,7 +228,7 @@ def _inner_level(found: list[Level], drilled: Level) -> Level:
     """
     candidates = [
         level for level in found
-        if _facing(level, drilled) < 0 and level.offset_nm + drilled.offset_nm != 0
+        if facing(level, drilled) < 0 and level.offset_nm + drilled.offset_nm != 0
     ]
     if not candidates:
         raise StompdrillError("no flat face backs the drilled face")
@@ -250,7 +250,7 @@ def _nearest_companion_level(found: list[Level], inner: Level) -> Level | None:
     a relief into structure, never hide one, so the rule is total.
     """
     candidates = [
-        level for level in found if _facing(level, inner) > 0 and level is not inner
+        level for level in found if facing(level, inner) > 0 and level is not inner
     ]
     if not candidates:
         return None

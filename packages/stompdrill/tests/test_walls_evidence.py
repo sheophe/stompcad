@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from stompdrill.cad import load_case_model
-from stompdrill.cad.case import _facing, _plates, build_frame, find_faces, select_solid
+from stompdrill.cad.case import build_frame, facing, find_faces, plates, select_solid
 from stompdrill.cad.region import build_region
 from stompdrill.cad.walls import (
     Wall,
@@ -100,7 +100,7 @@ def test_every_wall_level_sits_at_this_model_s_own_draft(part: str) -> None:
     unit[axis] = 1.0
     found = {
         round(draft_degrees(level.direction, (unit[0], unit[1], unit[2])), 3)
-        for level in _plates(list(levels(solid)))
+        for level in plates(list(levels(solid)))
     }
     assert found == {0.0, 90.0} | set(drafts)
 
@@ -124,7 +124,7 @@ def test_nothing_sits_between_the_draft_and_a_right_angle(part: str) -> None:
     unit[axis] = 1.0
     degrees = [
         draft_degrees(level.direction, (unit[0], unit[1], unit[2]))
-        for level in _plates(list(levels(solid)))
+        for level in plates(list(levels(solid)))
     ]
     between = [value for value in degrees if max(drafts) + 1e-3 < value < 90.0 - 1e-3]
     assert between == []
@@ -465,21 +465,21 @@ def _opposed_axis(direction: Direction) -> Direction:
     return (-axis[0], -axis[1], -axis[2])
 
 
-def _behind(plates: list[Level], outer: Level) -> list[Level]:
+def _behind(slabs: list[Level], outer: Level) -> list[Level]:
     """Every plate level standing behind ``outer``: the pool a pairing chooses from.
 
-    Rebuilt here from ``_facing`` and the offset sum rather than taken from
+    Rebuilt here from ``facing`` and the offset sum rather than taken from
     the pairing, because the control below has to reach the state before the
     choice to disagree with it.
     """
     return [
         level
-        for level in plates
-        if _facing(level, outer) < 0 and level.offset_nm + outer.offset_nm > 0
+        for level in slabs
+        if facing(level, outer) < 0 and level.offset_nm + outer.offset_nm > 0
     ]
 
 
-def _nearest_behind(plates: list[Level], outer: Level) -> Level | None:
+def _nearest_behind(slabs: list[Level], outer: Level) -> Level | None:
     """The nearest level behind ``outer``, larger area first: no axis clause at all.
 
     The control for the two assertions above, which both read the pairing's
@@ -487,7 +487,7 @@ def _nearest_behind(plates: list[Level], outer: Level) -> Level | None:
     deciding anything. Nothing in the tree pairs this way; it exists to
     disagree with the pairing that ships.
     """
-    candidates = _behind(plates, outer)
+    candidates = _behind(slabs, outer)
     if not candidates:
         return None
     return min(
@@ -518,14 +518,14 @@ def test_a_wall_s_inner_face_is_the_level_on_its_own_back_axis(part: str) -> Non
     one does, which on this catalogue is most of the square-walled castings.
     """
     solid, axis = _box(part)
-    plates = _plates(list(levels(solid)))
+    slabs = plates(list(levels(solid)))
     walls = find_walls(solid, axis)
     assert len(walls) == 4
     for wall in walls:
-        inner = _wall_inner_level(plates, wall.outer)
+        inner = _wall_inner_level(slabs, wall.outer)
         assert nearest_axis(inner.direction) == _opposed_axis(wall.outward)
         plate = inner.offset_nm + wall.outer.offset_nm
-        for rival in _behind(plates, wall.outer):
+        for rival in _behind(slabs, wall.outer):
             gap = abs(rival.offset_nm + wall.outer.offset_nm - plate)
             if rival is inner or gap > _RIVAL_WINDOW_NM:
                 continue
@@ -554,9 +554,9 @@ def test_dropping_the_axis_clause_answers_differently_on_a_cached_casting() -> N
 def _the_axis_decides(part: str) -> bool:
     """Whether any of ``part``'s walls pairs differently with the axis clause dropped."""
     solid, axis = _box(part)
-    plates = _plates(list(levels(solid)))
+    slabs = plates(list(levels(solid)))
     return any(
-        _nearest_behind(plates, wall.outer) is not _wall_inner_level(plates, wall.outer)
+        _nearest_behind(slabs, wall.outer) is not _wall_inner_level(slabs, wall.outer)
         for wall in find_walls(solid, axis)
     )
 
@@ -624,7 +624,7 @@ def test_a_lid_registers_no_wall_and_states_why(part: str) -> None:
     assert model.walls_unavailable
 
 
-def _paired_without_the_draft_clause(plates: list[Level], outer: Level) -> Level | None:
+def _paired_without_the_draft_clause(slabs: list[Level], outer: Level) -> Level | None:
     """The level the rule's other three clauses reach: behind, opposed axis, nearest.
 
     Rebuilt from the pool and not taken from ``_wall_inner_level``, because
@@ -635,7 +635,7 @@ def _paired_without_the_draft_clause(plates: list[Level], outer: Level) -> Level
     opposed = _opposed_axis(outer.direction)
     candidates = [
         level
-        for level in _behind(plates, outer)
+        for level in _behind(slabs, outer)
         if nearest_axis(level.direction) == opposed
     ]
     if not candidates:
@@ -658,9 +658,9 @@ def test_the_face_the_other_clauses_reach_drafts_no_more_than_the_outer_one(part
     is the hand-built counterexample in ``test_cad_walls.py``.
     """
     solid, axis = _box(part)
-    plates = _plates(list(levels(solid)))
+    slabs = plates(list(levels(solid)))
     for wall in find_walls(solid, axis):
-        picked = _paired_without_the_draft_clause(plates, wall.outer)
+        picked = _paired_without_the_draft_clause(slabs, wall.outer)
         assert picked is not None
         assert _own_draft(picked.direction) <= _own_draft(wall.outer.direction)
 
@@ -674,11 +674,11 @@ def test_the_one_casting_drafting_its_two_faces_unalike_drafts_the_inside_less()
     direction the inequality admits.
     """
     solid, axis = _box("1590BS")
-    plates = _plates(list(levels(solid)))
+    slabs = plates(list(levels(solid)))
     assert {
         (
             round(_own_draft(wall.outward), 3),
-            round(_own_draft(_wall_inner_level(plates, wall.outer).direction), 3),
+            round(_own_draft(_wall_inner_level(slabs, wall.outer).direction), 3),
         )
         for wall in find_walls(solid, axis)
     } == {(1.400, 1.250)}
@@ -692,11 +692,11 @@ def _drafts_refused(part: str) -> int:
     standing behind its outer face, and drafting further than it.
     """
     solid, axis = _box(part)
-    plates = _plates(list(levels(solid)))
+    slabs = plates(list(levels(solid)))
     refused = 0
     for wall in find_walls(solid, axis):
         outer = wall.outer
-        for level in _behind(plates, outer):
+        for level in _behind(slabs, outer):
             if nearest_axis(level.direction) != _opposed_axis(outer.direction):
                 continue
             refused += _own_draft(level.direction) > _own_draft(outer.direction)

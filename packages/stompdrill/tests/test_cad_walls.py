@@ -20,6 +20,7 @@ from stompdrill.cad.case import select_solid
 from stompdrill.cad.walls import (
     LATERAL_LIMIT,
     Wall,
+    _axis_unit,
     _wall_inner_level,
     build_wall_frame,
     draft_degrees,
@@ -836,3 +837,9 @@ def test_the_plane_tolerance_sits_between_the_rounding_and_a_plate(
 
         assert worst_mm < tolerance_mm
         assert tolerance_mm < mm_from_nm(surface.thickness_nm) / 1000.0
+
+
+def test_a_signed_kernel_axis_is_one_unit_vector() -> None:
+    assert _axis_unit(0, 1.0) == (1.0, 0.0, 0.0)
+    assert _axis_unit(1, -1.0) == (0.0, -1.0, 0.0)
+    assert _axis_unit(2, 1.0) == (0.0, 0.0, 1.0)
