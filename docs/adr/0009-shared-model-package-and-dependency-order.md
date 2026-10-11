@@ -8,7 +8,7 @@ This ADR adds `stompmodel` to the four packages decided in
 - Place `CoordinateFrame` and `FaceFrame` in `stompmodel` and retire ADR-0007's
   optional kernel extra.
 - Bring the document's version bump to 6 and `CaseRegistration` forward from
-  plan 3. The frame nests inside the registration, and a fourth admission rule
+  the collider's reading of the document. The frame nests inside the registration, and a fourth admission rule
   governs facts promoted from provenance.
 - Require promoted members to publish their reading conventions, including the
   `CaseFace` vocabulary and the sense of `FaceFrame.basis.w`.
@@ -322,14 +322,14 @@ generic over their values and are instantiated by both tools.
 
 ADR-0007's optional `stompdrill[step]` extra is retired. `stompgeom` takes the
 kernel unconditionally, so `stompdrill` now does too. The extra's rationale
-assumed a standalone `stompdrill`; plan 2 completed this dependency change.
+assumed a standalone `stompdrill`; the workspace migration completed this dependency change.
 
 Public import paths change without compatibility re-exports. The workspace is
 pre-release and has one consumer, so each name has one home.
 
 The migration requires byte identity for every emitted artefact, verified by the
 suite. **Amended:** the registration schema change is included here, with its
-version bump brought forward from plan 3. The document moves to version 6 in
+version bump brought forward from the collider's reading of the document. The document moves to version 6 in
 the commit adding `CaseRegistration`, including the resolved part, drilled
 face, model file name and frame. This gives `stompcollider` the complete document
 it needs. A reader validating v5 refuses the new version before reading new

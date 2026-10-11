@@ -247,6 +247,10 @@ to the thing it models cannot be read on its own terms. Where the software shows
 the model inaccurate, amend the model as mathematics rather than annotating it
 with the evidence.
 
+Do not cite a numbered decision or ruling from a specification or plan; state
+the reasoning, or cite an ADR by number. `test_no_spec_citations.py` in
+`stompdrill`'s tests enforces this over every tracked file.
+
 Working plans, specs and issues live in ignored directories. Keep durable
 architectural decisions in [docs/adr/](docs/adr/) and definitions in the
 [glossary](docs/GLOSSARY.md). [CLAUDE.md](CLAUDE.md) collects the agent-specific

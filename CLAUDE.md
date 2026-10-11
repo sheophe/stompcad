@@ -189,11 +189,13 @@ depends only on the `Stage` protocol.
   (ADR-0006, amendment 7).
 - A wall is discovered, not declared: lateral plate levels grouped by the signed
   kernel axis they lean on, and each group's extreme level is a wall's outer
-  surface (ADR-0007). A wall hole is cut along its component's own axis, not
-  normal to the wall, and its diameter admits the material between its tip and
-  that wall's outer face — a modelled nut, which sits beyond that face, does
-  not widen it. Where both signs of an axis reach a wall, the hole goes in the
-  nearer one (ADR-0007).
+  surface (ADR-0007). A lid has no walls: its lateral levels are a closure rim,
+  so the loader declines to discover any on the lid and reports
+  `walls_unavailable` (ADR-0007). A wall hole is cut along its component's own
+  axis, not normal to the wall, and its diameter admits the material between its
+  tip and that wall's outer face — a modelled nut, which sits beyond that face,
+  does not widen it. Where both signs of an axis reach a wall, the hole goes in
+  the nearer one (ADR-0007).
 - A wall's frame has its `u`/`v` datum at the centre of the outer region's
   bounding box and depth zero on the inner plane, and its `bounds_nm` state that
   region about that datum.
@@ -226,8 +228,9 @@ depends only on the `Stage` protocol.
   change output bytes; no ordering rule may consult input order. ADR-0006 and
   ADR-0007 describe the other inputs that affect output determinism.
 - `RouteHoles` alone assigns `Hole.index`, the sequence `1…n`; it is `None`
-  beforehand. Each tool has one contiguous block, with holes routed within it.
-  Emitters use `DrillData.numbered()`, which rejects unrouted data.
+  beforehand. Holes are routed within each tool's block, one block per tool on
+  each surface. Emitters use `DrillData.numbered()`, which rejects unrouted
+  data.
 - `ReferenceOutline.raw` preserves measured geometry. Transform it through the
   model rather than reconstructing it.
 - Keep diagnostics, provenance, tool assignments and ordering on `DrillData`.
@@ -275,6 +278,10 @@ ADRs define accepted architectural decisions. Update and accept the relevant
 ADR before changing architecture in code. When another document disagrees with
 an ADR, investigate the difference and correct the stale document. Keep reasons
 in ADRs and link to them from other guidance.
+
+Do not cite a decision or ruling by number from a draft specification or plan:
+state the reasoning, or cite an ADR by number. `test_no_spec_citations.py` in
+`stompdrill`'s tests fails the suite for any tracked file that does.
 
 ## Testing rules
 

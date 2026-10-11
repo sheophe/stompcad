@@ -91,10 +91,11 @@ assembly emitters read the finished data.
 When `--wall-reference` admits a component, `BoardSource` also measures its
 wall feature — the ray and profile of its own sideways cylindrical stack, one
 per in-plane axis sign — through `protrude.wall_features_of`, carried on
-`DockData.wall_features`. Once seated, `Clashes` excludes a wall-admitted
-component's clash with the case, checked per case solid, because that
-penetration is the wall hole's job and not a defect; its clash with the lid
-still reports.
+`DockData.wall_features`. Once seated, `Clashes` excludes the case clashes of every
+component for which a wall feature was measured, by designator, because that
+penetration is the wall hole's job and not a defect. A component the expression
+named but nothing was measured for is not excluded, since nothing will cut for
+it; its clash with the lid still reports.
 
 The tools exchange ordinary JSON and STEP files. This allows `stompcollider` to
 read the drill document through `stompmodel` without importing `stompdrill`.

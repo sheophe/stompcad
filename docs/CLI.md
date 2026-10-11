@@ -468,7 +468,10 @@ limits.
 
 Processing errors include `unknown-diameter`, `ambiguous-enclosure`,
 `unverifiable-enclosure`, `unmatched-enclosure`, `wrong-enclosure`,
-`hole-off-face`, `hole-through-boss`, `hole-obstructed` and `wrong-case-model`.
+`hole-off-face`, `hole-through-boss`, `hole-obstructed`, `wrong-case-model` and
+`wall-feature-unreachable`. The last is raised when `--wall-reference` named a
+component whose hole cannot be made: its axis reaches no drillable part of any
+wall in the seating that was chosen, or the enclosure has no walls to drill.
 
 Warnings include `grid-too-fine`, `grid-ambiguous`, `hole-outside-outline`,
 `nesting-truncated`, `case-orientation-unverifiable` and `off-size`.
@@ -488,6 +491,11 @@ The error reports how many paths were found, helping distinguish missing shapes
 from shapes that weren't recognised as circles.
 
 ### stompcad diagnostics
+
+`wall-feature-unreachable` is a warning, not an error, where the wall expression
+named no component of any board that was read, or where no wall feature was
+measured for the parts it did name. Nothing was cut, so the run's artefacts
+still describe what was drilled and none is withheld; it exits as any warning does.
 
 A known part whose model cannot be had raises `case-model-unavailable`,
 naming the part and the reason the model could not be obtained. It withholds

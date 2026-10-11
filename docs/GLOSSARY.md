@@ -81,8 +81,9 @@ of the canonical coordinate frame. The artboard and PDF MediaBox do not define
 this outline.
 
 **Tool block**:
-A contiguous run of holes with the same drill diameter. Each tool has exactly
-one block in the drill sequence.
+A contiguous run of holes on one surface with the same drill diameter. A tool
+has one block on each surface it drills, because numbering is surface-major and
+a change of surface is a setup change.
 
 ## Enclosure
 
