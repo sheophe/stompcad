@@ -649,13 +649,15 @@ def _paired_without_the_draft_clause(found: list[Level], outer: Level) -> Level 
 @pytest.mark.hammond
 @pytest.mark.parametrize("part", _cached_castings())
 def test_the_face_the_other_clauses_reach_drafts_no_more_than_the_outer_one(part: str) -> None:
-    """The catalogue property the inequality rests on, and not the clause itself.
+    """The catalogue property the inequality rests on, and why no cached box is refused.
 
     A box draws both faces of one wall out of the one footprint plane, so the
-    level the first three clauses reach already drafts the same or less. That
-    is a fact about how these castings are cast, and it can change when a
-    model is re-issued, which is why a suite holds it. The clause's own guard
-    is the hand-built counterexample in ``test_cad_walls.py``.
+    level the first three clauses reach already drafts the same or less. The
+    rule asks the inequality of that level alone, so this is what says every
+    cached box still pairs all four walls; it is a fact about how these
+    castings are cast and can change when a model is re-issued, which is why a
+    suite holds it. The clause's own guard is the hand-built counterexample in
+    ``test_cad_walls.py``.
     """
     solid, axis = _box(part)
     solid_plates = plates(list(levels(solid)))
@@ -685,11 +687,13 @@ def test_the_one_casting_drafting_its_two_faces_unalike_drafts_the_inside_less()
 
 
 def _drafts_refused(part: str) -> int:
-    """How many levels behind ``part``'s walls the draft clause turns away.
+    """How many levels behind ``part``'s walls the draft comparison would turn away.
 
     Rebuilt from the pool rather than read off the pairing, so the control
     below reaches the state before the choice: a level leaning back at a wall,
-    standing behind its outer face, and drafting further than it.
+    standing behind its outer face, and drafting further than it. The rule
+    asks the comparison of the nearest such level only, so these are the
+    levels it is a bound over rather than levels it removes.
     """
     solid, axis = _box(part)
     solid_plates = plates(list(levels(solid)))
@@ -704,15 +708,15 @@ def _drafts_refused(part: str) -> int:
 
 
 @pytest.mark.hammond
-def test_the_draft_clause_turns_a_level_away_on_a_cached_casting() -> None:
-    """The control: the inequality above would pass by stating nothing.
+def test_the_draft_clause_has_a_population_to_bound_on_a_cached_casting() -> None:
+    """The control: the assertion above would pass over an empty comparison.
 
-    It reads the pairing's own answer, so it goes vacuous if the clause ever
-    stops excluding anything. This counts the levels the clause refuses from
-    the pool directly and fails if no cached casting presents one -- chamfer
-    flats, fillet lands and drafted pockets lean back at a wall and draft far
-    steeper than it does. ``any`` rather than a count: how many a catalogue
-    presents is a fact about the catalogue.
+    It reads the levels the rule selects, so it says nothing if no cached
+    casting stands a steeply drafted level behind a wall at all. This counts
+    them from the pool directly and fails if none is there -- chamfer flats,
+    fillet lands and drafted pockets lean back at a wall and draft far steeper
+    than it does. ``any`` rather than a count: how many a catalogue presents
+    is a fact about the catalogue.
     """
     parts = _cached_castings()
     assert parts

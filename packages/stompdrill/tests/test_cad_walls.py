@@ -448,33 +448,44 @@ def _cached(part: str) -> Path:
 
 
 @pytest.mark.hammond
-def test_a_lid_registers_no_wall_though_its_rim_reads_as_four() -> None:
+def test_a_lid_registers_no_wall_though_its_rim_reads_as_four(hammond_b: Path) -> None:
     """A lid has no walls, and that is the loader's rule and not the geometry's.
 
-    ``find_walls`` answers four for a 1590F lid, as it does for every cached
-    lid, and the loader registers none of them: a hole in an enclosure wall is
-    irreversible and nobody drills a closure flange (ADR-0007). What it answers
-    is checked against the lid's own depth rather than pinned to a figure,
-    because no rim can be thicker than the lid carrying it -- so whatever a
-    rule built for a box makes of a rim, it is not a rim's thickness, and the
-    assertion survives anyone making ``find_walls`` answer better.
+    ``find_walls`` answers four for this lid's closure rim and the loader
+    registers none of them: a hole in an enclosure wall is irreversible and
+    nobody drills a closure flange (ADR-0007). Asserted on a lid the pairing
+    does answer for, so the loader's rule is seen doing the work -- on a lid
+    the pairing refuses there would be nothing left for it to refuse.
+    """
+    document = read_step(hammond_b)
+    spans = assembly_spans(document)
+    axis = min(range(3), key=lambda index: spans[index])
+    assert len(find_walls(select_solid(document, CaseFace.LID), axis)) == 4
+
+    model = load_case_model(hammond_b, face=CaseFace.LID, margin_nm=Nanometre(500_000))
+    assert model.walls == ()
+    assert dict(model.wall_regions) == {}
+    assert "lid" in (model.walls_unavailable or "")
+
+
+@pytest.mark.hammond
+def test_a_flat_rim_drafted_on_its_inside_is_refused_and_not_measured_across_the_part() -> None:
+    """The measured case the inequality is for: the 1590F lid's four rims.
+
+    A rim is flat where it meets the box and carries its draft inside, so the
+    nearest level behind it drafts the more of the two. Sieving the pool with
+    the inequality dropped that face and *nearest* reached the rim opposite,
+    the width of the part; selecting the nearest and then checking it refuses
+    the rim instead (ADR-0007). The loader keeps a lid out of the domain
+    before this is reached, which is why no document carried that width.
     """
     document = read_step(_cached("1590F"))
     spans = assembly_spans(document)
     axis = min(range(3), key=lambda index: spans[index])
     lid = select_solid(document, CaseFace.LID)
-    box = bounding_box_mm(lid.shape)
-    depth = box[axis + 3] - box[axis]
-    rims = find_walls(lid, axis)
-    assert len(rims) == 4
-    assert min(mm_from_nm(rim.plate_nm) for rim in rims) > depth
-
-    model = load_case_model(
-        _cached("1590F"), face=CaseFace.LID, margin_nm=Nanometre(500_000)
-    )
-    assert model.walls == ()
-    assert dict(model.wall_regions) == {}
-    assert "lid" in (model.walls_unavailable or "")
+    with pytest.raises(StompdrillError) as refused:
+        find_walls(lid, axis)
+    assert "drafts further than this wall's outer face" in str(refused.value)
 
 
 @pytest.mark.hammond
@@ -596,7 +607,7 @@ _GEOMETRIC_LITERALS = frozenset({"0", "90.0"})
 #: The pairing rule and the helpers in ``walls`` it calls. Named and not
 #: discovered: a helper added to the rule belongs in this list, and adding it is
 #: the moment to decide what that helper may name.
-_PAIRING_DEFS = ("_wall_inner_level", "_opposed_axis", "_level_draft")
+_PAIRING_DEFS = ("_wall_inner_level", "_opposed_axis", "level_draft")
 
 
 def _code_of(source: str, name: str) -> str:
@@ -690,18 +701,46 @@ def test_a_level_drafted_steeper_than_the_outer_face_is_no_inner_face() -> None:
     """The inequality: a wall's inner face drafts no more than its outer one.
 
     This is the clause's own guard, and no cached casting can be it -- none
-    stands a steeper rival nearer than its own inner face. Both outcomes are
-    asserted, because they are different: with the real inner face present the
-    clause turns the pocket away and *nearest* still reaches the face, which is
-    the clause's whole purpose; with the pocket the only candidate there is no
-    inner face to reach and the wall is refused.
+    stands a steeper rival nearer than its own inner face. A drafted pocket
+    leaning back at this wall is every candidate it has, so nothing here says
+    what the plate is and the wall is refused.
     """
     outer = _area_level(_tilted(1.40), 30.0)
     steep = _area_level(_tilted(8.00, back=True), -29.0)
     with pytest.raises(StompdrillError):
         _wall_inner_level([outer, steep], outer)
-    inner = _area_level(_tilted(1.25, back=True), -28.0)
-    assert _wall_inner_level([outer, steep, inner], outer) is inner
+
+
+def test_a_steeper_level_nearer_than_a_true_face_refuses_instead_of_reaching_past() -> None:
+    """The rule selects the nearest and then checks it, rather than sieving the pool.
+
+    A pocket drafted 8.000 degrees stands 1.000 mm behind an outer face drafted
+    1.400, and a face the inequality would admit stands 2.000 mm behind it.
+    Sieving drops the pocket and records that 2.000 mm as the plate, a thickness
+    nothing in this pool supports; selecting first refuses the wall, and a wall
+    left undrilled is the safe outcome (ADR-0007).
+    """
+    outer = _area_level(_tilted(1.40), 30.0)
+    steep = _area_level(_tilted(8.00, back=True), -29.0)
+    behind = _area_level(_tilted(1.25, back=True), -28.0)
+    with pytest.raises(StompdrillError) as refused:
+        _wall_inner_level([outer, steep, behind], outer)
+    assert "drafts further than this wall's outer face" in str(refused.value)
+
+
+def test_a_wall_with_nothing_behind_it_on_its_own_back_axis_says_so_instead() -> None:
+    """The other refusal, and it is a different fact about the pool.
+
+    One message for an empty pool and one for a nearest candidate drafted too
+    far: a reader told the pool was empty when it held a pocket would look for
+    the wrong defect in their model.
+    """
+    outer = _area_level(_tilted(1.40), 30.0)
+    length = math.sqrt(0.2**2 + 0.98**2)
+    sideways = _area_level((-0.2 / length, 0.0, -0.98 / length), -29.5)
+    with pytest.raises(StompdrillError) as refused:
+        _wall_inner_level([outer, sideways], outer)
+    assert "no level behind this wall leans on the opposite axis" in str(refused.value)
 
 
 def test_a_face_coincident_with_the_outer_one_is_no_inner_face() -> None:

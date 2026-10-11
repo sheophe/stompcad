@@ -36,6 +36,7 @@ __all__ = [
     "find_walls",
     "is_lateral",
     "lateral_plates",
+    "level_draft",
     "nearest_axis",
     "surface_key",
     "wall_bounds_nm",
@@ -192,13 +193,15 @@ def _opposed_axis(direction: Direction) -> Direction:
     return (-axis[0], -axis[1], -axis[2])
 
 
-def _level_draft(level: Level) -> float:
+def level_draft(level: Level) -> float:
     """How far ``level`` is drafted off the signed axis it leans on, in degrees.
 
     ``draft_degrees`` answers the tilt *out of* the plane perpendicular to the
     axis handed in, so against a level's own leaning axis it returns a right
     angle less the draft. The complement is the quantity a casting's draft is
-    published as, and the one a wall's two faces are compared by.
+    published as, and the one a wall's two faces are compared by. Published so
+    that ``tools/measure_walls.py`` measures the rule with the rule's own
+    arithmetic rather than a second spelling of it.
     """
     return 90.0 - draft_degrees(level.direction, nearest_axis(level.direction))
 
@@ -207,31 +210,36 @@ def _wall_inner_level(found: list[Level], outer: Level) -> Level:
     """The nearest level behind ``outer`` on the opposite signed axis, drafted no further.
 
     The equality is the one ``_grouped_by_axis`` tells one wall from another
-    by, read again from the other side of one wall: a level leaning elsewhere
-    backs no part of this wall however near it comes. The inequality turns
-    away a nearer rival drafted steeper than the outer face -- a pocket or a
-    chamfer land -- and the wall's own face, drafted the same or less where a
-    box draws both out of the one footprint plane, is then what *nearest*
-    reaches (ADR-0007). Only a wall whose every candidate it excludes refuses.
+    by, read again from the other side of one wall. The three exact clauses
+    select one level and the inequality is asked of that one: sieving the pool
+    with it can refuse nothing, since a casting always stands another level
+    further back for *nearest* to reach instead. So a pocket or a chamfer land
+    nearer than the wall's own face refuses the wall, which leaves it undrilled
+    rather than stating a plate no geometry here supports (ADR-0007).
     """
     opposed = _opposed_axis(outer.direction)
-    limit = _level_draft(outer)
     candidates = [
         level for level in found
         if facing(level, outer) < 0
         and level.offset_nm + outer.offset_nm > 0
         and nearest_axis(level.direction) == opposed
-        and _level_draft(level) <= limit
     ]
     if not candidates:
         raise StompdrillError(
-            "no level behind this wall leans on the opposite axis and drafts no "
-            "more than the wall's outer face does"
+            "no level behind this wall leans on the opposite axis, so nothing in "
+            "this enclosure stands behind it to measure a plate against"
         )
-    return min(
+    inner = min(
         candidates,
         key=lambda level: (level.offset_nm + outer.offset_nm, -level.area_mm2),
     )
+    if level_draft(inner) > level_draft(outer):
+        raise StompdrillError(
+            "the nearest level behind this wall on the opposite axis drafts "
+            "further than this wall's outer face, so nothing here states the "
+            "thickness of this wall's plate"
+        )
+    return inner
 
 
 def build_wall_frame(wall: Wall, drilled_outward: Direction) -> FaceFrame:
