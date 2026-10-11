@@ -6,13 +6,15 @@ holes into an enclosure model and checking how boards fit inside it.
 ## Packages and tools
 
 **stompcad**:
-The name of this project and its proposed command-line orchestrator. The design
-calls for an orchestrator that uses `stompdrill` and `stompcollider` as libraries,
-manages the case model cache and turns diagnostics into interactive questions.
-No orchestration command is implemented in this workspace. The available
-commands are `stompdrill` and `stompcollider`; see
-[ADR-0008](adr/0008-workspace-and-shared-geometry-core.md) for the orchestration
-design.
+The name of this project and of its orchestrator, which composes `stompdrill`
+and `stompcollider` as libraries into one run: eleven named steps, one position
+and one status, writing the artefacts either tool writes from its own command
+line. It acquires and caches the case model and turns diagnostics into
+questions. On a terminal it opens a full-screen workbench and the user stays
+inside it; a pipe, a dumb terminal or a CI runner gets a plain writer that
+streams the same step lines. It computes no geometry
+([ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md),
+[ADR-0014](adr/0014-the-workbench-and-its-resolution.md)).
 
 **stompcollider**:
 The tool that docks boards inside a drilled case and reports clashes. Its docking
@@ -88,7 +90,7 @@ one block in the drill sequence.
 A wall feature's floor on the radius a hole must admit — the largest coaxial
 concave cylinder on the feature's own axis — because a plug enters it however
 little material surrounds it there
-([wall-drilling spec](specs/stompcad-wall-drilling.md)).
+([ADR-0007](adr/0007-case-model-and-clearance.md)).
 
 **Boss**:
 A thickened corner column that carries a screw. The enclosure walls away from
@@ -107,8 +109,7 @@ the resolved part, drilled face, model filename and face frame in one value,
 **Clad length**:
 How much of a candidate axis a component's material actually covers, rather
 than the raw extent between its outermost points, and the measure that selects
-a wall feature's own axis
-([wall-drilling spec](specs/stompcad-wall-drilling.md)).
+a wall feature's own axis.
 
 **Drilled face**:
 The face of the enclosure through which the holes are cut. A caller that knows
@@ -136,7 +137,7 @@ The depth interval, along a wall feature's axis, from where it crosses a
 wall's inner surface to where it leaves the outer one. A wall hole's diameter
 counts the material from the feature's tip to the wall's outer face, a run
 that begins at the tip rather than at the inner surface
-([wall-drilling spec](specs/stompcad-wall-drilling.md)).
+([ADR-0007](adr/0007-case-model-and-clearance.md)).
 
 **Surface**:
 One plane of an enclosure that holes are cut in, named from the viewer at the
@@ -148,7 +149,9 @@ interchangeable.
 **Wall**:
 One of an enclosure's lateral plate levels, discovered — never declared — by
 grouping those levels on the nearest signed kernel axis and taking each
-group's extreme level as that wall's outer surface
+group's extreme level as that wall's outer surface. Only a box has walls: a
+lid's lateral levels are its closure rim, a flange nobody drills, so a lid is
+never searched and registers none
 ([ADR-0007](adr/0007-case-model-and-clearance.md)).
 
 **Wall feature**:
@@ -156,7 +159,7 @@ One seated component's cylindrical feature, expressed as a ray with a profile
 and an optional bore in the case's face frame — `WallFeature` in
 `stompmodel` — which the drill side resolves against the walls it discovered
 to size and cut a hole
-([wall-drilling spec](specs/stompcad-wall-drilling.md)).
+([ARCHITECTURE.md](ARCHITECTURE.md)).
 
 ## Boards and docking
 
@@ -188,10 +191,11 @@ Soldered wire or ribbon joining boards. Flexible parts are excluded from the
 model, so a harness does not constrain the docking of the boards it joins.
 
 **Manifest**:
-The proposed record beside a project's artwork describing how the pedal is
-built. It is intended to make runs reproducible and retain choices for later
-runs. The current tools take their settings through command-line options or
-library calls.
+The project file beside a pedal's artwork, named from its stem, that records
+how the pedal is built: one object per group of settings plus a schema version.
+`stompcad` reads it to supply values a run needs and fills only its gaps, with
+the values that produced artefacts. It holds declared intent alone
+([ADR-0014](adr/0014-the-workbench-and-its-resolution.md)).
 
 **Match**:
 The first docking phase, which checks whether a board's protruding elements
@@ -202,9 +206,10 @@ than seating.
 **Panel-reference group**:
 The components whose reference designators identify them as hardware facing the
 panel. This declaration selects which side of the board faces the drilled
-face; protruding elements are then recognised geometrically. The current
-`stompcollider` command requires `--panel-reference` and supplies no default.
-The proposed design places the pedal-specific `RV*,SW*` default in `stompcad`.
+face; protruding elements are then recognised geometrically. `stompcollider`
+requires `--panel-reference` and supplies no default. `stompcad` supplies none
+either: the group starts empty, the builder names it, and the project file
+remembers it.
 
 **Placement**:
 One rigid transform seating a board in the case: which face points at the panel,
