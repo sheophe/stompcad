@@ -458,7 +458,7 @@ the actual drilled face, beyond the published top view.
 
 ### Amendment: a wall pairs with its inner face by plate thickness, and a model says why it has no walls
 
-**Accepted**, and its pairing rule superseded by the axis amendment at the end of this file; its
+**Accepted**, and its pairing rule superseded by the axis amendment below; its
 second half, on why a model holds no walls, stands. `_inner_level` is correct for the drilled
 face, whose two faces are parallel, and
 stays so. A wall needs its own rule because its two faces need not be drafted alike: 1590BS
@@ -697,7 +697,11 @@ with `_wall_inner_level`'s own reason rather than drilling it somewhere else.
 
 ### Amendment: the draft inequality is withdrawn, because a lid drafts its rim the other way
 
-**Accepted.** This supersedes the second clause of the axis amendment above. **A wall's inner
+**Accepted**, and withdrawn in turn by the amendment at the end of this file, which restores the
+clause and states the rule the code implements — a lid has no walls, so the rim everything below
+reasons from is not a wall the program discovers. Read on for the geometry, which is correct and
+is the record of why the population was the error; the rule stated here is not current, and the
+`--inner-face` rows it describes are the ones the tool printed when it was. **A wall's inner
 face is the nearest plate level behind its outer face that leans on the exactly opposite signed
 kernel axis.** Three clauses, every one of them exact: *behind*, a positive plate distance along
 the outer normal; the equality on `nearest_axis`, which is the one `_grouped_by_axis` tells one
@@ -726,9 +730,9 @@ such a casting earns a refused wall hole rather than a hole cut to a depth the d
 misstates.
 
 **The two numbers the axis amendment deleted were doing different work, and the lid is where
-either of them did any.** Neither moves a box answer: every one of the 148 box walls pairs with
-the face it pairs with now, under the old pair of numbers, under the axis equality alone and
-under the axis equality with the inequality. The near-parallel angle refused ten of the 148 lid
+either of them did any.** Neither moves a box answer: every box wall pairs with the face it pairs
+with now, under the old pair of numbers, under the axis equality alone and under the axis equality
+with the inequality. The near-parallel angle refused ten lid
 walls outright — the 1590F's four, the 1590P1's four and two of the 1590N1's — because those
 rims draft their two faces unalike, which is the 1590BS's defect on a lid; discovery then
 reported no walls for those parts at all. `_PLATE_MAX_NM` is what kept that refusal from
@@ -737,8 +741,8 @@ neither has anything left to decide: no wall of either face of any cached castin
 back than 5.4852 mm, the 1590Y's lid rim.
 
 `tools/measure_walls.py --inner-face` is the measurement, and it now sweeps **both** faces of
-every casting the cache holds — 74 blocks, 296 walls — because the rule was chosen on the box
-population alone and the lid is the population that disproved a clause of it. Per wall it prints
+every casting the cache holds, because the rule was chosen on the box population alone and the lid
+is the population that disproved a clause of it. Per wall it prints
 the level the rule pairs with that wall beside the plate `find_walls` records, both faces' own
 drafts, the next level on the wall's own axis, the nearest level behind it leaning on any other
 axis with the gap between the two, and a `drafts more` row for every level that leans back at the
@@ -780,26 +784,37 @@ solid this program should never have been discovering walls in. The earlier reas
 about the geometry and wrong about the population: it weakened the definition of a wall to
 accommodate a flange that is not one.
 
-**The inequality is a definition, not a tolerance, and it refuses nothing in the catalogue.** Over
-the 148 box walls, which are now every wall the program discovers, the inner face's draft less the
-outer's is exactly 0.0 on 144 of them and −0.149984° on the 1590BS's four, whose inner face drafts
-the *less*; no box wall pairs differently with the clause in place than without it. The comparison
-needs no slack, because `direction_bin` renormalises every direction from an integer-millionths
-key, so a wall's two faces carry mirrored keys and their drafts come out of identical arithmetic —
-which is why those 144 read exactly zero and a bare `<=` admits everything a slack constant would.
-Both sides of the comparison come from the casting, so no figure is chosen and no catalogue can
-move the answer. On a casting that does violate it — a steeply drafted pocket standing nearer a
-wall's outer face than that wall's own inner face — the clause refuses the wall, and that is the
-safe outcome: a refused wall hole rather than a hole bored to a thickness the document misstates.
-The on-plane guard stays what notices a casting whose two planes diverge further than the frame's
-own rounding allows.
+**The inequality is a definition, not a tolerance, and what it turns away is not what it moves.**
+It turns away a great deal: the levels leaning back at a wall include chamfer flats, fillet lands
+and drafted pockets measuring 3.000° to 44.912°, the clause refuses every one of them, and most
+walls of most cached castings present at least one. It moves no pairing, and that is a measurement
+rather than a coincidence — not one refused level anywhere in the catalogue stands nearer its
+wall's outer face than that wall's own inner face does, so *nearest* was never going to reach one.
+Which is exactly what the clause is for: on a casting that did stand a steeply drafted pocket that
+near, the axis equality alone would take the pocket, and the inequality is what turns the pocket
+away and leaves *nearest* to reach the wall's own face — a correct plate, not a refusal. A **wall**
+is refused only where the clause excludes every candidate it had, which is the lid rim this
+amendment has taken out of the domain, and that refusal is the safe outcome: a wall left undrilled
+rather than a hole bored to a thickness the document misstates.
+
+**No slack, and none needed.** `direction_bin` renormalises every direction from an
+integer-millionths key, so a wall's two faces carry mirrored keys and their drafts come out of
+identical arithmetic: the inner face's draft less the outer's is exactly 0.0 on every cached box
+wall but the 1590BS's, whose inner face drafts 0.149984° *less*. A bare `<=` therefore admits
+everything a slack constant would. Both sides of the comparison come from the casting, so no figure
+is chosen and no catalogue can move the answer, and the on-plane guard stays what notices a casting
+whose two planes diverge further than the frame's own rounding allows.
 
 **The measurement.** `tools/measure_walls.py --inner-face` sweeps both solids of every cached
 casting — the box for the walls the program drills, the lid for the rim it declines to call one,
 because the lid population is the evidence that a rim is a flange. Per wall it prints the level the
 rule pairs with beside the plate `find_walls` records, both faces' own drafts, the next level on
 the wall's own axis, the nearest level behind it leaning on any other axis with the gap between the
-two, and a `draft refused` row for every level the inequality turns away. A wall the rule cannot
-answer prints `none` in place of a plate, so a loss cannot read as a zero.
+two, and a `draft refused` row for every level the inequality turns away, marked `nearest` where
+that level is the one depth alone would have taken. A wall the rule cannot answer prints `none` in
+place of a plate, so a loss cannot read as a zero. How many levels it turns away, and over how many
+walls, is that command's output rather than a figure copied here.
 `packages/stompdrill/tests/test_walls_evidence.py` holds the rim figures this amendment argues
-from, so a drift in them fails a suite rather than staling this document.
+from, and the catalogue property the clause rests on — that the level the other three clauses reach
+already drafts no more than the outer face does — so a casting re-issued against either fails a
+suite rather than staling this document.

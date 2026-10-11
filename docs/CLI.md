@@ -167,7 +167,10 @@ Only the box has walls. A lid is a closure plate whose lateral surface is a rim
 of a few millimetres, and nobody drills a rim, so a run on the lid discovers no
 wall and refuses every component the expression names with
 `wall-feature-unreachable`, saying that the enclosure has none to drill
-([ADR-0007](adr/0007-case-model-and-clearance.md)).
+([ADR-0007](adr/0007-case-model-and-clearance.md)). In `stompcad`'s workbench
+that finding offers the wall expression as the row to correct, because the
+remedy table is keyed by diagnostic code alone; on a lid run the row that
+actually answers it is the enclosure's drilled face.
 
 ```bash
 --wall-reference 'J*,!J3'
