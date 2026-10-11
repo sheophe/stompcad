@@ -75,8 +75,9 @@ class SurfaceKey(str):
 
     A ``str`` subclass and not an ``Enum``: the key is written into the drill
     document as a bare string, and a subclass keeps that serialisation
-    byte-identical while moving the check from every reader to the one
-    construction. ``SURFACES`` stays the single list of what exists.
+    byte-identical while offering a value that cannot be built invalid. The
+    records still check their own, because a document read from JSON hands
+    them bare strings. ``SURFACES`` stays the single list of what exists.
     """
 
     __slots__ = ()
@@ -483,7 +484,7 @@ class DrilledSurface:
 
     ``frame.basis``'s origin sits on the inner plane like every ``FaceFrame``'s,
     so the plane the bit enters is ``origin + thickness_nm · w`` for every
-    surface and no consumer branches on the key. ``bounds_nm`` is
+    surface, by one arithmetic and not six. ``bounds_nm`` is
     ``(x0, y0, x1, y1)`` in this surface's own canonical frame: the drillable
     region's extent. A wall's must be centred on that origin, because
     ``extent`` states a size and no offset; the drilled plate's boundary is a

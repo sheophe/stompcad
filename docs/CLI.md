@@ -94,7 +94,10 @@ key inserted before the extension, so `--emit excellon=tar-case.drl` also writes
 is written as one transaction, so either all of them land or none does.
 
 `stompdrill` never produces a wall hole: it reads artwork, which says nothing
-about the walls. The sibling naming is what `stompcad` writes through.
+about the walls. Nor does any command reach the sibling naming yet: `stompcad`
+cuts walls, but it writes the drill file and the drawings before that happens
+and only the document and the cut model after, so its per-surface formats never
+see a surface other than the plate.
 
 Use `--title TEXT` to set the title in drawings and headers. It defaults to an
 empty string.

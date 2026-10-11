@@ -191,11 +191,13 @@ depends only on the `Stage` protocol.
   kernel axis they lean on, and each group's extreme level is a wall's outer
   surface (ADR-0007). A lid has no walls: its lateral levels are a closure rim,
   so the loader declines to discover any on the lid and reports
-  `walls_unavailable` (ADR-0007). A wall hole is cut along its component's own
-  axis, not normal to the wall, and its diameter admits the material between its
-  tip and that wall's outer face — a modelled nut, which sits beyond that face,
-  does not widen it. Where both signs of an axis reach a wall, the hole goes in
-  the nearer one (ADR-0007).
+  `walls_unavailable` (ADR-0007). A wall hole is measured along its component's
+  own axis, not normal to the wall, and its diameter admits the material
+  between its tip and that wall's outer face — a modelled nut, which sits
+  beyond that face, does not widen it; the emitted model cuts along the wall's
+  normal instead, a divergence ADR-0007 records and bounds because a `Hole`
+  carries no axis of its own. Where both signs of an axis reach a wall, the
+  hole goes in the nearer one (ADR-0007).
 - A wall's frame has its `u`/`v` datum at the centre of the outer region's
   bounding box and depth zero on the inner plane, and its `bounds_nm` state that
   region about that datum.
