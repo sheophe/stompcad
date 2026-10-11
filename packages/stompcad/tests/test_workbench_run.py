@@ -65,7 +65,7 @@ class _Compose:
     ``hold`` keeps the run in flight so the rules that only apply while one
     works have something to work against. It releases as soon as the runner
     asks it to stop, because a fake that outlives its runner is a hung
-    suite rather than a failing test -- ``close()`` is what asks now.
+    suite rather than a failing test -- ``close()`` is what asks.
     """
 
     def __init__(self, hold: bool, finding: Diagnostic | None = None) -> None:

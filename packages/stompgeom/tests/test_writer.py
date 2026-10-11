@@ -105,7 +105,7 @@ def test_a_colour_chain_count_mismatch_is_refused() -> None:
 
 def test_the_mismatch_message_names_the_fixable_pattern() -> None:
     """The remedy has to point at the pattern that needs the edit -- one of
-    two candidate causes now that a route the census does not walk is the
+    two candidate causes, since a route the census does not walk is the
     other, so the message must still name the fixable symbol either way."""
     with pytest.raises(EmitterError, match=r"_COLOUR_CHAIN"):
         writer._reslot_colours(b"", expected=1)
@@ -633,7 +633,7 @@ def test_check_reslot_integrity_refuses_a_dangling_reference() -> None:
 
 
 def test_the_optional_wrapper_does_not_bridge_an_unrelated_entity() -> None:
-    """A wrapper absent before this item must not attach to a later one.
+    """A wrapper absent from one item must not attach to a later one.
 
     ``[^;]*?`` cannot cross an entity boundary (no entity body here holds a
     literal ``;``), so an intervening ``CARTESIAN_POINT`` between a wrapper

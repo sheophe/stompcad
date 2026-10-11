@@ -150,8 +150,8 @@ def _clash_key(clash: Clash) -> tuple[str, str, str, int, tuple[Nanometre, ...]]
     """The spec's clash order, extended to a total one by part and box.
 
     ``part`` earns its place beside ``with``: several of one board's solids
-    can meet the same solid of another, so the pair alone no longer
-    separates two findings.
+    can meet the same solid of another, so the pair alone does not
+    separate two findings.
     """
     return (clash.kind, clash.with_, clash.part or "", int(clash.depth_nm), clash.bbox_nm)
 
@@ -397,8 +397,8 @@ class Clashes:
         **The predicate the insertion search asks**, not the exact intersection
         findings are measured with: a board resting at first contact lies within
         a nanometre of what stopped it, and the boolean finds a sliver there. A
-        second definition failed every real seating, and the mutual-interference
-        stage never ran. What closes over the cavity takes no part -- the
+        second definition would fail every real seating, and the
+        mutual-interference stage would never run. What closes over the cavity takes no part -- the
         backplate goes on afterwards, so a lid that will not close is a finding,
         not a refusal. Case solids go as a sequence, as ``CaseCavity`` takes them.
         """

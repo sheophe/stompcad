@@ -916,10 +916,10 @@ def test_write_assembly_cannot_run_again_before_the_walls_are_cut(tmp_path: Path
 def test_a_boards_run_naming_no_wall_writes_the_assembly_stompcollider_writes(
     tmp_path: Path,
 ) -> None:
-    """The lock on lifting ADR-0013's stale-case limit, against a real baseline.
+    """The assembly's case is checked against a real baseline.
 
-    The assembly's case now comes from the fully-drilled model rather than
-    from the panel-drilled one the boards were scanned from. A run cutting no
+    It comes from the fully-drilled model, not from the panel-drilled one
+    the boards were scanned from (ADR-0013). A run cutting no
     wall renders identical bytes for the two, so this comparison against
     ``stompcollider``'s own command line stays exact; a run cutting one is the
     intended difference.

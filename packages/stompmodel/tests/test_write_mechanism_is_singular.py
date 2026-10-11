@@ -3,10 +3,9 @@
 ``stompmodel.protocols`` (``stage_payload``/``StagedWrite.commit``) is that
 home: the atomic ``os.replace`` and the ``.{name}.{hex}.tmp`` temporary naming
 it depends on. A module that restates either for a caller-visible artefact is
-the defect ticket 26 exists to remove; ``_SANCTIONED`` below names every
-definition excluded from that, and says why. This gate lives in the owner's
-own suite (ticket 25's convention), and never fires on ``stompgeom.writer``'s
-kernel scratch file. See ADR-0001, ADR-0005 and ADR-0008.
+a duplicated mechanism; ``_SANCTIONED`` below names every definition
+excluded from that, and says why. This gate lives in the owner's own
+suite, and never fires on ``stompgeom.writer``'s kernel scratch file. See ADR-0001, ADR-0005 and ADR-0008.
 """
 
 from __future__ import annotations

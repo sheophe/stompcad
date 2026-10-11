@@ -83,7 +83,7 @@ def test_every_step_consumes_only_attributes_some_step_holds() -> None:
 
 
 def test_the_enclosure_settings_re_run_from_the_step_that_opens_the_model() -> None:
-    """The model is opened at quantise, so its settings no longer re-read artwork."""
+    """The model is opened at quantise, so its settings do not re-read artwork."""
     assert "quantise" in _stale("case_face")
     assert "read-panel" not in _stale("case_face")
     assert "read-panel" not in _stale("case_model")
@@ -124,8 +124,8 @@ def test_the_walls_are_cut_again_when_the_boards_are_seated_again() -> None:
 def test_the_assembly_reads_the_document_the_walls_were_cut_into() -> None:
     """``drill walls`` is upstream of the assembly, because the assembly shows
     the case it cut. The derived half is what matters: a private field reaching
-    only that step must now invalidate both write steps after it, where before
-    it left a written assembly standing with a stale case in it."""
+    only that step must invalidate both write steps after it, or a written
+    assembly would stand with a stale case in it."""
     assert "_cut" in _STEP_CONSUMES["write-assembly"]
     assert "_case_model" in _STEP_CONSUMES["write-assembly"]
 

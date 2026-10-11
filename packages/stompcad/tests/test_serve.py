@@ -93,11 +93,11 @@ def _accepts_presentation(presentation: Presentation) -> None:
 
 
 def test_the_served_presentation_satisfies_the_boundary() -> None:
-    """``_Down`` is this side's ``Presentation`` now; ADR-0013 pinned the protocol.
+    """``_Down`` is the run process's ``Presentation``; ADR-0013 fixes the protocol.
 
-    ``WorkbenchPresentation`` implemented it in the interface's process; the
-    run's own process is where the implementation now lives, and
-    nothing had checked that this one still satisfies it.
+    ``WorkbenchPresentation`` implements it in the interface's process and
+    ``_Down`` implements it in the run's, so each side is checked against
+    the protocol on its own.
     """
     commands_out, commands_in = multiprocessing.Pipe(duplex=False)
     events_out, events_in = multiprocessing.Pipe(duplex=False)
@@ -110,7 +110,7 @@ def test_the_served_presentation_satisfies_the_boundary() -> None:
 
 
 def test_a_position_and_a_report_cross_with_their_values_intact(served: Any) -> None:
-    """``update`` and ``report`` are events too, though nothing had sent one until now.
+    """``update`` and ``report`` are events too, though no other composer sends one.
 
     Every other composer only ever calls ``begin``, ``finish_step`` and
     ``ask``, so ``Advanced`` and ``Reported`` were values ``wire.py`` closed

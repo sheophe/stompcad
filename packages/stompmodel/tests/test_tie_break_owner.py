@@ -4,7 +4,7 @@ Scans every workspace member's own source -- discovered from
 ``member_package_dirs``, read as plain text and never imported (this
 package must not import a sibling above it) -- for a tuple built from a
 hole's raw ``x``, ``y`` and ``diameter`` in any order: the tie-break
-restated by hand. This gate lives in the owner's own suite (ticket 25):
+restated by hand. This gate lives in the owner's own suite:
 running this package's own command must fail when the restatement
 reappears anywhere in the workspace.
 """

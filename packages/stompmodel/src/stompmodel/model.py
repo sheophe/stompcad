@@ -53,7 +53,7 @@ __all__ = [
 
 #: The snapping stage's name, and the key it records its effective pitch
 #: under. Spelled here rather than in the stage, because a writer and its
-#: readers are one conversation and they no longer share a package: a
+#: readers are one conversation across packages: a
 #: reader looking under a name the writer stopped using would find no
 #: pitch and silently do nothing. ``DrillData.grid_nm`` below is the one
 #: read, so no consumer needs either literal.

@@ -199,9 +199,9 @@ async def test_a_group_separator_is_one_drawn_line() -> None:
 async def test_the_arrows_wrap_inside_the_pane_that_holds_focus() -> None:
     """`↑`/`↓` wrap within a pane; only `←`/`→` change which pane.
 
-    Walking off the end used to hand focus to the next focusable widget,
-    which is the list -- so the arrows changed panes by accident, and a
-    builder who overshot the last row left the place without asking to.
+    Walking off the end would hand focus to the next focusable widget,
+    which is the list -- so the arrows would change panes by accident, and
+    a builder who overshot the last row would leave the place unasked.
     """
     app = Workbench(_session())
     async with app.run_test() as pilot:
@@ -259,7 +259,7 @@ def test_the_sidebar_binds_exactly_its_own_table() -> None:
 
 @pytest.mark.asyncio
 async def test_the_workbench_opens_inside_a_place_not_the_list() -> None:
-    """The list is focusable now, but the app still starts where the work is."""
+    """The list is focusable, but the app still starts where the work is."""
     app = Workbench(_session())
     async with app.run_test() as pilot:
         await pilot.pause()

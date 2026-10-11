@@ -92,8 +92,8 @@ def test_reframe_restates_a_point_on_another_frame() -> None:
     The target is a quarter turn about ``v`` from ``ROTATED`` and stands at
     a different origin, so the composed map is *not* its own inverse: swap
     the two frames in ``reframe`` and the answer changes. A half turn about
-    a shared origin -- the pair this test used to carry -- is an involution,
-    and an involution cannot fail on that swap.
+    a shared origin is an involution, and an involution cannot fail on
+    that swap.
     """
     target = CoordinateFrame(
         origin_nm=(Nanometre(4_000_000), Nanometre(6_000_000), Nanometre(10_000_000)),

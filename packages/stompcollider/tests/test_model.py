@@ -253,9 +253,8 @@ def test_board_extent_rejects_a_non_integer_nanometre() -> None:
 def test_board_takes_the_one_panel_face_there_is_or_none() -> None:
     """``+w`` is the only value, because which face points at the panel is
     derived rather than searched: a board is seatable only when its
-    components protrude out through the drilled face. ``-w`` was the other
-    half of a search that is withdrawn, and it is now refused rather than
-    accepted and silently ignored."""
+    components protrude out through the drilled face. ``-w`` belongs to no
+    search, so it is refused rather than accepted and silently ignored."""
     parts = (Component("D1", None),)
     assert Board(1, ("D1",), _extent(), _frame(), parts, panel_face="+w").panel_face == "+w"
     assert Board(1, ("D1",), _extent(), _frame(), parts).panel_face is None

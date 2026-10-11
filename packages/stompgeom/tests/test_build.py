@@ -209,8 +209,8 @@ def test_a_placed_coloured_solid_rereads_from_a_written_file(tmp_path: Path) -> 
 def test_an_unlocated_and_a_located_solid_over_one_base_both_survive() -> None:
     """``PlacedSolid`` invites placing one shape twice -- two identical
     footswitches on one board -- and an unplaced solid over the same base
-    used to vanish, its colour reappearing on the placed one. Both input
-    orders, because the collapse happened either way round."""
+    must not vanish, its colour reappearing on the placed one. Both input
+    orders, because a collapse could happen either way round."""
     for reverse in (False, True):
         base = _box(2, 3, 4)
         entries = [

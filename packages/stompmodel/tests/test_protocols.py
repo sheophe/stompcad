@@ -754,9 +754,9 @@ def test_a_stage_receives_the_scope_its_pipeline_opened() -> None:
 
 
 def test_a_stage_with_zero_weight_runs_under_a_live_sink() -> None:
-    """Finding 1(a): ``Pipeline.run`` zips stages against ``scope.parts(...)``
-    with ``strict=True``, so a zero-weight stage must still get a slot -- a
-    real sink that returned none for a zero total raised ``ValueError`` here.
+    """``Pipeline.run`` zips stages against ``scope.parts(...)`` with
+    ``strict=True``, so a zero-weight stage must still get a slot -- a real
+    sink returning none for a zero total would raise ``ValueError`` here.
     """
     from stompmodel.progress import track
 

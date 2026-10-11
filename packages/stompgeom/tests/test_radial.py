@@ -90,7 +90,7 @@ def test_the_axis_is_the_line_asked_about_not_the_model_axis() -> None:
     the solid's own centre, where an implementation ignoring
     ``axis_location_mm`` entirely would agree with them. Offset by 4 mm the
     radius-6 flange still reaches 5, but so does the radius-3 shaft, so the
-    reach at 3.5 is the shaft's tip and no longer the flange's top.
+    reach at 3.5 is the shaft's tip and not the flange's top.
     """
     beside = (4.0, 0.0, 0.0)
 

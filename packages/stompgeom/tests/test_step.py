@@ -237,7 +237,7 @@ def test_a_file_this_package_wrote_reads_back_its_own_timestamp(
 ) -> None:
     """The layer closed under its own round trip (ADR-0008): this writer
     emits no ST-Developer ``/* time_stamp */`` comment, but it does set
-    ``FILE_NAME``'s own field, and that is the field the reader now reads."""
+    ``FILE_NAME``'s own field, and that is the field the reader reads."""
     target = _written(tmp_path)
 
     assert b"'2020-01-02T03:04:05'" in target.read_bytes()
@@ -451,13 +451,12 @@ def test_steplabel_equality_is_by_field_not_by_kernel_identity() -> None:
 
 
 # ---------------------------------------------------------------------------
-# StepLabel -- the label carries its document (ticket 34, ADR-0008)
+# StepLabel -- the label carries its document (ADR-0008)
 #
-# ``leaf_labels`` used to return bare ``TDF_Label`` handles whose validity
-# depended on a document lifetime the return value gave no way to see. Every
-# claim below is executed evidence, not narrated: `.scratch/architecture-
-# review/design/wave4-t18-probes.py` (V1-V5) reproduces each one directly
-# against the bare pre-ticket API, independently of these tests.
+# A bare ``TDF_Label`` handle's validity depends on a document lifetime the
+# handle gives no way to see, so ``leaf_labels`` returns a ``StepLabel``
+# that holds its document. Every claim below is executed evidence, not
+# narrated.
 # ---------------------------------------------------------------------------
 
 
@@ -548,10 +547,8 @@ def test_anchoring_on_the_shape_tool_or_the_root_label_does_not_keep_a_label_val
         (leaf,) = leaf_labels(_build_one_leaf_document())
         return leaf
 
-    # Each scenario is built and collected on its own, one at a time --
-    # matching `.scratch/architecture-review/design/wave4-t18-probes-
-    # judge-v2.py` (P5) exactly, which this reproduces. Building all three
-    # scenarios first and collecting once at the end does NOT reproduce the
+    # Each scenario is built and collected on its own, one at a time.
+    # Building all three scenarios first and collecting once at the end does NOT reproduce the
     # defect reliably: memory the C++ side has already freed can still read
     # back its old, coherent bytes until something else overwrites them --
     # itself further evidence that a dangling label is a memory-safety

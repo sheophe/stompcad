@@ -917,7 +917,7 @@ def test_the_pitches_the_run_scanned_at_are_recorded_by_the_stage_that_used_them
 
 
 # --------------------------------------------------------------------------
-# What a hole admits, now that nothing widens it
+# What a hole admits, with nothing widening it
 # --------------------------------------------------------------------------
 
 

@@ -101,12 +101,11 @@ def test_the_null_scope_reports_nothing_and_still_divides() -> None:
 
 
 def test_a_zero_total_still_yields_one_child_per_weight_under_a_live_sink() -> None:
-    """Finding 1(a): a weight of 0.0 must not vanish under a real sink.
+    """A weight of 0.0 must not vanish under a real sink.
 
-    ``_Node._divide`` used to return early on a non-positive total, so a
-    single zero weight produced no child at all, diverging from
-    ``NullScope`` and breaking a pipeline whose stage weights summed to
-    ``0.0``.
+    Returning early on a non-positive total would give a single zero weight
+    no child at all, diverging from ``NullScope`` and breaking a pipeline
+    whose stage weights summed to ``0.0``.
     """
     recorder = Recorder()
     with track(recorder) as root:
@@ -128,8 +127,8 @@ def test_a_zero_weight_child_claims_no_share_of_the_bar() -> None:
 def test_a_real_scope_and_the_null_scope_agree_on_child_count(
     weights: list[float],
 ) -> None:
-    """Finding 1: the docstring promise that ``NullScope`` divides like a
-    real scope, over weight vectors including all-zero ones."""
+    """``NullScope`` divides like a real scope, over weight vectors
+    including all-zero ones."""
     recorder = Recorder()
     with track(recorder) as root:
         real_children = list(root.parts(*weights))
@@ -138,16 +137,17 @@ def test_a_real_scope_and_the_null_scope_agree_on_child_count(
 
 
 def test_a_negative_weight_raises_from_the_null_scope() -> None:
-    """Finding 1(b): ``NullScope.parts`` accepted anything before this fix."""
+    """``NullScope.parts`` rejects a negative weight as a real scope does."""
     with pytest.raises(ValueError, match="cannot be negative"):
         list(NO_PROGRESS.parts(-1.0))
 
 
 def test_a_single_negative_weight_raises_even_though_the_total_is_negative() -> None:
-    """Finding 1(c): the old guard checked ``total <= 0.0`` before the
-    validating loop, so ``parts(-1.0)`` returned silently instead of
-    raising -- the negative-weight check fired only when some other
-    weight kept the total positive.
+    """The negative-weight check runs whatever the total is.
+
+    A guard on ``total <= 0.0`` ahead of the validating loop would let
+    ``parts(-1.0)`` return silently, firing only when some other weight
+    kept the total positive.
     """
     recorder = Recorder()
     with track(recorder) as root:

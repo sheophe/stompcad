@@ -110,9 +110,9 @@ def narrating(
 ) -> tuple[Driver, _Data, None]:
     """A position and a report line, the two events no other composer sends.
 
-    Nothing in the suite drove ``Advanced`` or ``Reported`` across the
-    boundary before this: both are values ``wire.py`` closes over, and a
-    value nothing exercises is a value nothing has actually proven crosses.
+    No other composer drives ``Advanced`` or ``Reported`` across the
+    boundary: both are values ``wire.py`` closes over, and a value nothing
+    exercises is a value nothing has proven crosses.
     """
     presentation.begin(plan)
     presentation.update(0.5, ("seat",))

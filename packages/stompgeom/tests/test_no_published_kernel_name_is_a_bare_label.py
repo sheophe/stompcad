@@ -1,10 +1,10 @@
 """No name ``stompgeom``'s kernel-facing modules export returns a bare label.
 
 One reaches a caller only inside ``StepLabel``, which holds the document it
-was drawn from (ADR-0008, ticket 34: "the label carries its document"). This
+was drawn from (ADR-0008: "the label carries its document"). This
 gate lives beside the existing leaf-walk gate
 (``test_the_leaf_walk_is_stated_once.py``) and is discovered the same way --
-by carrying ``_REACH_TEST``, ticket 32's convention -- rather than added to a
+by carrying ``_REACH_TEST`` -- rather than added to a
 literal list of gates, so a workspace member or a gate gained later needs no
 edit here.
 """
@@ -16,8 +16,8 @@ from pathlib import Path
 
 from tools.workspace_membership import REPO, member_area_roots, member_package_dirs
 
-#: The two free functions this ticket deletes from every published surface.
-#: Either used to hand a caller a bare label with no lifetime guarantee.
+#: Two free functions that no published surface may carry: either would hand
+#: a caller a bare label with no lifetime guarantee.
 _DELETED_NAMES = frozenset({"label_name", "label_entry"})
 
 #: ``stompgeom``'s own modules that talk to the kernel directly -- the only
@@ -106,9 +106,8 @@ def test_the_scan_reaches_every_workspace_member() -> None:
 def test_stompgeoms_kernel_facing_surface_publishes_no_bare_label() -> None:
     """The rule-checking assertion. ``stompgeom``'s own kernel-facing
     modules export no function returning a bare ``TDF_Label`` today, and
-    the two functions this ticket deletes -- which used to hand a caller
-    exactly that -- appear in no member's own ``__all__`` anywhere in the
-    workspace.
+    the two functions that would hand a caller exactly that appear in no
+    member's own ``__all__`` anywhere in the workspace.
     """
     offenders: list[str] = []
     for path in _KERNEL_FACING:

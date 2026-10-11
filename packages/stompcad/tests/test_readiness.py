@@ -112,7 +112,7 @@ def _docking(case: str | None = None, case_model: Path | None = None) -> Setting
 
 
 def test_docking_needs_the_part_rather_than_a_path() -> None:
-    """The model is fetched from the part now, so the part is what is missing."""
+    """The model is fetched from the part, so the part is what is missing."""
     settings = _docking(case=None)
     blockers = {blocker for blocker, _place, _advice in readiness(settings).blockers}
     assert Blocker.NO_CASE_PART in blockers

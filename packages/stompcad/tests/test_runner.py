@@ -167,7 +167,7 @@ def test_an_ordinary_close_is_not_reported_as_a_death(runner: Any) -> None:
 
 
 def test_a_quit_during_a_pause_ends_without_a_signal(runner: Any) -> None:
-    """The one path that used to wedge: a ``Close`` reaching a paused run."""
+    """A ``Close`` reaching a paused run ends it, where a wait for an answer could wedge."""
     process = runner("tests.composers:asking")
     process.start(PANEL, DRILL_AND_DOCK, runnable())
     _until(process, wire.Asked)

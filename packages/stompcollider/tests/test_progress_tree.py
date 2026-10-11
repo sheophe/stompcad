@@ -353,7 +353,7 @@ def test_contact_depth_closes_its_own_span_whichever_phase_stops_it() -> None:
 
     Proved directly against ``contact_depth`` rather than through ``Seat``:
     ``_Stopping`` never calls it at all, so it cannot speak to whether the
-    phases *this* function now subdivides still close correctly. The three
+    phases *this* function subdivides close correctly. The three
     rows are the three exits the brief names, in the same order.
     """
     cases = (

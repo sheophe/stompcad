@@ -34,7 +34,7 @@ __all__ = ["Match", "PANEL_FACE", "TOLERANCE_PARAMETER"]
 
 #: The key ``Match`` records its recognition tolerance under, and the key
 #: the report reads it back from. Spelled once for the reason the pitch's
-#: own key is: the tolerance is now usually derived rather than typed, so
+#: own key is: the tolerance is usually derived rather than typed, so
 #: this record is the only place an operator can see what recognised their
 #: boards -- and a reader looking under a stale name would show nothing.
 TOLERANCE_PARAMETER: str = "tolerance_nm"

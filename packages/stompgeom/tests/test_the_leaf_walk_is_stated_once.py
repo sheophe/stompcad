@@ -1,10 +1,10 @@
 """``stompgeom.step.leaf_labels`` is the only XCAF *leaf* descent in the workspace.
 
 Deduplicating the three sites this fold found closes three recipes; an
-*undeclared* fourth site reopens the class -- previously a duplicate
-silently added to this package's own ``writer.py`` went uncaught by this
-package's own suite, run alone. This gate lives in the owner's own suite
-(ticket 25): its command must fail when an unsanctioned descent reappears
+*undeclared* fourth site reopens the class -- a duplicate silently
+added to this package's own ``writer.py`` would go uncaught by this
+package's own suite, run alone. This gate lives in the owner's own suite:
+its command must fail when an unsanctioned descent reappears
 anywhere in the workspace. A *declared* further home, named in
 ``_SANCTIONED`` below, is what it exists to permit rather than forbid.
 """

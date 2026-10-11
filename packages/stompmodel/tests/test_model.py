@@ -915,8 +915,8 @@ def test_the_three_severities_partition_the_findings() -> None:
 # what a stage record may hold
 #
 # The ``Diagnostic``-only cases of this shared guard, and the pure ``Severity``
-# tests, moved to ``stompmodel/tests/test_diagnostics.py`` with ``Diagnostic``
-# and ``Severity`` themselves. ``StageRun`` stays here, and still proves the
+# tests, live in ``stompmodel/tests/test_diagnostics.py`` with ``Diagnostic``
+# and ``Severity`` themselves. ``StageRun`` is tested here, and proves the
 # guard it imports from ``stompmodel.diagnostics`` by using it.
 # --------------------------------------------------------------------------
 

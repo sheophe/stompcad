@@ -3,8 +3,8 @@
 ``stompmodel.model.CaseFace`` is the vocabulary's one home. A module that
 spells out the set of legal faces again -- a container holding both
 ``"box"`` and ``"lid"``, or a comparison against either as a bare string --
-is the defect ticket 13 exists to remove. This gate lives in the owner's own
-suite (ticket 25): running this package's own command must fail when the
+duplicates the vocabulary. This gate lives in the owner's own
+suite: running this package's own command must fail when the
 duplication reappears anywhere in the workspace. See ADR-0008 and ADR-0009.
 """
 

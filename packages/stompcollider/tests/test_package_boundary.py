@@ -102,8 +102,8 @@ def test_the_scanner_still_finds_the_kernel_beside_a_permitted_import() -> None:
 
 
 def test_the_scanner_accepts_the_kernel_layer_this_package_declares() -> None:
-    """The INNOCENT probe beside them: stompgeom is a declared dependency
-    now, so ``boards.py``'s own import must not read as a violation."""
+    """The INNOCENT probe beside them: stompgeom is a declared dependency,
+    so ``boards.py``'s own import must not read as a violation."""
     assert foreign_imports("from stompgeom.levels import levels\n") == set()
 
 

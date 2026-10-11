@@ -2,9 +2,8 @@
 
 ``stompmodel.units.check_nanometres`` is the rule's one home; a definition
 that states the rule again -- in the owner's words or in its own mechanism,
-and inside the owner's own module as readily as another's -- is the defect
-ticket 01 exists to remove. This gate lives in the owner's own suite (ticket
-25): running this package's own documented command is what must fail when
+and inside the owner's own module as readily as another's -- duplicates
+the rule. This gate lives in the owner's own suite: running this package's own documented command is what must fail when
 the duplication reappears, in this package's source or any other's. See
 ADR-0004, ADR-0008 and ADR-0009.
 """

@@ -394,7 +394,7 @@ def test_an_axis_no_candidate_places_names_the_hole_it_came_nearest() -> None:
 
 def test_the_same_part_inside_the_tolerance_earns_no_finding() -> None:
     """The control: only the distance changed, so only the distance can be
-    what the finding above was about -- and the part now pairs."""
+    what the finding above was about -- and the part pairs."""
     data = Match(_TOLERANCE).apply(_with_a_missing_part(0.5))
 
     assert data.diagnostics == ()

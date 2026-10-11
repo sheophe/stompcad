@@ -527,7 +527,7 @@ def test_distinct_colours_survive_the_placement() -> None:
 
 
 def test_a_colour_shared_by_solids_of_two_boards_survives_on_both() -> None:
-    """The repeated-colour case ``stompgeom``'s writer now supports."""
+    """The repeated-colour case ``stompgeom``'s writer supports."""
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "assembly.stp"
         path.write_bytes(payload())
