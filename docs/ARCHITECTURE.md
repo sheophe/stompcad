@@ -54,13 +54,16 @@ option; STEP output cuts the supplied model.
 `Stage` protocol and works independently; a stage does not assert that a
 previous stage has run. `Pipeline` applies the stages in the supplied order.
 
-A supplied enclosure model discovers its own walls at load: `cad.walls`
-groups lateral plate levels by the kernel axis they lean nearest to and
-builds each one's frame and drillable region. `pipeline.walls` resolves a
+A supplied enclosure model discovers its own walls at load, unless the
+drilled solid is the lid, whose lateral levels are a closure rim and not walls:
+`cad.walls` groups lateral plate levels by the kernel axis they lean nearest to
+and builds each one's frame and drillable region. `pipeline.walls` resolves a
 supplied `WallFeature`'s ray against those walls, sizes the hole from the
 material between the feature's tip and the wall's outer face, and cuts it as
-the `DrillWalls` stage. `build_pipeline` does not compose that stage, so no
-command line drills a wall yet.
+the `DrillWalls` stage. `stompdrill`'s `build_pipeline` does not compose that
+stage, because nothing in the panel names a wall's component. `stompcad`
+composes it, for the components a builder named
+([ADR-0013](adr/0013-the-orchestrator-s-presentation-and-composed-run.md)).
 
 ## Board placement
 
@@ -118,7 +121,7 @@ reaches for a viewer rather than a kernel: `stompcad.workbench.session`
 holds the rules a project resolves and stales by, and the Textual modules
 under `stompcad.workbench` draw them. `stompcad.cases` owns the enclosure
 model cache — where it is, what is in it, and fetching what is not. See
-[docs/specs/stompcad-workbench.md](specs/stompcad-workbench.md).
+[ADR-0014](adr/0014-the-workbench-and-its-resolution.md).
 
 Beside that process boundary sits a second, narrower one: the viewer.
 `stompcad.workbench.window` hands it a path to a file a run has already
